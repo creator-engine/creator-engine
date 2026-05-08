@@ -31,7 +31,52 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Verify this plan against `.specify/memory/constitution.md`. For each gate
+below, record PASS / FAIL / N/A with a one-line justification.
+
+- **PASS**: the plan satisfies the gate.
+- **FAIL**: the plan violates the constitution and is blocked until revised or
+  until a Source-approved constitutional amendment changes the rule.
+- **N/A**: the gate does not apply to this plan, or the relevant Creator
+  Engine schema/validator has not been defined yet. N/A requires a concrete
+  explanation and MUST NOT be used to bypass an already-defined rule.
+
+- [ ] **I. Spec-First**: Approved spec exists, or this is explicitly approved
+  bootstrap governance setup; this plan does not introduce scope absent from
+  the spec or approved bootstrap scope.
+- [ ] **II. Repo-Native (v0.1)**: Plan produces only files/schemas/examples/
+  validators in this repo; no hosted control plane or external state store.
+- [ ] **III. Explicit Agent Identity**: Plan identifies the tenant, source
+  host, actor identity, runtime/tool, role, and authority context for any
+  agent-authored execution it describes. Before the identity schema exists,
+  provide these fields as plain text; do not mark this N/A for agent-authored
+  work.
+- [ ] **IV. Mutation-Class Governance**: Plan declares the mutation class(es)
+  involved and the actions each class permits. Before the mutation-class
+  schema exists, provide the class and permitted action as plain text; do not
+  mark this N/A for executable work.
+- [ ] **V. Author/Approver Separation**: Plan does not assume the author may
+  also approve or ratify; reviewer/ratifier roles are distinct from author.
+- [ ] **VI. Human Ratification**: Any merge, deploy, governance, security, or
+  identity step in this plan is explicitly gated on human/role ratification.
+- [ ] **VII. Verification Over Claims**: Plan defines concrete verification
+  evidence (tests, checks, review findings) for each completion claim.
+- [ ] **VIII. Attestation**: Plan describes how the resulting attestation
+  record will be produced and where it will live in the repo. Before the
+  attestation schema exists, only bootstrap or contract-definition work may
+  mark schema-specific attestation as N/A, and the plan MUST still record
+  bootstrap evidence in repository-visible artifacts.
+- [ ] **IX. LIMITLESS as Dogfood**: No tenant-specific assumption is hard-coded
+  into substrate artifacts; tenant data lives in fixtures.
+- [ ] **X. Spec Kit Compatibility**: Plan does not break vanilla Spec-Kit
+  readability of `spec.md` / `plan.md` / `tasks.md`.
+- [ ] **XI. YAGNI (v0.1)**: Plan introduces no coordination/drift/dashboard/
+  hosted-policy/multi-tenant-SaaS behavior as part of v0.1. Any such work is
+  outside the v0.1 charter and requires a separate Source-approved charter or
+  version change before it may be planned.
+- [ ] **XII. Security & Privacy**: Plan declares security/privacy posture and
+  does not introduce public/NDA-visible export pathways unless redaction gates
+  are explicitly defined and enforced.
 
 ## Project Structure
 
