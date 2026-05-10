@@ -1,0 +1,18 @@
+id: malformed-missing-acceptance
+title: Missing Acceptance Criteria
+tenant: example-tenant
+owner_role: source
+status: ready
+spec_type: implementation_spec
+mutation_class: docs
+permitted_actions:
+  - edit
+scope: >-
+  This fixture intentionally omits acceptance_criteria even though its
+  status is ready.
+verification:
+  method: validator-cli
+  evidence_refs:
+    - examples/malformed/spec.creator-engine.missing-acceptance.yml
+ratification_required: true
+identity_policy_ref: examples/well-formed/identity-record.yml

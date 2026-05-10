@@ -1,0 +1,52 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/tasks-wrapper-sidecar.schema.yaml"
+title: "Creator Engine Tasks Wrapper Sidecar"
+type: object
+required: [spec_ref, tasks]
+unevaluatedProperties: false
+properties:
+  spec_ref:
+    type: string
+    minLength: 1
+  tasks:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: object
+      required:
+        - id
+        - title
+        - mutation_class
+        - permitted_actions
+        - verification_evidence_ref
+        - author_actor_id
+      unevaluatedProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        mutation_class:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+        permitted_actions:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+        verification_evidence_ref:
+          type: string
+          minLength: 1
+        ratification_or_approval_ref:
+          type: string
+          minLength: 1
+        author_actor_id:
+          type: string
+          minLength: 1
+        approver_actor_id:
+          type: string
+          minLength: 1

@@ -1,0 +1,36 @@
+# Creator Engine v0.1 tenant identity record template.
+# Copy this file to tenants/<tenant>/identity-record.yml or another
+# tenant-controlled path, then replace every placeholder with tenant values.
+# This template is project-agnostic and intentionally contains no tenant names.
+
+tenant_id: example-tenant
+source_host: github
+source_host_installation_id: "123456"
+agent_app_slug: example-agent[bot]
+agent_actor_id: "987654321"
+runtime_tool: Codex CLI
+role_category: implementer
+authority_context:
+  description: >-
+    This identity may author governed implementation work according to the
+    referenced specification and authority matrix.
+  governing_spec_refs:
+    - specs/example/spec.md
+  ratifier_authority_refs:
+    - docs/contracts/authority-matrix.md
+human_ratifier_roles:
+  - source
+mutation_classes:
+  - docs
+  - code
+allowed_repositories:
+  - github.com/example-org/example-repo
+signing_policy:
+  commit_signing_required: false
+  commit_signing_method: none
+  attestation_signing_required: false
+attestation_storage_path: examples/well-formed/attestations
+ratification_storage_path: examples/well-formed/ratifications
+redaction_storage_path: examples/well-formed/redactions
+# Optional: path to a separate future platform identity record.
+# platform_identity_ref: tenants/example-tenant/platform-identity.yml

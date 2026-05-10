@@ -1,0 +1,25 @@
+# Creator Engine v0.1 spec sidecar template.
+# Place beside a vanilla Spec Kit spec.md as spec.creator-engine.yml.
+id: example-spec-001
+title: Example Governed Work
+tenant: example-tenant
+owner_role: source
+status: ready
+spec_type: implementation_spec
+mutation_class: docs
+permitted_actions:
+  - propose
+  - edit
+scope: >-
+  Describe the governed work boundary in repository-readable form.
+acceptance_criteria:
+  - The required artifact exists in the repository.
+  - The validator reports the sidecar as conformant.
+verification:
+  method: validator-and-review
+  evidence_refs:
+    - examples/well-formed/spec.md
+ratification_required: true
+identity_policy_ref: examples/well-formed/identity-record.yml
+# attestation_record_ref: attestations/2026-01-01-example-spec-001.yml
+# ratification_record_ref: ratifications/2026-01-01-example-spec-001.yml

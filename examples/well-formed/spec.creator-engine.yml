@@ -1,0 +1,22 @@
+id: example-spec-001
+title: Example Governed Work
+tenant: example-tenant
+owner_role: source
+status: ready
+spec_type: implementation_spec
+mutation_class: docs
+permitted_actions:
+  - propose
+  - edit
+scope: >-
+  Demonstrate a governed Spec Kit spec with Creator Engine metadata stored
+  in an adjacent sidecar.
+acceptance_criteria:
+  - The vanilla Spec Kit spec remains Markdown-only.
+  - The sidecar validates against the v0.1 wrapper schema.
+verification:
+  method: validator-cli
+  evidence_refs:
+    - examples/well-formed/spec.md
+ratification_required: true
+identity_policy_ref: examples/well-formed/identity-record.yml

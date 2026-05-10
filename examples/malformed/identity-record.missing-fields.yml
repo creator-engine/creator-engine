@@ -1,0 +1,25 @@
+tenant_id: example-tenant
+source_host: github
+source_host_installation_id: "123456"
+agent_app_slug: example-agent[bot]
+agent_actor_id: "987654321"
+runtime_tool: Codex CLI
+role_category: implementer
+authority_context:
+  description: Malformed example deliberately has no human ratifier roles.
+  governing_spec_refs:
+    - specs/001-v0-1-governance-substrate/spec.md
+  ratifier_authority_refs:
+    - docs/contracts/identity-record.md
+human_ratifier_roles: []
+mutation_classes:
+  - docs
+allowed_repositories:
+  - github.com/example-org/example-repo
+signing_policy:
+  commit_signing_required: false
+  commit_signing_method: none
+  attestation_signing_required: false
+attestation_storage_path: examples/malformed/attestations
+ratification_storage_path: examples/malformed/ratifications
+redaction_storage_path: examples/malformed/redactions
