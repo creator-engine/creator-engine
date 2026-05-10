@@ -12,18 +12,12 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
-## Format: `[ID] [P?] [Story] [Mutation: class/action] [Evidence: expected artifact] Description`
+## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
-- **Mutation: class/action**: Required for every executable task. Declare the
-  mutation class and the permitted action the task uses. Before the formal
-  mutation-class schema exists, use plain text such as `docs/update`,
-  `schema/create`, `validator/create`, `test/create`, or `governance/update`.
-- **Evidence: expected artifact**: Required for every executable task. Name the
-  evidence that will prove completion: changed file, test result, validator
-  output, review record, or attestation/evidence record.
 - Include exact file paths in descriptions
+- For Creator Engine governed work, keep Spec Kit `tasks.md` vanilla: task-level mutation class, permitted actions, verification evidence references, and author/approver metadata belong in the adjacent canonical `tasks.creator-engine.yml` sidecar, not in task lines.
 - Include at least one final task that records batch evidence and, once the
   attestation schema exists, writes or updates the attestation record.
 
@@ -34,21 +28,21 @@ description: "Task list template for feature implementation"
 - **Mobile**: `api/src/`, `ios/src/` or `android/src/`
 - Paths shown below assume single project - adjust based on plan.md structure
 
-<!-- 
+<!--
   ============================================================================
   IMPORTANT: The tasks below are SAMPLE TASKS for illustration purposes only.
-  
+
   The /speckit-tasks command MUST replace these with actual tasks based on:
   - User stories from spec.md (with their priorities P1, P2, P3...)
   - Feature requirements from plan.md
   - Entities from data-model.md
   - Endpoints from contracts/
-  
+
   Tasks MUST be organized by user story so each story can be:
   - Implemented independently
   - Tested independently
   - Delivered as an MVP increment
-  
+
   DO NOT keep these sample tasks in the generated tasks.md file.
   ============================================================================
 -->
@@ -57,9 +51,9 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 [Mutation: code/update] [Evidence: changed source file and test/check output] Create project structure per implementation plan
-- [ ] T002 [Mutation: config/create] [Evidence: changed project/config file] Initialize [language] project with [framework] dependencies
-- [ ] T003 [P] [Mutation: config/update] [Evidence: tool configuration or check output] Configure linting and formatting tools
+- [ ] T001 Create project structure per implementation plan
+- [ ] T002 Initialize [language] project with [framework] dependencies
+- [ ] T003 [P] Configure linting and formatting tools
 
 ---
 
@@ -71,12 +65,12 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 [Mutation: schema/create] [Evidence: changed schema/model file] Setup database schema and migrations framework
-- [ ] T005 [P] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement authentication/authorization framework
-- [ ] T006 [P] [Mutation: config/create] [Evidence: changed project/config file] Setup API routing and middleware structure
-- [ ] T007 [Mutation: schema/create] [Evidence: changed schema/model file] Create base models/entities that all stories depend on
-- [ ] T008 [Mutation: code/update] [Evidence: changed source file and test/check output] Configure error handling and logging infrastructure
-- [ ] T009 [Mutation: config/create] [Evidence: changed project/config file] Setup environment configuration management
+- [ ] T004 Setup database schema and migrations framework
+- [ ] T005 [P] Implement authentication/authorization framework
+- [ ] T006 [P] Setup API routing and middleware structure
+- [ ] T007 Create base models/entities that all stories depend on
+- [ ] T008 Configure error handling and logging infrastructure
+- [ ] T009 Setup environment configuration management
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -92,17 +86,17 @@ Examples of foundational tasks (adjust based on your project):
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] [Mutation: test/create] [Evidence: test result or validation output] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] [Mutation: test/create] [Evidence: test result or validation output] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] [Mutation: schema/create] [Evidence: changed schema/model file] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] [Mutation: schema/create] [Evidence: changed schema/model file] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] [Mutation: code/update] [Evidence: changed source file and test/check output] Add validation and error handling
-- [ ] T017 [US1] [Mutation: code/update] [Evidence: changed source file and test/check output] Add logging for user story 1 operations
+- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
+- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
+- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
+- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T016 [US1] Add validation and error handling
+- [ ] T017 [US1] Add logging for user story 1 operations
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -116,15 +110,15 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T018 [P] [US2] [Mutation: test/create] [Evidence: test result or validation output] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] [Mutation: test/create] [Evidence: test result or validation output] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] [Mutation: schema/create] [Evidence: changed schema/model file] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T023 [US2] [Mutation: code/update] [Evidence: changed source file and test/check output] Integrate with User Story 1 components (if needed)
+- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
+- [ ] T021 [US2] Implement [Service] in src/services/[service].py
+- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -138,14 +132,14 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T024 [P] [US3] [Mutation: test/create] [Evidence: test result or validation output] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T025 [P] [US3] [Mutation: test/create] [Evidence: test result or validation output] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
 
 ### Implementation for User Story 3
 
-- [ ] T026 [P] [US3] [Mutation: schema/create] [Evidence: changed schema/model file] Create [Entity] model in src/models/[entity].py
-- [ ] T027 [US3] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [Service] in src/services/[service].py
-- [ ] T028 [US3] [Mutation: code/update] [Evidence: changed source file and test/check output] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
+- [ ] T027 [US3] Implement [Service] in src/services/[service].py
+- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -159,13 +153,13 @@ Examples of foundational tasks (adjust based on your project):
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] TXXX [P] [Mutation: docs/update] [Evidence: changed documentation file] Documentation updates in docs/
-- [ ] TXXX [Mutation: code/update] [Evidence: changed source file and check output] Code cleanup and refactoring
-- [ ] TXXX [Mutation: code/update] [Evidence: performance check output] Performance optimization across all stories
-- [ ] TXXX [P] [Mutation: test/create] [Evidence: test result] Additional unit tests (if requested) in tests/unit/
-- [ ] TXXX [Mutation: security/update] [Evidence: security review or changed security file] Security hardening
-- [ ] TXXX [Mutation: test/create] [Evidence: quickstart validation output] Run quickstart.md validation
-- [ ] TXXX [Mutation: governance/update] [Evidence: repository evidence record] Record batch evidence and attestation/evidence status in the repository
+- [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX Code cleanup and refactoring
+- [ ] TXXX Performance optimization across all stories
+- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
+- [ ] TXXX Security hardening
+- [ ] TXXX Run quickstart.md validation
+- [ ] TXXX Record batch evidence and attestation/evidence status in the repository
 
 ---
 
