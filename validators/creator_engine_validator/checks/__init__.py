@@ -42,3 +42,4 @@ from . import identity as identity  # noqa: E402,F401
 from . import sidecar_conformance as sidecar_conformance  # noqa: E402,F401
 from . import duplicate_spec_id as duplicate_spec_id  # noqa: E402,F401
 from . import definition_of_ready as definition_of_ready  # noqa: E402,F401
+from . import mutation_class as mutation_class  # noqa: E402,F401
