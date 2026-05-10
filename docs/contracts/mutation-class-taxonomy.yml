@@ -1,0 +1,242 @@
+---
+# Creator Engine v0.1 baseline mutation-class taxonomy.
+#
+# Validates against schemas/mutation-class.schema.yaml.
+# See docs/contracts/mutation-class-taxonomy.md for the prose contract.
+#
+# Editing rules:
+#   - The nine baseline entries below MUST remain present and MUST NOT
+#     have their `name` values renamed. Renaming is a contract-breaking
+#     change requiring a v0.2 governance amendment.
+#   - Reading A strict (Source-approved 2026-05-10): no entry's
+#     agent_permitted_actions may include any reserved-restricted action.
+#   - Tenant overlays go in tenants/<name>/mutation-classes.yml, not here.
+
+- name: docs
+  is_baseline: true
+  description: >-
+    Documentation changes (prose, contracts, README files, handoffs,
+    retros). Lowest-blast-radius class; agents may author and PR.
+    Merge remains gated by human ratification per FR-007.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: false
+
+- name: code
+  is_baseline: true
+  description: >-
+    Source code changes (application, library, tooling). Agents may
+    author and PR; merge remains gated by human ratification per
+    FR-007 and the constitution's Authority & Boundaries section.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: false
+
+- name: schema
+  is_baseline: true
+  description: >-
+    Schema and validator changes (JSON Schema documents, contract
+    schemas, validator check definitions). Agents may author and PR;
+    merge remains gated by human ratification per FR-007.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: false
+
+- name: deploy
+  is_baseline: true
+  description: >-
+    Deploy and publish operations (releasing artifacts, promoting
+    builds, publishing to registries, or any public/NDA-visible
+    export). Privileged per FR-008. The deploy and publish actions
+    remain reserved for explicit human ratification under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - deploy
+    - publish
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true
+
+- name: governance
+  is_baseline: true
+  description: >-
+    Changes to the constitution, governance contracts, authority
+    matrix, ratification flow, or any rule that modifies how
+    mutations are governed. Privileged per FR-008. Weakening the
+    attestation or redaction gates is reserved for explicit human
+    ratification under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - weaken_attestation_gate
+    - weaken_redaction_gate
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true
+
+- name: identity
+  is_baseline: true
+  description: >-
+    Changes to identity records, source-host installations, agent app
+    or actor declarations, and organization/tenant/repository
+    settings. Privileged per FR-008. Settings alterations and
+    credential issuance/revocation are reserved for explicit human
+    ratification under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - alter_org_settings
+    - alter_tenant_settings
+    - alter_repo_settings
+    - issue_credential
+    - revoke_credential
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true
+
+- name: security
+  is_baseline: true
+  description: >-
+    Changes to security posture: credential and token handling,
+    signing policy, secret-management contracts. Privileged per
+    FR-008. Credential issuance and revocation are reserved for
+    explicit human ratification under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - issue_credential
+    - revoke_credential
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true
+
+- name: attestation
+  is_baseline: true
+  description: >-
+    Changes to attestation contracts, schemas, storage paths, or the
+    attestation gate itself. Privileged per FR-008. Weakening the
+    attestation gate is reserved for explicit human ratification
+    under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - weaken_attestation_gate
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true
+
+- name: redaction
+  is_baseline: true
+  description: >-
+    Changes to redaction-gate policy, redaction-record format, or
+    redaction approvals. Privileged per FR-008. Approving a redaction
+    and weakening the redaction gate are reserved for explicit human
+    ratification under Reading A.
+  action_vocabulary:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+    - merge
+    - approve_redaction
+    - weaken_redaction_gate
+  agent_permitted_actions:
+    - propose
+    - edit
+    - commit
+    - open_pr
+    - attest
+    - advise_only
+  human_ratification_required: true

@@ -1,0 +1,85 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/authority-matrix.schema.yaml"
+title: "Creator Engine Authority Matrix"
+description: |
+  An authority-matrix list with one row per generic role category.
+
+  The substrate baseline matrix ships exactly seven rows, one per
+  member of the role_category enum (source, ratifier, reviewer,
+  architect, implementer, verifier, observer). Tenant overlays at
+  tenants/<name>/authority-matrix-overlay.yml may extend or alias
+  rows under a separate, looser schema; this baseline schema does
+  not validate overlays.
+
+  Cross-row uniqueness of role_category and coverage of every
+  baseline mutation class across the rows are deferred to the
+  authority-matrix coverage check in sub-batch A2 (see
+  docs/contracts/authority-matrix.md).
+
+  FR-008 wiring: rows whose allowed_mutation_classes intersects the
+  privileged baseline class set (deploy, governance, identity,
+  security, attestation, redaction) MUST set required_ratifier_role
+  to a human-eligible role (source or ratifier) under Reading A.
+type: array
+minItems: 7
+maxItems: 7
+items:
+  type: object
+  required:
+    - role_category
+    - allowed_instruction_sources
+    - allowed_mutation_classes
+    - required_ratifier_role
+    - allowed_communication_surfaces
+    - required_audit_artifacts
+  unevaluatedProperties: false
+  properties:
+    role_category:
+      type: string
+      enum: [source, ratifier, reviewer, architect, implementer, verifier, observer]
+    tenant_role_name:
+      type: string
+      minLength: 1
+    allowed_instruction_sources:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+    allowed_mutation_classes:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction]
+    required_ratifier_role:
+      type: string
+      enum: [source, ratifier, reviewer, architect, implementer, verifier, observer]
+    allowed_communication_surfaces:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+    required_audit_artifacts:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+  allOf:
+    - if:
+        properties:
+          allowed_mutation_classes:
+            contains:
+              enum: [deploy, governance, identity, security, attestation, redaction]
+        required: [allowed_mutation_classes]
+      then:
+        properties:
+          required_ratifier_role:
+            enum: [source, ratifier]
+        required: [required_ratifier_role]
