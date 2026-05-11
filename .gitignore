@@ -1,3 +1,7 @@
+# `.hermes/` is instance-local runtime/session state for a deployed Creator
+# Engine instance (live `STATE.md`, handoffs, tmux/pane facts, etc.). Upstream
+# protocols and templates live under `docs/operations/` and `templates/`.
+# Do not unignore `.hermes/`; do not commit live instance state upstream.
 .hermes/
 __pycache__/
 *.pyc
