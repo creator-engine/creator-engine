@@ -1,54 +1,58 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (template, unratified) → 1.0.0
-Bump rationale: Initial ratification of the Creator Engine constitution. All
-template placeholders replaced with concrete principles, sections, and
-governance rules. No prior ratified version existed.
+Version change: 1.0.0 → 1.1.0
+Bump rationale: Materially expanded Principle II (Repo-Native First) to
+codify the upstream/local boundary: upstream Creator Engine artifacts must
+remain reusable across deployments; instance-local runtime/session state
+must live in ignored local files. New obligations imposed on upstream
+content and on tracked files; no principle removed or redefined. MINOR per
+the versioning policy.
 
-Modified principles: N/A (initial ratification — no prior principles to rename)
+Modified principles:
+  - II. Repo-Native First (v0.1) — added explicit upstream/local boundary
+    clauses (no tracking of instance-local runtime/session state; reusable
+    protocols, schemas, validators, templates, and generic examples belong
+    upstream); rationale extended to cover instance portability.
 
-Added sections:
-  - Core Principles (I–XII): Spec-First Development; Repo-Native First (v0.1);
-    Explicit Agent Identity; Mutation-Class Governance; Author/Approver
-    Separation; Human Ratification; Verification Over Claims; Attestation
-    Required; LIMITLESS as Dogfood, Not Dependency; Spec Kit Compatibility;
-    YAGNI for v0.1; Security & Privacy as First-Class Constraints.
-  - Definitions (minimal bootstrap vocabulary for Source, ratifier, approval,
-    authority context, and governed mutation).
-  - Bootstrap Applicability (initial constitution ratification and scaffolding
-    are approved setup work; full schema/validator enforcement begins when
-    the relevant v0.1 features define those contracts).
-  - Authority & Boundaries (governance rules around Source approval, batch
-    scope, prohibited unilateral agent actions).
-  - Workflow & Verification Discipline (batch evidence requirements,
-    repo-native auditability for v0.1).
-  - Governance (amendment procedure, versioning policy, compliance review).
+Added sections: None.
 
 Removed sections: None.
 
-Templates requiring updates:
-  - ✅ .specify/templates/plan-template.md — Constitution Check section
-    aligned to enumerate the twelve principles as plan gates.
-  - ⚠ .specify/templates/spec-template.md — does NOT yet require identity /
-    mutation-class metadata blocks. Deferred: Creator Engine wrapper schema
-    is not yet specified in v0.1; spec.md may remain Spec-Kit-pure until the
-    wrapper schema feature is itself spec'd. Revisit when the wrapper schema
-    feature lands.
-  - ✅ .specify/templates/tasks-template.md — task format now requires
-    mutation class, permitted action, and verification evidence; every
-    generated task list must include an attestation/evidence task even before
-    the full attestation schema lands.
+Templates and dependent artifacts requiring updates:
+  - ✅ docs/operations/session-continuity-protocol.md — added in this batch;
+    codifies fresh-session continuity for each deployed instance under the
+    new upstream/local boundary.
+  - ✅ templates/hermes/session-state/STATE.template.md — added in this
+    batch; generic instance-local state template. Upstream MUST NOT track
+    filled-in copies.
+  - ✅ .gitignore — annotated in this batch to make the upstream/local
+    boundary intent explicit; `.hermes/` remains ignored.
+  - ✅ .specify/templates/plan-template.md — Constitution Check still
+    enumerates the twelve principles; the Principle II amendment fits the
+    existing gate language without template change.
+  - ✅ .specify/templates/tasks-template.md — task format already requires
+    mutation class, permitted action, and verification evidence; no change
+    needed.
+  - ⚠ .specify/templates/spec-template.md — still does NOT require Creator
+    Engine wrapper metadata; deferred to the wrapper schema feature.
   - ✅ .specify/templates/checklist-template.md — generic; no changes needed.
-  - ✅ AGENTS.md / CLAUDE.md — both currently point agents to "the current
-    plan" for project context; no constitution-specific edits needed at
-    this version.
+  - ✅ AGENTS.md / CLAUDE.md — point agents to the current plan; no
+    constitution-specific edits needed at this version.
+
+Prior bump history:
+  - (template, unratified) → 1.0.0: Initial ratification of the twelve core
+    principles, definitions, bootstrap applicability, authority and
+    boundaries, workflow and verification discipline, and governance.
 
 Follow-up TODOs:
   - When the Creator Engine wrapper schema (identity + mutation-class +
     attestation + ratifier metadata over Spec Kit artifacts) is itself
     spec'd, update spec-template.md and tasks-template.md to require the
     exact machine-checkable wrapper fields.
+  - When the wrapper schema lands, ensure identity and attestation fields
+    reflect the upstream/local boundary so instance-local attestations are
+    not accidentally promoted into upstream artifacts.
 -->
 
 # Creator Engine Constitution
@@ -86,9 +90,22 @@ repository. v0.1 MUST NOT introduce a hosted SaaS control plane, external
 policy daemon, or non-repo state store. Every artifact MUST be reconstructable
 from `git clone` alone.
 
+Upstream Creator Engine artifacts MUST remain reusable across deployed
+instances. Upstream MUST NOT track instance-local runtime or session state,
+including but not limited to: absolute local filesystem paths, live branch
+names tied to in-flight instance work, live PR numbers or URLs, runtime or
+terminal identifiers, active role assignments per pane or agent, and
+per-instance immediate next steps. Reusable protocols, schemas, validators,
+templates, and generic or synthetic examples belong upstream; live
+runtime/session state belongs in instance-local files covered by the
+repository's ignore rules.
+
 **Rationale**: Repo-native v0.1 keeps the substrate auditable from git history
 and repository artifacts alone, avoids vendor lock-in, and allows tenants to
-adopt Creator Engine without standing up infrastructure.
+adopt Creator Engine without standing up infrastructure. The upstream/local
+boundary preserves the same property across instances: when upstream tracks
+instance-local runtime state, every clone inherits a dead snapshot of another
+deployment, and the substrate stops being a portable, deployable template.
 
 ### III. Explicit Agent Identity
 
@@ -325,4 +342,4 @@ the gating reference. Violations identified during review block ratification
 until either resolved in the artifact under review or addressed via an
 explicit, Source-approved amendment.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-08 | **Last Amended**: 2026-05-08
+**Version**: 1.1.0 | **Ratified**: 2026-05-08 | **Last Amended**: 2026-05-11
