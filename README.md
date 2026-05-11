@@ -42,6 +42,10 @@ deliverables.
 - `docs/product/`, `docs/architecture/`, `docs/governance/`,
   `docs/quality/`, `docs/devops/`, `docs/security/` — the canonical
   Creator Engine document set indexed below.
+- `docs/operations/` — operational protocol documentation (e.g.,
+  `docs/operations/session-continuity-protocol.md`). These are
+  operational protocols, not part of the 17-document canonical set
+  indexed below.
 - `schemas/`, `templates/`, `validators/`, `examples/`, `tenants/` —
   Feature 001 substrate artifacts and tenant fixtures.
 - `.hermes/` — Session continuity protocol and state for the operator.

@@ -68,7 +68,7 @@ A "parallel pair" is the operational unit of parallel work:
 - **One Claude Code pane** consuming a single envelope.
 - **One feature branch** (e.g., `feat/foo-…`).
 - **One physical worktree** at a unique path (e.g.,
-  `/home/nefarious/projects/creator-engine-<slice-or-feature>`).
+  `/home/<operator>/projects/creator-engine-<slice-or-feature>`).
 - **One Assignment Envelope** declaring scope, allowed mutation
   classes, prohibited surfaces, required validation, evidence
   requirements, stop conditions, and the conflict policy.
@@ -241,12 +241,12 @@ serialized integration path.
 - Pair A: Hermes-A pane authors envelope `env-A-001` for feature
   `feat/foo` with scope: implement Feature 003 PR template policy
   outline (non-privileged `docs` class). Worktree:
-  `/home/nefarious/projects/creator-engine-feat-foo`. Branch:
+  `/home/<operator>/projects/creator-engine-feat-foo`. Branch:
   `feat/foo`. Consumer: Claude Code session A.
 - Pair B: Hermes-B pane authors envelope `env-B-001` for feature
   `feat/bar` with scope: implement Feature 004 review evidence
   schema outline (non-privileged `docs` class). Worktree:
-  `/home/nefarious/projects/creator-engine-feat-bar`. Branch:
+  `/home/<operator>/projects/creator-engine-feat-bar`. Branch:
   `feat/bar`. Consumer: Claude Code session B.
 
 The envelopes' `allowed_mutation_classes` are both `[docs]`, but
