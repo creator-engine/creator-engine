@@ -1,0 +1,14 @@
+# Creator Engine v0.1 plan sidecar template.
+# Place beside a vanilla Spec Kit plan.md as plan.creator-engine.yml.
+spec_ref: spec.creator-engine.yml
+plan_mutation_class_summary:
+  - docs
+plan_permitted_actions_summary:
+  - propose
+  - edit
+verification_plan:
+  method: validator-and-review
+  evidence_refs:
+    - plan.md
+ratification_required: true
+identity_policy_ref: examples/well-formed/identity-record.yml

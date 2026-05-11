@@ -1,0 +1,14 @@
+# FR-006 / FR-027a malformed fixture: a `docs` task declaring a
+# reserved-restricted action (`deploy`) that is not in the docs class's
+# agent_permitted_actions. Schema-valid (passes tasks-wrapper-sidecar
+# schema) but fails the mutation_class class/action-mismatch check.
+spec_ref: examples/malformed/tasks.creator-engine.class-action-mismatch.yml#spec
+tasks:
+  - id: BAD-001
+    title: docs class declaring deploy action (FR-006/FR-027a mismatch)
+    mutation_class: docs
+    permitted_actions:
+      - deploy
+    verification_evidence_ref: examples/malformed/tasks.creator-engine.class-action-mismatch.yml#BAD-001
+    author_actor_id: example-agent[bot]
+    approver_actor_id: example-reviewer

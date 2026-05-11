@@ -1,0 +1,121 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/mutation-class.schema.yaml"
+title: "Creator Engine Mutation Class Declaration List"
+description: |
+  A list of mutation class declarations.
+
+  The substrate baseline taxonomy ships exactly nine entries with
+  is_baseline: true (docs, code, schema, deploy, governance, identity,
+  security, attestation, redaction). Tenant overlays at
+  tenants/<name>/mutation-classes.yml may add additional entries with
+  is_baseline: false; tenant extensions MUST NOT reuse a baseline name
+  and MUST NOT redefine baseline semantics. See
+  docs/contracts/mutation-class-taxonomy.md for the prose contract.
+
+  Reading A (Source-approved 2026-05-10): under the FR-008 privileged-
+  class rule, no class declaration may include any reserved-restricted
+  action in agent_permitted_actions. Human ratification is established
+  as a separate authority gate (human_ratification_required: true) and
+  via the authority matrix; it is not an unlock for agent-permitted
+  reserved-restricted actions.
+
+  Subset constraint deferred: agent_permitted_actions ⊆
+  action_vocabulary cannot be expressed cleanly across two arrays of
+  opaque strings in JSON Schema. The validator's mutation_class check
+  (sub-batch A2) enforces the subset rule per data-model.md Entity 2.
+type: array
+minItems: 1
+items:
+  type: object
+  required:
+    - name
+    - is_baseline
+    - description
+    - action_vocabulary
+    - agent_permitted_actions
+    - human_ratification_required
+  unevaluatedProperties: false
+  properties:
+    name:
+      type: string
+      pattern: "^[a-z][a-z0-9-]*$"
+      minLength: 1
+    is_baseline:
+      type: boolean
+    description:
+      type: string
+      minLength: 1
+    action_vocabulary:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        enum:
+          - propose
+          - edit
+          - commit
+          - open_pr
+          - attest
+          - advise_only
+          - merge
+          - deploy
+          - publish
+          - issue_credential
+          - revoke_credential
+          - alter_org_settings
+          - alter_tenant_settings
+          - alter_repo_settings
+          - approve_redaction
+          - weaken_attestation_gate
+          - weaken_redaction_gate
+    agent_permitted_actions:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+        enum:
+          - propose
+          - edit
+          - commit
+          - open_pr
+          - attest
+          - advise_only
+          - merge
+          - deploy
+          - publish
+          - issue_credential
+          - revoke_credential
+          - alter_org_settings
+          - alter_tenant_settings
+          - alter_repo_settings
+          - approve_redaction
+          - weaken_attestation_gate
+          - weaken_redaction_gate
+      not:
+        contains:
+          enum:
+            - merge
+            - deploy
+            - publish
+            - issue_credential
+            - revoke_credential
+            - alter_org_settings
+            - alter_tenant_settings
+            - alter_repo_settings
+            - approve_redaction
+            - weaken_attestation_gate
+            - weaken_redaction_gate
+    human_ratification_required:
+      type: boolean
+  allOf:
+    - if:
+        properties:
+          name:
+            enum: [deploy, governance, identity, security, attestation, redaction]
+        required: [name]
+      then:
+        properties:
+          human_ratification_required:
+            const: true
+        required: [human_ratification_required]

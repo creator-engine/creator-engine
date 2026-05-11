@@ -1,0 +1,18 @@
+id: duplicate-spec-id
+title: Duplicate Spec B
+tenant: example-tenant
+owner_role: source
+status: ready
+spec_type: implementation_spec
+mutation_class: docs
+permitted_actions:
+  - edit
+scope: Duplicate id fixture B.
+acceptance_criteria:
+  - Duplicate id B exists.
+verification:
+  method: validator-cli
+  evidence_refs:
+    - examples/malformed/duplicate-spec-id/b/spec.md
+ratification_required: true
+identity_policy_ref: examples/well-formed/identity-record.yml

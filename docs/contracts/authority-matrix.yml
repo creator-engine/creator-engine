@@ -1,0 +1,133 @@
+---
+# Creator Engine v0.1 baseline authority matrix.
+#
+# Validates against schemas/authority-matrix.schema.yaml.
+# See docs/contracts/authority-matrix.md for the prose contract.
+#
+# Editing rules:
+#   - Exactly seven rows, one per role_category enum value (Source-
+#     approved Escalation 2 Option (a), 2026-05-10).
+#   - Across the seven rows, every baseline mutation class MUST
+#     appear in at least one row's allowed_mutation_classes (coverage
+#     enforced by the authority-matrix check in sub-batch A2).
+#   - Tenant-specific role names, surfaces, and audit artifacts
+#     belong in tenants/<name>/authority-matrix-overlay.yml only,
+#     never in this baseline file (FR-024).
+
+- role_category: source
+  allowed_instruction_sources:
+    - source_directive
+    - spec
+    - plan
+    - tasks
+  allowed_mutation_classes:
+    - docs
+    - code
+    - schema
+    - deploy
+    - governance
+    - identity
+    - security
+    - attestation
+    - redaction
+  required_ratifier_role: source
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_commit_message
+    - repo_issue
+    - repo_review
+    - repo_attestation_record
+    - repo_ratification_record
+  required_audit_artifacts:
+    - attestation_record
+    - ratification_record
+
+- role_category: ratifier
+  allowed_instruction_sources:
+    - source_directive
+    - spec
+    - ratification_record
+  allowed_mutation_classes:
+    - governance
+    - identity
+  required_ratifier_role: source
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_review
+    - repo_ratification_record
+  required_audit_artifacts:
+    - attestation_record
+    - ratification_record
+
+- role_category: architect
+  allowed_instruction_sources:
+    - spec
+    - plan
+  allowed_mutation_classes:
+    - docs
+    - code
+    - schema
+  required_ratifier_role: ratifier
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_commit_message
+    - repo_review
+  required_audit_artifacts:
+    - attestation_record
+
+- role_category: implementer
+  allowed_instruction_sources:
+    - spec
+    - plan
+    - tasks
+  allowed_mutation_classes:
+    - docs
+    - code
+    - schema
+  required_ratifier_role: ratifier
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_commit_message
+  required_audit_artifacts:
+    - attestation_record
+
+- role_category: reviewer
+  allowed_instruction_sources:
+    - spec
+    - plan
+    - tasks
+  allowed_mutation_classes:
+    - docs
+  required_ratifier_role: ratifier
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_review
+  required_audit_artifacts:
+    - attestation_record
+
+- role_category: verifier
+  allowed_instruction_sources:
+    - spec
+    - plan
+    - tasks
+  allowed_mutation_classes:
+    - docs
+    - code
+  required_ratifier_role: ratifier
+  allowed_communication_surfaces:
+    - repo_pr
+    - repo_commit_message
+  required_audit_artifacts:
+    - attestation_record
+
+- role_category: observer
+  allowed_instruction_sources:
+    - spec
+  allowed_mutation_classes:
+    - docs
+  required_ratifier_role: ratifier
+  allowed_communication_surfaces:
+    - repo_review
+    - repo_issue
+  required_audit_artifacts:
+    - attestation_record

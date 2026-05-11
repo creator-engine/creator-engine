@@ -1,0 +1,13 @@
+# Creator Engine v0.1 tasks sidecar template.
+# Place beside a vanilla Spec Kit tasks.md as tasks.creator-engine.yml.
+spec_ref: spec.creator-engine.yml
+tasks:
+  - id: T001
+    title: Author the governed artifact
+    mutation_class: docs
+    permitted_actions:
+      - edit
+    verification_evidence_ref: tasks.md#t001
+    author_actor_id: example-agent[bot]
+    approver_actor_id: example-reviewer
+    ratification_or_approval_ref: reviews/example-review.md

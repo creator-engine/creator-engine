@@ -1,0 +1,6 @@
+PyYAML==6.0.2
+jsonschema==4.23.0
+attrs==24.2.0
+jsonschema-specifications==2024.10.1
+referencing==0.35.1
+rpds-py==0.22.3

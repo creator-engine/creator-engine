@@ -1,0 +1,19 @@
+spec_ref: spec.creator-engine.yml
+tasks:
+  - id: T001
+    title: Author example documentation
+    mutation_class: docs
+    permitted_actions:
+      - edit
+    verification_evidence_ref: examples/well-formed/tasks.md#t001
+    author_actor_id: example-agent[bot]
+    approver_actor_id: example-reviewer
+    ratification_or_approval_ref: examples/well-formed/reviews/example-review.md
+  - id: T002
+    title: Verify example documentation
+    mutation_class: docs
+    permitted_actions:
+      - propose
+    verification_evidence_ref: examples/well-formed/tasks.md#t002
+    author_actor_id: example-agent[bot]
+    approver_actor_id: example-reviewer
