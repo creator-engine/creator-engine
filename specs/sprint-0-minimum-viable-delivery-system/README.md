@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-11
 
-**Applies to**: Creator Engine development after PR #2 (`feat: add Creator Engine governance substrate and SDLC operating model`)
+**Applies to**: Creator Engine development after the merged governance-substrate baseline (Feature 001 governance-substrate work: `feat: add Creator Engine governance substrate and SDLC operating model`)
 
 **Decision**: Source approved **Option C — Minimum Viable Delivery System Sprint 0**.
 
@@ -223,7 +223,7 @@ A merge report that does not state the next task is incomplete.
 
 ## 8. Current Next Task
 
-Current state after PR #2:
+Current state after the merged governance-substrate baseline (the v0.1 governance substrate):
 
 - Feature 001 governance substrate is merged.
 - Feature 002 specification-only operating model is merged.
