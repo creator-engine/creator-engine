@@ -1,7 +1,9 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slice B1 scaffold. Markdown-only by ratified
-posture. Structured YAML sidecars deferred to B3.
+**Status**: Sprint 0 Slice B1 scaffold with Slice B2 (Definition of
+Ready, Definition of Done, dependency map, risk register) in progress.
+Markdown-only by ratified posture. Structured YAML sidecars deferred
+to B3.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -38,7 +40,7 @@ The delivery view MUST NOT be used to amend, skip, or backfill the
 Feature 001 lifecycle. Skipping or backfilling Feature 001 lifecycle
 states is a contract violation per FR-027a.
 
-## b. Work-item fields (B1)
+## b. Work-item fields
 
 Every backlog row below carries these fields. Field semantics:
 
@@ -69,9 +71,15 @@ Every backlog row below carries these fields. Field semantics:
   reference only. It is not a substitute for any repo-visible artifact
   or for Source ratification. Absence here is the default.
 
-These fields are sufficient for B1. Definition of Ready, Definition of
-Done, dependency-map elaboration, and risk registration are deferred
-to B2.
+These fields are the backlog's compact row schema. They are
+intentionally minimal so the backlog remains a row catalog and not a
+Jira clone. Definition of Ready, Definition of Done, dependency-map
+elaboration, and risk handling live in the B2 documents
+([`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md),
+[`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md),
+[`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+[`./RISK_REGISTER.md`](./RISK_REGISTER.md)); this section names only
+the fields a backlog row carries.
 
 ## c. Sprint 0 — Minimum Viable Delivery System
 
@@ -107,49 +115,58 @@ Owning source of truth:
 - **status**: `In Progress`
 - **scope**: Establish the minimum repo-native delivery control plane
   required to answer "what is next?" after every merge. Comprises B1
-  (this batch) and B2 (next).
+  (markdown control-plane scaffold) and B2 (Definition of Ready,
+  Definition of Done, dependency map, risk register). B3 and B4
+  remain deferred.
 - **acceptance gate**: Sprint 0 exit gates #2 (repo-native
   roadmap/backlog/Kanban) and #3 (post-merge next-task protocol).
+  Both B1 and B2 must reach `Ratified` or `Done` for Slice B to be
+  complete on the delivery view.
 - **dependencies / blockers**: `sprint-0/slice-a` (Done).
 - **anticipated mutation class**: `docs`
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`
 - **external tracker reference**: —
 
-#### c.2.1 Slice B1 — Markdown control-plane scaffold (current)
+#### c.2.1 Slice B1 — Markdown control-plane scaffold (Source-ratified)
 
 - **id**: `sprint-0/slice-b/b1`
 - **parent**: `sprint-0/slice-b`
-- **status**: `In Progress`
+- **status**: `Ratified`
 - **scope**: Create `docs/delivery/README.md`, `BACKLOG.md`,
   `KANBAN.md`, and `NEXT_TASK_PROTOCOL.md` under the Source-ratified
   envelope-equivalent posture; markdown-only; no `.github/`,
-  `specs/`, or structured YAML sidecar mutation. Defer DoR / DoD /
-  dependency map / risk register to B2.
+  `specs/`, or structured YAML sidecar mutation. DoR / DoD /
+  dependency map / risk register are covered by B2 and were not part
+  of the B1 commit boundary.
 - **acceptance gate**: B1 docs validate against the envelope's
-  content-smoke check; Source ratifies the scaffold.
+  content-smoke check; Source ratifies the scaffold. Source
+  ratification recorded; the canonical-branch merge that finalizes
+  B1 to `Done` is sequenced under the post-merge protocol and is
+  not yet reflected in this row.
 - **dependencies / blockers**: `sprint-0/slice-a` (Done).
 - **anticipated mutation class**: `docs`
 - **owner role**: `implementer` (Claude Code under Hermes envelope)
 - **ratifier role**: `source`
 - **external tracker reference**: —
 
-#### c.2.2 Slice B2 — DoR / DoD / dependency map / risk register (next)
+#### c.2.2 Slice B2 — DoR / DoD / dependency map / risk register (current)
 
 - **id**: `sprint-0/slice-b/b2`
 - **parent**: `sprint-0/slice-b`
-- **status**: `Blocked`
+- **status**: `In Progress`
 - **scope**: Author `docs/delivery/DEFINITION_OF_READY.md`,
   `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md`,
   layered onto Feature 001 FR-013 / FR-013a / FR-014 and the Sprint 0
-  execution sequence. Still markdown-only.
+  execution sequence. Minimal updates to the B1 README, backlog,
+  Kanban, and next-task protocol are included only for
+  discoverability and status coherence. Still markdown-only.
 - **acceptance gate**: Sprint 0 exit gate #2 fully satisfied;
   post-merge next-task protocol references a complete delivery
   control plane.
-- **dependencies / blockers**: `sprint-0/slice-b/b1` (must reach
-  `Ratified` or `Done`; currently `In Progress` under this batch).
-  Per §a, B2 cannot be `Ready` while this dependency is uncleared;
-  B2 is `Blocked` until B1 ratifies.
+- **dependencies / blockers**: `sprint-0/slice-b/b1` (`Ratified`;
+  the B1 → B2 dependency rule "B1 must reach `Ratified` or `Done`"
+  is cleared by Source ratification of B1).
 - **anticipated mutation class**: `docs`
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`
@@ -446,5 +463,11 @@ the source of truth.
    credentials, tokens) MUST NOT appear in this file. Merged PR
    numbers in canonical-branch commit subjects MAY be cited as
    historical evidence.
-5. When B2 lands, this file's maintenance rules are subordinate to
-   the Definition of Ready and Definition of Done documents.
+5. This file's maintenance rules are subordinate to
+   [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) and
+   [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) once B2
+   reaches `Ratified` or `Done`. Dependency edges between rows are
+   navigationally mirrored in
+   [`./DEPENDENCIES.md`](./DEPENDENCIES.md); standing risks bearing
+   on backlog hygiene live in
+   [`./RISK_REGISTER.md`](./RISK_REGISTER.md).
