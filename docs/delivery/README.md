@@ -1,8 +1,10 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slice B1 scaffold. Source-ratified posture under
-Option C of the Slice B strategy decision. Awaiting downstream Slice B2
-expansion before Slice B is complete.
+**Status**: Sprint 0 Slice B1 scaffold extended by Slice B2 (Definition
+of Ready, Definition of Done, dependency map, risk register). Source-
+ratified posture under Option C of the Slice B strategy decision.
+Slice B is complete on the delivery view once B2 reaches `Ratified`
+or `Done`; B3 and B4 remain deferred.
 
 ## a. Purpose
 
@@ -17,9 +19,12 @@ artifacts required to sequence governed work, preserve auditability
 from `git clone` alone, and hand the next batch to Source for
 ratification.
 
-The control plane is markdown-only in B1 by design. Structured backlog
-sidecars, dependency graphs, risk registers, and tracker adapters are
-out of scope for B1 and are deferred to later Slice B sub-batches.
+The control plane is markdown-only by design. Slice B1 introduced the
+README, backlog, Kanban, and next-task protocol; Slice B2 layered the
+Definition of Ready, Definition of Done, dependency map, and risk
+register on top of that scaffold. Structured backlog sidecars and
+tracker adapters remain out of scope and are deferred to later Slice
+B sub-batches.
 
 ## b. Anti-Jira-clone statement
 
@@ -96,26 +101,28 @@ This boundary aligns with
 
 ## e. File map
 
-### B1 (this batch — present)
+### B1 (present)
 
 | File | Role |
 |---|---|
 | [`README.md`](./README.md) | This file. Orients the control plane, names the tracker boundary, and lists deferrals. |
-| [`BACKLOG.md`](./BACKLOG.md) | Governed backlog of Sprint 0 slices and downstream features, with work-item fields sufficient for B1. |
+| [`BACKLOG.md`](./BACKLOG.md) | Governed backlog of Sprint 0 slices and downstream features, with the delivery-view work-item row schema. |
 | [`KANBAN.md`](./KANBAN.md) | Current Kanban view summarized from `BACKLOG.md`. Eight delivery-view status columns. |
 | [`NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) | Post-merge completion report fields and next-task selection rules. |
 
-### B2 (deferred — absent in this batch)
+### B2 (present)
 
 | File | Role |
 |---|---|
-| `docs/delivery/DEFINITION_OF_READY.md` | Delivery-view DoR for governed work items, layered onto Feature 001 FR-013 / FR-013a. |
-| `docs/delivery/DEFINITION_OF_DONE.md` | Delivery-view DoD, layered onto Feature 001 FR-014. |
-| `docs/delivery/DEPENDENCIES.md` | Dependency map across Sprint 0 slices and downstream features. |
-| `docs/delivery/RISK_REGISTER.md` | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
+| [`DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) | Delivery-view DoR for governed work items, layered onto Feature 001 FR-013 / FR-013a. |
+| [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) | Delivery-view DoD, layered onto Feature 001 FR-014. |
+| [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
+| [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
-Slice B is not complete until B2 lands. B1 alone does not satisfy
-Sprint 0 exit gate #2 in full.
+Slice B is complete on the delivery view once both B1 and B2 reach
+`Ratified` or `Done`. Together they satisfy Sprint 0 exit gate #2 in
+full; gate #3 is satisfied by the next-task protocol authored under
+B1 and cross-referenced from the B2 documents.
 
 ### Later sub-batches (deferred)
 
@@ -129,10 +136,10 @@ Sprint 0 exit gate #2 in full.
 - Live Jira / Linear mutations remain out of scope until separately
   ratified.
 
-## f. Out of scope for B1
+## f. Out of scope for the delivery control plane (current batch)
 
-The following are explicitly out of scope for this batch and MUST NOT
-be introduced under it:
+The following are explicitly out of scope for the current delivery
+control plane batch and MUST NOT be introduced under it:
 
 - Any `.github/` workflow, PR template, branch protection setting, or
   CODEOWNERS change (Feature 003 / Sprint 0 Slice C).
@@ -144,7 +151,8 @@ be introduced under it:
 - Any external-tracker integration, credential, or network call.
 - Any live GitHub or external-tracker mutation.
 - Implementation of US3 A1 (not authorized).
-- Implementation of Slice B2 work (deferred to its own ratified batch).
+- Implementation of Slice C work (deferred until Slice B reaches
+  `Ratified` or `Done` and the Slice C envelope is Source-ratified).
 
 ## g. How this control plane is used
 
@@ -165,9 +173,10 @@ A merge report that does not name the next task is incomplete per
 [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md)
 §7.
 
-## h. Acceptance posture for B1
+## h. Acceptance posture for B1 and B2
 
-This README satisfies the B1 envelope's README requirements:
+This README satisfies the B1 envelope's README requirements and is
+extended to discover the B2 documents:
 
 - Names the purpose as the minimum repo-native delivery control plane.
 - States explicitly that this is not a Jira clone.
@@ -175,8 +184,9 @@ This README satisfies the B1 envelope's README requirements:
   Feature 001 substrate, Feature 002 operating model, the roadmap,
   the Sprint 0 execution README, Spec Kit `tasks.md`, Creator Engine
   sidecars, and optional external trackers.
-- Provides the file map for B1 and the deferred B2 / B3 / B4 files.
+- Provides the file map for the present B1 and B2 files and the
+  deferred B3 / B4 files.
 - States that a fresh clone is sufficient to identify the next task
   and that no external tracker credential or network state is required
   for Sprint 0 exit gate #2.
-- Enumerates the out-of-scope surfaces for the B1 batch.
+- Enumerates the out-of-scope surfaces for the current batch.

@@ -1,9 +1,23 @@
 # Post-Merge Next-Task Protocol
 
-**Status**: Sprint 0 Slice B1 scaffold. Part of the **minimum
-repo-native delivery control plane** and **not a Jira clone**. A fresh
-clone is sufficient to apply this protocol; no external tracker
-credential or network state is required.
+**Status**: Sprint 0 Slice B1 scaffold, cross-referenced from Slice B2
+(Definition of Ready, Definition of Done, dependency map, risk
+register). Part of the **minimum repo-native delivery control plane**
+and **not a Jira clone**. A fresh clone is sufficient to apply this
+protocol; no external tracker credential or network state is required.
+
+The ten report fields in §b and the selection rules in §c are
+unchanged by Slice B2. Slice B2 supplies the readiness and completion
+gates the report fields are evaluated against
+([`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) and
+[`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md)), the dependency
+map the next-task selection rules walk
+([`./DEPENDENCIES.md`](./DEPENDENCIES.md)), and the standing risks
+that bear on report authoring
+([`./RISK_REGISTER.md`](./RISK_REGISTER.md)). Where this protocol and
+the Slice B2 documents reference the same field, the protocol
+controls for procedure; the Slice B2 documents control for the gate
+the procedure evaluates against.
 
 ## a. Purpose
 
@@ -216,9 +230,15 @@ Promoting any such fact into an upstream artifact is itself a
 governance violation and MUST be reverted unless Source ratifies a
 named exception.
 
-## f. Acceptance posture for B1
+## f. Acceptance posture for B1 (extended by B2)
 
-This document satisfies the B1 envelope's protocol requirements:
+This document satisfies the B1 envelope's protocol requirements and
+is cross-referenced from the Slice B2 documents
+([`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md),
+[`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md),
+[`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+[`./RISK_REGISTER.md`](./RISK_REGISTER.md)) without altering the ten
+report fields:
 
 - All ten post-merge fields from
   [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md)
