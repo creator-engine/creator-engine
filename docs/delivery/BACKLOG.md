@@ -138,7 +138,7 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-b/b2`
 - **parent**: `sprint-0/slice-b`
-- **status**: `Ready`
+- **status**: `Blocked`
 - **scope**: Author `docs/delivery/DEFINITION_OF_READY.md`,
   `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md`,
   layered onto Feature 001 FR-013 / FR-013a / FR-014 and the Sprint 0
@@ -147,7 +147,9 @@ Owning source of truth:
   post-merge next-task protocol references a complete delivery
   control plane.
 - **dependencies / blockers**: `sprint-0/slice-b/b1` (must reach
-  `Ratified` or `Done`).
+  `Ratified` or `Done`; currently `In Progress` under this batch).
+  Per §a, B2 cannot be `Ready` while this dependency is uncleared;
+  B2 is `Blocked` until B1 ratifies.
 - **anticipated mutation class**: `docs`
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`
@@ -320,8 +322,7 @@ the source of truth.
 
 - **id**: `feature-002`
 - **parent**: —
-- **status**: `Ratified` (spec merged); canonical document bodies
-  authored under `sprint-0/slice-a` (Done).
+- **status**: `Done`
 - **scope**: Operating-model specification only at the substrate
   layer; canonical document bodies authored under Slice A.
 - **acceptance gate**: Feature 002 spec acceptance criteria; merged.
@@ -331,6 +332,10 @@ the source of truth.
 - **owner role**: `architect`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `4ab7962 feat: add Creator Engine governance substrate and SDLC operating model (#2)`
+  on the canonical branch (Feature 002 spec); canonical document
+  bodies merged under `sprint-0/slice-a` (see §c.1).
 
 ### e.3 Feature 003 — GitHub CI governance
 

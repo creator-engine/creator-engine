@@ -42,9 +42,9 @@ here before being promoted to `Ready`.)*
 
 ### Ready
 
-| id | scope (one line) | dependencies cleared | notes |
-|---|---|---|---|
-| `sprint-0/slice-b/b2` | Author `DEFINITION_OF_READY.md`, `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md` under `docs/delivery/`. | `sprint-0/slice-b/b1` must reach `Ratified`. | Immediate next task once B1 ratifies cleanly. See §c. |
+*(No items currently in this column. `sprint-0/slice-b/b2` is the
+expected occupant once `sprint-0/slice-b/b1` reaches `Ratified` or
+`Done`; until then B2 is `Blocked` (see §Blocked and §c).)*
 
 ### In Progress
 
@@ -88,6 +88,7 @@ ratification but before the post-merge attestation is finalized in
 
 | id | scope (one line) | named blocker |
 |---|---|---|
+| `sprint-0/slice-b/b2` | Author `DEFINITION_OF_READY.md`, `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md` under `docs/delivery/`. | `sprint-0/slice-b/b1` must reach `Ratified` or `Done`; B1 is currently `In Progress` under this batch. |
 | `sprint-0/slice-c` | Thin GitHub / CI / PR governance (workflows, PR template, branch protection policy, review policy). | `sprint-0/slice-b` not yet complete; Slice C mutations require per-batch Source ratification (privileged). |
 | `sprint-0/slice-d` | Minimum review / QA / identity governance (Codex review identity, QA / review evidence template, review gate). | `sprint-0/slice-c` not yet complete; Slice D includes privileged `identity` work. |
 | `sprint-0/slice-e` | Manual Assignment Envelope template + worktree/branch naming + one-driver-per-worktree rule + envelope dry-run evidence. | `sprint-0/slice-c` and `sprint-0/slice-d` not yet complete. |
@@ -95,19 +96,25 @@ ratification but before the post-merge attestation is finalized in
 
 ## c. Immediate next likely post-B1 task
 
-Subject to Source ratification of this batch and to any blockers
-identified during validation or review, the immediate next post-B1
-task is:
+`sprint-0/slice-b/b2` is currently `Blocked` (see §Blocked) because
+its named dependency `sprint-0/slice-b/b1` has not yet reached
+`Ratified` or `Done`. Subject to Source ratification of this batch,
+which advances B1 to `Ratified` and clears that dependency, the
+immediate next post-B1 task is:
 
 > **`sprint-0/slice-b/b2`** — author the deferred B2 documents
 > (`DEFINITION_OF_READY.md`, `DEFINITION_OF_DONE.md`,
 > `DEPENDENCIES.md`, `RISK_REGISTER.md`) under `docs/delivery/`.
 
-Rationale: B2 has the highest priority among `Ready` items, its only
+Rationale: B2 is the highest-priority `Blocked` item, its only
 dependency is `sprint-0/slice-b/b1` reaching `Ratified`, and Sprint 0
-exit gate #2 cannot be fully satisfied until B2 lands. Slice C is
-gated on Slice B reaching `Ratified` or `Done`, so B2 is also the
-shortest path to unblock the next privileged slice.
+exit gate #2 cannot be fully satisfied until B2 lands. Per
+[`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c.4, the named
+blocking dependency (B1 ratification) is the implied next task until
+it clears; once cleared, B2 becomes the highest-priority `Ready`
+candidate per §c.1. Slice C is gated on Slice B reaching `Ratified`
+or `Done`, so B2 is also the shortest path to unblock the next
+privileged slice.
 
 If validation or review of B1 surfaces a blocker, the next-task
 recommendation defers to the rules in
