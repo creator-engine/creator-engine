@@ -1,0 +1,120 @@
+name: Validate
+
+# CI verifies; CI does not ratify.
+# This workflow produces validation evidence only.
+# It does not deploy, publish, merge, approve, or apply governance ratification.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate governance artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install validator (offline, from repo wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            -r validators/requirements.txt
+
+      - name: YAML parse check — workflow files
+        run: |
+          python - <<'PYEOF'
+          import sys, pathlib, yaml
+          errors = []
+          for p in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              try:
+                  yaml.safe_load(p.read_text())
+                  print(f"OK  {p}")
+              except yaml.YAMLError as exc:
+                  errors.append(f"FAIL {p}: {exc}")
+                  print(f"FAIL {p}: {exc}")
+          if errors:
+              sys.exit(1)
+          PYEOF
+
+      - name: YAML parse check — schemas and templates
+        run: |
+          python - <<'PYEOF'
+          import sys, pathlib, yaml
+          errors = []
+          dirs = ["schemas", "templates", "docs/contracts", "examples"]
+          for d in dirs:
+              for ext in ("*.yml", "*.yaml"):
+                  for p in sorted(pathlib.Path(d).rglob(ext)):
+                      try:
+                          yaml.safe_load(p.read_text())
+                          print(f"OK  {p}")
+                      except yaml.YAMLError as exc:
+                          errors.append(f"FAIL {p}: {exc}")
+                          print(f"FAIL {p}: {exc}")
+          if errors:
+              sys.exit(1)
+          PYEOF
+
+      - name: Creator Engine validator — well-formed examples
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
+
+      - name: Creator Engine validator — malformed examples (expect failures)
+        run: |
+          if PYTHONPATH=validators python -m creator_engine_validator check examples/malformed/; then
+            echo "FAIL: malformed examples unexpectedly passed"
+            exit 1
+          else
+            echo "OK: malformed examples correctly rejected"
+          fi
+
+      - name: Creator Engine validator — list checks (audit evidence)
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator --list-checks
+
+      - name: Workflow permissions audit (no write permissions present)
+        run: |
+          python - <<'PYEOF'
+          import sys, pathlib, yaml
+
+          def collect_permissions(obj, found, path=""):
+              if isinstance(obj, dict):
+                  for k, v in obj.items():
+                      if k == "permissions":
+                          if isinstance(v, dict):
+                              for perm_key, perm_val in v.items():
+                                  if str(perm_val).lower() == "write":
+                                      found.append(f"{path}.{perm_key}: write")
+                          elif isinstance(v, str) and v.lower() == "write":
+                              found.append(f"{path}: write (all)")
+                      else:
+                          collect_permissions(v, found, f"{path}.{k}")
+              elif isinstance(obj, list):
+                  for i, item in enumerate(obj):
+                      collect_permissions(item, found, f"{path}[{i}]")
+
+          p = pathlib.Path(".github/workflows/validate.yml")
+          doc = yaml.safe_load(p.read_text())
+          write_found = []
+          collect_permissions(doc, write_found)
+          if write_found:
+              for w in write_found:
+                  print(f"FAIL: write permission in YAML structure: {w}")
+              sys.exit(1)
+          top_perms = doc.get("permissions", {})
+          print(f"OK: declared permissions = {top_perms}")
+          print("OK: no write permissions found in YAML structure")
+          PYEOF
