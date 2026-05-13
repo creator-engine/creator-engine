@@ -1,10 +1,13 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slice B1 scaffold extended by Slice B2 (Definition
-of Ready, Definition of Done, dependency map, risk register). Source-
-ratified posture under Option C of the Slice B strategy decision.
-Slice B is complete on the delivery view once B2 reaches `Ratified`
-or `Done`; B3 and B4 remain deferred.
+**Status**: Sprint 0 Slice B complete on the delivery view. B1
+(markdown control-plane scaffold) and B2 (Definition of Ready,
+Definition of Done, dependency map, risk register) have both landed
+on the canonical branch under the Source-ratified posture (Option C
+of the Slice B strategy decision). B3 and B4 remain deferred.
+`sprint-0/slice-c` is the next candidate envelope; Slice C
+implementation is not authorized by this state and requires its own
+Source-ratified privileged envelope.
 
 ## a. Purpose
 

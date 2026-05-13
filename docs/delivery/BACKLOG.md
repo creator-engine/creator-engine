@@ -1,9 +1,12 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slice B1 scaffold with Slice B2 (Definition of
-Ready, Definition of Done, dependency map, risk register) in progress.
-Markdown-only by ratified posture. Structured YAML sidecars deferred
-to B3.
+**Status**: Sprint 0 Slice B complete on the delivery view. B1
+(markdown control-plane scaffold) and B2 (Definition of Ready,
+Definition of Done, dependency map, risk register) have both landed
+on the canonical branch. Markdown-only by ratified posture.
+Structured YAML sidecars deferred to B3. `sprint-0/slice-c` is the
+next candidate envelope; Slice C implementation is not authorized by
+this state and requires its own Source-ratified privileged envelope.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -112,7 +115,7 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-b`
 - **parent**: `sprint-0`
-- **status**: `In Progress`
+- **status**: `Done`
 - **scope**: Establish the minimum repo-native delivery control plane
   required to answer "what is next?" after every merge. Comprises B1
   (markdown control-plane scaffold) and B2 (Definition of Ready,
@@ -121,18 +124,22 @@ Owning source of truth:
 - **acceptance gate**: Sprint 0 exit gates #2 (repo-native
   roadmap/backlog/Kanban) and #3 (post-merge next-task protocol).
   Both B1 and B2 must reach `Ratified` or `Done` for Slice B to be
-  complete on the delivery view.
+  complete on the delivery view. Both B1 and B2 have now landed on
+  the canonical branch (see §c.2.1 and §c.2.2 durable evidence).
 - **dependencies / blockers**: `sprint-0/slice-a` (Done).
 - **anticipated mutation class**: `docs`
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: B1 and B2 merged on the canonical branch (see
+  §c.2.1 and §c.2.2). With both sub-batches landed, Slice B is
+  complete on the delivery view.
 
 #### c.2.1 Slice B1 — Markdown control-plane scaffold (Source-ratified)
 
 - **id**: `sprint-0/slice-b/b1`
 - **parent**: `sprint-0/slice-b`
-- **status**: `Ratified`
+- **status**: `Done`
 - **scope**: Create `docs/delivery/README.md`, `BACKLOG.md`,
   `KANBAN.md`, and `NEXT_TASK_PROTOCOL.md` under the Source-ratified
   envelope-equivalent posture; markdown-only; no `.github/`,
@@ -140,21 +147,22 @@ Owning source of truth:
   dependency map / risk register are covered by B2 and were not part
   of the B1 commit boundary.
 - **acceptance gate**: B1 docs validate against the envelope's
-  content-smoke check; Source ratifies the scaffold. Source
-  ratification recorded; the canonical-branch merge that finalizes
-  B1 to `Done` is sequenced under the post-merge protocol and is
-  not yet reflected in this row.
+  content-smoke check; Source ratifies the scaffold; the
+  canonical-branch merge finalizes B1 to `Done`.
 - **dependencies / blockers**: `sprint-0/slice-a` (Done).
 - **anticipated mutation class**: `docs`
 - **owner role**: `implementer` (Claude Code under Hermes envelope)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `77e0bfe docs: add Sprint 0 Slice B1 delivery control plane (#7)`
+  on the canonical branch.
 
-#### c.2.2 Slice B2 — DoR / DoD / dependency map / risk register (current)
+#### c.2.2 Slice B2 — DoR / DoD / dependency map / risk register
 
 - **id**: `sprint-0/slice-b/b2`
 - **parent**: `sprint-0/slice-b`
-- **status**: `In Progress`
+- **status**: `Done`
 - **scope**: Author `docs/delivery/DEFINITION_OF_READY.md`,
   `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md`,
   layered onto Feature 001 FR-013 / FR-013a / FR-014 and the Sprint 0
@@ -164,13 +172,14 @@ Owning source of truth:
 - **acceptance gate**: Sprint 0 exit gate #2 fully satisfied;
   post-merge next-task protocol references a complete delivery
   control plane.
-- **dependencies / blockers**: `sprint-0/slice-b/b1` (`Ratified`;
-  the B1 → B2 dependency rule "B1 must reach `Ratified` or `Done`"
-  is cleared by Source ratification of B1).
+- **dependencies / blockers**: `sprint-0/slice-b/b1` (`Done`).
 - **anticipated mutation class**: `docs`
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `d4a2636 docs: add Sprint 0 Slice B2 readiness controls (#10)`
+  on the canonical branch.
 
 #### c.2.3 Slice B3 — Structured YAML backlog sidecars (deferred)
 
@@ -212,18 +221,21 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-c`
 - **parent**: `sprint-0`
-- **status**: `Blocked`
+- **status**: `Ready`
 - **scope**: `.github/workflows/` baseline validation workflow; PR
   template; branch protection policy/checklist; review policy /
   CODEOWNERS policy as applicable; CI evidence rule
   (verifies-not-ratifies).
 - **acceptance gate**: Sprint 0 exit gates #4 (PR validation), #5
   (PR template and review policy), #6 (branch protection policy).
-- **dependencies / blockers**: `sprint-0/slice-b` must reach
-  `Ratified` or `Done` so the control plane can sequence Slice C.
-  Slice C mutations cross privileged
-  `governance`/`security`/`deploy` boundaries and require
-  per-batch Source ratification.
+- **dependencies / blockers**: `sprint-0/slice-b` is `Done`, so the
+  delivery-view dependency is cleared and Slice C is the next
+  candidate envelope. Slice C mutations cross privileged
+  `governance`/`security`/`deploy` boundaries and require a
+  per-batch Source-ratified privileged envelope before any
+  implementation begins; that ratification is what promotes Slice C
+  from `Ready` to `In Progress` and is not authorized by Slice B
+  reconciliation alone.
 - **anticipated mutation class**: `governance` (privileged); some
   `docs` for policy text.
 - **owner role**: `architect` (policy) / `implementer` (workflows)
