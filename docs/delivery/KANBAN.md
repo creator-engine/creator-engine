@@ -1,7 +1,12 @@
 # Creator Engine Kanban
 
-**Status**: Sprint 0 Slice B1 scaffold extended by Slice B2 (in
-progress). Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
+**Status**: Sprint 0 Slice B complete on the delivery view: B1
+(markdown control-plane scaffold) and B2 (Definition of Ready,
+Definition of Done, dependency map, risk register) have both landed
+on the canonical branch. `sprint-0/slice-c` is the next candidate
+envelope; its implementation is not authorized by this state and
+requires its own Source-ratified privileged envelope. Generated
+from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
 plane** and is **not a Jira clone**. It is a current readable view
@@ -42,15 +47,13 @@ here before being promoted to `Ready`.)*
 
 ### Ready
 
-*(No items currently in this column. `sprint-0/slice-b/b2` was
-previously listed here under B1; it is now `In Progress`.)*
+| id | scope (one line) | envelope class | notes |
+|---|---|---|---|
+| `sprint-0/slice-c` | Thin GitHub / CI / PR governance (workflows, PR template, branch protection policy, review policy / CODEOWNERS as applicable, CI evidence rule). | `governance` (privileged) | Delivery-view dependency on Slice B is cleared (B1 and B2 are `Done`). Slice C is the next candidate envelope. Implementation does NOT begin under this reconciliation — Slice C requires its own Source-ratified privileged envelope per Feature 001 FR-008 / FR-016 before promotion to `In Progress`. |
 
 ### In Progress
 
-| id | scope (one line) | envelope class | notes |
-|---|---|---|---|
-| `sprint-0/slice-b/b2` | Author `DEFINITION_OF_READY.md`, `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md` under `docs/delivery/`, with minimal coherence updates to the B1 docs. | `docs` | Current batch. Will move to `Verified` once the envelope's required validation passes; will move to `Ratified` only after Source ratifies B2. See §c. |
-| `sprint-0/slice-b` | Establish the minimum repo-native delivery control plane (covers B1 and B2). | `docs` | Parent slice; tracks B1 (Ratified) and B2 (In Progress) progress; stays open until B2 also ratifies / lands. |
+*(No items currently in this column.)*
 
 ### Verified
 
@@ -58,9 +61,7 @@ previously listed here under B1; it is now `In Progress`.)*
 
 ### Ratified
 
-| id | scope (one line) | ratification surface | notes |
-|---|---|---|---|
-| `sprint-0/slice-b/b1` | Create `docs/delivery/README.md`, `BACKLOG.md`, `KANBAN.md`, `NEXT_TASK_PROTOCOL.md` under a Source-ratified envelope-equivalent; markdown-only. | Source ratification recorded. | Source ratified the B1 scaffold; the canonical-branch merge finalizing B1 to `Done` is sequenced under the post-merge protocol and is not yet reflected here. The B1 → B2 dependency is cleared by this ratification. |
+*(No items currently in this column.)*
 
 ### Done
 
@@ -69,6 +70,9 @@ previously listed here under B1; it is now `In Progress`.)*
 | `feature-001` | v0.1 governance substrate: identity, attestation, mutation classes, authority matrix, DoR/DoD, ratification flow, redaction gate, validator, dogfood tenant fixture, examples, verification spec. | Merged under `specs/001-v0-1-governance-substrate/` and substrate artifacts under `docs/contracts/`, `schemas/`, `validators/`, `examples/`, `tenants/`. |
 | `feature-002` | v0.1-docs operating-model spec (specification-only at the operating-model layer). | Merged spec at `specs/002-canonical-docs-and-operating-model/spec.md`. |
 | `sprint-0/slice-a` | Author the 17 Feature 002 canonical documents under `docs/product/`, `docs/architecture/`, `docs/governance/`, `docs/quality/`, `docs/devops/`, `docs/security/`. | Canonical-branch commits `51a885e docs: integrate Sprint 0 Slice A canonical docs (#5)` and `7cc082f docs: harden Slice A post-merge references (#6)`. |
+| `sprint-0/slice-b` | Establish the minimum repo-native delivery control plane (covers B1 and B2). | Slice B is complete on the delivery view: B1 and B2 have both landed on the canonical branch (see rows below). |
+| `sprint-0/slice-b/b1` | Create `docs/delivery/README.md`, `BACKLOG.md`, `KANBAN.md`, `NEXT_TASK_PROTOCOL.md` under a Source-ratified envelope-equivalent; markdown-only. | Canonical-branch commit `77e0bfe docs: add Sprint 0 Slice B1 delivery control plane (#7)`. |
+| `sprint-0/slice-b/b2` | Author `DEFINITION_OF_READY.md`, `DEFINITION_OF_DONE.md`, `DEPENDENCIES.md`, and `RISK_REGISTER.md` under `docs/delivery/`, with minimal coherence updates to the B1 docs. | Canonical-branch commit `d4a2636 docs: add Sprint 0 Slice B2 readiness controls (#10)`. |
 
 ### Deferred
 
@@ -87,39 +91,39 @@ previously listed here under B1; it is now `In Progress`.)*
 
 | id | scope (one line) | named blocker |
 |---|---|---|
-| `sprint-0/slice-c` | Thin GitHub / CI / PR governance (workflows, PR template, branch protection policy, review policy). | `sprint-0/slice-b` not yet complete; Slice C mutations require per-batch Source ratification (privileged). |
 | `sprint-0/slice-d` | Minimum review / QA / identity governance (Codex review identity, QA / review evidence template, review gate). | `sprint-0/slice-c` not yet complete; Slice D includes privileged `identity` work. |
 | `sprint-0/slice-e` | Manual Assignment Envelope template + worktree/branch naming + one-driver-per-worktree rule + envelope dry-run evidence. | `sprint-0/slice-c` and `sprint-0/slice-d` not yet complete. |
 | `sprint-0/slice-f` | Release / deploy governance policy; deploy mutation ratification rule; release-candidate / merge-approval / deployment-approval checklists. | `sprint-0/slice-e` not yet complete; deploy targets do not yet exist. |
 
 ## c. Immediate next likely task
 
-With B1 `Ratified` and B2 `In Progress`, the B1 → B2 dependency is
-cleared and the immediate next task depends on the ratification
-state of B2:
+With B1 and B2 both `Done`, `sprint-0/slice-b` is complete on the
+delivery view. Slice C is no longer delivery-view `Blocked` on Slice
+B; it has been promoted to `Ready` as the next candidate envelope.
 
-> **Until B2 ratifies / merges, the next task is B2 validation and
-> ratification** — running the B2 envelope's required validation,
-> capturing the post-merge next-task report fields per
-> [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md), and securing
-> Source ratification of the B2 batch.
->
-> **Once B2 reaches `Ratified` or `Done`**, the immediate next task
-> is **`sprint-0/slice-c`** — author the thin GitHub / CI / PR
-> governance policy outline (workflows, PR template, branch
-> protection policy / checklist, review policy as applicable, CI
-> evidence rule). Slice C requires a Source-ratified privileged
-> envelope before consumption per
+> **The immediate next task is `sprint-0/slice-c`** — author the
+> thin GitHub / CI / PR governance policy outline (workflows, PR
+> template, branch protection policy / checklist, review policy as
+> applicable, CI evidence rule). Slice C is `Ready` (highest-priority
+> `Ready` item per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md)
+> §c.1) but Slice C mutations are privileged (`governance` /
+> `security` / `deploy`), so the next governed action is a
+> **ratification request to Source** for a Slice C privileged
+> envelope per Feature 001 FR-008 / FR-016 and per
+> [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c.5. Slice C
+> implementation does not begin until that envelope is ratified.
+> Slice C consumption requirements are also recorded in
 > [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §c.
 
 Rationale: Slice C is gated on Slice B reaching `Ratified` or `Done`
-per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §b, and Slice C is the
-highest-priority `Blocked` item once Slice B clears. Per
-[`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c.4, the named
-blocker (B2 ratification) is the implied next task until it clears.
+per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §b. With Slice B `Done`,
+Slice C is the highest-priority backlog candidate. Because Slice C
+crosses privileged surfaces, the §c.5 routing — privileged blocker
+becomes a ratification request rather than an implementation task —
+applies.
 
-If validation or review of B2 surfaces a blocker, the next-task
-recommendation defers to the rules in
+If shaping or scoping of the Slice C envelope surfaces ambiguity,
+the next-task recommendation defers to the rules in
 [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c. Per those
 rules, a named blocker becomes the implied next task; a missing or
 ambiguous backlog state escalates to Source.

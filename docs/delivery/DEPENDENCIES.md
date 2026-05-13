@@ -1,9 +1,15 @@
 # Creator Engine Dependency Map
 
-**Status**: Sprint 0 Slice B2. Part of the **minimum repo-native
-delivery control plane** and **not a Jira clone**. Markdown-only by
-ratified posture. Layered on top of, and subordinate to, the Feature
-001 substrate and the Sprint 0 execution sequence.
+**Status**: Sprint 0 Slice B complete on the delivery view. B1
+(markdown control-plane scaffold) and B2 (Definition of Ready,
+Definition of Done, dependency map, risk register) have both landed
+on the canonical branch. Part of the **minimum repo-native delivery
+control plane** and **not a Jira clone**. Markdown-only by ratified
+posture. Layered on top of, and subordinate to, the Feature 001
+substrate and the Sprint 0 execution sequence. `sprint-0/slice-c`
+is the next candidate envelope; Slice C implementation is not
+authorized by this state and requires its own Source-ratified
+privileged envelope.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -53,10 +59,17 @@ its successor.
 
 Slice A is `Done`
 ([`./BACKLOG.md`](./BACKLOG.md) §c.1 cites canonical-branch commits
-as durable evidence). Slice B is the active slice and is in turn
-decomposed in §c. Slices C through F remain `Blocked` until their
-predecessor in the chain reaches `Ratified` or `Done` AND their own
-privileged-class envelope is Source-ratified.
+as durable evidence). Slice B is `Done` on the delivery view because
+B1 and B2 have both landed on the canonical branch (see §c.2.1 and
+§c.2.2 durable evidence on
+[`./BACKLOG.md`](./BACKLOG.md)); the parent `sprint-0/slice-b` row
+is decomposed in §c. The B → C edge is therefore cleared for
+delivery-view readiness, and `sprint-0/slice-c` is the next
+candidate envelope (`Ready`); Slice C implementation is still
+separately gated by a Source-ratified privileged envelope per §h.
+Slices D through F remain `Blocked` until their predecessor in the
+chain reaches `Ratified` or `Done` AND their own privileged-class
+envelope is Source-ratified.
 
 ## c. Slice B internal dependencies
 
@@ -78,11 +91,10 @@ B1 (markdown control-plane scaffold) ──► B2 (DoR / DoD / dependencies / ri
 - **Successor**: `sprint-0/slice-b/b2` — this batch
   ([`./BACKLOG.md`](./BACKLOG.md) §c.2.2).
 - **Edge condition**: B1 reaches `Ratified` or `Done`.
-- **Edge state**: **cleared**. Source ratified B1; the B1 → B2
-  dependency rule is satisfied for this B2 batch. The
-  canonical-branch merge that would finalize B1 to `Done` is
-  sequenced under the post-merge protocol and is not yet reflected
-  in [`./BACKLOG.md`](./BACKLOG.md).
+- **Edge state**: **cleared**. B1 is `Done` on the canonical branch
+  (see §c.2.1 durable evidence in
+  [`./BACKLOG.md`](./BACKLOG.md)); the B1 → B2 dependency rule is
+  satisfied and B2 itself has subsequently landed.
 - **Why**: B2 introduces
   [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md),
   [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md), this
@@ -247,10 +259,10 @@ post-merge update procedure in
 | Predecessor | Successor | Predecessor delivery status | Edge state |
 |---|---|---|---|
 | `sprint-0/slice-a` | `sprint-0/slice-b` | `Done` | Cleared. |
-| `sprint-0/slice-b/b1` | `sprint-0/slice-b/b2` | `Ratified` | Cleared by Source ratification of B1. |
-| `sprint-0/slice-b/b2` | `sprint-0/slice-b/b3` | `In Progress` (B2 active, pending B2 ratification) | Pending B2 reaching `Ratified` or `Done` AND Source-ratified sidecar schema. Successor `Deferred`. |
-| `sprint-0/slice-b/b2` | `sprint-0/slice-b/b4` | `In Progress` (B2 active, pending B2 ratification) | Pending B2 reaching `Ratified` or `Done` AND Source-ratified adapter design. Successor `Deferred`. |
-| `sprint-0/slice-b` | `sprint-0/slice-c` | `In Progress` (B2 active under Slice B, pending B2 ratification) | Pending Slice B reaching `Ratified` or `Done`. Successor `Blocked`. Privileged envelope still requires §e. |
+| `sprint-0/slice-b/b1` | `sprint-0/slice-b/b2` | `Done` | Cleared; B1 landed on the canonical branch. |
+| `sprint-0/slice-b/b2` | `sprint-0/slice-b/b3` | `Done` | B1 → B2 → B3 predecessor rule cleared by B2 landing; successor remains `Deferred` pending a Source-ratified sidecar schema. |
+| `sprint-0/slice-b/b2` | `sprint-0/slice-b/b4` | `Done` | B1 → B2 → B4 predecessor rule cleared by B2 landing; successor remains `Deferred` pending a Source-ratified adapter design. |
+| `sprint-0/slice-b` | `sprint-0/slice-c` | `Done` | Cleared; Slice B is complete on the delivery view. Successor `Ready` as the next candidate envelope. Slice C implementation still requires a Source-ratified privileged envelope per §h. |
 | `sprint-0/slice-c` | `sprint-0/slice-d` | `Blocked` | Successor `Blocked`. Privileged `identity` envelope still requires §e. |
 | `sprint-0/slice-d` | `sprint-0/slice-e` | `Blocked` | Successor `Blocked`. Privileged `governance` envelope still requires §e. |
 | `sprint-0/slice-e` | `sprint-0/slice-f` | `Blocked` | Successor `Blocked`. Privileged `deploy` policy authoring still requires §e. |

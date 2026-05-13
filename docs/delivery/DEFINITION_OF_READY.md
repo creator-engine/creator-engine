@@ -1,9 +1,14 @@
 # Definition of Ready (Delivery View)
 
-**Status**: Sprint 0 Slice B2. Part of the **minimum repo-native
-delivery control plane** and **not a Jira clone**. Markdown-only by
-ratified posture. Layered on top of, and subordinate to, the Feature
-001 substrate.
+**Status**: Sprint 0 Slice B complete on the delivery view. B1
+(markdown control-plane scaffold) and B2 (Definition of Ready,
+Definition of Done, dependency map, risk register) have both landed
+on the canonical branch. Part of the **minimum repo-native delivery
+control plane** and **not a Jira clone**. Markdown-only by ratified
+posture. Layered on top of, and subordinate to, the Feature 001
+substrate. `sprint-0/slice-c` is the next candidate envelope;
+Slice C implementation is not authorized by this state and requires
+its own Source-ratified privileged envelope.
 
 **Scope**: This document defines when a Creator Engine work item is
 **Ready** to enter a Hermes-authored Assignment Envelope. It is the
@@ -164,9 +169,14 @@ per Feature 002 FR-018.
 ## d. Worked example — B2 and Slice C readiness
 
 This example illustrates the readiness gate at the time of the B2
-batch. It is non-normative; the binding rules live in §b and §c.
+batch and its post-merge reconciliation. It is non-normative; the
+binding rules live in §b and §c. The example also distinguishes
+**"Ready as the next candidate envelope"** (a delivery-view
+bookkeeping state) from **"authorized to implement"** (which, for a
+privileged class, additionally requires a Source-ratified envelope
+per §c).
 
-### d.1 `sprint-0/slice-b/b2` (this batch) — Ready; B1 → B2 dependency cleared
+### d.1 `sprint-0/slice-b/b2` — Ready when authored; now `Done` on the delivery view
 
 - **b.1 stable backlog id**: `sprint-0/slice-b/b2`. Present in
   [`./BACKLOG.md`](./BACKLOG.md) §c.2.2.
@@ -208,30 +218,40 @@ batch. It is non-normative; the binding rules live in §b and §c.
   commit / push / PR / merge.
 
 The privileged-class rule in §c does NOT apply: the anticipated
-mutation class is `docs`, not a privileged class. Readiness therefore
-turns on whether B1 has reached `Ratified` or `Done`. With B1 now at
-`Ratified`, B2 is `Ready` (and is `In Progress` in
-[`./BACKLOG.md`](./BACKLOG.md) and [`./KANBAN.md`](./KANBAN.md)
-pending Source ratification of B2).
+mutation class is `docs`, not a privileged class. Readiness for B2
+therefore turned on whether B1 had reached `Ratified` or `Done`. B2
+was `Ready` once B1 cleared, the B2 envelope was consumed, and B2
+has since landed on the canonical branch; both B1 and B2 are now
+`Done` in [`./BACKLOG.md`](./BACKLOG.md) and
+[`./KANBAN.md`](./KANBAN.md), so the parent `sprint-0/slice-b` is
+also `Done` on the delivery view.
 
-### d.2 `sprint-0/slice-c` — NOT Ready
+### d.2 `sprint-0/slice-c` — Ready as the next candidate envelope; implementation not yet authorized
 
-- **b.7 dependencies**: `sprint-0/slice-b` (the parent slice) is not
-  yet at `Ratified` or `Done`. Slice C cannot be promoted to `Ready`
-  until Slice B is.
+- **b.7 dependencies**: `sprint-0/slice-b` (the parent slice) is
+  `Done` on the delivery view (B1 and B2 have both landed), so the
+  delivery-view dependency from Slice B to Slice C is cleared and
+  Slice C is promoted to `Ready` as the next candidate envelope.
 - **b.6 anticipated mutation class**: `governance` (privileged), with
-  some `docs` for policy text. Per §c, even once Slice B is ratified,
-  Slice C requires Source ratification of its envelope before
-  implementation begins.
+  some `docs` for policy text, and possible `security` / `deploy`
+  implications. Per §c, the privileged-class rule still applies:
+  being `Ready` as a delivery-view candidate is **not** authorization
+  to implement. Slice C implementation MUST NOT begin until Source
+  ratifies a dedicated Slice C privileged envelope under Feature 001
+  FR-008 / FR-016. CI passing on B1 or B2, agent review text, or any
+  non-designated "go ahead" surface MUST NOT substitute for that
+  ratification.
 - **b.5 prohibited surfaces**: include `.github/` for content B1 and
-  B2 are not authorized to touch. The Slice C envelope will be
-  authorized to touch `.github/` (that is precisely its scope), but
-  only after the privileged-class ratification gate in §c clears.
+  B2 are not authorized to touch. The future Slice C envelope will
+  be authorized to touch `.github/` (that is precisely its scope),
+  but only inside a Source-ratified privileged envelope.
 
-Slice C therefore remains `Blocked` until Slice B reaches `Ratified`
-or `Done` AND Source ratifies the privileged Slice C envelope. CI
-passing on B1 or B2 does not move Slice C to `Ready`; only the named
-clearances do.
+Slice C is therefore `Ready` as the next candidate envelope (the
+delivery-view dependency on Slice B is cleared), while
+authorization-to-implement remains contingent on Source ratifying
+a dedicated Slice C privileged envelope. This distinction —
+"Ready as next candidate envelope" vs. "authorized to implement"
+— is the heart of the privileged-class rule in §c.
 
 ## e. Operating-procedure rules
 
@@ -271,5 +291,8 @@ requirements:
 - Names the privileged-class rule (§c): privileged tasks require
   Source ratification before implementation.
 - Provides a worked B2-vs-Slice-C example (§d) showing why
-  `sprint-0/slice-b/b2` is `Ready` once B1 is ratified while
-  `sprint-0/slice-c` is not.
+  `sprint-0/slice-b/b2` was `Ready` once B1 cleared (and has since
+  landed as `Done`) while `sprint-0/slice-c`, with Slice B now
+  complete on the delivery view, is `Ready` as the next candidate
+  envelope but is not authorized to implement until Source ratifies
+  a dedicated Slice C privileged envelope.
