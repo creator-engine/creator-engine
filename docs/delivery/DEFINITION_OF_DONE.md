@@ -1,18 +1,20 @@
 # Definition of Done (Delivery View)
 
-**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+**Status**: Sprint 0 Slices B, C, D, E, and F are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously; Slice C has since landed on the
 canonical branch as PR #12 (`1cfb955 ci: add baseline governance
 validation controls`); Slice D has since landed on the canonical
 branch as commit `6058661 docs: define reviewer evidence gate for
-Slice D`; and Slice E has now landed on the canonical branch as
+Slice D`; Slice E subsequently landed on the canonical branch as
 PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E assignment
-runtime protocol`. Part of the **minimum repo-native delivery
-control plane** and **not a Jira clone**. Markdown-only by ratified
-posture. Layered on top of, and subordinate to, the Feature 001
-substrate.
+runtime protocol`; and Slice F has now landed on the canonical
+branch as PR #16 / commit `cb7f94a docs: add Slice F release
+deploy governance policy`. Part of the **minimum repo-native
+delivery control plane** and **not a Jira clone**. Markdown-only by
+ratified posture. Layered on top of, and subordinate to, the
+Feature 001 substrate.
 
 **Scope**: This document defines when a Creator Engine work item is
 **Done** on the delivery view. It is the delivery-view counterpart of

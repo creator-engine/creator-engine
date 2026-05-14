@@ -1,23 +1,28 @@
 # Definition of Ready (Delivery View)
 
-**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+**Status**: Sprint 0 Slices B, C, D, E, and F are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously; Slice C has since landed on the
 canonical branch as PR #12 (`1cfb955 ci: add baseline governance
 validation controls`); Slice D has since landed on the canonical
 branch as commit `6058661 docs: define reviewer evidence gate for
-Slice D`; and Slice E has now landed on the canonical branch as
+Slice D`; Slice E subsequently landed on the canonical branch as
 PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E assignment
-runtime protocol`. Part of the **minimum repo-native delivery
+runtime protocol`; and Slice F has now landed on the canonical
+branch as PR #16 / commit `cb7f94a docs: add Slice F release deploy
+governance policy`. Part of the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001
 substrate. Live GitHub branch protection settings on the remote
 repository remain a separate privileged future decision and are not
-mutated by PR #12 or PR #14. Authorization-to-implement subsequent
-downstream work (Slice F shaping, Feature 003+, Feature 005, etc.)
-remains contingent on Source ratifying further per-batch privileged
-envelopes; Slice E landing does not, by itself, authorize any
+mutated by PR #12, PR #14, or PR #16.
+Authorization-to-implement downstream feature work (Feature 003+
+extension of the landed `.github/` baseline, Feature 004 reviewer-
+identity instantiation, Feature 005 dispatcher / worktree
+automation, Feature 006 release / deploy execution) remains
+contingent on Source ratifying further per-batch privileged
+envelopes; Slice F landing does not, by itself, authorize any
 downstream consumption.
 
 **Scope**: This document defines when a Creator Engine work item is
@@ -236,7 +241,7 @@ has since landed on the canonical branch; both B1 and B2 are now
 [`./KANBAN.md`](./KANBAN.md), so the parent `sprint-0/slice-b` is
 also `Done` on the delivery view.
 
-### d.2 `sprint-0/slice-c`, `sprint-0/slice-d`, and `sprint-0/slice-e` — each was Ready as next candidate envelope and has since landed as `Done`
+### d.2 `sprint-0/slice-c`, `sprint-0/slice-d`, `sprint-0/slice-e`, and `sprint-0/slice-f` — each was Ready as next candidate envelope and has since landed as `Done`
 
 - **b.7 dependencies**: at the time Slice B landed,
   `sprint-0/slice-b` (the parent slice) reached `Done` on the
@@ -265,23 +270,28 @@ The distinction — "Ready as next candidate envelope" vs.
 rule in §c. Slice D landed on the canonical branch as commit
 `6058661 docs: define reviewer evidence gate for Slice D` under a
 dedicated Source-ratified privileged `identity` envelope. Slice E
-has now landed on the canonical branch as PR #14 / commit
+subsequently landed on the canonical branch as PR #14 / commit
 `3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
 also under a dedicated Source-ratified bounded `governance` /
 `docs` envelope authoring the manual Assignment Envelope template
-and worktree runtime protocol layer. The Slice E row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.5 is therefore `Done` on the
-delivery view. The same "Ready as candidate vs. authorized to
-implement" distinction now applies to `sprint-0/slice-f` and to any
-downstream feature batch (e.g., Feature 003 extension, Feature 005
-dispatcher implementation): the delivery-view predecessor edges
-have cleared through E → F, but each downstream batch remains
-contingent on its own Source-ratified privileged envelope. Slice C
-landing does not by itself authorize any extension of the landed
-baseline (CODEOWNERS, live branch protection settings, or Feature
-003 instantiation); Slice E landing does not by itself authorize
-Slice F consumption or any Feature 005 work; each remains a
-separately ratified envelope.
+and worktree runtime protocol layer. Slice F has now landed on the
+canonical branch as PR #16 / commit `cb7f94a docs: add Slice F
+release deploy governance policy`, again under a dedicated
+Source-ratified bounded docs-only `governance` / `docs` envelope
+authoring the release / merge / deploy governance policy. The
+Slice F row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 is therefore
+`Done` on the delivery view. The same "Ready as candidate vs.
+authorized to implement" distinction now applies to any downstream
+feature batch (e.g., Feature 003 extension, Feature 005 dispatcher
+implementation, Feature 006 release / deploy execution): the
+Sprint 0 delivery-view predecessor edges have cleared through to
+F, but each downstream batch remains contingent on its own
+Source-ratified privileged envelope. Slice C landing does not by
+itself authorize any extension of the landed baseline (CODEOWNERS,
+live branch protection settings, or Feature 003 instantiation);
+Slice E landing does not by itself authorize any Feature 005 work;
+Slice F landing does not by itself authorize Feature 006 release /
+deploy execution; each remains a separately ratified envelope.
 
 ## e. Operating-procedure rules
 
@@ -327,7 +337,8 @@ requirements:
   envelope until Source ratified a dedicated Slice C privileged
   envelope; Slice C has since landed as PR #12, Slice D has since
   landed as commit `6058661`, Slice E has since landed as PR #14 /
-  commit `3cb0266`, and the same "Ready as candidate vs. authorized
-  to implement" distinction now applies to `sprint-0/slice-f` and
-  to any downstream feature batch whose authorization-to-implement
-  remains contingent on further Source-ratified envelopes.
+  commit `3cb0266`, Slice F has now landed as PR #16 / commit
+  `cb7f94a`, and the same "Ready as candidate vs. authorized to
+  implement" distinction now applies to any downstream feature
+  batch whose authorization-to-implement remains contingent on
+  further Source-ratified envelopes.
