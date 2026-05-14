@@ -1,6 +1,6 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+**Status**: Sprint 0 Slices B, C, D, E, and F are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously under the Source-ratified posture
@@ -14,27 +14,37 @@ gate for Slice D`, introducing the three Slice D delivery docs
 ([`./REVIEW_GATE.md`](./REVIEW_GATE.md),
 [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md),
 [`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md))
-with minimal coherence updates to the existing delivery docs; and
-Slice E has now landed on the canonical branch as PR #14 / commit
-`3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
-introducing the five Slice E delivery docs
+with minimal coherence updates to the existing delivery docs;
+Slice E subsequently landed on the canonical branch as PR #14 /
+commit `3cb0266 docs: add Sprint 0 Slice E assignment runtime
+protocol`, introducing the five Slice E delivery docs
 ([`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md),
 [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md),
 [`./ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md),
 [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md),
 [`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md))
+with minimal coherence updates to the existing delivery docs; and
+Slice F has now landed on the canonical branch as PR #16 / commit
+`cb7f94a docs: add Slice F release deploy governance policy`,
+introducing the five Slice F delivery docs
+([`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md),
+[`./RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md),
+[`./MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md),
+[`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md),
+[`./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md))
 with minimal coherence updates to the existing delivery docs. B3
 and B4 remain deferred. Live GitHub branch protection settings on
 the remote repository remain a separate privileged future decision:
 the landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
 policy only and PR #12 did not mutate live repository settings.
-With Slice E landed, the Slice E row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.5 is now `Done` with durable
-evidence PR #14 / `3cb0266`. The structural next candidate is
-Slice F shaping (release / deploy governance policy authoring), but
-authorization to consume any Slice F envelope remains contingent on
-Source ratifying a future privileged `deploy`-policy envelope; this
-batch does not author Slice F content.
+With Slice F landed, the Slice F row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.6 is now `Done` with durable
+evidence PR #16 / `cb7f94a`. The Slice F documents are policy /
+docs only; they do not, and never become, deploy automation. Live
+deploy automation, GitHub environments, branch protection settings,
+CODEOWNERS, Feature 006 deploy execution, and external trackers
+remain separate privileged future decisions and are not authorized
+by Slice F landing.
 
 ## a. Purpose
 
@@ -149,25 +159,23 @@ This boundary aligns with
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
-### Slice F delivery docs (authored draft)
+### Slice F delivery docs (landed)
 
-These five documents are authored under a Source-ratified bounded
-Sprint 0 Slice F docs-only `governance` / `docs` envelope
-(release / merge / deploy governance policy authoring). They
-define the policy that any future release, merge, deploy, or
-rollback mutation will obey; they do not, and never become, a
-merge, deploy, or rollback mechanic. Execution-side concerns
-(release agent identity, deploy attestations, GitHub
+These five documents landed on the canonical branch under PR #16 /
+commit `cb7f94a docs: add Slice F release deploy governance policy`,
+authored under a Source-ratified bounded Sprint 0 Slice F docs-only
+`governance` / `docs` envelope (release / merge / deploy governance
+policy authoring). They define the policy that any future release,
+merge, deploy, or rollback mutation will obey; they do not, and
+never become, a merge, deploy, or rollback mechanic. Execution-side
+concerns (release agent identity, deploy attestations, GitHub
 environments, deploy gates, rollback automation) remain Feature
-006 surface under a separately ratified privileged envelope. This
-authoring batch documents the five files under the Source-ratified
-envelope; it does not itself declare Slice F `Done`. The Slice F
-row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 remains `Blocked` on the
-delivery view, and canonical delivery-state promotion to `Done`
-remains gated on Source validation and post-merge durable
-canonical-branch evidence. Each Slice F document carries an explicit
-non-ratification statement and cites upstream sources of truth
-including Feature 001 FR-007 / FR-008 / FR-016.
+006 surface under a separately ratified privileged envelope. The
+Slice F row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 is `Done` on the
+delivery view with durable evidence PR #16 / `cb7f94a`. Each Slice F
+document carries an explicit non-ratification statement and cites
+upstream sources of truth including Feature 001 FR-007 / FR-008 /
+FR-016.
 
 | File | Role |
 |---|---|
@@ -256,14 +264,15 @@ MUST NOT be introduced as delivery-view changes under it:
 - Any external-tracker integration, credential, or network call.
 - Any live GitHub or external-tracker mutation.
 - Implementation of US3 A1 (not authorized).
-- Implementation of any Slice F work (which requires its own
-  Source-ratified privileged envelope per Feature 001 FR-008 /
-  FR-016 before any consumption begins). Slice D landed on the
-  canonical branch (commit `6058661`) and Slice E has now landed
-  (PR #14 / commit `3cb0266`); the structural next candidate is
-  Slice F shaping (release / deploy governance policy authoring)
-  under a future Source-ratified privileged envelope, and final
-  next-task selection remains Source's.
+- Any extension of the landed Slice F policy surface into
+  execution-side concerns (release agent identity, deploy
+  attestations, GitHub environments, deploy gates, rollback
+  automation) — that work is Feature 006 surface under a
+  separately ratified privileged envelope per Feature 001 FR-008 /
+  FR-016. Slice D landed on the canonical branch (commit `6058661`),
+  Slice E landed (PR #14 / commit `3cb0266`), and Slice F has now
+  landed (PR #16 / commit `cb7f94a`); final next-task selection
+  remains Source's.
 
 ## g. How this control plane is used
 

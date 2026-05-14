@@ -1,6 +1,6 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+**Status**: Sprint 0 Slices B, C, D, E, and F are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously; Slice C subsequently landed on the
@@ -13,8 +13,8 @@ introducing the three Slice D delivery docs
 (`docs/delivery/REVIEW_GATE.md`,
 `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
 `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`) with minimal
-coherence updates to the existing delivery docs; and Slice E has
-now landed on the canonical branch as PR #14 / commit
+coherence updates to the existing delivery docs; Slice E
+subsequently landed on the canonical branch as PR #14 / commit
 `3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
 introducing the five Slice E delivery docs
 (`docs/delivery/ASSIGNMENT_ENVELOPE_TEMPLATE.md`,
@@ -22,12 +22,22 @@ introducing the five Slice E delivery docs
 `docs/delivery/ENVELOPE_CONSUMPTION_CHECKLIST.md`,
 `docs/delivery/SCOPE_AUDIT_CHECKLIST.md`,
 `docs/delivery/ASSIGNMENT_ENVELOPE_DRY_RUN.md`) with minimal
+coherence updates to the existing delivery docs; and Slice F has
+now landed on the canonical branch as PR #16 / commit
+`cb7f94a docs: add Slice F release deploy governance policy`,
+introducing the five Slice F delivery docs
+(`docs/delivery/RELEASE_DEPLOY_GOVERNANCE.md`,
+`docs/delivery/RELEASE_CANDIDATE_CHECKLIST.md`,
+`docs/delivery/MERGE_APPROVAL_CHECKLIST.md`,
+`docs/delivery/DEPLOYMENT_APPROVAL_POLICY.md`,
+`docs/delivery/ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`) with minimal
 coherence updates to the existing delivery docs. Delivery-view
 backlog rows remain markdown-only; structured YAML sidecars
 deferred to B3. Live GitHub branch protection settings on the
 remote repository remain a separate privileged future decision and
-are not mutated by PR #12 or PR #14. The canonical-view Slice E
-row in §c.5 is now `Done` with durable evidence PR #14 / `3cb0266`.
+are not mutated by PR #12, PR #14, or PR #16. The canonical-view
+Slice F row in §c.6 is now `Done` with durable evidence PR #16 /
+`cb7f94a`.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -340,7 +350,7 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-f`
 - **parent**: `sprint-0`
-- **status**: `Blocked`
+- **status**: `Done`
 - **scope**: Release-candidate checklist; merge-approval checklist;
   deployment-approval policy; rollback/evidence expectations; explicit
   deploy mutation ratification rule; statement of currently absent
@@ -349,23 +359,29 @@ Owning source of truth:
   deploy governance documented) and confirmation that gate #12
   (Feature 003+ sequenced) is satisfied.
 - **dependencies / blockers**: `sprint-0/slice-e` is `Done`; the
-  delivery-view predecessor edge from Slice E has cleared (durable
-  evidence PR #14 / `3cb0266`). A bounded Sprint 0 Slice F
-  docs-only `governance` / `docs` policy-authoring envelope has
-  since been Source-ratified, and this authoring batch documents
-  the five Slice F delivery docs named in
-  [`./README.md`](./README.md)'s Slice F file map under that
-  envelope. The batch does not itself declare Slice F `Done`; the
-  row therefore remains `Blocked` on the delivery view, and
-  canonical delivery-state promotion to `Done` remains gated on
-  Source validation and post-merge durable canonical-branch
-  evidence per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h. No
-  deploy automation is implemented under Sprint 0; this slice
-  authors policy only.
+  delivery-view predecessor edge from Slice E was cleared (durable
+  evidence PR #14 / `3cb0266`). The Slice F authoring envelope was
+  Source-ratified as a bounded docs-only `governance` / `docs`
+  policy-authoring batch and has now landed on the canonical
+  branch. No deploy automation is implemented under Sprint 0; this
+  slice authored policy only. Live deploy automation, GitHub
+  environments, branch protection settings, CODEOWNERS, and
+  Feature 006 deploy execution remain separate privileged future
+  decisions and are not authorized by Slice F landing.
 - **anticipated mutation class**: `deploy` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `cb7f94a docs: add Slice F release deploy governance policy (#16)`
+  on the canonical branch, landing
+  [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md),
+  [`./RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md),
+  [`./MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md),
+  [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md),
+  and
+  [`./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md),
+  with minimal coherence updates to existing delivery docs.
 
 ## d. Specific reserved item — US3 A1
 
