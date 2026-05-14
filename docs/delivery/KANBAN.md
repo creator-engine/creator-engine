@@ -108,7 +108,7 @@ table below.)*
 
 | id | scope (one line) | named blocker |
 |---|---|---|
-| `sprint-0/slice-f` | Release / deploy governance policy; deploy mutation ratification rule; release-candidate / merge-approval / deployment-approval checklists. | The delivery-view predecessor edge from `sprint-0/slice-e` is cleared (PR #14 / `3cb0266`), but Slice F mutations are privileged (`deploy` / `governance` policy authoring) and a per-batch Source-ratified envelope under Feature 001 FR-008 / FR-016 has not yet been issued; deploy targets also do not yet exist. |
+| `sprint-0/slice-f` | Release / deploy governance policy; deploy mutation ratification rule; release-candidate / merge-approval / deployment-approval checklists. | The delivery-view predecessor edge from `sprint-0/slice-e` is cleared (PR #14 / `3cb0266`). A bounded Sprint 0 Slice F docs-only `governance` / `docs` policy-authoring envelope has since been Source-ratified, and this authoring batch documents the five Slice F delivery docs named in [`./README.md`](./README.md)'s Slice F file map under that envelope; the batch does not itself declare Slice F `Done`, and the row remains `Blocked` on this board pending Source validation and post-merge durable canonical-branch evidence. Deploy targets / environments do not yet exist. |
 
 ## c. Immediate next likely task
 

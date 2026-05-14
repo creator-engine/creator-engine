@@ -350,12 +350,18 @@ Owning source of truth:
   (Feature 003+ sequenced) is satisfied.
 - **dependencies / blockers**: `sprint-0/slice-e` is `Done`; the
   delivery-view predecessor edge from Slice E has cleared (durable
-  evidence PR #14 / `3cb0266`). Slice F nonetheless remains
-  `Blocked` pending a Source-ratified privileged `deploy` /
-  `governance` policy-authoring envelope; clearing the predecessor
-  edge is not authorization to consume per
-  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h. No deploy automation
-  is implemented under Sprint 0; this slice authors policy only.
+  evidence PR #14 / `3cb0266`). A bounded Sprint 0 Slice F
+  docs-only `governance` / `docs` policy-authoring envelope has
+  since been Source-ratified, and this authoring batch documents
+  the five Slice F delivery docs named in
+  [`./README.md`](./README.md)'s Slice F file map under that
+  envelope. The batch does not itself declare Slice F `Done`; the
+  row therefore remains `Blocked` on the delivery view, and
+  canonical delivery-state promotion to `Done` remains gated on
+  Source validation and post-merge durable canonical-branch
+  evidence per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h. No
+  deploy automation is implemented under Sprint 0; this slice
+  authors policy only.
 - **anticipated mutation class**: `deploy` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
