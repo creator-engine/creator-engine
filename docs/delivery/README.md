@@ -12,9 +12,15 @@ policy file). B3 and B4 remain deferred. Live GitHub branch
 protection settings on the remote repository remain a separate
 privileged future decision: the landed `.github/BRANCH_PROTECTION_POLICY.md`
 is file-based policy only and PR #12 did not mutate live repository
-settings. `sprint-0/slice-d` is the next candidate envelope;
-Slice D implementation is not authorized by this state and requires
-its own Source-ratified privileged envelope.
+settings. `sprint-0/slice-d` is now being authored on the working
+tree under a Source-ratified visible implementation envelope as a
+markdown-only delivery-doc batch
+([`./REVIEW_GATE.md`](./REVIEW_GATE.md),
+[`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md),
+[`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md)).
+The Slice D implementation has not advanced past `In Progress`
+under this batch and remains gated on Source validation before any
+staging, commit, push, or PR mechanics.
 
 ## a. Purpose
 
@@ -129,6 +135,22 @@ This boundary aligns with
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
+### Slice D delivery docs (authored, pending Source validation)
+
+These three documents are authored under the Source-ratified Slice D
+visible implementation envelope. They define a generic, implementation-
+agnostic reviewer identity pattern, review evidence template, and
+review gate. They do **not** instantiate a real reviewer identity; that
+work is downstream Feature 004 scope under its own per-batch privileged
+envelope. Until Source validates this batch, the Slice D row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.4 has not advanced past `In Progress`.
+
+| File | Role |
+|---|---|
+| [`REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md) | Generic reviewer identity record **pattern**. Deployment-time bindings (tool, model, host installation, durable actor, account, harness) are overlay decisions and are not selected upstream. |
+| [`REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md) | Generic markdown-equivalent template contract for independent review evidence. Constrains `verdict` to evidence-only outcomes and states explicitly that review evidence is **not Source ratification**. |
+| [`REVIEW_GATE.md`](./REVIEW_GATE.md) | Review-gate definition naming when evidence is required, how it is evaluated, what happens on blocking findings, and the standing invariants. |
+
 Slice B is complete on the delivery view once both B1 and B2 reach
 `Ratified` or `Done`. Together they satisfy Sprint 0 exit gate #2 in
 full; gate #3 is satisfied by the next-task protocol authored under
@@ -170,9 +192,12 @@ MUST NOT be introduced as delivery-view changes under it:
 - Any external-tracker integration, credential, or network call.
 - Any live GitHub or external-tracker mutation.
 - Implementation of US3 A1 (not authorized).
-- Implementation of Slice D, Slice E, or Slice F work (each
-  requires its own Source-ratified privileged envelope per Feature
-  001 FR-008 / FR-016 before any consumption begins).
+- Implementation of Slice E or Slice F work (each requires its own
+  Source-ratified privileged envelope per Feature 001 FR-008 /
+  FR-016 before any consumption begins). Slice D is now being
+  authored under its own Source-ratified visible implementation
+  envelope and remains gated on Source validation before any
+  staging, commit, push, or PR mechanics.
 
 ## g. How this control plane is used
 

@@ -10,9 +10,13 @@ PR template, branch protection policy file). Delivery-view backlog
 rows remain markdown-only; structured YAML sidecars deferred to B3.
 Live GitHub branch protection settings on the remote repository
 remain a separate privileged future decision and are not mutated by
-PR #12. `sprint-0/slice-d` is the next candidate envelope; Slice D
-implementation is not authorized by this state and requires its own
-Source-ratified privileged envelope.
+PR #12. `sprint-0/slice-d` is now being authored on the working
+tree under a Source-ratified visible implementation envelope
+(`docs/delivery/REVIEW_GATE.md`,
+`docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
+`docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`); the batch has
+not advanced past `In Progress` and remains gated on Source
+validation before any staging, commit, push, or PR mechanics.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -257,23 +261,39 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-d`
 - **parent**: `sprint-0`
-- **status**: `Ready`
-- **scope**: Codex reviewer identity record (or equivalent); QA /
-  review evidence template; review gate definition; rule that review
-  evidence is not Source ratification.
+- **status**: `In Progress`
+- **scope**: Generic reviewer identity record **pattern** (not an
+  instantiated identity); generic markdown-equivalent QA / review
+  evidence template; review-gate definition; standing invariant that
+  review evidence is **not Source ratification**. Implementation
+  remains project-, tenant-, runtime-, model-, and harness-agnostic;
+  concrete tool / model / host / actor / account bindings are
+  deployment-time overlay decisions and are not selected upstream by
+  this slice.
 - **acceptance gate**: Sprint 0 exit gates #7 (governed roles) and
   #10 (QA / review evidence format).
-- **dependencies / blockers**: `sprint-0/slice-c` is `Done`, so the
-  delivery-view dependency is cleared and Slice D is the next
-  candidate envelope. Slice D mutations cross privileged `identity`
-  boundaries and require a per-batch Source-ratified privileged
-  envelope before any implementation begins; that ratification is
-  what promotes Slice D from `Ready` to `In Progress` and is not
-  authorized by Slice C landing alone.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done` and the
+  Slice D privileged `identity` / `docs` envelope has been Source-
+  ratified for the visible implementation-agent authoring pass. The
+  batch has not yet been Source-validated; promotion past
+  `In Progress` to `Verified`, `Ratified`, or `Done` is not
+  authorized by this authoring pass alone. Author/approver
+  separation applies: the visible implementation agent authors the
+  Slice D artifacts and does not ratify them.
 - **anticipated mutation class**: `identity` (privileged) / `docs`
-- **owner role**: `architect`
+- **owner role**: `architect` (policy) / `implementer` (markdown
+  authoring under the Source-ratified visible implementation
+  envelope)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **provisional evidence** *(pending Source validation)*: working-tree
+  authoring of `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`,
+  `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
+  `docs/delivery/REVIEW_GATE.md`, with minimal status/discoverability
+  updates to `docs/delivery/README.md`, `docs/delivery/BACKLOG.md`,
+  `docs/delivery/KANBAN.md`, and `docs/delivery/DEPENDENCIES.md`. No
+  durable canonical-branch evidence exists yet; this is a working-
+  tree state awaiting Source validation.
 
 ### c.5 Slice E — Manual Assignment Envelope and worktree runtime protocol
 

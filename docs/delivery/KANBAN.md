@@ -9,10 +9,11 @@ introducing the file-based `.github/` baseline (validation workflow,
 PR template, branch protection policy file). Live GitHub branch
 protection settings on the remote repository remain a separate
 privileged future decision and are not mutated by PR #12.
-`sprint-0/slice-d` is the next candidate envelope; its
-implementation is not authorized by this state and requires its own
-Source-ratified privileged envelope. Generated from / summarizes
-[`./BACKLOG.md`](./BACKLOG.md).
+`sprint-0/slice-d` has been Source-ratified for visible
+implementation-agent authoring and is the current `In Progress`
+batch on the delivery view; the batch has not yet been Source-
+validated and has no durable canonical-branch evidence. Generated
+from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
 plane** and is **not a Jira clone**. It is a current readable view
@@ -53,13 +54,15 @@ here before being promoted to `Ready`.)*
 
 ### Ready
 
-| id | scope (one line) | envelope class | notes |
-|---|---|---|---|
-| `sprint-0/slice-d` | Codex reviewer identity record (or equivalent); QA / review evidence template; review gate definition; rule that review evidence is not Source ratification. | `identity` (privileged) | Delivery-view dependency on Slice C is cleared (`sprint-0/slice-c` is `Done`, see Done row below). Slice D is the next candidate envelope. Implementation does NOT begin under this reconciliation — Slice D requires its own Source-ratified privileged envelope per Feature 001 FR-008 / FR-016 before promotion to `In Progress`. |
+*(No items currently shaped only at `Ready`. `sprint-0/slice-d` has
+been promoted to `In Progress` under a Source-ratified visible
+implementation envelope; see the `In Progress` row below.)*
 
 ### In Progress
 
-*(No items currently in this column.)*
+| id | scope (one line) | envelope class | notes |
+|---|---|---|---|
+| `sprint-0/slice-d` | Generic reviewer identity record **pattern** (not an instantiated identity); generic markdown-equivalent QA / review evidence template; review-gate definition; standing invariant that review evidence is not Source ratification. | `identity` (privileged) / `docs` | Source-ratified visible implementation envelope authorizes markdown-only authoring under `docs/delivery/`. Working-tree artifacts: `REVIEWER_IDENTITY_REQUIREMENTS.md`, `REVIEW_EVIDENCE_TEMPLATE.md`, `REVIEW_GATE.md`, with minimal coherence updates to `README.md`, `BACKLOG.md`, this Kanban, and `DEPENDENCIES.md`. No staging, commit, push, or PR mechanics under this batch; promotion past `In Progress` requires Source validation. |
 
 ### Verified
 
@@ -103,33 +106,30 @@ here before being promoted to `Ready`.)*
 
 ## c. Immediate next likely task
 
-With `sprint-0/slice-c` `Done` on the delivery view (PR #12 landed
-the file-based `.github/` baseline), Slice D is no longer
-delivery-view `Blocked` on Slice C; it has been promoted to `Ready`
-as the next candidate envelope.
+`sprint-0/slice-d` has been Source-ratified for visible
+implementation-agent authoring and is currently `In Progress`. The
+authoring pass produces three new docs under `docs/delivery/`
+(`REVIEWER_IDENTITY_REQUIREMENTS.md`, `REVIEW_EVIDENCE_TEMPLATE.md`,
+`REVIEW_GATE.md`) with minimal coherence updates to the existing
+delivery docs.
 
-> **The immediate next task is `sprint-0/slice-d`** — author the
-> Codex reviewer identity record (or equivalent), the QA / review
-> evidence template, and the review-gate definition (Sprint 0 exit
-> gates #7 and #10). Slice D is `Ready` (highest-priority `Ready`
-> item per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c.1)
-> but Slice D mutations are privileged (`identity`), so the next
-> governed action is a **ratification request to Source** for a
-> Slice D privileged envelope per Feature 001 FR-008 / FR-016 and
-> per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §c.5.
-> Slice D implementation does not begin until that envelope is
-> ratified. Slice D consumption requirements remain governed by
-> [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §c.
+> **The immediate next governed action is Source validation of the
+> Slice D authoring pass.** No staging, commit, push, or PR mechanics
+> are authorized under this batch. After Source validation, the
+> Slice D batch advances per the lifecycle in
+> [`./BACKLOG.md`](./BACKLOG.md) §a; ratification of any subsequent
+> mechanics is itself a privileged decision per Feature 001 FR-008
+> and Feature 002 FR-008.
 
-Rationale: Slice D is gated on Slice C reaching `Ratified` or `Done`
-per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §b. With Slice C `Done`,
-Slice D is the highest-priority backlog candidate. Because Slice D
-crosses privileged surfaces, the §c.5 routing — privileged blocker
-becomes a ratification request rather than an implementation task —
-applies. Note: any extension of the landed `.github/` baseline
-(including CODEOWNERS, live branch protection settings, or
-Feature 003 instantiation) is itself a separate privileged
-envelope and is not unblocked by Slice C landing.
+Rationale: Slice D mutations are privileged (`identity`). Authoring
+under a Source-ratified visible implementation envelope is permitted,
+but the visible implementation agent is not authorized to ratify the
+artifacts it authored; author/approver separation (Feature 001
+FR-007) reserves ratification for Source. Note: any extension of the
+landed `.github/` baseline (including CODEOWNERS, live branch
+protection settings, or Feature 003 instantiation) is itself a
+separate privileged envelope and is not unblocked by Slice C
+landing or by this Slice D authoring pass.
 
 If shaping or scoping of the Slice D envelope surfaces ambiguity,
 the next-task recommendation defers to the rules in
