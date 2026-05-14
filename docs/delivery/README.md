@@ -19,9 +19,18 @@ and B4 remain deferred. Live GitHub branch protection settings on
 the remote repository remain a separate privileged future decision:
 the landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
 policy only and PR #12 did not mutate live repository settings.
-The next gated task is `sprint-0/slice-e` shaping under its own
-future Source-ratified privileged envelope; Slice E remains
-`Blocked` on the delivery view until that envelope is ratified.
+The Slice E authoring envelope has since been Source-ratified as
+a bounded docs-only `governance` / `docs` batch authoring the
+manual Assignment Envelope template and worktree runtime protocol
+layer; the Slice E authoring batch is in flight on the local
+worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`
+and has not yet merged. The Slice E row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.5 remains `Blocked` on the
+canonical view until the batch lands; the in-flight batch authors
+the new Slice E docs enumerated under §e below, with the explicit
+stop line and non-authorizing posture recorded in
+[`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md)
+§c.13 and §f.
 
 ## a. Purpose
 
@@ -135,6 +144,25 @@ This boundary aligns with
 | [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) | Delivery-view DoD, layered onto Feature 001 FR-014. |
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
+
+### Slice E delivery docs (authored on this branch; not yet merged)
+
+These five documents are authored under the Source-ratified
+bounded Slice E authoring envelope (docs-only governance/delivery
+content; no staging, commit, push, PR, merge, or branch deletion
+under the consumer's authorship). They define the manual
+Assignment Envelope template and worktree runtime protocol layer.
+Until this branch merges, the canonical-branch view of Slice E
+remains `Blocked`; this batch authors the contract that any future
+governed implementation envelope will obey.
+
+| File | Role |
+|---|---|
+| [`ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md) | Reusable manual Assignment Envelope template (header, Source ratification / authority record, mutation classes, authorized actor / role / pane, allowed files / operations, prohibited surfaces, dependencies, implementation instructions, validation and scope-audit commands, review / verification evidence fields, dry-run / handoff evidence fields, explicit stop condition, distinct ratifier field). |
+| [`WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md) | Runtime protocol for local isolated worktrees: branch / worktree naming convention; one-driver-per-worktree rule; controller / consumer split; preflight checks; no `.hermes` / handoff leakage into upstream tracked docs; no cross-project state leakage; prohibited Git / GitHub operations unless separately ratified; cleanup / defer rules. |
+| [`ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md) | Consumer-side checklist for before / during / after consumption of a Source-ratified envelope. |
+| [`SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) | Independent verifier-side checklist used after the consumer reaches the stop line. |
+| [`ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md) | Non-authorizing dry-run evidence using this Slice E worktree / branch as the worked example. |
 
 ### Slice D delivery docs (landed)
 

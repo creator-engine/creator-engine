@@ -12,10 +12,12 @@ as commit `6058661 docs: define reviewer evidence gate for Slice D`,
 landing the three Slice D delivery docs and minimal coherence
 updates. Live GitHub branch protection settings on the remote
 repository remain a separate privileged future decision and are not
-mutated by PR #12. The next gated task is `sprint-0/slice-e`
-shaping under its own future Source-ratified privileged envelope;
-Slice E remains `Blocked` on the delivery view until that envelope
-is ratified. Generated from / summarizes
+mutated by PR #12. The Slice E authoring envelope has since been Source-ratified as
+a bounded docs-only `governance` / `docs` batch; the Slice E
+authoring batch is in flight on the local worktree branch
+`docs/sprint0-slice-e-assignment-runtime-protocol` and has not
+yet merged. The canonical Slice E row remains `Blocked` on the
+board below until the batch lands. Generated from / summarizes
 [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -105,7 +107,7 @@ has landed on the canonical branch; see the `Done` table below.
 
 | id | scope (one line) | named blocker |
 |---|---|---|
-| `sprint-0/slice-e` | Manual Assignment Envelope template + worktree/branch naming + one-driver-per-worktree rule + envelope dry-run evidence. | No Source-ratified privileged `governance` / `docs` envelope for Slice E shaping has been recorded yet; the delivery-view predecessor edge `sprint-0/slice-d` is `Done`. |
+| `sprint-0/slice-e` | Manual Assignment Envelope template + worktree/branch naming + one-driver-per-worktree rule + envelope dry-run evidence. | The Slice E authoring envelope has been Source-ratified as a bounded docs-only `governance` / `docs` batch and the authoring batch is in flight on the local worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`; the canonical-view row remains `Blocked` until the batch lands on `main`. |
 | `sprint-0/slice-f` | Release / deploy governance policy; deploy mutation ratification rule; release-candidate / merge-approval / deployment-approval checklists. | `sprint-0/slice-e` not yet complete; deploy targets do not yet exist. |
 
 ## c. Immediate next likely task
@@ -115,15 +117,20 @@ canonical-branch evidence is commit
 `6058661 docs: define reviewer evidence gate for Slice D`. The
 next gated task is `sprint-0/slice-e` shaping.
 
-> **The immediate next governed action is a ratification request to
-> Source for a privileged `governance` / `docs` envelope authorizing
-> Slice E shaping** (manual Assignment Envelope template;
-> worktree/branch naming conventions; one-driver-per-worktree rule;
-> envelope consumption and scope-audit checklists; dry-run evidence
-> for at least one envelope). Slice E remains `Blocked` on the
-> delivery view until that envelope is recorded; consumption is
-> itself a privileged decision per Feature 001 FR-008 and Feature
-> 002 FR-008.
+> **The Slice E authoring envelope has been Source-ratified as a
+> bounded docs-only `governance` / `docs` batch** authoring the
+> manual Assignment Envelope template, the worktree runtime
+> protocol, the envelope consumption checklist, the scope-audit
+> checklist, and a non-authorizing dry-run evidence document. The
+> Slice E authoring batch is in flight on the local worktree
+> branch `docs/sprint0-slice-e-assignment-runtime-protocol`; the
+> consumer's authorship halts at the named stop line, and Source
+> has not separately ratified any staging / commit / push / PR /
+> merge / branch deletion mechanics under this envelope.
+> Independent verification and Source validation gate any further
+> action per [`./REVIEW_GATE.md`](./REVIEW_GATE.md). The
+> canonical-view Slice E row remains `Blocked` until the batch
+> lands on `main`.
 
 Rationale: Slice E mutations are privileged (`governance`). The
 delivery-view predecessor edge `sprint-0/slice-d` is `Done`, which

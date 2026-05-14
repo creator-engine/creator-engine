@@ -17,8 +17,12 @@ coherence updates to the existing delivery docs. Delivery-view
 backlog rows remain markdown-only; structured YAML sidecars
 deferred to B3. Live GitHub branch protection settings on the
 remote repository remain a separate privileged future decision and
-are not mutated by PR #12. The next gated task is `sprint-0/slice-e`
-shaping under its own future Source-ratified privileged envelope.
+are not mutated by PR #12. The Slice E authoring envelope has since been Source-ratified as
+a bounded docs-only `governance` / `docs` batch; the Slice E
+authoring batch is in flight on the local worktree branch
+`docs/sprint0-slice-e-assignment-runtime-protocol` and has not yet
+merged. The canonical-view Slice E row in §c.5 remains `Blocked`
+until the batch lands.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -311,11 +315,16 @@ Owning source of truth:
   one-driver-per-worktree).
 - **dependencies / blockers**: `sprint-0/slice-c` is `Done` and
   `sprint-0/slice-d` is `Done`; the delivery-view predecessor edges
-  have cleared. Slice E nonetheless remains `Blocked` until its own
-  Source-ratified privileged `governance` / `docs` envelope is
-  recorded; the next governed action for this slice is a
-  ratification request to Source for that envelope per Feature 001
-  FR-008.
+  have cleared. The Slice E authoring envelope has since been
+  Source-ratified as a bounded docs-only `governance` / `docs`
+  batch; the Slice E authoring batch is in flight on the local
+  worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`
+  (see [`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md))
+  and has not yet merged. The canonical-view row remains `Blocked`
+  until the batch lands; the consumer's authorship halts at the
+  named stop line per
+  [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md)
+  §j.
 - **anticipated mutation class**: `governance` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
