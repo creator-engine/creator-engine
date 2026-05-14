@@ -1,22 +1,24 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slices B and C are complete on the delivery
-view. B1 (markdown control-plane scaffold) and B2 (Definition of
-Ready, Definition of Done, dependency map, risk register) landed
-previously; Slice C has since landed on the canonical branch as
-PR #12 (`1cfb955 ci: add baseline governance validation controls`),
-introducing the file-based `.github/` baseline (validation workflow,
-PR template, branch protection policy file). Delivery-view backlog
-rows remain markdown-only; structured YAML sidecars deferred to B3.
-Live GitHub branch protection settings on the remote repository
-remain a separate privileged future decision and are not mutated by
-PR #12. `sprint-0/slice-d` is now being authored on the working
-tree under a Source-ratified visible implementation envelope
+**Status**: Sprint 0 Slices B, C, and D are complete on the
+delivery view. B1 (markdown control-plane scaffold) and B2
+(Definition of Ready, Definition of Done, dependency map, risk
+register) landed previously; Slice C subsequently landed on the
+canonical branch as PR #12 (`1cfb955 ci: add baseline governance
+validation controls`), introducing the file-based `.github/`
+baseline (validation workflow, PR template, branch protection
+policy file); and Slice D has since landed on the canonical branch
+as commit `6058661 docs: define reviewer evidence gate for Slice D`,
+introducing the three Slice D delivery docs
 (`docs/delivery/REVIEW_GATE.md`,
 `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
-`docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`); the batch has
-not advanced past `In Progress` and remains gated on Source
-validation before any staging, commit, push, or PR mechanics.
+`docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`) with minimal
+coherence updates to the existing delivery docs. Delivery-view
+backlog rows remain markdown-only; structured YAML sidecars
+deferred to B3. Live GitHub branch protection settings on the
+remote repository remain a separate privileged future decision and
+are not mutated by PR #12. The next gated task is `sprint-0/slice-e`
+shaping under its own future Source-ratified privileged envelope.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -261,7 +263,7 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-d`
 - **parent**: `sprint-0`
-- **status**: `In Progress`
+- **status**: `Done`
 - **scope**: Generic reviewer identity record **pattern** (not an
   instantiated identity); generic markdown-equivalent QA / review
   evidence template; review-gate definition; standing invariant that
@@ -272,28 +274,26 @@ Owning source of truth:
   this slice.
 - **acceptance gate**: Sprint 0 exit gates #7 (governed roles) and
   #10 (QA / review evidence format).
-- **dependencies / blockers**: `sprint-0/slice-c` is `Done` and the
-  Slice D privileged `identity` / `docs` envelope has been Source-
-  ratified for the visible implementation-agent authoring pass. The
-  batch has not yet been Source-validated; promotion past
-  `In Progress` to `Verified`, `Ratified`, or `Done` is not
-  authorized by this authoring pass alone. Author/approver
-  separation applies: the visible implementation agent authors the
-  Slice D artifacts and does not ratify them.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done`; the
+  Slice D privileged `identity` / `docs` envelope was Source-
+  ratified and the batch has now landed on the canonical branch.
+  Author/approver separation was preserved: the visible
+  implementation agent authored the Slice D artifacts and did not
+  ratify them.
 - **anticipated mutation class**: `identity` (privileged) / `docs`
 - **owner role**: `architect` (policy) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
   envelope)
 - **ratifier role**: `source`
 - **external tracker reference**: —
-- **provisional evidence** *(pending Source validation)*: working-tree
-  authoring of `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`,
-  `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
-  `docs/delivery/REVIEW_GATE.md`, with minimal status/discoverability
-  updates to `docs/delivery/README.md`, `docs/delivery/BACKLOG.md`,
-  `docs/delivery/KANBAN.md`, and `docs/delivery/DEPENDENCIES.md`. No
-  durable canonical-branch evidence exists yet; this is a working-
-  tree state awaiting Source validation.
+- **durable evidence**: merged commit
+  `6058661 docs: define reviewer evidence gate for Slice D` on the
+  canonical branch, landing
+  `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`,
+  `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`, and
+  `docs/delivery/REVIEW_GATE.md`, with minimal coherence updates to
+  `docs/delivery/README.md`, `docs/delivery/BACKLOG.md`,
+  `docs/delivery/KANBAN.md`, and `docs/delivery/DEPENDENCIES.md`.
 
 ### c.5 Slice E — Manual Assignment Envelope and worktree runtime protocol
 
@@ -309,9 +309,13 @@ Owning source of truth:
 - **acceptance gate**: Sprint 0 exit gates #8 (Assignment Envelope
   template + dry-run) and #9 (worktree/branch naming +
   one-driver-per-worktree).
-- **dependencies / blockers**: `sprint-0/slice-c` is `Done`;
-  `sprint-0/slice-d` remains the immediate predecessor edge for
-  sequencing the envelope's review evidence requirements.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done` and
+  `sprint-0/slice-d` is `Done`; the delivery-view predecessor edges
+  have cleared. Slice E nonetheless remains `Blocked` until its own
+  Source-ratified privileged `governance` / `docs` envelope is
+  recorded; the next governed action for this slice is a
+  ratification request to Source for that envelope per Feature 001
+  FR-008.
 - **anticipated mutation class**: `governance` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`

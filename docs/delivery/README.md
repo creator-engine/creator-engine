@@ -1,26 +1,27 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slices B and C are complete on the delivery
-view. B1 (markdown control-plane scaffold) and B2 (Definition of
-Ready, Definition of Done, dependency map, risk register) landed
-previously under the Source-ratified posture (Option C of the
-Slice B strategy decision); Slice C has since landed on the
-canonical branch as PR #12 (`1cfb955 ci: add baseline governance
-validation controls`), introducing the file-based `.github/`
-baseline (validation workflow, PR template, branch protection
-policy file). B3 and B4 remain deferred. Live GitHub branch
-protection settings on the remote repository remain a separate
-privileged future decision: the landed `.github/BRANCH_PROTECTION_POLICY.md`
-is file-based policy only and PR #12 did not mutate live repository
-settings. `sprint-0/slice-d` is now being authored on the working
-tree under a Source-ratified visible implementation envelope as a
-markdown-only delivery-doc batch
+**Status**: Sprint 0 Slices B, C, and D are complete on the
+delivery view. B1 (markdown control-plane scaffold) and B2
+(Definition of Ready, Definition of Done, dependency map, risk
+register) landed previously under the Source-ratified posture
+(Option C of the Slice B strategy decision); Slice C subsequently
+landed on the canonical branch as PR #12 (`1cfb955 ci: add baseline
+governance validation controls`), introducing the file-based
+`.github/` baseline (validation workflow, PR template, branch
+protection policy file); and Slice D has since landed on the
+canonical branch as commit `6058661 docs: define reviewer evidence
+gate for Slice D`, introducing the three Slice D delivery docs
 ([`./REVIEW_GATE.md`](./REVIEW_GATE.md),
 [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md),
-[`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md)).
-The Slice D implementation has not advanced past `In Progress`
-under this batch and remains gated on Source validation before any
-staging, commit, push, or PR mechanics.
+[`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md))
+with minimal coherence updates to the existing delivery docs. B3
+and B4 remain deferred. Live GitHub branch protection settings on
+the remote repository remain a separate privileged future decision:
+the landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
+policy only and PR #12 did not mutate live repository settings.
+The next gated task is `sprint-0/slice-e` shaping under its own
+future Source-ratified privileged envelope; Slice E remains
+`Blocked` on the delivery view until that envelope is ratified.
 
 ## a. Purpose
 
@@ -135,15 +136,16 @@ This boundary aligns with
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
-### Slice D delivery docs (authored, pending Source validation)
+### Slice D delivery docs (landed)
 
-These three documents are authored under the Source-ratified Slice D
-visible implementation envelope. They define a generic, implementation-
-agnostic reviewer identity pattern, review evidence template, and
-review gate. They do **not** instantiate a real reviewer identity; that
-work is downstream Feature 004 scope under its own per-batch privileged
-envelope. Until Source validates this batch, the Slice D row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.4 has not advanced past `In Progress`.
+These three documents landed on the canonical branch under commit
+`6058661 docs: define reviewer evidence gate for Slice D`. They
+define a generic, implementation-agnostic reviewer identity
+pattern, review evidence template, and review gate. They do **not**
+instantiate a real reviewer identity; that work is downstream
+Feature 004 scope under its own per-batch privileged envelope. The
+Slice D row in [`./BACKLOG.md`](./BACKLOG.md) §c.4 is `Done` on the
+delivery view.
 
 | File | Role |
 |---|---|
@@ -194,10 +196,10 @@ MUST NOT be introduced as delivery-view changes under it:
 - Implementation of US3 A1 (not authorized).
 - Implementation of Slice E or Slice F work (each requires its own
   Source-ratified privileged envelope per Feature 001 FR-008 /
-  FR-016 before any consumption begins). Slice D is now being
-  authored under its own Source-ratified visible implementation
-  envelope and remains gated on Source validation before any
-  staging, commit, push, or PR mechanics.
+  FR-016 before any consumption begins). Slice D has landed on the
+  canonical branch (commit `6058661`); Slice E shaping is the next
+  gated task under its own future Source-ratified privileged
+  envelope.
 
 ## g. How this control plane is used
 
