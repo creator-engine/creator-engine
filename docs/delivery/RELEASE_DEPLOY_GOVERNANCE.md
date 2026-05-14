@@ -1,7 +1,9 @@
 # Release / Deploy Governance (Slice F index)
 
-**Status**: Sprint 0 Slice F authored draft. This slice documents
-policy only; it does not implement, deploy, merge, or ratify.
+**Status**: Sprint 0 Slice F landed policy. Authored via PR #16 /
+`cb7f94a`; delivery-state reconciliation landed via PR #17 /
+`5be005b`. This document remains policy-only; it does not implement,
+deploy, merge, or ratify.
 
 This document is the **index / front door** for the four Sprint 0
 Slice F content documents that author Creator Engine v0.1's

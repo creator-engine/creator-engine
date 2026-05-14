@@ -1,7 +1,9 @@
 # Release Candidate Checklist
 
-**Status**: Sprint 0 Slice F authored draft. This slice documents
-policy only; it does not implement, deploy, merge, or ratify.
+**Status**: Sprint 0 Slice F landed policy. Authored via PR #16 /
+`cb7f94a`; delivery-state reconciliation landed via PR #17 /
+`5be005b`. This document remains policy-only; it does not implement,
+deploy, merge, or ratify.
 
 This document defines what promotes an in-progress governed work
 batch to **release-candidate (RC) status** on the delivery view, and
