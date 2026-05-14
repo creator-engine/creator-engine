@@ -1,22 +1,24 @@
 # Definition of Ready (Delivery View)
 
-**Status**: Sprint 0 Slices B, C, and D are complete on the delivery
-view. B1 (markdown control-plane scaffold) and B2 (Definition of
-Ready, Definition of Done, dependency map, risk register) landed
-previously; Slice C has since landed on the canonical branch as
-PR #12 (`1cfb955 ci: add baseline governance validation controls`);
-and Slice D has since landed on the canonical branch as commit
-`6058661 docs: define reviewer evidence gate for Slice D`. Part of
-the **minimum repo-native delivery control plane** and **not a Jira
-clone**. Markdown-only by ratified posture. Layered on top of, and
-subordinate to, the Feature 001 substrate. Live GitHub branch
-protection settings on the remote repository remain a separate
-privileged future decision and are not mutated by PR #12. The
-Slice E authoring batch (this branch, not yet merged) is authoring
-the manual Assignment Envelope template and worktree runtime
-protocol layer under its own Source-ratified bounded envelope;
-authorization-to-implement subsequent downstream work remains
-contingent on Source ratifying further envelopes.
+**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+delivery view. B1 (markdown control-plane scaffold) and B2
+(Definition of Ready, Definition of Done, dependency map, risk
+register) landed previously; Slice C has since landed on the
+canonical branch as PR #12 (`1cfb955 ci: add baseline governance
+validation controls`); Slice D has since landed on the canonical
+branch as commit `6058661 docs: define reviewer evidence gate for
+Slice D`; and Slice E has now landed on the canonical branch as
+PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E assignment
+runtime protocol`. Part of the **minimum repo-native delivery
+control plane** and **not a Jira clone**. Markdown-only by ratified
+posture. Layered on top of, and subordinate to, the Feature 001
+substrate. Live GitHub branch protection settings on the remote
+repository remain a separate privileged future decision and are not
+mutated by PR #12 or PR #14. Authorization-to-implement subsequent
+downstream work (Slice F shaping, Feature 003+, Feature 005, etc.)
+remains contingent on Source ratifying further per-batch privileged
+envelopes; Slice E landing does not, by itself, authorize any
+downstream consumption.
 
 **Scope**: This document defines when a Creator Engine work item is
 **Ready** to enter a Hermes-authored Assignment Envelope. It is the
@@ -234,7 +236,7 @@ has since landed on the canonical branch; both B1 and B2 are now
 [`./KANBAN.md`](./KANBAN.md), so the parent `sprint-0/slice-b` is
 also `Done` on the delivery view.
 
-### d.2 `sprint-0/slice-c` and `sprint-0/slice-d` — each was Ready as next candidate envelope and has since landed as `Done`
+### d.2 `sprint-0/slice-c`, `sprint-0/slice-d`, and `sprint-0/slice-e` — each was Ready as next candidate envelope and has since landed as `Done`
 
 - **b.7 dependencies**: at the time Slice B landed,
   `sprint-0/slice-b` (the parent slice) reached `Done` on the
@@ -260,19 +262,26 @@ also `Done` on the delivery view.
 
 The distinction — "Ready as next candidate envelope" vs.
 "authorized to implement" — is the heart of the privileged-class
-rule in §c. Slice D has since landed on the canonical branch as
-commit `6058661 docs: define reviewer evidence gate for Slice D`,
-under a dedicated Source-ratified privileged `identity` envelope.
-The same distinction now applies to `sprint-0/slice-e`: the
-delivery-view predecessor edge from Slice D is cleared, the Slice E
-authoring batch (this branch) is in flight under its own bounded
-Source-ratified envelope authoring the manual Assignment Envelope
-template and worktree runtime protocol layer, and
-authorization-to-implement any downstream batch remains contingent
-on Source ratifying further envelopes. Slice C landing does not by
-itself authorize any extension of the landed baseline (CODEOWNERS,
-live branch protection settings, or Feature 003 instantiation);
-each remains a separately ratified envelope.
+rule in §c. Slice D landed on the canonical branch as commit
+`6058661 docs: define reviewer evidence gate for Slice D` under a
+dedicated Source-ratified privileged `identity` envelope. Slice E
+has now landed on the canonical branch as PR #14 / commit
+`3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
+also under a dedicated Source-ratified bounded `governance` /
+`docs` envelope authoring the manual Assignment Envelope template
+and worktree runtime protocol layer. The Slice E row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.5 is therefore `Done` on the
+delivery view. The same "Ready as candidate vs. authorized to
+implement" distinction now applies to `sprint-0/slice-f` and to any
+downstream feature batch (e.g., Feature 003 extension, Feature 005
+dispatcher implementation): the delivery-view predecessor edges
+have cleared through E → F, but each downstream batch remains
+contingent on its own Source-ratified privileged envelope. Slice C
+landing does not by itself authorize any extension of the landed
+baseline (CODEOWNERS, live branch protection settings, or Feature
+003 instantiation); Slice E landing does not by itself authorize
+Slice F consumption or any Feature 005 work; each remains a
+separately ratified envelope.
 
 ## e. Operating-procedure rules
 
@@ -317,8 +326,8 @@ requirements:
   complete on the delivery view, was `Ready` as the next candidate
   envelope until Source ratified a dedicated Slice C privileged
   envelope; Slice C has since landed as PR #12, Slice D has since
-  landed as commit `6058661`, and the same distinction now applies
-  to `sprint-0/slice-e` whose authoring batch is in flight on this
-  branch under its own bounded Source-ratified envelope and whose
-  downstream authorization-to-implement remains contingent on
-  further Source-ratified envelopes.
+  landed as commit `6058661`, Slice E has since landed as PR #14 /
+  commit `3cb0266`, and the same "Ready as candidate vs. authorized
+  to implement" distinction now applies to `sprint-0/slice-f` and
+  to any downstream feature batch whose authorization-to-implement
+  remains contingent on further Source-ratified envelopes.

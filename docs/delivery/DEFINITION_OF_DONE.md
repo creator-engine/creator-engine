@@ -1,9 +1,18 @@
 # Definition of Done (Delivery View)
 
-**Status**: Sprint 0 Slice B2. Part of the **minimum repo-native
-delivery control plane** and **not a Jira clone**. Markdown-only by
-ratified posture. Layered on top of, and subordinate to, the Feature
-001 substrate.
+**Status**: Sprint 0 Slices B, C, D, and E are complete on the
+delivery view. B1 (markdown control-plane scaffold) and B2
+(Definition of Ready, Definition of Done, dependency map, risk
+register) landed previously; Slice C has since landed on the
+canonical branch as PR #12 (`1cfb955 ci: add baseline governance
+validation controls`); Slice D has since landed on the canonical
+branch as commit `6058661 docs: define reviewer evidence gate for
+Slice D`; and Slice E has now landed on the canonical branch as
+PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E assignment
+runtime protocol`. Part of the **minimum repo-native delivery
+control plane** and **not a Jira clone**. Markdown-only by ratified
+posture. Layered on top of, and subordinate to, the Feature 001
+substrate.
 
 **Scope**: This document defines when a Creator Engine work item is
 **Done** on the delivery view. It is the delivery-view counterpart of
@@ -169,9 +178,19 @@ the verifies-not-ratifies rule at SDLC transition T17
 3. A change to CI policy, branch protection, or `.github/` content is
    itself a privileged `governance` / `security` / `deploy`-class
    mutation per Feature 001 FR-008 and requires Source ratification.
-4. Until Feature 003 wires a CI workflow, §b.2 is satisfied by local
-   validation evidence captured in the post-merge report; the report
-   names the local-validation evidence relied upon per
+4. The Slice C file-based `.github/` baseline (validation workflow
+   `.github/workflows/validate.yml`, PR template
+   `.github/pull_request_template.md`, branch protection policy
+   `.github/BRANCH_PROTECTION_POLICY.md`) is already on the
+   canonical branch as of PR #12 (`1cfb955`); §b.2 MAY cite that
+   baseline's CI evidence where it applies. Further extension of
+   the `.github/` baseline (live GitHub branch protection settings,
+   CODEOWNERS, additional workflows, or any deeper instantiation)
+   remains Feature 003 surface under a separately ratified
+   privileged envelope. Where no applicable CI workflow has been
+   wired for a given mutation class, §b.2 is satisfied by local
+   validation evidence captured in the post-merge report; the
+   report names the local-validation evidence relied upon per
    [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.3.
 
 ## d. External tracker status cannot mark a repo work item Done

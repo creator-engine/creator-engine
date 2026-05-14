@@ -1,6 +1,6 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slices B, C, and D are complete on the
+**Status**: Sprint 0 Slices B, C, D, and E are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously under the Source-ratified posture
@@ -8,29 +8,33 @@ register) landed previously under the Source-ratified posture
 landed on the canonical branch as PR #12 (`1cfb955 ci: add baseline
 governance validation controls`), introducing the file-based
 `.github/` baseline (validation workflow, PR template, branch
-protection policy file); and Slice D has since landed on the
+protection policy file); Slice D has since landed on the
 canonical branch as commit `6058661 docs: define reviewer evidence
 gate for Slice D`, introducing the three Slice D delivery docs
 ([`./REVIEW_GATE.md`](./REVIEW_GATE.md),
 [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md),
 [`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md))
+with minimal coherence updates to the existing delivery docs; and
+Slice E has now landed on the canonical branch as PR #14 / commit
+`3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
+introducing the five Slice E delivery docs
+([`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md),
+[`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md),
+[`./ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md),
+[`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md),
+[`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md))
 with minimal coherence updates to the existing delivery docs. B3
 and B4 remain deferred. Live GitHub branch protection settings on
 the remote repository remain a separate privileged future decision:
 the landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
 policy only and PR #12 did not mutate live repository settings.
-The Slice E authoring envelope has since been Source-ratified as
-a bounded docs-only `governance` / `docs` batch authoring the
-manual Assignment Envelope template and worktree runtime protocol
-layer; the Slice E authoring batch is in flight on the local
-worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`
-and has not yet merged. The Slice E row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.5 remains `Blocked` on the
-canonical view until the batch lands; the in-flight batch authors
-the new Slice E docs enumerated under §e below, with the explicit
-stop line and non-authorizing posture recorded in
-[`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md)
-§c.13 and §f.
+With Slice E landed, the Slice E row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.5 is now `Done` with durable
+evidence PR #14 / `3cb0266`. The structural next candidate is
+Slice F shaping (release / deploy governance policy authoring), but
+authorization to consume any Slice F envelope remains contingent on
+Source ratifying a future privileged `deploy`-policy envelope; this
+batch does not author Slice F content.
 
 ## a. Purpose
 
@@ -145,16 +149,18 @@ This boundary aligns with
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
-### Slice E delivery docs (authored on this branch; not yet merged)
+### Slice E delivery docs (landed)
 
-These five documents are authored under the Source-ratified
+These five documents landed on the canonical branch under PR #14 /
+commit `3cb0266 docs: add Sprint 0 Slice E assignment runtime
+protocol`. They define the manual Assignment Envelope template and
+worktree runtime protocol layer, authored under the Source-ratified
 bounded Slice E authoring envelope (docs-only governance/delivery
-content; no staging, commit, push, PR, merge, or branch deletion
-under the consumer's authorship). They define the manual
-Assignment Envelope template and worktree runtime protocol layer.
-Until this branch merges, the canonical-branch view of Slice E
-remains `Blocked`; this batch authors the contract that any future
-governed implementation envelope will obey.
+content). They define the contract that any future governed
+implementation envelope will obey; they do not instantiate any
+automation surface, which remains Feature 005 scope under a
+separately ratified privileged envelope. The Slice E row in
+[`./BACKLOG.md`](./BACKLOG.md) §c.5 is `Done` on the delivery view.
 
 | File | Role |
 |---|---|
@@ -222,12 +228,14 @@ MUST NOT be introduced as delivery-view changes under it:
 - Any external-tracker integration, credential, or network call.
 - Any live GitHub or external-tracker mutation.
 - Implementation of US3 A1 (not authorized).
-- Implementation of Slice E or Slice F work (each requires its own
+- Implementation of any Slice F work (which requires its own
   Source-ratified privileged envelope per Feature 001 FR-008 /
-  FR-016 before any consumption begins). Slice D has landed on the
-  canonical branch (commit `6058661`); Slice E shaping is the next
-  gated task under its own future Source-ratified privileged
-  envelope.
+  FR-016 before any consumption begins). Slice D landed on the
+  canonical branch (commit `6058661`) and Slice E has now landed
+  (PR #14 / commit `3cb0266`); the structural next candidate is
+  Slice F shaping (release / deploy governance policy authoring)
+  under a future Source-ratified privileged envelope, and final
+  next-task selection remains Source's.
 
 ## g. How this control plane is used
 

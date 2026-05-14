@@ -167,10 +167,24 @@ The `--exclude=SCOPE_AUDIT_CHECKLIST.md` flag excludes this audit
 checklist itself, which is the regex's documented home; the
 audit is concerned with stale prose elsewhere, not with the
 regex documented here. The expected result for a successful
-Slice E batch is **no matches**. Other stale-language scans appropriate to a given batch
-(e.g., for canonical-document subtrees a batch did not touch) may
-be added to the audit; absence of a relevant scan with a recorded
-rationale is itself a scope-audit data point.
+Slice E batch is **no matches**.
+
+For a post-Slice-E reconciliation batch (e.g., the
+`docs/sprint0-slice-e-post-merge-reconciliation` envelope), the
+auditor additionally scans for stale Slice-E in-flight /
+not-merged / blocked-until-lands phrasing carried over from before
+PR #14 / `3cb0266` landed:
+
+```
+grep -RInE --exclude=SCOPE_AUDIT_CHECKLIST.md 'Slice E (authoring batch )?is in flight|Slice E (has )?not yet merged|sprint-0/slice-e` (remains|is) `Blocked`|canonical-view (Slice E )?row remains `Blocked` until the batch lands|remains Blocked until the batch lands|Slice E shaping is the next gated task' docs/delivery || true
+```
+
+The expected result for a successful post-Slice-E reconciliation
+batch is **no matches** outside the self-documenting regex above.
+Other stale-language scans appropriate to a given batch (e.g., for
+canonical-document subtrees a batch did not touch) may be added to
+the audit; absence of a relevant scan with a recorded rationale is
+itself a scope-audit data point.
 
 ## i. Markdown link / reference sanity
 
