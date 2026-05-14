@@ -1,13 +1,20 @@
 # Creator Engine Delivery Control Plane
 
-**Status**: Sprint 0 Slice B complete on the delivery view. B1
-(markdown control-plane scaffold) and B2 (Definition of Ready,
-Definition of Done, dependency map, risk register) have both landed
-on the canonical branch under the Source-ratified posture (Option C
-of the Slice B strategy decision). B3 and B4 remain deferred.
-`sprint-0/slice-c` is the next candidate envelope; Slice C
-implementation is not authorized by this state and requires its own
-Source-ratified privileged envelope.
+**Status**: Sprint 0 Slices B and C are complete on the delivery
+view. B1 (markdown control-plane scaffold) and B2 (Definition of
+Ready, Definition of Done, dependency map, risk register) landed
+previously under the Source-ratified posture (Option C of the
+Slice B strategy decision); Slice C has since landed on the
+canonical branch as PR #12 (`1cfb955 ci: add baseline governance
+validation controls`), introducing the file-based `.github/`
+baseline (validation workflow, PR template, branch protection
+policy file). B3 and B4 remain deferred. Live GitHub branch
+protection settings on the remote repository remain a separate
+privileged future decision: the landed `.github/BRANCH_PROTECTION_POLICY.md`
+is file-based policy only and PR #12 did not mutate live repository
+settings. `sprint-0/slice-d` is the next candidate envelope;
+Slice D implementation is not authorized by this state and requires
+its own Source-ratified privileged envelope.
 
 ## a. Purpose
 
@@ -139,13 +146,22 @@ B1 and cross-referenced from the B2 documents.
 - Live Jira / Linear mutations remain out of scope until separately
   ratified.
 
-## f. Out of scope for the delivery control plane (current batch)
+## f. Out of scope for the delivery control plane
 
-The following are explicitly out of scope for the current delivery
-control plane batch and MUST NOT be introduced under it:
+The following are out of scope for the delivery control plane and
+MUST NOT be introduced as delivery-view changes under it:
 
-- Any `.github/` workflow, PR template, branch protection setting, or
-  CODEOWNERS change (Feature 003 / Sprint 0 Slice C).
+- Further `.github/` workflow, PR template, branch protection policy
+  file, or CODEOWNERS change beyond the file-based baseline already
+  landed by `sprint-0/slice-c` (PR #12). Subsequent extension of
+  that baseline (including CODEOWNERS, if and when ratified) belongs
+  to its own Source-ratified `governance` envelope and ultimately to
+  Feature 003.
+- Live GitHub branch protection settings on the remote repository.
+  The landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
+  policy only; the live repository setting remains a separate
+  privileged future decision and is not authorized by Slice C
+  landing.
 - Any change to `specs/`, `schemas/`, `validators/`, `templates/`,
   `examples/`, `tenants/`, `docs/product/`, `docs/architecture/`,
   `docs/governance/`, `docs/quality/`, `docs/devops/`,
@@ -154,8 +170,9 @@ control plane batch and MUST NOT be introduced under it:
 - Any external-tracker integration, credential, or network call.
 - Any live GitHub or external-tracker mutation.
 - Implementation of US3 A1 (not authorized).
-- Implementation of Slice C work (deferred until Slice B reaches
-  `Ratified` or `Done` and the Slice C envelope is Source-ratified).
+- Implementation of Slice D, Slice E, or Slice F work (each
+  requires its own Source-ratified privileged envelope per Feature
+  001 FR-008 / FR-016 before any consumption begins).
 
 ## g. How this control plane is used
 
@@ -192,4 +209,6 @@ extended to discover the B2 documents:
 - States that a fresh clone is sufficient to identify the next task
   and that no external tracker credential or network state is required
   for Sprint 0 exit gate #2.
-- Enumerates the out-of-scope surfaces for the current batch.
+- Enumerates the out-of-scope surfaces for the original B1 and B2
+  acceptance posture (the §f rewrite post-PR #12 carries the
+  current delivery-view scope statement).

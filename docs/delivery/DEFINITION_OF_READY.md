@@ -1,14 +1,18 @@
 # Definition of Ready (Delivery View)
 
-**Status**: Sprint 0 Slice B complete on the delivery view. B1
-(markdown control-plane scaffold) and B2 (Definition of Ready,
-Definition of Done, dependency map, risk register) have both landed
-on the canonical branch. Part of the **minimum repo-native delivery
-control plane** and **not a Jira clone**. Markdown-only by ratified
-posture. Layered on top of, and subordinate to, the Feature 001
-substrate. `sprint-0/slice-c` is the next candidate envelope;
-Slice C implementation is not authorized by this state and requires
-its own Source-ratified privileged envelope.
+**Status**: Sprint 0 Slices B and C are complete on the delivery
+view. B1 (markdown control-plane scaffold) and B2 (Definition of
+Ready, Definition of Done, dependency map, risk register) landed
+previously; Slice C has since landed on the canonical branch as
+PR #12 (`1cfb955 ci: add baseline governance validation controls`).
+Part of the **minimum repo-native delivery control plane** and
+**not a Jira clone**. Markdown-only by ratified posture. Layered on
+top of, and subordinate to, the Feature 001 substrate. Live GitHub
+branch protection settings on the remote repository remain a
+separate privileged future decision and are not mutated by PR #12.
+`sprint-0/slice-d` is the next candidate envelope; Slice D
+implementation is not authorized by this state and requires its own
+Source-ratified privileged envelope.
 
 **Scope**: This document defines when a Creator Engine work item is
 **Ready** to enter a Hermes-authored Assignment Envelope. It is the
@@ -226,32 +230,41 @@ has since landed on the canonical branch; both B1 and B2 are now
 [`./KANBAN.md`](./KANBAN.md), so the parent `sprint-0/slice-b` is
 also `Done` on the delivery view.
 
-### d.2 `sprint-0/slice-c` — Ready as the next candidate envelope; implementation not yet authorized
+### d.2 `sprint-0/slice-c` — was Ready as next candidate envelope; now `Done`. The same pattern now applies to `sprint-0/slice-d`.
 
-- **b.7 dependencies**: `sprint-0/slice-b` (the parent slice) is
-  `Done` on the delivery view (B1 and B2 have both landed), so the
-  delivery-view dependency from Slice B to Slice C is cleared and
-  Slice C is promoted to `Ready` as the next candidate envelope.
+- **b.7 dependencies**: at the time Slice B landed,
+  `sprint-0/slice-b` (the parent slice) reached `Done` on the
+  delivery view, so the delivery-view dependency from Slice B to
+  Slice C was cleared and Slice C was promoted to `Ready` as the
+  next candidate envelope.
 - **b.6 anticipated mutation class**: `governance` (privileged), with
   some `docs` for policy text, and possible `security` / `deploy`
-  implications. Per §c, the privileged-class rule still applies:
-  being `Ready` as a delivery-view candidate is **not** authorization
-  to implement. Slice C implementation MUST NOT begin until Source
-  ratifies a dedicated Slice C privileged envelope under Feature 001
-  FR-008 / FR-016. CI passing on B1 or B2, agent review text, or any
-  non-designated "go ahead" surface MUST NOT substitute for that
-  ratification.
-- **b.5 prohibited surfaces**: include `.github/` for content B1 and
-  B2 are not authorized to touch. The future Slice C envelope will
-  be authorized to touch `.github/` (that is precisely its scope),
-  but only inside a Source-ratified privileged envelope.
+  implications. Per §c, the privileged-class rule applied: being
+  `Ready` as a delivery-view candidate was **not** authorization to
+  implement. Source subsequently ratified a dedicated Slice C
+  privileged envelope under Feature 001 FR-008 / FR-016 and Slice C
+  landed on the canonical branch as PR #12
+  (`1cfb955 ci: add baseline governance validation controls`),
+  introducing the file-based `.github/` baseline only.
+- **b.5 prohibited surfaces**: at consume time these included
+  `.github/` for content B1 and B2 were not authorized to touch. The
+  Slice C envelope was authorized to touch `.github/` (that was
+  precisely its scope) but only inside a Source-ratified privileged
+  envelope, and was not authorized to mutate live GitHub
+  repository settings — those remain a separate privileged future
+  decision regardless of Slice C landing.
 
-Slice C is therefore `Ready` as the next candidate envelope (the
-delivery-view dependency on Slice B is cleared), while
-authorization-to-implement remains contingent on Source ratifying
-a dedicated Slice C privileged envelope. This distinction —
-"Ready as next candidate envelope" vs. "authorized to implement"
-— is the heart of the privileged-class rule in §c.
+The distinction — "Ready as next candidate envelope" vs.
+"authorized to implement" — is the heart of the privileged-class
+rule in §c. With Slice C now `Done`, the same pattern applies to
+`sprint-0/slice-d`: the delivery-view dependency from Slice C to
+Slice D is cleared and Slice D is `Ready` as the next candidate
+envelope, while authorization-to-implement remains contingent on
+Source ratifying a dedicated Slice D privileged `identity`
+envelope. Slice C landing does not by itself authorize any
+extension of the landed baseline (CODEOWNERS, live branch
+protection settings, or Feature 003 instantiation); each remains a
+separately ratified envelope.
 
 ## e. Operating-procedure rules
 
@@ -292,7 +305,10 @@ requirements:
   Source ratification before implementation.
 - Provides a worked B2-vs-Slice-C example (§d) showing why
   `sprint-0/slice-b/b2` was `Ready` once B1 cleared (and has since
-  landed as `Done`) while `sprint-0/slice-c`, with Slice B now
-  complete on the delivery view, is `Ready` as the next candidate
-  envelope but is not authorized to implement until Source ratifies
-  a dedicated Slice C privileged envelope.
+  landed as `Done`) and why `sprint-0/slice-c`, once Slice B was
+  complete on the delivery view, was `Ready` as the next candidate
+  envelope until Source ratified a dedicated Slice C privileged
+  envelope; Slice C has since landed as PR #12 and the same pattern
+  now applies to `sprint-0/slice-d` (`Ready` as the next candidate
+  envelope; authorization-to-implement remains contingent on Source
+  ratifying a dedicated Slice D privileged `identity` envelope).

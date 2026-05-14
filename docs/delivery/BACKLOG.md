@@ -1,12 +1,18 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slice B complete on the delivery view. B1
-(markdown control-plane scaffold) and B2 (Definition of Ready,
-Definition of Done, dependency map, risk register) have both landed
-on the canonical branch. Markdown-only by ratified posture.
-Structured YAML sidecars deferred to B3. `sprint-0/slice-c` is the
-next candidate envelope; Slice C implementation is not authorized by
-this state and requires its own Source-ratified privileged envelope.
+**Status**: Sprint 0 Slices B and C are complete on the delivery
+view. B1 (markdown control-plane scaffold) and B2 (Definition of
+Ready, Definition of Done, dependency map, risk register) landed
+previously; Slice C has since landed on the canonical branch as
+PR #12 (`1cfb955 ci: add baseline governance validation controls`),
+introducing the file-based `.github/` baseline (validation workflow,
+PR template, branch protection policy file). Delivery-view backlog
+rows remain markdown-only; structured YAML sidecars deferred to B3.
+Live GitHub branch protection settings on the remote repository
+remain a separate privileged future decision and are not mutated by
+PR #12. `sprint-0/slice-d` is the next candidate envelope; Slice D
+implementation is not authorized by this state and requires its own
+Source-ratified privileged envelope.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -221,39 +227,49 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-c`
 - **parent**: `sprint-0`
-- **status**: `Ready`
+- **status**: `Done`
 - **scope**: `.github/workflows/` baseline validation workflow; PR
-  template; branch protection policy/checklist; review policy /
+  template; branch protection policy file; review policy /
   CODEOWNERS policy as applicable; CI evidence rule
-  (verifies-not-ratifies).
+  (verifies-not-ratifies). PR #12 landed the validation workflow,
+  PR template, and branch protection policy file; CODEOWNERS was
+  not included under the "as applicable" qualifier. Live GitHub
+  branch protection settings on the remote repository remain a
+  separate privileged future decision and were not mutated.
 - **acceptance gate**: Sprint 0 exit gates #4 (PR validation), #5
   (PR template and review policy), #6 (branch protection policy).
-- **dependencies / blockers**: `sprint-0/slice-b` is `Done`, so the
-  delivery-view dependency is cleared and Slice C is the next
-  candidate envelope. Slice C mutations cross privileged
-  `governance`/`security`/`deploy` boundaries and require a
-  per-batch Source-ratified privileged envelope before any
-  implementation begins; that ratification is what promotes Slice C
-  from `Ready` to `In Progress` and is not authorized by Slice B
-  reconciliation alone.
+- **dependencies / blockers**: `sprint-0/slice-b` is `Done` (the
+  delivery-view predecessor edge was cleared before consumption);
+  Slice C has since been Source-ratified as a privileged
+  `governance` envelope and merged on the canonical branch.
 - **anticipated mutation class**: `governance` (privileged); some
   `docs` for policy text.
 - **owner role**: `architect` (policy) / `implementer` (workflows)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `1cfb955 ci: add baseline governance validation controls (#12)`
+  on the canonical branch, landing `.github/workflows/validate.yml`,
+  `.github/pull_request_template.md`, and
+  `.github/BRANCH_PROTECTION_POLICY.md`.
 
 ### c.4 Slice D — Minimum review / QA / identity governance
 
 - **id**: `sprint-0/slice-d`
 - **parent**: `sprint-0`
-- **status**: `Blocked`
+- **status**: `Ready`
 - **scope**: Codex reviewer identity record (or equivalent); QA /
   review evidence template; review gate definition; rule that review
   evidence is not Source ratification.
 - **acceptance gate**: Sprint 0 exit gates #7 (governed roles) and
   #10 (QA / review evidence format).
-- **dependencies / blockers**: `sprint-0/slice-c` for review-policy
-  surfaces; Slice D mutations include privileged `identity` work.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done`, so the
+  delivery-view dependency is cleared and Slice D is the next
+  candidate envelope. Slice D mutations cross privileged `identity`
+  boundaries and require a per-batch Source-ratified privileged
+  envelope before any implementation begins; that ratification is
+  what promotes Slice D from `Ready` to `In Progress` and is not
+  authorized by Slice C landing alone.
 - **anticipated mutation class**: `identity` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
@@ -273,8 +289,9 @@ Owning source of truth:
 - **acceptance gate**: Sprint 0 exit gates #8 (Assignment Envelope
   template + dry-run) and #9 (worktree/branch naming +
   one-driver-per-worktree).
-- **dependencies / blockers**: `sprint-0/slice-c` and `sprint-0/slice-d`
-  to sequence the envelope's CI / review evidence requirements.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done`;
+  `sprint-0/slice-d` remains the immediate predecessor edge for
+  sequencing the envelope's review evidence requirements.
 - **anticipated mutation class**: `governance` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
@@ -378,7 +395,14 @@ the source of truth.
 - **acceptance gate**: Feature 003 spec ratified and implementation
   acceptance criteria met; Sprint 0 Slice C provides the policy
   outline that Feature 003 instantiates.
-- **dependencies / blockers**: `sprint-0/slice-c`.
+- **dependencies / blockers**: `sprint-0/slice-c` is `Done` (PR #12
+  landed the file-based `.github/` baseline), so the predecessor
+  edge is cleared. Feature 003 nonetheless remains `Deferred`
+  pending its own Source-ratified privileged envelope for any live
+  GitHub branch protection settings on the remote repository,
+  CODEOWNERS, or further extension of the landed `.github/`
+  baseline; Slice C landing does not by itself authorize Feature
+  003 implementation.
 - **anticipated mutation class**: `governance` (privileged)
 - **owner role**: `architect` / `implementer`
 - **ratifier role**: `source`

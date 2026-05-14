@@ -1,15 +1,19 @@
 # Creator Engine Dependency Map
 
-**Status**: Sprint 0 Slice B complete on the delivery view. B1
-(markdown control-plane scaffold) and B2 (Definition of Ready,
-Definition of Done, dependency map, risk register) have both landed
-on the canonical branch. Part of the **minimum repo-native delivery
-control plane** and **not a Jira clone**. Markdown-only by ratified
-posture. Layered on top of, and subordinate to, the Feature 001
-substrate and the Sprint 0 execution sequence. `sprint-0/slice-c`
-is the next candidate envelope; Slice C implementation is not
-authorized by this state and requires its own Source-ratified
-privileged envelope.
+**Status**: Sprint 0 Slices B and C are complete on the delivery
+view. B1 (markdown control-plane scaffold) and B2 (Definition of
+Ready, Definition of Done, dependency map, risk register) landed
+previously; Slice C has since landed on the canonical branch as
+PR #12 (`1cfb955 ci: add baseline governance validation controls`).
+Part of the **minimum repo-native delivery control plane** and
+**not a Jira clone**. Markdown-only by ratified posture. Layered on
+top of, and subordinate to, the Feature 001 substrate and the
+Sprint 0 execution sequence. Live GitHub branch protection settings
+on the remote repository remain a separate privileged future
+decision and are not mutated by PR #12. `sprint-0/slice-d` is the
+next candidate envelope; Slice D implementation is not authorized
+by this state and requires its own Source-ratified privileged
+envelope.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -63,13 +67,19 @@ as durable evidence). Slice B is `Done` on the delivery view because
 B1 and B2 have both landed on the canonical branch (see §c.2.1 and
 §c.2.2 durable evidence on
 [`./BACKLOG.md`](./BACKLOG.md)); the parent `sprint-0/slice-b` row
-is decomposed in §c. The B → C edge is therefore cleared for
-delivery-view readiness, and `sprint-0/slice-c` is the next
-candidate envelope (`Ready`); Slice C implementation is still
-separately gated by a Source-ratified privileged envelope per §h.
-Slices D through F remain `Blocked` until their predecessor in the
-chain reaches `Ratified` or `Done` AND their own privileged-class
-envelope is Source-ratified.
+is decomposed in §c. The B → C edge cleared first, Slice C was
+subsequently consumed under a Source-ratified privileged envelope,
+and Slice C has now landed on the canonical branch as PR #12
+([`./BACKLOG.md`](./BACKLOG.md) §c.3). The C → D edge is therefore
+cleared for delivery-view readiness, and `sprint-0/slice-d` is the
+next candidate envelope (`Ready`); Slice D implementation is still
+separately gated by a Source-ratified privileged `identity`
+envelope per §h. Slices E and F remain `Blocked` until their
+predecessor in the chain reaches `Ratified` or `Done` AND their own
+privileged-class envelope is Source-ratified. The PR #12 baseline
+is file-based only; live GitHub repository settings on the remote
+remain a separate privileged future decision and are not implied by
+the C → D edge clearing.
 
 ## c. Slice B internal dependencies
 
@@ -144,16 +154,24 @@ completion.
 
 - **Edge**: `sprint-0/slice-c` reaches `Ratified` or `Done` →
   `feature-003` becomes eligible for shaping.
+- **Edge state**: **cleared**. Slice C is `Done`
+  ([`./BACKLOG.md`](./BACKLOG.md) §c.3); Feature 003 is eligible
+  for shaping but remains `Deferred` until separately Source-
+  ratified.
 - **Scope link**: Slice C authors the thin GitHub / CI / PR governance
   policy outline ([`./BACKLOG.md`](./BACKLOG.md) §c.3); Feature 003
   instantiates that policy as `.github/workflows/`, the PR template,
   branch protection (and live GitHub settings if Source ratifies
   that mutation), review policy / CODEOWNERS, and the CI
   verifies-not-ratifies rule
-  ([`../product/ROADMAP.md`](../product/ROADMAP.md) §c).
+  ([`../product/ROADMAP.md`](../product/ROADMAP.md) §c). PR #12
+  landed the Slice C baseline (validation workflow, PR template,
+  branch protection policy file) only; the live GitHub setting and
+  any extension of the baseline remain Feature-003-or-later work
+  under a separately ratified privileged envelope.
 - **Privileged-class note**: Feature 003 mutations are privileged
   (`governance` / `security` / `deploy`) per Feature 001 FR-008;
-  ratification is required per-batch per §e.
+  ratification is required per-batch per §h.
 
 ### d.2 Feature 004 depends on `sprint-0/slice-d`
 
@@ -262,11 +280,11 @@ post-merge update procedure in
 | `sprint-0/slice-b/b1` | `sprint-0/slice-b/b2` | `Done` | Cleared; B1 landed on the canonical branch. |
 | `sprint-0/slice-b/b2` | `sprint-0/slice-b/b3` | `Done` | B1 → B2 → B3 predecessor rule cleared by B2 landing; successor remains `Deferred` pending a Source-ratified sidecar schema. |
 | `sprint-0/slice-b/b2` | `sprint-0/slice-b/b4` | `Done` | B1 → B2 → B4 predecessor rule cleared by B2 landing; successor remains `Deferred` pending a Source-ratified adapter design. |
-| `sprint-0/slice-b` | `sprint-0/slice-c` | `Done` | Cleared; Slice B is complete on the delivery view. Successor `Ready` as the next candidate envelope. Slice C implementation still requires a Source-ratified privileged envelope per §h. |
-| `sprint-0/slice-c` | `sprint-0/slice-d` | `Blocked` | Successor `Blocked`. Privileged `identity` envelope still requires §e. |
-| `sprint-0/slice-d` | `sprint-0/slice-e` | `Blocked` | Successor `Blocked`. Privileged `governance` envelope still requires §e. |
-| `sprint-0/slice-e` | `sprint-0/slice-f` | `Blocked` | Successor `Blocked`. Privileged `deploy` policy authoring still requires §e. |
-| `sprint-0/slice-c` | `feature-003` | `Blocked` | Successor `Deferred`. Privileged envelope still requires §e. |
+| `sprint-0/slice-b` | `sprint-0/slice-c` | `Done` | Cleared; Slice B is complete on the delivery view. Successor `Done` as of PR #12 (`1cfb955`). |
+| `sprint-0/slice-c` | `sprint-0/slice-d` | `Done` | Cleared; Slice C landed on the canonical branch. Successor `Ready` as the next candidate envelope. Slice D implementation still requires a Source-ratified privileged `identity` envelope per §h. |
+| `sprint-0/slice-d` | `sprint-0/slice-e` | `Ready` | Successor `Blocked`. Privileged `governance` envelope still requires §h. |
+| `sprint-0/slice-e` | `sprint-0/slice-f` | `Blocked` | Successor `Blocked`. Privileged `deploy` policy authoring still requires §h. |
+| `sprint-0/slice-c` | `feature-003` | `Done` | Predecessor `Done`; successor remains `Deferred`. Live GitHub branch protection settings and any extension of the landed `.github/` baseline (CODEOWNERS, etc.) still require a separately ratified privileged envelope per §h. |
 | `sprint-0/slice-d` | `feature-004` | `Blocked` | Successor `Deferred`. Privileged `identity` envelope still requires §e. |
 | `sprint-0/slice-e` | `feature-005` | `Blocked` | Successor `Deferred`. Privileged `governance` envelope still requires §e. |
 | `sprint-0/slice-f` | `feature-006` | `Blocked` | Successor `Deferred`. Privileged `deploy` envelope still requires §e. |
