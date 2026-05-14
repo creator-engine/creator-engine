@@ -1,28 +1,33 @@
 # Creator Engine Backlog
 
-**Status**: Sprint 0 Slices B, C, and D are complete on the
+**Status**: Sprint 0 Slices B, C, D, and E are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously; Slice C subsequently landed on the
 canonical branch as PR #12 (`1cfb955 ci: add baseline governance
 validation controls`), introducing the file-based `.github/`
 baseline (validation workflow, PR template, branch protection
-policy file); and Slice D has since landed on the canonical branch
+policy file); Slice D has since landed on the canonical branch
 as commit `6058661 docs: define reviewer evidence gate for Slice D`,
 introducing the three Slice D delivery docs
 (`docs/delivery/REVIEW_GATE.md`,
 `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
 `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`) with minimal
+coherence updates to the existing delivery docs; and Slice E has
+now landed on the canonical branch as PR #14 / commit
+`3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`,
+introducing the five Slice E delivery docs
+(`docs/delivery/ASSIGNMENT_ENVELOPE_TEMPLATE.md`,
+`docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md`,
+`docs/delivery/ENVELOPE_CONSUMPTION_CHECKLIST.md`,
+`docs/delivery/SCOPE_AUDIT_CHECKLIST.md`,
+`docs/delivery/ASSIGNMENT_ENVELOPE_DRY_RUN.md`) with minimal
 coherence updates to the existing delivery docs. Delivery-view
 backlog rows remain markdown-only; structured YAML sidecars
 deferred to B3. Live GitHub branch protection settings on the
 remote repository remain a separate privileged future decision and
-are not mutated by PR #12. The Slice E authoring envelope has since been Source-ratified as
-a bounded docs-only `governance` / `docs` batch; the Slice E
-authoring batch is in flight on the local worktree branch
-`docs/sprint0-slice-e-assignment-runtime-protocol` and has not yet
-merged. The canonical-view Slice E row in §c.5 remains `Blocked`
-until the batch lands.
+are not mutated by PR #12 or PR #14. The canonical-view Slice E
+row in §c.5 is now `Done` with durable evidence PR #14 / `3cb0266`.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -303,32 +308,33 @@ Owning source of truth:
 
 - **id**: `sprint-0/slice-e`
 - **parent**: `sprint-0`
-- **status**: `Blocked`
+- **status**: `Done`
 - **scope**: Assignment Envelope template; worktree/branch naming
   conventions; one-driver-per-worktree rule documentation; envelope
   consumption and scope-audit checklists; dry-run evidence for at
-  least one envelope. This slice will later define the reusable
-  envelope template/runtime protocol; the B1 envelope-equivalent used
-  for this batch is a temporary Source-ratified placeholder.
+  least one envelope.
 - **acceptance gate**: Sprint 0 exit gates #8 (Assignment Envelope
   template + dry-run) and #9 (worktree/branch naming +
   one-driver-per-worktree).
 - **dependencies / blockers**: `sprint-0/slice-c` is `Done` and
   `sprint-0/slice-d` is `Done`; the delivery-view predecessor edges
-  have cleared. The Slice E authoring envelope has since been
+  cleared and the Slice E authoring envelope was subsequently
   Source-ratified as a bounded docs-only `governance` / `docs`
-  batch; the Slice E authoring batch is in flight on the local
-  worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`
-  (see [`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md))
-  and has not yet merged. The canonical-view row remains `Blocked`
-  until the batch lands; the consumer's authorship halts at the
-  named stop line per
-  [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md)
-  §j.
+  batch. The Slice E authoring batch has now landed on the
+  canonical branch.
 - **anticipated mutation class**: `governance` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol (#14)`
+  on the canonical branch, landing
+  [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md),
+  [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md),
+  [`./ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md),
+  [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md), and
+  [`./ASSIGNMENT_ENVELOPE_DRY_RUN.md`](./ASSIGNMENT_ENVELOPE_DRY_RUN.md),
+  with minimal coherence updates to existing delivery docs.
 
 ### c.6 Slice F — Release / deploy governance policy
 
@@ -342,9 +348,14 @@ Owning source of truth:
 - **acceptance gate**: Sprint 0 exit gate #11 (release / merge /
   deploy governance documented) and confirmation that gate #12
   (Feature 003+ sequenced) is satisfied.
-- **dependencies / blockers**: `sprint-0/slice-e`. No deploy
-  automation is implemented under Sprint 0; this slice authors policy
-  only.
+- **dependencies / blockers**: `sprint-0/slice-e` is `Done`; the
+  delivery-view predecessor edge from Slice E has cleared (durable
+  evidence PR #14 / `3cb0266`). Slice F nonetheless remains
+  `Blocked` pending a Source-ratified privileged `deploy` /
+  `governance` policy-authoring envelope; clearing the predecessor
+  edge is not authorization to consume per
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h. No deploy automation
+  is implemented under Sprint 0; this slice authors policy only.
 - **anticipated mutation class**: `deploy` (privileged) / `docs`
 - **owner role**: `architect`
 - **ratifier role**: `source`

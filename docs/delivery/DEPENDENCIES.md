@@ -1,26 +1,29 @@
 # Creator Engine Dependency Map
 
-**Status**: Sprint 0 Slices B, C, and D are complete on the
+**Status**: Sprint 0 Slices B, C, D, and E are complete on the
 delivery view. B1 (markdown control-plane scaffold) and B2
 (Definition of Ready, Definition of Done, dependency map, risk
 register) landed previously; Slice C subsequently landed on the
 canonical branch as PR #12 (`1cfb955 ci: add baseline governance
-validation controls`); and Slice D has since landed on the
+validation controls`); Slice D has since landed on the
 canonical branch as commit `6058661 docs: define reviewer evidence
-gate for Slice D`. Part of the **minimum repo-native delivery
-control plane** and **not a Jira clone**. Markdown-only by ratified
-posture. Layered on top of, and subordinate to, the Feature 001
-substrate and the Sprint 0 execution sequence. Live GitHub branch
-protection settings on the remote repository remain a separate
-privileged future decision and are not mutated by PR #12. The
-C → D edge is cleared and `sprint-0/slice-d` is `Done` on the
-delivery view. The Slice E authoring envelope has since been Source-ratified as
-a bounded docs-only `governance` / `docs` batch; the Slice E
-authoring batch is in flight on the local worktree branch
-`docs/sprint0-slice-e-assignment-runtime-protocol` and has not yet
-merged. The D → E delivery-view predecessor edge is cleared; the
-canonical-view Slice E row in [`./BACKLOG.md`](./BACKLOG.md) §c.5
-remains `Blocked` until the batch lands per §h.
+gate for Slice D`; and Slice E has now landed on the canonical
+branch as PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E
+assignment runtime protocol`. Part of the **minimum repo-native
+delivery control plane** and **not a Jira clone**. Markdown-only by
+ratified posture. Layered on top of, and subordinate to, the
+Feature 001 substrate and the Sprint 0 execution sequence. Live
+GitHub branch protection settings on the remote repository remain
+a separate privileged future decision and are not mutated by PR #12
+or PR #14. The C → D edge is cleared and `sprint-0/slice-d` is
+`Done` on the delivery view; the D → E edge is cleared and
+`sprint-0/slice-e` is now `Done` on the delivery view with durable
+evidence PR #14 / `3cb0266`. The E → F delivery-view predecessor
+edge is therefore cleared; `sprint-0/slice-f` in
+[`./BACKLOG.md`](./BACKLOG.md) §c.6 remains `Blocked` because Slice
+F authoring is itself privileged (`deploy` / `governance` policy)
+and is not authorized until Source ratifies a future privileged
+envelope per §h — not because Slice E remains incomplete.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -84,14 +87,25 @@ commit `6058661 docs: define reviewer evidence gate for Slice D`
 delivery docs (`docs/delivery/REVIEW_GATE.md`,
 `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`,
 `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`) plus minimal
-coherence updates. The D → E delivery-view predecessor edge is
-therefore cleared. Slices E and F remain `Blocked` until their own
-privileged-class envelopes are Source-ratified; clearing the
-predecessor edge does not, by itself, authorize consumption per §h.
-The PR #12 baseline is file-based only; live GitHub repository
+coherence updates. The D → E edge cleared next, and
+`sprint-0/slice-e` has now landed on the canonical branch as PR #14
+/ commit `3cb0266 docs: add Sprint 0 Slice E assignment runtime
+protocol` ([`./BACKLOG.md`](./BACKLOG.md) §c.5), landing the five
+Slice E delivery docs
+(`docs/delivery/ASSIGNMENT_ENVELOPE_TEMPLATE.md`,
+`docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md`,
+`docs/delivery/ENVELOPE_CONSUMPTION_CHECKLIST.md`,
+`docs/delivery/SCOPE_AUDIT_CHECKLIST.md`,
+`docs/delivery/ASSIGNMENT_ENVELOPE_DRY_RUN.md`) plus minimal
+coherence updates. The E → F delivery-view predecessor edge is
+therefore cleared. Slice F remains `Blocked` until its own
+privileged-class envelope is Source-ratified; clearing the
+predecessor edge does not, by itself, authorize consumption per
+§h. The PR #12 baseline is file-based only; live GitHub repository
 settings on the remote remain a separate privileged future decision
 and are not implied by the C → D edge clearing, by the Slice D
-landing, or by any D → E edge clearing.
+landing, by the D → E edge clearing, by the Slice E landing, or by
+the E → F edge clearing.
 
 ## c. Slice B internal dependencies
 
@@ -294,11 +308,11 @@ post-merge update procedure in
 | `sprint-0/slice-b/b2` | `sprint-0/slice-b/b4` | `Done` | B1 → B2 → B4 predecessor rule cleared by B2 landing; successor remains `Deferred` pending a Source-ratified adapter design. |
 | `sprint-0/slice-b` | `sprint-0/slice-c` | `Done` | Cleared; Slice B is complete on the delivery view. Successor `Done` as of PR #12 (`1cfb955`). |
 | `sprint-0/slice-c` | `sprint-0/slice-d` | `Done` | Cleared; both predecessor and successor have landed on the canonical branch (Slice D durable evidence: commit `6058661 docs: define reviewer evidence gate for Slice D`). |
-| `sprint-0/slice-d` | `sprint-0/slice-e` | `Done` | Predecessor edge cleared; the Slice E authoring envelope has been Source-ratified as a bounded docs-only `governance` / `docs` batch and the authoring batch is in flight on the local worktree branch `docs/sprint0-slice-e-assignment-runtime-protocol`; the canonical-view successor row remains `Blocked` until the batch lands per §h. |
-| `sprint-0/slice-e` | `sprint-0/slice-f` | `Blocked` | Successor `Blocked`. Privileged `deploy` policy authoring still requires §h. |
+| `sprint-0/slice-d` | `sprint-0/slice-e` | `Done` | Cleared; both predecessor and successor have landed on the canonical branch (Slice E durable evidence: PR #14 / commit `3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol`). |
+| `sprint-0/slice-e` | `sprint-0/slice-f` | `Done` | Predecessor edge cleared (PR #14 / `3cb0266`); successor `Blocked`. Slice F authoring is privileged (`deploy` / `governance` policy) and still requires a Source-ratified envelope per §h; Slice E completion does not, by itself, authorize Slice F consumption. |
 | `sprint-0/slice-c` | `feature-003` | `Done` | Predecessor `Done`; successor remains `Deferred`. Live GitHub branch protection settings and any extension of the landed `.github/` baseline (CODEOWNERS, etc.) still require a separately ratified privileged envelope per §h. |
 | `sprint-0/slice-d` | `feature-004` | `Done` | Predecessor `Done`; successor remains `Deferred`. Privileged `identity` envelope for Feature 004 still requires §e. |
-| `sprint-0/slice-e` | `feature-005` | `Blocked` | Successor `Deferred`. Privileged `governance` envelope still requires §e. |
+| `sprint-0/slice-e` | `feature-005` | `Done` | Predecessor `Done`; successor remains `Deferred`. Privileged `governance` envelope still requires §e. |
 | `sprint-0/slice-f` | `feature-006` | `Blocked` | Successor `Deferred`. Privileged `deploy` envelope still requires §e. |
 | Sprint 0 exit (gates 1–12) + Features 003–006 | `v1.0` | mixed (`Done` / `Deferred` / `Blocked`) | Successor `Deferred` until every dependency in §e is `Done`. |
 | Sprint 0 exit + Source-ratified future spec | `us3/a1` | (not yet specced) | Successor `Blocked` / `Deferred` per §f. |
