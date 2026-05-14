@@ -149,6 +149,34 @@ This boundary aligns with
 | [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
 | [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
+### Slice F delivery docs (authored draft)
+
+These five documents are authored under a Source-ratified bounded
+Sprint 0 Slice F docs-only `governance` / `docs` envelope
+(release / merge / deploy governance policy authoring). They
+define the policy that any future release, merge, deploy, or
+rollback mutation will obey; they do not, and never become, a
+merge, deploy, or rollback mechanic. Execution-side concerns
+(release agent identity, deploy attestations, GitHub
+environments, deploy gates, rollback automation) remain Feature
+006 surface under a separately ratified privileged envelope. This
+authoring batch documents the five files under the Source-ratified
+envelope; it does not itself declare Slice F `Done`. The Slice F
+row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 remains `Blocked` on the
+delivery view, and canonical delivery-state promotion to `Done`
+remains gated on Source validation and post-merge durable
+canonical-branch evidence. Each Slice F document carries an explicit
+non-ratification statement and cites upstream sources of truth
+including Feature 001 FR-007 / FR-008 / FR-016.
+
+| File | Role |
+|---|---|
+| [`RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md) | Index / front door binding the four content docs; names the boundary between Slice F policy authoring and Feature 006 execution / identities; restates the no-deployment-targets fact and the explicit non-mutation of `.github/`, `CODEOWNERS`, environments, branch protection, and deploy automation. |
+| [`RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md) | What promotes an in-progress batch to release-candidate status (validator pass, review-gate state per [`./REVIEW_GATE.md`](./REVIEW_GATE.md), scope audit per [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md), Source ratification record per Feature 001 FR-016); explicit "this checklist authors policy, not deploy automation" sentence. |
+| [`MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md) | Pre-merge gates complementing the Definition of Done and the review gate; restates Source-ratification authority and the Definition-of-Ready privileged-class rule; PR / merge evidence and post-merge report expectations; explicit "CI green is not Source ratification" and Feature 001 FR-007 author/approver-separation statements. |
+| [`DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md) | Names `deploy` as a Feature 001 FR-008 privileged mutation class with Source-only ratifier; explicit deploy-mutation ratification rule ("no agent may deploy without Source-ratified authority"); explicit statement that no deployment targets / environments currently exist; defers execution-side concerns to Feature 006; explicit non-ratification statement for any CI / review verdict touching deploy. |
+| [`ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md) | Rollback decision criteria (who decides, on what evidence); post-release evidence layered onto the ten post-merge fields in [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b without amending them; defect-discovered-post-merge interaction with the Definition-of-Done lifecycle; automated rollback deferred to Feature 006. |
+
 ### Slice E delivery docs (landed)
 
 These five documents landed on the canonical branch under PR #14 /
