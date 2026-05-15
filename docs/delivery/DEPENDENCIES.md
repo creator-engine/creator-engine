@@ -26,7 +26,13 @@ evidence PR #16 / `cb7f94a`. `sprint-0/slice-f` in
 [`./BACKLOG.md`](./BACKLOG.md) §c.6 is `Done` on the delivery view.
 The downstream F → Feature 006 predecessor edge is therefore
 cleared; Feature 006 remains `Deferred` pending its own
-Source-ratified privileged envelope per §h.
+Source-ratified privileged envelope per §h. Post-Sprint-0 substrate
+has additionally landed on the canonical branch:
+`post-sprint-0/oss-readiness` (PR #20 / `35bf85f` and PR #21 /
+`5b762f9`) and `post-sprint-0/workflow-hardening` (PR #22 /
+`d892cd3` and PR #23 / `3dc45a1`). These post-Sprint-0 substrates
+are separate from the Sprint 0 A → B → C → D → E → F dependency
+chain and do not alter the Sprint 0 delivery-edge records in §g.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).

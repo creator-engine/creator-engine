@@ -45,6 +45,20 @@ deploy automation, GitHub environments, branch protection settings,
 CODEOWNERS, Feature 006 deploy execution, and external trackers
 remain separate privileged future decisions and are not authorized
 by Slice F landing.
+Post-Sprint-0 substrate has since landed on the canonical branch:
+PR #20 (`35bf85f docs: add open-source readiness materials (#20)`)
+added open-source readiness materials; PR #21 (`5b762f9 fix:
+remediate public launch readiness blockers (#21)`) remediated
+public-launch readiness blockers; PR #22 (`d892cd3 feat: add
+workflow hardening controls (#22)`) added the workflow-hardening
+protocol set (operations protocol docs under `docs/operations/`,
+schemas, templates, and validator checks covering R-011 and R-012);
+and PR #23 (`3dc45a1 fix: harden workflow validator follow-ups
+(#23)`) hardened the workflow validator with CI validator
+improvements and follow-up fixes. These four PRs are
+post-Sprint-0 substrate and are not Sprint 0 Slice A-F items; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9. The delivery view
+now reflects canonical main at commit `3dc45a1`.
 
 ## a. Purpose
 
@@ -102,6 +116,7 @@ repository. It does not redefine them.
 | [`specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) | Sprint 0 execution sequence, exit gates, and post-merge next-task protocol fields. |
 | Spec Kit `tasks.md` and Creator Engine sidecars (`spec.creator-engine.yml`, `plan.creator-engine.yml`, `tasks.creator-engine.yml`) | Canonical work-item records for governed batches. |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only; never substitutes for repo-visible artifacts. |
+| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3` and PR #23 / `3dc45a1`. Upstream evidence for R-011 and R-012 mitigations in [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §a. |
 
 Where this control plane and any upstream source of truth disagree,
 the upstream source of truth wins until Source ratifies a correction.

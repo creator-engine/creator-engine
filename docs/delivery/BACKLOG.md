@@ -37,7 +37,14 @@ deferred to B3. Live GitHub branch protection settings on the
 remote repository remain a separate privileged future decision and
 are not mutated by PR #12, PR #14, or PR #16. The canonical-view
 Slice F row in §c.6 is now `Done` with durable evidence PR #16 /
-`cb7f94a`.
+`cb7f94a`. Post-Sprint-0 substrate has since landed: PR #20
+(`35bf85f docs: add open-source readiness materials (#20)`) and
+PR #21 (`5b762f9 fix: remediate public launch readiness blockers
+(#21)`) added open-source and public-launch readiness substrate;
+PR #22 (`d892cd3 feat: add workflow hardening controls (#22)`) and
+PR #23 (`3dc45a1 fix: harden workflow validator follow-ups (#23)`)
+added and hardened the workflow-hardening protocol substrate. See
+§e.8 and §e.9.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -411,7 +418,9 @@ Owning source of truth:
 These rows summarize the Feature 001–006 and v1.0 scope from
 [`../product/ROADMAP.md`](../product/ROADMAP.md) without duplicating
 the roadmap body. They are intentionally terse; the roadmap remains
-the source of truth.
+the source of truth. Post-Sprint-0 substrate items that have landed
+on the canonical branch but are not Feature 001–006 scope are
+recorded as §e.8 and §e.9.
 
 ### e.1 Feature 001 — v0.1 governance substrate
 
@@ -547,6 +556,50 @@ the source of truth.
 - **owner role**: `source` (integration ratifier) / `architect`
 - **ratifier role**: `source`
 - **external tracker reference**: —
+
+### e.8 Post-Sprint-0 substrate — open-source / public-launch readiness
+
+- **id**: `post-sprint-0/oss-readiness`
+- **parent**: —
+- **status**: `Done`
+- **scope**: Open-source readiness materials (PR #20) and
+  public-launch readiness blocker remediation (PR #21).
+  Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item.
+- **acceptance gate**: Merged on the canonical branch with durable
+  commit evidence.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `docs`
+- **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commits `35bf85f docs: add
+  open-source readiness materials (#20)` and `5b762f9 fix:
+  remediate public launch readiness blockers (#21)` on the
+  canonical branch.
+
+### e.9 Post-Sprint-0 substrate — workflow-hardening protocol
+
+- **id**: `post-sprint-0/workflow-hardening`
+- **parent**: —
+- **status**: `Done`
+- **scope**: Workflow-hardening controls: operations protocol docs
+  (`docs/operations/CONTROLLER_BOUNDARY_POLICY.md`,
+  `NO_COPY_PASTE_PATTERN.md`, `PATH_MANIFEST_FIDELITY_PROTOCOL.md`,
+  `TRANSCRIPT_ARCHIVE_PROTOCOL.md`), schemas, templates, validator
+  checks, and CI validator hardening. Provides durable landed
+  evidence for R-011 and R-012 mitigations in
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md). Post-Sprint-0
+  substrate; not a Sprint 0 Slice A-F item.
+- **acceptance gate**: Merged on the canonical branch with durable
+  commit evidence.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `docs` / `code` (validator)
+- **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commits `d892cd3 feat: add workflow
+  hardening controls (#22)` and `3dc45a1 fix: harden workflow
+  validator follow-ups (#23)` on the canonical branch.
 
 ## f. Maintenance rules
 

@@ -1,9 +1,10 @@
 # Sprint 0 Risk Register
 
-**Status**: Sprint 0 Slice B2. Part of the **minimum repo-native
-delivery control plane** and **not a Jira clone**. Markdown-only by
-ratified posture. Layered on top of, and subordinate to, the Feature
-001 substrate.
+**Status**: Sprint 0 Slices A–F complete on the delivery view;
+post-Sprint-0 substrate (PRs #20–#23) has also landed on the
+canonical branch. Part of the **minimum repo-native delivery control
+plane** and **not a Jira clone**. Markdown-only by ratified posture.
+Layered on top of, and subordinate to, the Feature 001 substrate.
 
 **Scope**: This register names the standing risks to Sprint 0
 execution and the immediate post-Sprint-0 follow-on work. It is a
@@ -27,6 +28,7 @@ of the contracts and policies named under each mitigation and does
 | Feature 002 spec at `specs/002-canonical-docs-and-operating-model/spec.md` | Operating-model invariants, including verifies-not-ratifies (FR-013) and the conflict taxonomy (FR-017/FR-018). |
 | [`../operations/session-continuity-protocol.md`](../operations/session-continuity-protocol.md) | Instance-local-vs-upstream split; basis for R-006. |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only. Tracker entries are advisory; basis for R-002 and R-006. |
+| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3` and PR #23 / `3dc45a1`. Upstream source for R-011 (§c.11) and R-012 (§c.12) mitigations. |
 
 A fresh clone is sufficient to evaluate this register. No external
 tracker credential or network state is required.
@@ -485,8 +487,11 @@ operator changes.
 - **owner role**: `source` (boundary authority); `controller`
   (Nefarious / Hermes in coordinating seats); `implementer`
   (refuses to ratify content they did not author).
-- **current status**: Open; mitigation active under the
-  workflow-hardening protocol set.
+- **current status**: Open; mitigation active. Workflow-hardening
+  protocol docs provide durable landed evidence: PR #22 /
+  `d892cd3` (operations protocol docs, schemas, templates,
+  validator checks) and PR #23 / `3dc45a1` (CI validator
+  hardening, follow-up fixes).
 
 ### c.12 R-012 — Path-manifest / Markdown corruption (`__init__.py` regression class)
 
@@ -539,8 +544,11 @@ operator changes.
 - **owner role**: `source` (boundary authority); `architect` /
   `controller` (envelope and handoff authors); `implementer`
   (preflight recomputation); `verifier` (validator).
-- **current status**: Open; mitigation active under the
-  workflow-hardening protocol set.
+- **current status**: Open; mitigation active. Workflow-hardening
+  protocol docs provide durable landed evidence: PR #22 /
+  `d892cd3` (operations protocol docs, schemas, templates,
+  validator checks including `path_manifest_fidelity` check) and
+  PR #23 / `3dc45a1` (CI validator hardening, follow-up fixes).
 
 ## d. Maintenance rules
 
@@ -587,8 +595,9 @@ The register is extended by the workflow-hardening protocol set
 ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md),
 [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md),
 [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md),
-and [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md))
-to include:
+and [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)),
+which has landed on the canonical branch as durable evidence under
+PR #22 / `d892cd3` and PR #23 / `3dc45a1`, to include:
 
 - R-011 (controller-seat boundary breach) in §c.11.
 - R-012 (path-manifest / Markdown corruption, the `__init__.py`
