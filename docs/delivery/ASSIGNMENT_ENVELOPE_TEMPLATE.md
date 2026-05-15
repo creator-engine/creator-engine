@@ -121,6 +121,26 @@ mutation outside the allowed set is necessary, the consumer halts
 and escalates per §c.11 stop condition rather than broadening scope
 implicitly.
 
+Per
+[`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md)
+§c, the envelope MUST declare the manifest's normalized count and
+SHA256 alongside the fenced manifest block. The required shape is:
+
+| Field | Semantics |
+|---|---|
+| `allowed_paths_count` (or `*_PATHS_COUNT=` declaration) | The number of unique, normalized path lines across `allowed_create_paths` and `allowed_update_paths`. The shape `<NAME>_PATHS_COUNT=<integer>` immediately precedes the fenced manifest. |
+| `allowed_paths_sha256` (or `*_PATHS_SHA256=` declaration) | The SHA256 of the normalized (sorted, deduplicated, LF-joined, one trailing newline, UTF-8) manifest. The shape `<NAME>_PATHS_SHA256=<64 lowercase hex>` immediately precedes the fenced manifest. |
+| fenced manifest block | A ```` ```text ```` block immediately following the declarations whose body is one repo-relative path per non-empty line, sorted, deduplicated. |
+
+The consumer recomputes the count and SHA256 from the fenced block at
+preflight time and halts on any mismatch (count, hash, or the
+`path_manifest_init_py_corruption` regression class). The
+verifier-side `path_manifest_fidelity` check is the validator
+implementation of this rule. The pointer-only relay rule in
+[`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
+applies to the envelope as a whole, so the fenced manifest never
+travels through a paste pipeline.
+
 ### c.6 Explicitly prohibited surfaces and forbidden operations (REQUIRED)
 
 Restate, by name, the surfaces and operations the envelope forbids,

@@ -24,6 +24,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("check-examples", help="validate bundled well-formed/malformed examples")
     sub.add_parser("scan-no-limitless", help="run only the no-LIMITLESS generic-path scan")
+
+    scan_handoffs = sub.add_parser(
+        "scan-handoffs",
+        help="run only the handoff_schema check against a path (handoff/recommended-prompt docs)",
+    )
+    scan_handoffs.add_argument("path", nargs="?", default=".", help="path to scan")
+
+    scan_manifest = sub.add_parser(
+        "scan-path-manifest",
+        help="run only the path_manifest_fidelity check against a path",
+    )
+    scan_manifest.add_argument("path", nargs="?", default=".", help="path to scan")
+
+    verify_attribution = sub.add_parser(
+        "verify-attribution",
+        help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
+    )
+    verify_attribution.add_argument("--base", required=True, help="base commit (e.g., origin/main)")
+    verify_attribution.add_argument("paths", nargs="*", default=["."], help="paths to scope")
     return parser
 
 
@@ -67,6 +86,9 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/identity-record.missing-fields.yml"), False, "FR-001"),
         ("malformed", Path("examples/malformed/spec.creator-engine.missing-acceptance.yml"), False, "FR-013"),
         ("malformed", Path("examples/malformed/duplicate-spec-id"), False, "FR-027a"),
+        ("malformed", Path("examples/malformed/handoffs/init-py-corruption.md"), False, "path_manifest_init_py_corruption"),
+        ("malformed", Path("examples/malformed/handoffs/hash-mismatch.md"), False, "path_manifest_hash_mismatch"),
+        ("malformed", Path("examples/malformed/handoffs/count-mismatch.md"), False, "path_manifest_count_mismatch"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -123,6 +145,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-no-limitless":
         from .checks.no_limitless_strings import run as _run_no_limitless
         result = _run_no_limitless([Path(".")])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-handoffs":
+        from .checks.handoff_schema import run as _run_handoff_schema
+        result = _run_handoff_schema([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-path-manifest":
+        from .checks.path_manifest_fidelity import run as _run_manifest
+        result = _run_manifest([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-attribution":
+        from .checks.role_boundary_attribution import run_with_base as _run_attribution
+        result = _run_attribution([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
 
     parser.print_usage(sys.stderr)

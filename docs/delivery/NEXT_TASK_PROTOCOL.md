@@ -203,6 +203,18 @@ report:
    The delivery view MUST NOT amend the canonical lifecycle.
 5. Confirm that no instance-local facts entered the upstream tree.
    See §e.
+6. **Path-manifest hash verification.** If the merge advanced a
+   batch authored under a fenced path manifest per
+   [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md)
+   §c, the report-author confirms that the merge commit's
+   changed-file set, when normalized (sorted, deduplicated, LF-joined
+   with one trailing newline, UTF-8) and SHA256-hashed, equals the
+   envelope's declared `*_PATHS_SHA256` value. The
+   `path_manifest_fidelity` validator's recomputation provides this
+   value mechanically; the report cites both hashes if they
+   disagree. The hash also serves as the input to the next batch's
+   handoff per [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
+   when a successor envelope re-uses or extends the manifest.
 
 ## e. Prohibited content in this protocol and in the artifacts it updates
 

@@ -43,6 +43,40 @@ role, not a personal name.
 - `<authority>` ratified `<decision-summary>`.
 - `<authority>` ratified `<decision-summary>`.
 
+## Controller attestation
+
+Snapshot from `<iso-8601-timestamp>`; restate the controller / pane
+boundary in force at this instant.
+
+- Controller role: `<controller-role-or-coordinator-name>`. Authorized
+  actions: relay handoffs (pointer-only), recompute path-manifest
+  count/SHA256, archive implementer-pane transcripts, run independent
+  scope-audit, perform mechanics only under a separately Source-
+  ratified envelope. See
+  `docs/operations/CONTROLLER_BOUNDARY_POLICY.md`.
+- Controller MUST NOT author tracked files inside the implementer's
+  envelope; the controller-seat-edit anti-pattern in
+  `docs/operations/CONTROLLER_BOUNDARY_POLICY.md` §e is in force.
+- Last controller-asserted attestation: `<iso-8601-timestamp>` —
+  `<short-attestation-text>`.
+
+## Active handoffs
+
+List handoff files currently in flight (or recently closed and not
+yet retired). One entry per handoff. If none, write `None`.
+
+- `<repo-relative-or-absolute-handoff-path>`
+  - kind: `<hermes-handoff | hermes-recommended-prompt>`
+  - role: `<architect | implementer | controller | reviewer>`
+  - expected sha256 (byte-level): `<64-lowercase-hex>`
+  - state: `<open | awaiting-stop-line | closed>`
+  - transcript archive: `<.hermes/transcripts/<file>.txt or none>`
+  - transcript expected sha256 (byte-level): `<64-lowercase-hex or none>`
+
+The expected SHA256 values are recomputed by the verifier per
+`docs/operations/NO_COPY_PASTE_PATTERN.md` §g and
+`docs/operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md` §e.
+
 ## Active roles and panes
 
 Snapshot from `<iso-8601-timestamp>`; verify live runtime state at session

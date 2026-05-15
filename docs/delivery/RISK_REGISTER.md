@@ -440,6 +440,108 @@ operator changes.
 - **current status**: Open; mitigation active. No implementation is
   authorized.
 
+### c.11 R-011 — Controller-seat boundary breach
+
+- **id**: `R-011`
+- **description**: The controller (e.g., Nefarious / Hermes acting in
+  a coordinating role) silently authors tracked files inside an
+  implementer's envelope — typically a "small" Markdown link fix, a
+  whitespace cleanup, or a docs reword — and the controller's edit
+  is then verified by the controller themselves at the scope-audit
+  stage. Author/approver separation per Feature 001 FR-007 collapses;
+  the implementer-pane transcript no longer reflects the diff; the
+  edit has no Source ratification of its own; and the
+  controller-seat edit may mask a path-manifest-fidelity issue
+  (R-012) the implementer would otherwise have surfaced.
+- **likelihood**: `Medium`. The pressure to "save a round-trip" by
+  editing from the controller seat is constant whenever the
+  controller has filesystem access and the implementer pane is busy
+  or paused.
+- **impact**: `High`. Violates Feature 001 FR-007; corrupts the
+  implementer-pane transcript as the system of record under
+  [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md);
+  may produce diffs Source review cannot reproduce from artifacts.
+- **mitigation**:
+  1. [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md)
+     §d hardcodes the controller-verifies-never-authors rule and
+     §e names the controller-seat-edit anti-pattern explicitly.
+  2. [`./ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md)
+     and [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md)
+     name the controller / implementer boundary as a preflight check
+     before any tracked-file mutation and before any mechanics.
+  3. The Creator Engine validator's `role_boundary_attribution`
+     check provides a verifier-side audit surface; when run with
+     `--base <commit>`, it can be used to surface controller-seat
+     attribution against a base commit.
+  4. [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)
+     §d closes the implementer-pane transcript with a recorded
+     SHA256 so that any controller-authored content authored after
+     the stop line is observable.
+- **trigger / early warning**: A commit's diff includes paths the
+  implementer-pane transcript does not show being authored; the
+  controller's report-back claims to have "made a small fix" inside
+  the implementer's manifest; a scope-audit run finds a path in the
+  diff that the implementer never opened.
+- **owner role**: `source` (boundary authority); `controller`
+  (Nefarious / Hermes in coordinating seats); `implementer`
+  (refuses to ratify content they did not author).
+- **current status**: Open; mitigation active under the
+  workflow-hardening protocol set.
+
+### c.12 R-012 — Path-manifest / Markdown corruption (`__init__.py` regression class)
+
+- **id**: `R-012`
+- **description**: An envelope or handoff is relayed through a
+  paste-pipeline path (chat pane, terminal multiplexer, clipboard)
+  that corrupts Markdown around path manifests. The most-attested
+  corruption strips double-underscores: the literal path
+  `validators/creator_engine_validator/checks/__init__.py` arrives
+  in the implementer's pane as
+  `validators/creator_engine_validator/checks/init.py`. The
+  implementer authors the corrupted path; the registry-running
+  `__init__.py` is left untouched; the substrate diverges silently
+  from the envelope. Adjacent regressions include duplicated paths,
+  off-by-one counts, stripped blank lines, and reflowed code fences.
+- **likelihood**: `Medium`. Paste corruption is the *default*
+  outcome of relaying long Markdown bodies across surfaces that
+  reinterpret formatting; it has been observed in prior batches.
+- **impact**: `Severe`. The substrate diverges from the
+  Source-ratified envelope without surfacing a single PR-level
+  error; the controller's scope audit passes against the corrupted
+  manifest; recovery requires Source ratification of an amended
+  manifest and a fresh batch.
+- **mitigation**:
+  1. [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
+     codifies the pointer-only relay (path + expected SHA256 +
+     consume-and-verify instruction). The manifest never travels
+     through chat.
+  2. [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md)
+     names the fenced-block manifest shape, the normalized
+     count/SHA256 computation, and the gates at which preflight
+     runs (envelope publication, handoff consumption, tracked-file
+     mutation, scope audit, mechanics).
+  3. The Creator Engine validator's `path_manifest_fidelity` check
+     emits the explicit `path_manifest_init_py_corruption` error
+     class whenever a manifest line or a free-text reference inside
+     the document body is the literal corrupted form
+     `<package>/checks/init.py`, regardless of whether the declared
+     count/hash also fail.
+  4. [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md)
+     and [`./ENVELOPE_CONSUMPTION_CHECKLIST.md`](./ENVELOPE_CONSUMPTION_CHECKLIST.md)
+     require the count/SHA256 to be declared and the implementer to
+     recompute them before consumption.
+- **trigger / early warning**: A handoff or envelope's authorized
+  path manifest contains the literal token `checks/init.py` rather
+  than `checks/__init__.py`; a declared `*_PATHS_COUNT` does not
+  equal the unique-line count of the fenced block; a declared
+  `*_PATHS_SHA256` does not equal the recomputed SHA256 of the
+  normalized manifest.
+- **owner role**: `source` (boundary authority); `architect` /
+  `controller` (envelope and handoff authors); `implementer`
+  (preflight recomputation); `verifier` (validator).
+- **current status**: Open; mitigation active under the
+  workflow-hardening protocol set.
+
 ## d. Maintenance rules
 
 1. Risks are added or amended in this document; the addition is
@@ -480,3 +582,17 @@ requirements:
 - Each risk row includes id, description, likelihood, impact,
   mitigation, trigger / early warning, owner role, and current
   status.
+
+The register is extended by the workflow-hardening protocol set
+([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md),
+[`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md),
+[`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md),
+and [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md))
+to include:
+
+- R-011 (controller-seat boundary breach) in §c.11.
+- R-012 (path-manifest / Markdown corruption, the `__init__.py`
+  regression class) in §c.12.
+
+Both rows follow the existing row style. The B2 acceptance posture
+above remains intact for the original ten risks.
