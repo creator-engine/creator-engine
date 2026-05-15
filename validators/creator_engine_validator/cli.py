@@ -121,12 +121,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "check-examples":
         return _check_examples(args.json_output)
     if subcommand == "scan-no-limitless":
-        # Per T012, body remains a stub until no_limitless_strings registers in T098.
-        if args.json_output:
-            print(json.dumps({"ok": True, "subcommand": "scan-no-limitless", "status": "stub"}, indent=2))
-        else:
-            print("scan-no-limitless stub: no LIMITLESS scanner registered yet.")
-        return 0
+        from .checks.no_limitless_strings import run as _run_no_limitless
+        result = _run_no_limitless([Path(".")])
+        return _emit_results([result], args.json_output)
 
     parser.print_usage(sys.stderr)
     return 2

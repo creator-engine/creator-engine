@@ -154,3 +154,19 @@ wheelhouse notices are in [`NOTICE`](./NOTICE).
 - Security policy and private vulnerability reporting:
   [`SECURITY.md`](./SECURITY.md).
 - Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
+
+## Contact
+
+For general, non-security, non-conduct project, community, or
+governance inquiries, email
+[`ubuntuaws745@gmail.com`](mailto:ubuntuaws745@gmail.com). This is the
+primary public contact for general project correspondence only; it
+does not replace the dedicated reporting channels above:
+
+- Vulnerabilities and other security-sensitive reports must go
+  privately to
+  [`ubuntuaws745+security@gmail.com`](mailto:ubuntuaws745+security@gmail.com)
+  per [`SECURITY.md`](./SECURITY.md).
+- Code of conduct reports must go privately to
+  [`ubuntuaws745+conduct@gmail.com`](mailto:ubuntuaws745+conduct@gmail.com)
+  per [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).

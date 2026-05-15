@@ -46,11 +46,12 @@ representing the project.
 ## Reporting and enforcement
 
 If you observe behavior that you believe violates this Code, please
-report it privately to the project maintainers. A dedicated conduct
-contact will be published before public launch; until then, use
-whatever private channel you currently have for reaching the
-maintainers, or wait for the published contact rather than escalating
-publicly. Placeholder: `contact to be published before public launch`.
+report it privately to the project maintainers by email at
+[`ubuntuaws745+conduct@gmail.com`](mailto:ubuntuaws745+conduct@gmail.com).
+This is the dedicated private conduct contact for Creator Engine.
+Do not report conduct concerns through public GitHub issues, pull
+requests, or other public project spaces — use this private contact
+instead.
 
 When reporting, please include what happened, where it happened,
 approximate dates/links if available, and any context that would help
