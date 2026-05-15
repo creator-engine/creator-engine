@@ -156,6 +156,33 @@ each perform the boundary checks named in their respective checklists:
 A boundary check that cannot be performed (missing ratification, no
 controller available, no archived transcript) is a halt condition.
 
+### f.1 The `role_boundary_attribution` verifier check — scope and limits
+
+The repository-local `role_boundary_attribution` validator check is a
+Phase-1 audit aid for this policy and the R-011 risk row. It does NOT
+ratify a batch, and its modes have explicit limits that controllers
+and ratifiers MUST understand before relying on its output:
+
+- **Default whole-tree mode** (run by `python -m creator_engine_validator
+  check <paths>` and `check-examples`) is *advisory*. It emits warnings,
+  not errors, when a `role: controller` document carries a fenced path
+  manifest. A clean whole-tree run is not by itself proof of boundary
+  compliance; a warning is a signal to investigate, not a CI failure.
+- **`verify-attribution --base <commit>` mode** compares changed files
+  between `<base>..HEAD` against active handoff manifests under
+  `.hermes/handoffs/`. This mode is best-effort and requires that
+  directory to be present and readable. A fresh clone of the public
+  repository does NOT include `.hermes/`; in that environment the mode
+  reports `role_boundary_no_active_handoff` and cannot be used as
+  attribution evidence. Controllers operating outside an environment
+  with `.hermes/` populated MUST use a separate attribution record
+  (transcript archive plus `git log` evidence) and MUST NOT treat
+  absence of the check as proof of compliance.
+
+The detailed contract for both modes lives in `validators/README.md`
+and in the docstring of
+`validators/creator_engine_validator/checks/role_boundary_attribution.py`.
+
 ## g. Cross-cutting prohibitions
 
 - The implementer pane MUST NOT consume an envelope relayed by paste;

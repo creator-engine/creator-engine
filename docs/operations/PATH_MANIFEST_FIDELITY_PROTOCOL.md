@@ -20,7 +20,7 @@ failure modes:
 
 1. **Markdown / paste-pipeline corruption** of paths such as
    `validators/creator_engine_validator/checks/__init__.py` arriving
-   as `validators/creator_engine_validator/checks/init.py`.
+   as `validators/creator_engine_validator/checks/init.py`. <!-- path_manifest_fidelity: pedagogical -->
 2. **Silent off-by-one** in the number of paths (a duplicated path, a
    stripped blank line, an interpolated extra path inside a fenced
    block).

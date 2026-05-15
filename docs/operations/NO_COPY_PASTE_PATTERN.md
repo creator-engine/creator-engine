@@ -21,8 +21,8 @@ probability:
    filenames such that
    `validators/creator_engine_validator/checks/__init__.py` arrives
    in the implementer's pane as
-   `validators/creator_engine_validator/checks/init.py`. The
-   implementer then authors against the wrong manifest and the
+   `validators/creator_engine_validator/checks/init.py`. <!-- path_manifest_fidelity: pedagogical -->
+   The implementer then authors against the wrong manifest and the
    resulting batch corrupts the substrate.
 2. **Evidence-chain corruption.** The pasted prompt is a transient
    transcript artifact: no two operators see exactly the same text;
@@ -180,17 +180,8 @@ records the exact wording.
 
 A specific, observed failure mode motivates this pattern. Pasted
 relays have, more than once, transformed the literal path
-
-```text
-validators/creator_engine_validator/checks/__init__.py
-```
-
-into the corrupted path
-
-```text
-validators/creator_engine_validator/checks/init.py
-```
-
+`validators/creator_engine_validator/checks/__init__.py` into the
+corrupted path `validators/creator_engine_validator/checks/init.py` <!-- path_manifest_fidelity: pedagogical -->
 because the paste pipeline interpreted the surrounding Markdown as
 bold-underscore formatting and stripped the leading and trailing
 double underscores. The corrupted path does not exist in the Python

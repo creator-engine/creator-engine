@@ -4,6 +4,7 @@ from pathlib import Path
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.path_manifest_fidelity import (
     CHECK_NAME,
+    PEDAGOGICAL_SENTINEL,
     run,
     scan_document,
 )
@@ -145,6 +146,59 @@ def test_cli_scan_path_manifest_runs(capsys, tmp_path: Path):
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "PASS path_manifest_fidelity" in out
+
+
+def test_pedagogical_sentinel_suppresses_free_text_corruption():
+    # Same-line HTML sentinel opts a pedagogical reference out of the
+    # init-py-corruption check.
+    text = (
+        "Pasted relays may transform `__init__.py` into the corrupted form "
+        "`validators/creator_engine_validator/checks/init.py`. "
+        f"{PEDAGOGICAL_SENTINEL}\n"
+    )
+    errors = scan_document(text, "fake.md")
+    codes = {e.code for e in errors}
+    assert "path_manifest_init_py_corruption" not in codes, [e.format() for e in errors]
+    assert errors == [], [e.format() for e in errors]
+
+
+def test_sentinel_less_free_text_corruption_still_errors():
+    # Without the sentinel, the same pedagogical wording still fails.
+    text = (
+        "Pasted relays may transform `__init__.py` into the corrupted form "
+        "`validators/creator_engine_validator/checks/init.py`.\n"
+    )
+    errors = scan_document(text, "fake.md")
+    codes = {e.code for e in errors}
+    assert "path_manifest_init_py_corruption" in codes, [e.format() for e in errors]
+
+
+def test_sentinel_does_not_suppress_fenced_manifest_corruption():
+    # Corruption inside a ```text fenced block is a manifest surface and
+    # still errors even when a sentinel appears on adjacent lines.
+    text = (
+        f"Pedagogical preamble. {PEDAGOGICAL_SENTINEL}\n"
+        "\n"
+        "```text\n"
+        "validators/creator_engine_validator/checks/init.py\n"
+        "```\n"
+        f"\nTrailing prose. {PEDAGOGICAL_SENTINEL}\n"
+    )
+    errors = scan_document(text, "fake.md")
+    codes = {e.code for e in errors}
+    assert "path_manifest_init_py_corruption" in codes, [e.format() for e in errors]
+
+
+def test_sentinel_only_applies_on_same_line():
+    # A sentinel on a line above the corruption does not suppress it; the
+    # opt-out is deliberately same-line only.
+    text = (
+        f"{PEDAGOGICAL_SENTINEL}\n"
+        "Quoting `validators/creator_engine_validator/checks/init.py` here.\n"
+    )
+    errors = scan_document(text, "fake.md")
+    codes = {e.code for e in errors}
+    assert "path_manifest_init_py_corruption" in codes, [e.format() for e in errors]
 
 
 def test_cli_scan_path_manifest_flags_init_py_corruption(capsys, tmp_path: Path):

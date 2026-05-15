@@ -33,6 +33,18 @@ jobs:
             --find-links validators/wheelhouse \
             -r validators/requirements.txt
 
+      - name: Install validator test deps (offline, from dev wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            --find-links validators/wheelhouse-dev \
+            -r validators/requirements-dev.txt
+
+      - name: Creator Engine validator — pytest suite (offline)
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+            python -m pytest -p no:cacheprovider validators/tests/ -q
+
       - name: YAML parse check — workflow files
         run: |
           python - <<'PYEOF'
