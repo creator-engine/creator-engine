@@ -22,6 +22,17 @@ fenced manifest line or a free-text path reference in the document
 body is the literal corrupted form, regardless of whether the
 declared count/hash also fail.
 
+Pedagogical prose (regression docs, risk-register narrative) needs to
+quote the corrupted form verbatim without tripping the verifier. The
+opt-out is the same-line HTML sentinel
+``<!-- path_manifest_fidelity: pedagogical -->``. The sentinel
+suppresses an emitted error only when the corrupted token appears in
+free-text prose, outside any triple-backtick ``text`` fenced block. A
+corrupted token inside a triple-backtick ``text`` fenced block — a
+path-manifest surface — still errors regardless of nearby sentinel
+text. The sentinel is narrow by design: it does not suppress any
+other error class.
+
 See:
   - ``docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`` for the
     operating protocol.
@@ -71,6 +82,11 @@ FENCE_CLOSE = "```"
 # not match the well-formed `__init__.py`).
 INIT_PY_CORRUPTION_PATTERN = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_./-]+/checks/init\.py)(?![A-Za-z0-9_])")
 
+# Same-line HTML sentinel that opts a corrupted token out of the
+# init-py-corruption check when (and only when) the token appears in
+# free-text prose outside any ```text``` fenced block.
+PEDAGOGICAL_SENTINEL = "<!-- path_manifest_fidelity: pedagogical -->"
+
 
 @dataclass(frozen=True)
 class Declaration:
@@ -90,6 +106,42 @@ def _normalize_manifest(lines: list[str]) -> tuple[int, str, str]:
 
 def _line_of_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
+
+
+def _fenced_text_ranges(text: str) -> list[tuple[int, int]]:
+    """Return inclusive-exclusive byte ranges for every triple-backtick ``text`` fenced block.
+
+    Each range covers the bytes between the opening fence line and the next
+    closing fence marker.
+    """
+    ranges: list[tuple[int, int]] = []
+    idx = 0
+    while True:
+        open_idx = text.find(FENCE_OPEN, idx)
+        if open_idx == -1:
+            break
+        start = open_idx + len(FENCE_OPEN)
+        close_idx = text.find(FENCE_CLOSE, start)
+        if close_idx == -1:
+            break
+        ranges.append((start, close_idx))
+        idx = close_idx + len(FENCE_CLOSE)
+    return ranges
+
+
+def _offset_is_in_fenced_text(offset: int, ranges: list[tuple[int, int]]) -> bool:
+    for start, end in ranges:
+        if start <= offset < end:
+            return True
+    return False
+
+
+def _line_containing_offset(text: str, offset: int) -> str:
+    line_start = text.rfind("\n", 0, offset) + 1
+    line_end = text.find("\n", offset)
+    if line_end == -1:
+        line_end = len(text)
+    return text[line_start:line_end]
 
 
 def _find_first_fence_after(text: str, offset: int) -> tuple[int, int] | None:
@@ -147,7 +199,14 @@ def scan_document(text: str, path: str | Path) -> list[ValidationError]:
     path_str = str(path)
 
     # Scan for `<package>/checks/init.py` corruption anywhere in the document.
+    # Free-text matches may be suppressed by the same-line pedagogical
+    # sentinel; matches inside a ```text fenced block — a path-manifest
+    # surface — are never suppressed.
+    fenced_ranges = _fenced_text_ranges(text)
     for match in INIT_PY_CORRUPTION_PATTERN.finditer(text):
+        in_fence = _offset_is_in_fenced_text(match.start(), fenced_ranges)
+        if not in_fence and PEDAGOGICAL_SENTINEL in _line_containing_offset(text, match.start()):
+            continue
         line = _line_of_offset(text, match.start())
         errors.append(
             make_error(

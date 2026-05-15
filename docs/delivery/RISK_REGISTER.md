@@ -497,8 +497,8 @@ operator changes.
   corruption strips double-underscores: the literal path
   `validators/creator_engine_validator/checks/__init__.py` arrives
   in the implementer's pane as
-  `validators/creator_engine_validator/checks/init.py`. The
-  implementer authors the corrupted path; the registry-running
+  `validators/creator_engine_validator/checks/init.py`. <!-- path_manifest_fidelity: pedagogical -->
+  The implementer authors the corrupted path; the registry-running
   `__init__.py` is left untouched; the substrate diverges silently
   from the envelope. Adjacent regressions include duplicated paths,
   off-by-one counts, stripped blank lines, and reflowed code fences.
