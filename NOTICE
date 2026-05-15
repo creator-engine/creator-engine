@@ -1,0 +1,55 @@
+Creator Engine
+Copyright 2026 Creator Engine contributors
+
+This product includes software developed by the Creator Engine
+contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License").
+See the LICENSE file in this repository, or
+http://www.apache.org/licenses/LICENSE-2.0, for the full license text.
+
+------------------------------------------------------------------------
+Third-party vendored wheels (offline wheelhouse)
+------------------------------------------------------------------------
+
+Creator Engine ships an offline Python wheelhouse under
+`validators/wheelhouse/` (runtime) and `validators/wheelhouse-dev/`
+(development/test) so that the offline validator can be installed from
+a fresh `git clone` without network access. Each wheel is distributed
+unmodified under its upstream license; the upstream license text and
+metadata are contained inside the wheel itself (typically under
+`*.dist-info/LICENSE`, `*.dist-info/LICENSE*`, `*.dist-info/COPYING`,
+or `*.dist-info/METADATA`).
+
+The summary below is best-effort attribution derived from each wheel's
+own metadata at the time of inclusion. The wheel's own metadata is
+authoritative; in case of any conflict between this summary and the
+wheel's `*.dist-info/METADATA`, the wheel's metadata governs.
+
+Runtime wheelhouse (`validators/wheelhouse/`):
+
+- PyYAML 6.0.2 — MIT License. Upstream: https://pyyaml.org/
+- attrs 24.2.0 — MIT License.
+- jsonschema 4.23.0 — MIT License.
+- jsonschema-specifications 2024.10.1 — MIT License.
+- referencing 0.35.1 — MIT License.
+- rpds-py 0.22.3 — MIT License.
+
+Development wheelhouse (`validators/wheelhouse-dev/`):
+
+- iniconfig 2.3.0 — MIT License.
+- packaging 26.2 — Apache License 2.0 OR BSD 2-Clause License
+  (dual-licensed by the upstream project).
+- pluggy 1.6.0 — MIT License.
+- Pygments 2.20.0 — BSD 2-Clause License.
+- pytest 9.0.2 — MIT License.
+
+These vendored wheels are included for convenience and offline
+reproducibility only. Their inclusion does not relicense them: each
+wheel remains under its own upstream license as recorded in its
+distribution metadata.
+
+If you redistribute Creator Engine together with the vendored
+wheelhouse, you are responsible for complying with each wheel's
+upstream license terms in addition to the Apache License 2.0 that
+covers Creator Engine itself.

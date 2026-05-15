@@ -1,5 +1,21 @@
 # Creator Engine
 
+## Status and stability
+
+Creator Engine is pre-1.0. v0.1 ships only files inside a git
+repository (see "v0.1 scope" below); v1.0 is the integration target
+for an end-to-end governed agentic SDLC loop with every privileged
+gate human-ratified. Spec/plan/tasks artifacts, schemas, templates,
+and the offline validator may change without backward compatibility
+guarantees until v1.0. Privileged operations (deploys, governance
+amendments, identity/security/attestation/redaction changes, repo
+settings, branch protection, visibility flips) remain Source-ratified
+regardless of release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
+
+LIMITLESS is the named public dogfood tenant; generic paths in the
+substrate must not hardcode it (enforced by the offline validator's
+`scan-no-limitless` check).
+
 ## What Creator Engine is
 
 Creator Engine is a repo-native agentic SDLC governance substrate. It
@@ -122,3 +138,19 @@ Amendments to the constitution, the Feature 001 substrate, or the
 Feature 002 operating model are themselves Creator-Engine-governed
 mutations: a spec/plan/tasks triple under explicit Source approval,
 versioned per the constitution's Governance section.
+
+## License
+
+Creator Engine is licensed under the Apache License, Version 2.0.
+The full text is in [`LICENSE`](./LICENSE); attribution and vendored
+wheelhouse notices are in [`NOTICE`](./NOTICE).
+
+## Community and contribution
+
+- Contribution workflow and local validation commands:
+  [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- Governance, authority, and ratification on-ramp:
+  [`GOVERNANCE.md`](./GOVERNANCE.md).
+- Security policy and private vulnerability reporting:
+  [`SECURITY.md`](./SECURITY.md).
+- Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
