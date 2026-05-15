@@ -221,20 +221,21 @@ Every merge completion report must include:
 
 A merge report that does not state the next task is incomplete.
 
-## 8. Current Next Task
+## 8. Current Completion State and Next Selection
 
-Current state after the merged governance-substrate baseline (the v0.1 governance substrate):
+Current state after Sprint 0 slice consumption:
 
 - Feature 001 governance substrate is merged.
 - Feature 002 specification-only operating model is merged.
-- Sprint 0 / Delivery Readiness is not complete.
-- The canonical documentation directories and `.github/` are absent.
+- Sprint 0 Execution Slices A, B, C, D, E, and F are Done / complete on the delivery view recorded in `docs/delivery/BACKLOG.md` and `docs/delivery/KANBAN.md`.
+- Sprint 0 slice consumption is complete; the earlier Slice A next-task state recorded in prior revisions of this section has been superseded by the landed Sprint 0 slices A–F.
+- Features 003, 004, 005, and 006 remain Deferred. They require separate Source-ratified shaping or implementation envelopes before any work begins, and Sprint 0 completion does not authorize their implementation.
 
-The next task is:
+Authoritative current delivery state lives in `docs/delivery/BACKLOG.md` and `docs/delivery/KANBAN.md`. This document is retained as a historical execution-sequencing artifact for Sprint 0 and is not the live source of slice status.
 
-**Sprint 0 Execution Slice A — Author the Feature 002 canonical documentation set.**
+The next selection now defers to Source among the post-Sprint-0 Feature 003–006 shaping or implementation envelopes. No implementation of Features 003, 004, 005, or 006 is authorized by this document alone, and Sprint 0 completion does not by itself authorize live GitHub settings, `CODEOWNERS`, branch protection settings, GitHub environments, deploy automation, external tracker integrations, or any other future privileged work. Each such activity requires its own Source-ratified envelope.
 
-Before Slice A implementation begins, Nefarious should prepare an architect/engineer handoff that points Claude Code to Feature 002, this document, Feature 001 contracts, and the acceptance boundaries above.
+Feature 001 and Feature 002 contract semantics, including the acceptance boundaries and stop conditions in this document, remain unchanged by this reconciliation.
 
 ## 9. Stop Conditions
 
