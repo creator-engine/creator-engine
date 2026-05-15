@@ -20,13 +20,12 @@ public GitHub issues, public pull requests, or other public discussions
 that include reproduction details, exploit payloads, or sensitive
 identifiers for any suspected vulnerability.
 
-- Preferred channel: a dedicated security contact will be published
-  before public launch. Until that contact is published, send reports
-  to the project maintainers through whatever private channel was used
-  to obtain repository access. If you have no such channel and believe
-  you have found a vulnerability, please wait for the published
-  security contact rather than disclosing publicly.
-- Placeholder: `security contact to be published before public launch`.
+- Preferred channel: email
+  [`ubuntuaws745+security@gmail.com`](mailto:ubuntuaws745+security@gmail.com).
+  This is the dedicated private security contact for Creator Engine.
+  Do not post vulnerability details, exploit payloads, or sensitive
+  identifiers in public GitHub issues, pull requests, or any other
+  public discussion — use this private contact instead.
 
 When reporting, please include:
 
