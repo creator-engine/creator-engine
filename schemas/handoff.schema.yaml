@@ -1,0 +1,97 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/handoff.schema.yaml"
+title: "Creator Engine Hermes Handoff Front Matter"
+description: |
+  Schema for the YAML front matter of a Hermes-authored handoff
+  document under `.hermes/handoffs/` and for the canonical template
+  at `templates/hermes/handoffs/HANDOFF.template.md`.
+
+  The handoff body MUST also declare a fenced path manifest preceded
+  by `ALLOWED_PATHS_COUNT=<integer>` and
+  `ALLOWED_PATHS_SHA256=<64 lowercase hex>` declarations per
+  `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md` §c. The
+  body-level requirement is enforced separately by the
+  `path_manifest_fidelity` validator check.
+type: object
+required:
+  - kind
+  - role
+  - mode
+  - controller
+  - ratifier
+  - source_authorization_path
+  - source_authorization_sha256
+  - repo
+  - base_branch
+  - base_commit
+  - allowed_paths_count
+  - allowed_paths_sha256
+  - stop_line
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    enum: [hermes-handoff]
+  role:
+    type: string
+    enum: [architect, implementer, controller, reviewer]
+  mode:
+    type: string
+    minLength: 1
+  controller:
+    type: string
+    minLength: 1
+  ratifier:
+    type: string
+    minLength: 1
+  source_authorization_path:
+    type: string
+    minLength: 1
+  source_authorization_sha256:
+    type: string
+    description: |
+      Lowercase 64-hex SHA256 of the on-disk recommended-prompt or
+      authorization file. The placeholder string `tbd` is permitted
+      in unfilled templates only and MUST be replaced before relay.
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{64}$" }
+      - { type: string, enum: [tbd] }
+  repo:
+    type: string
+    minLength: 1
+  base_branch:
+    type: string
+    minLength: 1
+  base_commit:
+    description: |
+      Full commit SHA (40 hex chars), or the literal `tbd` placeholder
+      in unfilled templates.
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{40}$" }
+      - { type: string, enum: [tbd] }
+  allowed_paths_count:
+    description: |
+      Number of unique normalized path lines in the fenced manifest
+      that follows. Templates MAY use the literal `tbd` placeholder.
+    oneOf:
+      - { type: integer, minimum: 1 }
+      - { type: string, enum: [tbd] }
+  allowed_paths_sha256:
+    description: |
+      Lowercase 64-hex SHA256 of the normalized manifest. Templates
+      MAY use the literal `tbd` placeholder.
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{64}$" }
+      - { type: string, enum: [tbd] }
+  stop_line:
+    type: string
+    minLength: 1
+  predecessor_handoff_path:
+    type: string
+    minLength: 1
+  predecessor_transcript_sha256:
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{64}$" }
+      - { type: string, enum: [none, tbd] }
+  notes:
+    type: string

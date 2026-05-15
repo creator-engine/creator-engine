@@ -67,30 +67,47 @@ The consumer performs these checks before opening the envelope body:
 
 After preflight, before any mutation, the consumer:
 
-1. **Restates the allowed paths.** Reads the envelope's
+1. **Recomputes the path manifest count and SHA256.** Per
+   [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md)
+   §c and §d, the consumer parses the envelope's
+   `*_PATHS_COUNT=<integer>` and `*_PATHS_SHA256=<64-hex>` declarations
+   and the fenced ```` ```text ```` manifest block that follows.
+   The consumer recomputes the normalized count and SHA256 from the
+   fenced block (deduplicate, sort ascending, LF-join, one trailing
+   newline, UTF-8) and confirms both match the declarations. The
+   consumer also scans the fenced block for the
+   `path_manifest_init_py_corruption` regression class (any literal
+   `checks/init.py` line that should have been `checks/__init__.py`).
+   Any mismatch is a halt; the consumer reports "BLOCKED — manifest
+   preflight mismatch" and does not edit. The consumer additionally
+   verifies the byte-level SHA256 of the on-disk envelope / handoff
+   file against the controller's relayed expected SHA256 per
+   [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
+   §e; mismatch is a halt.
+2. **Restates the allowed paths.** Reads the envelope's
    `allowed_create_paths` and `allowed_update_paths` and writes them
    down or quotes them. Edits outside the union of these sets are
    refused.
-2. **Restates the prohibited surfaces.** Reads the envelope's
+3. **Restates the prohibited surfaces.** Reads the envelope's
    prohibited-surfaces list (including the standing list in
    [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md)
    §c.6). Mutations to any of these surfaces are refused even if
    they appear mechanically convenient.
-3. **Verifies Source ratification exists for the envelope.**
+4. **Verifies Source ratification exists for the envelope.**
    Confirms the envelope's `ratifier`, `ratification_record_ref`, and
    `ratification_scope` fields are populated. An envelope with empty
    ratification fields is not consumable; the consumer halts and
    escalates per §g.
-4. **Verifies reviewer-identity requirements or named waiver.** If
+5. **Verifies reviewer-identity requirements or named waiver.** If
    the batch is reviewable, confirms the envelope cites either a
    ratified reviewer identity record per
    [`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md)
    or a Source-ratified named waiver under the envelope's
    `waivers_named` field. Silence is not a waiver.
-5. **Confirms allowed operations.** Reads the envelope's
+6. **Confirms allowed operations.** Reads the envelope's
    `allowed_operations`; operations beyond this set (delete, rename,
    chmod, mv, force-push, hook bypass) are refused.
-6. **Confirms no scope broadening.** If completing the batch
+7. **Confirms no scope broadening.** If completing the batch
    apparently requires a mutation outside the allowed set, the
    consumer does NOT broaden scope implicitly; the consumer halts
    and escalates per §g.

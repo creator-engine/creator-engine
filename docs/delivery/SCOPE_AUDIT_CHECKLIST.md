@@ -46,8 +46,11 @@ The auditor lists the changed files and compares them against the
 envelope's allowed-paths set:
 
 1. `git diff --name-only` lists every changed file relative to the
-   envelope's `base_commit`.
-2. The auditor sorts the output (`git diff --name-only | sort`) and
+   envelope's `base_commit`. The auditor also runs
+   `git ls-files --others --exclude-standard` so that untracked
+   non-ignored files are not omitted from the comparison.
+2. The auditor sorts the union (`(git diff --name-only;
+   git ls-files --others --exclude-standard) | sort -u`) and
    compares element-by-element against the union of the envelope's
    `allowed_create_paths` and `allowed_update_paths`.
 3. Any path in the diff that is **not** in the allowed set is a
@@ -58,6 +61,22 @@ envelope's allowed-paths set:
    acceptable when the envelope marks it as conditional (e.g., a
    "minimal coherence update only if directly needed" file); the
    auditor confirms the conditional logic from the envelope text.
+5. **Verifier-side manifest recomputation.** Per
+   [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md)
+   §d and §g, the auditor independently recomputes the normalized
+   count and SHA256 of the envelope's fenced path manifest and
+   confirms equality with the declared `*_PATHS_COUNT=` and
+   `*_PATHS_SHA256=` declarations. The auditor then computes the
+   sorted-set SHA256 of the actual changed-and-untracked file list
+   (from step 2) and compares it to the manifest SHA256. The two
+   hashes are equal if and only if the implementer authored exactly
+   the manifest; any inequality is a boundary failure. The auditor
+   additionally scans the envelope body for the
+   `path_manifest_init_py_corruption` regression class (literal
+   `checks/init.py` where `checks/__init__.py` was intended) per
+   [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
+   §i. Any of these mismatches MUST be recorded as a blocking
+   finding regardless of how clean the rest of the diff appears.
 
 ## d. Prohibited-surface check
 

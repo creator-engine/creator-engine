@@ -1,0 +1,68 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/recommended-prompt.schema.yaml"
+title: "Creator Engine Hermes Recommended-Prompt Front Matter"
+description: |
+  Schema for the YAML front matter of a Source-authored / Source-
+  ratified recommended-prompt document under
+  `.hermes/recommended-prompts/` and for the canonical template at
+  `templates/hermes/recommended-prompts/RECOMMENDED_PROMPT.template.md`.
+
+  The recommended-prompt body MUST also declare a fenced path manifest
+  preceded by `ALLOWED_PATHS_COUNT=<integer>` and
+  `ALLOWED_PATHS_SHA256=<64 lowercase hex>` declarations per
+  `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md` §c. The
+  body-level requirement is enforced separately by the
+  `path_manifest_fidelity` validator check.
+type: object
+required:
+  - kind
+  - role
+  - ratifier
+  - controller
+  - authorized_actor
+  - repo
+  - base_branch
+  - base_commit
+  - allowed_paths_count
+  - allowed_paths_sha256
+  - stop_line
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    enum: [hermes-recommended-prompt]
+  role:
+    type: string
+    enum: [architect, implementer, controller, reviewer]
+  ratifier:
+    type: string
+    minLength: 1
+  controller:
+    type: string
+    minLength: 1
+  authorized_actor:
+    type: string
+    minLength: 1
+  repo:
+    type: string
+    minLength: 1
+  base_branch:
+    type: string
+    minLength: 1
+  base_commit:
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{40}$" }
+      - { type: string, enum: [tbd] }
+  allowed_paths_count:
+    oneOf:
+      - { type: integer, minimum: 1 }
+      - { type: string, enum: [tbd] }
+  allowed_paths_sha256:
+    oneOf:
+      - { type: string, pattern: "^[0-9a-f]{64}$" }
+      - { type: string, enum: [tbd] }
+  stop_line:
+    type: string
+    minLength: 1
+  notes:
+    type: string
