@@ -33,6 +33,11 @@ has additionally landed on the canonical branch:
 `d892cd3` and PR #23 / `3dc45a1`). These post-Sprint-0 substrates
 are separate from the Sprint 0 A → B → C → D → E → F dependency
 chain and do not alter the Sprint 0 delivery-edge records in §g.
+CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) has been added to
+the post-Sprint-0 backlog; its predecessor edges (Sprint 0 complete +
+post-Sprint-0 substrate) are cleared and its successor edges
+(Feature 004/CFC follow-on identity/schema work) are recorded in
+§d.5 and §g.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -267,6 +272,40 @@ completion.
   automation. Feature 006 implements the execution surface;
   ratification of every deploy remains Source's.
 
+### d.5 CFC-1 depends on Sprint 0 + post-Sprint-0 substrate; precedes Feature 004/CFC follow-on
+
+- **Item**: `post-sprint-0/cfc-1-codex-first-class`
+  ([`./BACKLOG.md`](./BACKLOG.md) §e.10).
+- **Predecessor edges** (all cleared):
+  - Sprint 0 Slices A–F: all `Done` on the delivery view (see §b
+    and §g).
+  - `post-sprint-0/oss-readiness`: `Done` (PR #20 / `35bf85f` and
+    PR #21 / `5b762f9`).
+  - `post-sprint-0/workflow-hardening`: `Done` (PR #22 / `d892cd3`
+    and PR #23 / `3dc45a1`). The workflow-hardening substrate is a
+    direct prerequisite because CFC-1 Batch 1 depends on the
+    pointer-only handoff, path-manifest fidelity, and transcript
+    archival controls it established.
+- **Why**: Batch 1 creates the governance scope and operations
+  protocol that will govern any future Codex-as-actor batch.
+  It is `governance/docs`-class and does not require a privileged
+  predecessor beyond the completed Sprint 0 operating model and
+  hardened workflow controls.
+- **Successor edges** (not yet cleared):
+  - Feature 004/CFC follow-on Batch 2+ (Codex identity record,
+    review-evidence schema, architecture actor/tool matrix update):
+    requires CFC-1 Batch 1 to reach `Done` AND a separate
+    Source-ratified privileged envelope for each Batch 2+ item.
+    These are `identity`- and `schema`-class mutations and are not
+    unblocked by CFC-1 Batch 1 landing.
+  - Feature 005 dispatch automation: separate predecessor chain
+    (see §d.3); CFC-1 Batch 1 is not a direct predecessor of
+    Feature 005.
+- **Privileged-class note**: CFC-1 Batch 1 is `governance/docs`-
+  class. Its successor Batch 2+ items are privileged `identity` /
+  `schema` class per Feature 001 FR-008; each requires its own
+  Source-ratified envelope per §h.
+
 ## e. v1.0 integration target
 
 v1.0 is an integration target reached when Features 001 through 006
@@ -336,6 +375,8 @@ post-merge update procedure in
 | `sprint-0/slice-f` | `feature-006` | `Done` | Predecessor `Done` (PR #16 / `cb7f94a`); successor remains `Deferred`. Privileged `deploy` envelope for Feature 006 release / deploy execution still requires §e; the Slice F batch is policy / docs only and does not authorize Feature 006 implementation. |
 | Sprint 0 exit (gates 1–12) + Features 003–006 | `v1.0` | mixed (`Done` / `Deferred` / `Blocked`) | Successor `Deferred` until every dependency in §e is `Done`. |
 | Sprint 0 exit + Source-ratified future spec | `us3/a1` | (not yet specced) | Successor `Blocked` / `Deferred` per §f. |
+| Sprint 0 (all slices) + `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` | `post-sprint-0/cfc-1-codex-first-class` | `Done` (all predecessors) | All predecessor edges cleared; CFC-1 in `Backlog` pending Source ratification. See §d.5. |
+| `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record, schema, architecture update) | `Backlog` (CFC-1) | Successor not yet shaped; requires CFC-1 `Done` AND separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
 

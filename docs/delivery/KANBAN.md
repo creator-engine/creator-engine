@@ -24,7 +24,11 @@ or PR #16. The canonical Slice F row has moved from `Blocked` to
 Post-Sprint-0 substrate has since landed and is reflected in the
 `Done` table below: `post-sprint-0/oss-readiness` (PR #20 / `35bf85f`
 and PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening`
-(PR #22 / `d892cd3` and PR #23 / `3dc45a1`).
+(PR #22 / `d892cd3` and PR #23 / `3dc45a1`). CFC-1
+(`post-sprint-0/cfc-1-codex-first-class`) governance scope and
+operations protocol substrate has been added to the `Backlog` column
+below, pending Source ratification; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.10.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -61,8 +65,9 @@ merge, this board is regenerated per
 
 ### Backlog
 
-*(No items currently shaped only at `Backlog`. New items first land
-here before being promoted to `Ready`.)*
+| id | scope (one line) | notes |
+|---|---|---|
+| `post-sprint-0/cfc-1-codex-first-class` | Governance scope + operations protocol substrate for Codex-first-class, without identity instantiation, schema mutation, authority expansion, provider binding, GitHub settings mutation, or Feature 005 dispatch automation. | Pending Source ratification; see [`./BACKLOG.md`](./BACKLOG.md) §e.10. |
 
 ### Ready
 
@@ -126,15 +131,22 @@ Post-Sprint-0 substrate has additionally landed:
 `post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
 PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening` (`Done`,
 PR #22 / `d892cd3` and PR #23 / `3dc45a1`). Slices A–F and the
-post-Sprint-0 substrate have all landed on the canonical branch;
-the next-task selection defers to Source.
+post-Sprint-0 substrate have all landed on the canonical branch.
+CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) is the earliest
+identified post-Sprint-0 backlog candidate; it is in `Backlog`
+pending Source ratification and does not imply identity,
+schema, architecture, provider binding, or dispatch automation
+work is part of Batch 1. Final next-task selection remains Source's.
 
 > Sprint 0 slice consumption and post-Sprint-0 substrate landing
 > are complete on the delivery view.
-> Downstream candidates (Feature 003 extension of the landed
-> `.github/` baseline, Feature 004 reviewer-identity instantiation,
-> Feature 005 dispatcher / worktree automation, Feature 006
-> release / deploy execution) are each `Deferred` in
+> CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope
+> and operations protocol substrate is the earliest identified
+> post-Sprint-0 backlog candidate, pending Source ratification.
+> Downstream deferred candidates (Feature 003 extension of the
+> landed `.github/` baseline, Feature 004 reviewer-identity
+> instantiation, Feature 005 dispatcher / worktree automation,
+> Feature 006 release / deploy execution) are each `Deferred` in
 > [`./BACKLOG.md`](./BACKLOG.md) §e and require their own
 > Source-ratified privileged envelopes per Feature 001 FR-008 /
 > FR-016. Final next-task selection — including which feature

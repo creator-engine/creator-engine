@@ -59,6 +59,12 @@ improvements and follow-up fixes. These four PRs are
 post-Sprint-0 substrate and are not Sprint 0 Slice A-F items; see
 [`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9. The delivery view
 now reflects canonical main at commit `3dc45a1`.
+CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
+operations protocol substrate is the earliest identified post-Sprint-0
+backlog candidate; it is recorded in
+[`./BACKLOG.md`](./BACKLOG.md) §e.10, pending Source ratification. A
+fresh clone of this branch is sufficient to discover CFC-1 without
+reading every table.
 
 ## a. Purpose
 
