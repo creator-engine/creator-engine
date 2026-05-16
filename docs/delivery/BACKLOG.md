@@ -644,6 +644,59 @@ recorded as §e.8 and §e.9.
   `30a3e8c docs: add CFC-1 scope and protocol envelope (#25)` on the
   canonical branch.
 
+### e.11 Post-Sprint-0 substrate — CFC follow-on Batch 2A: Codex role/authority decision request
+
+- **id**: `post-sprint-0/cfc-2a-codex-role-decision`
+- **parent**: —
+- **status**: `Backlog`
+- **scope**: Decision-request artifact at
+  `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md` letting
+  Source explicitly decide Codex role and authority semantics
+  before any architecture actor/tool matrix update, Codex identity
+  record, review/architect-evidence schema, validator, template,
+  example, provider/tool/model/host/account binding, or authority
+  expansion. Enumerates candidate `role_category` mappings
+  (`architect`, `implementer`, both, `reviewer`, new role) with
+  invariants, downstream consequences for Batch 2B / 2C / 2D, and
+  FR-015 / baseline authority-matrix coverage consequences;
+  reaffirms that the seven-row baseline authority-matrix rule is
+  not amended by Batch 2A and that
+  `docs/contracts/authority-matrix.yml` is not mutated. Lists
+  seven discrete Source decisions: Codex `role_category`; Codex
+  allowed mutation classes for Phase 1; Codex authority boundary
+  (architect parity is authoring parity, not ratification / merge
+  / deploy authority); provider/tool/model/host/account binding
+  posture; review-evidence semantics under architect framing;
+  public/tenant role label; reaffirmation of authority-matrix
+  non-mutation. Minimal coherence updates to
+  `docs/governance/CODEX_FIRST_CLASS_SCOPE.md` §5,
+  `docs/delivery/BACKLOG.md` §e, `docs/delivery/KANBAN.md`, and
+  `docs/delivery/DEPENDENCIES.md` are part of the five-path
+  manifest. Privileged Codex identity record, evidence schema,
+  architecture actor/tool matrix update, provider binding, and
+  authority expansion are explicitly **not** authorized by Batch
+  2A; they are deferred to separately Source-ratified Batch 2B /
+  2C / 2D / later envelopes.
+- **acceptance gate**: Batch 2A decision document and coherence
+  updates validate against the substrate validator and the
+  five-path manifest fidelity check; Source ratifies one option
+  from the seven §6 decisions in
+  `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`; merged
+  on the canonical branch with finalized attestation.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-1-codex-first-class` (`Done`, PR #25 /
+  `30a3e8c`). Successor Batches 2B (architecture actor/tool
+  matrix update), 2C (Codex identity record), and 2D
+  (review/architect-evidence schema) depend on Batch 2A reaching
+  `Done` and each require their own Source-ratified privileged
+  envelopes.
+- **anticipated mutation class**: `governance` / `docs`
+- **owner role**: `architect` (drafter) / `implementer` (markdown
+  authoring under the Source-ratified visible implementation
+  envelope); `controller` / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
 ## f. Maintenance rules
 
 1. New backlog entries MUST cite their owning source of truth (Sprint

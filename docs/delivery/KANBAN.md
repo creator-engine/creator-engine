@@ -65,7 +65,9 @@ merge, this board is regenerated per
 
 ### Backlog
 
-*(No items currently in this column. CFC-1 has moved to `Done`; see the `Done` table below.)*
+| id | scope (one line) | dependencies / blockers |
+|---|---|---|
+| `post-sprint-0/cfc-2a-codex-role-decision` | CFC follow-on Batch 2A decision-request artifact (`docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`) letting Source decide Codex `role_category`, allowed mutation classes, authority boundary, binding posture, review-evidence semantics, public/tenant role label, and reaffirmation that `docs/contracts/authority-matrix.yml` is not mutated by Batch 2A. `governance` / `docs` mutation class. | `post-sprint-0/cfc-1-codex-first-class` (`Done`, PR #25 / `30a3e8c`). |
 
 ### Ready
 

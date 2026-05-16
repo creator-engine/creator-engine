@@ -309,6 +309,42 @@ completion.
   `schema` class per Feature 001 FR-008; each requires its own
   Source-ratified envelope per §h.
 
+### d.6 CFC follow-on Batch 2A depends on CFC-1; precedes Batch 2B / 2C / 2D
+
+- **Item**: `post-sprint-0/cfc-2a-codex-role-decision`
+  ([`./BACKLOG.md`](./BACKLOG.md) §e.11).
+- **Predecessor edge (cleared)**:
+  `post-sprint-0/cfc-1-codex-first-class` → `post-sprint-0/cfc-2a-codex-role-decision`.
+  CFC-1 is `Done` on the canonical branch (PR #25 / `30a3e8c`),
+  so the predecessor edge is cleared.
+- **Why**: Batch 2A is the docs/governance decision-request gate
+  that lets Source explicitly decide Codex role and authority
+  semantics before any architecture actor/tool matrix update,
+  Codex identity record, review/architect-evidence schema,
+  validator, template, example, provider/tool/model/host/account
+  binding, or authority expansion. It depends on the CFC-1 Batch 1
+  scope and protocol substrate already being landed, because the
+  candidate role mappings and the seven discrete Source decisions
+  in Batch 2A reference the CFC-1 §3 non-authorizations and §5
+  forward-scope rows.
+- **Class**: `governance` / `docs`. Batch 2A does **not** mutate
+  `docs/contracts/authority-matrix.yml` and does **not** amend the
+  seven-row FR-015 baseline authority-matrix rule.
+- **Successor edges** (not yet cleared):
+  - Batch 2B — architecture actor/tool matrix update under
+    `docs/architecture/` (`governance`-class). Requires Batch 2A
+    Source decisions §6.1 and §6.5, plus a separately Source-
+    ratified Batch 2B envelope.
+  - Batch 2C — Codex identity record under
+    `docs/contracts/identity-record.md` semantics (`identity`-
+    class, privileged). Requires Batch 2A Source decisions §6.1,
+    §6.2, §6.4, and §6.6, plus a separately Source-ratified
+    Batch 2C envelope.
+  - Batch 2D — review/architect/implementer-evidence schema
+    (`schema`-class, privileged). Requires Batch 2A Source
+    decision §6.5, plus a separately Source-ratified Batch 2D
+    envelope.
+
 ## e. v1.0 integration target
 
 v1.0 is an integration target reached when Features 001 through 006
@@ -380,6 +416,8 @@ post-merge update procedure in
 | Sprint 0 exit + Source-ratified future spec | `us3/a1` | (not yet specced) | Successor `Blocked` / `Deferred` per §f. |
 | Sprint 0 (all slices) + `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` | `post-sprint-0/cfc-1-codex-first-class` | `Done` (all predecessors) | Predecessor edges cleared; CFC-1 is `Done` — landed on canonical branch as PR #25 / `30a3e8c`. See §d.5. |
 | `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record, schema, architecture update) | `Done` (CFC-1) | CFC-1 is `Done` (PR #25 / `30a3e8c`); successor not yet shaped. Requires separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
+| `post-sprint-0/cfc-1-codex-first-class` | `post-sprint-0/cfc-2a-codex-role-decision` | `Done` (CFC-1) | Cleared; CFC-1 is `Done` (PR #25 / `30a3e8c`); successor is `Backlog` pending Source ratification of the Batch 2A §6 decisions in `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`. `governance` / `docs` class; non-privileged predecessor edge. See §d.6. |
+| `post-sprint-0/cfc-2a-codex-role-decision` | CFC follow-on Batch 2B / 2C / 2D (architecture actor/tool matrix update, Codex identity record, review/architect-evidence schema) | `Backlog` | Predecessor not yet `Done`; successors not yet shaped. Each successor requires a separately Source-ratified privileged envelope per §h once Batch 2A reaches `Done`. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
 
