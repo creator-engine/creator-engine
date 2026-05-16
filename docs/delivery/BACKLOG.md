@@ -45,8 +45,8 @@ PR #22 (`d892cd3 feat: add workflow hardening controls (#22)`) and
 PR #23 (`3dc45a1 fix: harden workflow validator follow-ups (#23)`)
 added and hardened the workflow-hardening protocol substrate. See
 §e.8 and §e.9. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
-governance scope and operations protocol substrate has been added to
-the post-Sprint-0 backlog as §e.10, pending Source ratification.
+governance scope and operations protocol substrate has landed on the
+canonical branch as PR #25 / merge commit `30a3e8c`; see §e.10.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -607,7 +607,7 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/cfc-1-codex-first-class`
 - **parent**: —
-- **status**: `Backlog` (pending Source ratification)
+- **status**: `Done`
 - **scope**: Governance scope document
   (`docs/governance/CODEX_FIRST_CLASS_SCOPE.md`) and operations
   protocol (`docs/operations/CODEX_FIRST_CLASS_PROTOCOL.md`)
@@ -640,6 +640,9 @@ recorded as §e.8 and §e.9.
   `controller` / `reviewer` (Nefarious)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `30a3e8c docs: add CFC-1 scope and protocol envelope (#25)` on the
+  canonical branch.
 
 ## f. Maintenance rules
 

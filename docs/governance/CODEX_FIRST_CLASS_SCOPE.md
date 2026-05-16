@@ -4,7 +4,7 @@
 **Batch**: 1 (governance/docs scope and protocol authoring)
 **Mutation class**: `governance` / `docs`
 **Ratifier**: `source` only
-**Status**: Awaiting Source ratification
+**Status**: Landed — merged on canonical origin/main via PR #25 / merge commit `30a3e8c`
 
 ## 1. Purpose
 

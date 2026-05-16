@@ -3,7 +3,8 @@
 **Status**: Sprint 0 Slices A–F complete on the delivery view;
 post-Sprint-0 substrate (PRs #20–#23) has also landed on the
 canonical branch. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
-specific risk controls have been added as §c.13–§c.19. Part of the
+specific risk controls have been added as §c.13–§c.19; CFC-1 Batch 1
+has since landed on the canonical branch as PR #25 / `30a3e8c`. Part of the
 **minimum repo-native delivery control plane** and **not a Jira
 clone**. Markdown-only by ratified posture. Layered on top of, and
 subordinate to, the Feature 001 substrate.

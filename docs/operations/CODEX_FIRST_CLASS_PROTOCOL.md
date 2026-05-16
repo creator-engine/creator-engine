@@ -3,7 +3,7 @@
 **Backlog id**: `post-sprint-0/cfc-1-codex-first-class`
 **Batch**: 1 (governance/docs scope and protocol authoring)
 **Governance scope**: [`docs/governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
-**Status**: Awaiting Source ratification
+**Status**: Landed — merged on canonical origin/main via PR #25 / merge commit `30a3e8c`
 
 This document defines the operational protocol for
 Hermes/Nefarious-to-Codex handoffs, Codex-only worktree isolation,
