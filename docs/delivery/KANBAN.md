@@ -26,9 +26,9 @@ Post-Sprint-0 substrate has since landed and is reflected in the
 and PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening`
 (PR #22 / `d892cd3` and PR #23 / `3dc45a1`). CFC-1
 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
-operations protocol substrate has been added to the `Backlog` column
-below, pending Source ratification; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.10.
+operations protocol substrate has landed on the canonical branch as
+PR #25 / `30a3e8c` and has moved from `Backlog` to `Done` on the
+board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.10.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -65,9 +65,7 @@ merge, this board is regenerated per
 
 ### Backlog
 
-| id | scope (one line) | notes |
-|---|---|---|
-| `post-sprint-0/cfc-1-codex-first-class` | Governance scope + operations protocol substrate for Codex-first-class, without identity instantiation, schema mutation, authority expansion, provider binding, GitHub settings mutation, or Feature 005 dispatch automation. | Pending Source ratification; see [`./BACKLOG.md`](./BACKLOG.md) §e.10. |
+*(No items currently in this column. CFC-1 has moved to `Done`; see the `Done` table below.)*
 
 ### Ready
 
@@ -103,6 +101,7 @@ canonical branch; see the `Done` table below.)*
 | `sprint-0/slice-f` | Release-candidate checklist; merge-approval checklist; deployment-approval policy; rollback / evidence expectations; explicit `deploy` mutation ratification rule; statement of currently absent deployment targets / environments. Policy / docs only; not deploy automation. | Canonical-branch commit `cb7f94a docs: add Slice F release deploy governance policy (#16)` landed `docs/delivery/RELEASE_DEPLOY_GOVERNANCE.md`, `docs/delivery/RELEASE_CANDIDATE_CHECKLIST.md`, `docs/delivery/MERGE_APPROVAL_CHECKLIST.md`, `docs/delivery/DEPLOYMENT_APPROVAL_POLICY.md`, and `docs/delivery/ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`, with minimal coherence updates to existing delivery docs. |
 | `post-sprint-0/oss-readiness` | Open-source readiness materials (PR #20) and public-launch readiness blocker remediation (PR #21). Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `35bf85f docs: add open-source readiness materials (#20)` and `5b762f9 fix: remediate public launch readiness blockers (#21)`. |
 | `post-sprint-0/workflow-hardening` | Workflow-hardening protocol set: operations protocol docs, schemas, templates, validator checks, CI validator hardening. Durable evidence for R-011 and R-012. Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `d892cd3 feat: add workflow hardening controls (#22)` and `3dc45a1 fix: harden workflow validator follow-ups (#23)`. |
+| `post-sprint-0/cfc-1-codex-first-class` | Governance scope + operations protocol substrate for Codex-first-class, without identity instantiation, schema mutation, authority expansion, provider binding, GitHub settings mutation, or Feature 005 dispatch automation. Batch 2+ deferred to separately Source-ratified envelopes. | Canonical-branch commit `30a3e8c docs: add CFC-1 scope and protocol envelope (#25)`. |
 
 ### Deferred
 
@@ -124,45 +123,31 @@ on the canonical branch; see the `Done` table above.)*
 
 ## c. Immediate next likely task
 
-`sprint-0/slice-f` is `Done` on the delivery view; durable
-canonical-branch evidence is PR #16 / commit
-`cb7f94a docs: add Slice F release deploy governance policy`.
-Post-Sprint-0 substrate has additionally landed:
-`post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
-PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening` (`Done`,
-PR #22 / `d892cd3` and PR #23 / `3dc45a1`). Slices A–F and the
-post-Sprint-0 substrate have all landed on the canonical branch.
-CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) is the earliest
-identified post-Sprint-0 backlog candidate; it is in `Backlog`
-pending Source ratification and does not imply identity,
-schema, architecture, provider binding, or dispatch automation
-work is part of Batch 1. Final next-task selection remains Source's.
+CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope
+and operations protocol substrate has landed on the canonical branch
+as PR #25 / `30a3e8c`. All Sprint 0 Slices A–F and post-Sprint-0
+substrate items (`post-sprint-0/oss-readiness`, `Done`;
+`post-sprint-0/workflow-hardening`, `Done`; and now
+`post-sprint-0/cfc-1-codex-first-class`, `Done`) are complete on
+the delivery view.
 
-> Sprint 0 slice consumption and post-Sprint-0 substrate landing
-> are complete on the delivery view.
-> CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope
-> and operations protocol substrate is the earliest identified
-> post-Sprint-0 backlog candidate, pending Source ratification.
-> Downstream deferred candidates (Feature 003 extension of the
-> landed `.github/` baseline, Feature 004 reviewer-identity
-> instantiation, Feature 005 dispatcher / worktree automation,
-> Feature 006 release / deploy execution) are each `Deferred` in
+There are no items currently in `Backlog`, `Ready`, `In Progress`,
+`Verified`, or `Ratified`. The next work is a separate
+Source-ratified follow-on selection. No next task is mechanically
+certain from the current delivery state; final next-task selection
+remains Source's.
+
+> All Sprint 0 slices and post-Sprint-0 substrate items have landed
+> on the canonical branch. Downstream deferred candidates (Feature
+> 003 extension of the landed `.github/` baseline, Feature 004
+> reviewer-identity instantiation / CFC follow-on Batch 2+, Feature
+> 005 dispatcher / worktree automation, Feature 006 release / deploy
+> execution) are each `Deferred` in
 > [`./BACKLOG.md`](./BACKLOG.md) §e and require their own
 > Source-ratified privileged envelopes per Feature 001 FR-008 /
 > FR-016. Final next-task selection — including which feature
 > shaping is in fact next, and under what bounded envelope —
 > remains Source's.
-
-Rationale: every Sprint 0 slice from A through F now carries
-durable canonical-branch evidence in [`./BACKLOG.md`](./BACKLOG.md);
-per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h a cleared
-dependency edge is not a substitute for Source ratification of a
-privileged envelope. Any extension of the landed `.github/`
-baseline (including CODEOWNERS, live branch protection settings, or
-Feature 003 instantiation), and any extension of the landed Slice F
-policy surface into Feature 006 release / deploy execution, is
-itself a separate privileged envelope and is not unblocked by
-Slice C, Slice D, Slice E, or Slice F landing.
 
 If the next-task selection surfaces ambiguity, the recommendation
 defers to the rules in
