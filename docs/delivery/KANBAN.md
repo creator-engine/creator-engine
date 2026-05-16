@@ -36,10 +36,14 @@ the board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.11. CFC
 follow-on Batch 2B (`post-sprint-0/cfc-2b-codex-architecture-matrix`)
 has landed on the canonical branch as PR #28 / `c06a3e7 docs: encode
 Codex architecture matrix role decision` and is `Done` on the board
-below; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. The next gate is
-CFC follow-on Batch 2C
-(`post-sprint-0/cfc-2c-codex-identity-decision`), which appears in
-the `Backlog` column below; see [`./BACKLOG.md`](./BACKLOG.md) §e.13.
+below; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. CFC follow-on Batch
+2C (`post-sprint-0/cfc-2c-codex-identity-decision`) has landed on
+the canonical branch as PR #29 / `66a8074 docs: draft Codex identity
+record encoding decision (#29)` and is `Done` on the board below;
+see [`./BACKLOG.md`](./BACKLOG.md) §e.13. Source ratified eight §6
+decisions; the next gate is the Codex identity record authoring
+envelope, a separately Source-ratified privileged `identity`-class
+gate.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -76,9 +80,10 @@ merge, this board is regenerated per
 
 ### Backlog
 
-| id | scope (one line) | dependencies / blockers |
-|---|---|---|
-| `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2C decision-request artifact (`docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`) letting Source decide how the Batch 2A ratified Option C semantics and the Batch 2B envelope-bound authority wording are encoded inside the existing `docs/contracts/identity-record.md` substrate (single-record at `architect`, single-record at `implementer`, two separate records, or a `schema`-class amendment to multi-valued `role_category`), plus `authority_context`, `human_ratifier_roles`, `allowed_repositories`, `signing_policy`, storage paths, `tenant_id`, and reaffirmation that Batch 2D remains downstream. `governance` / `docs` mutation class. | `post-sprint-0/cfc-2a-codex-role-decision` (`Done`, PR #27 / `6b51882`); `post-sprint-0/cfc-2b-codex-architecture-matrix` (`Done`, PR #28 / `c06a3e7`). |
+*(No items currently in this column. The Codex identity record authoring
+envelope is the next gate; it requires a separate Source-ratified
+privileged `identity`-class envelope per Feature 001 FR-008 and is not
+yet shaped.)*
 
 ### Ready
 
@@ -117,6 +122,7 @@ canonical branch; see the `Done` table below.)*
 | `post-sprint-0/cfc-1-codex-first-class` | Governance scope + operations protocol substrate for Codex-first-class, without identity instantiation, schema mutation, authority expansion, provider binding, GitHub settings mutation, or Feature 005 dispatch automation. Batch 2+ deferred to separately Source-ratified envelopes. | Canonical-branch commit `30a3e8c docs: add CFC-1 scope and protocol envelope (#25)`. |
 | `post-sprint-0/cfc-2a-codex-role-decision` | CFC follow-on Batch 2A Codex role/authority decision request at `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`. Source ratified Option C (per-batch architect/implementer authoring assignment); Phase-1 allowed mutation classes = `governance`, `docs`, and `code` (with `code` gated to implementer-class envelopes; privileged classes Source-ratified); provider/tool/model/host/account binding remains placeholder/unbound; review evidence retained as a separate artifact class; `codex-architect` is a tenant/public overlay alias only; `docs/contracts/authority-matrix.yml` not mutated. | Canonical-branch commit `6b51882 docs: draft Codex role authority decision (#27)`. |
 | `post-sprint-0/cfc-2b-codex-architecture-matrix` | CFC follow-on Batch 2B architecture actor/tool matrix update at `docs/architecture/agent-interaction-model.md` §a (Codex row) and §b.4 (per-batch governed authoring / review pattern). Instantiates Batch 2A §6.1 Option C; authority remains envelope-bound, not personality-bound; Codex retains authoring parity only — no ratification, merge, or deploy authority; `codex-architect` named as tenant/public overlay alias, not a new baseline `role_category` row. `governance` / `docs` mutation class only — identity record, evidence schemas, authority matrix, and provider binding remain deferred. | Canonical-branch commit `c06a3e7 docs: encode Codex architecture matrix role decision` (PR #28). |
+| `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2C identity record encoding decision at `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`. Source ratified eight §6 decisions: Option A (single record, `role_category = architect`; Option C conservative fallback retained); `human_ratifier_roles = ["source"]`; placeholder/unbound posture for `allowed_repositories`, `signing_policy`, storage paths, and `tenant_id`; Batch 2D reaffirmed as downstream. `governance` / `docs` mutation class only — identity record, schemas, authority matrix, validators, templates, examples, tenants, `docs/architecture/**`, and `.github/**` not mutated. | Canonical-branch commit `66a8074 docs: draft Codex identity record encoding decision (#29)`. |
 
 ### Deferred
 
@@ -143,18 +149,20 @@ CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) is `Done` (PR #25
 (`post-sprint-0/cfc-2a-codex-role-decision`) is `Done` (PR #27 /
 `6b51882`). CFC follow-on Batch 2B
 (`post-sprint-0/cfc-2b-codex-architecture-matrix`) is `Done` (PR #28
-/ `c06a3e7`). The Source-ratified Batch 2A Option C semantics and
-the Batch 2B envelope-bound authority wording are landed but the
-Codex identity record has not yet been authored; CFC follow-on Batch
-2C (`post-sprint-0/cfc-2c-codex-identity-decision`) is the next gate
-and appears in the `Backlog` column above.
+/ `c06a3e7`). CFC follow-on Batch 2C
+(`post-sprint-0/cfc-2c-codex-identity-decision`) is `Done` (PR #29
+/ `66a8074`). Source ratified eight §6 decisions in
+`docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`.
 
-The Batch 2C decision request precedes any Codex identity record
-authoring envelope, any review/architect/implementer evidence schema
-(Batch 2D), and any provider/tool/model/host/account binding. Batch
-2C itself is `governance` / `docs`-class and does not mutate the
-identity-record contract or schema, the authority matrix, validators,
-templates, examples, tenants, `docs/architecture/**`, or `.github/**`.
+The Batch 2C §6 decisions pin the encoding posture (Option A —
+single record, `role_category = architect`), `authority_context`,
+`human_ratifier_roles`, `allowed_repositories`, `signing_policy`,
+storage paths, and `tenant_id` for the future Codex identity record
+authoring envelope. The next gate is that privileged
+`identity`-class envelope — a separate Source-ratified gate that
+is not yet shaped. Batch 2D (review/architect/implementer evidence
+schema, privileged `schema`-class) and provider/tool/model/host/
+account binding also remain separate downstream gates.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; Feature 004 reviewer-identity instantiation

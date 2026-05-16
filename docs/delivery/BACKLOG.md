@@ -53,11 +53,13 @@ docs: draft Codex role authority decision (#27)`; see §e.11. CFC
 follow-on Batch 2B (`post-sprint-0/cfc-2b-codex-architecture-matrix`)
 landed on the canonical branch as PR #28 / merge commit `c06a3e7
 docs: encode Codex architecture matrix role decision`; see §e.12.
-The next gate is CFC follow-on Batch 2C
-(`post-sprint-0/cfc-2c-codex-identity-decision`), the Codex identity
-record encoding decision request at
-`docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`; see
-§e.13.
+CFC follow-on Batch 2C
+(`post-sprint-0/cfc-2c-codex-identity-decision`) has landed on the
+canonical branch as PR #29 / merge commit `66a8074 docs: draft Codex
+identity record encoding decision (#29)`; see §e.13. Source ratified
+eight §6 decisions. The next gate is the Codex identity record
+authoring envelope, a separately Source-ratified privileged
+`identity`-class gate.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -700,7 +702,9 @@ recorded as §e.8 and §e.9.
   matrix update), 2C (Codex identity record encoding decision
   request), and 2D (review/architect/implementer-evidence schema)
   each require their own Source-ratified envelopes; 2B has since
-  landed (see §e.12) and 2C is the current next gate (see §e.13).
+  landed (see §e.12) and 2C has since landed (see §e.13); the current
+  next gate is the Codex identity record authoring envelope, a
+  separately Source-ratified privileged `identity`-class gate.
 - **anticipated mutation class**: `governance` / `docs`
 - **owner role**: `architect` (drafter) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
@@ -761,7 +765,7 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/cfc-2c-codex-identity-decision`
 - **parent**: —
-- **status**: `Backlog`
+- **status**: `Done`
 - **scope**: Decision-request artifact at
   `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`
   letting Source explicitly decide how the Batch 2A ratified
@@ -794,8 +798,12 @@ recorded as §e.8 and §e.9.
   mutated by Batch 2C. Minimal coherence updates to
   `docs/governance/CODEX_FIRST_CLASS_SCOPE.md`,
   `docs/delivery/BACKLOG.md`, `docs/delivery/KANBAN.md`, and
-  `docs/delivery/DEPENDENCIES.md` are part of the five-path
-  manifest. Codex identity record creation,
+  `docs/delivery/DEPENDENCIES.md` are part of the historical
+  five-path manifest for the original PR #29 commit; the follow-on
+  reconciliation gate extends this to the seven-path boundary
+  documented in
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md` §10.
+  Codex identity record creation,
   `docs/contracts/identity-record.md` mutation,
   `schemas/identity-record.schema.yaml` mutation, authority-matrix
   mutation, validator/template/example/tenant mutation,
@@ -803,11 +811,19 @@ recorded as §e.8 and §e.9.
   binding, Codex authority expansion, dispatch automation, and
   deploy are explicitly **not** authorized by Batch 2C.
 - **acceptance gate**: Batch 2C decision document and coherence
-  updates validate against the substrate validator and the five-path
-  manifest fidelity check; Source ratifies one option from the eight
-  §6 decisions in
-  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`;
-  merged on the canonical branch with finalized attestation.
+  updates validate against the substrate validator and the historical
+  five-path manifest fidelity check (original PR #29 boundary); the
+  follow-on reconciliation gate validates against the seven-path
+  boundary in
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md` §10;
+  Source ratified the eight §6 decisions in
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`
+  (Option A selected as primary encoding; Option C conservative
+  fallback retained; `human_ratifier_roles = ["source"]`;
+  placeholder/unbound posture for `allowed_repositories`,
+  `signing_policy`, storage paths, and `tenant_id`; Batch 2D
+  reaffirmed as downstream); merged on the canonical branch. Gate
+  met.
 - **dependencies / blockers**:
   `post-sprint-0/cfc-2a-codex-role-decision` (`Done`, PR #27 /
   `6b51882`) and
@@ -824,6 +840,16 @@ recorded as §e.8 and §e.9.
   envelope); `controller` / `reviewer` (Nefarious)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `66a8074 docs: draft Codex identity record encoding decision (#29)`
+  on the canonical branch. Source ratified Option A (single Codex
+  identity record, baseline `role_category = architect`; Option C
+  conservative fallback retained); `human_ratifier_roles = ["source"]`;
+  placeholder/unbound posture for `allowed_repositories`,
+  `signing_policy`, storage paths, and `tenant_id`;
+  `docs/contracts/authority-matrix.yml`, schemas, validators,
+  templates, examples, tenants, `docs/architecture/**`, and
+  `.github/**` not mutated.
 
 ## f. Maintenance rules
 
