@@ -46,7 +46,18 @@ PR #23 (`3dc45a1 fix: harden workflow validator follow-ups (#23)`)
 added and hardened the workflow-hardening protocol substrate. See
 §e.8 and §e.9. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
 governance scope and operations protocol substrate has landed on the
-canonical branch as PR #25 / merge commit `30a3e8c`; see §e.10.
+canonical branch as PR #25 / merge commit `30a3e8c`; see §e.10. CFC
+follow-on Batch 2A (`post-sprint-0/cfc-2a-codex-role-decision`)
+landed on the canonical branch as PR #27 / merge commit `6b51882
+docs: draft Codex role authority decision (#27)`; see §e.11. CFC
+follow-on Batch 2B (`post-sprint-0/cfc-2b-codex-architecture-matrix`)
+landed on the canonical branch as PR #28 / merge commit `c06a3e7
+docs: encode Codex architecture matrix role decision`; see §e.12.
+The next gate is CFC follow-on Batch 2C
+(`post-sprint-0/cfc-2c-codex-identity-decision`), the Codex identity
+record encoding decision request at
+`docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`; see
+§e.13.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -648,7 +659,7 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/cfc-2a-codex-role-decision`
 - **parent**: —
-- **status**: `Backlog`
+- **status**: `Done`
 - **scope**: Decision-request artifact at
   `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md` letting
   Source explicitly decide Codex role and authority semantics
@@ -686,10 +697,127 @@ recorded as §e.8 and §e.9.
 - **dependencies / blockers**:
   `post-sprint-0/cfc-1-codex-first-class` (`Done`, PR #25 /
   `30a3e8c`). Successor Batches 2B (architecture actor/tool
-  matrix update), 2C (Codex identity record), and 2D
-  (review/architect-evidence schema) depend on Batch 2A reaching
-  `Done` and each require their own Source-ratified privileged
-  envelopes.
+  matrix update), 2C (Codex identity record encoding decision
+  request), and 2D (review/architect/implementer-evidence schema)
+  each require their own Source-ratified envelopes; 2B has since
+  landed (see §e.12) and 2C is the current next gate (see §e.13).
+- **anticipated mutation class**: `governance` / `docs`
+- **owner role**: `architect` (drafter) / `implementer` (markdown
+  authoring under the Source-ratified visible implementation
+  envelope); `controller` / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commit
+  `6b51882 docs: draft Codex role authority decision (#27)` on the
+  canonical branch. Source ratified Option C (per-batch
+  architect/implementer authoring assignment); Phase-1 allowed
+  mutation classes = `governance`, `docs`, and `code` (with `code`
+  gated to implementer-class envelopes; privileged classes remain
+  Source-ratified); provider/tool/model/host/account binding remains
+  placeholder/unbound; review evidence retained as a separate
+  artifact class; `codex-architect` is a tenant/public overlay alias
+  only, not a new baseline `role_category` row;
+  `docs/contracts/authority-matrix.yml` was not mutated.
+
+### e.12 Post-Sprint-0 substrate — CFC follow-on Batch 2B: Codex architecture actor/tool matrix update
+
+- **id**: `post-sprint-0/cfc-2b-codex-architecture-matrix`
+- **parent**: —
+- **status**: `Done`
+- **scope**: Architecture actor/tool matrix update instantiating the
+  Batch 2A §6.1 Option C role choice in
+  `docs/architecture/agent-interaction-model.md` §a (Codex row) and
+  §b.4 (per-batch governed authoring / review pattern). Authority is
+  worded as **envelope-bound, not personality-bound**: an
+  architect-class envelope authorizes architect authoring; an
+  implementer-class envelope authorizes implementer authoring. Codex
+  retains authoring parity only — no ratification, merge, or deploy
+  authority. `codex-architect` is named as a tenant/public overlay
+  alias, not a new baseline `role_category` row. The Batch 2B
+  envelope is `governance` / `docs`-class and does not mutate
+  `docs/contracts/identity-record.md`,
+  `docs/contracts/authority-matrix.md`,
+  `schemas/`, validators, templates, examples, tenants, or
+  `.github/`. Codex identity record creation, review/architect/
+  implementer-evidence schemas, and provider binding remain deferred.
+- **acceptance gate**: Batch 2B architecture matrix update validates
+  against the substrate validator; delivery docs are coherent; Source
+  ratification recorded; merged on the canonical branch with finalized
+  attestation.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-2a-codex-role-decision` (`Done`, PR #27 /
+  `6b51882`).
+- **anticipated mutation class**: `governance` / `docs`
+- **owner role**: `architect` (drafter) / `implementer` (markdown
+  authoring under the Source-ratified visible implementation
+  envelope); `controller` / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commit
+  `c06a3e7 docs: encode Codex architecture matrix role decision`
+  on the canonical branch (PR #28).
+
+### e.13 Post-Sprint-0 substrate — CFC follow-on Batch 2C: Codex identity record encoding decision request
+
+- **id**: `post-sprint-0/cfc-2c-codex-identity-decision`
+- **parent**: —
+- **status**: `Backlog`
+- **scope**: Decision-request artifact at
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`
+  letting Source explicitly decide how the Batch 2A ratified
+  Option C semantics (per-batch architect/implementer authoring
+  assignment) and the Batch 2B envelope-bound authority wording are
+  encoded inside the existing `docs/contracts/identity-record.md`
+  substrate, **before** any Codex identity record authoring envelope
+  is consumed. Enumerates four candidate encodings under
+  single-valued `role_category`: Option A — single record with
+  baseline `role_category = architect` (implementer authoring
+  authorized solely by implementer-class envelopes); Option B —
+  single record with baseline `role_category = implementer`
+  (architect authoring authorized solely by architect-class
+  envelopes); Option C — two separate Codex identity records
+  (one architect, one implementer); Option D — amend the
+  identity-record schema to permit multi-valued `role_category`,
+  explicitly marked as a heavier `schema`-class privileged
+  amendment outside this draft's authority. Lists eight discrete
+  Source decisions: identity record encoding; `authority_context`
+  fields (including governing spec refs to the Batch 2A role-authority
+  decision and the Batch 2B agent-interaction-model wording);
+  `human_ratifier_roles` (Source); `allowed_repositories`
+  (placeholder/unbound versus concrete); `signing_policy`
+  (placeholder/unbound, including whether `commit_signing_method =
+  none` remains appropriate); storage paths
+  (`attestation_storage_path`, `ratification_storage_path`,
+  `redaction_storage_path`); `tenant_id` (placeholder substrate-
+  internal slug versus tenant-overlay deferral); and reaffirmation
+  that the Batch 2D evidence schema remains downstream and is not
+  mutated by Batch 2C. Minimal coherence updates to
+  `docs/governance/CODEX_FIRST_CLASS_SCOPE.md`,
+  `docs/delivery/BACKLOG.md`, `docs/delivery/KANBAN.md`, and
+  `docs/delivery/DEPENDENCIES.md` are part of the five-path
+  manifest. Codex identity record creation,
+  `docs/contracts/identity-record.md` mutation,
+  `schemas/identity-record.schema.yaml` mutation, authority-matrix
+  mutation, validator/template/example/tenant mutation,
+  `docs/architecture/**` mutation, `.github/**` mutation, provider
+  binding, Codex authority expansion, dispatch automation, and
+  deploy are explicitly **not** authorized by Batch 2C.
+- **acceptance gate**: Batch 2C decision document and coherence
+  updates validate against the substrate validator and the five-path
+  manifest fidelity check; Source ratifies one option from the eight
+  §6 decisions in
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`;
+  merged on the canonical branch with finalized attestation.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-2a-codex-role-decision` (`Done`, PR #27 /
+  `6b51882`) and
+  `post-sprint-0/cfc-2b-codex-architecture-matrix` (`Done`,
+  PR #28 / `c06a3e7`). Successor — a separately Source-ratified
+  privileged `identity`-class envelope authoring the Codex identity
+  record — depends on Batch 2C reaching `Done`. Batch 2D
+  (review/architect/implementer evidence schema, privileged
+  `schema`-class) remains downstream of Batch 2C and requires its
+  own Source-ratified envelope.
 - **anticipated mutation class**: `governance` / `docs`
 - **owner role**: `architect` (drafter) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
