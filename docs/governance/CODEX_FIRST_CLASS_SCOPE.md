@@ -170,21 +170,28 @@ When Codex acts in a future authorized batch:
 
 The following items are explicitly deferred to later Source-ratified
 CFC follow-on envelopes. Recording them here does not authorize them.
-Review-evidence-schema framing is **contingent on the CFC follow-on
-Batch 2A Source decision** captured in
-[`./CODEX_ROLE_AND_AUTHORITY_DECISION.md`](./CODEX_ROLE_AND_AUTHORITY_DECISION.md)
-§6.5 — depending on which option Source ratifies, the future schema
-may be retained as review evidence, renamed to architect/implementer
-evidence, or absorbed into attestation/ratification records.
+Review-evidence-schema framing follows the **Batch 2A §6.5 ratified
+posture** captured in
+[`./CODEX_ROLE_AND_AUTHORITY_DECISION.md`](./CODEX_ROLE_AND_AUTHORITY_DECISION.md):
+review evidence is retained as a separate artifact class.
+Architect-class artifacts authored by Codex are attested through the
+ordinary attestation flow; review evidence remains the separate
+artifact class any reviewer (Codex-as-reviewer or otherwise) may
+author. The Batch 2A role/authority decision is **landed**; the Batch
+2B architecture actor/tool matrix wording is **landed**; the next
+gate is the Batch 2C identity record encoding decision request in
+[`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md),
+which precedes any Codex identity record authoring envelope.
 
 | Deferred item | Expected class | Gate |
 |---|---|---|
-| CFC follow-on Batch 2A — Codex role/authority decision request | `governance` / `docs` | Source ratifies one option from [`./CODEX_ROLE_AND_AUTHORITY_DECISION.md`](./CODEX_ROLE_AND_AUTHORITY_DECISION.md) §6 before any Batch 2B/2C/2D mutation; Batch 2A itself does not amend the seven-row FR-015 baseline authority-matrix rule |
-| Codex identity record | `identity` (privileged) | Separate Source-ratified Feature 004 / CFC follow-on envelope; field values pinned by the Batch 2A §6.1 / §6.2 / §6.4 / §6.6 decisions |
-| Review-evidence schema | `schema` | Separate Source-ratified envelope with schema spec; framing contingent on the Batch 2A §6.5 decision |
-| Architecture actor/tool matrix update | `governance` | Separate Source-ratified envelope (Batch 2B), instantiating the Batch 2A §6.1 role choice |
-| Provider/tool/model/host/account binding | deployment overlay | Source decision at binding time; binding posture pinned by the Batch 2A §6.4 decision |
-| Codex authority expansion (ratification, merge, deploy) | Source decision | Not currently planned; Batch 2A §6.3 reaffirms that architect parity is authoring parity only |
+| CFC follow-on Batch 2A — Codex role/authority decision request | `governance` / `docs` | **Landed.** Source ratified Option C (per-batch architect/implementer authoring assignment) and the seven §6 decisions in [`./CODEX_ROLE_AND_AUTHORITY_DECISION.md`](./CODEX_ROLE_AND_AUTHORITY_DECISION.md). Batch 2A did not amend the seven-row FR-015 baseline authority-matrix rule. |
+| CFC follow-on Batch 2B — Architecture actor/tool matrix update | `governance` / `docs` | **Landed.** Instantiates the Batch 2A §6.1 Option C role choice in [`../architecture/agent-interaction-model.md`](../architecture/agent-interaction-model.md) §a and §b.4. Authority remains envelope-bound, not personality-bound. |
+| CFC follow-on Batch 2C — Codex identity record encoding decision request | `governance` / `docs` | Source ratifies one option from [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6 before any Codex identity record authoring envelope is consumed; Batch 2C itself does not mutate `docs/contracts/identity-record.md`, `docs/contracts/authority-matrix.md`, `schemas/identity-record.schema.yaml`, validators, templates, examples, tenants, `docs/architecture/**`, or `.github/**`. |
+| Codex identity record | `identity` (privileged) | Separate Source-ratified Feature 004 / CFC follow-on envelope; field values pinned by the Batch 2A §6.2 / §6.4 / §6.6 ratified posture and by the Batch 2C §6.1–§6.7 decisions |
+| Review-evidence schema (Batch 2D) | `schema` (privileged) | Separate Source-ratified envelope with schema spec; framing follows the Batch 2A §6.5 ratified posture (review evidence retained as a separate artifact class). Batch 2D is downstream of Batch 2C and is reaffirmed as non-mutated by Batch 2C per [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8 |
+| Provider/tool/model/host/account binding | deployment overlay | Source decision at binding time; binding posture remains placeholder/unbound per the Batch 2A §6.4 ratified posture and the Batch 2C §6.4 / §6.5 / §6.7 recommended posture |
+| Codex authority expansion (ratification, merge, deploy) | Source decision | Not currently planned; Batch 2A §6.3 ratified that architect parity is authoring parity only and Batch 2C §4 / §7 inherits the boundary unmodified |
 | Feature 005 dispatch automation | `governance` / `code` | Feature 005 spec ratified |
 
 ## 6. Cross-references

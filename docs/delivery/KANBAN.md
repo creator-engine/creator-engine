@@ -28,7 +28,18 @@ and PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening`
 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
 operations protocol substrate has landed on the canonical branch as
 PR #25 / `30a3e8c` and has moved from `Backlog` to `Done` on the
-board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.10.
+board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.10. CFC follow-on
+Batch 2A (`post-sprint-0/cfc-2a-codex-role-decision`) has landed on
+the canonical branch as PR #27 / `6b51882 docs: draft Codex role
+authority decision (#27)` and has moved from `Backlog` to `Done` on
+the board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.11. CFC
+follow-on Batch 2B (`post-sprint-0/cfc-2b-codex-architecture-matrix`)
+has landed on the canonical branch as PR #28 / `c06a3e7 docs: encode
+Codex architecture matrix role decision` and is `Done` on the board
+below; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. The next gate is
+CFC follow-on Batch 2C
+(`post-sprint-0/cfc-2c-codex-identity-decision`), which appears in
+the `Backlog` column below; see [`./BACKLOG.md`](./BACKLOG.md) §e.13.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -67,7 +78,7 @@ merge, this board is regenerated per
 
 | id | scope (one line) | dependencies / blockers |
 |---|---|---|
-| `post-sprint-0/cfc-2a-codex-role-decision` | CFC follow-on Batch 2A decision-request artifact (`docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`) letting Source decide Codex `role_category`, allowed mutation classes, authority boundary, binding posture, review-evidence semantics, public/tenant role label, and reaffirmation that `docs/contracts/authority-matrix.yml` is not mutated by Batch 2A. `governance` / `docs` mutation class. | `post-sprint-0/cfc-1-codex-first-class` (`Done`, PR #25 / `30a3e8c`). |
+| `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2C decision-request artifact (`docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`) letting Source decide how the Batch 2A ratified Option C semantics and the Batch 2B envelope-bound authority wording are encoded inside the existing `docs/contracts/identity-record.md` substrate (single-record at `architect`, single-record at `implementer`, two separate records, or a `schema`-class amendment to multi-valued `role_category`), plus `authority_context`, `human_ratifier_roles`, `allowed_repositories`, `signing_policy`, storage paths, `tenant_id`, and reaffirmation that Batch 2D remains downstream. `governance` / `docs` mutation class. | `post-sprint-0/cfc-2a-codex-role-decision` (`Done`, PR #27 / `6b51882`); `post-sprint-0/cfc-2b-codex-architecture-matrix` (`Done`, PR #28 / `c06a3e7`). |
 
 ### Ready
 
@@ -104,6 +115,8 @@ canonical branch; see the `Done` table below.)*
 | `post-sprint-0/oss-readiness` | Open-source readiness materials (PR #20) and public-launch readiness blocker remediation (PR #21). Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `35bf85f docs: add open-source readiness materials (#20)` and `5b762f9 fix: remediate public launch readiness blockers (#21)`. |
 | `post-sprint-0/workflow-hardening` | Workflow-hardening protocol set: operations protocol docs, schemas, templates, validator checks, CI validator hardening. Durable evidence for R-011 and R-012. Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `d892cd3 feat: add workflow hardening controls (#22)` and `3dc45a1 fix: harden workflow validator follow-ups (#23)`. |
 | `post-sprint-0/cfc-1-codex-first-class` | Governance scope + operations protocol substrate for Codex-first-class, without identity instantiation, schema mutation, authority expansion, provider binding, GitHub settings mutation, or Feature 005 dispatch automation. Batch 2+ deferred to separately Source-ratified envelopes. | Canonical-branch commit `30a3e8c docs: add CFC-1 scope and protocol envelope (#25)`. |
+| `post-sprint-0/cfc-2a-codex-role-decision` | CFC follow-on Batch 2A Codex role/authority decision request at `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`. Source ratified Option C (per-batch architect/implementer authoring assignment); Phase-1 allowed mutation classes = `governance`, `docs`, and `code` (with `code` gated to implementer-class envelopes; privileged classes Source-ratified); provider/tool/model/host/account binding remains placeholder/unbound; review evidence retained as a separate artifact class; `codex-architect` is a tenant/public overlay alias only; `docs/contracts/authority-matrix.yml` not mutated. | Canonical-branch commit `6b51882 docs: draft Codex role authority decision (#27)`. |
+| `post-sprint-0/cfc-2b-codex-architecture-matrix` | CFC follow-on Batch 2B architecture actor/tool matrix update at `docs/architecture/agent-interaction-model.md` §a (Codex row) and §b.4 (per-batch governed authoring / review pattern). Instantiates Batch 2A §6.1 Option C; authority remains envelope-bound, not personality-bound; Codex retains authoring parity only — no ratification, merge, or deploy authority; `codex-architect` named as tenant/public overlay alias, not a new baseline `role_category` row. `governance` / `docs` mutation class only — identity record, evidence schemas, authority matrix, and provider binding remain deferred. | Canonical-branch commit `c06a3e7 docs: encode Codex architecture matrix role decision` (PR #28). |
 
 ### Deferred
 
@@ -125,25 +138,30 @@ on the canonical branch; see the `Done` table above.)*
 
 ## c. Immediate next likely task
 
-CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope
-and operations protocol substrate has landed on the canonical branch
-as PR #25 / `30a3e8c`. All Sprint 0 Slices A–F and post-Sprint-0
-substrate items (`post-sprint-0/oss-readiness`, `Done`;
-`post-sprint-0/workflow-hardening`, `Done`; and now
-`post-sprint-0/cfc-1-codex-first-class`, `Done`) are complete on
-the delivery view.
+CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) is `Done` (PR #25
+/ `30a3e8c`). CFC follow-on Batch 2A
+(`post-sprint-0/cfc-2a-codex-role-decision`) is `Done` (PR #27 /
+`6b51882`). CFC follow-on Batch 2B
+(`post-sprint-0/cfc-2b-codex-architecture-matrix`) is `Done` (PR #28
+/ `c06a3e7`). The Source-ratified Batch 2A Option C semantics and
+the Batch 2B envelope-bound authority wording are landed but the
+Codex identity record has not yet been authored; CFC follow-on Batch
+2C (`post-sprint-0/cfc-2c-codex-identity-decision`) is the next gate
+and appears in the `Backlog` column above.
 
-There are no items currently in `Backlog`, `Ready`, `In Progress`,
-`Verified`, or `Ratified`. The next work is a separate
-Source-ratified follow-on selection. No next task is mechanically
-certain from the current delivery state; final next-task selection
-remains Source's.
+The Batch 2C decision request precedes any Codex identity record
+authoring envelope, any review/architect/implementer evidence schema
+(Batch 2D), and any provider/tool/model/host/account binding. Batch
+2C itself is `governance` / `docs`-class and does not mutate the
+identity-record contract or schema, the authority matrix, validators,
+templates, examples, tenants, `docs/architecture/**`, or `.github/**`.
 
-> All Sprint 0 slices and post-Sprint-0 substrate items have landed
-> on the canonical branch. Downstream deferred candidates (Feature
-> 003 extension of the landed `.github/` baseline, Feature 004
-> reviewer-identity instantiation / CFC follow-on Batch 2+, Feature
-> 005 dispatcher / worktree automation, Feature 006 release / deploy
+> Downstream deferred candidates (Feature 003 extension of the landed
+> `.github/` baseline; Feature 004 reviewer-identity instantiation
+> via the privileged `identity`-class Codex identity record authoring
+> envelope downstream of Batch 2C; CFC follow-on Batch 2D
+> review/architect/implementer-evidence schema; Feature 005
+> dispatcher / worktree automation; Feature 006 release / deploy
 > execution) are each `Deferred` in
 > [`./BACKLOG.md`](./BACKLOG.md) §e and require their own
 > Source-ratified privileged envelopes per Feature 001 FR-008 /
