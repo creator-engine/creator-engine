@@ -58,12 +58,20 @@ and PR #23 (`3dc45a1 fix: harden workflow validator follow-ups
 improvements and follow-up fixes. These four PRs are
 post-Sprint-0 substrate and are not Sprint 0 Slice A-F items; see
 [`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9. The delivery view
-now reflects canonical main at commit `30a3e8c`.
+now reflects canonical main at commit `66a8074`.
 CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
 operations protocol substrate has landed on the canonical branch via
 PR #25 / merge commit `30a3e8c`; see [`./BACKLOG.md`](./BACKLOG.md)
-§e.10. The next work is a separate Source-ratified follow-on
-selection.
+§e.10. CFC follow-on Batch 2A (`post-sprint-0/cfc-2a-codex-role-decision`)
+has landed as PR #27 / `6b51882`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.11. CFC follow-on Batch 2B
+(`post-sprint-0/cfc-2b-codex-architecture-matrix`) has landed as
+PR #28 / `c06a3e7`; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. CFC
+follow-on Batch 2C (`post-sprint-0/cfc-2c-codex-identity-decision`)
+has landed as PR #29 / `66a8074`; Source ratified eight §6 decisions;
+see [`./BACKLOG.md`](./BACKLOG.md) §e.13. The next work is the Codex
+identity record authoring envelope, a separately Source-ratified
+privileged `identity`-class gate.
 
 ## a. Purpose
 

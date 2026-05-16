@@ -4,10 +4,15 @@
 post-Sprint-0 substrate (PRs #20–#23) has also landed on the
 canonical branch. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
 specific risk controls have been added as §c.13–§c.19; CFC-1 Batch 1
-has since landed on the canonical branch as PR #25 / `30a3e8c`. Part of the
-**minimum repo-native delivery control plane** and **not a Jira
-clone**. Markdown-only by ratified posture. Layered on top of, and
-subordinate to, the Feature 001 substrate.
+has since landed on the canonical branch as PR #25 / `30a3e8c`. CFC
+follow-on Batches 2A (PR #27 / `6b51882`), 2B (PR #28 / `c06a3e7`),
+and 2C (PR #29 / `66a8074`) have all landed; Source ratified eight §6
+decisions in Batch 2C. The next gate is the Codex identity record
+authoring envelope, a separately Source-ratified privileged
+`identity`-class gate. Part of the **minimum repo-native delivery
+control plane** and **not a Jira clone**. Markdown-only by ratified
+posture. Layered on top of, and subordinate to, the Feature 001
+substrate.
 
 **Scope**: This register names the standing risks to Sprint 0
 execution and the immediate post-Sprint-0 follow-on work. It is a

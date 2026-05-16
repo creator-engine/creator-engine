@@ -1,15 +1,31 @@
-# CFC follow-on Batch 2C — Codex Identity Record Encoding Decision Request
+# CFC follow-on Batch 2C — Codex Identity Record Encoding Decision
 
 **Batch id**: `post-sprint-0/cfc-2c-codex-identity-decision`
-**Batch**: CFC follow-on Batch 2C (decision-request, docs/governance only)
+**Batch**: CFC follow-on Batch 2C (ratified, docs/governance only)
 **Mutation class**: `governance` / `docs`
 **Ratifier**: `source` only
-**Status**: Decision request — Source has not yet selected an option.
+**Status**: Source-ratified — eight §6 decisions ratified by Source; merged on canonical origin/main via PR #29 / merge commit `66a8074`.
+
+## Source-ratified decisions (PR #29 / merge commit `66a8074`)
+
+Source ratified the following eight §6 decisions as a bundle. Detailed candidate values and recommendation rationale are preserved in §3–§5 and each §6 subsection for historical context.
+
+| Decision | Source-ratified posture |
+|---|---|
+| §6.1 Codex identity record encoding | Option A — single record, baseline `role_category = architect`. Option C (two separate records) retained as conservative fallback only if a future authoring envelope proves Option A incompatible with checked-in schema truth. Option B and Option D not selected. |
+| §6.2 `authority_context` | Description text as written in §6.2. `governing_spec_refs`: the four cited paths in §6.2 plus `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`. `ratifier_authority_refs`: `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` and `docs/contracts/authority-matrix.md`. |
+| §6.3 `human_ratifier_roles` | `["source"]`. |
+| §6.4 `allowed_repositories` | Placeholder/unbound posture; no concrete repository binding. Literal placeholder wording deferred to the future authoring envelope. |
+| §6.5 `signing_policy` | `commit_signing_required = false`, `commit_signing_method = none`, `attestation_signing_required = false`. Placeholder/unbound signing posture. |
+| §6.6 Storage paths | Substrate-internal storage under a Codex-specific path beneath the §6.7 placeholder tenant slug. Literal path strings deferred to the future authoring envelope. |
+| §6.7 `tenant_id` | Placeholder substrate-internal slug; no concrete tenant binding. Literal slug deferred to the future authoring envelope. |
+| §6.8 Batch 2D evidence schema | Ratify the statement as written — Batch 2D remains downstream; Batch 2C does not mutate evidence schemas. |
 
 ## 1. Purpose
 
-This document is a **Source decision-request artifact**, not a final
-decision. It exists to let Source explicitly decide how the
+This document originated as a **Source decision-request artifact** and is
+now **Source-ratified** (PR #29 / merge commit `66a8074`). It exists to
+let Source explicitly decide how the
 Source-ratified Batch 2A Codex Option C semantics (per-batch
 architect/implementer authoring role assignment) and the Batch 2B
 architecture actor/tool matrix wording (envelope-bound authority, not
@@ -21,12 +37,16 @@ authority-matrix contract, mutates a validator, template, example, or
 tenant overlay, binds a provider/tool/model/host/account, or expands
 Codex authority.
 
-Batch 2C produces only this decision document and minimal coherence
-updates to the four existing delivery/governance files listed in §10.
-Source ratification of one of the options in §3 and the eight discrete
-decisions in §6 is the gate that any subsequent Codex identity record
-authoring envelope consumes. Until Source ratifies, no encoding claim
-in this document is in effect.
+The original Batch 2C commit (PR #29 / `66a8074`) produced only this
+decision document and minimal coherence updates to the four existing
+delivery/governance files in the §10 historical five-path manifest.
+This follow-on reconciliation gate addresses residual coherence gaps
+across the expanded seven-path boundary listed in §10. Source
+ratification of the eight §6 decisions is now recorded in the
+ratification block above and in each §6 subsection's **Source-ratified
+selection** line; these encoding claims are in effect. The future Codex
+identity record authoring envelope is the next separately Source-ratified
+privileged gate.
 
 ## 2. Source-ratified basis carried forward
 
@@ -391,6 +411,11 @@ candidate values and the recommended value.
     amendment.
 - **Recommended value**: Option A, with Option C as conservative
   fallback (see §5).
+- **Source-ratified selection**: Option A — single record, baseline
+  `role_category = architect`. Option C (two separate records) retained
+  as conservative fallback only if a future authoring envelope proves
+  Option A incompatible with checked-in schema truth. Option B and
+  Option D are not selected.
 - **Effect of ratification**: selects which encoding the future
   Codex identity record authoring envelope (separately Source-
   ratified, `identity`-class privileged) consumes. No identity
@@ -434,6 +459,12 @@ authoring envelope will adopt.
   - `docs/contracts/authority-matrix.md`
   - Any Source-added paths.
 - **Recommended value**: the two paths above.
+- **Source-ratified selection**: description text as written above;
+  `governing_spec_refs` = the four cited paths plus
+  `docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`;
+  `ratifier_authority_refs` =
+  `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` and
+  `docs/contracts/authority-matrix.md`.
 - **Effect of ratification**: pins the `authority_context` field
   values the future identity record authoring envelope will adopt.
 
@@ -447,6 +478,7 @@ authoring envelope will adopt.
 - **Recommended value**: `["source"]`. Source-only ratification per
   Feature 001 FR-008 is the Phase 1 invariant; any delegation is a
   separately Source-ratified governance amendment outside Batch 2C.
+- **Source-ratified selection**: `["source"]`.
 - **Effect of ratification**: pins the `human_ratifier_roles` field
   the future identity record authoring envelope will adopt.
 
@@ -473,6 +505,9 @@ authoring envelope will adopt.
   The Source-ratified placeholder value will be chosen by the future
   identity record authoring envelope; Batch 2C does not pick the
   literal placeholder string.
+- **Source-ratified selection**: placeholder/unbound posture; no
+  concrete repository binding. Literal placeholder wording deferred
+  to the future authoring envelope.
 - **Effect of ratification**: pins the `allowed_repositories` posture
   the future identity record authoring envelope will adopt. **Batch
   2C does not bind any concrete repository identifier.**
@@ -503,6 +538,10 @@ authoring envelope will adopt.
   with `commit_signing_method = none` is permitted (the "if `true`,
   must not be `none`" rule binds only the `true` branch) makes this
   posture contract-conformant.
+- **Source-ratified selection**: `commit_signing_required = false`,
+  `commit_signing_method = none`,
+  `attestation_signing_required = false`. Placeholder/unbound signing
+  posture; no signing enforcement authorized by this decision.
 - **Effect of ratification**: pins the `signing_policy` posture the
   future identity record authoring envelope will adopt. Deployment-
   time overlay binding remains a separately Source-ratified
@@ -538,6 +577,9 @@ will adopt.
   the literal path strings chosen by the future identity record
   authoring envelope. Batch 2C does not author the directories and
   does not bind tenant overlays.
+- **Source-ratified selection**: substrate-internal storage under a
+  Codex-specific path beneath the §6.7 placeholder tenant slug.
+  Literal path strings deferred to the future authoring envelope.
 - **Effect of ratification**: pins the storage-path posture the
   future identity record authoring envelope will adopt. The actual
   directory creation is part of the future privileged
@@ -564,6 +606,9 @@ The contract requires `tenant_id` to be a kebab-case slug matching
   posture. The literal slug is chosen by the future identity record
   authoring envelope. Batch 2C does not author a tenant record under
   `tenants/`.
+- **Source-ratified selection**: placeholder substrate-internal slug;
+  no concrete tenant binding. Literal slug deferred to the future
+  authoring envelope.
 - **Effect of ratification**: pins the `tenant_id` posture the future
   identity record authoring envelope will adopt.
 
@@ -580,6 +625,10 @@ The contract requires `tenant_id` to be a kebab-case slug matching
   - Ratify the statement as written.
   - Ratify a Source-amended statement.
 - **Recommended value**: ratify the statement as written.
+- **Source-ratified selection**: ratify the statement as written —
+  Batch 2D evidence schema remains downstream; Batch 2C does not
+  mutate evidence schemas; Batch 2D remains a separate downstream
+  Source-ratified gate.
 - **Effect of ratification**: makes the non-mutation of evidence
   schemas part of the Batch 2C acceptance posture and preserves the
   Batch 2D gate as a separate Source decision.
@@ -633,8 +682,10 @@ item below requires its own separately Source-ratified envelope:
 
 The following documents are cited as the substrate context for this
 decision request. **None of these documents is modified by Batch
-2C.** Only the four delivery/governance files in §10 are modified by
-Batch 2C in addition to this document.
+2C.** The four delivery/governance files in the §10 historical
+five-path manifest were modified by the original Batch 2C commit
+(PR #29 / `66a8074`); the follow-on reconciliation gate modifies
+the seven-path boundary listed in §10.
 
 | Document | Relevance | Modified by Batch 2C? |
 |---|---|---|
@@ -675,8 +726,10 @@ This document satisfies the Batch 2C decision-request boundary if:
    storage paths, `tenant_id`, and the Batch 2D-remains-downstream
    reaffirmation.
 6. It cross-references the documents in §8 without modifying any of
-   them (only the four delivery/governance files in §10 are modified
-   by Batch 2C in addition to this document).
+   them (the original Batch 2C commit modified the four delivery/
+   governance files in the §10 historical five-path manifest; the
+   follow-on reconciliation gate modifies the seven-path boundary
+   listed in §10).
 7. It includes a "does not authorize" block (§7) that explicitly
    forecloses identity-record creation, identity-record contract
    mutation, identity-record schema mutation, authority-matrix
@@ -686,7 +739,8 @@ This document satisfies the Batch 2C decision-request boundary if:
 
 ## 10. Batch 2C allowed path manifest (informational)
 
-Batch 2C mutates only these five tracked paths:
+The original Batch 2C commit (PR #29 / merge commit `66a8074`)
+mutated these five tracked paths (historical boundary):
 
 ```text
 docs/delivery/BACKLOG.md
@@ -696,6 +750,24 @@ docs/governance/CODEX_FIRST_CLASS_SCOPE.md
 docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md
 ```
 
-This manifest is restated here for self-containment; it is also
-recorded in the Source-ratified prompt and engineer handoff that
-authorize this batch.
+The follow-on reconciliation gate (local-commit gate, post-PR #29)
+corrects residual coherence gaps across the following seven tracked
+paths (current reconciliation boundary):
+
+```text
+docs/delivery/BACKLOG.md
+docs/delivery/DEPENDENCIES.md
+docs/delivery/KANBAN.md
+docs/delivery/README.md
+docs/delivery/RISK_REGISTER.md
+docs/governance/CODEX_FIRST_CLASS_SCOPE.md
+docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md
+```
+
+The five-path list is the historical PR #29 boundary. The seven-path
+list is the current reconciliation boundary. Both lists include this
+document; only the reconciliation boundary includes `README.md` and
+`RISK_REGISTER.md`. This manifest is restated here for
+self-containment; the historical five-path boundary is also recorded
+in the Source-ratified prompt and engineer handoff that authorized
+the original Batch 2C commit.
