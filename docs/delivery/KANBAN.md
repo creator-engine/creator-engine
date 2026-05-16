@@ -21,6 +21,10 @@ protection settings on the remote repository remain a separate
 privileged future decision and are not mutated by PR #12, PR #14,
 or PR #16. The canonical Slice F row has moved from `Blocked` to
 `Done` on the board below with durable evidence PR #16 / `cb7f94a`.
+Post-Sprint-0 substrate has since landed and is reflected in the
+`Done` table below: `post-sprint-0/oss-readiness` (PR #20 / `35bf85f`
+and PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening`
+(PR #22 / `d892cd3` and PR #23 / `3dc45a1`).
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -92,6 +96,8 @@ canonical branch; see the `Done` table below.)*
 | `sprint-0/slice-d` | Generic reviewer identity record **pattern** (not an instantiated identity); generic markdown-equivalent QA / review evidence template; review-gate definition; standing invariant that review evidence is not Source ratification. | Canonical-branch commit `6058661 docs: define reviewer evidence gate for Slice D` landed `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`, `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`, and `docs/delivery/REVIEW_GATE.md`, with minimal coherence updates to `docs/delivery/README.md`, `docs/delivery/BACKLOG.md`, this Kanban, and `docs/delivery/DEPENDENCIES.md`. |
 | `sprint-0/slice-e` | Manual Assignment Envelope template; worktree / branch naming and one-driver-per-worktree rule; envelope consumption and scope-audit checklists; non-authorizing dry-run evidence. | Canonical-branch commit `3cb0266 docs: add Sprint 0 Slice E assignment runtime protocol (#14)` landed `docs/delivery/ASSIGNMENT_ENVELOPE_TEMPLATE.md`, `docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md`, `docs/delivery/ENVELOPE_CONSUMPTION_CHECKLIST.md`, `docs/delivery/SCOPE_AUDIT_CHECKLIST.md`, and `docs/delivery/ASSIGNMENT_ENVELOPE_DRY_RUN.md`, with minimal coherence updates to `docs/delivery/README.md`, `docs/delivery/BACKLOG.md`, this Kanban, and `docs/delivery/DEPENDENCIES.md`. |
 | `sprint-0/slice-f` | Release-candidate checklist; merge-approval checklist; deployment-approval policy; rollback / evidence expectations; explicit `deploy` mutation ratification rule; statement of currently absent deployment targets / environments. Policy / docs only; not deploy automation. | Canonical-branch commit `cb7f94a docs: add Slice F release deploy governance policy (#16)` landed `docs/delivery/RELEASE_DEPLOY_GOVERNANCE.md`, `docs/delivery/RELEASE_CANDIDATE_CHECKLIST.md`, `docs/delivery/MERGE_APPROVAL_CHECKLIST.md`, `docs/delivery/DEPLOYMENT_APPROVAL_POLICY.md`, and `docs/delivery/ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`, with minimal coherence updates to existing delivery docs. |
+| `post-sprint-0/oss-readiness` | Open-source readiness materials (PR #20) and public-launch readiness blocker remediation (PR #21). Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `35bf85f docs: add open-source readiness materials (#20)` and `5b762f9 fix: remediate public launch readiness blockers (#21)`. |
+| `post-sprint-0/workflow-hardening` | Workflow-hardening protocol set: operations protocol docs, schemas, templates, validator checks, CI validator hardening. Durable evidence for R-011 and R-012. Post-Sprint-0 substrate; not a Sprint 0 Slice A-F item. | Canonical-branch commits `d892cd3 feat: add workflow hardening controls (#22)` and `3dc45a1 fix: harden workflow validator follow-ups (#23)`. |
 
 ### Deferred
 
@@ -116,10 +122,15 @@ on the canonical branch; see the `Done` table above.)*
 `sprint-0/slice-f` is `Done` on the delivery view; durable
 canonical-branch evidence is PR #16 / commit
 `cb7f94a docs: add Slice F release deploy governance policy`.
-Slices A–F have all landed; the next-task selection on the Sprint 0
-delivery view therefore defers to Source.
+Post-Sprint-0 substrate has additionally landed:
+`post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
+PR #21 / `5b762f9`) and `post-sprint-0/workflow-hardening` (`Done`,
+PR #22 / `d892cd3` and PR #23 / `3dc45a1`). Slices A–F and the
+post-Sprint-0 substrate have all landed on the canonical branch;
+the next-task selection defers to Source.
 
-> Sprint 0 slice consumption is complete on the delivery view.
+> Sprint 0 slice consumption and post-Sprint-0 substrate landing
+> are complete on the delivery view.
 > Downstream candidates (Feature 003 extension of the landed
 > `.github/` baseline, Feature 004 reviewer-identity instantiation,
 > Feature 005 dispatcher / worktree automation, Feature 006
