@@ -44,7 +44,9 @@ PR #21 (`5b762f9 fix: remediate public launch readiness blockers
 PR #22 (`d892cd3 feat: add workflow hardening controls (#22)`) and
 PR #23 (`3dc45a1 fix: harden workflow validator follow-ups (#23)`)
 added and hardened the workflow-hardening protocol substrate. See
-§e.8 and §e.9.
+§e.8 and §e.9. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
+governance scope and operations protocol substrate has been added to
+the post-Sprint-0 backlog as §e.10, pending Source ratification.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -600,6 +602,44 @@ recorded as §e.8 and §e.9.
 - **durable evidence**: merged commits `d892cd3 feat: add workflow
   hardening controls (#22)` and `3dc45a1 fix: harden workflow
   validator follow-ups (#23)` on the canonical branch.
+
+### e.10 Post-Sprint-0 substrate — CFC-1: Codex first-class actor envelope (Batch 1)
+
+- **id**: `post-sprint-0/cfc-1-codex-first-class`
+- **parent**: —
+- **status**: `Backlog` (pending Source ratification)
+- **scope**: Governance scope document
+  (`docs/governance/CODEX_FIRST_CLASS_SCOPE.md`) and operations
+  protocol (`docs/operations/CODEX_FIRST_CLASS_PROTOCOL.md`)
+  establishing the bounded scope/protocol substrate for making Codex
+  first-class later, without instantiating Codex identity, creating
+  review-evidence schemas, updating the architecture actor/tool
+  matrix, expanding Codex authority, binding any
+  provider/tool/model/host/account, mutating GitHub settings, or
+  implementing Feature 005 dispatch automation. Batch 1 mutation
+  class: `governance` / `docs`. Delivery docs updated for
+  discoverability (`docs/delivery/BACKLOG.md`, `KANBAN.md`,
+  `DEPENDENCIES.md`, `README.md`, `RISK_REGISTER.md`). Privileged
+  Codex identity record, review-evidence schema, architecture
+  actor/tool matrix update, and Codex authority expansion are
+  explicitly deferred to a later Source-ratified Feature 004/CFC
+  follow-on envelope.
+- **acceptance gate**: Batch 1 governance scope and operations
+  protocol documents validate; delivery docs are coherent; Source
+  ratification is recorded; merged on the canonical branch with
+  finalized attestation.
+- **dependencies / blockers**: Sprint 0 Slices A–F (`Done`);
+  `post-sprint-0/oss-readiness` (`Done`);
+  `post-sprint-0/workflow-hardening` (`Done`). Each of these
+  predecessor edges is cleared. Feature 004/CFC follow-on identity
+  and schema work depends on this item reaching `Done` and requires
+  its own Source-ratified privileged envelope; it does not unblock
+  here.
+- **anticipated mutation class**: `governance` / `docs`
+- **owner role**: `implementer` (Claude Code under Hermes envelope);
+  `controller` / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
 
 ## f. Maintenance rules
 

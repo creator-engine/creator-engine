@@ -2,9 +2,11 @@
 
 **Status**: Sprint 0 Slices A–F complete on the delivery view;
 post-Sprint-0 substrate (PRs #20–#23) has also landed on the
-canonical branch. Part of the **minimum repo-native delivery control
-plane** and **not a Jira clone**. Markdown-only by ratified posture.
-Layered on top of, and subordinate to, the Feature 001 substrate.
+canonical branch. CFC-1 (`post-sprint-0/cfc-1-codex-first-class`)
+specific risk controls have been added as §c.13–§c.19. Part of the
+**minimum repo-native delivery control plane** and **not a Jira
+clone**. Markdown-only by ratified posture. Layered on top of, and
+subordinate to, the Feature 001 substrate.
 
 **Scope**: This register names the standing risks to Sprint 0
 execution and the immediate post-Sprint-0 follow-on work. It is a
@@ -550,6 +552,304 @@ operator changes.
   validator checks including `path_manifest_fidelity` check) and
   PR #23 / `3dc45a1` (CI validator hardening, follow-up fixes).
 
+### c.13 R-013 — Codex verification confused with Source ratification
+
+- **id**: `R-013`
+- **description**: A CFC-1 or future CFC batch Codex review verdict
+  (`pass`, `pass_with_observations`) is treated as equivalent to
+  Source ratification, and a privileged-class mutation is merged
+  without explicit Source ratification. The verifies-not-ratifies
+  invariant collapses in the Codex-specific context.
+- **likelihood**: `Medium`. The risk is elevated for CFC follow-on
+  batches where Codex review is explicitly informative and where the
+  quality of Codex output may make it tempting to treat a positive
+  verdict as sufficient.
+- **impact**: `Severe`. Violates Feature 001 FR-008 and FR-013;
+  corrupts the substrate audit trail; erodes the foundational
+  principle that no AI review substitutes for Source ratification of
+  any privileged class.
+- **mitigation**:
+  1. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §3.5 explicitly prohibits Codex ratification authority for any
+     artifact class.
+  2. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     §5 restates the verifies-not-ratifies invariant in the
+     Codex-specific context with explicit verdict constraints.
+  3. [`./REVIEW_GATE.md`](./REVIEW_GATE.md) names explicit criteria
+     for when independent review evidence is required and how it is
+     evaluated; a Codex verdict enters this gate as evidence, not as
+     ratification.
+  4. Feature 001 FR-013 and Feature 002 FR-013 are the authoritative
+     substrate statements; any CFC envelope that purports to modify
+     this invariant is a contract violation.
+- **trigger / early warning**: A merge report cites a Codex verdict
+  as governance evidence without a separate `repo_ratification_record`
+  from Source. A PR description includes "Codex approved" as a
+  substitute for Source ratification. A CFC batch envelope's ratifier
+  field names Codex rather than `source`.
+- **owner role**: `source` (sole ratifier); `controller` (Nefarious
+  must not relay a Codex verdict as ratification); `implementer`
+  (must not escalate a Codex verdict to ratification).
+- **current status**: Open; mitigation active via scope doc §3.5 and
+  protocol doc §5.
+
+### c.14 R-014 — Codex actor authority or mutation-class scope creep
+
+- **id**: `R-014`
+- **description**: A CFC-1 or future CFC batch gradually expands the
+  scope of Codex-authorized mutations — adding paths, mutation
+  classes, or action types beyond the Source-ratified envelope —
+  rationalized as "small" scope extensions needed for the batch.
+  Each individual extension appears reasonable; together they expand
+  Codex authority beyond the Source-ratified boundary.
+- **likelihood**: `Medium`. Scope creep is common under time pressure;
+  for CFC batches the risk is that the Codex-first-class framing is
+  misread as implying Codex is already a fully authorized actor
+  rather than an actor whose authority is bounded per envelope.
+- **impact**: `Severe`. Violates Feature 001 FR-008; may introduce
+  privileged mutations (identity, schema, governance) without Source
+  ratification; corrupts the substrate.
+- **mitigation**:
+  1. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §3 enumerates all non-authorized Batch 1 actions; any extension
+     of the list requires a new Source-ratified envelope.
+  2. The allowed path manifest in each CFC envelope is
+     count-and-SHA256-verified; Codex must stop immediately if any
+     path outside the manifest would be mutated.
+  3. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     §4 stop-line item 1 requires immediate escalation if a file
+     outside the allowed manifest would be authored.
+  4. The post-merge scope-audit field
+     ([`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.5)
+     surfaces unexpected paths.
+- **trigger / early warning**: A CFC batch diff includes paths outside
+  the Source-ratified allowed path manifest. A Codex session proposes
+  creating an identity record, a schema, or an architecture document
+  not in the manifest. A CFC envelope's `allowed_mutation_classes` is
+  silently extended beyond the ratified class list.
+- **owner role**: `source` (scope authority); `controller` (Nefarious
+  catches manifest overflows); `implementer` (Codex must hard-stop at
+  manifest boundary).
+- **current status**: Open; mitigation active via scope doc §3 and
+  protocol doc §4.
+
+### c.15 R-015 — Codex author/approver collapse
+
+- **id**: `R-015`
+- **description**: The actor that authors a CFC batch artifact is also
+  the actor that ratifies or independently reviews it, collapsing the
+  author/approver separation required by Feature 001 FR-007. In the
+  Codex-specific context this could arise if Codex authors artifacts
+  and then its own review evidence is treated as independent
+  verification, or if Nefarious authors the artifacts and then
+  approves them as both controller and ratifier without Source being
+  separate.
+- **likelihood**: `Medium`. The CFC-1 framing explicitly names Codex
+  as both a future author and a future reviewer, creating a surface
+  for collapse if batch boundaries are not maintained.
+- **impact**: `High`. Violates Feature 001 FR-007; corrupts the
+  independent review gate; may allow self-certifying artifacts to
+  merge.
+- **mitigation**:
+  1. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §4.2 and §4.3 separately restate Nefarious's
+     controller/reviewer/approver role and Claude Code's implementer
+     role as distinct seats.
+  2. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     §3 defines evidence requirements; a Codex review of
+     Codex-authored artifacts must be independently verifiable by
+     Nefarious before Source ratification.
+  3. Feature 001 FR-007 is the authoritative statement; any CFC
+     envelope that assigns the same actor to author and ratify is a
+     contract violation.
+  4. Nefarious independently verifies Codex output before reporting
+     to Source; Nefarious is the controller/reviewer, not the
+     ratifier.
+- **trigger / early warning**: A CFC batch shows the same actor
+  (Codex or Claude Code or Nefarious) as both the artifact author and
+  the ratifier. A review evidence record is authored by the same
+  session that authored the artifacts under review. A merge report
+  omits a distinct ratifier field.
+- **owner role**: `source` (ratifier, by definition separate from any
+  implementer); `controller` (Nefarious maintains the boundary);
+  `architect` (envelope design must name distinct author and ratifier
+  seats).
+- **current status**: Open; mitigation active via scope doc §4.2 and
+  §4.3 and protocol doc §3.
+
+### c.16 R-016 — Controller-seat tracked-file authoring during CFC batches
+
+- **id**: `R-016`
+- **description**: During a CFC-1 or future CFC batch, Nefarious (in
+  the controller/reviewer seat) directly authors tracked files that
+  are in the implementer's (Claude Code's or Codex's) allowed path
+  manifest — typically a "quick fix" to a newly-created governance or
+  operations doc — without going through the implementer pane. This
+  is a CFC-specific instance of R-011 with the additional
+  complication that the CFC governance docs name Nefarious as the
+  controller/reviewer, making it easier for the boundary to blur
+  implicitly.
+- **likelihood**: `Medium`. The CFC docs define Nefarious's role
+  prominently; during batch execution the distinction between
+  "Nefarious reading the draft" and "Nefarious authoring a paragraph"
+  is easy to collapse under time pressure.
+- **impact**: `High`. Violates Feature 001 FR-007; corrupts the
+  implementer-pane transcript as the system of record; controller-
+  seat edits to CFC governance docs specifically undermine the
+  scope/protocol artifacts that are meant to define the boundary.
+- **mitigation**:
+  1. R-011 ([`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.11) is
+     the general control; R-016 is the CFC-specific application.
+  2. [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md)
+     §d hardcodes controller-verifies-never-authors; this applies
+     during CFC batches without exception.
+  3. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §4.2 restates that Nefarious verifies and approves but does not
+     author the Batch 1 tracked files.
+  4. [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)
+     §d closes the implementer-pane transcript; controller-authored
+     content after the stop line is detectable.
+- **trigger / early warning**: A CFC batch diff includes changes to
+  CFC governance or operations docs that are not reflected in the
+  implementer-pane transcript. Nefarious's report-back claims to have
+  "made a small fix" to `CODEX_FIRST_CLASS_SCOPE.md` or
+  `CODEX_FIRST_CLASS_PROTOCOL.md`. A scope-audit run finds a tracked
+  path in the diff that the implementer never opened.
+- **owner role**: `source` (boundary authority); `controller`
+  (Nefarious must not edit tracked files in the implementer's
+  manifest); `implementer` (refuses to ratify content they did not
+  author).
+- **current status**: Open; mitigation active via R-011 controls and
+  scope doc §4.2.
+
+### c.17 R-017 — Codex worktree isolation failure
+
+- **id**: `R-017`
+- **description**: During a future CFC batch where Codex acts as
+  implementer, Codex shares a worktree with Claude Code or Nefarious,
+  or writes directly to the canonical main branch without going
+  through an isolated worktree and PR. The one-driver-per-worktree
+  invariant is violated; concurrent writes from different sessions
+  corrupt the worktree state; or Codex output is merged without a
+  reviewable PR.
+- **likelihood**: `Low`. The risk is low for Batch 1 (Claude Code is
+  the Batch 1 implementer); it rises for any future CFC batch where
+  Codex acts as the primary tracked-file author.
+- **impact**: `High`. Violates
+  [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md)
+  §d.2 (one-driver-per-worktree); may produce merges without
+  independent review; corrupts the audit trail.
+- **mitigation**:
+  1. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     §2 defines Codex-only worktree isolation with a `-codex-review`
+     suffix naming convention and explicit prohibition on writing to
+     Claude Code worktrees or canonical main.
+  2. [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md)
+     §d.2 applies without exception; Codex worktrees follow the same
+     one-driver rule.
+  3. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §4.4 restates Codex worktree isolation as a governance
+     requirement; isolation does not substitute for Source
+     authorization.
+  4. Any Codex-authored batch must go through an isolated worktree →
+     PR → Source ratification → merge path; no direct-to-main write
+     is authorized.
+- **trigger / early warning**: A Codex session is found to have
+  authored files in a worktree that also has an active Claude Code
+  session. A Codex-authored commit appears on canonical main without
+  a corresponding PR. Two different actor sessions share the same
+  worktree directory.
+- **owner role**: `source` (authorizes Codex batches); `controller`
+  (Nefarious must verify isolation before authorizing a Codex
+  session); `implementer` (Codex must stop if isolation invariants
+  cannot be satisfied).
+- **current status**: Open; mitigation active via protocol doc §2.
+
+### c.18 R-018 — Provider/tool/model/host/account binding leakage into upstream docs
+
+- **id**: `R-018`
+- **description**: A CFC-1 or future CFC batch binds a concrete
+  provider, tool, model version, host installation, or account into
+  the governance scope or operations protocol documents. The upstream
+  tree picks up a dependency on a specific deployment decision that
+  should remain a deployment-time overlay.
+- **likelihood**: `Medium`. CFC batches are explicitly about making
+  Codex first-class; the temptation to name specific tools, models,
+  or API endpoints is high when drafting protocol docs that describe
+  how Codex should act.
+- **impact**: `High`. Violates Feature 002 FR-025
+  (implementation-agnostic substrate); makes the governance docs
+  non-portable; forces a Source-ratified amendment whenever the
+  concrete binding changes.
+- **mitigation**:
+  1. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §3.7 explicitly prohibits provider/tool/model/host/account
+     binding in Batch 1.
+  2. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     is written in implementation-agnostic language; it names "Codex"
+     as an actor-role label, not as a specific model-version or API
+     product.
+  3. The allowed path manifest for Batch 1 does not include any
+     `tenants/`, `schemas/`, or deployment-overlay paths where
+     bindings would normally live.
+  4. The Creator Engine substrate's `scan-no-limitless` check may
+     be extended to surface concrete model/provider strings in
+     governance docs.
+- **trigger / early warning**: A CFC batch diff includes a concrete
+  model, provider, API endpoint, account, or host binding in a
+  governance or operations doc. A protocol doc names a specific API
+  endpoint URL. A governance doc names a specific account or host
+  path.
+- **owner role**: `source` (binding authority); `architect` (ensures
+  protocol docs remain binding-agnostic); `implementer` (stops if a
+  concrete binding appears in a draft).
+- **current status**: Open; mitigation active via scope doc §3.7 and
+  implementation-agnostic doc authoring.
+
+### c.19 R-019 — Batch 1 accidentally absorbing Batch 2 or Feature 005 scope
+
+- **id**: `R-019`
+- **description**: CFC-1 Batch 1 grows to include identity record
+  creation, review-evidence schema authoring, architecture actor/tool
+  matrix updates, or Feature 005 dispatch automation — any of the
+  explicitly deferred items in
+  [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+  §3. The batch expands silently because each addition appears to be
+  a "natural next step" from the scope/protocol substrate work.
+- **likelihood**: `Medium`. The CFC-1 framing makes it easy to reason
+  that "while we're documenting Codex scope, we should also create
+  the identity record" or "while we're writing the protocol, we
+  should also add the schema." Each individual addition is locally
+  motivated; together they absorb Batch 2+ scope.
+- **impact**: `Severe`. Any absorbed Batch 2 item is a
+  privileged-class mutation that was not Source-ratified under the
+  Batch 1 envelope; this is a contract violation per Feature 001
+  FR-008 and Feature 002 FR-018.
+- **mitigation**:
+  1. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §3 enumerates all non-authorized Batch 1 items; each item
+     requires a separate Source-ratified envelope.
+  2. The allowed path manifest for Batch 1 (7 paths; count and SHA256
+     verified) explicitly excludes all `tenants/`, `schemas/`,
+     `docs/architecture/`, and any other Batch 2+ path.
+  3. [`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md)
+     §4 stop-line item 5 requires Codex to stop immediately if
+     instructions appear to expand scope to any §3-prohibited item.
+  4. [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+     §5 records the deferred items with their expected class and gate,
+     making it explicit that each requires a separate envelope.
+- **trigger / early warning**: A Batch 1 diff includes a file under
+  `tenants/`, `schemas/`, `docs/architecture/`, or any other
+  Batch 2+ path. A draft of a CFC artifact includes language that
+  reads like an identity record section. An envelope proposes to
+  "also" add the review-evidence schema. A Feature 005 dispatch
+  automation concept appears in a protocol draft.
+- **owner role**: `source` (scope authority); `controller` (Nefarious
+  must catch scope leakage before reporting to Source); `implementer`
+  (must hard-stop and escalate if a scope expansion is implicated).
+- **current status**: Open; mitigation active via scope doc §3 and
+  path manifest verification.
+
 ## d. Maintenance rules
 
 1. Risks are added or amended in this document; the addition is
@@ -605,3 +905,26 @@ PR #22 / `d892cd3` and PR #23 / `3dc45a1`, to include:
 
 Both rows follow the existing row style. The B2 acceptance posture
 above remains intact for the original ten risks.
+
+The register is further extended by the CFC-1 Batch 1 governance
+scope and operations protocol substrate work to include:
+
+- R-013 (Codex verification confused with Source ratification) in
+  §c.13.
+- R-014 (Codex actor authority or mutation-class scope creep) in
+  §c.14.
+- R-015 (Codex author/approver collapse) in §c.15.
+- R-016 (controller-seat tracked-file authoring during CFC batches)
+  in §c.16.
+- R-017 (Codex worktree isolation failure) in §c.17.
+- R-018 (provider/tool/model/host/account binding leakage into
+  upstream docs) in §c.18.
+- R-019 (Batch 1 accidentally absorbing Batch 2 or Feature 005
+  scope) in §c.19.
+
+All seven rows follow the existing row style. Upstream sources for
+the CFC-1 risks are
+[`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md)
+and
+[`../operations/CODEX_FIRST_CLASS_PROTOCOL.md`](../operations/CODEX_FIRST_CLASS_PROTOCOL.md).
+The B2 and workflow-hardening acceptance postures above remain intact.
