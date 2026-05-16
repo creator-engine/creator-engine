@@ -26,7 +26,7 @@ Feature 002 names nine actors/tools with explicit presence categories:
 | Source | Operationally active. |
 | Nefarious / Hermes | Operationally active. |
 | Claude Code | Operationally active. |
-| Codex | Named; governed identity record deferred to Feature 004. |
+| Codex | Governed first-class actor; identity record deferred with upstream placeholder/unbound provider/tool/model/host/account semantics. Phase 1 authoring posture follows Source-ratified per-batch role assignment between `architect` and `implementer`; `codex-architect` is a tenant/public overlay alias only, not a new baseline role. |
 | QA agent | Named; governed identity record deferred to Feature 004. |
 | security agent | Named; governed identity record deferred to Feature 004. |
 | release agent | Named; governed identity record deferred to Feature 006. |
@@ -41,6 +41,15 @@ authority, prohibited actions) live in the Feature 002 spec
 [`../governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](../governance/AUTHORITY_AND_RATIFICATION_MODEL.md).
 This document does not restate them; instead, the rest of this file
 describes how these actors interact during a governed mutation.
+
+Batch 2A ratified Codex Option C: Codex may be represented as a
+governed first-class actor whose Phase 1 authoring role is selected by
+the Source-ratified envelope for the specific batch. An
+architect-class envelope authorizes architect authoring; an
+implementer-class envelope authorizes implementer authoring. This is
+architect parity as authoring parity only: it is not ratification
+authority, not merge authority, and not deploy authority. The authority
+remains envelope-bound, not personality-bound.
 
 ## b. Actor-to-actor interaction patterns
 
@@ -62,13 +71,14 @@ governance artifact produced.
   ratification is the human anchor and is not subject to Phase 2
   autonomy expansion.
 
-### b.2 Hermes → Claude Code (envelope handoff)
+### b.2 Hermes → governed author (envelope handoff)
 
 - **When**: T11–T13 (envelope authoring → consumption).
 - **Surface**: the Assignment Envelope YAML file under the
   tenant-declared envelope directory.
 - **Artifact**: the envelope itself (FR-005 fields populated; author
-  is the Hermes role; consumer is the Claude Code role).
+  is the Hermes role; consumer is the Claude Code role, Codex role, or
+  another Source-ratified governed author role named by the envelope).
 - **Invariants**: author MUST ≠ consumer (FR-006); envelope is
   single-use (FR-007); privileged-class envelopes require Source
   ratification before consumption (FR-008).
@@ -87,18 +97,27 @@ governance artifact produced.
   attestation gate is privileged (`attestation` class) and remains
   Phase 1.
 
-### b.4 Codex → Hermes (independent review)
+### b.4 Codex ↔ Hermes (per-batch governed authoring and review)
 
-- **When**: T16 (attestation drafted → independent review complete).
-- **Surface**: review findings records (schema deferred to Feature
-  004); PR review comments recorded as review evidence.
-- **Artifact**: review findings record under the future Feature 004
-  schema; pre-Feature-004, review evidence is recorded in
-  repository-visible artifacts per constitution Principle VIII.
-- **Invariants**: review evidence is NEVER ratification for
-  privileged classes (FR-013, FR-017); Codex writes only to a
-  separate Codex-only worktree if fallback implementation is
-  authorized (Codex never writes to the active Claude worktree).
+- **When**: T11–T16, when a Source-ratified envelope names Codex as
+  the consuming actor for architect-class authoring, implementer-class
+  authoring, or independent review. Without that envelope, Codex has
+  no standing write authority.
+- **Surface**: the Assignment Envelope YAML for architect/implementer
+  authoring; review findings records (schema deferred to Feature 004)
+  and PR review comments when Codex is acting as reviewer.
+- **Artifact**: Codex-authored architect or implementer artifacts under
+  the envelope's allowed paths and mutation classes; review findings
+  records when Codex acts as reviewer. Architect-class artifacts are
+  attested through the ordinary attestation flow; review evidence
+  remains a separate Phase 1 artifact class and never substitutes for
+  ratification.
+- **Invariants**: Codex has no ratification authority, no merge
+  authority, and no deploy authority. Codex verifies-not-ratifies:
+  review evidence and Codex-authored architect/implementer evidence are
+  evidence only. Codex writes only inside a separate Codex-only
+  worktree under one-driver-per-worktree isolation and never writes to
+  the active Claude Code worktree or the canonical main worktree.
 
 ### b.5 CI → ratifier audit chain (mechanical evidence)
 
@@ -166,7 +185,7 @@ governed by the Feature 001 ratification-flow contract.
   - `repo_ratification_record` — YAML records under
     `ratification_storage_path`.
 - **Assignment Envelope YAML**: the explicit handoff surface from
-  Hermes to Claude Code.
+  Hermes to the governed author named by the envelope.
 - **Validator outputs and test logs**: evidence-only surfaces; never
   ratification.
 
@@ -212,15 +231,17 @@ artifacts with separate authorities. Two invariants:
    matrix, but it remains distinct from human ratification and never
    substitutes for it.
 
-The Codex reviewer, the future QA agent, and the future security
-agent are explicitly named as reviewers, not ratifiers. Even if a
-reviewer's findings recommend merge, the merge gate (T20) still
-requires Source authorization for privileged classes.
+Codex, the future QA agent, and the future security agent are not
+ratifiers. When Codex acts as reviewer, its review evidence is not
+ratification. When Codex acts under a Source-ratified architect or
+implementer envelope, its authored artifacts and evidence are still not
+ratification. Even if findings recommend merge, the merge gate (T20)
+still requires Source authorization for privileged classes.
 
-## f. Envelope handoff sequence (Hermes → Claude)
+## f. Envelope handoff sequence (Hermes → governed author)
 
 The envelope handoff is the operational seam where Creator Engine
-governance meets `/speckit-implement` mechanics. Every FR-005 field
+governance meets governed authoring mechanics. Every FR-005 field
 is exercised exactly once per handoff.
 
 1. **Batch approval recorded** (T10). Source records the approved
@@ -249,8 +270,9 @@ is exercised exactly once per handoff.
    - `conflict_policy` — rebase/merge/conflict-resolution authority
      and escalation rules.
    - `created_by_actor_id` — Hermes role.
-   - `consuming_actor_id` — Claude Code role (or another approved
-     implementer role).
+   - `consuming_actor_id` — Claude Code role, Codex role, or another
+     approved governed author role selected by the Source-ratified
+     envelope.
 3. **Source ratification for privileged-class envelopes** (FR-008).
    If `allowed_mutation_classes` declares any privileged class, the
    envelope is committed only with Source ratification recorded; the
@@ -258,9 +280,10 @@ is exercised exactly once per handoff.
 4. **Worktree/branch provisioning** (T12). Hermes provisions the
    worktree at `worktree_path` and ensures the branch
    `feature_branch` exists from the agreed base.
-5. **Envelope consumption** (T13). Claude Code begins work inside the
-   worktree. `/speckit-implement` reads the approved spec/plan/tasks
-   artifacts; the consumer mutates only inside
+5. **Envelope consumption** (T13). The envelope's consuming actor
+   begins work inside the worktree. `/speckit-implement` reads the
+   approved spec/plan/tasks artifacts when the envelope invokes Spec
+   Kit implementation mechanics; the consumer mutates only inside
    `allowed_mutation_classes` and outside `prohibited_surfaces`;
    tasks are marked `[X]` only after local validation per FR-010.
 6. **Stop on stop_conditions** (T13 → T14). When stop conditions are
