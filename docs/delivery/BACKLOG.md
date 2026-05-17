@@ -69,11 +69,13 @@ review evidence schema contract (#34)` (PR head SHA `2a8fe0f`); see
 (`post-sprint-0/cfc-2d-2-architect-evidence-schema`) has since
 landed on the canonical branch as PR #36 / merge commit `51a2134
 feat: add architect evidence schema contract (#36)` (PR head SHA
-`451be39`); see §e.16. The next privileged schema-class gate is
-Batch 2D.3 (implementer-evidence schema, privileged
-`schema`-class), which remains downstream and requires its own
-separately Source-ratified privileged `schema`-class envelope per
-Feature 001 FR-008.
+`451be39`); see §e.16. CFC follow-on Batch 2D.3
+implementer-evidence schema
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) is currently
+locally authored under a Source-ratified privileged `schema`-class
+implementer envelope and awaiting controller verification and
+Source ratification before merge; not yet landed on the canonical
+branch. See §e.17.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -720,10 +722,14 @@ recorded as §e.8 and §e.9.
   identity record authoring has since landed (see §e.14), and
   Batch 2D.1 review-evidence schema has since landed (see §e.15),
   and Batch 2D.2 architect-evidence schema has since landed (see
-  §e.16); the next privileged schema-class gate is Batch 2D.3
-  (implementer-evidence schema), which remains downstream and
-  requires its own separately Source-ratified privileged
-  `schema`-class envelope.
+  §e.16); Batch 2D.3 (implementer-evidence schema) is currently
+  in progress as locally authored content under a Source-ratified
+  privileged `schema`-class implementer envelope, awaiting
+  controller verification and Source ratification before local
+  commit, push, PR, and merge, and is not yet landed on the
+  canonical branch; other downstream envelopes remain separate
+  and require their own separately Source-ratified privileged
+  envelopes.
 - **anticipated mutation class**: `governance` / `docs`
 - **owner role**: `architect` (drafter) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
@@ -1056,6 +1062,67 @@ recorded as §e.8 and §e.9.
   [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
   [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
   [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
+
+### e.17 Post-Sprint-0 substrate — CFC follow-on Batch 2D.3: implementer-evidence machine-readable schema
+
+- **id**: `post-sprint-0/cfc-2d-3-implementer-evidence-schema`
+- **parent**: —
+- **status**: `In Progress`
+- **scope**: Batch 2D.3 conservative machine-readable schema-class
+  authoring slice for governed implementer evidence. Authors
+  `schemas/implementer-evidence.schema.yaml`,
+  `templates/implementer-evidence.template.yaml`,
+  `docs/contracts/implementer-evidence.md`, the
+  `implementer_evidence_schema` validator check with unit and
+  integration tests, well-formed and malformed examples under
+  `examples/well-formed/implementer-evidence/` and
+  `examples/malformed/implementer-evidence/`, and minimal coherence
+  updates to the contracts READMEs, this backlog,
+  [`./KANBAN.md`](./KANBAN.md), [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
+  [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
+  Verdict enum is constrained to implementer-evidence-only
+  outcomes (`implementation_complete`, `implementation_partial`,
+  `scope_boundary_unclear`, `cannot_implement`);
+  `implementer_role_category` is fixed to `implementer`; the
+  `non_ratification_statement` field is mandatory; the
+  `evidence_timestamp` field is source-controlled or ISO-8601 only;
+  `unevaluatedProperties: false` matches existing schema strictness.
+  Examples contain no LIMITLESS-specific identifiers and no
+  provider/tool/model/host/account binding. Implementer-evidence
+  framing preserves the Batch 2A §6.3 ratified authority-boundary
+  posture (architect/implementer parity is authoring/execution
+  parity, not ratification/merge/deploy authority) and the Batch
+  2B envelope-bound authority wording; it does not amend the
+  Batch 2D.1 review-evidence or Batch 2D.2 architect-evidence
+  schema/template/contract/validator/examples and does not
+  authorize ratification, merge, deploy, branch deletion, branch
+  protection mutation, live repository-settings change,
+  provider/tool/model/host/account binding, tenant binding, or
+  authority expansion.
+- **acceptance gate**: Schema, template, contract, validator
+  check, tests, and examples validate against the substrate
+  validator (`pytest`, `check-examples`, `scan-no-limitless`);
+  delivery docs are coherent; Source ratification of the
+  Batch 2D.3 envelope recorded and the envelope merged on the
+  canonical branch with finalized attestation. Gate not yet met:
+  current state is locally authored only, awaiting controller
+  verification and Source ratification before merge.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-2d-2-architect-evidence-schema` (`Done`,
+  PR #36 / `51a2134`, head `451be39`) and prior CFC follow-on
+  Batches 2A / 2B / 2C / 2D.1 / Codex identity record authoring
+  (each `Done`). Batch 2D.3 is a sibling schema-class authoring
+  slice that does not amend Batch 2D.1 or Batch 2D.2.
+- **anticipated mutation class**: `schema` (privileged) / `docs`
+- **owner role**: `implementer` (Claude Code under the
+  Source-ratified visible implementation envelope); `controller`
+  / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: not yet landed on the canonical branch;
+  no PR or merge commit exists. Local authoring under
+  `post-sprint-0/cfc-2d-3-implementer-evidence-schema`.
 
 ## f. Maintenance rules
 

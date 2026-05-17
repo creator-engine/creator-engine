@@ -1,0 +1,79 @@
+# Creator Engine implementer evidence record template.
+# Copy this file to a tenant-controlled evidence directory and
+# replace every placeholder with implementer-supplied values. This
+# template is project-, tenant-, runtime-, model-, and harness-
+# agnostic and intentionally contains no concrete implementer
+# product, model, CLI, account, runner, source-host installation
+# id, bot slug, or tooling binding.
+#
+# Prose contract: docs/contracts/implementer-evidence.md.
+# Machine-checkable schema: schemas/implementer-evidence.schema.yaml.
+#
+# Implementer evidence is NOT Source ratification, NOT review
+# evidence, and NOT architect evidence. The implementer retains
+# authoring/execution parity only.
+
+evidence_id: example-implementer-evidence
+implementation_subject: >-
+  Example implementation subject the implementer executed. Describe
+  the schema, validator surface, template, contract, code change,
+  or other tracked-file authoring performed under the
+  Source-ratified implementer-class envelope.
+authored_artifact_refs:
+  - schemas/example.schema.yaml
+  - templates/example.template.yaml
+allowed_path_boundary_refs:
+  - schemas/example.schema.yaml
+  - templates/example.template.yaml
+  - docs/contracts/example.md
+implementer_identity_ref: tenants/example-tenant/implementer/identity-record.yml
+implementer_role_category: implementer
+execution_mode: manual_human
+implementation_scope: >-
+  In scope: the listed authored_artifact_refs, bounded by
+  allowed_path_boundary_refs. Out of scope: ratification, merge,
+  deploy, branch deletion, branch protection mutation, live
+  repository-settings change, provider/tool/model/host/account
+  binding, tenant binding, authority expansion, and any tracked
+  path outside allowed_path_boundary_refs.
+mutation_classes_executed:
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+  - branch_protection
+  - deploy_automation
+  - codeowners
+  - secrets_or_tokens
+  - instance_local_paths
+  - authority_matrix_baseline
+  - mutation_class_taxonomy_baseline
+  - provider_tool_model_host_account_binding
+  - tenant_binding
+  - authority_expansion
+validation_evidence_refs:
+  - examples/well-formed
+test_evidence_refs:
+  - validators/tests
+implementation_summary: >-
+  Implementer summary goes here. Free-text body summarizing what
+  the implementer executed and why. The body MUST be sufficient
+  for a fresh-clone reviewer to understand the executed change
+  independently of the implementer's authoring session and MUST
+  be sufficient for Source to perform ratification independently.
+deviations: []
+open_questions: []
+verdict: implementation_complete
+recommended_follow_up: >-
+  Optional free-text recommendations for follow-up work (separate
+  envelopes, future slices, deferred items, downstream review and
+  ratification). MAY be empty.
+evidence_timestamp: source-controlled:examples/well-formed/implementer-evidence/example-implementer-evidence.yml
+non_ratification_statement: >-
+  This implementer evidence is NOT Source ratification and does
+  not authorize merge, deploy, branch deletion, branch protection
+  mutation, live repository-settings change, provider/tool/model/
+  host/account binding, tenant binding, or authority expansion.
+  Privileged mutation classes remain Source-ratified regardless of
+  this verdict. Implementer-evidence framing does not substitute
+  for review evidence or architect evidence under separately
+  Source-ratified envelopes.

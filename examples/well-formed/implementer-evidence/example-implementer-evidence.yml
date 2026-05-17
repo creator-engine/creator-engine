@@ -1,0 +1,86 @@
+evidence_id: example-implementer-evidence
+implementation_subject: >-
+  Example implementer-evidence record demonstrating the
+  conservative authoring shape for a schema-class implementation
+  subject under the Creator Engine governance substrate.
+authored_artifact_refs:
+  - schemas/implementer-evidence.schema.yaml
+  - templates/implementer-evidence.template.yaml
+  - docs/contracts/implementer-evidence.md
+allowed_path_boundary_refs:
+  - schemas/implementer-evidence.schema.yaml
+  - templates/implementer-evidence.template.yaml
+  - docs/contracts/implementer-evidence.md
+  - validators/creator_engine_validator/checks/implementer_evidence_schema.py
+  - validators/creator_engine_validator/checks/__init__.py
+  - validators/creator_engine_validator/cli.py
+  - validators/tests/unit/test_implementer_evidence_schema.py
+  - validators/tests/integration/test_implementer_evidence_examples.py
+  - examples/well-formed/implementer-evidence/example-implementer-evidence.yml
+  - examples/malformed/implementer-evidence/missing-verdict.yml
+  - examples/malformed/implementer-evidence/invalid-verdict-value.yml
+  - examples/malformed/implementer-evidence/missing-non-ratification-statement.yml
+implementer_identity_ref: tenants/example-tenant/implementer/identity-record.yml
+implementer_role_category: implementer
+execution_mode: manual_human
+implementation_scope: >-
+  In scope: the listed authored_artifact_refs, bounded by
+  allowed_path_boundary_refs. Out of scope: ratification, merge,
+  deploy, branch deletion, branch protection mutation, live
+  repository-settings change, provider/tool/model/host/account
+  binding, tenant binding, authority expansion, and any tracked
+  path outside allowed_path_boundary_refs.
+mutation_classes_executed:
+  - schema
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+  - branch_protection
+  - deploy_automation
+  - codeowners
+  - secrets_or_tokens
+  - instance_local_paths
+  - authority_matrix_baseline
+  - mutation_class_taxonomy_baseline
+  - provider_tool_model_host_account_binding
+  - tenant_binding
+  - authority_expansion
+validation_evidence_refs:
+  - examples/well-formed
+  - examples/malformed
+test_evidence_refs:
+  - validators/tests/unit/test_implementer_evidence_schema.py
+  - validators/tests/integration/test_implementer_evidence_examples.py
+implementation_summary: >-
+  Implementer authored the Batch 2D.3 implementer-evidence schema
+  contract, machine-checkable schema, template, well-formed and
+  malformed examples, validator check, unit and integration tests,
+  and prose contract under the Source-ratified implementer-class
+  envelope. Implementer affirmed that the authored artifacts
+  preserve the Phase 1 authority posture, retain Source as the
+  sole ratifier, do not promote concrete tool/model/host/account
+  bindings into upstream constants, and do not include real
+  secrets, tokens, source-host installation ids, durable actor
+  ids, app slugs, account names, or machine-local absolute paths.
+  Sibling Batch 2D.1 review-evidence and Batch 2D.2
+  architect-evidence artifacts were not mutated.
+deviations: []
+open_questions: []
+verdict: implementation_complete
+recommended_follow_up: >-
+  Continue to defer privileged identity, deploy, governance, and
+  authority-expansion mutations to their own Source-ratified
+  envelopes. Any downstream consumption of implementer-evidence
+  by a unified cross-role evidence schema remains a separately
+  Source-ratified privileged schema-class envelope and is not
+  authored under this envelope.
+evidence_timestamp: source-controlled:examples/well-formed/implementer-evidence/example-implementer-evidence.yml
+non_ratification_statement: >-
+  This implementer evidence is NOT Source ratification and does
+  not authorize merge, deploy, branch deletion, branch protection
+  mutation, live repository-settings change, provider/tool/model/
+  host/account binding, tenant binding, or authority expansion.
+  Privileged mutation classes remain Source-ratified regardless of
+  this verdict. Implementer-evidence framing does not substitute
+  for review evidence or architect evidence under separately
+  Source-ratified envelopes.
