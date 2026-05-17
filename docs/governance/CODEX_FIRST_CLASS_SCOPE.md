@@ -188,10 +188,21 @@ privileged `identity`-class gate; single Codex identity record with
 placeholder/unbound posture for `allowed_repositories`, `signing_policy`,
 and `tenant_id`; storage paths under `tenants/creator-engine-substrate/codex/`;
 no concrete provider/tool/model/host/account binding; PR #31 / merge commit
-`78b57a4`; see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.14. The
-next gate is Batch 2D (review/architect/implementer evidence schema, privileged
-`schema`-class), requiring a separately Source-ratified schema-class envelope
-before any Batch 2D implementation.
+`78b57a4`; see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.14.
+CFC follow-on Batch 2D.1 review-evidence schema is **landed** —
+Source-ratified privileged `schema`-class envelope authoring
+`schemas/review-evidence.schema.yaml`,
+`templates/review-evidence.template.yaml`,
+`docs/contracts/review-evidence.md`, the `review_evidence_schema`
+validator check with unit and integration tests, and well-formed /
+malformed examples; PR #34 / merge commit `e1f5ffc feat: add review
+evidence schema contract (#34)` (PR head SHA `2a8fe0f`); see
+[`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.15. The next
+gate is Batch 2D.2 (architect-evidence schema, privileged
+`schema`-class), requiring a separately Source-ratified privileged
+schema-class envelope before any Batch 2D.2 implementation; Batch
+2D.3 (implementer-evidence schema, privileged `schema`-class)
+remains further downstream.
 
 | Deferred item | Expected class | Gate |
 |---|---|---|
@@ -199,7 +210,7 @@ before any Batch 2D implementation.
 | CFC follow-on Batch 2B — Architecture actor/tool matrix update | `governance` / `docs` | **Landed.** Instantiates the Batch 2A §6.1 Option C role choice in [`../architecture/agent-interaction-model.md`](../architecture/agent-interaction-model.md) §a and §b.4. Authority remains envelope-bound, not personality-bound. |
 | CFC follow-on Batch 2C — Codex identity record encoding decision request | `governance` / `docs` | **Landed.** Source ratified eight §6 decisions: Option A selected (single Codex identity record, baseline `role_category = architect`; Option C conservative fallback retained); `human_ratifier_roles = ["source"]`; placeholder/unbound posture for `allowed_repositories`, `signing_policy`, storage paths, and `tenant_id`; Batch 2D reaffirmed as downstream non-mutated by Batch 2C. PR #29 / merge commit `66a8074`; see [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md). |
 | Codex identity record | `identity` (privileged) | **Landed.** Source-ratified CFC follow-on privileged `identity`-class envelope; single Codex identity record with `role_category = architect` and `human_ratifier_roles = ["source"]`; placeholder/unbound posture for `allowed_repositories`, `signing_policy`, and `tenant_id`; storage paths under `tenants/creator-engine-substrate/codex/`; no concrete provider/tool/model/host/account/tenant/repository bound. PR #31 / merge commit `78b57a4`; see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.14. |
-| Review-evidence schema (Batch 2D) | `schema` (privileged) | Separate Source-ratified envelope with schema spec; framing follows the Batch 2A §6.5 ratified posture (review evidence retained as a separate artifact class). Batch 2D is downstream of Batch 2C and is reaffirmed as non-mutated by Batch 2C per [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8 |
+| Review-evidence schema (Batch 2D) | `schema` (privileged) | Batch 2D.1 review-evidence schema is **landed.** Source-ratified privileged `schema`-class envelope; framing follows the Batch 2A §6.5 ratified posture (review evidence retained as a separate artifact class). PR #34 / merge commit `e1f5ffc` (PR head SHA `2a8fe0f`); see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.15. The remaining sub-batches — Batch 2D.2 (architect-evidence schema) and Batch 2D.3 (implementer-evidence schema) — remain downstream of Batch 2C, are reaffirmed as non-mutated by Batch 2C per [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8, and each requires a separately Source-ratified privileged schema-class envelope. Batch 2D.2 is the current downstream gate. |
 | Provider/tool/model/host/account binding | deployment overlay | Source decision at binding time; binding posture remains placeholder/unbound per the Batch 2A §6.4 ratified posture and the Batch 2C §6.4 / §6.5 / §6.7 recommended posture |
 | Codex authority expansion (ratification, merge, deploy) | Source decision | Not currently planned; Batch 2A §6.3 ratified that architect parity is authoring parity only and Batch 2C §4 / §7 inherits the boundary unmodified |
 | Feature 005 dispatch automation | `governance` / `code` | Feature 005 spec ratified |

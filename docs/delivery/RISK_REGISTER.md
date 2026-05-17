@@ -9,10 +9,15 @@ follow-on Batches 2A (PR #27 / `6b51882`), 2B (PR #28 / `c06a3e7`),
 and 2C (PR #29 / `66a8074`) have all landed; Source ratified eight §6
 decisions in Batch 2C. The Codex identity record authoring envelope has
 since landed on the canonical branch as PR #31 / merge commit `78b57a4`;
-see [`./BACKLOG.md`](./BACKLOG.md) §e.14. The next gate is Batch 2D
-(review/architect/implementer evidence schema, privileged `schema`-class),
-which requires a separately Source-ratified schema-class envelope before
-any Batch 2D implementation. Part of
+see [`./BACKLOG.md`](./BACKLOG.md) §e.14. CFC follow-on Batch 2D.1
+review-evidence schema has since landed on the canonical branch as
+PR #34 / merge commit `e1f5ffc feat: add review evidence schema
+contract (#34)` (PR head SHA `2a8fe0f`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.15. The next gate is Batch 2D.2
+(architect-evidence schema, privileged `schema`-class), which requires
+a separately Source-ratified privileged schema-class envelope before
+any Batch 2D.2 implementation; Batch 2D.3 (implementer-evidence schema,
+privileged `schema`-class) remains further downstream. Part of
 the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001
