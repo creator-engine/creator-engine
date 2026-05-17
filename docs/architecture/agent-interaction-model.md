@@ -17,6 +17,16 @@ The Actor/Tool Ownership Matrix at
 Ownership Matrix is normative; this document references it and binds
 its rows to interaction patterns.
 
+The deterministic syscall / governed-state-machine doctrine that
+underlies these interaction patterns is canonized in
+[`./agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md)
+under "Doctrine: deterministic syscall layer over probabilistic
+agents." The seven interaction patterns below describe how named
+actors cross that syscall boundary in practice: probabilistic agents
+operate inside Assignment Envelopes, evidence flows through the
+audit chain, and ratification of privileged mutations remains
+Source's responsibility.
+
 ## a. Actor/Tool Ownership Matrix (cross-reference)
 
 Feature 002 names nine actors/tools with explicit presence categories:
