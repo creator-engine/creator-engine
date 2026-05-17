@@ -1,0 +1,83 @@
+evidence_id: example-architect-evidence
+design_subject: >-
+  Example architect-evidence record demonstrating the
+  conservative authoring shape for a docs-class design subject
+  under the Creator Engine governance substrate.
+authored_artifact_refs:
+  - specs/001-v0-1-governance-substrate/spec.md
+  - docs/contracts/architect-evidence.md
+architect_identity_ref: tenants/example-tenant/architect/identity-record.yml
+architect_role_category: architect
+authoring_mode: manual_human
+design_scope: >-
+  In scope: the listed authored_artifact_refs and the named
+  design_subject. Out of scope: implementer-class authoring,
+  privileged ratification, merge, deploy, branch protection
+  mutation, and any live repository-settings change.
+mutation_classes_proposed:
+  - docs
+  - schema
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+  - branch_protection
+  - deploy_automation
+  - codeowners
+  - secrets_or_tokens
+  - instance_local_paths
+  - authority_matrix_baseline
+  - mutation_class_taxonomy_baseline
+supporting_evidence_refs:
+  - examples/well-formed
+recommendations: >-
+  Architect confirmed that the authored artifacts preserve the
+  Phase 1 authority posture, retain Source as the sole ratifier,
+  do not promote concrete tool/model/host/account bindings into
+  upstream constants, and do not include real secrets, tokens,
+  source-host installation ids, durable actor ids, app slugs,
+  account names, or machine-local absolute paths. Architect
+  recommends Source ratify the proposed authoring under the
+  Batch 2A Option C posture and the Batch 2B envelope-bound
+  authority wording.
+decision_options:
+  - option_id: option-a-conservative-shape
+    summary: >-
+      Adopt the conservative architect-evidence shape modeled on
+      Batch 2D.1 review-evidence, with `architect_role_category`
+      fixed and `verdict` constrained to architect-evidence-only
+      outcomes.
+    tradeoffs: >-
+      Preserves Phase 1 rigor and parallelism with review-evidence;
+      defers any cross-role unified evidence schema to a later
+      explicitly ratified envelope.
+    recommended_default: true
+  - option_id: option-b-unified-evidence
+    summary: >-
+      Defer to a unified cross-role evidence schema later, with
+      role-discriminated subtypes.
+    tradeoffs: >-
+      Heavier `schema`-class amendment scope; not authorized
+      under the current envelope and would require a separate
+      Source-ratified privileged schema-class envelope.
+    recommended_default: false
+open_questions:
+  - >-
+    Whether the downstream Batch 2D.3 implementer-evidence schema
+    should reuse the architect-evidence `decision_options` shape
+    or define its own implementer-class outcome shape; deferred
+    to the Batch 2D.3 envelope.
+verdict: recommendation_complete
+recommended_follow_up: >-
+  Continue to defer privileged identity, deploy, governance, and
+  implementer-class mutations to their own Source-ratified
+  envelopes. The Batch 2D.3 implementer-evidence schema remains
+  the downstream successor and is not authored under this
+  envelope.
+evidence_timestamp: source-controlled:examples/well-formed/architect-evidence/example-architect-evidence.yml
+non_ratification_statement: >-
+  This architect evidence is NOT Source ratification and does not
+  authorize merge, deploy, branch deletion, branch protection
+  mutation, or live repository-settings change. Privileged
+  mutation classes remain Source-ratified regardless of this
+  verdict. Architect-evidence framing does not substitute for
+  implementer authoring under a separately Source-ratified
+  implementer envelope.

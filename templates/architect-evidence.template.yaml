@@ -1,0 +1,65 @@
+# Creator Engine architect evidence record template.
+# Copy this file to a tenant-controlled evidence directory and
+# replace every placeholder with architect-supplied values. This
+# template is project-, tenant-, runtime-, model-, and harness-
+# agnostic and intentionally contains no concrete architect
+# product, model, CLI, account, runner, source-host installation
+# id, bot slug, or tooling binding.
+#
+# Prose contract: docs/contracts/architect-evidence.md.
+# Machine-checkable schema: schemas/architect-evidence.schema.yaml.
+#
+# Architect evidence is NOT Source ratification, NOT review
+# evidence, and NOT implementer evidence. The architect retains
+# authoring parity only.
+
+evidence_id: example-architect-evidence
+design_subject: >-
+  Example design subject the architect addressed. Describe the
+  contract, schema, validator surface, decision request, or
+  governance question under design.
+authored_artifact_refs:
+  - specs/example/spec.md
+  - specs/example/plan.md
+architect_identity_ref: tenants/example-tenant/architect/identity-record.yml
+architect_role_category: architect
+authoring_mode: manual_human
+design_scope: >-
+  In scope: the listed authored_artifact_refs and the named
+  design_subject. Out of scope: implementer-class authoring,
+  privileged ratification, merge, deploy, branch protection
+  mutation, and any live repository-settings change.
+mutation_classes_proposed:
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+  - branch_protection
+  - deploy_automation
+  - codeowners
+  - secrets_or_tokens
+  - instance_local_paths
+  - authority_matrix_baseline
+  - mutation_class_taxonomy_baseline
+supporting_evidence_refs:
+  - examples/well-formed
+recommendations: >-
+  Architect recommendations go here. Free-text body summarizing
+  what the architect produced as design context and why. The body
+  MUST be sufficient for Source to perform ratification
+  independently of the architect's authoring session.
+decision_options: []
+open_questions: []
+verdict: recommendation_complete
+recommended_follow_up: >-
+  Optional free-text recommendations for follow-up work (separate
+  envelopes, future slices, deferred items, downstream
+  implementer-class consumption). MAY be empty.
+evidence_timestamp: source-controlled:examples/well-formed/architect-evidence/example-architect-evidence.yml
+non_ratification_statement: >-
+  This architect evidence is NOT Source ratification and does not
+  authorize merge, deploy, branch deletion, branch protection
+  mutation, or live repository-settings change. Privileged
+  mutation classes remain Source-ratified regardless of this
+  verdict. Architect-evidence framing does not substitute for
+  implementer-class authoring under a separately Source-ratified
+  implementer envelope.
