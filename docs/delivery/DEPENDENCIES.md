@@ -51,7 +51,13 @@ canonical branch as PR #29 / `66a8074 docs: draft Codex identity
 record encoding decision (#29)` and is `Done` on the delivery view;
 see §d.8 and §g. Source ratified eight §6 decisions. The next gate
 is the Codex identity record authoring envelope, a separately
-Source-ratified privileged `identity`-class gate.
+Source-ratified privileged `identity`-class gate; a local authoring
+branch/worktree (`identity/codex-record-authoring`) is currently
+drafting the substrate-internal placeholder/unbound Codex identity
+record under `tenants/creator-engine-substrate/codex/` —
+uncommitted/unmerged pending Source validation and later Git
+mechanics; no concrete provider/tool/model/host/account/tenant/
+repository is bound.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -524,7 +530,7 @@ post-merge update procedure in
 | `post-sprint-0/cfc-1-codex-first-class` | `post-sprint-0/cfc-2a-codex-role-decision` | `Done` (CFC-1) | Cleared; CFC-1 is `Done` (PR #25 / `30a3e8c`); successor is `Done` (PR #27 / `6b51882`). `governance` / `docs` class; non-privileged predecessor edge. See §d.6. |
 | `post-sprint-0/cfc-2a-codex-role-decision` | `post-sprint-0/cfc-2b-codex-architecture-matrix` | `Done` (Batch 2A) | Cleared; predecessor is `Done` (PR #27 / `6b51882`); successor is `Done` (PR #28 / `c06a3e7`). `governance` / `docs` class. See §d.7. |
 | `post-sprint-0/cfc-2a-codex-role-decision` + `post-sprint-0/cfc-2b-codex-architecture-matrix` | `post-sprint-0/cfc-2c-codex-identity-decision` | `Done` (both predecessors) | Cleared; both predecessors are `Done`; successor is `Done` — merged on the canonical branch as PR #29 / `66a8074`. Source ratified eight §6 decisions. `governance` / `docs` class; non-privileged predecessor edges. See §d.8. |
-| `post-sprint-0/cfc-2c-codex-identity-decision` | Codex identity record authoring envelope (`identity`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions ratified, pinning encoding posture. Successor not yet shaped; requires a separately Source-ratified privileged `identity`-class envelope per §h. |
+| `post-sprint-0/cfc-2c-codex-identity-decision` | Codex identity record authoring envelope (`identity`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions ratified, pinning encoding posture. Successor not yet shaped; requires a separately Source-ratified privileged `identity`-class envelope per §h. A local authoring branch/worktree (`identity/codex-record-authoring`) is currently drafting the substrate-internal placeholder/unbound Codex identity record under `tenants/creator-engine-substrate/codex/` — uncommitted/unmerged pending Source validation and later Git mechanics; no concrete provider/tool/model/host/account/tenant/repository is bound. |
 | `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); Batch 2D explicitly reaffirmed as non-mutated by Batch 2C per [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. Successor not yet shaped; requires a separately Source-ratified privileged `schema`-class envelope per §h. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
