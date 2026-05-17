@@ -5,6 +5,28 @@ document is the public on-ramp to its governance model. It is a
 summary and an index; the authoritative documents live in the repo
 and are linked below.
 
+## Operating-model framing
+
+Creator Engine is deterministic scaffolding over probabilistic
+agentic engines. The substrate is closer to an operating-system
+kernel and syscall boundary than to an ad hoc chatbot workflow: a
+finite set of states, transitions, authorizing gates, evidence
+artifacts, and ratifiers that probabilistic agents participate in
+rather than bypass. The intent is to retain the learning and
+reasoning of agentic engines while imposing predictability,
+stability, reproducibility, traceability, and auditability for
+enterprise-scale SDLC. In v0.1 the boundary is procedurally enforced
+by human discipline plus the Feature 001 offline validator and CI
+checks; a runtime gate/syscall executor is a possible future shape,
+not a current capability.
+
+The full doctrine — and the canonical prompt-file ratification phrase
+used for future ratifier-scoped handoffs — is in
+[`docs/architecture/agentic-sdlc-operating-model.md`](./docs/architecture/agentic-sdlc-operating-model.md)
+under "Doctrine: deterministic syscall layer over probabilistic
+agents" and §h. This GOVERNANCE.md remains the public on-ramp; the
+operating-model document remains authoritative for SDLC mechanics.
+
 ## Authority hierarchy
 
 The source-of-truth hierarchy (Feature 002 FR-019) is:

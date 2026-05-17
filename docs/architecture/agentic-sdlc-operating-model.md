@@ -14,6 +14,79 @@ Where the source spec at
 `specs/002-canonical-docs-and-operating-model/spec.md` and this
 document disagree, the source spec wins until Feature 002 is amended.
 
+## Doctrine: deterministic syscall layer over probabilistic agents
+
+Creator Engine is deterministic scaffolding over probabilistic
+agentic engines. The intent is to retain the learning, reasoning, and
+breadth that probabilistic agents provide while imposing
+predictability, stability, reproducibility, traceability, and
+auditability on the work they produce. Without that layer,
+agent-authored output is fit for exploration; with it, agent-authored
+work can carry the same enterprise-scale SDLC discipline that
+human-authored work is expected to carry.
+
+Architecturally, the operating model is closer to an operating-system
+kernel and syscall boundary than to an ad hoc chatbot workflow:
+
+- Probabilistic agentic engines (Claude Code, Codex, and any future
+  governed implementer or reviewer) are the userland processes —
+  broad capability, non-deterministic execution, no inherent guarantee
+  of repeatability.
+- Creator Engine is the kernel boundary — a finite, named set of
+  states (the 25-state SDLC machine in §a), transitions (the
+  24-transition matrix in §b), authorizing gates, required evidence
+  artifacts, and ratifiers (the authority matrix referenced in §e and
+  in [`../governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](../governance/AUTHORITY_AND_RATIFICATION_MODEL.md)).
+- The Assignment Envelope (§d) is the call-site contract that crosses
+  the boundary: declared scope, allowed mutation classes, prohibited
+  surfaces, required validation, evidence requirements, and stop
+  conditions. The envelope makes each crossing auditable before,
+  during, and after execution.
+
+Two consequences follow from the boundary framing:
+
+1. The unit of agent work shifts from "agents do tasks" to "agents
+   participate in a governed state machine." Agent capability inside
+   the envelope is unconstrained by Creator Engine; the envelope
+   itself is what governance binds.
+2. Creator Engine must practice the SDLC governance discipline it
+   productizes. Mutations to this operating model, to the Feature 001
+   substrate, or to the constitution are themselves
+   Creator-Engine-governed mutations (privileged `governance` class
+   per Feature 001 FR-008), subject to the same spec/plan/tasks
+   triple, evidence, and human ratification any other privileged
+   mutation requires.
+
+Two invariants make the boundary load-bearing rather than ornamental:
+
+- **CI verifies; CI does not ratify.** Mechanical validation produces
+  evidence for the audit chain; it never authorizes a privileged
+  transition. See §b T17 and
+  [`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md).
+- **Agents produce evidence; agents do not ratify privileged
+  mutations.** Source remains the Phase 1 ratifier for every
+  privileged boundary (FR-008 classes: `deploy`, `governance`,
+  `identity`, `security`, `attestation`, `redaction`). Agent review
+  output, agent-drafted attestations, and agent-authored architect or
+  implementer artifacts are all evidence in the audit chain, never
+  ratification. See §c, §e, and
+  [`./agent-interaction-model.md`](./agent-interaction-model.md) §e.
+
+Phase 2 may introduce governed autonomy expansions under ratified
+policy (see §c). It does not exist yet. Until a Phase 2 amendment is
+itself Source-ratified per §g, the syscall boundary described above is
+**procedurally enforced**: the gates, transitions, evidence
+requirements, and ratifier rules are upheld by human discipline plus
+the offline validator and CI checks defined in the Feature 001
+substrate. A typed runtime executor that mechanically denies
+out-of-envelope syscalls — a gate/syscall executor that rejects
+unauthorized mutation classes, prohibited surfaces, or missing
+ratifications at call time — is a plausible future implementation
+shape, not a v0.1 capability. The syscall metaphor is explanatory
+architecture doctrine for the current procedural enforcement; it is
+not permission to implement runtime automation in advance of
+ratification.
+
 ## a. The 25-state SDLC machine (FR-001)
 
 The Creator Engine SDLC state machine is the backbone of the
@@ -291,6 +364,40 @@ constitution's amendment procedure:
 
 Phase 2 expansion is itself such an amendment (FR-028); Phase 2 is not
 implemented by Feature 002.
+
+## h. Prompt-file ratification phrase
+
+Some governed handoffs are scoped by a prompt file: a handoff
+document, an envelope draft committed to disk, or another file whose
+contents define the scope of a ratifier-authorized action. Where a
+ratifier authorizes work by reference to such a file, the canonical
+human-readable ratification phrase is:
+
+```text
+Source ratifies prompt:<absolute prompt path> with SHA:<sha256>
+```
+
+Both arguments are required. `<absolute prompt path>` is the absolute
+filesystem path of the prompt file at the moment of ratification.
+`<sha256>` is the lowercase hexadecimal SHA-256 digest of the prompt
+file's bytes at that same moment. Binding the ratification to the
+digest closes the prompt file's contents: any subsequent edit produces
+a different digest and therefore a different, un-ratified artifact.
+
+This phrase is procedural, not ornamental. Its job is to give the
+audit chain a single, locatable line that can be parsed and
+cross-checked against the file on disk. It does NOT replace the
+ratification record formats specified in Feature 001 (FR-016,
+FR-020a); the YAML ratification record remains the canonical
+artifact. Where the prompt-ratification phrase and the YAML
+ratification record disagree, the YAML record wins.
+
+The phrase belongs to the same authority rules as any other
+ratification surface: it is valid only when uttered by a ratifier
+authorized for the relevant mutation class per the Feature 001
+authority matrix and Feature 002 §e, and the author/approver
+separation rule (FR-006/FR-007) still applies — the ratifier MUST
+NOT have authored the prompt file.
 
 ## Acceptance posture for this document
 
