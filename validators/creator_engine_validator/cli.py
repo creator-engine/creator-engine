@@ -92,6 +92,9 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/review-evidence/missing-verdict.yml"), False, "FR-001"),
         ("malformed", Path("examples/malformed/review-evidence/invalid-verdict-value.yml"), False, "FR-001"),
         ("malformed", Path("examples/malformed/review-evidence/missing-non-ratification-statement.yml"), False, "FR-001"),
+        ("malformed", Path("examples/malformed/architect-evidence/missing-verdict.yml"), False, "FR-001"),
+        ("malformed", Path("examples/malformed/architect-evidence/invalid-verdict-value.yml"), False, "FR-001"),
+        ("malformed", Path("examples/malformed/architect-evidence/missing-non-ratification-statement.yml"), False, "FR-001"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []

@@ -1,0 +1,229 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/architect-evidence.schema.yaml"
+title: "Creator Engine Architect Evidence Record"
+description: |
+  Machine-readable schema for an architect evidence record authored
+  under the Creator Engine delivery control plane.
+
+  Prose contract: `docs/contracts/architect-evidence.md`.
+
+  An architect evidence record captures what a governed architect
+  produced as design context, decision options, and recommendations
+  for a specific design subject. Architect evidence is NOT Source
+  ratification, NOT review evidence, and NOT implementer evidence.
+  The architect retains authoring parity only; ratification,
+  approval to merge, deploy authorization, branch protection
+  mutation, and live repository-settings change remain Source-only
+  per Feature 001 FR-008 and the Batch 2A §6.3 ratified
+  authority-boundary posture.
+
+  The `verdict` enum is constrained to architect-evidence-only
+  outcomes; the `non_ratification_statement` field is mandatory and
+  MUST restate that this record does not authorize merge, deploy,
+  branch deletion, branch protection mutation, or live
+  repository-settings change.
+
+  Concrete architect product, model, CLI, SaaS account, runner,
+  source-host application, bot slug, or tooling identifiers MUST
+  NOT appear here as normative upstream bindings; those are
+  deployment-time overlay decisions. Real secrets, tokens,
+  credentials, source-host installation ids, durable actor ids,
+  app slugs, account names, and machine-local absolute paths MUST
+  NOT appear here.
+type: object
+required:
+  - evidence_id
+  - design_subject
+  - authored_artifact_refs
+  - architect_identity_ref
+  - architect_role_category
+  - authoring_mode
+  - design_scope
+  - mutation_classes_proposed
+  - prohibited_surfaces_acknowledged
+  - supporting_evidence_refs
+  - recommendations
+  - decision_options
+  - open_questions
+  - verdict
+  - recommended_follow_up
+  - evidence_timestamp
+  - non_ratification_statement
+unevaluatedProperties: false
+properties:
+  evidence_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]*$"
+    minLength: 1
+    description: |
+      Stable repo-relative identifier for this evidence record,
+      unique within a tenant overlay.
+  design_subject:
+    type: string
+    minLength: 1
+    description: |
+      Human-readable statement of the design subject the architect
+      addressed (e.g., the contract, schema, validator surface,
+      decision request, or governance question under design).
+  authored_artifact_refs:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Repo-relative paths to artifacts the architect authored or
+      proposes to author under this envelope (spec, plan, tasks,
+      decision request, schema draft, prose contract draft,
+      template draft, etc.). External tracker URLs are non-canonical
+      and MUST NOT appear here.
+  architect_identity_ref:
+    type: string
+    minLength: 1
+    description: |
+      Repo-relative path to the ratified architect identity record
+      under which this evidence is authored.
+  architect_role_category:
+    type: string
+    const: architect
+    description: |
+      Fixed to `architect`. Records with any other `role_category`
+      are not governed architect evidence under this contract.
+  authoring_mode:
+    type: string
+    enum: [manual_human, manual_agent, mixed_human_and_agent]
+    description: |
+      Generic authoring-mode label. Concrete tool/model/CLI
+      selection is a deployment-time overlay decision and MUST NOT
+      be hard-coded as an upstream binding here.
+  design_scope:
+    type: string
+    minLength: 1
+    description: |
+      Human-readable scope statement naming in-scope and
+      out-of-scope items for this architect evidence.
+  mutation_classes_proposed:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: "^[a-z][a-z0-9-]*$"
+    description: |
+      Mutation classes that the proposed/authored change would
+      touch, per `docs/contracts/mutation-class-taxonomy.md`.
+      Naming a privileged class here does NOT authorize the
+      mutation; the privileged-class envelope still requires Source
+      ratification per Feature 001 FR-008.
+  prohibited_surfaces_acknowledged:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Prohibited-surface labels the architect affirmatively
+      acknowledged are out of authoring scope under this envelope
+      (e.g., `live_repository_settings`, `branch_protection`,
+      `deploy_automation`, `codeowners`, `secrets_or_tokens`,
+      `instance_local_paths`, `authority_matrix_baseline`,
+      `mutation_class_taxonomy_baseline`). The architect does not
+      author these surfaces under architect-evidence framing.
+  supporting_evidence_refs:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Repo-relative paths or command-result references the
+      architect consulted (specs, prior contracts, validator output,
+      attestation paths). External tracker URLs are non-canonical
+      and MAY appear only as advisory references. MAY be empty when
+      the architect consulted no additional supporting evidence.
+  recommendations:
+    type: string
+    minLength: 1
+    description: |
+      Free-text body of architect recommendations and decision
+      context. The body MUST be sufficient for Source to perform
+      ratification independently of the architect's authoring
+      session.
+  decision_options:
+    type: array
+    items:
+      type: object
+      required: [option_id, summary, tradeoffs, recommended_default]
+      unevaluatedProperties: false
+      properties:
+        option_id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+          minLength: 1
+        summary:
+          type: string
+          minLength: 1
+        tradeoffs:
+          type: string
+          minLength: 1
+        recommended_default:
+          type: boolean
+    description: |
+      Structured enumeration of options the architect surfaced for
+      Source ratification. MAY be empty when the recommendation is
+      unitary and no option enumeration is required. At most one
+      option SHOULD carry `recommended_default: true`; the absence
+      of a recommended default is itself a recommendation posture.
+  open_questions:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Open questions the architect surfaced for Source. MAY be
+      empty when the architect has no open questions.
+  verdict:
+    type: string
+    enum:
+      - recommendation_complete
+      - recommendation_partial
+      - scope_boundary_unclear
+      - cannot_author
+    description: |
+      Architect-evidence-only outcome. The schema MUST NOT accept
+      any verdict value that implies the architect can ratify,
+      approve merge, waive a privileged gate, modify branch
+      protection, run or modify deploy automation, apply live
+      repository settings, or substitute for implementer authoring
+      under an implementer-class envelope.
+  recommended_follow_up:
+    type: string
+    description: |
+      Free-text recommendations for follow-up work (separate
+      envelopes, future slices, deferred items, downstream
+      implementer-class consumption). MAY be empty when there is
+      no follow-up recommendation.
+  evidence_timestamp:
+    description: |
+      Either an ISO-8601 timestamp (e.g.,
+      `2026-05-17T12:00:00Z`) or a source-controlled timestamp
+      reference (e.g., `commit:<sha>` or a repo-relative path
+      naming a commit-bound evidence file). A machine-local clock
+      value MUST NOT be presented as authoritative.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  non_ratification_statement:
+    type: string
+    minLength: 1
+    description: |
+      Explicit textual statement that this architect evidence is
+      NOT Source ratification and does not authorize merge,
+      deploy, branch deletion, branch protection mutation, or
+      live repository-settings change. Its absence is itself a
+      contract violation under `docs/contracts/architect-evidence.md`.

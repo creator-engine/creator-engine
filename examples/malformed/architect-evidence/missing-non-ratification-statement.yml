@@ -1,0 +1,25 @@
+# Malformed architect evidence example: the mandatory
+# `non_ratification_statement` field is omitted. Per
+# docs/contracts/architect-evidence.md, its absence is itself a
+# contract violation. The validator MUST reject this record under
+# FR-001 and cite docs/contracts/architect-evidence.md.
+evidence_id: malformed-missing-non-ratification-statement
+design_subject: Example design subject statement.
+authored_artifact_refs:
+  - specs/001-v0-1-governance-substrate/spec.md
+architect_identity_ref: tenants/example-tenant/architect/identity-record.yml
+architect_role_category: architect
+authoring_mode: manual_human
+design_scope: Example scope statement.
+mutation_classes_proposed:
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+supporting_evidence_refs:
+  - examples/well-formed
+recommendations: Example recommendations body.
+decision_options: []
+open_questions: []
+verdict: recommendation_complete
+recommended_follow_up: ""
+evidence_timestamp: source-controlled:examples/malformed/architect-evidence/missing-non-ratification-statement.yml
