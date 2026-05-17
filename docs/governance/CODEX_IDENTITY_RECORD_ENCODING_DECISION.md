@@ -46,7 +46,16 @@ ratification of the eight §6 decisions is now recorded in the
 ratification block above and in each §6 subsection's **Source-ratified
 selection** line; these encoding claims are in effect. The future Codex
 identity record authoring envelope is the next separately Source-ratified
-privileged gate.
+privileged gate. A local authoring branch/worktree
+(`identity/codex-record-authoring`) is currently drafting the
+substrate-internal placeholder/unbound Codex identity record under
+`tenants/creator-engine-substrate/codex/` (record file plus
+`attestations/`, `ratifications/`, and `redactions/` storage
+directories) — uncommitted/unmerged pending Source validation and
+later Git mechanics; no concrete provider/tool/model/host/account/
+tenant/repository is bound and no schema, validator, template,
+example, contract, or architecture file is modified by that
+authoring envelope.
 
 ## 2. Source-ratified basis carried forward
 

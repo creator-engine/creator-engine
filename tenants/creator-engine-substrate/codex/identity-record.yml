@@ -1,0 +1,49 @@
+tenant_id: creator-engine-substrate
+source_host: github
+source_host_installation_id: placeholder-unbound-source-host-installation-id
+agent_app_slug: placeholder-unbound-agent-app-slug
+agent_actor_id: placeholder-unbound-agent-actor-id
+runtime_tool: placeholder-unbound-runtime-tool
+role_category: architect
+authority_context:
+  description: >-
+    Codex acts under per-batch Source-ratified architect/implementer authoring
+    assignment per docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md §3.3 /
+    §6.1 (Option C ratified) and the envelope-bound authority wording in
+    docs/architecture/agent-interaction-model.md §a / §b.4. Authority remains
+    envelope-bound, not personality-bound. Codex has authoring parity only: no
+    ratification authority, no merge authority, no deploy authority. This is a
+    placeholder substrate-internal identity record; tenant, source-host
+    installation, agent application, agent actor, runtime/tool, repository,
+    and signing identities are placeholder/unbound and are not concretely
+    bound by this record (Batch 2A §6.4 ratified posture). The
+    `mutation_classes` value enumerates the Codex Phase 1 authoring classes
+    ratified for non-privileged authoring; privileged classes remain
+    Source-ratified per Feature 001 FR-008. The Batch 2A §6.2 ratified
+    posture that `code` is gated to Source-ratified implementer-class
+    envelopes is preserved by this record — `code` is not enumerated here
+    and is not granted standing on this identity outside a separately
+    Source-ratified implementer-class envelope.
+  governing_spec_refs:
+    - docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md
+    - docs/architecture/agent-interaction-model.md
+    - docs/governance/CODEX_FIRST_CLASS_SCOPE.md
+    - docs/operations/CODEX_FIRST_CLASS_PROTOCOL.md
+    - docs/governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md
+  ratifier_authority_refs:
+    - docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md
+    - docs/contracts/authority-matrix.md
+human_ratifier_roles:
+  - source
+mutation_classes:
+  - governance
+  - docs
+allowed_repositories:
+  - placeholder-unbound-repository
+signing_policy:
+  commit_signing_required: false
+  commit_signing_method: none
+  attestation_signing_required: false
+attestation_storage_path: tenants/creator-engine-substrate/codex/attestations/
+ratification_storage_path: tenants/creator-engine-substrate/codex/ratifications/
+redaction_storage_path: tenants/creator-engine-substrate/codex/redactions/

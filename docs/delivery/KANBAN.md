@@ -43,7 +43,12 @@ record encoding decision (#29)` and is `Done` on the board below;
 see [`./BACKLOG.md`](./BACKLOG.md) §e.13. Source ratified eight §6
 decisions; the next gate is the Codex identity record authoring
 envelope, a separately Source-ratified privileged `identity`-class
-gate.
+gate. A local authoring branch/worktree
+(`identity/codex-record-authoring`) is currently drafting the
+substrate-internal placeholder/unbound Codex identity record under
+`tenants/creator-engine-substrate/codex/` — uncommitted/unmerged
+pending Source validation and later Git mechanics; no concrete
+provider/tool/model/host/account/tenant/repository is bound.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -82,8 +87,13 @@ merge, this board is regenerated per
 
 *(No items currently in this column. The Codex identity record authoring
 envelope is the next gate; it requires a separate Source-ratified
-privileged `identity`-class envelope per Feature 001 FR-008 and is not
-yet shaped.)*
+privileged `identity`-class envelope per Feature 001 FR-008. A local
+authoring branch/worktree (`identity/codex-record-authoring`) is
+currently drafting the substrate-internal placeholder/unbound Codex
+identity record under `tenants/creator-engine-substrate/codex/` —
+uncommitted/unmerged pending Source validation and later Git mechanics;
+no concrete provider/tool/model/host/account/tenant/repository is
+bound.)*
 
 ### Ready
 

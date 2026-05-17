@@ -59,7 +59,12 @@ canonical branch as PR #29 / merge commit `66a8074 docs: draft Codex
 identity record encoding decision (#29)`; see §e.13. Source ratified
 eight §6 decisions. The next gate is the Codex identity record
 authoring envelope, a separately Source-ratified privileged
-`identity`-class gate.
+`identity`-class gate; a local authoring branch/worktree
+(`identity/codex-record-authoring`) is currently drafting that
+substrate-internal placeholder/unbound Codex identity record under
+`tenants/creator-engine-substrate/codex/` — uncommitted/unmerged
+pending Source validation and later Git mechanics, with no concrete
+provider/tool/model/host/account/tenant/repository binding.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
