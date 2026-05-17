@@ -26,5 +26,5 @@ The authoritative source for generated work remains the feature plan until each 
 CFC follow-on Batch 2D contract documents (post-Sprint-0 substrate; each lifts or extends a separate evidence artifact class and is governed under its own separately Source-ratified privileged `schema`-class envelope per Feature 001 FR-008):
 
 - `review-evidence.md` — FR-001, FR-027 (Batch 2D.1 schema-class lift of `../delivery/REVIEW_EVIDENCE_TEMPLATE.md`; landed).
-- `architect-evidence.md` — FR-001, FR-027 (Batch 2D.2 schema-class authoring; sibling to review-evidence; does not amend review-evidence semantics and does not authorize implementer-class authoring).
-- Batch 2D.3 implementer-evidence contract — not authored here; remains downstream and requires its own separately Source-ratified privileged `schema`-class envelope.
+- `architect-evidence.md` — FR-001, FR-027 (Batch 2D.2 schema-class authoring; landed; sibling to review-evidence; does not amend review-evidence semantics and does not authorize implementer-class authoring).
+- Batch 2D.3 implementer-evidence contract — not authored here; remains the next privileged schema-class gate and requires its own separately Source-ratified privileged `schema`-class envelope.
