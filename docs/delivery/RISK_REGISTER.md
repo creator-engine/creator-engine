@@ -7,14 +7,12 @@ specific risk controls have been added as §c.13–§c.19; CFC-1 Batch 1
 has since landed on the canonical branch as PR #25 / `30a3e8c`. CFC
 follow-on Batches 2A (PR #27 / `6b51882`), 2B (PR #28 / `c06a3e7`),
 and 2C (PR #29 / `66a8074`) have all landed; Source ratified eight §6
-decisions in Batch 2C. The next gate is the Codex identity record
-authoring envelope, a separately Source-ratified privileged
-`identity`-class gate; a local authoring branch/worktree
-(`identity/codex-record-authoring`) is currently drafting the
-substrate-internal placeholder/unbound Codex identity record under
-`tenants/creator-engine-substrate/codex/` — uncommitted/unmerged
-pending Source validation and later Git mechanics, and no concrete
-provider/tool/model/host/account/tenant/repository is bound. Part of
+decisions in Batch 2C. The Codex identity record authoring envelope has
+since landed on the canonical branch as PR #31 / merge commit `78b57a4`;
+see [`./BACKLOG.md`](./BACKLOG.md) §e.14. The next gate is Batch 2D
+(review/architect/implementer evidence schema, privileged `schema`-class),
+which requires a separately Source-ratified schema-class envelope before
+any Batch 2D implementation. Part of
 the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001

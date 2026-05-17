@@ -44,18 +44,21 @@ This follow-on reconciliation gate addresses residual coherence gaps
 across the expanded seven-path boundary listed in §10. Source
 ratification of the eight §6 decisions is now recorded in the
 ratification block above and in each §6 subsection's **Source-ratified
-selection** line; these encoding claims are in effect. The future Codex
-identity record authoring envelope is the next separately Source-ratified
-privileged gate. A local authoring branch/worktree
-(`identity/codex-record-authoring`) is currently drafting the
-substrate-internal placeholder/unbound Codex identity record under
-`tenants/creator-engine-substrate/codex/` (record file plus
-`attestations/`, `ratifications/`, and `redactions/` storage
-directories) — uncommitted/unmerged pending Source validation and
-later Git mechanics; no concrete provider/tool/model/host/account/
-tenant/repository is bound and no schema, validator, template,
-example, contract, or architecture file is modified by that
-authoring envelope.
+selection** line; these encoding claims are in effect. The Codex identity record authoring envelope has landed —
+Source-ratified privileged `identity`-class gate; PR #31 / merge
+commit `78b57a4e70956b610621a6dd1b2764fe81dc317a`; single Codex
+identity record with `role_category = architect` and
+`human_ratifier_roles = ["source"]`; placeholder/unbound posture
+for `allowed_repositories`, `signing_policy`, and `tenant_id`;
+storage paths under `tenants/creator-engine-substrate/codex/`
+(record file plus `attestations/`, `ratifications/`, and
+`redactions/` directories); no concrete provider/tool/model/host/
+account/tenant/repository bound; no schema, validator, template,
+example, contract, or architecture file modified. The next
+separately Source-ratified gate is Batch 2D
+(review/architect/implementer evidence schema, privileged
+`schema`-class), which requires a separately Source-ratified
+schema-class envelope before any Batch 2D implementation.
 
 ## 2. Source-ratified basis carried forward
 
@@ -167,10 +170,11 @@ second `role_category` value on the identity.
   6. Author/approver separation (FR-007).
   7. Architect parity is authoring parity only (Batch 2A §6.3).
 - **Downstream consequences**:
-  - The future Codex identity record authoring envelope (a separately
-    Source-ratified privileged `identity`-class envelope, outside
-    this Batch 2C draft's authority) authors one Codex identity
-    record file with `role_category = architect`.
+  - The downstream Codex identity record authoring envelope (now landed
+    as PR #31 / 78b57a4; a separately Source-ratified privileged
+    `identity`-class envelope, outside this Batch 2C draft's
+    authority) authors one Codex identity record file with
+    `role_category = architect`.
   - Batch 2D evidence schema (separately Source-ratified) governs the
     review/architect/implementer evidence artifact class consistent
     with the Batch 2A §6.5 ratified posture (review evidence retained
@@ -198,8 +202,9 @@ second `role_category` value on the identity.
   mutation-class authorization.
 - **Preserved invariants**: all invariants in Option A apply.
 - **Downstream consequences**:
-  - The future Codex identity record authoring envelope authors one
-    Codex identity record file with `role_category = implementer`.
+  - The Codex identity record authoring envelope (had Option B been
+    selected) would have authored one Codex identity record file with
+    `role_category = implementer`.
   - Batch 2D evidence schema framing is unchanged from Option A.
 - **Schema/contract amendment cost**: **none**. Same as Option A.
 - **Note vs. Batch 2A ratified wording**: Option B mirrors Option A
@@ -235,11 +240,11 @@ distinct actor ids), its own `mutation_classes`, its own
   implementer-authored artifacts carry distinct `consuming_actor_id`
   values per envelope.
 - **Downstream consequences**:
-  - The future Codex identity record authoring envelope authors **two**
-    Codex identity record files (or one file with two records,
-    subject to the substrate's storage convention for multiple
-    identities under a single tenant). Each record carries its own
-    `authority_context.description`,
+  - The Codex identity record authoring envelope (had Option C been
+    selected) would have authored **two** Codex identity record files
+    (or one file with two records, subject to the substrate's storage
+    convention for multiple identities under a single tenant). Each
+    record carries its own `authority_context.description`,
     `authority_context.governing_spec_refs`, and
     `authority_context.ratifier_authority_refs`.
   - Batch 2D evidence schema framing is unchanged from Option A.
@@ -273,16 +278,16 @@ amendment to `docs/contracts/identity-record.md` and to
   single-valued `role_category` is **amended**.
 - **Downstream consequences**:
   - A separately Source-ratified `schema`-class privileged envelope
-    must precede the future Codex identity record authoring envelope.
+    would have had to precede the Codex identity record authoring envelope.
     That schema-class envelope amends
     `docs/contracts/identity-record.md` and
     `schemas/identity-record.schema.yaml`. It also potentially
     requires re-running the validator against existing identity
     records and against the dogfood tenant fixture.
-  - The future Codex identity record authoring envelope (also
-    privileged `identity`-class, separately Source-ratified) then
-    authors one Codex identity record file with array-valued
-    `role_category`.
+  - The Codex identity record authoring envelope (also privileged
+    `identity`-class, separately Source-ratified; had Option D been
+    selected) would then have authored one Codex identity record file
+    with array-valued `role_category`.
   - Batch 2D evidence schema framing is unchanged from Option A.
 - **Schema/contract amendment cost**: **heavy**. Privileged
   `schema`-class mutation of

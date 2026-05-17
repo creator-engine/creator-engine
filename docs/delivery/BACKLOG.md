@@ -57,14 +57,13 @@ CFC follow-on Batch 2C
 (`post-sprint-0/cfc-2c-codex-identity-decision`) has landed on the
 canonical branch as PR #29 / merge commit `66a8074 docs: draft Codex
 identity record encoding decision (#29)`; see §e.13. Source ratified
-eight §6 decisions. The next gate is the Codex identity record
-authoring envelope, a separately Source-ratified privileged
-`identity`-class gate; a local authoring branch/worktree
-(`identity/codex-record-authoring`) is currently drafting that
-substrate-internal placeholder/unbound Codex identity record under
-`tenants/creator-engine-substrate/codex/` — uncommitted/unmerged
-pending Source validation and later Git mechanics, with no concrete
-provider/tool/model/host/account/tenant/repository binding.
+eight §6 decisions. The Codex identity record authoring envelope
+(`post-sprint-0/cfc-codex-identity-record-authoring`) has since landed
+on the canonical branch as PR #31 / merge commit `78b57a4 docs: author
+Codex identity record (#31)`; see §e.14. The next gate is Batch 2D
+(review/architect/implementer evidence schema, privileged
+`schema`-class), which requires a separately Source-ratified
+schema-class envelope before any Batch 2D implementation.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -707,9 +706,11 @@ recorded as §e.8 and §e.9.
   matrix update), 2C (Codex identity record encoding decision
   request), and 2D (review/architect/implementer-evidence schema)
   each require their own Source-ratified envelopes; 2B has since
-  landed (see §e.12) and 2C has since landed (see §e.13); the current
-  next gate is the Codex identity record authoring envelope, a
-  separately Source-ratified privileged `identity`-class gate.
+  landed (see §e.12), 2C has since landed (see §e.13), and Codex
+  identity record authoring has since landed (see §e.14); the current
+  downstream gate is the Batch 2D review/architect/implementer evidence
+  schema, a separately Source-ratified privileged `schema`-class
+  envelope required before implementation.
 - **anticipated mutation class**: `governance` / `docs`
 - **owner role**: `architect` (drafter) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
@@ -855,6 +856,47 @@ recorded as §e.8 and §e.9.
   `docs/contracts/authority-matrix.yml`, schemas, validators,
   templates, examples, tenants, `docs/architecture/**`, and
   `.github/**` not mutated.
+
+### e.14 Post-Sprint-0 substrate — CFC follow-on: Codex identity record authoring
+
+- **id**: `post-sprint-0/cfc-codex-identity-record-authoring`
+- **parent**: —
+- **status**: `Done`
+- **scope**: CFC follow-on Codex identity record authoring under
+  the Source-ratified privileged `identity`-class envelope. Authors
+  one Codex identity record file with `role_category = architect`
+  and `human_ratifier_roles = ["source"]`, plus `attestations/`,
+  `ratifications/`, and `redactions/` storage directories under
+  `tenants/creator-engine-substrate/codex/`. Encoding posture pins
+  from Batch 2C §6.1–§6.7: placeholder/unbound `allowed_repositories`,
+  `signing_policy`, and `tenant_id`; no concrete
+  provider/tool/model/host/account/repository bound; no schema,
+  validator, template, example, contract, or architecture file
+  modified. Codex authority not expanded; Batch 2D evidence schema
+  remains a separate downstream gate requiring its own
+  Source-ratified schema-class envelope.
+- **acceptance gate**: Identity record file and storage directories
+  exist under `tenants/creator-engine-substrate/codex/` and validate
+  against the substrate; Source ratification recorded; merged on the
+  canonical branch with finalized attestation. Gate met.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-2c-codex-identity-decision` (`Done`, PR #29 /
+  `66a8074`). Successor — Batch 2D review/architect/implementer
+  evidence schema (privileged `schema`-class) — remains downstream
+  and requires its own separately Source-ratified schema-class
+  envelope per Feature 001 FR-008.
+- **anticipated mutation class**: `identity` (privileged)
+- **owner role**: `implementer` (Codex under the Source-ratified
+  envelope); `controller` / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commit
+  `78b57a4 docs: author Codex identity record (#31)` on the
+  canonical branch. Single Codex identity record with
+  `role_category = architect`, `human_ratifier_roles = ["source"]`,
+  placeholder/unbound posture for `allowed_repositories`,
+  `signing_policy`, and `tenant_id`; storage paths under
+  `tenants/creator-engine-substrate/codex/`.
 
 ## f. Maintenance rules
 
