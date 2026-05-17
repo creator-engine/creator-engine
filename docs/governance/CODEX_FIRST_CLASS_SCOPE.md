@@ -214,10 +214,22 @@ authority-boundary posture (architect parity is authoring parity,
 not ratification/merge/deploy authority) and the Batch 2B
 envelope-bound authority wording; it does not amend Batch 2D.1
 review-evidence artifacts and does not authorize implementer-class
-authoring. The next privileged schema-class gate is Batch 2D.3
-(implementer-evidence schema, privileged `schema`-class), which
-remains downstream and requires its own separately
-Source-ratified privileged `schema`-class envelope.
+authoring. CFC follow-on Batch 2D.3 implementer-evidence schema
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) is currently
+**locally authored** under a Source-ratified privileged
+`schema`-class implementer envelope; awaiting controller
+verification and Source ratification before merge; not yet landed
+on the canonical branch. Implementer-evidence framing preserves
+the Batch 2A §6.3 ratified authority-boundary posture
+(architect/implementer parity is authoring/execution parity, not
+ratification/merge/deploy authority) and the Batch 2B
+envelope-bound authority wording; it does not amend Batch 2D.1
+review-evidence or Batch 2D.2 architect-evidence artifacts and
+does not authorize ratification, merge, deploy, branch deletion,
+branch protection mutation, live repository-settings change,
+provider/tool/model/host/account binding, tenant binding, or
+authority expansion. See
+[`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.17.
 
 | Deferred item | Expected class | Gate |
 |---|---|---|
@@ -227,7 +239,7 @@ Source-ratified privileged `schema`-class envelope.
 | Codex identity record | `identity` (privileged) | **Landed.** Source-ratified CFC follow-on privileged `identity`-class envelope; single Codex identity record with `role_category = architect` and `human_ratifier_roles = ["source"]`; placeholder/unbound posture for `allowed_repositories`, `signing_policy`, and `tenant_id`; storage paths under `tenants/creator-engine-substrate/codex/`; no concrete provider/tool/model/host/account/tenant/repository bound. PR #31 / merge commit `78b57a4`; see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.14. |
 | Review-evidence schema (Batch 2D.1) | `schema` (privileged) | Batch 2D.1 review-evidence schema is **landed.** Source-ratified privileged `schema`-class envelope; framing follows the Batch 2A §6.5 ratified posture (review evidence retained as a separate artifact class). PR #34 / merge commit `e1f5ffc` (PR head SHA `2a8fe0f`); see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.15. |
 | Architect-evidence schema (Batch 2D.2) | `schema` (privileged) | Batch 2D.2 architect-evidence schema is **landed.** Source-ratified privileged `schema`-class envelope; architect evidence is a separate artifact class from Batch 2D.1 review evidence; framing preserves the Batch 2A §6.3 ratified authority-boundary posture (architect parity is authoring parity, not ratification/merge/deploy authority) and the Batch 2B envelope-bound authority wording. Does not amend Batch 2D.1 review-evidence artifacts and does not authorize implementer-class authoring. PR #36 / merge commit `51a2134` (PR head SHA `451be39`); see [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.16. |
-| Implementer-evidence schema (Batch 2D.3) | `schema` (privileged) | Batch 2D.3 implementer-evidence schema remains downstream of Batch 2D.2 and is reaffirmed as non-mutated by Batch 2C per [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8; requires its own separately Source-ratified privileged `schema`-class envelope. |
+| Implementer-evidence schema (Batch 2D.3) | `schema` (privileged) | Batch 2D.3 implementer-evidence schema is currently **locally authored** under a Source-ratified privileged `schema`-class implementer envelope; awaiting controller verification and Source ratification before merge; not yet landed on the canonical branch. Implementer-evidence is a separate artifact class from Batch 2D.1 review evidence and Batch 2D.2 architect evidence; framing preserves the Batch 2A §6.3 ratified authority-boundary posture and the Batch 2B envelope-bound authority wording; does not amend Batch 2D.1 or Batch 2D.2 artifacts and does not authorize ratification, merge, deploy, branch deletion, branch protection mutation, live repository-settings change, provider/tool/model/host/account binding, tenant binding, or authority expansion; reaffirmed as non-mutated by Batch 2C per [`./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](./CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. See [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e.17. |
 | Provider/tool/model/host/account binding | deployment overlay | Source decision at binding time; binding posture remains placeholder/unbound per the Batch 2A §6.4 ratified posture and the Batch 2C §6.4 / §6.5 / §6.7 recommended posture |
 | Codex authority expansion (ratification, merge, deploy) | Source decision | Not currently planned; Batch 2A §6.3 ratified that architect parity is authoring parity only and Batch 2C §4 / §7 inherits the boundary unmodified |
 | Feature 005 dispatch automation | `governance` / `code` | Feature 005 spec ratified |

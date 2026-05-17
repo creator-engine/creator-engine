@@ -1,0 +1,38 @@
+# Malformed implementer evidence example: the `verdict` field
+# carries a value outside the implementer-evidence-only enum. The
+# validator MUST reject this record under FR-001 and cite
+# docs/contracts/implementer-evidence.md. In particular, a verdict
+# that implies ratification, merge authorization, deploy
+# authorization, provider/tool/model/host/account binding, tenant
+# binding, authority expansion, or substitution for review/
+# architect evidence is a contract violation of the
+# implementer-evidence enum.
+evidence_id: malformed-invalid-verdict-value
+implementation_subject: Example implementation subject statement.
+authored_artifact_refs:
+  - schemas/implementer-evidence.schema.yaml
+allowed_path_boundary_refs:
+  - schemas/implementer-evidence.schema.yaml
+implementer_identity_ref: tenants/example-tenant/implementer/identity-record.yml
+implementer_role_category: implementer
+execution_mode: manual_human
+implementation_scope: Example scope statement.
+mutation_classes_executed:
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+validation_evidence_refs:
+  - examples/well-formed
+test_evidence_refs:
+  - validators/tests
+implementation_summary: Example implementation summary body.
+deviations: []
+open_questions: []
+verdict: approved_for_merge
+recommended_follow_up: ""
+evidence_timestamp: source-controlled:examples/malformed/implementer-evidence/invalid-verdict-value.yml
+non_ratification_statement: >-
+  This implementer evidence is NOT Source ratification and does
+  not authorize merge, deploy, branch deletion, branch protection
+  mutation, live repository-settings change, provider/tool/model/
+  host/account binding, tenant binding, or authority expansion.

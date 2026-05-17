@@ -1,0 +1,29 @@
+# Malformed implementer evidence example: the mandatory
+# `non_ratification_statement` field is omitted. Per
+# docs/contracts/implementer-evidence.md, its absence is itself a
+# contract violation. The validator MUST reject this record under
+# FR-001 and cite docs/contracts/implementer-evidence.md.
+evidence_id: malformed-missing-non-ratification-statement
+implementation_subject: Example implementation subject statement.
+authored_artifact_refs:
+  - schemas/implementer-evidence.schema.yaml
+allowed_path_boundary_refs:
+  - schemas/implementer-evidence.schema.yaml
+implementer_identity_ref: tenants/example-tenant/implementer/identity-record.yml
+implementer_role_category: implementer
+execution_mode: manual_human
+implementation_scope: Example scope statement.
+mutation_classes_executed:
+  - docs
+prohibited_surfaces_acknowledged:
+  - live_repository_settings
+validation_evidence_refs:
+  - examples/well-formed
+test_evidence_refs:
+  - validators/tests
+implementation_summary: Example implementation summary body.
+deviations: []
+open_questions: []
+verdict: implementation_complete
+recommended_follow_up: ""
+evidence_timestamp: source-controlled:examples/malformed/implementer-evidence/missing-non-ratification-statement.yml

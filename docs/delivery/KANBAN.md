@@ -57,11 +57,13 @@ architect-evidence schema
 landed on the canonical branch as PR #36 / merge commit `51a2134
 feat: add architect evidence schema contract (#36)` (PR head SHA
 `451be39`) and is `Done` on the board below; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.16. The next privileged
-schema-class gate is Batch 2D.3 (implementer-evidence schema,
-privileged `schema`-class), which remains downstream and
-requires its own separately Source-ratified privileged
-`schema`-class envelope per Feature 001 FR-008.
+[`./BACKLOG.md`](./BACKLOG.md) §e.16. CFC follow-on Batch 2D.3
+implementer-evidence schema
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) is currently
+locally authored under a Source-ratified privileged `schema`-class
+implementer envelope; awaiting controller verification and Source
+ratification before merge. It is `In Progress` on the board below;
+see [`./BACKLOG.md`](./BACKLOG.md) §e.17.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -103,11 +105,10 @@ envelope has landed (PR #31 / `78b57a4`), Batch 2D.1 review-evidence
 schema has landed (PR #34 / `e1f5ffc`, head `2a8fe0f`), and Batch 2D.2
 architect-evidence schema has landed (PR #36 / `51a2134`, head
 `451be39`); see `Done` table below and
-[`./BACKLOG.md`](./BACKLOG.md) §e.16. The next privileged
-schema-class gate is Batch 2D.3 (implementer-evidence schema,
-privileged `schema`-class), which remains downstream and requires
-its own separately Source-ratified privileged `schema`-class envelope
-per Feature 001 FR-008.)*
+[`./BACKLOG.md`](./BACKLOG.md) §e.16. CFC follow-on Batch 2D.3
+implementer-evidence schema is currently `In Progress` (locally
+authored, not yet landed); see the `In Progress` column below and
+[`./BACKLOG.md`](./BACKLOG.md) §e.17.)*
 
 ### Ready
 
@@ -117,7 +118,9 @@ canonical branch; see the `Done` table below.)*
 
 ### In Progress
 
-*(No items currently in this column.)*
+| id | scope (one line) | current state |
+|---|---|---|
+| `post-sprint-0/cfc-2d-3-implementer-evidence-schema` | CFC follow-on Batch 2D.3 conservative machine-readable schema-class authoring slice for governed implementer evidence: `schemas/implementer-evidence.schema.yaml`, `templates/implementer-evidence.template.yaml`, `docs/contracts/implementer-evidence.md`, `implementer_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the contracts READMEs, [`./BACKLOG.md`](./BACKLOG.md) §e.17, this Kanban, [`./DEPENDENCIES.md`](./DEPENDENCIES.md), [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md). Implementer-evidence is a separate artifact class; does not amend Batch 2D.1 review-evidence or Batch 2D.2 architect-evidence semantics; does not authorize ratification, merge, deploy, branch deletion, branch protection mutation, live repository-settings change, provider/tool/model/host/account binding, tenant binding, or authority expansion. | Locally authored under a Source-ratified privileged `schema`-class implementer envelope; awaiting controller verification and Source ratification before merge; not yet landed on the canonical branch. |
 
 ### Verified
 
@@ -190,11 +193,14 @@ CFC follow-on Batch 2D.1 review-evidence schema
 architect-evidence schema
 (`post-sprint-0/cfc-2d-2-architect-evidence-schema`) is `Done`
 (PR #36 / `51a2134`, head `451be39`); see
-[`./BACKLOG.md`](./BACKLOG.md) §e.16. The next privileged
-schema-class gate is Batch 2D.3 (implementer-evidence schema,
-privileged `schema`-class), which remains downstream and
-requires its own separately Source-ratified privileged
-`schema`-class envelope per Feature 001 FR-008.
+[`./BACKLOG.md`](./BACKLOG.md) §e.16. CFC follow-on Batch 2D.3
+implementer-evidence schema
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) is currently
+`In Progress` — locally authored under a Source-ratified privileged
+`schema`-class implementer envelope; awaiting controller
+verification and Source ratification before merge; not yet landed
+on the canonical branch. See [`./BACKLOG.md`](./BACKLOG.md) §e.17
+and the `In Progress` column above.
 
 The Codex identity record is landed on canonical main: single
 Codex identity record with `role_category = architect` and
@@ -214,9 +220,13 @@ PR #36 / `51a2134` (head `451be39`):
 `docs/contracts/architect-evidence.md`, the
 `architect_evidence_schema` validator check, and well-formed /
 malformed examples; see [`./BACKLOG.md`](./BACKLOG.md) §e.16.
-Batch 2D.3 implementer-evidence schema and
-provider/tool/model/host/account binding remain separate
-downstream gates.
+Batch 2D.3 implementer-evidence schema is currently `In Progress`
+— locally authored under a Source-ratified privileged
+`schema`-class implementer envelope, not yet landed on the
+canonical branch; see [`./BACKLOG.md`](./BACKLOG.md) §e.17 and the
+`In Progress` column above. Provider/tool/model/host/account
+binding and any future unified cross-role evidence schema remain
+separate downstream gates.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; CFC follow-on Batch 2D.3
