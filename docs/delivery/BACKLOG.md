@@ -65,16 +65,15 @@ review-evidence schema
 (`post-sprint-0/cfc-2d-1-review-evidence-schema`) has since landed on
 the canonical branch as PR #34 / merge commit `e1f5ffc feat: add
 review evidence schema contract (#34)` (PR head SHA `2a8fe0f`); see
-§e.15. Batch 2D.2 (architect-evidence schema, privileged
-`schema`-class) is currently being authored under a separately
-Source-ratified privileged `schema`-class envelope on
-`post-sprint-0/cfc-2d-2-architect-evidence-schema`; local
-working-tree authoring is in progress and durable canonical-branch
-evidence will be backfilled on merge; see §e.16. The remaining
-downstream gate is Batch 2D.3 (implementer-evidence schema,
-privileged `schema`-class), which remains downstream and requires
-its own separately Source-ratified privileged `schema`-class
-envelope per Feature 001 FR-008.
+§e.15. CFC follow-on Batch 2D.2 architect-evidence schema
+(`post-sprint-0/cfc-2d-2-architect-evidence-schema`) has since
+landed on the canonical branch as PR #36 / merge commit `51a2134
+feat: add architect evidence schema contract (#36)` (PR head SHA
+`451be39`); see §e.16. The next privileged schema-class gate is
+Batch 2D.3 (implementer-evidence schema, privileged
+`schema`-class), which remains downstream and requires its own
+separately Source-ratified privileged `schema`-class envelope per
+Feature 001 FR-008.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -719,11 +718,12 @@ recorded as §e.8 and §e.9.
   each require their own Source-ratified envelopes; 2B has since
   landed (see §e.12), 2C has since landed (see §e.13), Codex
   identity record authoring has since landed (see §e.14), and
-  Batch 2D.1 review-evidence schema has since landed (see §e.15);
-  the current downstream gate is Batch 2D.2 (architect-evidence
-  schema), a separately Source-ratified privileged `schema`-class
-  envelope required before implementation, with Batch 2D.3
-  (implementer-evidence schema) remaining downstream.
+  Batch 2D.1 review-evidence schema has since landed (see §e.15),
+  and Batch 2D.2 architect-evidence schema has since landed (see
+  §e.16); the next privileged schema-class gate is Batch 2D.3
+  (implementer-evidence schema), which remains downstream and
+  requires its own separately Source-ratified privileged
+  `schema`-class envelope.
 - **anticipated mutation class**: `governance` / `docs`
 - **owner role**: `architect` (drafter) / `implementer` (markdown
   authoring under the Source-ratified visible implementation
@@ -895,12 +895,13 @@ recorded as §e.8 and §e.9.
 - **dependencies / blockers**:
   `post-sprint-0/cfc-2c-codex-identity-decision` (`Done`, PR #29 /
   `66a8074`). Successor Batch 2D.1 review-evidence schema has since
-  landed (see §e.15, PR #34 / `e1f5ffc`, head `2a8fe0f`). The
-  remaining downstream gate is Batch 2D.2 (architect-evidence
-  schema, privileged `schema`-class), with Batch 2D.3
-  (implementer-evidence schema, privileged `schema`-class) further
-  downstream; each requires its own separately Source-ratified
-  privileged schema-class envelope per Feature 001 FR-008.
+  landed (see §e.15, PR #34 / `e1f5ffc`, head `2a8fe0f`) and
+  Batch 2D.2 architect-evidence schema has since landed (see
+  §e.16, PR #36 / `51a2134`, head `451be39`). The next privileged
+  schema-class gate is Batch 2D.3 (implementer-evidence schema,
+  privileged `schema`-class), which remains downstream and
+  requires its own separately Source-ratified privileged
+  schema-class envelope per Feature 001 FR-008.
 - **anticipated mutation class**: `identity` (privileged)
 - **owner role**: `implementer` (Codex under the Source-ratified
   envelope); `controller` / `reviewer` (Nefarious)
@@ -957,11 +958,12 @@ recorded as §e.8 and §e.9.
   PR #31 / `78b57a4`) and prior CFC follow-on Batches 2A / 2B / 2C
   (each `Done`). Batch 2D.1 is the schema-class lift of an
   existing prose contract and does not author Batch 2D.2 or
-  Batch 2D.3. Successor — Batch 2D.2 (architect-evidence schema,
-  privileged `schema`-class) — remains downstream and requires its
-  own separately Source-ratified privileged schema-class envelope;
-  Batch 2D.3 (implementer-evidence schema, privileged
-  `schema`-class) is further downstream.
+  Batch 2D.3. Sibling Batch 2D.2 architect-evidence schema has
+  since landed (see §e.16, PR #36 / `51a2134`, head `451be39`).
+  The next privileged schema-class gate is Batch 2D.3
+  (implementer-evidence schema, privileged `schema`-class), which
+  remains downstream and requires its own separately
+  Source-ratified privileged schema-class envelope.
 - **anticipated mutation class**: `schema` (privileged) / `docs`
 - **owner role**: `implementer` (Claude Code under the
   Source-ratified visible implementation envelope); `controller`
@@ -986,7 +988,7 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/cfc-2d-2-architect-evidence-schema`
 - **parent**: —
-- **status**: `In Progress`
+- **status**: `Done`
 - **scope**: Batch 2D.2 conservative machine-readable schema-class
   authoring slice for governed architect evidence. Authors
   `schemas/architect-evidence.schema.yaml`,
@@ -1023,10 +1025,7 @@ recorded as §e.8 and §e.9.
   validator (`pytest`, `check-examples`, `scan-no-limitless`);
   delivery docs are coherent; Source ratification of the
   Batch 2D.2 envelope recorded and the envelope merged on the
-  canonical branch with finalized attestation. Local authoring
-  evidence under
-  `post-sprint-0/cfc-2d-2-architect-evidence-schema` precedes
-  the canonical-branch merge.
+  canonical branch with finalized attestation. Gate met.
 - **dependencies / blockers**:
   `post-sprint-0/cfc-2d-1-review-evidence-schema` (`Done`,
   PR #34 / `e1f5ffc`, head `2a8fe0f`) and prior CFC follow-on
@@ -1042,9 +1041,21 @@ recorded as §e.8 and §e.9.
   envelope); `controller` / `reviewer` (Nefarious)
 - **ratifier role**: `source`
 - **external tracker reference**: —
-- **durable evidence**: pending canonical-branch merge; backfill
-  the merge commit reference here once the Batch 2D.2 envelope
-  is ratified and merged.
+- **durable evidence**: merged commit
+  `51a2134 feat: add architect evidence schema contract (#36)` on
+  the canonical branch (PR head SHA `451be39`), landing
+  `schemas/architect-evidence.schema.yaml`,
+  `templates/architect-evidence.template.yaml`,
+  `docs/contracts/architect-evidence.md`, the
+  `architect_evidence_schema` validator check with unit and
+  integration tests, well-formed and malformed examples under
+  `examples/well-formed/architect-evidence/` and
+  `examples/malformed/architect-evidence/`, and minimal coherence
+  updates to the contracts READMEs, this backlog,
+  [`./KANBAN.md`](./KANBAN.md),
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
+  [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
 
 ## f. Maintenance rules
 

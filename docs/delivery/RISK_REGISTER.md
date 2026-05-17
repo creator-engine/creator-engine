@@ -15,14 +15,14 @@ PR #34 / merge commit `e1f5ffc feat: add review evidence schema
 contract (#34)` (PR head SHA `2a8fe0f`); see
 [`./BACKLOG.md`](./BACKLOG.md) §e.15. CFC follow-on Batch 2D.2
 architect-evidence schema
-(`post-sprint-0/cfc-2d-2-architect-evidence-schema`) is currently
-being authored under a separately Source-ratified privileged
-`schema`-class envelope; local working-tree authoring is in
-progress and durable canonical-branch evidence will be backfilled
-on merge; see [`./BACKLOG.md`](./BACKLOG.md) §e.16. Batch 2D.3
-(implementer-evidence schema, privileged `schema`-class) remains
-further downstream and requires its own separately Source-ratified
-privileged `schema`-class envelope. Part of
+(`post-sprint-0/cfc-2d-2-architect-evidence-schema`) has since
+landed on the canonical branch as PR #36 / merge commit `51a2134
+feat: add architect evidence schema contract (#36)` (PR head SHA
+`451be39`); see [`./BACKLOG.md`](./BACKLOG.md) §e.16. The next
+privileged schema-class gate is Batch 2D.3 (implementer-evidence
+schema, privileged `schema`-class), which remains downstream and
+requires its own separately Source-ratified privileged
+`schema`-class envelope. Part of
 the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001
