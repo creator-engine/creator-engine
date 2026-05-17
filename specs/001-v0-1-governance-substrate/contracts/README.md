@@ -24,6 +24,7 @@ files they describe are NOT created by `/speckit-plan`.
 | [redaction-record](./redaction-record.contract.md) | `docs/contracts/redaction-record.md`, `schemas/redaction-record.schema.yaml`, `templates/redaction-record.template.yaml` | FR-020, FR-020a, FR-021 |
 | [lifecycle-state-machine](./lifecycle-state-machine.contract.md) | `docs/contracts/lifecycle-state-machine.md`, `docs/contracts/definition-of-ready.md`, `docs/contracts/definition-of-done.md` | FR-013, FR-013a, FR-014 |
 | [validator-cli](./validator-cli.contract.md) | `validators/creator_engine_validator/` (CLI surface, exit codes, output formats) | FR-025, FR-026, FR-027, FR-027a |
+| review-evidence (Batch 2D.1 lift of [`../../../docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`](../../../docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md)) | `docs/contracts/review-evidence.md`, `schemas/review-evidence.schema.yaml`, `templates/review-evidence.template.yaml` | FR-001, FR-027 (Batch 2D.1 schema-class lift; Batch 2D.2 architect-evidence and Batch 2D.3 implementer-evidence schemas remain downstream) |
 
 ## Contract authoring rules
 

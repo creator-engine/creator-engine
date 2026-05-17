@@ -47,3 +47,4 @@ from . import no_limitless_strings as no_limitless_strings  # noqa: E402,F401
 from . import path_manifest_fidelity as path_manifest_fidelity  # noqa: E402,F401
 from . import handoff_schema as handoff_schema  # noqa: E402,F401
 from . import role_boundary_attribution as role_boundary_attribution  # noqa: E402,F401
+from . import review_evidence_schema as review_evidence_schema  # noqa: E402,F401

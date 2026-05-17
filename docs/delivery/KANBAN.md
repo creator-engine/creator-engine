@@ -100,7 +100,9 @@ canonical branch; see the `Done` table below.)*
 
 ### In Progress
 
-*(No items currently in this column.)*
+| id | scope (one line) | envelope state |
+|---|---|---|
+| `post-sprint-0/cfc-2d-1-review-evidence-schema` | CFC follow-on Batch 2D.1 conservative machine-readable lift of [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md): `schemas/review-evidence.schema.yaml`, `templates/review-evidence.template.yaml`, `docs/contracts/review-evidence.md`, `review_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the prose template status pointer, the contracts README, this Kanban, [`./BACKLOG.md`](./BACKLOG.md) §e.15, and [`./DEPENDENCIES.md`](./DEPENDENCIES.md). Architect-evidence (Batch 2D.2) and implementer-evidence (Batch 2D.3) schemas remain downstream. | Local authoring in isolated worktree only; not staged, committed, pushed, reviewed, or merged. Source ratification of the Batch 2D.1 envelope remains separate. |
 
 ### Verified
 

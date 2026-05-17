@@ -1,0 +1,26 @@
+# Malformed review evidence example: the required `verdict` field is
+# omitted. The validator MUST reject this record under FR-001 and
+# cite docs/contracts/review-evidence.md.
+evidence_id: malformed-missing-verdict
+reviewed_artifact_refs:
+  - specs/001-v0-1-governance-substrate/spec.md
+reviewed_diff_or_commit_ref: example/pre-merge-diff
+reviewer_identity_ref: tenants/example-tenant/reviewer/identity-record.yml
+reviewer_role_category: reviewer
+review_mode: manual_human
+review_scope: Example scope statement.
+mutation_classes_under_review:
+  - docs
+prohibited_surfaces_checked:
+  - live_repository_settings
+validation_evidence_refs:
+  - examples/well-formed
+findings: Example findings body.
+blocking_findings: []
+non_blocking_findings: []
+recommended_follow_up: ""
+evidence_timestamp: source-controlled:examples/malformed/review-evidence/missing-verdict.yml
+non_ratification_statement: >-
+  This review evidence is NOT Source ratification and does not
+  authorize merge, deploy, branch deletion, branch protection
+  mutation, or live repository-settings change.

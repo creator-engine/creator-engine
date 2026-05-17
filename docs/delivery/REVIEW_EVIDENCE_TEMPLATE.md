@@ -1,10 +1,16 @@
 # Review Evidence Template (Generic)
 
-**Status**: Slice D authored draft. This document defines a generic
-markdown-equivalent **template contract** for independent review
-evidence under the Creator Engine delivery control plane. It is not a
-machine-readable schema; the JSON/YAML evidence schema is downstream
-Feature 004 work and is out of scope for Slice D.
+**Status**: Slice D authored draft, with a Batch 2D.1 machine-readable
+lift now landed under
+[`../contracts/review-evidence.md`](../contracts/review-evidence.md)
+(schema at `schemas/review-evidence.schema.yaml`, template at
+`templates/review-evidence.template.yaml`, validator check
+`review_evidence_schema`). This document remains the prose template
+contract and is the authority for human review where it disagrees
+with the schema; the schema MUST be revised through the lifecycle to
+match. The architect-evidence (Batch 2D.2) and implementer-evidence
+(Batch 2D.3) schemas remain explicitly downstream and require their
+own separately Source-ratified privileged `schema`-class envelopes.
 
 Part of the **minimum repo-native delivery control plane** and
 **not a Jira clone**. Layered onto, and subordinate to, the Feature

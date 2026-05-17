@@ -898,6 +898,57 @@ recorded as §e.8 and §e.9.
   `signing_policy`, and `tenant_id`; storage paths under
   `tenants/creator-engine-substrate/codex/`.
 
+### e.15 Post-Sprint-0 substrate — CFC follow-on Batch 2D.1: review-evidence machine-readable schema
+
+- **id**: `post-sprint-0/cfc-2d-1-review-evidence-schema`
+- **parent**: —
+- **status**: `In Progress`
+- **scope**: Batch 2D.1 conservative machine-readable lift of the
+  existing prose review-evidence contract at
+  [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md).
+  Authors `schemas/review-evidence.schema.yaml`,
+  `templates/review-evidence.template.yaml`,
+  `docs/contracts/review-evidence.md`, the
+  `review_evidence_schema` validator check with unit and
+  integration tests, well-formed and malformed examples under
+  `examples/well-formed/review-evidence/` and
+  `examples/malformed/review-evidence/`, and minimal coherence
+  updates to the prose template status pointer, the contracts
+  README, and Batch 2D.1 rows in this backlog,
+  [`./KANBAN.md`](./KANBAN.md), and
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md). Preserves the existing
+  review process semantics; introduces no new review process.
+  Verdict enum is constrained to evidence-only outcomes
+  (`no_blocking_findings`, `blocking_findings_present`,
+  `scope_boundary_unclear`, `cannot_review`);
+  `reviewer_role_category` is fixed to `reviewer`; the
+  `non_ratification_statement` field is mandatory; the
+  `evidence_timestamp` field is source-controlled or ISO-8601 only;
+  `unevaluatedProperties: false` matches existing schema strictness.
+  Examples contain no LIMITLESS-specific identifiers and no
+  provider/tool/model/host/account binding. Architect-evidence
+  (Batch 2D.2) and implementer-evidence (Batch 2D.3) schemas
+  remain explicitly downstream and are not authored under this
+  envelope.
+- **acceptance gate**: Schema, template, contract, validator
+  check, tests, and examples validate against the substrate
+  validator (`pytest`, `check-examples`, `scan-no-limitless`);
+  delivery docs are coherent; Source ratification of the
+  Batch 2D.1 envelope and merge on the canonical branch remain
+  outside this row.
+- **dependencies / blockers**:
+  `post-sprint-0/cfc-codex-identity-record-authoring` (`Done`,
+  PR #31 / `78b57a4`) and prior CFC follow-on Batches 2A / 2B / 2C
+  (each `Done`). Batch 2D.1 is the schema-class lift of an
+  existing prose contract and does not author Batch 2D.2 or
+  Batch 2D.3.
+- **anticipated mutation class**: `schema` (privileged) / `docs`
+- **owner role**: `implementer` (Claude Code under the
+  Source-ratified visible implementation envelope); `controller`
+  / `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
 ## f. Maintenance rules
 
 1. New backlog entries MUST cite their owning source of truth (Sprint
