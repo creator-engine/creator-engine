@@ -49,15 +49,15 @@ and §g. CFC follow-on Batch 2C
 (`post-sprint-0/cfc-2c-codex-identity-decision`) has landed on the
 canonical branch as PR #29 / `66a8074 docs: draft Codex identity
 record encoding decision (#29)` and is `Done` on the delivery view;
-see §d.8 and §g. Source ratified eight §6 decisions. The next gate
-is the Codex identity record authoring envelope, a separately
-Source-ratified privileged `identity`-class gate; a local authoring
-branch/worktree (`identity/codex-record-authoring`) is currently
-drafting the substrate-internal placeholder/unbound Codex identity
-record under `tenants/creator-engine-substrate/codex/` —
-uncommitted/unmerged pending Source validation and later Git
-mechanics; no concrete provider/tool/model/host/account/tenant/
-repository is bound.
+see §d.8 and §d.9 and §g. Source ratified eight §6 decisions. The
+Codex identity record authoring envelope
+(`post-sprint-0/cfc-codex-identity-record-authoring`) has since
+landed on the canonical branch as PR #31 / merge commit `78b57a4
+docs: author Codex identity record (#31)`; see §d.9 and
+[`./BACKLOG.md`](./BACKLOG.md) §e.14. The next gate is Batch 2D
+(review/architect/implementer evidence schema, privileged
+`schema`-class), which requires a separately Source-ratified
+schema-class envelope before any Batch 2D implementation.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -441,20 +441,54 @@ completion.
   retained); `human_ratifier_roles = ["source"]`; placeholder/unbound
   posture for `allowed_repositories`, `signing_policy`, storage
   paths, and `tenant_id`; Batch 2D reaffirmed as downstream.
-- **Successor edges** (not yet cleared):
+- **Successor edges** (cleared for identity record authoring; Batch 2D not yet cleared):
   - **Codex identity record authoring envelope** (privileged
-    `identity`-class). Batch 2C §6.1–§6.7 decisions are now
-    ratified, pinning the encoding posture for this envelope. The
-    envelope itself requires a separate Source-ratified privileged
-    `identity`-class authorization; it is the Feature 004 / CFC
-    follow-on identity envelope referenced in §d.5 and is **not**
-    Batch 2C itself.
+    `identity`-class). **Cleared.** `Done` — merged on canonical
+    branch as PR #31 / merge commit `78b57a4`. See §d.9.
   - **Batch 2D — review/architect/implementer-evidence schema**
     (privileged `schema`-class). Downstream of Batch 2C and
     explicitly reaffirmed in
     [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md)
     §6.8 as non-mutated by Batch 2C. Requires a separately
     Source-ratified privileged `schema`-class envelope.
+
+### d.9 CFC follow-on Codex identity record authoring depends on Batch 2C; precedes Batch 2D
+
+- **Item**: `post-sprint-0/cfc-codex-identity-record-authoring`
+  ([`./BACKLOG.md`](./BACKLOG.md) §e.14).
+- **Predecessor edge (cleared)**:
+  `post-sprint-0/cfc-2c-codex-identity-decision` →
+  `post-sprint-0/cfc-codex-identity-record-authoring`.
+  Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions
+  ratified, pinning the encoding posture for the identity record.
+- **Why**: The identity record authoring envelope is the privileged
+  `identity`-class gate that consumes the Batch 2C §6.1–§6.7
+  decisions and authors the Codex identity record under
+  `tenants/creator-engine-substrate/codex/`. It requires Batch 2C
+  to be `Done` because the encoding posture (`role_category =
+  architect`, `human_ratifier_roles`, storage paths, `tenant_id`
+  posture) is pinned by the Batch 2C ratified decisions.
+- **Class**: `identity` (privileged). Does not mutate
+  `docs/contracts/identity-record.md`,
+  `schemas/identity-record.schema.yaml`,
+  `docs/contracts/authority-matrix.md`, validators, templates,
+  examples, `docs/architecture/**`, or `.github/**`. No concrete
+  provider/tool/model/host/account/repository binding. Codex
+  authority not expanded.
+- **Landed state**: `Done` — merged on the canonical branch as
+  PR #31 / merge commit `78b57a4 docs: author Codex identity record
+  (#31)`. Single Codex identity record with `role_category =
+  architect` and `human_ratifier_roles = ["source"]`;
+  placeholder/unbound posture for `allowed_repositories`,
+  `signing_policy`, and `tenant_id`; storage paths under
+  `tenants/creator-engine-substrate/codex/`.
+- **Successor edges** (not yet cleared):
+  - **Batch 2D — review/architect/implementer-evidence schema**
+    (privileged `schema`-class). Downstream of the identity record
+    authoring envelope and reaffirmed as non-mutated by it.
+    Requires a separately Source-ratified privileged `schema`-class
+    envelope with a schema specification before any Batch 2D
+    implementation.
 
 ## e. v1.0 integration target
 
@@ -526,11 +560,12 @@ post-merge update procedure in
 | Sprint 0 exit (gates 1–12) + Features 003–006 | `v1.0` | mixed (`Done` / `Deferred` / `Blocked`) | Successor `Deferred` until every dependency in §e is `Done`. |
 | Sprint 0 exit + Source-ratified future spec | `us3/a1` | (not yet specced) | Successor `Blocked` / `Deferred` per §f. |
 | Sprint 0 (all slices) + `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` | `post-sprint-0/cfc-1-codex-first-class` | `Done` (all predecessors) | Predecessor edges cleared; CFC-1 is `Done` — landed on canonical branch as PR #25 / `30a3e8c`. See §d.5. |
-| `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record, schema, architecture update) | `Done` (CFC-1) | CFC-1 is `Done` (PR #25 / `30a3e8c`); successor not yet shaped. Requires separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
+| `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record authoring `Done`; Batch 2D evidence schema, architecture update, and other downstream envelopes not yet shaped) | `Done` (CFC-1; identity record authoring) | CFC-1 is `Done` (PR #25 / `30a3e8c`); Codex identity record authoring is `Done` (PR #31 / `78b57a4`). Remaining downstream Batch 2D (review/architect/implementer evidence schema, `schema`-class, privileged) and other downstream envelopes are not yet shaped. Requires separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
 | `post-sprint-0/cfc-1-codex-first-class` | `post-sprint-0/cfc-2a-codex-role-decision` | `Done` (CFC-1) | Cleared; CFC-1 is `Done` (PR #25 / `30a3e8c`); successor is `Done` (PR #27 / `6b51882`). `governance` / `docs` class; non-privileged predecessor edge. See §d.6. |
 | `post-sprint-0/cfc-2a-codex-role-decision` | `post-sprint-0/cfc-2b-codex-architecture-matrix` | `Done` (Batch 2A) | Cleared; predecessor is `Done` (PR #27 / `6b51882`); successor is `Done` (PR #28 / `c06a3e7`). `governance` / `docs` class. See §d.7. |
 | `post-sprint-0/cfc-2a-codex-role-decision` + `post-sprint-0/cfc-2b-codex-architecture-matrix` | `post-sprint-0/cfc-2c-codex-identity-decision` | `Done` (both predecessors) | Cleared; both predecessors are `Done`; successor is `Done` — merged on the canonical branch as PR #29 / `66a8074`. Source ratified eight §6 decisions. `governance` / `docs` class; non-privileged predecessor edges. See §d.8. |
-| `post-sprint-0/cfc-2c-codex-identity-decision` | Codex identity record authoring envelope (`identity`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions ratified, pinning encoding posture. Successor not yet shaped; requires a separately Source-ratified privileged `identity`-class envelope per §h. A local authoring branch/worktree (`identity/codex-record-authoring`) is currently drafting the substrate-internal placeholder/unbound Codex identity record under `tenants/creator-engine-substrate/codex/` — uncommitted/unmerged pending Source validation and later Git mechanics; no concrete provider/tool/model/host/account/tenant/repository is bound. |
+| `post-sprint-0/cfc-2c-codex-identity-decision` | `post-sprint-0/cfc-codex-identity-record-authoring` (Codex identity record authoring, `identity`-class, privileged) | `Done` (Batch 2C and identity record authoring) | Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions ratified. Successor identity record authoring is `Done` — merged on canonical branch as PR #31 / merge commit `78b57a4`; single Codex identity record with `role_category = architect`, `human_ratifier_roles = ["source"]`, placeholder/unbound posture; storage paths under `tenants/creator-engine-substrate/codex/`. See §d.9. |
+| `post-sprint-0/cfc-codex-identity-record-authoring` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (identity record authoring) | Identity record authoring is `Done` (PR #31 / `78b57a4`); Batch 2D reaffirmed as non-mutated by the identity record authoring envelope. Successor not yet shaped; requires a separately Source-ratified privileged `schema`-class envelope per §h. |
 | `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); Batch 2D explicitly reaffirmed as non-mutated by Batch 2C per [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. Successor not yet shaped; requires a separately Source-ratified privileged `schema`-class envelope per §h. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
