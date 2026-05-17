@@ -1,0 +1,53 @@
+# Creator Engine review evidence record template.
+# Copy this file to a tenant-controlled evidence directory and
+# replace every placeholder with reviewer-supplied values. This
+# template is project-, tenant-, runtime-, model-, and harness-
+# agnostic and intentionally contains no concrete reviewer
+# product, model, CLI, account, runner, source-host installation
+# id, bot slug, or QA-harness binding.
+#
+# Prose contract: docs/contracts/review-evidence.md.
+# Upstream template contract: docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md.
+# Machine-checkable schema: schemas/review-evidence.schema.yaml.
+#
+# Review evidence is NOT Source ratification.
+
+evidence_id: example-review-evidence
+reviewed_artifact_refs:
+  - specs/example/spec.md
+  - specs/example/plan.md
+reviewed_diff_or_commit_ref: example/pre-merge-diff
+reviewer_identity_ref: tenants/example-tenant/reviewer/identity-record.yml
+reviewer_role_category: reviewer
+review_mode: manual_human
+review_scope: >-
+  In scope: the listed reviewed_artifact_refs and the diff range
+  named by reviewed_diff_or_commit_ref. Out of scope: downstream
+  privileged envelopes that require separate Source ratification.
+mutation_classes_under_review:
+  - docs
+prohibited_surfaces_checked:
+  - live_repository_settings
+  - branch_protection
+  - deploy_automation
+  - codeowners
+  - secrets_or_tokens
+  - instance_local_paths
+validation_evidence_refs:
+  - examples/well-formed
+findings: >-
+  Reviewer observations go here. Free-text body summarizing what
+  the reviewer examined and what they observed.
+blocking_findings: []
+non_blocking_findings: []
+verdict: no_blocking_findings
+recommended_follow_up: >-
+  Optional free-text recommendations for follow-up work (separate
+  envelopes, future slices, deferred items). MAY be empty.
+evidence_timestamp: source-controlled:examples/well-formed/review-evidence/example-review-evidence.yml
+non_ratification_statement: >-
+  This review evidence is NOT Source ratification and does not
+  authorize merge, deploy, branch deletion, branch protection
+  mutation, or live repository-settings change. Privileged
+  mutation classes remain Source-ratified regardless of this
+  verdict.
