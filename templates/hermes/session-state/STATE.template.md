@@ -24,6 +24,35 @@ checklists, and ratification rules.
 - Base HEAD at snapshot: `<commit-sha>` — `<commit-subject>`
 - Working tree expectation: `<short-description-of-expected-cleanliness>`
 
+## Root-worktree invariant status
+
+Snapshot from `<iso-8601-timestamp>` of the four root-invariant
+conditions in
+`docs/operations/ROOT_WORKTREE_INVARIANT.md` §c against the root
+checkout (distinct from any per-gate worktree above). This block is a
+template field; the deployed instance fills it with its own observed
+state at session start and after every merge-close gate.
+
+- Root checkout branch: `<branch-name>` (expected `main` unless a
+  Source-ratified reassignment is in force).
+- Root checkout HEAD vs live `origin/main` after `git fetch origin
+  main`: `<equal | ahead | behind | diverged>`.
+- Root working-tree cleanliness: `<clean | staged-paths-present |
+  unstaged-tracked-modifications | untracked-top-level-scratch |
+  multiple>` (`clean` means no staged paths, no unstaged tracked
+  modifications, and no untracked top-level scratch outside
+  `.gitignore`).
+- Root in-flight authoring: `<none | present-from-prior-envelope |
+  present-untracked>` (substantive authoring belongs in an isolated
+  per-gate worktree or clone per
+  `docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md`, not on the root).
+- Invariant holds: `<yes | no>`. If `no`, the remediation posture is
+  shape-the-next-prompt per
+  `docs/operations/ROOT_WORKTREE_INVARIANT.md` §e; the instance MUST
+  NOT opportunistically clean the root from the controller seat.
+- Last invariant check: `<iso-8601-timestamp>` by
+  `<operator-role-or-pane-label>`.
+
 ## PR state
 
 List PRs relevant to the instance's current work. Use one entry per PR. If

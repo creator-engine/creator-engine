@@ -75,7 +75,16 @@ Gate 2 Lane B
 has since landed on the canonical branch as PR #41 / merge commit
 `8dd18a0 docs: add external contributor intake boundary (#41)` and is
 `Done` on the board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.19.
-Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
+A new post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` is now tracked on the board
+with four child rows (audit `Done`; policy/docs current `In Progress`;
+checks/preflight `Deferred`; current-root reconciliation `Deferred`);
+see [`./BACKLOG.md`](./BACKLOG.md) §e.20. Public-readiness
+continuation remains blocked **only** until the policy/docs child
+gate lands; the checks/preflight and current-root reconciliation
+gates are explicitly later gates and are not on the public-readiness
+critical path. Generated from / summarizes
+[`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
 plane** and is **not a Jira clone**. It is a current readable view
@@ -129,11 +138,10 @@ canonical branch; see the `Done` table below.)*
 
 ### In Progress
 
-*(No items currently in this column. Batch 2D.3 implementer-evidence
-schema has landed on the canonical branch; Gate 2 Lane A (PR #40 /
-`a63304a`) and Gate 2 Lane B (PR #41 / `8dd18a0`) have also landed;
-see the `Done` table below and [`./BACKLOG.md`](./BACKLOG.md)
-§e.17–§e.19.)*
+| id | scope (one line) | parent |
+|---|---|---|
+| `post-sprint-0/root-worktree-lifecycle` | Post-Sprint-0 substrate parent for the root-worktree navigation/orchestration-only invariant and its four child gates (audit; policy/docs current; deferred checks/preflight; deferred current-root reconciliation). | — |
+| `post-sprint-0/root-worktree-lifecycle/policy-docs-current` | Authoring of [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) and the minimal cross-link / template / next-task-protocol / backlog / Kanban coherence updates needed to make the root invariant canonical. `docs`-class only; no validator/preflight code, no current-root reconciliation, no GitHub-settings mutation, no public-readiness decision-record consumption. | `post-sprint-0/root-worktree-lifecycle` |
 
 ### Verified
 
@@ -169,6 +177,7 @@ see the `Done` table below and [`./BACKLOG.md`](./BACKLOG.md)
 | `post-sprint-0/cfc-2d-3-implementer-evidence-schema` | CFC follow-on Batch 2D.3 conservative machine-readable schema-class authoring slice for governed implementer evidence: `schemas/implementer-evidence.schema.yaml`, `templates/implementer-evidence.template.yaml`, `docs/contracts/implementer-evidence.md`, `implementer_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the contracts READMEs, [`./BACKLOG.md`](./BACKLOG.md) §e.17, this Kanban, [`./DEPENDENCIES.md`](./DEPENDENCIES.md), [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md). Implementer-evidence is a separate artifact class; does not amend Batch 2D.1 review-evidence or Batch 2D.2 architect-evidence semantics; does not authorize ratification, merge, deploy, branch deletion, branch protection mutation, live repository-settings change, provider/tool/model/host/account binding, tenant binding, or authority expansion. | Canonical-branch merge commit `01f21a5 feat: add implementer evidence schema contract (#38)` (PR head SHA `0b630be`). |
 | `post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook` | Gate 2 Lane A: operations rehearsal runbook for parallel pair work (`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md`). Operational/non-normative; does not amend governance substrate, schemas, authority contracts, or identity records; public visibility remains separately gated. | Canonical-branch merge commit `a63304a docs: add parallel pair rehearsal runbook (#40)`. |
 | `post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary` | Gate 2 Lane B: external contributor intake boundary document (`docs/governance/EXTERNAL_CONTRIBUTOR_INTAKE_BOUNDARY.md`). `governance` / `docs` mutation class; defines intake boundary for external contributors without expanding authority, mutating schemas, identity records, or authority contracts. | Canonical-branch merge commit `8dd18a0 docs: add external contributor intake boundary (#41)`. |
+| `post-sprint-0/root-worktree-lifecycle/audit` | Audit of the post-Sprint-0 operating model for substantive authoring leaking onto the root checkout, with findings condensed into [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §a–§b background. | Audit findings reflected in [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §a–§b and in the cross-link / template / next-task-protocol / backlog / Kanban coherence updates landing under `post-sprint-0/root-worktree-lifecycle/policy-docs-current`. |
 
 ### Deferred
 
@@ -182,6 +191,8 @@ see the `Done` table below and [`./BACKLOG.md`](./BACKLOG.md)
 | `feature-006` | Release / deployment governance; release agent identity; deploy attestations; rollback evidence; GitHub environments. | Sprint 0 Slice F policy → Feature 006 spec. |
 | `v1.0` | End-to-end governed agentic SDLC integration target. | Sprint 0 exit + Features 003–006 ratified. |
 | `us3/a1` | Reserved item; implementation not authorized. | Awaits explicit Source ratification of a future spec. |
+| `post-sprint-0/root-worktree-lifecycle/checks-preflight` | Deferred privileged `code`-class envelope authoring a `root_worktree_state` validator check, optional CLI flag(s), tests, and well-formed / malformed examples. Out of scope under the policy/docs child gate; named only so future Source ratification has a referenceable id. | `post-sprint-0/root-worktree-lifecycle` (later separately-Source-ratified privileged `code`-class envelope). |
+| `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation` | Deferred separately-ratified envelope to reconcile a specific operator's currently dirty root checkout back to the four root-invariant conditions, authored in an isolated per-gate worktree or clone (not on the root checkout) and without destructive remediation against unrecorded evidence per [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §e. | `post-sprint-0/root-worktree-lifecycle` (later separately-Source-ratified envelope). |
 
 ### Blocked
 
@@ -254,6 +265,22 @@ Gate 2 Lane B
 (`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
 is `Done` (PR #41 / `8dd18a0`); see
 [`./BACKLOG.md`](./BACKLOG.md) §e.19.
+
+The current `In Progress` item is
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` under
+the parent `post-sprint-0/root-worktree-lifecycle`: authoring of
+[`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+and the minimal cross-link / template / next-task-protocol /
+backlog / Kanban coherence updates; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.20.2. Public-readiness
+continuation remains blocked **only** until this policy/docs child
+gate lands. The sibling deferred gates
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` (validator
+/ CLI preflight implementation) and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+(reconciliation of a specific operator's dirty root) are explicitly
+later gates and require their own separately-Source-ratified
+envelopes; see [`./BACKLOG.md`](./BACKLOG.md) §e.20.3–§e.20.4.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; Feature 005 dispatcher / worktree automation;
