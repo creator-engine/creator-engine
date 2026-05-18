@@ -57,8 +57,7 @@ and PR #23 (`3dc45a1 fix: harden workflow validator follow-ups
 (#23)`) hardened the workflow validator with CI validator
 improvements and follow-up fixes. These four PRs are
 post-Sprint-0 substrate and are not Sprint 0 Slice A-F items; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9. The delivery view
-now reflects canonical main at commit `66a8074`.
+[`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9.
 CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
 operations protocol substrate has landed on the canonical branch via
 PR #25 / merge commit `30a3e8c`; see [`./BACKLOG.md`](./BACKLOG.md)
@@ -69,9 +68,40 @@ has landed as PR #27 / `6b51882`; see
 PR #28 / `c06a3e7`; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. CFC
 follow-on Batch 2C (`post-sprint-0/cfc-2c-codex-identity-decision`)
 has landed as PR #29 / `66a8074`; Source ratified eight §6 decisions;
-see [`./BACKLOG.md`](./BACKLOG.md) §e.13. The next work is the Codex
-identity record authoring envelope, a separately Source-ratified
-privileged `identity`-class gate.
+see [`./BACKLOG.md`](./BACKLOG.md) §e.13. The Codex identity record
+authoring envelope
+(`post-sprint-0/cfc-codex-identity-record-authoring`) has since
+landed on the canonical branch as PR #31 / merge commit `78b57a4
+docs: author Codex identity record (#31)`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.14. CFC follow-on Batch 2D.1
+review-evidence schema
+(`post-sprint-0/cfc-2d-1-review-evidence-schema`) has since landed
+as PR #34 / merge commit `e1f5ffc feat: add review evidence schema
+contract (#34)` (PR head SHA `2a8fe0f`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.15. CFC follow-on Batch 2D.2
+architect-evidence schema
+(`post-sprint-0/cfc-2d-2-architect-evidence-schema`) has since landed
+as PR #36 / merge commit `51a2134 feat: add architect evidence schema
+contract (#36)` (PR head SHA `451be39`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.16. CFC follow-on Batch 2D.3
+implementer-evidence schema
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) has since
+landed as PR #38 / merge commit `01f21a5 feat: add implementer
+evidence schema contract (#38)` (PR head SHA `0b630be`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.17. Gate 2 Lane A has since landed
+on the canonical branch as PR #40 / merge commit `a63304a docs: add
+parallel pair rehearsal runbook (#40)`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.18. Gate 2 Lane B has since landed
+on the canonical branch as PR #41 / merge commit `8dd18a0 docs: add
+external contributor intake boundary (#41)`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.19. PR #42 / merge commit `921d46d
+docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
+delivery-ledger reconciliation. The delivery view now reflects
+canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
+Public visibility / public-readiness remains separately
+Source-ratified and unimplemented; it is the recommended next
+substantive governed gate after this delivery-header reconciliation
+lands.
 
 ## a. Purpose
 

@@ -23,7 +23,21 @@ Batch 2D.3 implementer-evidence schema
 (`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) has since
 landed on the canonical branch as PR #38 / merge commit `01f21a5
 feat: add implementer evidence schema contract (#38)` (PR head SHA
-`0b630be`); see [`./BACKLOG.md`](./BACKLOG.md) §e.17. Part of
+`0b630be`); see [`./BACKLOG.md`](./BACKLOG.md) §e.17. Gate 2 Lane A
+has since landed on the canonical branch as PR #40 / merge commit
+`a63304a docs: add parallel pair rehearsal runbook (#40)`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.18. Gate 2 Lane B has since landed
+on the canonical branch as PR #41 / merge commit `8dd18a0 docs: add
+external contributor intake boundary (#41)`; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.19. PR #42 / merge commit `921d46d
+docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
+delivery-ledger reconciliation; it is a reconciliation event and does
+not require a new backlog row. The delivery view now reflects
+canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
+Public visibility / public-readiness remains separately
+Source-ratified and unimplemented; it is the recommended next
+substantive governed gate after this delivery-header reconciliation
+lands. Part of
 the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001
