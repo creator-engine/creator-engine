@@ -47,6 +47,7 @@ operating consequences for the controller / implementer split.
 | [`./NO_COPY_PASTE_PATTERN.md`](./NO_COPY_PASTE_PATTERN.md) | Pointer-only relay shape the controller MUST use to hand an envelope to the implementer. |
 | [`./PATH_MANIFEST_FIDELITY_PROTOCOL.md`](./PATH_MANIFEST_FIDELITY_PROTOCOL.md) | Manifest count/hash preflight that the controller and the implementer both run. |
 | [`./TRANSCRIPT_ARCHIVE_PROTOCOL.md`](./TRANSCRIPT_ARCHIVE_PROTOCOL.md) | Archive/hash protocol for the implementer pane's transcript. |
+| [`./ROOT_WORKTREE_INVARIANT.md`](./ROOT_WORKTREE_INVARIANT.md) | Navigation/orchestration-only invariant on the root checkout and dirty-root remediation posture; a separate filesystem-state concern from this role-boundary policy and from the per-gate worktree lifecycle. |
 | `docs/delivery/RISK_REGISTER.md` R-011 | Controller-seat boundary breach as a standing risk. |
 
 ## c. Roles in scope
@@ -199,6 +200,13 @@ and in the docstring of
   substitute for Source ratification per
   [`../delivery/DEFINITION_OF_DONE.md`](../delivery/DEFINITION_OF_DONE.md)
   §c.
+- The filesystem state of the root checkout (branch, remote parity,
+  cleanliness, absence of in-flight authoring) is a separate concern
+  governed by
+  [`./ROOT_WORKTREE_INVARIANT.md`](./ROOT_WORKTREE_INVARIANT.md). That
+  policy does not redefine the role boundary in §c–§e, and this
+  policy does not redefine the root-state invariant; the two are
+  applied together at session start and at merge-close.
 
 ## h. Acceptance posture
 

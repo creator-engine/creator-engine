@@ -83,10 +83,21 @@ docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation; it is a reconciliation event and does
 not require a new backlog row. The delivery view now reflects
 canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
-Public visibility / public-readiness remains separately
-Source-ratified and unimplemented; it is the recommended next
-substantive governed gate after this delivery-header reconciliation
-lands.
+A new post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has since been added with
+four child gates (audit `Done`; policy/docs current in progress;
+checks/preflight deferred; current-root reconciliation deferred);
+see [`./BACKLOG.md`](./BACKLOG.md) §e.20.
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` is the
+interposed policy/docs gate that runs next after this delivery-header
+reconciliation. Public-readiness continuation remains blocked **only**
+until that policy/docs child gate lands; the deferred
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+gates remain later separately Source-ratified gates and are not on
+the public-readiness critical path. Repository visibility /
+public-readiness remain separately Source-ratified and
+unimplemented.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).

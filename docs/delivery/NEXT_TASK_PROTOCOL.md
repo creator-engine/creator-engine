@@ -215,6 +215,30 @@ report:
    disagree. The hash also serves as the input to the next batch's
    handoff per [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md)
    when a successor envelope re-uses or extends the manifest.
+7. **Root-worktree invariant check.** At session start (before any
+   new envelope is consumed and before §c selection rules are
+   applied) and again after every merge-close gate (before §b.10
+   cleanup state is finalized), the report-author confirms the four
+   conditions of the root-worktree invariant against the root
+   checkout per
+   [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+   §c: the root is on the canonical branch; the root's HEAD is equal
+   to live `origin/main` after a `git fetch origin main`; the root's
+   working tree has no staged paths, no unstaged tracked
+   modifications, and no untracked top-level scratch that is not
+   ignored; and the root carries no in-flight substantive authoring.
+   These checks are read-only against the root and MUST NOT mutate
+   the root in the act of checking. A failure on any condition is a
+   halt-to-shape signal per
+   [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+   §e: the report-author MUST NOT opportunistically clean the root,
+   MUST NOT silently stage/commit/push, MUST surface the dirty-root
+   observation in the §b.10 cleanup-state field, and MUST route the
+   remediation to a separately Source-ratified envelope. The §b.9
+   next-task recommendation under a dirty root SHOULD be the
+   remediation envelope shaping (or the §c.3 escalation to Source)
+   rather than the consumption of a new substantive authoring
+   envelope.
 
 ## e. Prohibited content in this protocol and in the artifacts it updates
 

@@ -84,7 +84,15 @@ gated; see §e.18. Gate 2 Lane B
 (`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
 has since landed on the canonical branch as PR #41 / merge commit
 `8dd18a0 docs: add external contributor intake boundary (#41)`; see
-§e.19.
+§e.19. A new post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has been added with four
+child gates (audit complete; policy/docs current — in progress;
+checks/preflight deferred; current-root reconciliation deferred);
+see §e.20. Public-readiness continuation remains blocked **only**
+until the §e.20.2 policy/docs child gate lands; the §e.20.3
+checks/preflight and §e.20.4 current-root reconciliation child
+gates are explicitly later gates and are not on the public-readiness
+critical path.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1181,6 +1189,167 @@ recorded as §e.8 and §e.9.
 - **durable evidence**: merged commit
   `8dd18a0 docs: add external contributor intake boundary (#41)` on
   the canonical branch.
+
+### e.20 Post-Sprint-0 substrate — root-worktree lifecycle (parent)
+
+- **id**: `post-sprint-0/root-worktree-lifecycle`
+- **parent**: —
+- **status**: `In Progress`
+- **scope**: Post-Sprint-0 substrate parent for the root-worktree
+  navigation/orchestration-only invariant and its sequenced child
+  gates. The parent groups: (i) audit of the current operating model
+  for substantive authoring leaking onto the root checkout; (ii) the
+  policy/docs landing of
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  and the minimal cross-link / template / next-task-protocol
+  coherence updates; (iii) deferred validator / preflight
+  implementation of a `root_worktree_state` check and CLI flag(s);
+  (iv) deferred reconciliation of any currently dirty root checkout
+  in any specific operator's clone. The parent does not author any
+  validator code, does not reconcile a dirty root, and does not
+  mutate GitHub settings, public-launch posture, deploy automation,
+  schemas, authority contracts, identity records, templates outside
+  the named manifest, or tenants. Public-readiness continuation
+  remains blocked **only** on §e.20.2 (policy/docs current)
+  landing; §e.20.3 (checks/preflight) and §e.20.4 (current-root
+  reconciliation) are explicitly later gates and do not unblock
+  public-readiness by being deferred.
+- **acceptance gate**: §e.20.1 and §e.20.2 reach `Done`; §e.20.3 and
+  §e.20.4 reach `Deferred` with named owning future gates. The
+  parent reaches `Done` only after §e.20.3 and §e.20.4 themselves
+  reach `Done` under separately Source-ratified envelopes.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `docs` (children §e.20.1 / §e.20.2)
+  / `code` (deferred child §e.20.3) / `governance` (deferred child
+  §e.20.4 reconciliation envelope)
+- **owner role**: `architect` / `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.20.1 Audit of root-checkout authoring leakage (child)
+
+- **id**: `post-sprint-0/root-worktree-lifecycle/audit`
+- **parent**: `post-sprint-0/root-worktree-lifecycle`
+- **status**: `Done`
+- **scope**: Audit of the post-Sprint-0 operating model for the
+  failure mode in which substantive authoring under an envelope
+  ends up on the root checkout rather than in an isolated per-gate
+  worktree or clone, and the consequent loss of the navigation /
+  orchestration property of the root. Findings are condensed into
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  §a–§b background and do not require their own standalone artifact
+  under this gate.
+- **acceptance gate**: Audit findings reflected in
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  §a–§b and in the named cross-link updates landing under §e.20.2.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `docs`
+- **owner role**: `architect`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.20.2 Policy/docs current (child)
+
+- **id**: `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
+- **parent**: `post-sprint-0/root-worktree-lifecycle`
+- **status**: `In Progress`
+- **scope**: Author
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  as the canonical root-worktree navigation/orchestration-only
+  invariant policy, and make the minimal coherence updates required
+  to make it discoverable: cross-link from
+  [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md)
+  (without merging role-boundary and worktree-lifecycle concerns);
+  add session-start and post-merge root-state checks to
+  [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) (avoiding
+  instance-local paths, pane ids, open PR URLs, secrets, and local
+  runtime state); add a root-invariant status template field to
+  [`../../templates/hermes/session-state/STATE.template.md`](../../templates/hermes/session-state/STATE.template.md)
+  (template field only, not this machine's live state); add this
+  backlog parent and its four child rows; and reflect the backlog
+  change in [`./KANBAN.md`](./KANBAN.md). `docs`-class only; no
+  validator/preflight code, no schema/template/authority/identity
+  mutation outside the named manifest, no GitHub-settings mutation,
+  no current-root reconciliation cleanup, no public-readiness
+  decision-record consumption.
+- **acceptance gate**: Six-file manifest validates locally;
+  cross-links resolve; backlog/Kanban coherence reflects the new
+  parent and four children; Source ratifies the policy/docs
+  landing; merged on the canonical branch with finalized
+  attestation.
+- **dependencies / blockers**:
+  `post-sprint-0/root-worktree-lifecycle/audit` (`Done`).
+- **anticipated mutation class**: `docs`
+- **owner role**: `implementer` (Claude Code under the
+  Source-ratified visible implementation envelope); `controller` /
+  `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.20.3 Checks / preflight implementation (deferred child)
+
+- **id**: `post-sprint-0/root-worktree-lifecycle/checks-preflight`
+- **parent**: `post-sprint-0/root-worktree-lifecycle`
+- **status**: `Deferred`
+- **scope**: Deferred privileged `code`-class envelope authoring a
+  `root_worktree_state` validator check, optional CLI flag(s) (for
+  example a `--require-root-clean` preflight gate on selected
+  validator entry points), associated schemas if any, unit and
+  integration tests, well-formed and malformed examples, and the
+  minimal coherence updates to the validator README and contracts
+  index. Out of scope under §e.20.2; this child is named only so
+  that future Source ratification has a referenceable id.
+- **acceptance gate**: Source-ratified privileged `code`-class
+  envelope landed on the canonical branch; validator check passes
+  on a clean root; validator check halts (or surfaces the
+  configured advisory) on a dirty root per
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  §c and §e.
+- **dependencies / blockers**:
+  `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
+  (must reach `Done` first so the validator check has a normative
+  contract to enforce).
+- **anticipated mutation class**: `code` (privileged) / `docs`
+- **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.20.4 Current-root reconciliation (deferred child)
+
+- **id**: `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+- **parent**: `post-sprint-0/root-worktree-lifecycle`
+- **status**: `Deferred`
+- **scope**: Deferred separately-ratified envelope to reconcile a
+  specific operator's currently dirty root checkout (any leftover
+  in-flight authoring, untracked top-level scratch, or branch /
+  remote-parity drift) back to the four root-invariant conditions.
+  The reconciliation envelope's authoring belongs in an isolated
+  per-gate worktree or clone per
+  [`./WORKTREE_RUNTIME_PROTOCOL.md`](./WORKTREE_RUNTIME_PROTOCOL.md);
+  it is not authorized to be performed from the controller seat
+  against the root checkout, and it is not authorized to use
+  destructive remediation against unrecorded evidence per
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  §e. The reconciliation envelope MUST NOT mutate GitHub settings,
+  schemas, authority contracts, identity records, validators, or
+  templates beyond what its own Source-ratified manifest enumerates.
+- **acceptance gate**: Source-ratified reconciliation envelope
+  landed on the canonical branch (or recorded as not-required if
+  the relevant root checkout has independently re-satisfied the
+  invariant); the root checkout it targeted satisfies the four
+  root-invariant conditions; cleanup-state field in the merge
+  report per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md)
+  §b.10 confirms invariant restoration.
+- **dependencies / blockers**:
+  `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
+  (must reach `Done` first so the reconciliation envelope has a
+  normative contract to remediate toward). Not blocked by
+  §e.20.3, which is a sibling deferred gate.
+- **anticipated mutation class**: `governance` (envelope shape) /
+  `docs` (envelope evidence)
+- **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
 
 ## f. Maintenance rules
 
