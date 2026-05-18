@@ -63,7 +63,18 @@ implementer-evidence schema
 landed on the canonical branch as PR #38 / merge commit `01f21a5
 feat: add implementer evidence schema contract (#38)` (PR head SHA
 `0b630be`) and is `Done` on the board below; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.17.
+[`./BACKLOG.md`](./BACKLOG.md) §e.17. Gate 2 Lane A
+(`post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook`) has
+since landed on the canonical branch as PR #40 / merge commit `a63304a
+docs: add parallel pair rehearsal runbook (#40)` and is `Done` on the
+board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.18.
+`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md` is
+operational/non-normative; public visibility remains separately gated.
+Gate 2 Lane B
+(`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
+has since landed on the canonical branch as PR #41 / merge commit
+`8dd18a0 docs: add external contributor intake boundary (#41)` and is
+`Done` on the board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.19.
 Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -104,9 +115,11 @@ merge, this board is regenerated per
 envelope has landed (PR #31 / `78b57a4`), Batch 2D.1 review-evidence
 schema has landed (PR #34 / `e1f5ffc`, head `2a8fe0f`), Batch 2D.2
 architect-evidence schema has landed (PR #36 / `51a2134`, head
-`451be39`), and Batch 2D.3 implementer-evidence schema has landed
-(PR #38 / `01f21a5`, head `0b630be`); see `Done` table below and
-[`./BACKLOG.md`](./BACKLOG.md) §e.17.)*
+`451be39`), Batch 2D.3 implementer-evidence schema has landed
+(PR #38 / `01f21a5`, head `0b630be`), Gate 2 Lane A has landed
+(PR #40 / `a63304a`), and Gate 2 Lane B has landed (PR #41 /
+`8dd18a0`); see `Done` table below and
+[`./BACKLOG.md`](./BACKLOG.md) §e.18–§e.19.)*
 
 ### Ready
 
@@ -117,8 +130,10 @@ canonical branch; see the `Done` table below.)*
 ### In Progress
 
 *(No items currently in this column. Batch 2D.3 implementer-evidence
-schema has landed on the canonical branch; see the `Done` table below
-and [`./BACKLOG.md`](./BACKLOG.md) §e.17.)*
+schema has landed on the canonical branch; Gate 2 Lane A (PR #40 /
+`a63304a`) and Gate 2 Lane B (PR #41 / `8dd18a0`) have also landed;
+see the `Done` table below and [`./BACKLOG.md`](./BACKLOG.md)
+§e.17–§e.19.)*
 
 ### Verified
 
@@ -152,6 +167,8 @@ and [`./BACKLOG.md`](./BACKLOG.md) §e.17.)*
 | `post-sprint-0/cfc-2d-1-review-evidence-schema` | CFC follow-on Batch 2D.1 conservative machine-readable lift of [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md): `schemas/review-evidence.schema.yaml`, `templates/review-evidence.template.yaml`, `docs/contracts/review-evidence.md`, `review_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the prose template status pointer, the contracts README, this Kanban, [`./BACKLOG.md`](./BACKLOG.md) §e.15, and [`./DEPENDENCIES.md`](./DEPENDENCIES.md). Sibling architect-evidence (Batch 2D.2) has since landed (see the row below and [`./BACKLOG.md`](./BACKLOG.md) §e.16); implementer-evidence (Batch 2D.3) schema remains downstream. | Canonical-branch merge commit `e1f5ffc feat: add review evidence schema contract (#34)` (PR head SHA `2a8fe0f`). |
 | `post-sprint-0/cfc-2d-2-architect-evidence-schema` | CFC follow-on Batch 2D.2 conservative machine-readable schema-class authoring slice for governed architect evidence: `schemas/architect-evidence.schema.yaml`, `templates/architect-evidence.template.yaml`, `docs/contracts/architect-evidence.md`, `architect_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the contracts READMEs, [`./BACKLOG.md`](./BACKLOG.md) §e.16, this Kanban, [`./DEPENDENCIES.md`](./DEPENDENCIES.md), [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md). Architect-evidence is a separate artifact class; does not amend Batch 2D.1 review-evidence semantics and does not authorize implementer-class authoring. | Canonical-branch merge commit `51a2134 feat: add architect evidence schema contract (#36)` (PR head SHA `451be39`). |
 | `post-sprint-0/cfc-2d-3-implementer-evidence-schema` | CFC follow-on Batch 2D.3 conservative machine-readable schema-class authoring slice for governed implementer evidence: `schemas/implementer-evidence.schema.yaml`, `templates/implementer-evidence.template.yaml`, `docs/contracts/implementer-evidence.md`, `implementer_evidence_schema` validator check with unit/integration tests, well-formed and malformed examples, and minimal coherence updates to the contracts READMEs, [`./BACKLOG.md`](./BACKLOG.md) §e.17, this Kanban, [`./DEPENDENCIES.md`](./DEPENDENCIES.md), [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md). Implementer-evidence is a separate artifact class; does not amend Batch 2D.1 review-evidence or Batch 2D.2 architect-evidence semantics; does not authorize ratification, merge, deploy, branch deletion, branch protection mutation, live repository-settings change, provider/tool/model/host/account binding, tenant binding, or authority expansion. | Canonical-branch merge commit `01f21a5 feat: add implementer evidence schema contract (#38)` (PR head SHA `0b630be`). |
+| `post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook` | Gate 2 Lane A: operations rehearsal runbook for parallel pair work (`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md`). Operational/non-normative; does not amend governance substrate, schemas, authority contracts, or identity records; public visibility remains separately gated. | Canonical-branch merge commit `a63304a docs: add parallel pair rehearsal runbook (#40)`. |
+| `post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary` | Gate 2 Lane B: external contributor intake boundary document (`docs/governance/EXTERNAL_CONTRIBUTOR_INTAKE_BOUNDARY.md`). `governance` / `docs` mutation class; defines intake boundary for external contributors without expanding authority, mutating schemas, identity records, or authority contracts. | Canonical-branch merge commit `8dd18a0 docs: add external contributor intake boundary (#41)`. |
 
 ### Deferred
 
@@ -226,6 +243,17 @@ malformed examples; see [`./BACKLOG.md`](./BACKLOG.md) §e.17 and
 the `Done` table above. Provider/tool/model/host/account binding
 and any future unified cross-role evidence schema remain separate
 downstream gates.
+
+Gate 2 Lane A
+(`post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook`) is
+`Done` (PR #40 / `a63304a`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.18.
+`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md` is
+operational/non-normative; public visibility remains separately gated.
+Gate 2 Lane B
+(`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
+is `Done` (PR #41 / `8dd18a0`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.19.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; Feature 005 dispatcher / worktree automation;

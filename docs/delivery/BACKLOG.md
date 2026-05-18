@@ -74,7 +74,17 @@ implementer-evidence schema
 (`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) has since
 landed on the canonical branch as PR #38 / merge commit `01f21a5
 feat: add implementer evidence schema contract (#38)` (PR head SHA
-`0b630be`); see §e.17.
+`0b630be`); see §e.17. Gate 2 Lane A
+(`post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook`) has
+since landed on the canonical branch as PR #40 / merge commit `a63304a
+docs: add parallel pair rehearsal runbook (#40)`;
+`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md` is
+operational/non-normative and public visibility remains separately
+gated; see §e.18. Gate 2 Lane B
+(`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
+has since landed on the canonical branch as PR #41 / merge commit
+`8dd18a0 docs: add external contributor intake boundary (#41)`; see
+§e.19.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1125,6 +1135,52 @@ recorded as §e.8 and §e.9.
   [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
   [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
   [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
+
+### e.18 Post-Sprint-0 substrate — Gate 2 Lane A: parallel pair rehearsal runbook
+
+- **id**: `post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook`
+- **parent**: —
+- **status**: `Done`
+- **scope**: Gate 2 Lane A operational rehearsal runbook for parallel
+  pair work, landing
+  `docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md`. Operational /
+  non-normative; does not amend the governance substrate, schemas,
+  authority contracts, identity records, templates, examples, tenants,
+  `.github/`, or any Feature 003/005/006 deferred scope. Public
+  visibility and any broader publication decision remain separately
+  gated and are not authorized by this item.
+- **acceptance gate**: Merged on the canonical branch with durable
+  commit evidence. Gate met.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `docs`
+- **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commit
+  `a63304a docs: add parallel pair rehearsal runbook (#40)` on the
+  canonical branch.
+
+### e.19 Post-Sprint-0 substrate — Gate 2 Lane B: external contributor intake boundary
+
+- **id**: `post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`
+- **parent**: —
+- **status**: `Done`
+- **scope**: Gate 2 Lane B governance boundary document for external
+  contributor intake, landing
+  `docs/governance/EXTERNAL_CONTRIBUTOR_INTAKE_BOUNDARY.md`. Defines
+  the intake boundary for external contributors without expanding
+  authority, mutating the authority matrix, identity records, schemas,
+  validators, templates, examples, tenants, or `.github/`.
+- **acceptance gate**: Merged on the canonical branch with durable
+  commit evidence. Gate met.
+- **dependencies / blockers**: —
+- **anticipated mutation class**: `governance` / `docs`
+- **owner role**: `architect` / `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+- **durable evidence**: merged commit
+  `8dd18a0 docs: add external contributor intake boundary (#41)` on
+  the canonical branch.
 
 ## f. Maintenance rules
 
