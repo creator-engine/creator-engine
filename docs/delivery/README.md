@@ -98,15 +98,18 @@ external contributor intake boundary (#41)`; see
 docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation. The delivery view now reflects
 canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
-A new post-Sprint-0 substrate parent
-`post-sprint-0/root-worktree-lifecycle` has since been added with
-four child gates (audit `Done`; policy/docs current in progress;
-checks/preflight deferred; current-root reconciliation deferred);
-see [`./BACKLOG.md`](./BACKLOG.md) §e.20.
-`post-sprint-0/root-worktree-lifecycle/policy-docs-current` is the
-interposed policy/docs gate that runs next after this delivery-header
-reconciliation. Public-readiness continuation remains blocked **only**
-until that policy/docs child gate lands; the deferred
+The post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has since landed on the
+canonical branch as PR #44 / merge commit `30327aa docs: add root
+worktree invariant policy (#44)`; the parent row and the
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` child are
+now `Done`, the `post-sprint-0/root-worktree-lifecycle/audit` child
+remains `Done`, and the
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+children remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md)
+§e.20. Public-readiness continuation is no longer blocked by the
+policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
@@ -170,7 +173,7 @@ repository. It does not redefine them.
 | [`specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) | Sprint 0 execution sequence, exit gates, and post-merge next-task protocol fields. |
 | Spec Kit `tasks.md` and Creator Engine sidecars (`spec.creator-engine.yml`, `plan.creator-engine.yml`, `tasks.creator-engine.yml`) | Canonical work-item records for governed batches. |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only; never substitutes for repo-visible artifacts. |
-| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3` and PR #23 / `3dc45a1`. Upstream evidence for R-011 and R-012 mitigations in [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §a. |
+| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md), [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3`, PR #23 / `3dc45a1`, and PR #44 / `30327aa`. Upstream evidence for R-011 and R-012 mitigations in [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §a; the root-worktree navigation/orchestration-only invariant is sourced from [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md). |
 
 Where this control plane and any upstream source of truth disagree,
 the upstream source of truth wins until Source ratifies a correction.

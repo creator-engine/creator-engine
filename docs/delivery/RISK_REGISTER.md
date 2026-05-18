@@ -34,15 +34,18 @@ docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation; it is a reconciliation event and does
 not require a new backlog row. The delivery view now reflects
 canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
-A new post-Sprint-0 substrate parent
-`post-sprint-0/root-worktree-lifecycle` has since been added with
-four child gates (audit `Done`; policy/docs current in progress;
-checks/preflight deferred; current-root reconciliation deferred);
-see [`./BACKLOG.md`](./BACKLOG.md) §e.20.
-`post-sprint-0/root-worktree-lifecycle/policy-docs-current` is the
-interposed policy/docs gate that runs next after this delivery-header
-reconciliation. Public-readiness continuation remains blocked **only**
-until that policy/docs child gate lands; the deferred
+The post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has since landed on the
+canonical branch as PR #44 / merge commit `30327aa docs: add root
+worktree invariant policy (#44)`; the parent row and the
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` child are
+now `Done`, the `post-sprint-0/root-worktree-lifecycle/audit` child
+remains `Done`, and the
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+children remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md)
+§e.20. Public-readiness continuation is no longer blocked by the
+policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
