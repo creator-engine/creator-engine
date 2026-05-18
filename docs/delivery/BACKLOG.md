@@ -84,15 +84,22 @@ gated; see §e.18. Gate 2 Lane B
 (`post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary`)
 has since landed on the canonical branch as PR #41 / merge commit
 `8dd18a0 docs: add external contributor intake boundary (#41)`; see
-§e.19. A new post-Sprint-0 substrate parent
-`post-sprint-0/root-worktree-lifecycle` has been added with four
-child gates (audit complete; policy/docs current — in progress;
-checks/preflight deferred; current-root reconciliation deferred);
-see §e.20. Public-readiness continuation remains blocked **only**
-until the §e.20.2 policy/docs child gate lands; the §e.20.3
-checks/preflight and §e.20.4 current-root reconciliation child
-gates are explicitly later gates and are not on the public-readiness
-critical path.
+§e.19. The post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has since landed on the
+canonical branch as PR #44 / merge commit `30327aa docs: add root
+worktree invariant policy (#44)`; the parent and its
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` child
+are `Done`, the `post-sprint-0/root-worktree-lifecycle/audit` child
+remains `Done`, and the
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+children remain `Deferred`; see §e.20. Public-readiness continuation
+remains separately Source-ratified and unimplemented; it is no longer
+blocked by the policy/docs child gate. The deferred
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+children are explicitly later gates and are not on the
+public-readiness critical path.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1194,7 +1201,13 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/root-worktree-lifecycle`
 - **parent**: —
-- **status**: `In Progress`
+- **status**: `Done` — merged on the canonical branch as PR #44 /
+  merge commit `30327aad2aea`, `docs: add root worktree invariant
+  policy (#44)`. §e.20.1 (audit) and §e.20.2 (policy/docs current)
+  are `Done`; §e.20.3 (checks/preflight) and §e.20.4 (current-root
+  reconciliation) remain `Deferred` and will each require their own
+  separately Source-ratified envelope before the parent's deferred
+  closure conditions are met.
 - **scope**: Post-Sprint-0 substrate parent for the root-worktree
   navigation/orchestration-only invariant and its sequenced child
   gates. The parent groups: (i) audit of the current operating model
@@ -1252,7 +1265,9 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
 - **parent**: `post-sprint-0/root-worktree-lifecycle`
-- **status**: `In Progress`
+- **status**: `Done` — merged on the canonical branch as PR #44 /
+  merge commit `30327aad2aea`, `docs: add root worktree invariant
+  policy (#44)`.
 - **scope**: Author
   [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
   as the canonical root-worktree navigation/orchestration-only

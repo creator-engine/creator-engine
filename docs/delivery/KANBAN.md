@@ -75,15 +75,20 @@ Gate 2 Lane B
 has since landed on the canonical branch as PR #41 / merge commit
 `8dd18a0 docs: add external contributor intake boundary (#41)` and is
 `Done` on the board below; see [`./BACKLOG.md`](./BACKLOG.md) §e.19.
-A new post-Sprint-0 substrate parent
-`post-sprint-0/root-worktree-lifecycle` is now tracked on the board
-with four child rows (audit `Done`; policy/docs current `In Progress`;
-checks/preflight `Deferred`; current-root reconciliation `Deferred`);
-see [`./BACKLOG.md`](./BACKLOG.md) §e.20. Public-readiness
-continuation remains blocked **only** until the policy/docs child
-gate lands; the checks/preflight and current-root reconciliation
-gates are explicitly later gates and are not on the public-readiness
-critical path. Generated from / summarizes
+The post-Sprint-0 substrate parent
+`post-sprint-0/root-worktree-lifecycle` has since landed on the
+canonical branch as PR #44 / merge commit `30327aa docs: add root
+worktree invariant policy (#44)`; the parent row and the
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` child are
+now `Done` on the board below alongside the previously-`Done`
+`post-sprint-0/root-worktree-lifecycle/audit` child, while
+`post-sprint-0/root-worktree-lifecycle/checks-preflight` and
+`post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
+remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md) §e.20.
+Public-readiness continuation remains separately Source-ratified and
+unimplemented; the deferred checks/preflight and current-root
+reconciliation gates are explicitly later gates and are not on the
+public-readiness critical path. Generated from / summarizes
 [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
@@ -138,10 +143,11 @@ canonical branch; see the `Done` table below.)*
 
 ### In Progress
 
-| id | scope (one line) | parent |
-|---|---|---|
-| `post-sprint-0/root-worktree-lifecycle` | Post-Sprint-0 substrate parent for the root-worktree navigation/orchestration-only invariant and its four child gates (audit; policy/docs current; deferred checks/preflight; deferred current-root reconciliation). | — |
-| `post-sprint-0/root-worktree-lifecycle/policy-docs-current` | Authoring of [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) and the minimal cross-link / template / next-task-protocol / backlog / Kanban coherence updates needed to make the root invariant canonical. `docs`-class only; no validator/preflight code, no current-root reconciliation, no GitHub-settings mutation, no public-readiness decision-record consumption. | `post-sprint-0/root-worktree-lifecycle` |
+*(No items currently in this column.
+`post-sprint-0/root-worktree-lifecycle` and its child
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` have
+landed on the canonical branch; see the `Done` table below and
+[`./BACKLOG.md`](./BACKLOG.md) §e.20.)*
 
 ### Verified
 
@@ -178,6 +184,8 @@ canonical branch; see the `Done` table below.)*
 | `post-sprint-0/gate-2-lane-a-parallel-pair-rehearsal-runbook` | Gate 2 Lane A: operations rehearsal runbook for parallel pair work (`docs/operations/PARALLEL_PAIR_REHEARSAL_RUNBOOK.md`). Operational/non-normative; does not amend governance substrate, schemas, authority contracts, or identity records; public visibility remains separately gated. | Canonical-branch merge commit `a63304a docs: add parallel pair rehearsal runbook (#40)`. |
 | `post-sprint-0/gate-2-lane-b-external-contributor-intake-boundary` | Gate 2 Lane B: external contributor intake boundary document (`docs/governance/EXTERNAL_CONTRIBUTOR_INTAKE_BOUNDARY.md`). `governance` / `docs` mutation class; defines intake boundary for external contributors without expanding authority, mutating schemas, identity records, or authority contracts. | Canonical-branch merge commit `8dd18a0 docs: add external contributor intake boundary (#41)`. |
 | `post-sprint-0/root-worktree-lifecycle/audit` | Audit of the post-Sprint-0 operating model for substantive authoring leaking onto the root checkout, with findings condensed into [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §a–§b background. | Audit findings reflected in [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §a–§b and in the cross-link / template / next-task-protocol / backlog / Kanban coherence updates landing under `post-sprint-0/root-worktree-lifecycle/policy-docs-current`. |
+| `post-sprint-0/root-worktree-lifecycle` | Post-Sprint-0 substrate parent for the root-worktree navigation/orchestration-only invariant and its four child gates (audit; policy/docs current; deferred checks/preflight; deferred current-root reconciliation). | Canonical-branch merge commit `30327aa docs: add root worktree invariant policy (#44)`. Parent reaches `Done` for §e.20.1 / §e.20.2; §e.20.3 (checks/preflight) and §e.20.4 (current-root reconciliation) remain `Deferred` and each require their own separately Source-ratified envelope. |
+| `post-sprint-0/root-worktree-lifecycle/policy-docs-current` | Authoring of [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) and the minimal cross-link / template / next-task-protocol / backlog / Kanban coherence updates needed to make the root invariant canonical. `docs`-class only; no validator/preflight code, no current-root reconciliation, no GitHub-settings mutation, no public-readiness decision-record consumption. | Canonical-branch merge commit `30327aa docs: add root worktree invariant policy (#44)`. |
 
 ### Deferred
 
@@ -266,21 +274,29 @@ Gate 2 Lane B
 is `Done` (PR #41 / `8dd18a0`); see
 [`./BACKLOG.md`](./BACKLOG.md) §e.19.
 
-The current `In Progress` item is
-`post-sprint-0/root-worktree-lifecycle/policy-docs-current` under
-the parent `post-sprint-0/root-worktree-lifecycle`: authoring of
-[`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
-and the minimal cross-link / template / next-task-protocol /
-backlog / Kanban coherence updates; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.20.2. Public-readiness
-continuation remains blocked **only** until this policy/docs child
-gate lands. The sibling deferred gates
+The `post-sprint-0/root-worktree-lifecycle` parent and its
+`post-sprint-0/root-worktree-lifecycle/policy-docs-current` child
+have landed on the canonical branch as PR #44 / merge commit
+`30327aa docs: add root worktree invariant policy (#44)`; both rows
+are `Done` on the board above; see [`./BACKLOG.md`](./BACKLOG.md)
+§e.20–§e.20.2. The sibling deferred gates
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` (validator
 / CLI preflight implementation) and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 (reconciliation of a specific operator's dirty root) are explicitly
 later gates and require their own separately-Source-ratified
 envelopes; see [`./BACKLOG.md`](./BACKLOG.md) §e.20.3–§e.20.4.
+
+With the root-worktree policy/docs gate landed, the next candidate
+Source-ratifiable gate, subject to Source ratification, is the
+queued public-readiness continuation. The public-readiness
+continuation remains separately Source-ratified and unimplemented;
+its own repo-private and public-readiness blockers and the
+substance of its queued continuation are not consumed, refreshed,
+or executed by this Kanban view. Final next-task selection —
+including whether the public-readiness continuation is in fact
+authorized next, and under what bounded envelope — remains
+Source's.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; Feature 005 dispatcher / worktree automation;
