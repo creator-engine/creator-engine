@@ -66,11 +66,11 @@ landed on the canonical branch as PR #36 / merge commit `51a2134
 feat: add architect evidence schema contract (#36)` (PR head SHA
 `451be39`); see §d.11 and [`./BACKLOG.md`](./BACKLOG.md) §e.16.
 CFC follow-on Batch 2D.3 implementer-evidence schema
-(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) is
-currently locally authored under a Source-ratified privileged
-`schema`-class implementer envelope and awaiting controller
-verification and Source ratification before merge; not yet
-landed. See §d.12 and [`./BACKLOG.md`](./BACKLOG.md) §e.17.
+(`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) has
+since landed on the canonical branch as PR #38 / merge commit
+`01f21a5 feat: add implementer evidence schema contract (#38)`
+(PR head SHA `0b630be`); see §d.12 and
+[`./BACKLOG.md`](./BACKLOG.md) §e.17.
 
 **Scope**: This document maps dependencies across Sprint 0 slices and
 post-Sprint-0 features as recorded in [`./BACKLOG.md`](./BACKLOG.md).
@@ -386,14 +386,10 @@ completion.
   - Batch 2D — review/architect/implementer-evidence schema
     (`schema`-class, privileged). Batch 2D.1 review-evidence
     schema has since landed (see §d.10, PR #34 / `e1f5ffc`, head
-    `2a8fe0f`) and Batch 2D.2 architect-evidence schema has since
-    landed (see §d.11, PR #36 / `51a2134`, head `451be39`); Batch
-    2D.3 (implementer-evidence schema) is now in progress —
-    locally authored under a Source-ratified privileged
-    `schema`-class implementer envelope; awaiting controller
-    verification and Source ratification before local commit,
-    push, PR, and merge; not yet landed on the canonical branch
-    (see §d.12).
+    `2a8fe0f`), Batch 2D.2 architect-evidence schema has since
+    landed (see §d.11, PR #36 / `51a2134`, head `451be39`), and
+    Batch 2D.3 (implementer-evidence schema) has since landed
+    (see §d.12, PR #38 / `01f21a5`, head `0b630be`).
 
 ### d.7 CFC follow-on Batch 2B depends on Batch 2A; precedes Batch 2C
 
@@ -503,7 +499,7 @@ completion.
   placeholder/unbound posture for `allowed_repositories`,
   `signing_policy`, and `tenant_id`; storage paths under
   `tenants/creator-engine-substrate/codex/`.
-- **Successor edges** (Batch 2D.1 cleared; Batch 2D.2 / 2D.3 not yet cleared):
+- **Successor edges** (Batch 2D.1 cleared; Batch 2D.2 cleared; Batch 2D.3 cleared):
   - **Batch 2D.1 — review-evidence schema** (privileged
     `schema`-class). **Cleared.** `Done` — merged on the canonical
     branch as PR #34 / merge commit `e1f5ffc feat: add review
@@ -515,8 +511,10 @@ completion.
     architect evidence schema contract (#36)` (PR head SHA
     `451be39`). See §d.11.
   - **Batch 2D.3 — implementer-evidence schema** (privileged
-    `schema`-class). Further downstream; requires its own
-    separately Source-ratified privileged `schema`-class envelope.
+    `schema`-class). **Cleared.** `Done` — merged on the canonical
+    branch as PR #38 / merge commit `01f21a5 feat: add implementer
+    evidence schema contract (#38)` (PR head SHA `0b630be`). See
+    §d.12.
 
 ### d.10 CFC follow-on Batch 2D.1 review-evidence schema depends on Codex identity record authoring; precedes Batch 2D.2 / 2D.3
 
@@ -545,10 +543,8 @@ completion.
   Batch 2D.1's envelope and required their own separately
   Source-ratified privileged `schema`-class envelopes; Batch 2D.2
   has since landed (PR #36 / `51a2134`, head `451be39`) and
-  Batch 2D.3 is now in progress — locally authored under a
-  Source-ratified privileged `schema`-class implementer envelope;
-  awaiting controller verification and Source ratification before
-  merge; not yet landed on the canonical branch.
+  Batch 2D.3 has since landed (PR #38 / `01f21a5`, head
+  `0b630be`).
 - **Landed state**: `Done` — merged on the canonical branch as
   PR #34 / merge commit `e1f5ffc feat: add review evidence schema
   contract (#34)` (PR head SHA `2a8fe0f`). Landed
@@ -560,18 +556,17 @@ completion.
   template status pointer, the contracts README, and the Batch 2D.1
   rows in [`./BACKLOG.md`](./BACKLOG.md), [`./KANBAN.md`](./KANBAN.md),
   and this document.
-- **Successor edges** (Batch 2D.2 cleared; Batch 2D.3 in progress, not yet landed):
+- **Successor edges** (Batch 2D.2 cleared; Batch 2D.3 cleared):
   - **Batch 2D.2 — architect-evidence schema** (privileged
     `schema`-class). **Cleared.** `Done` — merged on the
     canonical branch as PR #36 / merge commit `51a2134 feat: add
     architect evidence schema contract (#36)` (PR head SHA
     `451be39`). See §d.11.
   - **Batch 2D.3 — implementer-evidence schema** (privileged
-    `schema`-class). **In progress.** Locally authored under a
-    Source-ratified privileged `schema`-class implementer
-    envelope; awaiting controller verification and Source
-    ratification before merge; not yet landed on the canonical
-    branch. See §d.12.
+    `schema`-class). **Cleared.** `Done` — merged on the canonical
+    branch as PR #38 / merge commit `01f21a5 feat: add implementer
+    evidence schema contract (#38)` (PR head SHA `0b630be`). See
+    §d.12.
 
 ### d.11 CFC follow-on Batch 2D.2 architect-evidence schema depends on Batch 2D.1; precedes Batch 2D.3
 
@@ -614,13 +609,12 @@ completion.
   [`./KANBAN.md`](./KANBAN.md), this document, and
   [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
   [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
-- **Successor edges** (Batch 2D.3 in progress, not yet landed):
+- **Successor edges** (Batch 2D.3 cleared):
   - **Batch 2D.3 — implementer-evidence schema** (privileged
-    `schema`-class). **In progress.** Locally authored under a
-    Source-ratified privileged `schema`-class implementer
-    envelope; awaiting controller verification and Source
-    ratification before merge; not yet landed on the canonical
-    branch. See §d.12.
+    `schema`-class). **Cleared.** `Done` — merged on the canonical
+    branch as PR #38 / merge commit `01f21a5 feat: add implementer
+    evidence schema contract (#38)` (PR head SHA `0b630be`). See
+    §d.12.
 
 ### d.12 CFC follow-on Batch 2D.3 implementer-evidence schema depends on Batch 2D.2
 
@@ -654,10 +648,19 @@ completion.
   `docs/governance/CODEX_ROLE_AND_AUTHORITY_DECISION.md`,
   tenants, `.github/**`, or any Batch 2D.1 review-evidence or
   Batch 2D.2 architect-evidence artifact.
-- **Landed state**: Not yet landed. Currently locally authored
-  under a Source-ratified privileged `schema`-class implementer
-  envelope; awaiting controller verification and Source
-  ratification before merge. No PR or merge commit exists.
+- **Landed state**: `Done` — merged on the canonical branch as
+  PR #38 / merge commit `01f21a5 feat: add implementer evidence
+  schema contract (#38)` (PR head SHA `0b630be`). Landed
+  `schemas/implementer-evidence.schema.yaml`,
+  `templates/implementer-evidence.template.yaml`,
+  `docs/contracts/implementer-evidence.md`, the
+  `implementer_evidence_schema` validator check with unit and
+  integration tests, well-formed and malformed examples, and
+  minimal coherence updates to the contracts READMEs, the
+  Batch 2D.3 rows in [`./BACKLOG.md`](./BACKLOG.md),
+  [`./KANBAN.md`](./KANBAN.md), this document,
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
+  [`../governance/CODEX_FIRST_CLASS_SCOPE.md`](../governance/CODEX_FIRST_CLASS_SCOPE.md).
 - **Successor edges**: Any future unified cross-role evidence
   schema or downstream evidence consumer remains explicitly
   downstream and requires its own separately Source-ratified
@@ -733,15 +736,15 @@ post-merge update procedure in
 | Sprint 0 exit (gates 1–12) + Features 003–006 | `v1.0` | mixed (`Done` / `Deferred` / `Blocked`) | Successor `Deferred` until every dependency in §e is `Done`. |
 | Sprint 0 exit + Source-ratified future spec | `us3/a1` | (not yet specced) | Successor `Blocked` / `Deferred` per §f. |
 | Sprint 0 (all slices) + `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` | `post-sprint-0/cfc-1-codex-first-class` | `Done` (all predecessors) | Predecessor edges cleared; CFC-1 is `Done` — landed on canonical branch as PR #25 / `30a3e8c`. See §d.5. |
-| `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record authoring `Done`; Batch 2D.1 review-evidence schema `Done`; Batch 2D.2 architect-evidence schema `Done`; Batch 2D.3 implementer-evidence schema `In Progress` — locally authored under a Source-ratified privileged `schema`-class implementer envelope, awaiting controller verification and Source ratification before merge, not yet landed; architecture update and other downstream envelopes not yet shaped) | `Done` (CFC-1; identity record authoring; Batch 2D.1; Batch 2D.2) | CFC-1 is `Done` (PR #25 / `30a3e8c`); Codex identity record authoring is `Done` (PR #31 / `78b57a4`); Batch 2D.1 review-evidence schema is `Done` (PR #34 / `e1f5ffc`, head `2a8fe0f`); Batch 2D.2 architect-evidence schema is `Done` (PR #36 / `51a2134`, head `451be39`); Batch 2D.3 (implementer-evidence schema, `schema`-class, privileged) is `In Progress` — locally authored under a Source-ratified privileged `schema`-class implementer envelope; awaiting controller verification and Source ratification before merge; not yet landed on the canonical branch. Other downstream envelopes (architecture update, future unified cross-role evidence schema or downstream evidence consumer, provider/tool/model/host/account binding, tenant binding, deploy/dispatch, and any authority expansion) remain not yet shaped and require separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
+| `post-sprint-0/cfc-1-codex-first-class` | Feature 004/CFC follow-on Batch 2+ (identity record authoring `Done`; Batch 2D.1 review-evidence schema `Done`; Batch 2D.2 architect-evidence schema `Done`; Batch 2D.3 implementer-evidence schema `Done`; architecture update and other downstream envelopes not yet shaped) | `Done` (CFC-1; identity record authoring; Batch 2D.1; Batch 2D.2; Batch 2D.3) | CFC-1 is `Done` (PR #25 / `30a3e8c`); Codex identity record authoring is `Done` (PR #31 / `78b57a4`); Batch 2D.1 review-evidence schema is `Done` (PR #34 / `e1f5ffc`, head `2a8fe0f`); Batch 2D.2 architect-evidence schema is `Done` (PR #36 / `51a2134`, head `451be39`); Batch 2D.3 implementer-evidence schema is `Done` (PR #38 / `01f21a5`, head `0b630be`). Other downstream envelopes (architecture update, future unified cross-role evidence schema or downstream evidence consumer, provider/tool/model/host/account binding, tenant binding, deploy/dispatch, and any authority expansion) remain not yet shaped and require separate Source-ratified privileged envelopes per §h. Not authorized by CFC-1 Batch 1 landing. |
 | `post-sprint-0/cfc-1-codex-first-class` | `post-sprint-0/cfc-2a-codex-role-decision` | `Done` (CFC-1) | Cleared; CFC-1 is `Done` (PR #25 / `30a3e8c`); successor is `Done` (PR #27 / `6b51882`). `governance` / `docs` class; non-privileged predecessor edge. See §d.6. |
 | `post-sprint-0/cfc-2a-codex-role-decision` | `post-sprint-0/cfc-2b-codex-architecture-matrix` | `Done` (Batch 2A) | Cleared; predecessor is `Done` (PR #27 / `6b51882`); successor is `Done` (PR #28 / `c06a3e7`). `governance` / `docs` class. See §d.7. |
 | `post-sprint-0/cfc-2a-codex-role-decision` + `post-sprint-0/cfc-2b-codex-architecture-matrix` | `post-sprint-0/cfc-2c-codex-identity-decision` | `Done` (both predecessors) | Cleared; both predecessors are `Done`; successor is `Done` — merged on the canonical branch as PR #29 / `66a8074`. Source ratified eight §6 decisions. `governance` / `docs` class; non-privileged predecessor edges. See §d.8. |
 | `post-sprint-0/cfc-2c-codex-identity-decision` | `post-sprint-0/cfc-codex-identity-record-authoring` (Codex identity record authoring, `identity`-class, privileged) | `Done` (Batch 2C and identity record authoring) | Batch 2C is `Done` (PR #29 / `66a8074`); §6.1–§6.7 decisions ratified. Successor identity record authoring is `Done` — merged on canonical branch as PR #31 / merge commit `78b57a4`; single Codex identity record with `role_category = architect`, `human_ratifier_roles = ["source"]`, placeholder/unbound posture; storage paths under `tenants/creator-engine-substrate/codex/`. See §d.9. |
 | `post-sprint-0/cfc-codex-identity-record-authoring` | `post-sprint-0/cfc-2d-1-review-evidence-schema` (Batch 2D.1 review-evidence schema lift, `schema`-class, privileged) | `Done` (identity record authoring; Batch 2D.1) | Identity record authoring is `Done` (PR #31 / `78b57a4`). Batch 2D.1 successor is `Done` — merged on the canonical branch as PR #34 / `e1f5ffc` (PR head SHA `2a8fe0f`). See §d.10. |
-| `post-sprint-0/cfc-2d-1-review-evidence-schema` | `post-sprint-0/cfc-2d-2-architect-evidence-schema` (Batch 2D.2 architect-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.1) | Cleared; Batch 2D.1 is `Done` (PR #34 / `e1f5ffc`, head `2a8fe0f`); successor Batch 2D.2 is `Done` — merged on the canonical branch as PR #36 / `51a2134` (PR head SHA `451be39`). Batch 2D.3 (implementer-evidence schema) remains further downstream and requires its own separately Source-ratified privileged `schema`-class envelope per §h. See §d.10 and §d.11. |
-| `post-sprint-0/cfc-2d-2-architect-evidence-schema` | `post-sprint-0/cfc-2d-3-implementer-evidence-schema` (Batch 2D.3 implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.2) | Predecessor is `Done` (PR #36 / `51a2134`, head `451be39`). Successor Batch 2D.3 is `In Progress` — locally authored under a Source-ratified privileged `schema`-class implementer envelope; awaiting controller verification and Source ratification before merge; not yet landed on the canonical branch. See §d.11 and §d.12. |
-| `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); Batch 2D explicitly reaffirmed as non-mutated by Batch 2C per [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. Batch 2D.1 review-evidence schema has since landed (PR #34 / `e1f5ffc`, head `2a8fe0f`) and Batch 2D.2 architect-evidence schema has since landed (PR #36 / `51a2134`, head `451be39`); Batch 2D.3 (implementer-evidence) is `In Progress` — locally authored under a Source-ratified privileged `schema`-class implementer envelope; awaiting controller verification and Source ratification before merge; not yet landed on the canonical branch. Any future unified cross-role evidence schema or downstream evidence consumer remains downstream and requires its own separately Source-ratified privileged envelope per §h. |
+| `post-sprint-0/cfc-2d-1-review-evidence-schema` | `post-sprint-0/cfc-2d-2-architect-evidence-schema` (Batch 2D.2 architect-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.1) | Cleared; Batch 2D.1 is `Done` (PR #34 / `e1f5ffc`, head `2a8fe0f`); successor Batch 2D.2 is `Done` — merged on the canonical branch as PR #36 / `51a2134` (PR head SHA `451be39`); Batch 2D.3 (implementer-evidence schema) has since landed (PR #38 / `01f21a5`, head `0b630be`). See §d.10, §d.11, and §d.12. |
+| `post-sprint-0/cfc-2d-2-architect-evidence-schema` | `post-sprint-0/cfc-2d-3-implementer-evidence-schema` (Batch 2D.3 implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.2) | Predecessor is `Done` (PR #36 / `51a2134`, head `451be39`); successor Batch 2D.3 is `Done` — merged on the canonical branch as PR #38 / `01f21a5` (PR head SHA `0b630be`). See §d.11 and §d.12. |
+| `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); Batch 2D explicitly reaffirmed as non-mutated by Batch 2C per [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. Batch 2D.1 review-evidence schema has since landed (PR #34 / `e1f5ffc`, head `2a8fe0f`), Batch 2D.2 architect-evidence schema has since landed (PR #36 / `51a2134`, head `451be39`), and Batch 2D.3 (implementer-evidence) has since landed (PR #38 / `01f21a5`, head `0b630be`). Any future unified cross-role evidence schema or downstream evidence consumer remains downstream and requires its own separately Source-ratified privileged envelope per §h. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
 
