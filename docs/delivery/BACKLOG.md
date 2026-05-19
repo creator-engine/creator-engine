@@ -99,7 +99,16 @@ blocked by the policy/docs child gate. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 children are explicitly later gates and are not on the
-public-readiness critical path.
+public-readiness critical path. A new post-Sprint-0 substrate
+parent `post-sprint-0/public-readiness` is being authored under a
+Source-ratified docs-only envelope; its `post-sprint-0/public-readiness/gate-artifact`
+child lands `docs/delivery/PUBLIC_READINESS_GATE.md` as the canonical
+public-readiness gate delivery-view artifact, and its
+`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
+as the named owning future privileged envelope for the actual
+repository visibility flip (and any concurrently-ratified live
+branch-protection / ruleset application). The gate artifact does not
+authorize making the repository public; see §e.21.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1363,6 +1372,157 @@ recorded as §e.8 and §e.9.
 - **anticipated mutation class**: `governance` (envelope shape) /
   `docs` (envelope evidence)
 - **owner role**: `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+### e.21 Post-Sprint-0 substrate — public-readiness (parent)
+
+- **id**: `post-sprint-0/public-readiness`
+- **parent**: —
+- **status**: `In Progress`
+- **scope**: Post-Sprint-0 substrate parent for the public-readiness
+  gate and its sequenced child gates. The parent groups: (i) the
+  delivery-view gate artifact authoring landing
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and the
+  minimal coherence updates needed to discover it; (ii) the deferred
+  privileged envelope that would actually flip the repository to
+  public on the remote (and, if Source ratifies it concurrently,
+  apply live branch-protection / ruleset settings to the live `main`
+  branch). The parent preserves the distinction between
+  substrate / documentation work (this child) and the privileged
+  live visibility / settings flip (deferred child), per
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §c and
+  §f. The parent does not author any validator code, does not
+  mutate live GitHub settings, does not change repository
+  visibility, does not apply branch-protection / ruleset settings to
+  the live remote, does not ratify CODEOWNERS, does not author or
+  execute a redaction-gate corpus, and does not mutate schemas,
+  authority contracts, identity records, templates outside the
+  named manifest, validators, examples, or tenants.
+- **acceptance gate**: §e.21.1 reaches `Done`; §e.21.2 reaches
+  `Deferred` with a named owning future privileged envelope. The
+  parent reaches `Done` only after §e.21.2 itself reaches `Done`
+  under a separately Source-ratified privileged envelope.
+- **dependencies / blockers**:
+  `post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
+  PR #21 / `5b762f9`); `post-sprint-0/workflow-hardening` (`Done`,
+  PR #22 / `d892cd3` and PR #23 / `3dc45a1`);
+  `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
+  (`Done`, PR #44 / `30327aa`). Each predecessor edge is cleared.
+- **anticipated mutation class**: `docs` (child §e.21.1) /
+  `governance` / `security` (deferred child §e.21.2, potentially
+  also `deploy` if the envelope ratifies live branch-protection /
+  ruleset application in the same batch)
+- **owner role**: `architect` / `implementer`
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.21.1 Public-readiness gate artifact (child)
+
+- **id**: `post-sprint-0/public-readiness/gate-artifact`
+- **parent**: `post-sprint-0/public-readiness`
+- **status**: `In Progress`
+- **scope**: Author
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
+  canonical delivery-view public-readiness gate artifact, and make
+  the minimal coherence updates required to make it discoverable
+  and consistent with the queued-continuation state:
+  [`./README.md`](./README.md) (file map and status header),
+  [`./BACKLOG.md`](./BACKLOG.md) (this row plus its parent and
+  deferred sibling), [`./KANBAN.md`](./KANBAN.md) (board reflects
+  the new parent and children),
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) (new edges for §e.21.1
+  / §e.21.2), and [`./RISK_REGISTER.md`](./RISK_REGISTER.md)
+  (workflow-hardening protocol-set citation extended to include
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  and PR #44 / `30327aa`). The gate artifact records public-
+  readiness gate semantics; cites already-landed substrate
+  (PR #20 / `35bf85f` and PR #21 / `5b762f9`); enumerates the
+  residual checklist for future separate ratification (repository
+  visibility flip; live branch-protection / ruleset application;
+  any CODEOWNERS decision; any future redaction-gate corpus; any
+  future GitHub-settings mutation); explicitly states that this
+  gate does not authorize making the repository public; and names
+  the owning future privileged envelope for the actual visibility
+  flip. Bundled SAFE_TO_DEFER findings from the shaping architect
+  are landed under this child: the
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)
+  §g forward-looking blocker phrasing has been rewritten to landed-
+  state/past-tense citing PR #44 / `30327aa`, and the
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §a / §e workflow-
+  hardening protocol-set citation has been expanded as described
+  above. `docs`-class only; no validator/preflight code, no
+  schema/template/authority/identity mutation outside the named
+  manifest, no GitHub-settings mutation, no visibility flip, no
+  CODEOWNERS authoring, no redaction-gate corpus authoring or
+  execution.
+- **acceptance gate**: Seven-file manifest validates locally
+  ([`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md),
+  [`./README.md`](./README.md), [`./KANBAN.md`](./KANBAN.md),
+  [`./BACKLOG.md`](./BACKLOG.md),
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md),
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md));
+  cross-links resolve; backlog / Kanban / dependencies / risk-
+  register coherence reflects the new parent and two children;
+  Source ratifies the gate-artifact authoring envelope; merged on
+  the canonical branch with finalized attestation.
+- **dependencies / blockers**:
+  `post-sprint-0/root-worktree-lifecycle/policy-docs-current`
+  (`Done`, PR #44 / `30327aa`).
+- **anticipated mutation class**: `docs`
+- **owner role**: `implementer` (Claude Code under the
+  Source-ratified visible implementation envelope); `controller` /
+  `reviewer` (Nefarious)
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
+#### e.21.2 Public visibility flip (deferred child)
+
+- **id**: `post-sprint-0/public-readiness/visibility-flip`
+- **parent**: `post-sprint-0/public-readiness`
+- **status**: `Deferred`
+- **scope**: Deferred separately-Source-ratified privileged
+  envelope that would flip the canonical repository from private to
+  public on the remote, and — if Source ratifies it concurrently
+  in the same batch — apply live branch-protection / ruleset
+  settings to the live `main` branch. Privileged
+  (`governance` / `security` / potentially `deploy`)-class per
+  Feature 001 FR-008; `source` is the sole ratifier per FR-008. The
+  visibility-flip envelope MUST observe the workflow-hardening
+  protocol set
+  ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md),
+  [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md),
+  [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md),
+  [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md),
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md))
+  and the release / merge / deploy policy in
+  [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md)
+  and the four Slice F content docs. The visibility-flip envelope
+  is **not** authorized by the §e.21.1 gate-artifact landing; the
+  gate artifact only records that the visibility flip exists as a
+  named owning future privileged envelope. Any CODEOWNERS
+  decision, any future redaction-gate corpus, and any other future
+  GitHub-settings mutation beyond the visibility flip itself MAY be
+  ratified under separate envelopes from this one; see
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e
+  and §f.
+- **acceptance gate**: Source-ratified privileged envelope landed
+  on the canonical branch; visibility-flip mutation recorded with
+  the post-merge attestation per Feature 001 FR-016; the gate
+  artifact's §e residual checklist updated to reflect the new
+  landed state under a subsequent docs-only reconciliation batch.
+- **dependencies / blockers**:
+  `post-sprint-0/public-readiness/gate-artifact` (must reach `Done`
+  first so the visibility-flip envelope has a normative gate
+  artifact to discharge).
+- **anticipated mutation class**: `governance` /
+  `security` (privileged); potentially `deploy` if live branch-
+  protection / ruleset settings are ratified in the same batch.
+- **owner role**: `implementer` (separately named under the
+  Source-ratified envelope; not Nefarious-as-controller per
+  [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md)
+  §d–§e)
 - **ratifier role**: `source`
 - **external tracker reference**: —
 

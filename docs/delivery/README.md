@@ -113,9 +113,21 @@ policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
-the public-readiness critical path. Repository visibility /
-public-readiness remain separately Source-ratified and
-unimplemented.
+the public-readiness critical path. A new post-Sprint-0 substrate
+parent `post-sprint-0/public-readiness` is being authored under a
+Source-ratified docs-only envelope; its
+`post-sprint-0/public-readiness/gate-artifact` child lands
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
+canonical delivery-view public-readiness gate artifact, and its
+`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
+as the named owning future privileged envelope for the actual
+repository visibility flip. The gate artifact does not authorize
+making the repository public; live GitHub settings, repository
+visibility, live branch-protection / ruleset application, any
+CODEOWNERS decision, any future redaction-gate corpus, and any
+other future GitHub-settings mutation remain separately Source-
+ratified and unimplemented. See
+[`./BACKLOG.md`](./BACKLOG.md) §e.21.
 
 ## a. Purpose
 
@@ -256,6 +268,22 @@ FR-016.
 | [`MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md) | Pre-merge gates complementing the Definition of Done and the review gate; restates Source-ratification authority and the Definition-of-Ready privileged-class rule; PR / merge evidence and post-merge report expectations; explicit "CI green is not Source ratification" and Feature 001 FR-007 author/approver-separation statements. |
 | [`DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md) | Names `deploy` as a Feature 001 FR-008 privileged mutation class with Source-only ratifier; explicit deploy-mutation ratification rule ("no agent may deploy without Source-ratified authority"); explicit statement that no deployment targets / environments currently exist; defers execution-side concerns to Feature 006; explicit non-ratification statement for any CI / review verdict touching deploy. |
 | [`ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md) | Rollback decision criteria (who decides, on what evidence); post-release evidence layered onto the ten post-merge fields in [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b without amending them; defect-discovered-post-merge interaction with the Definition-of-Done lifecycle; automated rollback deferred to Feature 006. |
+
+### Post-Sprint-0 public-readiness gate (in flight)
+
+This document is being authored under a Source-ratified docs-only
+envelope (`post-sprint-0/public-readiness/gate-artifact`); see
+[`./BACKLOG.md`](./BACKLOG.md) §e.21.1. It is a delivery-view
+artifact recording public-readiness gate semantics, the substrate
+already landed (PR #20 / `35bf85f` and PR #21 / `5b762f9`), the
+residual checklist for future separate ratification, the explicit
+statement that this gate does not authorize making the repository
+public, and the named owning future privileged envelope for the
+visibility flip.
+
+| File | Role |
+|---|---|
+| [`PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) | Canonical delivery-view public-readiness gate artifact. Records gate semantics, landed substrate, residual checklist (repository visibility flip; live branch-protection / ruleset application; any CODEOWNERS decision; any future redaction-gate corpus; any future GitHub-settings mutation), explicit non-authorization of repository visibility change, and the named owning future privileged `post-sprint-0/public-readiness/visibility-flip` envelope. |
 
 ### Slice E delivery docs (landed)
 
