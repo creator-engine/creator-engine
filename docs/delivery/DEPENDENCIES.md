@@ -98,14 +98,15 @@ policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
-the public-readiness critical path. A new post-Sprint-0 substrate
-parent `post-sprint-0/public-readiness` is being authored under a
-Source-ratified docs-only envelope; its
-`post-sprint-0/public-readiness/gate-artifact` child is `In Progress`
-and the sibling `post-sprint-0/public-readiness/visibility-flip` child
-is `Deferred` as the named owning future privileged envelope for the
-actual repository visibility flip; see §d.13 and
-[`./BACKLOG.md`](./BACKLOG.md) §e.21. Repository visibility / live
+the public-readiness critical path. The post-Sprint-0 substrate parent `post-sprint-0/public-readiness`
+and its `post-sprint-0/public-readiness/gate-artifact` child have
+landed on the canonical branch as PR #46 / merge commit `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233
+docs: add public readiness continuation gate (#46)`; both are `Done`
+on the delivery view; see §d.13 and
+[`./BACKLOG.md`](./BACKLOG.md) §e.21. The sibling
+`post-sprint-0/public-readiness/visibility-flip` child remains
+`Deferred` as the named owning future privileged envelope for the
+actual repository visibility flip. Repository visibility / live
 GitHub-settings mutations remain separately Source-ratified and
 unimplemented; the gate-artifact landing does not authorize the
 visibility flip.
@@ -739,8 +740,12 @@ completion.
   `security` (privileged), potentially `deploy` if live branch-
   protection / ruleset settings are ratified in the same batch, for
   the deferred visibility-flip child.
-- **Landed / in-flight state**: gate-artifact child is `In Progress`
-  under a Source-ratified docs-only authoring envelope; deferred
+- **Landed state**: gate-artifact child is `Done` — merged on the
+  canonical branch as PR #46 / merge commit
+  `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+  continuation gate (#46)`, landing
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and the
+  minimal coherence updates required to discover it; deferred
   visibility-flip child remains `Deferred` and requires its own
   separately Source-ratified privileged envelope.
 - **Successor edges (deferred)** for the gate-artifact child:
@@ -836,8 +841,8 @@ post-merge update procedure in
 | `post-sprint-0/cfc-2d-1-review-evidence-schema` | `post-sprint-0/cfc-2d-2-architect-evidence-schema` (Batch 2D.2 architect-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.1) | Cleared; Batch 2D.1 is `Done` (PR #34 / `e1f5ffc`, head `2a8fe0f`); successor Batch 2D.2 is `Done` — merged on the canonical branch as PR #36 / `51a2134` (PR head SHA `451be39`); Batch 2D.3 (implementer-evidence schema) has since landed (PR #38 / `01f21a5`, head `0b630be`). See §d.10, §d.11, and §d.12. |
 | `post-sprint-0/cfc-2d-2-architect-evidence-schema` | `post-sprint-0/cfc-2d-3-implementer-evidence-schema` (Batch 2D.3 implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2D.2) | Predecessor is `Done` (PR #36 / `51a2134`, head `451be39`); successor Batch 2D.3 is `Done` — merged on the canonical branch as PR #38 / `01f21a5` (PR head SHA `0b630be`). See §d.11 and §d.12. |
 | `post-sprint-0/cfc-2c-codex-identity-decision` | CFC follow-on Batch 2D (review/architect/implementer-evidence schema, `schema`-class, privileged) | `Done` (Batch 2C) | Batch 2C is `Done` (PR #29 / `66a8074`); Batch 2D explicitly reaffirmed as non-mutated by Batch 2C per [`../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md`](../governance/CODEX_IDENTITY_RECORD_ENCODING_DECISION.md) §6.8. Batch 2D.1 review-evidence schema has since landed (PR #34 / `e1f5ffc`, head `2a8fe0f`), Batch 2D.2 architect-evidence schema has since landed (PR #36 / `51a2134`, head `451be39`), and Batch 2D.3 (implementer-evidence) has since landed (PR #38 / `01f21a5`, head `0b630be`). Any future unified cross-role evidence schema or downstream evidence consumer remains downstream and requires its own separately Source-ratified privileged envelope per §h. |
-| `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` + `post-sprint-0/root-worktree-lifecycle/policy-docs-current` | `post-sprint-0/public-readiness/gate-artifact` (`docs`-class) | `Done` (all predecessors) | Cleared; predecessors are `Done` (PR #20 / `35bf85f`, PR #21 / `5b762f9`, PR #22 / `d892cd3`, PR #23 / `3dc45a1`, PR #44 / `30327aa`). Gate-artifact successor is `In Progress` under a Source-ratified docs-only authoring envelope, landing [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and the minimal coherence updates. See §d.13. |
-| `post-sprint-0/public-readiness/gate-artifact` | `post-sprint-0/public-readiness/visibility-flip` (privileged `governance` / `security` / potentially `deploy`-class) | `In Progress` (gate-artifact) | Predecessor `In Progress`; successor remains `Deferred`. The visibility-flip envelope is the named owning future privileged envelope for the actual repository visibility flip and any concurrently-Source-ratified live branch-protection / ruleset application; it is not authorized by the gate-artifact landing per [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §f and §g and still requires §h. See §d.13. |
+| `post-sprint-0/oss-readiness` + `post-sprint-0/workflow-hardening` + `post-sprint-0/root-worktree-lifecycle/policy-docs-current` | `post-sprint-0/public-readiness/gate-artifact` (`docs`-class) | `Done` (all predecessors) | Cleared; predecessors are `Done` (PR #20 / `35bf85f`, PR #21 / `5b762f9`, PR #22 / `d892cd3`, PR #23 / `3dc45a1`, PR #44 / `30327aa`). Gate-artifact successor is `Done` — merged on the canonical branch as PR #46 / merge commit `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness continuation gate (#46)`, landing [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and the minimal coherence updates. See §d.13. |
+| `post-sprint-0/public-readiness/gate-artifact` | `post-sprint-0/public-readiness/visibility-flip` (privileged `governance` / `security` / potentially `deploy`-class) | `Done` (gate-artifact, PR #46 / `2ee63dd`) | Predecessor `Done` (PR #46 / `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233`); successor remains `Deferred`. The visibility-flip envelope is the named owning future privileged envelope for the actual repository visibility flip and any concurrently-Source-ratified live branch-protection / ruleset application; it is not authorized by the gate-artifact landing per [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §f and §g and still requires §h. See §d.13. |
 
 ## h. Rule — privileged dependencies require ratification requests, not implementation shortcuts
 

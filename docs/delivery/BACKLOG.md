@@ -99,16 +99,17 @@ blocked by the policy/docs child gate. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 children are explicitly later gates and are not on the
-public-readiness critical path. A new post-Sprint-0 substrate
-parent `post-sprint-0/public-readiness` is being authored under a
-Source-ratified docs-only envelope; its `post-sprint-0/public-readiness/gate-artifact`
-child lands `docs/delivery/PUBLIC_READINESS_GATE.md` as the canonical
-public-readiness gate delivery-view artifact, and its
-`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
-as the named owning future privileged envelope for the actual
-repository visibility flip (and any concurrently-ratified live
-branch-protection / ruleset application). The gate artifact does not
-authorize making the repository public; see §e.21.
+public-readiness critical path. The post-Sprint-0 substrate parent `post-sprint-0/public-readiness`
+and its `post-sprint-0/public-readiness/gate-artifact` child have
+landed on the canonical branch as PR #46 / merge commit
+`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+continuation gate (#46)`, landing `docs/delivery/PUBLIC_READINESS_GATE.md`
+as the canonical public-readiness gate delivery-view artifact; see
+§e.21. The `post-sprint-0/public-readiness/visibility-flip` child
+remains `Deferred` as the named owning future privileged envelope for
+the actual repository visibility flip (and any concurrently-ratified
+live branch-protection / ruleset application). The gate artifact does
+not authorize making the repository public.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1379,7 +1380,13 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/public-readiness`
 - **parent**: —
-- **status**: `In Progress`
+- **status**: `Done` — `post-sprint-0/public-readiness/gate-artifact`
+  (§e.21.1) landed on the canonical branch as PR #46 / merge commit
+  `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+  continuation gate (#46)`; `post-sprint-0/public-readiness/visibility-flip`
+  (§e.21.2) remains `Deferred` and requires its own separately
+  Source-ratified privileged envelope before the parent's deferred
+  closure conditions are met.
 - **scope**: Post-Sprint-0 substrate parent for the public-readiness
   gate and its sequenced child gates. The parent groups: (i) the
   delivery-view gate artifact authoring landing
@@ -1421,7 +1428,9 @@ recorded as §e.8 and §e.9.
 
 - **id**: `post-sprint-0/public-readiness/gate-artifact`
 - **parent**: `post-sprint-0/public-readiness`
-- **status**: `In Progress`
+- **status**: `Done` — merged on the canonical branch as PR #46 /
+  merge commit `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add
+  public readiness continuation gate (#46)`.
 - **scope**: Author
   [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
   canonical delivery-view public-readiness gate artifact, and make
@@ -1476,6 +1485,15 @@ recorded as §e.8 and §e.9.
   `reviewer` (Nefarious)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: merged commit
+  `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+  continuation gate (#46)` on the canonical branch (PR #46), landing
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and
+  minimal coherence updates to [`./README.md`](./README.md),
+  [`./BACKLOG.md`](./BACKLOG.md), [`./KANBAN.md`](./KANBAN.md),
+  [`./DEPENDENCIES.md`](./DEPENDENCIES.md),
+  [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
+  [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md).
 
 #### e.21.2 Public visibility flip (deferred child)
 
