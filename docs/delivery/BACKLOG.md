@@ -93,23 +93,41 @@ are `Done`, the `post-sprint-0/root-worktree-lifecycle/audit` child
 remains `Done`, and the
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
-children remain `Deferred`; see §e.20. Public-readiness continuation
-remains separately Source-ratified and unimplemented; it is no longer
-blocked by the policy/docs child gate. The deferred
+children remain `Deferred`; see §e.20. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 children are explicitly later gates and are not on the
 public-readiness critical path. The post-Sprint-0 substrate parent `post-sprint-0/public-readiness`
-and its `post-sprint-0/public-readiness/gate-artifact` child have
-landed on the canonical branch as PR #46 / merge commit
+and its `post-sprint-0/public-readiness/gate-artifact` child landed
+on the canonical branch as PR #46 / merge commit
 `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
 continuation gate (#46)`, landing `docs/delivery/PUBLIC_READINESS_GATE.md`
 as the canonical public-readiness gate delivery-view artifact; see
-§e.21. The `post-sprint-0/public-readiness/visibility-flip` child
-remains `Deferred` as the named owning future privileged envelope for
-the actual repository visibility flip (and any concurrently-ratified
-live branch-protection / ruleset application). The gate artifact does
-not authorize making the repository public.
+§e.21. The `post-sprint-0/public-readiness/visibility-flip` child has
+since been ratified and consumed under its own separately-Source-
+ratified privileged envelope; the canonical repository is now public
+on the remote at live main SHA
+`4db2a222c15d33b5d5d8e04b07db2d8b3a661459` (`docs: reconcile public
+readiness ledger watermark (#48)`), verified under the post-flight
+read-only verification archive
+`ce-public-launch-post-flight-read-only-verification-20260519T092126Z`;
+the visibility-flip child is `Done` on the delivery view, the parent
+`post-sprint-0/public-readiness` row reflects the same closure, and
+the `post-sprint-0/public-readiness/gate-artifact` child remains
+`Done` per PR #46. The visibility-flip envelope's durable evidence is
+the live remote state plus the post-flight verification gate, not a
+tracked-file commit. Items remaining separately Source-ratified and
+unimplemented beyond the verified launch posture are: any CODEOWNERS
+decision; any future redaction-gate corpus; any future deploy /
+release execution automation (Feature 006); and any further live
+GitHub-settings mutation beyond the verified launch posture per
+`docs/delivery/PUBLIC_READINESS_GATE.md` §e and §f. The post-flight
+verification observed one bot-originated dependency follow-up PR
+against the now-public canonical repository (Dependabot bump of
+`pytest` under `validators/`); bot-originated dependency / security
+follow-up PRs are not themselves a public-readiness §e residual item
+and are triaged under separate `docs` / `code` envelopes per the
+merge-approval and definition-of-done gates.
 
 **Scope**: Governed Creator Engine work items only. Repo-visible
 artifacts here are canonical; external tracker entries (if any) are
@@ -1384,9 +1402,14 @@ recorded as §e.8 and §e.9.
   (§e.21.1) landed on the canonical branch as PR #46 / merge commit
   `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
   continuation gate (#46)`; `post-sprint-0/public-readiness/visibility-flip`
-  (§e.21.2) remains `Deferred` and requires its own separately
-  Source-ratified privileged envelope before the parent's deferred
-  closure conditions are met.
+  (§e.21.2) has since been ratified and consumed under its own
+  separately-Source-ratified privileged envelope, with durable
+  evidence in the live remote state (canonical repository now public
+  at live main SHA `4db2a222c15d33b5d5d8e04b07db2d8b3a661459`,
+  `docs: reconcile public readiness ledger watermark (#48)`) and the
+  post-flight read-only verification archive
+  `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`.
+  Both children are `Done`; the parent row reflects the same closure.
 - **scope**: Post-Sprint-0 substrate parent for the public-readiness
   gate and its sequenced child gates. The parent groups: (i) the
   delivery-view gate artifact authoring landing
@@ -1407,10 +1430,12 @@ recorded as §e.8 and §e.9.
   authority contracts, identity records, templates outside the
   named manifest, validators, examples, or tenants.
 - **acceptance gate**: §e.21.1 reaches `Done`; §e.21.2 reaches
-  `Deferred` with a named owning future privileged envelope. The
-  parent's deferred closure conditions are met only after §e.21.2
-  itself reaches `Done` under a separately Source-ratified privileged
-  envelope.
+  `Done` under a separately-Source-ratified privileged envelope. Both
+  conditions are now met: §e.21.1 landed under PR #46 / `2ee63dd`,
+  and §e.21.2 has since landed via live remote / settings mutation
+  under its own separately-Source-ratified privileged envelope with
+  durable evidence in the live remote state and the post-flight
+  read-only verification archive (see §e.21.2 below).
 - **dependencies / blockers**:
   `post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
   PR #21 / `5b762f9`); `post-sprint-0/workflow-hardening` (`Done`,
@@ -1496,20 +1521,20 @@ recorded as §e.8 and §e.9.
   [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and
   [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md).
 
-#### e.21.2 Public visibility flip (deferred child)
+#### e.21.2 Public visibility flip (landed)
 
 - **id**: `post-sprint-0/public-readiness/visibility-flip`
 - **parent**: `post-sprint-0/public-readiness`
-- **status**: `Deferred`
-- **scope**: Deferred separately-Source-ratified privileged
-  envelope that would flip the canonical repository from private to
-  public on the remote, and — if Source ratifies it concurrently
-  in the same batch — apply live branch-protection / ruleset
-  settings to the live `main` branch. Privileged
-  (`governance` / `security` / potentially `deploy`)-class per
-  Feature 001 FR-008; `source` is the sole ratifier per FR-008. The
-  visibility-flip envelope MUST observe the workflow-hardening
-  protocol set
+- **status**: `Done` — ratified and consumed under a separately-
+  Source-ratified privileged envelope; the canonical repository is
+  now public on the remote.
+- **scope**: Separately-Source-ratified privileged envelope that
+  flipped the canonical repository from private to public on the
+  remote, and concurrently ratified the launch-time live branch-
+  protection / ruleset posture for the live `main` branch.
+  Privileged (`governance` / `security` / `deploy`)-class per
+  Feature 001 FR-008; `source` was the sole ratifier per FR-008.
+  The envelope observed the workflow-hardening protocol set
   ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md),
   [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md),
   [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md),
@@ -1517,33 +1542,43 @@ recorded as §e.8 and §e.9.
   [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md))
   and the release / merge / deploy policy in
   [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md)
-  and the four Slice F content docs. The visibility-flip envelope
-  is **not** authorized by the §e.21.1 gate-artifact landing; the
-  gate artifact only records that the visibility flip exists as a
-  named owning future privileged envelope. Any CODEOWNERS
-  decision, any future redaction-gate corpus, and any other future
-  GitHub-settings mutation beyond the visibility flip itself MAY be
-  ratified under separate envelopes from this one; see
-  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e
-  and §f.
-- **acceptance gate**: Source-ratified privileged envelope landed
-  on the canonical branch; visibility-flip mutation recorded with
-  the post-merge attestation per Feature 001 FR-016; the gate
-  artifact's §e residual checklist updated to reflect the new
-  landed state under a subsequent docs-only reconciliation batch.
+  and the four Slice F content docs. The envelope was *not*
+  authorized by the §e.21.1 gate-artifact landing; it was authorized
+  by a distinct separately-Source-ratified privileged envelope
+  whose durable evidence is the live remote state plus the post-
+  flight verification gate. Any CODEOWNERS decision, any future
+  redaction-gate corpus, any future deploy / release execution
+  automation (Feature 006), and any further live GitHub-settings
+  mutation beyond the verified launch posture remain `Deferred` and
+  are owned by their own separately-Source-ratified envelopes per
+  [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e and
+  §f.
+- **acceptance gate**: Source-ratified privileged envelope ratified
+  and consumed; visibility-flip mutation recorded with the post-
+  flight read-only verification archive per Feature 001 FR-016
+  evidence expectations; this row reconciled to `Done` under a
+  subsequent docs-only reconciliation batch. All conditions met.
 - **dependencies / blockers**:
-  `post-sprint-0/public-readiness/gate-artifact` (must reach `Done`
-  first so the visibility-flip envelope has a normative gate
-  artifact to discharge).
-- **anticipated mutation class**: `governance` /
-  `security` (privileged); potentially `deploy` if live branch-
-  protection / ruleset settings are ratified in the same batch.
+  `post-sprint-0/public-readiness/gate-artifact` (`Done`, PR #46 /
+  `2ee63dd`).
+- **anticipated mutation class**: `governance` / `security`
+  (privileged); `deploy` for the launch-time live branch-
+  protection / ruleset posture ratified concurrently in the same
+  batch.
 - **owner role**: `implementer` (separately named under the
   Source-ratified envelope; not Nefarious-as-controller per
   [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md)
   §d–§e)
 - **ratifier role**: `source`
 - **external tracker reference**: —
+- **durable evidence**: live remote state on the canonical
+  repository (public visibility) at live main SHA
+  `4db2a222c15d33b5d5d8e04b07db2d8b3a661459` (`docs: reconcile
+  public readiness ledger watermark (#48)`); post-flight read-only
+  verification archive
+  `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`.
+  This row's durable evidence is the live remote state plus the
+  post-flight verification gate, not a tracked-file commit.
 
 ## f. Maintenance rules
 

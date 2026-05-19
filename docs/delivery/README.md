@@ -97,11 +97,13 @@ external contributor intake boundary (#41)`; see
 [`./BACKLOG.md`](./BACKLOG.md) §e.19. PR #42 / merge commit `921d46d
 docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation. The delivery view now reflects
-canonical main at commit `bbeff5a5cc396cf0843c41c2067f1725942ea151`.
-PR #46 (`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233`) and PR #47
-(`bbeff5a5cc396cf0843c41c2067f1725942ea151`) are reconciliation/landing
-events represented by existing delivery rows rather than new backlog rows,
-mirroring the PR #42 reconciliation precedent.
+canonical main at commit `4db2a222c15d33b5d5d8e04b07db2d8b3a661459`.
+PR #46 (`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233`), PR #47
+(`bbeff5a5cc396cf0843c41c2067f1725942ea151`), and PR #48
+(`4db2a222c15d33b5d5d8e04b07db2d8b3a661459`) are
+reconciliation/landing events represented by existing delivery rows
+rather than new backlog rows, mirroring the PR #42 reconciliation
+precedent.
 The post-Sprint-0 substrate parent
 `post-sprint-0/root-worktree-lifecycle` has since landed on the
 canonical branch as PR #44 / merge commit `30327aa docs: add root
@@ -112,28 +114,41 @@ remains `Done`, and the
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 children remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md)
-§e.20. Public-readiness continuation is no longer blocked by the
-policy/docs child gate; the deferred
+§e.20. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
 the public-readiness critical path. The post-Sprint-0 substrate
 parent `post-sprint-0/public-readiness` and its
-`post-sprint-0/public-readiness/gate-artifact` child have landed on
+`post-sprint-0/public-readiness/gate-artifact` child landed on
 the canonical branch as PR #46 / merge commit
 `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
 continuation gate (#46)`, landing
 [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
 canonical delivery-view public-readiness gate artifact; see
 [`./BACKLOG.md`](./BACKLOG.md) §e.21 and §e.21.1. The
-`post-sprint-0/public-readiness/visibility-flip` child remains
-`Deferred` as the named owning future privileged envelope for the
-actual repository visibility flip. The gate artifact does not
-authorize making the repository public; live GitHub settings,
-repository visibility, live branch-protection / ruleset application,
-any CODEOWNERS decision, any future redaction-gate corpus, and any
-other future GitHub-settings mutation remain separately Source-
-ratified and unimplemented.
+`post-sprint-0/public-readiness/visibility-flip` child has since
+been ratified and consumed under its own separately-Source-
+ratified privileged envelope; the canonical repository is now
+public on the remote at live main SHA
+`4db2a222c15d33b5d5d8e04b07db2d8b3a661459` (`docs: reconcile public
+readiness ledger watermark (#48)`), verified under the post-flight
+read-only verification archive
+`ce-public-launch-post-flight-read-only-verification-20260519T092126Z`;
+see [`./BACKLOG.md`](./BACKLOG.md) §e.21.2. Items remaining
+separately Source-ratified and unimplemented beyond the verified
+launch posture are: any CODEOWNERS decision; any future redaction-
+gate corpus; any future deploy / release execution automation
+(Feature 006); and any further live GitHub-settings mutation beyond
+the verified launch posture per
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e and
+§f. The post-flight verification observed one bot-originated
+dependency follow-up PR against the now-public canonical repository
+(Dependabot bump of `pytest` under `validators/`); bot-originated
+dependency / security follow-up PRs are not themselves a public-
+readiness §e residual item and are triaged under separate `docs` /
+`code` envelopes per the merge-approval and definition-of-done
+gates.
 
 ## a. Purpose
 
@@ -283,15 +298,24 @@ readiness continuation gate (#46)`, authored under a Source-ratified
 docs-only envelope (`post-sprint-0/public-readiness/gate-artifact`);
 see [`./BACKLOG.md`](./BACKLOG.md) §e.21.1. It is a delivery-view
 artifact recording public-readiness gate semantics, the substrate
-already landed (PR #20 / `35bf85f` and PR #21 / `5b762f9`), the
-residual checklist for future separate ratification, the explicit
-statement that this gate does not authorize making the repository
-public, and the named owning future privileged envelope for the
-visibility flip.
+already landed (PR #20 / `35bf85f`, PR #21 / `5b762f9`, and the
+landed visibility flip — live remote state at live main SHA
+`4db2a222c15d33b5d5d8e04b07db2d8b3a661459` verified under post-
+flight read-only verification archive
+`ce-public-launch-post-flight-read-only-verification-20260519T092126Z`),
+the residual checklist for items still `Deferred` beyond the
+verified launch posture (any CODEOWNERS decision; any future
+redaction-gate corpus; any future deploy / release execution
+automation under Feature 006; any further live GitHub-settings
+mutation beyond the verified launch posture), the explicit
+statement that this gate did not itself authorize the visibility
+flip, and the named privileged envelope
+`post-sprint-0/public-readiness/visibility-flip` (now `Done` per
+[`./BACKLOG.md`](./BACKLOG.md) §e.21.2) that did.
 
 | File | Role |
 |---|---|
-| [`PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) | Canonical delivery-view public-readiness gate artifact. Records gate semantics, landed substrate, residual checklist (repository visibility flip; live branch-protection / ruleset application; any CODEOWNERS decision; any future redaction-gate corpus; any future GitHub-settings mutation), explicit non-authorization of repository visibility change, and the named owning future privileged `post-sprint-0/public-readiness/visibility-flip` envelope. |
+| [`PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) | Canonical delivery-view public-readiness gate artifact. Records gate semantics, landed substrate (including the now-landed visibility flip with durable evidence in the live remote state at live main SHA `4db2a222c15d33b5d5d8e04b07db2d8b3a661459` and the post-flight read-only verification archive `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`), residual checklist for items still `Deferred` beyond the verified launch posture (further live branch-protection / ruleset application; any CODEOWNERS decision; any future redaction-gate corpus; any further GitHub-settings mutation beyond the verified launch posture; any release / deploy execution automation under Feature 006), explicit statement that this gate did not itself authorize the visibility flip, and the named privileged `post-sprint-0/public-readiness/visibility-flip` envelope that did. |
 
 ### Slice E delivery docs (landed)
 
