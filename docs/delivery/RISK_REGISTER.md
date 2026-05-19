@@ -49,24 +49,26 @@ policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
-the public-readiness critical path. A new post-Sprint-0 substrate
-parent `post-sprint-0/public-readiness` is being authored under a
-Source-ratified docs-only envelope; its
-`post-sprint-0/public-readiness/gate-artifact` child lands
-[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and its
-deferred `post-sprint-0/public-readiness/visibility-flip` child is
-the named owning future privileged envelope for the actual
-repository visibility flip; see [`./BACKLOG.md`](./BACKLOG.md)
-§e.21. Repository visibility / live GitHub-settings mutations
-remain separately Source-ratified and unimplemented; the gate-
-artifact landing does not authorize the visibility flip, and
+the public-readiness critical path. The post-Sprint-0 substrate parent `post-sprint-0/public-readiness`
+and its `post-sprint-0/public-readiness/gate-artifact` child have
+landed on the canonical branch as PR #46 / merge commit
+`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+continuation gate (#46)`, landing
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
+canonical delivery-view public-readiness gate artifact; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.21. The deferred
+`post-sprint-0/public-readiness/visibility-flip` child remains the
+named owning future privileged envelope for the actual repository
+visibility flip. Repository visibility / live GitHub-settings
+mutations remain separately Source-ratified and unimplemented; the
+gate-artifact landing does not authorize the visibility flip, and
 R-003 / R-007 / R-013 (CI / agent review / Codex verdict
 substituting for Source ratification) apply with full force to any
 future visibility-flip or other §e residual envelope per
-[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e–§g. Part of the **minimum repo-native delivery
-control plane** and **not a Jira clone**. Markdown-only by ratified
-posture. Layered on top of, and subordinate to, the Feature 001
-substrate.
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e–§g.
+Part of the **minimum repo-native delivery control plane** and **not
+a Jira clone**. Markdown-only by ratified posture. Layered on top of,
+and subordinate to, the Feature 001 substrate.
 
 **Scope**: This register names the standing risks to Sprint 0
 execution and the immediate post-Sprint-0 follow-on work. It is a

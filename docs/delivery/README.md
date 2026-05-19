@@ -113,21 +113,23 @@ policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
-the public-readiness critical path. A new post-Sprint-0 substrate
-parent `post-sprint-0/public-readiness` is being authored under a
-Source-ratified docs-only envelope; its
-`post-sprint-0/public-readiness/gate-artifact` child lands
+the public-readiness critical path. The post-Sprint-0 substrate
+parent `post-sprint-0/public-readiness` and its
+`post-sprint-0/public-readiness/gate-artifact` child have landed on
+the canonical branch as PR #46 / merge commit
+`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
+continuation gate (#46)`, landing
 [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
-canonical delivery-view public-readiness gate artifact, and its
-`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
-as the named owning future privileged envelope for the actual
-repository visibility flip. The gate artifact does not authorize
-making the repository public; live GitHub settings, repository
-visibility, live branch-protection / ruleset application, any
-CODEOWNERS decision, any future redaction-gate corpus, and any
+canonical delivery-view public-readiness gate artifact; see
+[`./BACKLOG.md`](./BACKLOG.md) §e.21 and §e.21.1. The
+`post-sprint-0/public-readiness/visibility-flip` child remains
+`Deferred` as the named owning future privileged envelope for the
+actual repository visibility flip. The gate artifact does not
+authorize making the repository public; live GitHub settings,
+repository visibility, live branch-protection / ruleset application,
+any CODEOWNERS decision, any future redaction-gate corpus, and any
 other future GitHub-settings mutation remain separately Source-
-ratified and unimplemented. See
-[`./BACKLOG.md`](./BACKLOG.md) §e.21.
+ratified and unimplemented.
 
 ## a. Purpose
 
@@ -269,11 +271,13 @@ FR-016.
 | [`DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md) | Names `deploy` as a Feature 001 FR-008 privileged mutation class with Source-only ratifier; explicit deploy-mutation ratification rule ("no agent may deploy without Source-ratified authority"); explicit statement that no deployment targets / environments currently exist; defers execution-side concerns to Feature 006; explicit non-ratification statement for any CI / review verdict touching deploy. |
 | [`ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md) | Rollback decision criteria (who decides, on what evidence); post-release evidence layered onto the ten post-merge fields in [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b without amending them; defect-discovered-post-merge interaction with the Definition-of-Done lifecycle; automated rollback deferred to Feature 006. |
 
-### Post-Sprint-0 public-readiness gate (in flight)
+### Post-Sprint-0 public-readiness gate (landed)
 
-This document is being authored under a Source-ratified docs-only
-envelope (`post-sprint-0/public-readiness/gate-artifact`); see
-[`./BACKLOG.md`](./BACKLOG.md) §e.21.1. It is a delivery-view
+This document landed on the canonical branch under PR #46 / merge
+commit `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public
+readiness continuation gate (#46)`, authored under a Source-ratified
+docs-only envelope (`post-sprint-0/public-readiness/gate-artifact`);
+see [`./BACKLOG.md`](./BACKLOG.md) §e.21.1. It is a delivery-view
 artifact recording public-readiness gate semantics, the substrate
 already landed (PR #20 / `35bf85f` and PR #21 / `5b762f9`), the
 residual checklist for future separate ratification, the explicit
