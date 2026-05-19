@@ -207,11 +207,14 @@ MUST NOT be read as authorizing, any of the following:
   mutation, template mutation outside the named manifest, or
   validator mutation. None of those are touched.
 
-The §6 public-readiness continuation that depends on this substrate
-remains blocked **only** on this policy/docs child gate landing.
-Preflight implementation and current-root reconciliation cleanup are
-explicitly named as later gates and are not unblocked by this
-policy's landing.
+This policy/docs child gate landed on the canonical branch as PR #44
+/ merge commit `30327aa docs: add root worktree invariant policy
+(#44)`, which is the durable evidence that the §6 public-readiness
+continuation is no longer blocked on this substrate. Preflight
+implementation and current-root reconciliation cleanup remained
+explicitly named as later gates at the time of that landing and were
+not, and are not, authorized by this policy's landing; each requires
+its own separately Source-ratified envelope before it advances.
 
 ## h. Acceptance posture
 

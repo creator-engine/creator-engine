@@ -88,8 +88,16 @@ remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md) §e.20.
 Public-readiness continuation remains separately Source-ratified and
 unimplemented; the deferred checks/preflight and current-root
 reconciliation gates are explicitly later gates and are not on the
-public-readiness critical path. Generated from / summarizes
-[`./BACKLOG.md`](./BACKLOG.md).
+public-readiness critical path. A new post-Sprint-0 substrate parent
+`post-sprint-0/public-readiness` is being authored under a Source-
+ratified docs-only envelope; its
+`post-sprint-0/public-readiness/gate-artifact` child is `In Progress`
+on the board below (landing
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md)), and its
+`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
+as the named owning future privileged envelope for the actual
+repository visibility flip; see [`./BACKLOG.md`](./BACKLOG.md) §e.21.
+Generated from / summarizes [`./BACKLOG.md`](./BACKLOG.md).
 
 This board is part of the **minimum repo-native delivery control
 plane** and is **not a Jira clone**. It is a current readable view
@@ -143,11 +151,10 @@ canonical branch; see the `Done` table below.)*
 
 ### In Progress
 
-*(No items currently in this column.
-`post-sprint-0/root-worktree-lifecycle` and its child
-`post-sprint-0/root-worktree-lifecycle/policy-docs-current` have
-landed on the canonical branch; see the `Done` table below and
-[`./BACKLOG.md`](./BACKLOG.md) §e.20.)*
+| id | scope (one line) | envelope |
+|---|---|---|
+| `post-sprint-0/public-readiness` | Post-Sprint-0 substrate parent for the public-readiness gate and its sequenced child gates: gate-artifact authoring (this batch) and the deferred visibility-flip envelope. | Source-ratified docs-only authoring envelope (visible implementer: Claude Code under the Source-ratified envelope; controller / reviewer: Nefarious). |
+| `post-sprint-0/public-readiness/gate-artifact` | Authoring of [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and minimal coherence updates to [`./README.md`](./README.md), [`./BACKLOG.md`](./BACKLOG.md), this Kanban, [`./DEPENDENCIES.md`](./DEPENDENCIES.md), [`./RISK_REGISTER.md`](./RISK_REGISTER.md), and [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md). `docs`-class only; no validator/preflight code, no schema/template/authority/identity mutation outside the named manifest, no GitHub-settings mutation, no repository visibility flip, no CODEOWNERS authoring, no redaction-gate corpus authoring or execution. | Source-ratified docs-only authoring envelope. |
 
 ### Verified
 
@@ -201,6 +208,7 @@ landed on the canonical branch; see the `Done` table below and
 | `us3/a1` | Reserved item; implementation not authorized. | Awaits explicit Source ratification of a future spec. |
 | `post-sprint-0/root-worktree-lifecycle/checks-preflight` | Deferred privileged `code`-class envelope authoring a `root_worktree_state` validator check, optional CLI flag(s), tests, and well-formed / malformed examples. Out of scope under the policy/docs child gate; named only so future Source ratification has a referenceable id. | `post-sprint-0/root-worktree-lifecycle` (later separately-Source-ratified privileged `code`-class envelope). |
 | `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation` | Deferred separately-ratified envelope to reconcile a specific operator's currently dirty root checkout back to the four root-invariant conditions, authored in an isolated per-gate worktree or clone (not on the root checkout) and without destructive remediation against unrecorded evidence per [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md) §e. | `post-sprint-0/root-worktree-lifecycle` (later separately-Source-ratified envelope). |
+| `post-sprint-0/public-readiness/visibility-flip` | Deferred separately-Source-ratified privileged envelope that would flip the canonical repository from private to public on the remote and — if Source ratifies it concurrently in the same batch — apply live branch-protection / ruleset settings to the live `main` branch. Privileged (`governance` / `security` / potentially `deploy`)-class per Feature 001 FR-008. Not authorized by the §e.21.1 gate-artifact landing per [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §f and §g. | `post-sprint-0/public-readiness` (later separately-Source-ratified privileged envelope). |
 
 ### Blocked
 
@@ -287,16 +295,28 @@ are `Done` on the board above; see [`./BACKLOG.md`](./BACKLOG.md)
 later gates and require their own separately-Source-ratified
 envelopes; see [`./BACKLOG.md`](./BACKLOG.md) §e.20.3–§e.20.4.
 
-With the root-worktree policy/docs gate landed, the next candidate
-Source-ratifiable gate, subject to Source ratification, is the
-queued public-readiness continuation. The public-readiness
-continuation remains separately Source-ratified and unimplemented;
-its own repo-private and public-readiness blockers and the
-substance of its queued continuation are not consumed, refreshed,
-or executed by this Kanban view. Final next-task selection —
-including whether the public-readiness continuation is in fact
-authorized next, and under what bounded envelope — remains
-Source's.
+With the root-worktree policy/docs gate landed, the queued
+public-readiness continuation is now in flight as the
+`post-sprint-0/public-readiness` parent under a Source-ratified
+docs-only authoring envelope. The
+`post-sprint-0/public-readiness/gate-artifact` child is `In Progress`
+on the board above, landing
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and the
+minimal coherence updates required to discover it. The sibling
+`post-sprint-0/public-readiness/visibility-flip` child is `Deferred`
+on the board above and is the named owning future privileged
+envelope for the actual repository visibility flip (and any
+concurrently-Source-ratified live branch-protection / ruleset
+application). Landing the gate-artifact child does NOT authorize
+making the repository public; live GitHub settings, repository
+visibility, live branch-protection / ruleset application, any
+CODEOWNERS decision, any future redaction-gate corpus, and any
+other future GitHub-settings mutation remain separately Source-
+ratified and unimplemented per
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e–§g.
+Final next-task selection — including whether the visibility-flip
+envelope or any other §e residual item is in fact authorized next,
+and under what bounded envelope — remains Source's.
 
 > Downstream deferred candidates (Feature 003 extension of the landed
 > `.github/` baseline; Feature 005 dispatcher / worktree automation;

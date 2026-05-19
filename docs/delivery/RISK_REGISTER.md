@@ -49,9 +49,21 @@ policy/docs child gate; the deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
-the public-readiness critical path. Repository visibility /
-public-readiness remain separately Source-ratified and
-unimplemented. Part of the **minimum repo-native delivery
+the public-readiness critical path. A new post-Sprint-0 substrate
+parent `post-sprint-0/public-readiness` is being authored under a
+Source-ratified docs-only envelope; its
+`post-sprint-0/public-readiness/gate-artifact` child lands
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) and its
+deferred `post-sprint-0/public-readiness/visibility-flip` child is
+the named owning future privileged envelope for the actual
+repository visibility flip; see [`./BACKLOG.md`](./BACKLOG.md)
+§e.21. Repository visibility / live GitHub-settings mutations
+remain separately Source-ratified and unimplemented; the gate-
+artifact landing does not authorize the visibility flip, and
+R-003 / R-007 / R-013 (CI / agent review / Codex verdict
+substituting for Source ratification) apply with full force to any
+future visibility-flip or other §e residual envelope per
+[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e–§g. Part of the **minimum repo-native delivery
 control plane** and **not a Jira clone**. Markdown-only by ratified
 posture. Layered on top of, and subordinate to, the Feature 001
 substrate.
@@ -78,7 +90,7 @@ of the contracts and policies named under each mitigation and does
 | Feature 002 spec at `specs/002-canonical-docs-and-operating-model/spec.md` | Operating-model invariants, including verifies-not-ratifies (FR-013) and the conflict taxonomy (FR-017/FR-018). |
 | [`../operations/session-continuity-protocol.md`](../operations/session-continuity-protocol.md) | Instance-local-vs-upstream split; basis for R-006. |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only. Tracker entries are advisory; basis for R-002 and R-006. |
-| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3` and PR #23 / `3dc45a1`. Upstream source for R-011 (§c.11) and R-012 (§c.12) mitigations. |
+| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md), [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3`, PR #23 / `3dc45a1`, and PR #44 / `30327aa`. Upstream source for R-011 (§c.11) and R-012 (§c.12) mitigations; the root-worktree navigation/orchestration-only invariant is sourced from [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md). |
 
 A fresh clone is sufficient to evaluate this register. No external
 tracker credential or network state is required.
@@ -943,9 +955,11 @@ The register is extended by the workflow-hardening protocol set
 ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md),
 [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md),
 [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md),
-and [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md)),
+[`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md),
+and [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)),
 which has landed on the canonical branch as durable evidence under
-PR #22 / `d892cd3` and PR #23 / `3dc45a1`, to include:
+PR #22 / `d892cd3`, PR #23 / `3dc45a1`, and PR #44 / `30327aa`, to
+include:
 
 - R-011 (controller-seat boundary breach) in §c.11.
 - R-012 (path-manifest / Markdown corruption, the `__init__.py`
