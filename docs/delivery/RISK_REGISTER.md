@@ -48,28 +48,42 @@ remains `Done`, and the
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 children remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md)
-§e.20. Public-readiness continuation is no longer blocked by the
-policy/docs child gate; the deferred
+§e.20. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
 gates remain later separately Source-ratified gates and are not on
 the public-readiness critical path. The post-Sprint-0 substrate parent `post-sprint-0/public-readiness`
-and its `post-sprint-0/public-readiness/gate-artifact` child have
-landed on the canonical branch as PR #46 / merge commit
+and its `post-sprint-0/public-readiness/gate-artifact` child landed
+on the canonical branch as PR #46 / merge commit
 `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
 continuation gate (#46)`, landing
 [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
 canonical delivery-view public-readiness gate artifact; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.21. The deferred
-`post-sprint-0/public-readiness/visibility-flip` child remains the
-named owning future privileged envelope for the actual repository
-visibility flip. Repository visibility / live GitHub-settings
-mutations remain separately Source-ratified and unimplemented; the
-gate-artifact landing does not authorize the visibility flip, and
-R-003 / R-007 / R-013 (CI / agent review / Codex verdict
-substituting for Source ratification) apply with full force to any
-future visibility-flip or other §e residual envelope per
+[`./BACKLOG.md`](./BACKLOG.md) §e.21. The
+`post-sprint-0/public-readiness/visibility-flip` child has since
+been ratified and consumed under its own separately-Source-ratified
+privileged envelope; the canonical repository is now public on the
+remote at live main SHA `4db2a222c15d33b5d5d8e04b07db2d8b3a661459`
+(`docs: reconcile public readiness ledger watermark (#48)`),
+verified under the post-flight read-only verification archive
+`ce-public-launch-post-flight-read-only-verification-20260519T092126Z`.
+Items remaining separately Source-ratified and unimplemented beyond
+the verified launch posture are any CODEOWNERS decision, any future
+redaction-gate corpus, any future deploy / release execution
+automation (Feature 006), and any further live GitHub-settings
+mutation beyond the verified launch posture; R-003 / R-007 / R-013
+(CI / agent review / Codex verdict substituting for Source
+ratification) applied at full force to the now-landed visibility
+flip and apply at full force to every remaining `Deferred` §e
+residual envelope per
 [`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e–§g.
+Bot-originated dependency / security follow-up PRs raised against
+the now-public canonical repository (e.g., the post-flight-observed
+Dependabot bump of `pytest` under `validators/`) are not themselves
+a §e residual envelope and are triaged under separate `docs` /
+`code` envelopes per the merge-approval and definition-of-done
+gates; the same R-003 / R-007 / R-013 substrate applies to those
+triage decisions.
 Part of the **minimum repo-native delivery control plane** and **not
 a Jira clone**. Markdown-only by ratified posture. Layered on top of,
 and subordinate to, the Feature 001 substrate.
