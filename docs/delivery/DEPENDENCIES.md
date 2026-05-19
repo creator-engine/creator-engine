@@ -82,7 +82,11 @@ external contributor intake boundary (#41)`; see
 docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation; it is a reconciliation event and does
 not require a new backlog row. The delivery view now reflects
-canonical main at commit `921d46d8ef7e489f16158fe6b2f85f96f8bbbcec`.
+canonical main at commit `bbeff5a5cc396cf0843c41c2067f1725942ea151`.
+PR #46 (`2ee63ddde7608c1bb7c9dc52dab2eadb097d2233`) and PR #47
+(`bbeff5a5cc396cf0843c41c2067f1725942ea151`) are reconciliation/landing
+events represented by existing delivery rows rather than new backlog rows,
+mirroring the PR #42 reconciliation precedent.
 The post-Sprint-0 substrate parent
 `post-sprint-0/root-worktree-lifecycle` has since landed on the
 canonical branch as PR #44 / merge commit `30327aa docs: add root

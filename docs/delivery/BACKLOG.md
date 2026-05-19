@@ -1408,8 +1408,9 @@ recorded as §e.8 and §e.9.
   named manifest, validators, examples, or tenants.
 - **acceptance gate**: §e.21.1 reaches `Done`; §e.21.2 reaches
   `Deferred` with a named owning future privileged envelope. The
-  parent reaches `Done` only after §e.21.2 itself reaches `Done`
-  under a separately Source-ratified privileged envelope.
+  parent's deferred closure conditions are met only after §e.21.2
+  itself reaches `Done` under a separately Source-ratified privileged
+  envelope.
 - **dependencies / blockers**:
   `post-sprint-0/oss-readiness` (`Done`, PR #20 / `35bf85f` and
   PR #21 / `5b762f9`); `post-sprint-0/workflow-hardening` (`Done`,
