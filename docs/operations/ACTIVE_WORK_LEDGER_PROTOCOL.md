@@ -1,0 +1,415 @@
+# Active-Work Ledger Protocol
+
+**Status**: Parallel Controller Orchestration (PCO) Slice 0 normative
+protocol. Part of the **minimum repo-native delivery control plane**
+and **not a Jira clone**. Layered onto, and subordinate to, the
+Feature 001 governance substrate and the Feature 002 operating model.
+A fresh clone is sufficient to apply this protocol; no external
+tracker credential or network state is required.
+
+## a. Purpose
+
+When more than one Source-ratified Controller authors lanes of work
+simultaneously — for example, when Hermes and a second Nefarious pane
+both hold ratified envelopes pointing at different worktrees — the
+one-driver-per-worktree rule from
+[`../architecture/parallel-agent-development-model.md`](../architecture/parallel-agent-development-model.md)
+is necessary but not sufficient. We additionally need a *coordination
+substrate* that records, for any moment in time, **which Controller
+is currently driving which lane**, and that lets a Controller verify
+that fact before it launches a parallel Architect or Implementer
+pane.
+
+This protocol defines that substrate's static contract: the tracked
+schema, the local runtime directory shape, the record fields, the
+lease and stale-record semantics, the atomic-write and advisory-lock
+rules, and the pre-launch read/validate behavior. **Slice 0 records
+and validates these entries; it does not yet enforce multi-controller
+execution.** Enforcement is reserved for later PCO slices.
+
+## b. Source-of-truth relationship
+
+| Upstream source of truth | Role |
+|---|---|
+| Feature 001 governance substrate | Author/approver separation; privileged-class enumeration; ratification flow. |
+| Feature 002 operating model | Assignment-Envelope contract; verifies-not-ratifies; authority-conflict halt path. |
+| [`../architecture/parallel-agent-development-model.md`](../architecture/parallel-agent-development-model.md) | One-driver-per-worktree rule; the parallel-pair shape. |
+| [`../architecture/parallel-controller-orchestration.md`](../architecture/parallel-controller-orchestration.md) | Architectural companion to this protocol. |
+| [`./CONTROLLER_BOUNDARY_POLICY.md`](./CONTROLLER_BOUNDARY_POLICY.md) | Controller / Implementer boundary policy. The ledger does not relax this boundary; every claim still operates under a ratified envelope. |
+| [`./NO_COPY_PASTE_PATTERN.md`](./NO_COPY_PASTE_PATTERN.md) | Pointer-only relay shape; ledger records cite envelopes and handoffs by path, never inline their content. |
+| [`./PATH_MANIFEST_FIDELITY_PROTOCOL.md`](./PATH_MANIFEST_FIDELITY_PROTOCOL.md) | Manifest count/hash preflight; ledger records are local-runtime and therefore not subject to manifest fidelity. |
+| [`./ROOT_WORKTREE_INVARIANT.md`](./ROOT_WORKTREE_INVARIANT.md) | Navigation/orchestration-only invariant on the root checkout. |
+| `schemas/active-work-ledger.schema.yaml` | Tracked machine-readable contract for ledger records. |
+
+Where this protocol overlaps with the Feature 002 verifies-not-ratifies
+invariant or with the Feature 001 author/approver separation contract,
+the upstream contract controls. This protocol does not redefine those
+contracts; it adds a coordination-substrate layer above them.
+
+## c. Scope of Slice 0
+
+Slice 0 is **record/validate only**:
+
+* defines the tracked record schema;
+* defines the local runtime directory shape;
+* validates one record at a time against the schema;
+* documents the lease, atomic-write, advisory-lock, and pre-launch
+  read/validate disciplines that later slices will enforce.
+
+Slice 0 does **not**:
+
+* enforce multi-controller execution;
+* detect cross-lane semantic conflicts;
+* allocate worktrees;
+* bind any concrete tool / model / CLI / SaaS account / runner;
+* replace Assignment Envelopes or handoffs as authority;
+* replace Source ratification.
+
+Slice 0 also does not cross-check claim/heartbeat/event records for
+lane uniqueness, `worktree_path` collisions, heartbeat monotonicity,
+event-log ordering, or stale-record reclamation. Those are the
+explicit subjects of the later PCO slices listed in §t.
+
+## d. Tracked-schema vs local runtime-state distinction
+
+* `schemas/active-work-ledger.schema.yaml` is **tracked**. It is the
+  canonical record contract, frozen at the commit level, and reviewed
+  through the normal Source-ratified mutation flow.
+* Ledger records (claim, heartbeat, event files) are **local runtime
+  state**. They live under `.hermes/active-work-ledger/`, which is
+  covered by the existing `.hermes/` ignore rule, and they MUST NOT
+  be added to the index. Adding them would conflate runtime state
+  with substrate.
+* This protocol document, and the validator skeleton, are tracked.
+
+## e. Runtime directory shape
+
+The runtime directory layout is:
+
+```
+.hermes/active-work-ledger/
+  claims/<controller-id>/<lane-id>.yaml
+  heartbeats/<controller-id>/<lane-id>.yaml
+  events/<YYYY>/<MM>/<DD>/<UTC-timestamp>-<controller-id>-<event-id>.yaml
+  locks/<lane-id>.lock
+```
+
+* `claims/<controller-id>/<lane-id>.yaml` — one current claim record
+  per `(controller, lane)` pair. Overwritten on lease renewal or
+  release.
+* `heartbeats/<controller-id>/<lane-id>.yaml` — the latest heartbeat
+  record per `(controller, lane)` pair. Overwritten on each emission.
+* `events/<YYYY>/<MM>/<DD>/<UTC-timestamp>-<controller-id>-<event-id>.yaml`
+  — append-only event log entries. One file per event. Never edited,
+  never deleted by the protocol itself; archival is a later-slice
+  concern.
+* `locks/<lane-id>.lock` — advisory `flock(2)` files. Empty file is
+  fine; the file exists to give `flock` something to grip.
+
+Orphaned atomic-write temporary files of the form
+`<target>.tmp.<pid>.<nonce>` MAY appear under any of the above paths.
+The validator MUST tolerate them by skipping (see §l).
+
+## f. Controller id format
+
+Pattern: `^[a-z][a-z0-9-]{2,63}$`.
+
+Examples: `hermes-primary`, `nefarious-laptop-a`, `nefarious-laptop-b`.
+
+A `controller_id` is **stable** per physical operator+host pair. It
+MUST NOT embed:
+
+* secrets, tokens, credentials, or installation ids;
+* durable actor ids or app slugs;
+* concrete model, tool, CLI, runner, or account identifiers.
+
+Concrete bindings remain deployment-time overlay decisions per
+`docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md` §c precedent.
+
+## g. Lane id format
+
+Pattern: `^[a-z][a-z0-9-]{2,63}$`.
+
+A `lane_id` is the coordination unit. The recommended convention is
+`<feature-or-slice>-<short-suffix>` (e.g.,
+`pco-slice0-active-work-ledger-author`). Lane ids are
+human-meaningful but Slice 0 does not enforce structure beyond the
+pattern.
+
+## h. Claim record fields
+
+A claim record (`record_type: claim`) carries:
+
+* `kind: active-work-ledger-record` (discriminator).
+* `record_type: claim`.
+* `schema_version: "1"`.
+* `controller_id` — per §f.
+* `lane_id` — per §g.
+* `record_timestamp` — ISO-8601 UTC `Z` or source-controlled reference.
+* `worktree_path` — required; repo-relative or absolute path of the
+  physical worktree the claim names. Treated as advisory, not a
+  secret.
+* `branch` — optional; branch name on which the claim operates.
+* `envelope_ref` — required; repo-relative path to the active
+  Assignment Envelope, or the literal `none` for coordination lanes
+  that operate without an envelope.
+* `handoff_ref` — optional; repo-relative path to the active handoff
+  document.
+* `recommended_prompt_ref` — optional; repo-relative path to the
+  active recommended-prompt document.
+* `lease_seconds` — required integer in `[60, 86400]`. Default is
+  `3600` (one hour); the schema validates the range only.
+* `claimed_at` — required timestamp at which the claim was created.
+* `last_heartbeat_at` — required timestamp of the most recent
+  heartbeat the Controller emitted for this claim. For fresh claims,
+  equals `claimed_at`.
+* `pane_label` — optional; one of `architect | implementer |
+  controller | reviewer`. Generic role label only. NOT a model or
+  tool binding.
+* `released_at` — optional timestamp at which the claim was closed.
+  When present, `release_reason` MUST also be present.
+* `release_reason` — optional enum
+  `{ completed, aborted, lapsed, handed_off }`; required iff
+  `released_at` is present.
+
+## i. Heartbeat record fields
+
+A heartbeat record (`record_type: heartbeat`) carries:
+
+* `kind`, `record_type: heartbeat`, `schema_version: "1"`,
+  `controller_id`, `lane_id`, `record_timestamp` — shared envelope.
+* `claim_ref` — required; repo-relative path to the claim file this
+  heartbeat updates.
+* `heartbeat_sequence` — required integer `>= 0`; monotonically
+  non-decreasing per claim. Slice 0 validates type and lower-bound
+  only; cross-record monotonicity is reserved for later slices.
+* `emitted_at` — required timestamp at which the heartbeat was
+  emitted.
+* `note` — optional free-text status note, `maxLength: 1024`. MUST
+  NOT contain secrets, tokens, credentials, or actor ids. Slice 0
+  does not enforce this prohibition mechanically.
+
+## j. Event log record fields
+
+An event log record (`record_type: event`) carries:
+
+* `kind`, `record_type: event`, `schema_version: "1"`,
+  `controller_id`, `lane_id`, `record_timestamp` — shared envelope.
+* `event_kind` — required enum:
+  * `claim_created` — a new claim was written;
+  * `claim_released` — a claim was closed cleanly (any
+    `release_reason` other than `lapsed`);
+  * `claim_lapsed` — a claim went stale and was treated as released;
+  * `heartbeat_emitted` — a heartbeat was written;
+  * `lane_handoff_announced` — the lane is being offered to another
+    Controller;
+  * `lane_handoff_received` — the lane has been received by the
+    other Controller.
+* `event_id` — required; matches pattern
+  `^[a-z0-9][a-z0-9-]{2,63}$`. Stable within
+  `(controller_id, lane_id, YYYY-MM-DD)` scope. Slice 0 does not
+  enforce cross-record uniqueness.
+* `event_timestamp` — required timestamp at which the event occurred.
+* `subject_claim_ref` — optional repo-relative path to a claim file
+  the event describes.
+* `subject_handoff_ref` — optional repo-relative path to a handoff
+  document the event references; used for `lane_handoff_*` events.
+* `details` — optional structured object with `summary` and
+  `actor_pane_label` fields. `unevaluatedProperties: false` —
+  unknown keys are rejected.
+
+## k. Lease / stale-record semantics
+
+Every claim carries `lease_seconds`. The lease semantics are:
+
+* Default `lease_seconds` is `3600`. Min `60`, max `86400`. The
+  schema validates the range; the default is a prose convention.
+* A claim is **live** when
+  `now - last_heartbeat_at <= lease_seconds`.
+* A claim is **stale** when
+  `now - last_heartbeat_at > lease_seconds`.
+* Stale records are **advisory** in Slice 0; Controllers SHOULD
+  observe them but Slice 0 does not yet enforce reclamation.
+* Later slices MAY reclaim a stale claim by emitting a `claim_lapsed`
+  event, overwriting the heartbeat with a new sequence number, and
+  taking the lane under a different `controller_id`. The reclamation
+  flow itself is later-slice scope.
+
+Slice 0 validates only that `lease_seconds` is an integer in
+`[60, 86400]`; it does not validate any wall-clock relationship
+between `claimed_at`, `last_heartbeat_at`, and `record_timestamp`.
+
+## l. Atomic write approach
+
+Writers MUST use the temp-file + fsync + rename pattern:
+
+1. Write the new record to `<target>.tmp.<pid>.<nonce>` within the
+   same directory as `<target>`.
+2. `fsync(2)` the temp file.
+3. `rename(2)` it over `<target>` atomically.
+
+Writers MUST NOT partial-write into the live path. The validator
+MUST tolerate the presence of orphaned `*.tmp.*` files by skipping
+any path whose last name segment contains `".tmp."`; a stale temp
+file is not a validation failure.
+
+Slice 0 documents this discipline; runtime tooling that actually
+performs the writes is a later-slice concern.
+
+## m. Advisory lock approach
+
+Around every read-modify-write sequence that touches a lane's claim
+or heartbeat files, writers MUST hold an exclusive advisory lock on
+`locks/<lane-id>.lock` using `flock(LOCK_EX)` (POSIX `flock(2)`).
+The lock is advisory; cooperating writers respect it.
+
+Slice 0 documents this discipline; the runtime tooling that takes
+the lock is a later-slice concern.
+
+## n. Event log shape
+
+The event log is **append-only**. One event per file. The protocol
+itself never edits or deletes event files. Each file's name carries
+its own UTC timestamp, controller id, and event id so that ordering
+is reconstructible from filenames.
+
+`event_kind` is enumerated in §j. Later slices MAY introduce
+additional event kinds via a schema-version bump; the Slice 0 set is
+the floor.
+
+## o. Pre-launch claim read/validate behavior
+
+Before a Controller starts a parallel Architect or Implementer pane,
+it MUST:
+
+1. Enumerate the live (non-stale) claims under
+   `.hermes/active-work-ledger/claims/`.
+2. Validate every read claim file against the schema using the
+   `active_work_ledger_schema` validator check.
+3. Refuse to claim a `worktree_path` already held by a live claim
+   under a *different* `controller_id`. (Holding multiple live
+   claims on the same worktree under the *same* controller is
+   itself a one-driver-per-worktree violation handled by the
+   controller boundary policy, not by this ledger.)
+4. Write the new claim atomically (§l) under the lane's lock (§m).
+5. Emit a `claim_created` event before transitioning the pane to
+   active.
+
+Slice 0 documents this discipline. The mechanical enforcement of
+step (3) — the "refuse to claim" gate — is a later-slice concern
+(the Slice 1 conflict validator).
+
+## p. Slice 0 boundary statement
+
+**Slice 0 records and validates Active-Work Ledger entries; it does
+not yet enforce multi-controller execution, does not yet detect
+cross-lane semantic conflicts, and does not yet allocate worktrees.
+Enforcement is reserved for later PCO slices.**
+
+This statement is normative. Reviewers MUST see it preserved
+verbatim in this document and reflected in the schema description,
+the architecture doc, and the feature spec.
+
+## q. Relationship to Assignment Envelopes
+
+Every claim record carries `envelope_ref` — a repo-relative path to
+the Assignment Envelope under whose authority the lane operates, or
+the literal `none` for coordination lanes that operate without an
+envelope (e.g., architect-only planning).
+
+The envelope, not the ledger, remains the substantive authority. A
+claim record CANNOT grant the lane more authority than its envelope
+grants. The ledger only records *which Controller is currently
+holding the lane*; the envelope governs *what the lane is permitted
+to author*.
+
+## r. Relationship to handoff and recommended-prompt schemas
+
+Claim records MAY cite a `handoff_ref` and a
+`recommended_prompt_ref` when those documents exist. The ledger
+never duplicates handoff or recommended-prompt content; it points to
+those documents by repo-relative path. The pointer-only relay
+discipline from
+[`./NO_COPY_PASTE_PATTERN.md`](./NO_COPY_PASTE_PATTERN.md) applies.
+
+The handoff and recommended-prompt schemas
+(`schemas/handoff.schema.yaml`,
+`schemas/recommended-prompt.schema.yaml`) remain the canonical
+contracts for those documents. The ledger does not extend or
+override them.
+
+## s. Relationship to one-driver-per-worktree
+
+The
+[`parallel-agent-development-model.md`](../architecture/parallel-agent-development-model.md)
+one-driver-per-worktree rule continues to apply. A claim names
+exactly one physical `worktree_path` and exactly one driving
+`controller_id`. Two live (non-stale) claims for the same
+`worktree_path`, under *different* `controller_id` values, is a
+collision that later slices (Slice 1 conflict validator) MUST
+reject.
+
+Slice 0 does NOT cross-check this collision; the schema validates
+one record at a time. The collision check is explicitly later-slice
+scope and is named here so that the boundary is unambiguous.
+
+## t. Relationship to future slices
+
+Slice 0 introduces the schema and protocol primitives that later
+PCO slices will operate on:
+
+* **Slice 1 — Conflict Validator**: cross-record overlap detection,
+  including the worktree-path collision described in §s, lane
+  uniqueness per controller, and heartbeat monotonicity per claim.
+* **Slice 2 — Worktree Allocator**: issues short-lived worktree
+  leases that line up with ledger claims; resolves contention before
+  a claim is written.
+* **Slice 3 — Pane Registry**: visible-pane identity records (which
+  Architect/Implementer pane is bound to which claim).
+* **Slice 4 — Side-Effect Ledger**: tracks externally observable
+  side effects per lane (CI runs, deploys, GitHub state mutations)
+  so that fan-in verification has a structured input.
+* **Slice 5 — `pco-fanin`**: integration verification under
+  multi-lane authorship; explicitly does not trust lane self-report.
+* **Slice 6 — Integration Queue**: serialized canonical-branch
+  landing order across lanes.
+
+Each slice keeps the substrate-before-automation discipline: protocol
+and validator first, runtime tooling after.
+
+## u. Prohibited surfaces
+
+Ledger records MUST NOT carry:
+
+* secrets, tokens, credentials, source-host installation ids;
+* durable actor ids, app slugs, account names;
+* concrete model, tool, CLI, runner, or QA-harness identifiers as
+  normative upstream bindings;
+* machine-local absolute paths beyond `worktree_path` (which is
+  required and treated as advisory, not as a secret).
+
+This prohibition mirrors the
+`schemas/review-evidence.schema.yaml` and the controller-boundary
+policy. Slice 0 does not enforce the prohibition mechanically beyond
+the schema's structural constraints (`unevaluatedProperties: false`,
+enum constraints on `pane_label` and `release_reason`); the broader
+discipline is operational.
+
+## v. Acceptance posture
+
+A fresh-clone reviewer can verify the following from this document
+alone:
+
+1. What lives under `.hermes/active-work-ledger/` and why it is
+   untracked.
+2. What a claim record is, what a heartbeat record is, and what an
+   event record is.
+3. What `lease_seconds` and stale-record semantics mean in Slice 0
+   (advisory).
+4. The atomic-write rule (temp + fsync + rename) and the
+   advisory-lock rule (`flock(2)` on `locks/<lane-id>.lock`).
+5. The pre-launch read/validate discipline.
+6. The Slice 0 boundary: record/validate only, no enforcement.
+7. The relationships to Assignment Envelopes, handoffs,
+   recommended-prompts, and one-driver-per-worktree.
+8. The slice plan that closes each later-slice gap.

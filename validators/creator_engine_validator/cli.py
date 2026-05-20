@@ -37,6 +37,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_manifest.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_ledger = sub.add_parser(
+        "scan-active-work-ledger",
+        help="run only the active_work_ledger_schema check against a path",
+    )
+    scan_ledger.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -162,6 +168,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-path-manifest":
         from .checks.path_manifest_fidelity import run as _run_manifest
         result = _run_manifest([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-active-work-ledger":
+        from .checks.active_work_ledger_schema import run as _run_ledger
+        result = _run_ledger([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution

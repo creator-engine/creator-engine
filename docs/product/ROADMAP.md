@@ -168,27 +168,63 @@ operating model; governed identity record deferred." Instantiating
 their identity records and evidence schemas requires a separate spec
 and ratification, since identity is itself a privileged mutation class.
 
-## e. Feature 005 — dispatch / worktree / sandbox runtime (scope summary)
+## e. Feature 005 — Parallel Controller Orchestration (PCO) (scope summary)
 
-**Status**: Deferred. Not yet specced.
+**Status**: In progress. Slice 0 (Active-Work Ledger) is the first
+coordination-substrate slice; later slices remain deferred.
 
-Feature 005 will implement the automation Feature 002's manual
-protocol points toward:
+Feature 005 establishes the parallel-controller orchestration
+substrate that lets multiple Source-ratified Controllers coordinate
+isolated lanes of work without colliding on worktrees, branches, or
+Assignment Envelopes, and that, in later slices, automates the
+dispatcher / worktree / sandbox runtime previously planned under
+Feature 005. PCO is layered onto, not in place of, the
+one-driver-per-worktree rule from
+[`../architecture/parallel-agent-development-model.md`](../architecture/parallel-agent-development-model.md).
 
-- Hermes dispatcher that consumes Source-ratified batch approvals and
-  emits Assignment Envelopes (FR-005-conformant) without scope
-  expansion.
-- Worktree lifecycle automation: branch creation, worktree
-  provisioning, cleanup; preserves one-driver-per-worktree.
-- Sandboxing for safe parallel runtime per Feature 002's parallel-agent
-  development model.
-- Conflict detection that maps observed conflicts onto Feature 002's
-  taxonomy (`textual`, `file/task ownership`, `semantic`, `authority`)
-  and routes them to the named resolver.
+Slice plan:
+
+1. **Slice 0 — Active-Work Ledger** *(in progress, this batch)*.
+   Adds the ledger record schema
+   (`schemas/active-work-ledger.schema.yaml`), the prose protocol
+   ([`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md)),
+   the architecture doc
+   ([`../architecture/parallel-controller-orchestration.md`](../architecture/parallel-controller-orchestration.md)),
+   and a validator skeleton (`active_work_ledger_schema`). Records
+   and validates only; does not yet enforce multi-controller
+   execution. Spec:
+   [`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).
+2. **Slice 1 — Conflict Validator.** Cross-record overlap detection:
+   worktree-path collisions, lane uniqueness per controller,
+   heartbeat monotonicity, event-id uniqueness within scope.
+3. **Slice 2 — Worktree Allocator.** Short-lived worktree leases that
+   line up with ledger claims; resolves contention before a claim is
+   written. Subsumes the Feature 005 worktree-lifecycle automation
+   line item.
+4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
+   Architect/Implementer pane is bound to which claim, on which host.
+5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
+   side effects per lane (CI runs, deploys, GitHub state mutations).
+6. **Slice 5 — `pco-fanin`.** Integration verification under
+   multi-lane authorship; reconstructs the integrated state from
+   tracked artifacts and validator output, not from lane self-report.
+7. **Slice 6 — Integration Queue.** Serialized canonical-branch
+   landing order across lanes; Source-ratified. Subsumes the
+   conflict-detection-and-routing line item previously planned for
+   Feature 005.
+
+The previously-planned dispatcher / worktree / sandbox runtime work
+(Hermes dispatcher, worktree lifecycle automation, sandboxing for
+safe parallel runtime, taxonomy-routed conflict detection) is
+preserved as later-slice scope under PCO. Each later slice keeps the
+substrate-before-automation discipline: protocol and validator first,
+runtime tooling after.
 
 **Deferral rationale**: Feature 002 specifies the manual protocol the
-dispatcher must obey. Building automation before the manual protocol is
-ratified and rehearsed risks freezing a wrong protocol into code.
+orchestration substrate must obey. Building automation before the
+manual coordination substrate is rehearsed risks freezing a wrong
+protocol into code. Slice 0 is the substrate; later slices add
+automation on top of it.
 
 ## f. Feature 006 — release / deployment governance (scope summary)
 
@@ -247,7 +283,7 @@ Concretely, v1.0 requires:
 |---|---|---|
 | 003 | `.github/` workflows, PR templates, branch protection, CI checks | Feature 002 is specification-only at the operating-model layer; wiring CI is a privileged `governance`/`security`/`deploy` mutation that requires its own spec/plan/tasks triple. |
 | 004 | Codex / QA / security identity records and evidence schemas | Identity is a privileged mutation class (Feature 001 FR-008); each governed identity requires its own ratified spec. Feature 002 names the roles and reserves their surfaces. |
-| 005 | Hermes dispatcher, worktree lifecycle automation, sandboxing, safe parallel runtime | Feature 002 specifies the manual protocol the dispatcher must obey; building automation before the manual protocol is rehearsed risks freezing a wrong contract into code. |
+| 005 | Parallel Controller Orchestration (PCO): active-work ledger, conflict validator, worktree allocator, pane registry, side-effect ledger, `pco-fanin`, integration queue, and the dispatcher / sandbox runtime previously planned under Feature 005. | Feature 002 specifies the manual protocol the orchestration substrate must obey; building automation before the manual coordination substrate is rehearsed risks freezing a wrong protocol into code. |
 | 006 | Release records, deploy attestations, rollback evidence, GitHub environments, Source-approved deploy gates | The `deploy` mutation class is Source-only per Feature 001 FR-008; deploy targets do not yet exist. |
 
 Phase 2 autonomy expansion is OUT OF SCOPE for any of Features 002
