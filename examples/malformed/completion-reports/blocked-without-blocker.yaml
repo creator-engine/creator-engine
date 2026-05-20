@@ -1,0 +1,29 @@
+# Malformed: gate_class F with outcome blocked but no blocker_description
+# and no resumption_pointer. The class-F oneOf clause requires both;
+# CR-001 fails.
+kind: completion-report
+schema_version: "1"
+gate_class: F
+envelope_ref: ".hermes/envelopes/source-ratify-blocked-without-blocker.md"
+envelope_sha256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+controller_id: "hermes-primary"
+lane_id: "blocked-without-blocker-example"
+gate_opened_at: "2026-05-20T12:00:00Z"
+gate_closed_at: "2026-05-20T12:15:00Z"
+outcome: "blocked"
+summary: |
+  Demonstrates the CR-001 failure when a class-F report omits both
+  blocker_description and resumption_pointer.
+recommended_immediate_next_step:
+  description: "Add blocker_description and resumption_pointer to the class-F report."
+  rationale: "A blocked gate without a blocker description is undefined runtime state."
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-fix-blocked-without-blocker.md"
+  prompt_sha256: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  canonical_ratification_line: "Source ratifies the class-F repair gate."
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

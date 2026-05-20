@@ -1,0 +1,43 @@
+# Completion Report sidecar template — Class C-merge (Git/GitHub mutation, ended at merge).
+# Contract: schemas/completion-report.schema.yaml + docs/operations/COMPLETION_REPORT_PROTOCOL.md.
+# Cross-reference: docs/delivery/NEXT_TASK_PROTOCOL.md §b (canonical ten-field merge rule).
+# Replace every <placeholder> before authoring.
+kind: completion-report
+schema_version: "1"
+gate_class: "C-merge"
+envelope_ref: "<repo-relative-path-to-envelope-or-prompt>"
+envelope_sha256: "<64-lower-hex-sha256>"
+controller_id: "<controller-id>"
+lane_id: "<lane-id>"
+gate_opened_at: "<YYYY-MM-DDThh:mm:ssZ>"
+gate_closed_at: "<YYYY-MM-DDThh:mm:ssZ>"
+outcome: "completed"
+summary: |
+  <one to four sentences summarising what merged>
+recommended_immediate_next_step:
+  description: "<what follows the merge>"
+  rationale: "<why that next gate follows>"
+  next_action_kind: "source_ratifiable_prompt"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: "<repo-relative-or-hermes-relative-path-to-next-prompt>"
+  prompt_sha256: "<64-lower-hex-sha256>"
+  canonical_ratification_line: "<the line Source will use to authorise the next gate>"
+merge_report:
+  pr_number: 0
+  pr_url_or_identifier: "<pr-url-or-identifier>"
+  merge_commit: "<7-40-lower-hex>"
+  head_ref: "<head-ref-branch-name>"
+  head_sha: "<7-40-lower-hex>"
+  base_ref: "main"
+  base_sha: "<7-40-lower-hex>"
+  merged_at: "<YYYY-MM-DDThh:mm:ssZ>"
+  merged_by_role: "controller"
+  merge_strategy: "squash"
+  validator_summary_ref: "<repo-relative-path-to-validator-summary>"
+evidence_artifact_pointers:
+  - "<repo-relative-path-to-evidence-artifact>"
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

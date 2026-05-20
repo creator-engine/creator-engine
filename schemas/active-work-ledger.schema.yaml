@@ -68,11 +68,15 @@ properties:
       applies. Drives the `oneOf` per-shape required-field sets.
   schema_version:
     type: string
-    const: "1"
+    enum: ["1", "2"]
     description: |
-      Active-Work Ledger schema version. Slice 0 ships v1; later
-      slices MAY extend via additive optional fields and bump this
-      const.
+      Active-Work Ledger schema version. Slice 0 ships v1; Slice 0.5
+      adds four event_kind values (`gate_opened`, `gate_closed`,
+      `completion_report_emitted`, `gate_blocked`) as an additive
+      extension and accepts records carrying either version. Older
+      readers (v1-only) ignore unknown event kinds; v2 readers accept
+      either set. Later slices MAY extend further via additional
+      additive optional fields and a further version bump.
   controller_id:
     type: string
     pattern: "^[a-z][a-z0-9-]{2,63}$"
@@ -250,8 +254,28 @@ properties:
       - heartbeat_emitted
       - lane_handoff_announced
       - lane_handoff_received
+      - gate_opened
+      - gate_closed
+      - completion_report_emitted
+      - gate_blocked
     description: |
-      Event log discriminator. Required on `event` records.
+      Event log discriminator. Required on `event` records. The
+      Slice 0 set (`claim_created`, `claim_released`, `claim_lapsed`,
+      `heartbeat_emitted`, `lane_handoff_announced`,
+      `lane_handoff_received`) is preserved. Slice 0.5 adds four
+      additive completion-report-substrate event kinds:
+        * `gate_opened` — a Source-ratified gate began under a
+          recorded envelope+SHA;
+        * `gate_closed` — a Source-ratified gate ended without
+          blocker (completed or partial);
+        * `completion_report_emitted` — a Completion Report artifact
+          was appended for this lane / gate, optionally pointed at
+          via `details.completion_report_ref`;
+        * `gate_blocked` — a Source-ratified gate was blocked or
+          aborted; pairs with a class-F Completion Report.
+      The additive event-kind extension travels with
+      `schema_version: "2"`; v1 records continue to validate as
+      before.
   event_id:
     type: string
     pattern: "^[a-z0-9][a-z0-9-]{2,63}$"
@@ -302,10 +326,22 @@ properties:
         description: |
           Generic role label of the pane that produced the event.
           NOT a model/tool/account binding.
+      completion_report_ref:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+        description: |
+          Optional repo-relative path to a Completion Report
+          artifact this event pairs with. Used by Slice 0.5
+          event kinds `completion_report_emitted` and `gate_blocked`
+          to bind the event log to the schema-validated report
+          packet.
     description: |
       Optional structured event details. Slice 0 keeps this surface
-      narrow; later slices MAY extend via additive optional fields
-      and a schema-version bump.
+      narrow; Slice 0.5 adds the additive optional
+      `completion_report_ref` pointer used by completion-report
+      substrate events. Later slices MAY extend via additional
+      additive optional fields and a schema-version bump.
 oneOf:
   - description: |
       Claim record shape — required when `record_type == claim`.

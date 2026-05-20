@@ -1,0 +1,25 @@
+# Malformed: missing required envelope_sha256 field. CR-001 fails.
+kind: completion-report
+schema_version: "1"
+gate_class: A
+envelope_ref: ".hermes/envelopes/source-ratify-missing-envelope-sha256.md"
+controller_id: "hermes-primary"
+lane_id: "missing-envelope-sha256-example"
+gate_opened_at: "2026-05-20T10:00:00Z"
+gate_closed_at: "2026-05-20T10:30:00Z"
+outcome: "completed"
+summary: |
+  Demonstrates the CR-001 failure when envelope_sha256 is missing.
+recommended_immediate_next_step:
+  description: "Add envelope_sha256 with the 64 lower-hex SHA of the envelope file."
+  rationale: "Every report must bind to the exact bytes Source ratified."
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-fix-missing-envelope-sha256.md"
+  prompt_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  canonical_ratification_line: "Source ratifies the envelope-sha256 repair gate."
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

@@ -277,6 +277,37 @@ is reconstructible from filenames.
 additional event kinds via a schema-version bump; the Slice 0 set is
 the floor.
 
+### n.1 Slice 0.5 additive extension — completion-report event kinds
+
+Slice 0.5 (Completion Report Substrate) additively extends this
+schema with `schema_version: "2"` and four new `event_kind` values:
+
+* `gate_opened` — a Source-ratified gate began under a recorded
+  envelope + SHA256.
+* `gate_closed` — a Source-ratified gate ended without a blocker
+  (outcome `completed` or `partial`).
+* `completion_report_emitted` — a schema-conforming Completion
+  Report sidecar has been appended for this gate. The matching
+  sidecar SHOULD be referenced via the new optional
+  `details.completion_report_ref` pointer.
+* `gate_blocked` — a Source-ratified gate was blocked or aborted;
+  pairs with a class-F Completion Report sidecar.
+
+The extension is **additive**: Slice 0 v1 records continue to
+validate unchanged; v2 records simply expand the accepted
+`event_kind` and `details` surface. The companion contract is
+[`./COMPLETION_REPORT_PROTOCOL.md`](./COMPLETION_REPORT_PROTOCOL.md);
+the tracked machine contract is
+`schemas/completion-report.schema.yaml`.
+
+### n.2 schema_version migration note
+
+`schema_version` accepts `"1"` (Slice 0) and `"2"` (Slice 0.5).
+Writers MAY emit either version. Readers that only understand v1
+MUST ignore unknown `event_kind` values rather than treating them
+as schema errors. There is no destructive migration; v1 → v2 is a
+pure extension.
+
 ## o. Pre-launch claim read/validate behavior
 
 Before a Controller starts a parallel Architect or Implementer pane,

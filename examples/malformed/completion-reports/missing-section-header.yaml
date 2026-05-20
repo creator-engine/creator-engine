@@ -1,0 +1,32 @@
+# Schema-valid YAML sidecar paired with a malformed Markdown body that
+# omits the `Exact next Source prompt pointer+SHA256` terminal section
+# header. The YAML itself self-declares all three sections present —
+# the CR-003 terminal-section check (warn-only in v1) catches the
+# mismatch against the Markdown body.
+kind: completion-report
+schema_version: "1"
+gate_class: A
+envelope_ref: ".hermes/envelopes/source-ratify-missing-section-header-example.md"
+envelope_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+controller_id: "hermes-primary"
+lane_id: "missing-section-header-example"
+gate_opened_at: "2026-05-20T10:00:00Z"
+gate_closed_at: "2026-05-20T10:30:00Z"
+outcome: "completed"
+summary: |
+  Demonstrates the CR-003 failure mode: YAML self-declares all three
+  terminal sections present, but the adjacent Markdown body omits the
+  `Exact next Source prompt pointer+SHA256` header.
+recommended_immediate_next_step:
+  description: "Re-author the Markdown body to embed all three section headers in canonical order."
+  rationale: "CR-003 must see the headers in the rendered body, not just in the YAML self-declaration."
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-fix-missing-section-header.md"
+  prompt_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  canonical_ratification_line: "Source ratifies the section-header repair gate."
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

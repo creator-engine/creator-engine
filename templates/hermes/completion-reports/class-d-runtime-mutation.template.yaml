@@ -1,0 +1,35 @@
+# Completion Report sidecar template — Class D (Non-Git runtime / config / provider mutation).
+# Contract: schemas/completion-report.schema.yaml + docs/operations/COMPLETION_REPORT_PROTOCOL.md.
+# Identifiers MUST be redacted per §m. Replace every <placeholder> before authoring.
+kind: completion-report
+schema_version: "1"
+gate_class: D
+envelope_ref: "<repo-relative-path-to-envelope-or-prompt>"
+envelope_sha256: "<64-lower-hex-sha256>"
+controller_id: "<controller-id>"
+lane_id: "<lane-id>"
+gate_opened_at: "<YYYY-MM-DDThh:mm:ssZ>"
+gate_closed_at: "<YYYY-MM-DDThh:mm:ssZ>"
+outcome: "completed"
+summary: |
+  <one to four sentences summarising the runtime mutation>
+recommended_immediate_next_step:
+  description: "<what the next action is>"
+  rationale: "<why this action follows>"
+  next_action_kind: "source_ratifiable_prompt"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: "<repo-relative-or-hermes-relative-path-to-next-prompt>"
+  prompt_sha256: "<64-lower-hex-sha256>"
+  canonical_ratification_line: "<the line Source will use to authorise the next gate>"
+# One of side_effect_ledger_ref OR (interim_side_effect_note_ref + interim_side_effect_note_sha256).
+interim_side_effect_note_ref: "<repo-relative-path-to-side-effect-note>"
+interim_side_effect_note_sha256: "<64-lower-hex-sha256>"
+mutation_descriptors:
+  - target_class: "<surface-class>"
+    target_identifier_redacted: "<redacted-identifier>"
+    change_summary: "<short change summary>"
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true
