@@ -21,12 +21,17 @@ description: |
   without colliding on worktrees, branches, or Assignment Envelopes.
 
   Slice 0 boundary statement: this schema and its validator skeleton
-  record and validate ledger entries; they do NOT yet enforce
-  multi-controller execution, do NOT yet detect cross-lane semantic
-  conflicts, and do NOT yet allocate worktrees. Enforcement is
-  reserved for later PCO slices (conflict validator, worktree
-  allocator, pane registry, side-effect ledger, `pco-fanin`,
-  integration queue).
+  record and validate ledger entries one record at a time. Slice 1/2
+  adds the separate `active_work_ledger_conflicts` validator check for
+  cross-record/pre-launch invariants (live worktree collisions, live
+  lane uniqueness per controller, heartbeat claim references, event
+  claim references, heartbeat sequence monotonicity where timestamps
+  are parseable, and scoped event-id uniqueness). This schema still
+  does NOT allocate worktrees, does NOT launch multi-controller
+  execution, and does NOT encode concrete model/tool/SaaS/account
+  bindings. Enforcement beyond those read-only pre-launch checks is
+  reserved for later PCO slices (worktree allocator, pane registry,
+  side-effect ledger, `pco-fanin`, integration queue).
 
   The tracked schema (this file) is distinct from local runtime
   state. Ledger records live under the untracked runtime directory
@@ -222,8 +227,10 @@ properties:
     minimum: 0
     description: |
       Per-claim monotonically non-decreasing sequence counter.
-      Slice 0 validates type and lower-bound only; cross-record
-      monotonicity is reserved for later slices. Required on
+      The schema validates type and lower-bound only. Slice 1/2's
+      `active_work_ledger_conflicts` check enforces cross-record
+      monotonicity for heartbeat records that reference the same claim
+      and have parseable `emitted_at` timestamps. Required on
       `heartbeat` records.
   emitted_at:
     description: |
@@ -281,9 +288,10 @@ properties:
     pattern: "^[a-z0-9][a-z0-9-]{2,63}$"
     description: |
       Event identifier. Stable within
-      `(controller_id, lane_id, YYYY-MM-DD)` scope. Cross-record
-      uniqueness is reserved for later slices. Required on `event`
-      records.
+      `(controller_id, lane_id, YYYY-MM-DD)` scope. The schema
+      validates shape only; Slice 1/2's `active_work_ledger_conflicts`
+      check enforces scoped uniqueness when `event_timestamp` can be
+      resolved to a day. Required on `event` records.
   event_timestamp:
     description: |
       ISO-8601 UTC timestamp (or source-controlled reference) at

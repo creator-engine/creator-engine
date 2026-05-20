@@ -43,6 +43,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_ledger.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_ledger_conflicts = sub.add_parser(
+        "scan-active-work-ledger-conflicts",
+        help="run only the active_work_ledger_conflicts pre-launch check against a path",
+    )
+    scan_ledger_conflicts.add_argument("path", nargs="?", default=".", help="path to scan")
+
     scan_completion = sub.add_parser(
         "scan-completion-reports",
         help="run the completion_report_schema / required_for_envelope / terminal_sections checks against a path",
@@ -182,6 +188,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-active-work-ledger":
         from .checks.active_work_ledger_schema import run as _run_ledger
         result = _run_ledger([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-active-work-ledger-conflicts":
+        from .checks.active_work_ledger_conflicts import run as _run_ledger_conflicts
+        result = _run_ledger_conflicts([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "scan-completion-reports":
         from .checks.completion_report_schema import run as _run_cr_schema

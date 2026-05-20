@@ -7,12 +7,12 @@ Scope discipline — Slice 0 is **record/validate only**:
 
 * this check validates one record at a time against the schema;
 * it MUST NOT cross-check lane uniqueness across files,
-  ``worktree_path`` collisions between claims, heartbeat
-  monotonicity within a claim, event-log ordering, stale-record
-  reclamation, or any other cross-record invariant. Those are
-  reserved for later PCO slices (conflict validator, worktree
-  allocator, pane registry, side-effect ledger, ``pco-fanin``,
-  integration queue).
+  ``worktree_path`` collisions between claims beyond noting that
+  ``active_work_ledger_conflicts`` owns them, heartbeat
+  monotonicity within a claim beyond field shape, event-log ordering,
+  stale-record reclamation, or any other cross-record invariant. The
+  Slice 1/2 conflict check is intentionally separate so this schema
+  layer remains one-record validation.
 
 Slice 0.5 additive extension: the schema now accepts
 ``schema_version`` ``"1"`` or ``"2"`` and recognises four additional

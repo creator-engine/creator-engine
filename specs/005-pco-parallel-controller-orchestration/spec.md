@@ -429,11 +429,12 @@ performs the locking is a later-slice concern.
 
 Before launching an Architect or Implementer pane, a Controller MUST
 enumerate live claims, validate every read claim file against the
-schema, refuse to claim a `worktree_path` already held by a live
-claim under a different `controller_id`, write the new claim
-atomically under the lane lock, and emit a `claim_created` event.
-Mechanical enforcement of the "refuse to claim" gate is a Slice 1
-concern.
+schema, run the `active_work_ledger_conflicts` pre-launch check,
+refuse to claim a `worktree_path` already held by a live claim under a
+different `controller_id`, write the new claim atomically under the
+lane lock, and emit a `claim_created` event. The Slice 1/2 validator
+mechanically enforces the read-only refusal predicates; worktree
+allocation and pane launch orchestration remain later-slice scope.
 
 ### PCO-011 — Slice 0 Boundary Statement (No Enforcement)
 
@@ -510,9 +511,50 @@ in the schema description, the prose protocol, and this spec.
 A claim MUST name exactly one physical `worktree_path` and exactly
 one driving `controller_id`. Two live (non-stale) claims for the same
 `worktree_path` under different `controller_id` values is a
-substrate-level conflict that Slice 1 (Conflict Validator) MUST
-reject; Slice 0 records the data needed for that detection but does
-NOT itself perform the cross-record check.
+substrate-level conflict that Slice 1/2's
+`active_work_ledger_conflicts` validator MUST reject before launch;
+`active_work_ledger_schema` still records the data and validates each
+record independently.
+
+### PCO-014 — Claim and Event Reference Integrity
+
+Heartbeat records MUST reference a discovered claim record via
+`claim_ref`. Event records that carry `subject_claim_ref` MUST
+reference a discovered claim record. The pre-launch conflict validator
+MUST fail unresolved references without duplicating one-record schema
+semantics.
+
+### PCO-015 — Live Lane Uniqueness
+
+Among non-stale, unreleased claim records, `(controller_id, lane_id)`
+MUST identify exactly one live claim. A duplicate live lane under the
+same controller is a pre-launch conflict even when the two records name
+different worktrees.
+
+### PCO-016 — Heartbeat Sequence Monotonicity
+
+For heartbeat records that reference the same claim and whose
+`emitted_at` values are parseable timestamps, `heartbeat_sequence` MUST
+be monotonically non-decreasing in emitted-time order. Source-controlled
+or commit-based timestamps remain structurally valid, but the
+cross-record monotonicity check is advisory/skipped until a comparable
+time axis exists.
+
+### PCO-017 — Event-ID Scoped Uniqueness
+
+Event `event_id` values MUST be unique within `(controller_id, lane_id,
+YYYY-MM-DD)` when `event_timestamp` can be resolved to a UTC day. This
+prevents duplicate event lifecycle records inside the scope already
+named by the schema.
+
+### PCO-018 — Slice 1/2 Validator Discoverability
+
+The validator registry and CLI MUST expose the Slice 1/2 check as
+`active_work_ledger_conflicts`, while preserving
+`active_work_ledger_schema` as the one-record Slice 0 schema check.
+A focused CLI path such as
+`creator_engine_validator scan-active-work-ledger-conflicts <path>` MAY
+run the pre-launch layer alone.
 
 ---
 
@@ -522,7 +564,9 @@ Slice 0 explicitly does NOT introduce:
 
 * runtime enforcement of any kind (no multi-controller writing
   trials, no live coordination tooling);
-* live conflict detection (cross-record overlap checks; Slice 1);
+* live conflict detection beyond the read-only
+  `active_work_ledger_conflicts` pre-launch checks (semantic conflict
+  analysis and runtime coordination remain later-slice concerns);
 * automatic worktree allocation (Slice 2);
 * visible-pane identity records (Slice 3);
 * side-effect tracking (Slice 4);
@@ -543,10 +587,10 @@ for a specific reason:
 
 | Slice | Closes | Deferred because |
 |---|---|---|
-| Slice 1 — Conflict Validator | worktree-path collisions across claims; lane uniqueness per controller; heartbeat monotonicity; event-id uniqueness | The substrate must record records before any cross-record invariant can be enforced. |
-| Slice 2 — Worktree Allocator | automatic worktree allocation | Allocation requires a ratified conflict validator (Slice 1) on which to base lease decisions. |
+| Slice 1/2 — Conflict / Pre-Launch Validator | worktree-path collisions across live claims; live lane uniqueness per controller; heartbeat and event claim-reference integrity; heartbeat monotonicity where timestamps are parseable; event-id uniqueness within `(controller_id, lane_id, YYYY-MM-DD)` | Landed as a validator-only layer above Slice 0 schema records; it refuses unsafe pre-launch state without allocating worktrees or launching panes. |
+| Slice 2 — Worktree Allocator | automatic worktree allocation | Allocation requires a ratified conflict/pre-launch validator on which to base lease decisions. |
 | Slice 3 — Pane Registry | visible-pane identity records | Pane identity is a privileged mutation class (Feature 001 FR-008-style) and requires its own ratified record contract. |
-| Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Side-effect tracking depends on a stable lane substrate (Slice 0) and on conflict validation (Slice 1). |
+| Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Side-effect tracking depends on a stable lane substrate (Slice 0) and on conflict/pre-launch validation (Slice 1/2). |
 | Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
 | Slice 6 — Integration Queue | serialized canonical-branch landing order across lanes | Integration ordering depends on fan-in verification (Slice 5) and on Source-ratified gate definitions. |
 
@@ -573,17 +617,21 @@ together with the prose protocol, the architecture doc, the schema,
 and the validator check + tests:
 
 1. The seven PCO slices and the Slice 0 boundary statement.
-2. The Slice 0 functional requirements `PCO-001` through `PCO-013`.
-3. The Slice 0 non-goals and the slice each non-goal defers to.
+2. The Slice 0/1/2 functional requirements `PCO-001` through `PCO-018`.
+3. The remaining non-goals and the slice each non-goal defers to.
 4. The validator's `active_work_ledger_schema` check is registered
    and validates one record at a time against the schema.
-5. The unit tests at
-   `validators/tests/unit/test_active_work_ledger_schema.py` cover
+5. The validator's `active_work_ledger_conflicts` check is registered,
+   has focused CLI discoverability, and validates the pre-launch
+   cross-record invariants without absorbing the schema check.
+6. The unit tests at
+   `validators/tests/unit/test_active_work_ledger_schema.py` and
+   `validators/tests/unit/test_active_work_ledger_conflicts.py` cover
    the golden positive and negative cases.
-6. The protocol's atomic-write rule (temp + fsync + rename) and
+7. The protocol's atomic-write rule (temp + fsync + rename) and
    advisory-lock rule (`flock(2)` on `locks/<lane-id>.lock`) are
    documented; runtime tooling that implements them is later-slice
    scope.
-7. The relationship to Assignment Envelopes, handoffs,
+8. The relationship to Assignment Envelopes, handoffs,
    recommended-prompts, and one-driver-per-worktree is preserved
    without weakening any upstream contract.

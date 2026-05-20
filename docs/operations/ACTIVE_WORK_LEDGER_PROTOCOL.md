@@ -24,8 +24,12 @@ This protocol defines that substrate's static contract: the tracked
 schema, the local runtime directory shape, the record fields, the
 lease and stale-record semantics, the atomic-write and advisory-lock
 rules, and the pre-launch read/validate behavior. **Slice 0 records
-and validates these entries; it does not yet enforce multi-controller
-execution.** Enforcement is reserved for later PCO slices.
+and validates these entries one record at a time. Slice 1/2 adds a
+separate cross-record/pre-launch conflict validator for the minimal
+claim/heartbeat/event invariants required before a Controller can
+safely claim a lane/worktree.** Later slices still own worktree
+allocation, pane registry, side-effect tracking, fan-in, integration
+queueing, and live multi-controller writing.
 
 ## b. Source-of-truth relationship
 
@@ -56,7 +60,23 @@ Slice 0 is **record/validate only**:
 * documents the lease, atomic-write, advisory-lock, and pre-launch
   read/validate disciplines that later slices will enforce.
 
-Slice 0 does **not**:
+Slice 1/2 now adds:
+
+* `active_work_ledger_conflicts`, a separate cross-record validator
+  layered above the schema check;
+* live-claim collision detection for `worktree_path` under different
+  `controller_id` values;
+* live `controller_id`/`lane_id` uniqueness;
+* heartbeat `claim_ref` and event `subject_claim_ref` resolution;
+* heartbeat sequence monotonicity for parseable heartbeat timelines;
+* event-id uniqueness within `(controller_id, lane_id, YYYY-MM-DD)`.
+
+The split is intentional: `active_work_ledger_schema` remains the
+Slice 0 one-record contract, while `active_work_ledger_conflicts`
+implements the pre-launch refusal checks without allocating worktrees
+or launching runtime automation.
+
+Slice 0/1/2 still do **not**:
 
 * enforce multi-controller execution;
 * detect cross-lane semantic conflicts;
@@ -377,21 +397,28 @@ one-driver-per-worktree rule continues to apply. A claim names
 exactly one physical `worktree_path` and exactly one driving
 `controller_id`. Two live (non-stale) claims for the same
 `worktree_path`, under *different* `controller_id` values, is a
-collision that later slices (Slice 1 conflict validator) MUST
-reject.
+collision that the Slice 1/2 `active_work_ledger_conflicts` validator
+MUST reject before a Controller treats a lane/worktree as safely
+claimable.
 
-Slice 0 does NOT cross-check this collision; the schema validates
-one record at a time. The collision check is explicitly later-slice
-scope and is named here so that the boundary is unambiguous.
+`active_work_ledger_schema` still does NOT cross-check this collision;
+it validates one record at a time. The collision check is explicitly
+owned by `active_work_ledger_conflicts` so the record-schema and
+pre-launch-conflict responsibilities remain auditable as separate
+layers.
 
 ## t. Relationship to future slices
 
-Slice 0 introduces the schema and protocol primitives that later
-PCO slices will operate on:
+Slice 0 introduced the schema and protocol primitives that later
+PCO slices operate on. Slice 1/2 has now landed the conflict/pre-launch
+validator layer:
 
-* **Slice 1 — Conflict Validator**: cross-record overlap detection,
-  including the worktree-path collision described in §s, lane
-  uniqueness per controller, and heartbeat monotonicity per claim.
+* **Slice 1/2 — Conflict / pre-launch validator**: cross-record
+  overlap detection, including the worktree-path collision described
+  in §s, live lane uniqueness per controller, heartbeat-reference
+  resolution, event claim-reference resolution, heartbeat monotonicity
+  where timestamps are parseable, and event-id uniqueness within the
+  `(controller_id, lane_id, YYYY-MM-DD)` scope.
 * **Slice 2 — Worktree Allocator**: issues short-lived worktree
   leases that line up with ledger claims; resolves contention before
   a claim is written.
@@ -440,7 +467,10 @@ alone:
 4. The atomic-write rule (temp + fsync + rename) and the
    advisory-lock rule (`flock(2)` on `locks/<lane-id>.lock`).
 5. The pre-launch read/validate discipline.
-6. The Slice 0 boundary: record/validate only, no enforcement.
+6. The Slice 0/1/2 boundary: one-record schema validation remains
+   separate from read-only cross-record/pre-launch conflict checks; no
+   worktree allocation or multi-controller runtime enforcement is
+   introduced by this slice.
 7. The relationships to Assignment Envelopes, handoffs,
    recommended-prompts, and one-driver-per-worktree.
 8. The slice plan that closes each later-slice gap.
