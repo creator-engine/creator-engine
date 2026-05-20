@@ -1,0 +1,339 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/active-work-ledger.schema.yaml"
+title: "Creator Engine Active-Work Ledger Record"
+description: |
+  Machine-readable schema for a single Active-Work Ledger record
+  authored under the Creator Engine Parallel Controller Orchestration
+  (PCO) substrate.
+
+  Prose contract:
+  `docs/operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`.
+
+  Architectural companion:
+  `docs/architecture/parallel-controller-orchestration.md`.
+
+  Feature spec:
+  `specs/005-pco-parallel-controller-orchestration/spec.md`.
+
+  An Active-Work Ledger record is one of three structural kinds —
+  `claim`, `heartbeat`, or `event` — that together let multiple
+  Source-ratified Controllers coordinate isolated lanes of work
+  without colliding on worktrees, branches, or Assignment Envelopes.
+
+  Slice 0 boundary statement: this schema and its validator skeleton
+  record and validate ledger entries; they do NOT yet enforce
+  multi-controller execution, do NOT yet detect cross-lane semantic
+  conflicts, and do NOT yet allocate worktrees. Enforcement is
+  reserved for later PCO slices (conflict validator, worktree
+  allocator, pane registry, side-effect ledger, `pco-fanin`,
+  integration queue).
+
+  The tracked schema (this file) is distinct from local runtime
+  state. Ledger records live under the untracked runtime directory
+  `.hermes/active-work-ledger/` and MUST NOT be added to the index.
+
+  Concrete tool, model, CLI, SaaS account, runner, source-host
+  application, bot slug, or QA-harness identifiers MUST NOT appear
+  here as normative upstream bindings; those remain
+  deployment-time overlay decisions per
+  `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md` §c precedent.
+  Real secrets, tokens, credentials, source-host installation ids,
+  durable actor ids, app slugs, account names, and machine-local
+  absolute paths beyond `worktree_path` (which is required and
+  treated as advisory, not as a secret) MUST NOT appear in ledger
+  records.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - controller_id
+  - lane_id
+  - record_timestamp
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: active-work-ledger-record
+    description: |
+      Discriminator constant. Records that do not carry this exact
+      value are not governed Active-Work Ledger records under this
+      contract and MUST NOT be validated by the
+      `active_work_ledger_schema` check.
+  record_type:
+    type: string
+    enum: [claim, heartbeat, event]
+    description: |
+      Sub-discriminator selecting which structural record shape
+      applies. Drives the `oneOf` per-shape required-field sets.
+  schema_version:
+    type: string
+    const: "1"
+    description: |
+      Active-Work Ledger schema version. Slice 0 ships v1; later
+      slices MAY extend via additive optional fields and bump this
+      const.
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable identifier for the driving Controller (e.g.,
+      `hermes-primary`, `nefarious-laptop-a`). Stable per physical
+      operator+host pair. MUST NOT embed secrets, tokens,
+      installation ids, durable actor ids, model identifiers, or
+      account names.
+  lane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Coordination unit identifier. Typically
+      `<feature-or-slice>-<short-suffix>`.
+  record_timestamp:
+    description: |
+      Either an ISO-8601 UTC timestamp (e.g.,
+      `2026-05-20T03:30:30Z`) or a source-controlled reference
+      (`commit:<sha>` or `source-controlled:<repo-relative-path>`).
+      A machine-local clock value MUST NOT be presented as
+      authoritative. Mirrors the `evidence_timestamp` shape in
+      `schemas/review-evidence.schema.yaml`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  # Claim-only fields
+  worktree_path:
+    type: string
+    minLength: 1
+    description: |
+      Repo-relative or absolute path of the physical worktree the
+      claim names. Treated as advisory (not a secret), but required
+      on every `claim` record so that the one-driver-per-worktree
+      rule can be checked. Required on `claim` records.
+  branch:
+    type: string
+    minLength: 1
+    description: |
+      Optional branch name on which the claim is currently
+      operating. Recommended but not required; pre-worktree
+      planning lanes MAY omit this.
+  envelope_ref:
+    description: |
+      Repo-relative path to the Assignment Envelope under whose
+      authority the lane is operating, or the literal `none` for
+      coordination lanes that operate without an envelope (e.g.,
+      architect-only planning). Required on `claim` records. The
+      envelope, not the ledger, remains the substantive authority.
+    oneOf:
+      - type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+      - type: string
+        const: none
+  handoff_ref:
+    type: string
+    minLength: 1
+    description: |
+      Optional repo-relative path to the active handoff document
+      under whose stop line the lane is operating.
+  recommended_prompt_ref:
+    type: string
+    minLength: 1
+    description: |
+      Optional repo-relative path to the active recommended-prompt
+      document the lane is executing.
+  lease_seconds:
+    type: integer
+    minimum: 60
+    maximum: 86400
+    description: |
+      Lease duration in seconds. Default value documented in the
+      protocol (3600); the schema validates the range only. A
+      heartbeat older than `lease_seconds` past `last_heartbeat_at`
+      makes the claim stale (advisory in Slice 0). Required on
+      `claim` records.
+  claimed_at:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) at
+      which the claim was created. Same shape as
+      `record_timestamp`. Required on `claim` records.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  last_heartbeat_at:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) of
+      the most recent heartbeat the Controller emitted for this
+      claim. For fresh claims, equals `claimed_at`. Same shape as
+      `record_timestamp`. Required on `claim` records.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  pane_label:
+    type: string
+    minLength: 1
+    enum: [architect, implementer, controller, reviewer]
+    description: |
+      Optional human-readable label of the visible pane this claim
+      describes. Generic role label only; NOT a model, tool, CLI,
+      account, or runner binding.
+  released_at:
+    description: |
+      Optional ISO-8601 UTC timestamp (or source-controlled
+      reference) at which the claim was closed. When present, the
+      claim is considered released and `release_reason` MUST also
+      be present.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  release_reason:
+    type: string
+    enum: [completed, aborted, lapsed, handed_off]
+    description: |
+      Required iff `released_at` is present. Records why the claim
+      ended.
+  # Heartbeat-only fields
+  claim_ref:
+    type: string
+    minLength: 1
+    description: |
+      Repo-relative path to the claim file this heartbeat updates.
+      Required on `heartbeat` records.
+  heartbeat_sequence:
+    type: integer
+    minimum: 0
+    description: |
+      Per-claim monotonically non-decreasing sequence counter.
+      Slice 0 validates type and lower-bound only; cross-record
+      monotonicity is reserved for later slices. Required on
+      `heartbeat` records.
+  emitted_at:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) at
+      which the heartbeat was emitted. Same shape as
+      `record_timestamp`. Required on `heartbeat` records.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional free-text status note. Advisory only; MUST NOT
+      contain secrets, tokens, credentials, or actor ids. Slice 0
+      does not enforce this prohibition mechanically.
+  # Event-only fields
+  event_kind:
+    type: string
+    enum:
+      - claim_created
+      - claim_released
+      - claim_lapsed
+      - heartbeat_emitted
+      - lane_handoff_announced
+      - lane_handoff_received
+    description: |
+      Event log discriminator. Required on `event` records.
+  event_id:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]{2,63}$"
+    description: |
+      Event identifier. Stable within
+      `(controller_id, lane_id, YYYY-MM-DD)` scope. Cross-record
+      uniqueness is reserved for later slices. Required on `event`
+      records.
+  event_timestamp:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) at
+      which the event occurred. Same shape as `record_timestamp`.
+      Required on `event` records.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  subject_claim_ref:
+    type: string
+    minLength: 1
+    description: |
+      Optional repo-relative path to a claim file the event
+      describes (e.g., for `claim_created` / `claim_released` /
+      `claim_lapsed` / `heartbeat_emitted`).
+  subject_handoff_ref:
+    type: string
+    minLength: 1
+    description: |
+      Optional repo-relative path to a handoff document the event
+      references (used for `lane_handoff_announced` /
+      `lane_handoff_received`).
+  details:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      summary:
+        type: string
+        minLength: 1
+        maxLength: 1024
+        description: |
+          Short human-readable summary of the event.
+      actor_pane_label:
+        type: string
+        enum: [architect, implementer, controller, reviewer]
+        description: |
+          Generic role label of the pane that produced the event.
+          NOT a model/tool/account binding.
+    description: |
+      Optional structured event details. Slice 0 keeps this surface
+      narrow; later slices MAY extend via additive optional fields
+      and a schema-version bump.
+oneOf:
+  - description: |
+      Claim record shape — required when `record_type == claim`.
+    properties:
+      record_type:
+        const: claim
+    required:
+      - worktree_path
+      - envelope_ref
+      - lease_seconds
+      - claimed_at
+      - last_heartbeat_at
+  - description: |
+      Heartbeat record shape — required when
+      `record_type == heartbeat`.
+    properties:
+      record_type:
+        const: heartbeat
+    required:
+      - claim_ref
+      - heartbeat_sequence
+      - emitted_at
+  - description: |
+      Event record shape — required when `record_type == event`.
+    properties:
+      record_type:
+        const: event
+    required:
+      - event_kind
+      - event_id
+      - event_timestamp
