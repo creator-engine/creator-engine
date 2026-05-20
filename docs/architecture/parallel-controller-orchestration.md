@@ -122,10 +122,14 @@ runtime tooling after.
    Additively extends the Slice 0 schema with four new event kinds.
    Records and validates only; the Hermes final-answer hook is
    reserved for the follow-on Slice 0.5R and ratified separately.
-2. **Slice 1 — Conflict Validator.** Cross-record overlap detection:
-   worktree-path collision, lane uniqueness per controller,
-   heartbeat monotonicity per claim, event-id uniqueness within the
-   `(controller, lane, day)` scope.
+2. **Slice 1/2 — Conflict / Pre-Launch Validator.** Cross-record
+   overlap detection: worktree-path collision, live lane uniqueness
+   per controller, heartbeat claim-reference resolution, event
+   subject-claim-reference resolution, heartbeat monotonicity per
+   claim where timestamps are parseable, and event-id uniqueness
+   within the `(controller, lane, day)` scope. This is validator-only:
+   it refuses unsafe pre-launch state but does not allocate worktrees
+   or launch panes.
 3. **Slice 2 — Worktree Allocator.** Short-lived worktree leases
    that line up with ledger claims; resolves contention before a
    claim is written.
@@ -152,7 +156,9 @@ Slice 0 explicitly does NOT introduce:
 
 * runtime enforcement of any kind (no multi-controller writing
   trials, no live coordination tooling);
-* live conflict detection (no cross-record checks; that is Slice 1);
+* live conflict detection beyond the read-only `active_work_ledger_conflicts`
+  pre-launch checks (semantic conflict analysis and runtime coordination remain
+  later-slice concerns);
 * automatic worktree allocation (that is Slice 2);
 * model, tool, CLI, account, runner, or QA-harness bindings (those
   remain deployment-time overlay decisions);
@@ -174,8 +180,10 @@ A fresh-clone reviewer must be able to:
 3. Read `schemas/active-work-ledger.schema.yaml` and verify that the
    schema mirrors the prose contract.
 4. Run the validator (`creator_engine_validator check`) from a fresh
-   clone and observe that the new `active_work_ledger_schema` check
-   is registered and passes on the worktree.
+   clone and observe that both `active_work_ledger_schema` and
+   `active_work_ledger_conflicts` are registered; use
+   `creator_engine_validator scan-active-work-ledger-conflicts <path>`
+   for the focused pre-launch layer.
 5. Trace each Slice 0 claim back to existing canonical doctrine
    (one-driver-per-worktree, controller boundary policy, Feature 001
    ratification) and confirm that PCO layers onto, rather than
