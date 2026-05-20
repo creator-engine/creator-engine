@@ -43,6 +43,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_ledger.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_completion = sub.add_parser(
+        "scan-completion-reports",
+        help="run the completion_report_schema / required_for_envelope / terminal_sections checks against a path",
+    )
+    scan_completion.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -104,6 +110,10 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/implementer-evidence/missing-verdict.yml"), False, "FR-001"),
         ("malformed", Path("examples/malformed/implementer-evidence/invalid-verdict-value.yml"), False, "FR-001"),
         ("malformed", Path("examples/malformed/implementer-evidence/missing-non-ratification-statement.yml"), False, "FR-001"),
+        ("malformed", Path("examples/malformed/completion-reports/missing-envelope-sha256.yaml"), False, "CR-001"),
+        ("malformed", Path("examples/malformed/completion-reports/mismatched-sha.yaml"), False, "CR-002"),
+        ("malformed", Path("examples/malformed/completion-reports/blocked-without-blocker.yaml"), False, "CR-001"),
+        ("malformed", Path("examples/malformed/completion-reports/none-without-rationale.yaml"), False, "CR-001"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -173,6 +183,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.active_work_ledger_schema import run as _run_ledger
         result = _run_ledger([Path(args.path)])
         return _emit_results([result], args.json_output)
+    if subcommand == "scan-completion-reports":
+        from .checks.completion_report_schema import run as _run_cr_schema
+        from .checks.completion_report_required_for_envelope import run as _run_cr_pairing
+        from .checks.completion_report_terminal_sections import run as _run_cr_terminal
+        results = [
+            _run_cr_schema([Path(args.path)]),
+            _run_cr_pairing([Path(args.path)]),
+            _run_cr_terminal([Path(args.path)]),
+        ]
+        return _emit_results(results, args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)

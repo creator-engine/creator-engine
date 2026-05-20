@@ -1,0 +1,33 @@
+kind: completion-report
+schema_version: "1"
+gate_class: D
+envelope_ref: ".hermes/envelopes/source-ratify-example-class-d.md"
+envelope_sha256: "3333333333333333333333333333333333333333333333333333333333333333"
+controller_id: "hermes-primary"
+lane_id: "runtime-config-tunnel"
+gate_opened_at: "2026-05-20T08:00:00Z"
+gate_closed_at: "2026-05-20T08:30:00Z"
+outcome: "completed"
+summary: |
+  Rotated the redacted runtime MCP config entry and recorded the
+  rotation in an interim side-effect note (Side-Effect Ledger
+  surface lands in Feature 005 Slice 4/7).
+recommended_immediate_next_step:
+  description: "Open the Slice 0.5R Hermes runtime hook authoring gate."
+  rationale: "The runtime substrate is now ready for the final-answer hook to read."
+  next_action_kind: "source_ratifiable_prompt"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-hermes-runtime-completion-report-hook.md"
+  prompt_sha256: "4444444444444444444444444444444444444444444444444444444444444444"
+  canonical_ratification_line: "Source ratifies the Hermes runtime hook gate (Slice 0.5R)."
+interim_side_effect_note_ref: ".hermes/completion-reports/runtime-config-tunnel/side-effect-note-20260520T083000Z.md"
+interim_side_effect_note_sha256: "5555555555555555555555555555555555555555555555555555555555555555"
+mutation_descriptors:
+  - target_class: "mcp.config"
+    target_identifier_redacted: "mcp:<redacted>"
+    change_summary: "Rotated stale entry; new entry committed atomically with fsync+rename."
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

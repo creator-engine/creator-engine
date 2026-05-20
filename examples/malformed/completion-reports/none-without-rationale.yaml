@@ -1,0 +1,30 @@
+# Malformed: exact_next_source_prompt.kind is `none` but no
+# none_rationale is provided. CR-001 fails on the
+# exact_next_source_prompt sub-schema's oneOf clause.
+kind: completion-report
+schema_version: "1"
+gate_class: E
+envelope_ref: ".hermes/envelopes/source-ratify-none-without-rationale.md"
+envelope_sha256: "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca"
+controller_id: "hermes-primary"
+lane_id: "none-without-rationale-example"
+gate_opened_at: "2026-05-20T13:00:00Z"
+gate_closed_at: "2026-05-20T13:30:00Z"
+outcome: "completed"
+summary: |
+  Demonstrates the CR-001 failure when exact_next_source_prompt.kind
+  is `none` but no canonical absence rationale is supplied.
+recommended_immediate_next_step:
+  description: "Add a canonical none_rationale value to exact_next_source_prompt."
+  rationale: "A 'no next gate' claim without a cited reason MUST fail validation."
+  next_action_kind: "no_next_gate"
+exact_next_source_prompt:
+  kind: "none"
+research_archive_path: ".hermes/research/none-without-rationale-example/"
+evidence_index_path: ".hermes/research/none-without-rationale-example/evidence-index.json"
+evidence_artifact_pointers:
+  - ".hermes/research/none-without-rationale-example/notes.md"
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

@@ -133,6 +133,185 @@ citation.
 
 ---
 
+### User Story US-0.5.1 — Controller Emits a Completion Report for a Ratified Gate (Priority: P1)
+
+The same Controller, when a Source-ratified gate ends, MUST be able
+to produce a Completion Report sidecar that validates against
+`schemas/completion-report.schema.yaml`. The sidecar carries the
+universal fields (`kind`, `schema_version`, `gate_class`,
+`envelope_ref`, `envelope_sha256`, `controller_id`, `lane_id`,
+`gate_opened_at`, `gate_closed_at`, `outcome`, `summary`,
+`recommended_immediate_next_step`, `exact_next_source_prompt`,
+`terminal_packet_sections_present`) plus the class-specific fields
+required by §g of
+[`../../docs/operations/COMPLETION_REPORT_PROTOCOL.md`](../../docs/operations/COMPLETION_REPORT_PROTOCOL.md).
+Without a valid sidecar, the gate's return value is undefined runtime
+state.
+
+**Why this priority**: The completion-report sidecar is the
+deterministic return packet of every ratified gate. It is the
+substrate the Slice 0.5R Hermes runtime hook will read. Without it,
+later slices have nothing to enforce against.
+
+**Independent Test**: A reviewer can write a golden completion-report
+sidecar by hand, run
+`creator_engine_validator scan-completion-reports examples/well-formed/completion-reports`,
+and observe `PASS completion_report_schema` and
+`PASS completion_report_required_for_envelope`.
+
+**Acceptance Scenarios**:
+
+1. **Given** the tracked schema and prose protocol, **When** a
+   Controller authors a class-A completion-report sidecar with all
+   universal required fields, **Then** the validator's CR-001 check
+   passes.
+2. **Given** a class-C-merge gate, **When** the Controller authors a
+   sidecar embedding the structured `merge_report` object, **Then**
+   the CR-001 check passes; the prose ten-field rule from
+   `../../docs/delivery/NEXT_TASK_PROTOCOL.md` §b continues to control
+   for human review.
+3. **Given** a class-F (blocked / aborted) gate, **When** the
+   Controller authors a sidecar with `outcome ∈ {blocked, aborted}`,
+   `blocker_description`, and `resumption_pointer`, **Then** the
+   CR-001 check passes.
+
+---
+
+### User Story US-0.5.2 — Envelope→Report Pairing Validates Mechanically (Priority: P1)
+
+CR-002 (`completion_report_required_for_envelope`) MUST mechanically
+verify that, when a completion-report sidecar's `envelope_ref`
+resolves to a real file on disk, the file's SHA256 equals the
+sidecar's `envelope_sha256`. CR-002 MUST also fail when two
+completion-report sidecars with `outcome: completed` reference the
+same envelope.
+
+**Why this priority**: CR-002 catches drift between the bytes Source
+ratified and the bytes the gate claims to have executed. Without
+mechanical pairing, the report's binding to ratification is
+documentary, not enforceable.
+
+**Independent Test**: A reviewer can construct two sidecars pointing
+at a known file and confirm that the matching-SHA case passes while
+the mismatched-SHA case fails with `CR-002`; the bundled
+`examples/malformed/completion-reports/mismatched-sha.yaml` fixture
+exercises the failure path.
+
+**Acceptance Scenarios**:
+
+1. **Given** a sidecar whose `envelope_ref` does not resolve to any
+   file on disk (typical for `.hermes/`-prefixed envelopes), **When**
+   CR-002 runs, **Then** the check passes (the envelope is presumed
+   to live under the local-runtime ignore).
+2. **Given** a sidecar whose `envelope_ref` resolves to a real file
+   with a different SHA256, **When** CR-002 runs, **Then** the check
+   fails citing `CR-002` and the prose contract.
+3. **Given** two sidecars referencing the same envelope, both with
+   `outcome: completed`, **When** CR-002 runs, **Then** the check
+   fails.
+
+---
+
+### User Story US-0.5.3 — Terminal Sections Are Captured in Canonical Order (Priority: P1)
+
+Per-class Markdown templates under
+`templates/hermes/completion-reports/` MUST contain the three literal
+terminal section headers `Summary`,
+`Recommended immediate next step`, and
+`Exact next Source prompt pointer+SHA256` in that canonical order.
+CR-003 (`completion_report_terminal_sections`, warn-only in v1)
+verifies that adjacent Markdown bodies for each YAML sidecar present
+the three headers in the same canonical order.
+
+**Why this priority**: The three section headers are the cross-skill
+terminal packet shape the Controller continuity and GitHub-PR
+workflow skills already require. Pinning them in templates and in a
+warn-only validator gives CI-time defense in depth ahead of the
+Slice 0.5R runtime hook.
+
+**Independent Test**: A reviewer can list the six per-class Markdown
+templates and confirm each contains the three headers verbatim and
+in canonical order; the bundled malformed fixture
+`examples/malformed/completion-reports/missing-section-header.md`
+exercises the CR-003 warning path.
+
+**Acceptance Scenarios**:
+
+1. **Given** the six per-class Markdown templates (`class-a-ratified-prompt`,
+   `class-c-merge`, `class-c-pr-only`, `class-d-runtime-mutation`,
+   `class-e-read-only-research`, `class-f-blocked-or-aborted`),
+   **When** a reviewer reads each template, **Then** the three
+   canonical headers appear verbatim and in canonical order.
+2. **Given** a Markdown body that omits one of the three headers,
+   **When** CR-003 runs, **Then** the check emits a `CR-003`
+   warning citing the missing header(s).
+
+---
+
+### User Story US-0.5.4 — Active-Work Ledger Records Completion-Report Events Additively (Priority: P1)
+
+`schemas/active-work-ledger.schema.yaml` MUST accept
+`schema_version: "2"` and the four new `event_kind` values
+`gate_opened`, `gate_closed`, `completion_report_emitted`, and
+`gate_blocked`, with an optional `details.completion_report_ref`
+pointer linking the event to a completion-report sidecar. The
+extension MUST be additive: v1 records continue to validate
+unchanged.
+
+**Why this priority**: Binding completion-report emission into the
+existing Active-Work Ledger event stream avoids a parallel ad-hoc
+artifact stream and gives the Slice 0.5R runtime hook a single
+source of truth (the ledger) to read.
+
+**Independent Test**: A reviewer can author v2 event records using
+each of the four new event kinds and confirm the
+`active_work_ledger_schema` check passes; v1 records continue to
+pass unchanged.
+
+**Acceptance Scenarios**:
+
+1. **Given** an event record with `schema_version: "2"` and
+   `event_kind: gate_opened`, **When** the validator runs, **Then**
+   the check passes.
+2. **Given** a `completion_report_emitted` event with
+   `details.completion_report_ref` pointing at a sidecar path,
+   **When** the validator runs, **Then** the check passes.
+3. **Given** a `schema_version: "1"` Slice 0 event using only the
+   original six event kinds, **When** the validator runs, **Then**
+   the check still passes (additive extension).
+
+---
+
+### User Story US-0.5.5 — Slice 0.5 Defers Runtime Enforcement (Priority: P1)
+
+Slice 0.5 is **record/validate only**. The Hermes final-answer /
+send-blocking runtime hook is reserved for the follow-on Slice 0.5R
+and is ratified separately as a Hermes-side change. The
+grandfather-exemption for dangling pre-hook gates is reserved for
+Slice 0.5T. The governed-override emergency bypass is reserved for
+Slice 0.5G.
+
+**Why this priority**: Keeping authoring and runtime on separate
+gates preserves the substrate-before-automation discipline that PCO
+Slice 0 established.
+
+**Independent Test**: A reviewer reads
+[`../../docs/operations/COMPLETION_REPORT_PROTOCOL.md`](../../docs/operations/COMPLETION_REPORT_PROTOCOL.md)
+§n and §o and can name the deferred slices (0.5R / 0.5T / 0.5G)
+and the specific Slice 0.5 non-goal each closes.
+
+**Acceptance Scenarios**:
+
+1. **Given** the Slice 0.5 substrate, **When** a Controller emits a
+   terminal answer for a ratified gate without an accompanying
+   sidecar, **Then** Slice 0.5 does NOT mechanically block the
+   answer; the block is reserved for Slice 0.5R.
+2. **Given** a dangling pre-hook gate observed in the ledger,
+   **When** Slice 0.5 runs, **Then** Slice 0.5 does NOT
+   retroactively close it; closure is reserved for Slice 0.5T.
+
+---
+
 ### User Story US-0.4 — Slice 0 Does Not Yet Enforce Execution (Priority: P1)
 
 The spec, the protocol doc, and the architecture doc explicitly state
@@ -273,6 +452,58 @@ ledger, remains the substantive authority; ledger records never
 replace handoff content. Pointer-only relay per
 [`../../docs/operations/NO_COPY_PASTE_PATTERN.md`](../../docs/operations/NO_COPY_PASTE_PATTERN.md)
 applies.
+
+### CR-001 — Completion Report Schema (Slice 0.5)
+
+The tracked schema at `schemas/completion-report.schema.yaml`
+defines the Completion Report contract: universal required fields
+(per
+[`../../docs/operations/COMPLETION_REPORT_PROTOCOL.md`](../../docs/operations/COMPLETION_REPORT_PROTOCOL.md)
+§f), per-class conditional fields (§g), and the
+`exact_next_source_prompt` shape (§i.2). The
+`completion_report_schema` validator check validates one sidecar
+at a time against this schema.
+
+### CR-002 — Envelope→Report Pairing (Slice 0.5)
+
+The `completion_report_required_for_envelope` validator check MUST
+verify that, when a completion-report sidecar's `envelope_ref`
+resolves to a real file in the scanned tree, the file's SHA256
+equals `envelope_sha256`; and MUST fail when more than one sidecar
+references the same envelope with `outcome: completed`. The
+canonical envelope→report cardinality is "at most one completed
+report per ratified envelope."
+
+### CR-003 — Terminal Section Headers (Slice 0.5, warn-only)
+
+The `completion_report_terminal_sections` validator check MUST
+verify that, when a completion-report Markdown body is present
+adjacent to its YAML sidecar, the body contains the three literal
+section headers `Summary`,
+`Recommended immediate next step`, and
+`Exact next Source prompt pointer+SHA256` in that canonical order.
+CR-003 emits warnings, not errors, in v1; the primary enforcer is
+the Slice 0.5R Hermes runtime hook.
+
+### PCO-014 — Active-Work Ledger Additive Event Extension (Slice 0.5)
+
+`schemas/active-work-ledger.schema.yaml` MUST additively accept
+`schema_version: "2"` and four new `event_kind` values:
+`gate_opened`, `gate_closed`, `completion_report_emitted`, and
+`gate_blocked`. The optional `details.completion_report_ref`
+pointer MAY appear under any `event_kind` and matches the same
+filename pattern used elsewhere in the schema. The extension is
+additive: Slice 0 v1 records continue to validate unchanged.
+
+### PCO-015 — Slice 0.5 Boundary Statement (No Runtime Enforcement)
+
+Slice 0.5 records and validates completion-report sidecars and
+extends the Active-Work Ledger schema additively; it does NOT yet
+implement the Hermes final-answer / send-blocking runtime hook
+(Slice 0.5R), does NOT yet retroactively close dangling pre-hook
+gates (Slice 0.5T), and does NOT yet implement the governed-override
+emergency bypass (Slice 0.5G). This statement MUST appear normatively
+in the schema description, the prose protocol, and this spec.
 
 ### PCO-013 — Relationship to One-Driver-Per-Worktree
 

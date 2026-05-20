@@ -1,0 +1,30 @@
+# Completion Report sidecar template — Class A (Source-ratified saved prompt execution).
+# Contract: schemas/completion-report.schema.yaml + docs/operations/COMPLETION_REPORT_PROTOCOL.md.
+# Replace every <placeholder> before authoring.
+kind: completion-report
+schema_version: "1"
+gate_class: A
+envelope_ref: "<repo-relative-path-to-envelope-or-prompt>"
+envelope_sha256: "<64-lower-hex-sha256>"
+controller_id: "<controller-id>"
+lane_id: "<lane-id>"
+gate_opened_at: "<YYYY-MM-DDThh:mm:ssZ>"
+gate_closed_at: "<YYYY-MM-DDThh:mm:ssZ>"
+outcome: "completed"
+summary: |
+  <one to four sentences summarising what the gate did>
+recommended_immediate_next_step:
+  description: "<what the next action is>"
+  rationale: "<why this action follows from the just-completed gate>"
+  next_action_kind: "source_ratifiable_prompt"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: "<repo-relative-or-hermes-relative-path-to-next-prompt>"
+  prompt_sha256: "<64-lower-hex-sha256>"
+  canonical_ratification_line: "<the line Source will use to authorise the next gate>"
+evidence_artifact_pointers:
+  - "<repo-relative-path-to-evidence-artifact>"
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

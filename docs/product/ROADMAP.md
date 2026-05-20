@@ -184,8 +184,8 @@ one-driver-per-worktree rule from
 
 Slice plan:
 
-1. **Slice 0 — Active-Work Ledger** *(in progress, this batch)*.
-   Adds the ledger record schema
+1. **Slice 0 — Active-Work Ledger** *(merged on `main` via PR #52,
+   merge commit `dab1ac9`)*. Adds the ledger record schema
    (`schemas/active-work-ledger.schema.yaml`), the prose protocol
    ([`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md)),
    the architecture doc
@@ -194,6 +194,23 @@ Slice plan:
    and validates only; does not yet enforce multi-controller
    execution. Spec:
    [`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).
+1.5. **Slice 0.5 — Completion Report Substrate** *(in progress,
+   this batch)*. Adds the completion-report record schema
+   (`schemas/completion-report.schema.yaml`), the prose protocol
+   ([`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md)),
+   per-class Markdown/YAML templates under
+   `templates/hermes/completion-reports/`, well-formed/malformed
+   examples under `examples/well-formed/completion-reports/` and
+   `examples/malformed/completion-reports/`, and three validator
+   checks (`completion_report_schema` CR-001,
+   `completion_report_required_for_envelope` CR-002,
+   `completion_report_terminal_sections` CR-003 warn-only).
+   Additively extends the Active-Work Ledger schema with four new
+   event kinds (`gate_opened`, `gate_closed`,
+   `completion_report_emitted`, `gate_blocked`) under
+   `schema_version: "2"`. Records and validates only; the Hermes
+   final-answer / send-blocking runtime hook is reserved for the
+   follow-on slice 0.5R. `requires: Slice 0`.
 2. **Slice 1 — Conflict Validator.** Cross-record overlap detection:
    worktree-path collisions, lane uniqueness per controller,
    heartbeat monotonicity, event-id uniqueness within scope.

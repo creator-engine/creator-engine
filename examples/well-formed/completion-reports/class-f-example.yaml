@@ -1,0 +1,34 @@
+kind: completion-report
+schema_version: "1"
+gate_class: F
+envelope_ref: ".hermes/envelopes/source-ratify-example-class-f.md"
+envelope_sha256: "6666666666666666666666666666666666666666666666666666666666666666"
+controller_id: "hermes-primary"
+lane_id: "blocked-gate-example"
+gate_opened_at: "2026-05-20T09:00:00Z"
+gate_closed_at: "2026-05-20T09:15:00Z"
+outcome: "blocked"
+summary: |
+  Gate opened to perform a hypothetical downstream task but was
+  blocked when the upstream substrate was not present. Closing the
+  gate explicitly per the protocol: a blocked gate without a closure
+  report is undefined runtime state.
+recommended_immediate_next_step:
+  description: "Resolve the blocker by ratifying the upstream substrate gate."
+  rationale: "The downstream gate cannot make progress without the upstream substrate; ratify the upstream gate first."
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-upstream-substrate.md"
+  prompt_sha256: "7777777777777777777777777777777777777777777777777777777777777777"
+  canonical_ratification_line: "Source ratifies the upstream substrate gate before the downstream gate may reopen."
+blocker_description: "Upstream substrate gate has not been ratified; downstream depends on it."
+resumption_pointer:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-example-class-f-resume.md"
+  prompt_sha256: "8888888888888888888888888888888888888888888888888888888888888888"
+partial_side_effects: []
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

@@ -163,6 +163,24 @@ update. Cleanup actions that mutate shared state (deleting remote
 branches, force-pushes) MUST be ratified separately and MUST NOT
 have been silently performed under this item's envelope.
 
+### b.10 Completion Report Substrate cross-reference (non-merge ratified gates)
+
+For ratified gates that did **not** end at a canonical-branch
+merge (classes A, C-pr-only, D, E, F per
+[`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md)
+§d.1), a Completion Report sidecar authored against
+`schemas/completion-report.schema.yaml` MUST exist and validate.
+The item is NOT `Done` until that artifact exists. This criterion
+references the Completion Report Substrate; it does NOT duplicate
+the ten-field merge rule from §b.7. The two surfaces are
+complementary:
+
+* Class C-merge → §b.7 ten-field rule controls for human review;
+  the optional class-C-merge schema fields encode the same facts
+  in machine-readable form.
+* Classes A, C-pr-only, D, E, F → the completion-report sidecar is
+  the substantive return packet; §b.7 does not apply.
+
 ## c. CI verifies; CI does not ratify
 
 **CI verifies; CI does not ratify.**
@@ -250,12 +268,13 @@ requirements:
 - Names this as a delivery-view DoD layered on top of Feature 001
   FR-014 and on the delivery statuses in
   [`./BACKLOG.md`](./BACKLOG.md).
-- Enumerates the nine Done criteria (§b.1–§b.9) covering scope
+- Enumerates the Done criteria (§b.1–§b.10) covering scope
   conformance, validation evidence, scope audit, independent review
   evidence (when applicable), Source ratification (privileged
   classes and current Phase 1 integration), PR / merge evidence,
-  the ten-field post-merge report, Backlog / Kanban refresh, and
-  cleanup state.
+  the ten-field post-merge report, Backlog / Kanban refresh,
+  cleanup state, and (for non-merge ratified gates) the Completion
+  Report Substrate sidecar requirement.
 - States explicitly that **CI verifies; CI does not ratify** (§c).
 - States explicitly that external tracker status cannot mark a repo
   work item Done (§d).

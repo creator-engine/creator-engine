@@ -1,0 +1,32 @@
+# Malformed: envelope_ref points to an existing tracked file in the
+# scanned tree, but envelope_sha256 is all-zeros so it cannot match
+# the file's real SHA256. CR-002 fails. The schema itself accepts the
+# 64-lower-hex string, so CR-001 passes; this isolates the CR-002
+# failure mode.
+kind: completion-report
+schema_version: "1"
+gate_class: A
+envelope_ref: "schemas/completion-report.schema.yaml"
+envelope_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+controller_id: "hermes-primary"
+lane_id: "mismatched-sha-example"
+gate_opened_at: "2026-05-20T11:00:00Z"
+gate_closed_at: "2026-05-20T11:30:00Z"
+outcome: "completed"
+summary: |
+  Demonstrates the CR-002 failure mode: envelope_ref resolves to a
+  real file in the scanned tree, but envelope_sha256 does not match
+  the file's actual SHA256.
+recommended_immediate_next_step:
+  description: "Recompute the SHA256 of the envelope file and update envelope_sha256."
+  rationale: "Reports must bind to the exact bytes Source ratified."
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: ".hermes/envelopes/source-ratify-fix-mismatched-sha.md"
+  prompt_sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  canonical_ratification_line: "Source ratifies the SHA repair gate."
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

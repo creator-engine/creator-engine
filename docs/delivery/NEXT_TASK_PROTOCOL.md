@@ -297,3 +297,26 @@ report fields:
   only — it does not amend the Feature 001 spec-status lifecycle.
 - Instance-local facts are explicitly prohibited from upstream
   delivery artifacts.
+
+## f. Non-merge ratified gates (cross-reference to Completion Report Substrate)
+
+The ten fields in §b are the canonical post-merge report. For
+ratified gates that do **not** end at a canonical-branch merge —
+PR-only edits, non-Git runtime / config / provider mutations,
+read-only research, and blocked / aborted gates — the substantive
+return packet is a Completion Report artifact authored against
+`schemas/completion-report.schema.yaml`. The prose contract,
+trigger taxonomy, per-class required fields, and canonical absence
+reasons live at
+[`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md).
+
+This protocol does NOT duplicate the ten merge fields in the
+completion-report schema; the schema's class-C-merge `merge_report`
+object encodes the same facts in machine-readable form, and §b
+above continues to control for human review of a merge gate. The
+two surfaces are complementary, not redundant.
+
+For class C-merge, authors satisfy this protocol's §b and the
+class-C-merge schema fields together. For all other ratified-gate
+classes (A, C-pr-only, D, E, F), the completion-report artifact is
+the return packet; §b does not apply.

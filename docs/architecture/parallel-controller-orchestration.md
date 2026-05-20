@@ -87,16 +87,17 @@ The following invariants remain in force unchanged:
 
 ## d. Coordination primitives
 
-PCO introduces four coordination primitives. Slice 0 introduces the
-**schema and protocol** for all four; runtime mechanics arrive in
-later slices.
+PCO introduces five coordination primitives. Slice 0 introduces the
+**schema and protocol** for the first four; Slice 0.5 adds the fifth
+(Completion Report). Runtime mechanics arrive in later slices.
 
-| Primitive | Purpose | Slice 0 substance |
+| Primitive | Purpose | Slice substance |
 |---|---|---|
-| **Claim** | "Controller X is currently driving lane L on worktree W under envelope E." | Tracked record shape; validator; protocol §h. |
-| **Heartbeat** | "Claim is still live as of timestamp T, sequence N." | Tracked record shape; validator; protocol §i. |
-| **Lane** | The coordination unit that claims and heartbeats reference. | `lane_id` pattern in schema; protocol §g. |
-| **Event log** | Append-only record of `claim_created`, `claim_released`, `claim_lapsed`, `heartbeat_emitted`, `lane_handoff_announced`, `lane_handoff_received`. | Tracked record shape; validator; protocol §j, §n. |
+| **Claim** | "Controller X is currently driving lane L on worktree W under envelope E." | Slice 0: tracked record shape; validator; ledger protocol §h. |
+| **Heartbeat** | "Claim is still live as of timestamp T, sequence N." | Slice 0: tracked record shape; validator; ledger protocol §i. |
+| **Lane** | The coordination unit that claims and heartbeats reference. | Slice 0: `lane_id` pattern in schema; ledger protocol §g. |
+| **Event log** | Append-only record of `claim_created`, `claim_released`, `claim_lapsed`, `heartbeat_emitted`, `lane_handoff_announced`, `lane_handoff_received`. Slice 0.5 adds `gate_opened`, `gate_closed`, `completion_report_emitted`, `gate_blocked`. | Slice 0 + 0.5 additive: tracked record shape; validator; ledger protocol §j, §n, §n.1. |
+| **Completion Report** | Deterministic return packet for every Source-ratified gate. Binds envelope+SHA to outcome, evidence, and the next ratifiable prompt pointer. | Slice 0.5: tracked schema (`schemas/completion-report.schema.yaml`); prose protocol [`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md); per-class templates; CR-001/CR-002/CR-003 validators. |
 
 The runtime directory shape (`.hermes/active-work-ledger/`), the
 atomic-write rule (temp + fsync + rename), the advisory-lock rule
@@ -111,10 +112,16 @@ PCO is delivered in slices. Each slice keeps the
 substrate-before-automation discipline: protocol and validator first,
 runtime tooling after.
 
-1. **Slice 0 — Active-Work Ledger (this slice).** Tracked record
-   schema + prose protocol + architecture doc + validator skeleton.
-   Records and validates one record at a time. Does **not** enforce
+1. **Slice 0 — Active-Work Ledger.** Tracked record schema + prose
+   protocol + architecture doc + validator skeleton. Records and
+   validates one record at a time. Does **not** enforce
    multi-controller execution.
+1.5. **Slice 0.5 — Completion Report Substrate.** Tracked completion-
+   report schema + prose protocol + per-class templates + well-formed
+   and malformed examples + CR-001 / CR-002 / CR-003 validator checks.
+   Additively extends the Slice 0 schema with four new event kinds.
+   Records and validates only; the Hermes final-answer hook is
+   reserved for the follow-on Slice 0.5R and ratified separately.
 2. **Slice 1 — Conflict Validator.** Cross-record overlap detection:
    worktree-path collision, lane uniqueness per controller,
    heartbeat monotonicity per claim, event-id uniqueness within the

@@ -1,0 +1,557 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/completion-report.schema.yaml"
+title: "Creator Engine Completion Report"
+description: |
+  Machine-readable schema for a single Completion Report artifact
+  authored under the Creator Engine Parallel Controller Orchestration
+  (PCO) substrate.
+
+  Prose contract:
+  `docs/operations/COMPLETION_REPORT_PROTOCOL.md`.
+
+  Architectural framing:
+  `docs/architecture/parallel-controller-orchestration.md`.
+
+  Feature spec:
+  `specs/005-pco-parallel-controller-orchestration/spec.md`
+  (Slice 0.5).
+
+  A Completion Report is the deterministic return packet emitted by
+  every Source-ratified gate. It records which envelope was executed,
+  which controller drove the gate, what the outcome was, what evidence
+  it produced, and the next Source-ratifiable prompt pointer (or a
+  canonical absence rationale).
+
+  Slice 0.5 boundary statement: this schema and its validator skeleton
+  record and validate completion-report artifacts; they do NOT yet
+  implement the Hermes final-answer / send-blocking runtime hook. The
+  runtime enforcement vector is reserved for the follow-on slice
+  (Slice 0.5R) and is ratified separately as a Hermes-side change.
+
+  Tracked-schema vs local runtime-state distinction:
+    * this schema and its prose protocol are tracked;
+    * completion-report artifacts themselves live under
+      `.hermes/research/<run-archive>/completion-report-*.yaml` (and
+      `.md`) or under `.hermes/completion-reports/<lane_id>/*.yaml`,
+      both covered by the existing `.hermes/` ignore rule, and MUST
+      NOT be added to the index.
+
+  Concrete tool, model, CLI, SaaS account, runner, source-host
+  application, bot slug, or QA-harness identifiers MUST NOT appear
+  here as normative upstream bindings; those remain deployment-time
+  overlay decisions per `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`
+  §c precedent. Real secrets, tokens, credentials, source-host
+  installation ids, durable actor ids, app slugs, account names, and
+  machine-local absolute paths beyond `worktree_path` (advisory) MUST
+  NOT appear in completion-report artifacts.
+type: object
+required:
+  - kind
+  - schema_version
+  - gate_class
+  - envelope_ref
+  - envelope_sha256
+  - controller_id
+  - lane_id
+  - gate_opened_at
+  - gate_closed_at
+  - outcome
+  - summary
+  - recommended_immediate_next_step
+  - exact_next_source_prompt
+  - terminal_packet_sections_present
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: completion-report
+    description: |
+      Discriminator constant. Files that do not carry this exact value
+      are not governed Completion Reports under this contract and MUST
+      NOT be validated by the `completion_report_schema` check.
+  schema_version:
+    type: string
+    const: "1"
+    description: |
+      Completion Report schema version. Slice 0.5 ships v1; later
+      slices MAY extend via additive optional fields and bump this
+      const (mirroring the active-work-ledger schema discipline).
+  gate_class:
+    type: string
+    enum: [A, C-merge, C-pr-only, D, E, F]
+    description: |
+      Trigger class from `docs/operations/COMPLETION_REPORT_PROTOCOL.md`:
+        A — Source-ratified saved prompt execution (universal case;
+            also covers the visible architect/engineer pane subclass);
+        C-merge — Git/GitHub mutation gate that ended at a
+            canonical-branch merge (carries the ten
+            NEXT_TASK_PROTOCOL.md §b fields via `merge_report`);
+        C-pr-only — Git/GitHub mutation gate that opened/edited a PR
+            without merging (carries PR identifiers);
+        D — Non-Git runtime / config / provider / credential / tooling
+            mutation gate;
+        E — Read-only research gate that consumed a ratified prompt;
+        F — Blocked / interrupted gate after ratification.
+  envelope_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Repo-relative path to the Source-ratified envelope/prompt file
+      whose execution this report returns from. Required on every
+      class. Pointer-only relay per
+      `docs/operations/NO_COPY_PASTE_PATTERN.md`.
+  envelope_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      SHA256 of the envelope file as Source ratified it, 64 lower-hex.
+      Required on every class. The hash binds the report to the exact
+      bytes Source ratified.
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable identifier for the driving Controller. Same shape as
+      `active-work-ledger.schema.yaml` `controller_id`.
+  lane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      PCO lane identifier. Same shape as
+      `active-work-ledger.schema.yaml` `lane_id`. Use `single` when
+      PCO is not active on the gate.
+  gate_opened_at:
+    description: |
+      Timestamp at which the gate opened. Same shape as
+      `active-work-ledger.schema.yaml` `record_timestamp`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  gate_closed_at:
+    description: |
+      Timestamp at which the gate ended (success, partial, blocked, or
+      aborted). Same shape as `gate_opened_at`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  outcome:
+    type: string
+    enum: [completed, partial, blocked, aborted]
+    description: |
+      Gate exit code. `completed` and `partial` are reserved for
+      classes A, C-merge, C-pr-only, D, and E. `blocked` and `aborted`
+      are reserved for class F.
+  summary:
+    type: string
+    minLength: 1
+    maxLength: 4096
+    description: |
+      Short prose summary. Maps to the `Summary` terminal packet
+      section.
+  recommended_immediate_next_step:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - description
+      - rationale
+      - next_action_kind
+    properties:
+      description:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      rationale:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      next_action_kind:
+        type: string
+        enum:
+          - source_ratifiable_prompt
+          - backlog_refresh_and_source_escalation
+          - blocker_resolution
+          - no_next_gate
+    description: |
+      Maps to the `Recommended immediate next step` terminal packet
+      section. `backlog_refresh_and_source_escalation` covers
+      `NEXT_TASK_PROTOCOL.md` §c.3; `blocker_resolution` covers §c.4;
+      `no_next_gate` is the only value permitted to set
+      `exact_next_source_prompt.kind == none`.
+  exact_next_source_prompt:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - kind
+    properties:
+      kind:
+        type: string
+        enum: [present, none]
+      prompt_path:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+      prompt_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      canonical_ratification_line:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      none_rationale:
+        type: string
+        enum:
+          - roadmap_milestone_complete
+          - source_paused_program
+          - awaiting_external_dependency
+          - backlog_refresh_required
+    oneOf:
+      - description: |
+          Present-next-prompt shape — required when
+          `kind == present`.
+        properties:
+          kind:
+            const: present
+        required:
+          - prompt_path
+          - prompt_sha256
+          - canonical_ratification_line
+      - description: |
+          No-next-prompt shape — required when `kind == none`. The
+          `none_rationale` MUST cite one of the four canonical
+          absence reasons.
+        properties:
+          kind:
+            const: none
+        required:
+          - none_rationale
+    description: |
+      Maps to the `Exact next Source prompt pointer+SHA256` terminal
+      packet section. When `kind == present`, `prompt_path`,
+      `prompt_sha256`, and `canonical_ratification_line` are required.
+      When `kind == none`, `none_rationale` is required and MUST cite
+      one of the canonical absence reasons.
+  evidence_artifact_pointers:
+    type: array
+    items:
+      type: string
+      minLength: 1
+      pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Repo-relative pointers to evidence artifacts produced by the
+      gate (e.g., research archive paths, transcript paths, validator
+      output paths). At least one entry is required for class E
+      (enforced by the conditional `oneOf` below).
+  terminal_packet_sections_present:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - summary
+      - recommended_immediate_next_step
+      - exact_next_source_prompt_pointer_sha256
+    properties:
+      summary:
+        type: boolean
+      recommended_immediate_next_step:
+        type: boolean
+      exact_next_source_prompt_pointer_sha256:
+        type: boolean
+    description: |
+      Self-declared presence of the three literal terminal-packet
+      section headers in the Markdown body the controller emitted.
+      The runtime hook (Slice 0.5R) cross-verifies these declarations
+      against the actual terminal text it is about to release; the
+      CI-side `completion_report_terminal_sections` check (CR-003)
+      cross-verifies against the adjacent Markdown body when present.
+  merge_report:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - pr_number
+      - pr_url_or_identifier
+      - merge_commit
+      - head_ref
+      - head_sha
+      - base_ref
+      - base_sha
+      - merged_at
+      - merged_by_role
+      - merge_strategy
+      - validator_summary_ref
+    properties:
+      pr_number:
+        type: integer
+        minimum: 1
+      pr_url_or_identifier:
+        type: string
+        minLength: 1
+      merge_commit:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+      head_ref:
+        type: string
+        minLength: 1
+      head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+      base_ref:
+        type: string
+        minLength: 1
+      base_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+      merged_at:
+        type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      merged_by_role:
+        type: string
+        enum: [architect, implementer, controller, reviewer, source]
+      merge_strategy:
+        type: string
+        enum: [squash, rebase, merge]
+      validator_summary_ref:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Required iff `gate_class == "C-merge"`. Encodes the ten
+      NEXT_TASK_PROTOCOL.md §b post-merge fields in machine-readable
+      form. This schema does NOT redefine or duplicate the prose
+      ten-field rule; it records the same facts in structured form
+      so the validator can read them.
+  pr_action:
+    type: string
+    enum: [opened, edited, reviewed, closed, reopened]
+    description: |
+      Required iff `gate_class == "C-pr-only"`.
+  pr_identifiers:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - pr_number
+      - pr_url_or_identifier
+      - head_ref
+      - head_sha
+      - base_ref
+    properties:
+      pr_number:
+        type: integer
+        minimum: 1
+      pr_url_or_identifier:
+        type: string
+        minLength: 1
+      head_ref:
+        type: string
+        minLength: 1
+      head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+      base_ref:
+        type: string
+        minLength: 1
+    description: |
+      Required iff `gate_class == "C-pr-only"`.
+  side_effect_ledger_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Repo-relative path to a Side-Effect Ledger record (Feature 005
+      Slice 4 / Slice 7 surface). Either this field OR
+      `interim_side_effect_note_ref` + `interim_side_effect_note_sha256`
+      is required iff `gate_class == "D"`.
+  interim_side_effect_note_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Interim side-effect note path used before the Side-Effect
+      Ledger lands. Required-with-sibling per the class-D conditional.
+  interim_side_effect_note_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      SHA256 of the interim side-effect note, 64 lower-hex.
+  mutation_descriptors:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      unevaluatedProperties: false
+      required:
+        - target_class
+        - target_identifier_redacted
+        - change_summary
+      properties:
+        target_class:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_identifier_redacted:
+          type: string
+          minLength: 1
+          maxLength: 256
+        change_summary:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    description: |
+      Required iff `gate_class == "D"`. Each entry describes one
+      mutated surface (e.g., MCP config, provider account, tmux
+      session). Identifiers MUST be redacted per the well-formed
+      handoff examples precedent.
+  research_archive_path:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Required iff `gate_class == "E"`. Repo-relative path to the
+      research run archive (typically under `.hermes/research/`).
+  evidence_index_path:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+    description: |
+      Required iff `gate_class == "E"`. Repo-relative path to the
+      machine-readable evidence index inside the research archive.
+  blocker_description:
+    type: string
+    minLength: 1
+    maxLength: 2048
+    description: |
+      Required iff `gate_class == "F"`. Names the specific blocker
+      that closed the gate (e.g., "upstream PR not merged",
+      "Source rescinded ratification mid-flight").
+  resumption_pointer:
+    type: object
+    unevaluatedProperties: false
+    required:
+      - kind
+    properties:
+      kind:
+        type: string
+        enum: [present, none]
+      prompt_path:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+      prompt_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      none_rationale:
+        type: string
+        minLength: 1
+        maxLength: 2048
+    oneOf:
+      - properties:
+          kind:
+            const: present
+        required:
+          - prompt_path
+          - prompt_sha256
+      - properties:
+          kind:
+            const: none
+        required:
+          - none_rationale
+    description: |
+      Required iff `gate_class == "F"`. Names the resumption pointer
+      (a follow-on prompt envelope) or explicitly states no
+      resumption is planned, with rationale.
+  partial_side_effects:
+    type: array
+    items:
+      type: object
+      unevaluatedProperties: false
+      required:
+        - target_class
+        - target_identifier_redacted
+        - change_summary
+      properties:
+        target_class:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_identifier_redacted:
+          type: string
+          minLength: 1
+          maxLength: 256
+        change_summary:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    description: |
+      Optional on class F. Same shape as `mutation_descriptors`.
+      Records any partial side effects that landed before the gate
+      blocked or aborted.
+oneOf:
+  - description: |
+      Class A — Source-ratified saved prompt execution (universal
+      case, includes the visible architect/engineer pane subclass).
+      No class-specific required fields beyond the universal set.
+    properties:
+      gate_class:
+        const: A
+  - description: |
+      Class C-merge — Git/GitHub mutation gate that ended at a
+      canonical-branch merge. Requires `merge_report`.
+    properties:
+      gate_class:
+        const: C-merge
+    required:
+      - merge_report
+  - description: |
+      Class C-pr-only — Git/GitHub mutation gate that opened/edited
+      a PR without merging. Requires `pr_action` and `pr_identifiers`.
+    properties:
+      gate_class:
+        const: C-pr-only
+    required:
+      - pr_action
+      - pr_identifiers
+  - description: |
+      Class D — Non-Git runtime / config / provider / credential /
+      tooling mutation gate. Requires `mutation_descriptors` and
+      either `side_effect_ledger_ref` or the interim sibling fields.
+    properties:
+      gate_class:
+        const: D
+    required:
+      - mutation_descriptors
+    anyOf:
+      - required:
+          - side_effect_ledger_ref
+      - required:
+          - interim_side_effect_note_ref
+          - interim_side_effect_note_sha256
+  - description: |
+      Class E — Read-only research gate that consumed Source
+      ratification. Requires research archive + evidence index
+      pointers and at least one evidence artifact pointer.
+    properties:
+      gate_class:
+        const: E
+    required:
+      - research_archive_path
+      - evidence_index_path
+      - evidence_artifact_pointers
+  - description: |
+      Class F — Blocked / interrupted gate after ratification.
+      Requires blocker description and resumption pointer. Outcome
+      MUST be `blocked` or `aborted`.
+    properties:
+      gate_class:
+        const: F
+      outcome:
+        enum: [blocked, aborted]
+    required:
+      - blocker_description
+      - resumption_pointer

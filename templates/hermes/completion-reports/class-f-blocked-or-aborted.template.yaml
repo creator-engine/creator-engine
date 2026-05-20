@@ -1,0 +1,34 @@
+# Completion Report sidecar template — Class F (Blocked or aborted gate).
+# Contract: schemas/completion-report.schema.yaml + docs/operations/COMPLETION_REPORT_PROTOCOL.md.
+# Identifiers under partial_side_effects MUST be redacted per §m. Replace every <placeholder>.
+kind: completion-report
+schema_version: "1"
+gate_class: F
+envelope_ref: "<repo-relative-path-to-envelope-or-prompt>"
+envelope_sha256: "<64-lower-hex-sha256>"
+controller_id: "<controller-id>"
+lane_id: "<lane-id>"
+gate_opened_at: "<YYYY-MM-DDThh:mm:ssZ>"
+gate_closed_at: "<YYYY-MM-DDThh:mm:ssZ>"
+outcome: "blocked"
+summary: |
+  <one to four sentences summarising what was attempted and what blocked it>
+recommended_immediate_next_step:
+  description: "<usually a narrow blocker-resolution prompt>"
+  rationale: "<why this action follows from the blocker>"
+  next_action_kind: "blocker_resolution"
+exact_next_source_prompt:
+  kind: "present"
+  prompt_path: "<repo-relative-or-hermes-relative-path-to-next-prompt>"
+  prompt_sha256: "<64-lower-hex-sha256>"
+  canonical_ratification_line: "<the line Source will use to authorise the next gate>"
+blocker_description: "<what blocked the gate>"
+resumption_pointer:
+  kind: "present"
+  prompt_path: "<repo-relative-or-hermes-relative-path-to-resumption-prompt>"
+  prompt_sha256: "<64-lower-hex-sha256>"
+partial_side_effects: []
+terminal_packet_sections_present:
+  summary: true
+  recommended_immediate_next_step: true
+  exact_next_source_prompt_pointer_sha256: true

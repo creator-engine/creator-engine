@@ -197,3 +197,87 @@ def test_release_reason_constrained(tmp_path: Path):
     errors = validate_active_work_ledger_record(record, tmp_path / "claim.yaml")
     assert errors
     assert any("release_reason" in error.path for error in errors)
+
+
+def test_slice_0_5_gate_opened_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "gate_opened"
+    record["event_id"] = "gate-opened-001"
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_0_5_gate_closed_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "gate_closed"
+    record["event_id"] = "gate-closed-001"
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_0_5_completion_report_emitted_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "completion_report_emitted"
+    record["event_id"] = "completion-report-emitted-001"
+    record["details"] = {
+        "summary": "report appended",
+        "completion_report_ref": (
+            ".hermes/research/example-archive/completion-report-20260520T070000Z.yaml"
+        ),
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_0_5_gate_blocked_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "gate_blocked"
+    record["event_id"] = "gate-blocked-001"
+    record["details"] = {
+        "summary": "blocked",
+        "completion_report_ref": (
+            ".hermes/completion-reports/example-lane/20260520T091500Z.yaml"
+        ),
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_0_v1_records_still_validate(tmp_path: Path):
+    # The Slice 0.5 additive extension MUST NOT break Slice 0 v1 records.
+    record = valid_event_record()
+    # schema_version stays "1"; event_kind stays in the v1 set.
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_unknown_event_kind_still_rejected(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "completely_bogus_event_kind"
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors
+    assert any("event_kind" in error.path for error in errors)
+
+
+def test_bogus_schema_version_rejected(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "99"
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors
+    assert any("schema_version" in error.path for error in errors)
+
+
+def test_completion_report_ref_pattern_enforced(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "2"
+    record["event_kind"] = "completion_report_emitted"
+    record["event_id"] = "completion-report-emitted-bad-ref"
+    record["details"] = {"completion_report_ref": "$$bad ref$$"}
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors
+    assert any("completion_report_ref" in error.path for error in errors)
