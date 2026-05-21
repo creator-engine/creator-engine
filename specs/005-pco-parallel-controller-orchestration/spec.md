@@ -463,6 +463,302 @@ Slice 2A non-goal each closes.
 
 ---
 
+### User Story US-2.5.1 — Controller Identity Is Bound to a Signing Key Record (Priority: P1)
+
+A Source-ratified Controller, once the Slice 2.5 substrate is
+present, MUST hold a tracked **controller-key record** that binds
+its `controller_id` to a verifiable public key. The record names the
+`controller_id`, the public key material, the key algorithm, the
+key issuance timestamp, the issuing identity (per Feature 001
+identity contract), and the key custody mode (operator-time decision
+per the Open Source Decisions section below). Controller identity is
+no longer treated as a forgeable free string once any
+controller-key record exists in the scanned tree.
+
+**Why this priority**: Slice 2A
+([`docs/operations/WORKTREE_LEASE_PROTOCOL.md`](../../docs/operations/WORKTREE_LEASE_PROTOCOL.md)
+§j) flagged forgery risk as operationally material under
+multi-Controller rehearsal. Slice 2R productizes the lease layer
+into a runtime allocator; without identity hardening, the
+allocator's refusal predicates remain forgeable. The key record is
+the load-bearing primitive every later identity-scoped check binds
+to.
+
+**Independent Test**: A reviewer can author a golden controller-key
+record under `tenants/<tenant>/controllers/<controller-id>.key.yaml`
+(or the path Source ratifies under PCO-026), run the
+`controller_key_schema` validator check, and observe
+`PASS controller_key_schema`. A second record with a malformed
+public-key block fails with `PCO-025` and cites the prose contract.
+
+**Acceptance Scenarios**:
+
+1. **Given** the tracked controller-key schema and one well-formed
+   key record under the agreed-on path, **When** the validator runs,
+   **Then** the `controller_key_schema` check passes for that
+   record.
+2. **Given** a controller-key record whose `controller_id` does not
+   match the Slice 0 `^[a-z][a-z0-9-]{2,63}$` pattern, **When** the
+   validator runs, **Then** the check fails citing `PCO-025` and the
+   prose contract.
+3. **Given** a tree with zero controller-key records, **When** the
+   validator runs, **Then** the `worktree_lease_signature` predicate
+   (`PCO-024`) does NOT fire and existing Slice 2A behavior is
+   preserved unchanged (backward-compatibility floor per PCO-026).
+
+---
+
+### User Story US-2.5.2 — Forged Lease and Forged Controller Identity Are Detectable (Priority: P1)
+
+Once at least one controller-key record exists in the scanned tree,
+the `active_work_ledger_conflicts` validator MUST run the
+`worktree_lease_signature` (`PCO-024`) predicate against every live
+`worktree_lease` record. A lease whose embedded signature does not
+verify against a known controller-key record for the lease's
+`controller_id` MUST fail with `PCO-024`. A lease whose
+`controller_id` does not match any known key record MUST also fail
+with `PCO-024`. The same predicate makes a forged Active-Work
+Ledger claim that descends from an unverifiable lease detectable
+through the existing Slice 2A `PCO-021`
+(`claim_requires_live_lease`) refusal: a forged claim cannot point
+at a verifiable lease, so it is refused upstream.
+
+**Why this priority**: This is the acceptance criterion (A6 in the
+architect report §6) that converts the Slice 2A controller-identity
+caveat into a mechanically enforceable refusal. Without it, Slice
+2R's runtime allocator would productize an unauthenticated
+coordination protocol.
+
+**Independent Test**: A reviewer can stage a tree with one
+well-formed controller-key record for `hermes-primary`, one
+correctly signed lease record under `hermes-primary`, and one lease
+record under `hermes-primary` carrying a tampered signature. The
+validator passes the first lease and fails the second with
+`PCO-024`. A reviewer can also stage a lease under
+`controller_id: nefarious-laptop-a` for which no key record exists
+and observe `PCO-024` fail with an explicit "no key for
+`controller_id`" failure message.
+
+**Acceptance Scenarios**:
+
+1. **Given** a tree with one controller-key record for
+   `hermes-primary` and one live lease under `hermes-primary` whose
+   embedded signature verifies against that key, **When**
+   `active_work_ledger_conflicts` runs, **Then** `PCO-024` passes
+   for that lease.
+2. **Given** the same tree but with a second lease whose signature
+   does not verify, **When** the validator runs, **Then** `PCO-024`
+   fails for the second lease citing
+   `docs/operations/WORKTREE_LEASE_PROTOCOL.md` §j and the
+   controller-key contract.
+3. **Given** a lease record under a `controller_id` for which no
+   key record exists in the scanned tree, **When** the validator
+   runs, **Then** `PCO-024` fails with an explicit
+   "unknown controller key" message.
+4. **Given** a tree with zero controller-key records, **When** the
+   validator runs, **Then** `PCO-024` does NOT fire on any lease
+   (backward-compatibility floor; Slice 2A behavior is preserved).
+
+---
+
+### User Story US-2R.1 — Allocator Refuses Before `git worktree add` Under Cross-Controller Contention (Priority: P1)
+
+The `pco-allocate` CLI, given an Assignment Envelope reference and a
+target lane id, MUST run the `active_work_ledger_conflicts`
+validator against the tracked + local-runtime state **before**
+issuing any `git worktree add` command. If the validator would
+refuse the resulting state (specifically: a live lease under another
+`controller_id` already covers the same normalized `worktree_path`
+per `PCO-022`, or an existing live claim on the worktree under
+another `controller_id` per `PCO-010`), the allocator MUST exit
+non-zero, cite the failing predicate by code, and leave the working
+tree and local-runtime directories untouched.
+
+**Why this priority**: This is acceptance criterion A1 from the
+architect report. It is the predicate that turns Slice 2A's paper
+refusal into a runtime block on collision. Without it, the allocator
+could produce a half-allocated worktree on contention.
+
+**Independent Test**: A reviewer can stage a tree with a live lease
+under `nefarious-laptop-a` for `/worktrees/example`, then invoke
+`pco-allocate --envelope <path> --lane example-lane` as
+`hermes-primary`. The CLI exits non-zero, cites `PCO-022` (or
+`PCO-010` if the contention is at the claim layer), and no
+`git worktree` mutation is observable.
+
+**Acceptance Scenarios**:
+
+1. **Given** a tree with a live lease for `/worktrees/example`
+   under `controller_id: nefarious-laptop-a`, **When**
+   `pco-allocate` runs as `hermes-primary` requesting the same
+   worktree path, **Then** the CLI exits non-zero before any
+   `git worktree add` is attempted and cites `PCO-022`.
+2. **Given** a tree with a live ledger claim on
+   `/worktrees/example` under
+   `controller_id: nefarious-laptop-a` but no lease (Slice 1/2
+   contention), **When** `pco-allocate` runs as `hermes-primary`,
+   **Then** the CLI exits non-zero before allocation and cites
+   `PCO-010`.
+3. **Given** the same tree, **When** the operator inspects
+   `git worktree list` after the refused allocation, **Then** no
+   new worktree appears.
+
+---
+
+### User Story US-2R.2 — Allocator Performs Lease + Claim + Event Atomically (Priority: P1)
+
+When the pre-launch validator passes, `pco-allocate` MUST perform
+the following operations **atomically under an exclusive advisory
+lock** on `locks/<lane-id>.lock` (per Slice 0 PCO-009): (a) issue
+`git worktree add` to materialize the target worktree, (b) write a
+new `worktree_lease` record covering the new worktree, (c) write a
+new Active-Work Ledger `claim` record bound to the lease, and (d)
+emit a `claim_created` event record per Slice 0 PCO-006. On any
+failure mid-sequence, the allocator MUST roll back partial state so
+that the tree is observably indistinguishable from the pre-allocate
+state (no orphan worktree, no orphan lease, no orphan claim, no
+orphan event).
+
+**Why this priority**: This is acceptance criterion A2. The
+atomicity invariant is what lets later slices (pane registry,
+side-effect ledger, fan-in) treat the lease+claim+event triple as
+a single substrate primitive rather than three independently
+auditable artifacts that may disagree.
+
+**Independent Test**: A reviewer can simulate a failure injected
+between steps (b) and (c) using a controlled fault hook in
+`pco-allocate`'s test harness, then run the conflict validator and
+inspect `git worktree list`; no partial state is visible. A
+successful allocation produces a lease + claim + event that all
+reference each other consistently and that validate against their
+respective schemas.
+
+**Acceptance Scenarios**:
+
+1. **Given** a clean tree and a passing pre-launch check, **When**
+   `pco-allocate` succeeds, **Then** a new worktree, a new lease, a
+   new claim, and a new `claim_created` event all exist and
+   cross-reference correctly.
+2. **Given** a controlled fault after step (b) (lease written) but
+   before step (c) (claim written), **When** the allocator rolls
+   back, **Then** the lease record is removed, no worktree directory
+   remains, and no event is emitted.
+3. **Given** a controlled fault after step (a) (`git worktree add`
+   succeeded) but before step (b), **When** the allocator rolls
+   back, **Then** `git worktree remove` is invoked on the
+   not-yet-leased worktree path.
+4. **Given** two `pco-allocate` invocations targeting the same
+   `lane_id` running concurrently, **When** both attempt the
+   sequence, **Then** the advisory lock on `locks/<lane-id>.lock`
+   serializes them; one succeeds, the other refuses cleanly.
+
+---
+
+### User Story US-2R.3 — Claim Writes Require a Held Lease; Pane Launch Is Gated; Root Checkout Invariant Holds (Priority: P1)
+
+The Slice 2R runtime MUST enforce three additional invariants
+beyond the allocator's happy path:
+
+1. **Claim-writes-only-under-held-lease**: any code path (including
+   `pco-allocate` rollback retries and any future Hermes runtime
+   hook) that attempts to write a new Active-Work Ledger claim
+   record MUST first read a live `worktree_lease` under the writer's
+   `controller_id` covering the claim's `worktree_path`. Writes
+   without a held lease MUST be refused. This is the runtime
+   counterpart to Slice 2A's `PCO-021` paper refusal.
+2. **Pre-launch refusal on conflict-validator failure**: any pane
+   launch path that consumes a claim (Architect or Implementer pane
+   spawn driven by Hermes or by the operator) MUST refuse to spawn
+   the pane when `active_work_ledger_conflicts` would refuse the
+   current state. The launch refusal MUST cite the failing
+   predicate by code (`PCO-010`, `PCO-021`, `PCO-022`, `PCO-024`,
+   etc.) and MUST emit a `gate_blocked` event per Slice 0.5
+   PCO-014.
+3. **Root checkout invariant preservation**: `pco-allocate` and
+   `pco-release` MUST refuse to operate when the controller's
+   current working directory is the root checkout
+   (per
+   [`../../docs/operations/ROOT_WORKTREE_INVARIANT.md`](../../docs/operations/ROOT_WORKTREE_INVARIANT.md)).
+   The root checkout is reserved for Source-supervised mutations;
+   the allocator's job is to create and release isolated worktrees,
+   not to mutate the root.
+
+**Why this priority**: These are acceptance criteria A3
+(claim-writes-only-under-held-lease) and A4 (pane launch is gated)
+from the architect report, plus the root checkout invariant that
+Slice 2A explicitly preserves and that the runtime allocator must
+not violate.
+
+**Independent Test**: A reviewer can (a) attempt to write a claim
+record via a small repro script without holding a lease and observe
+the runtime refusal; (b) stage a tree whose conflict validator
+fails, attempt to launch a pane, and observe the launch refused
+with a `gate_blocked` event; (c) invoke `pco-allocate` from inside
+the root checkout and observe the refusal citing
+`ROOT_WORKTREE_INVARIANT.md`.
+
+**Acceptance Scenarios**:
+
+1. **Given** a `controller_id: hermes-primary` with no live lease
+   for `/worktrees/example`, **When** any path under Slice 2R
+   attempts to write a claim for `/worktrees/example`, **Then** the
+   write is refused at runtime citing `PCO-021`.
+2. **Given** a tree whose `active_work_ledger_conflicts` validator
+   would refuse the current state, **When** an operator attempts to
+   launch an Architect pane bound to the failing claim, **Then**
+   the pane is not spawned, the failing predicate code is reported,
+   and a `gate_blocked` event is emitted per PCO-014.
+3. **Given** an operator who invokes `pco-allocate` from the root
+   checkout, **When** the CLI starts, **Then** it exits non-zero
+   citing the root-worktree invariant and performs no mutation.
+4. **Given** a successful allocation followed by a `pco-release`
+   call, **When** `pco-release` runs, **Then** it (a) removes the
+   lease, (b) marks the claim released with a `release_reason`,
+   (c) emits a `claim_released` event, and (d) invokes
+   `git worktree remove` on the allocated worktree path — all
+   atomically under the same lane lock.
+
+---
+
+### User Story US-2R.4 — Slice 2R Does NOT Expand Autonomy or Subsume Later Slices (Priority: P1)
+
+Slice 2R is **runtime allocation only**. It does NOT introduce a
+pane registry (Slice 3), does NOT introduce a side-effect ledger
+(Slice 4), does NOT introduce multi-lane fan-in (Slice 5), does NOT
+introduce an integration queue (Slice 6), does NOT introduce a
+tracker / GitHub-issue connector (Feature 008), does NOT
+re-enable `pco-completion-gate` (Slice 0.5R), and does NOT
+authorize fully autonomous multi-controller or cross-workstation
+operation. Each later slice is named and remains separately
+ratified.
+
+**Why this priority**: The substrate-before-automation discipline
+that PCO Slice 0, 0.5, 1/2, and 2A each held to MUST hold across
+Slice 2.5 + 2R. Productizing the allocator while expanding
+autonomy in the same gate would freeze a wrong protocol into code.
+
+**Independent Test**: A reviewer reads the spec and the architecture
+companion ([`../../docs/architecture/parallel-controller-orchestration.md`](../../docs/architecture/parallel-controller-orchestration.md))
+and can name the deferred slices (3, 4, 5, 6, 0.5R) and the specific
+Slice 2R non-goal each closes.
+
+**Acceptance Scenarios**:
+
+1. **Given** the Slice 2R substrate, **When** a reviewer searches
+   for a tracked pane-registry record schema, **Then** none exists
+   (Slice 3).
+2. **Given** the Slice 2R substrate, **When** a reviewer searches
+   for a tracked side-effect-evidence record schema, **Then** none
+   exists (Slice 4).
+3. **Given** the Slice 2R substrate, **When** a reviewer searches
+   for any GitHub / Jira / Linear connector code, **Then** none
+   exists (Feature 008, deferred).
+4. **Given** the Slice 2R substrate, **When** a reviewer searches
+   for any re-enabled `pco-completion-gate` runtime hook, **Then**
+   none exists (Slice 0.5R, separately ratified).
+
+---
+
 ### User Story US-0.4 — Slice 0 Does Not Yet Enforce Execution (Priority: P1)
 
 The spec, the protocol doc, and the architecture doc explicitly state
@@ -740,7 +1036,7 @@ by the conflict layer. Schema-level validation of single lease
 records is owned by `worktree_lease_schema` (`PCO-020`); resolve
 `PCO-020` first when both fire.
 
-### PCO-024 — Slice 2A Boundary Statement (No Allocator, No Runtime)
+### PCO-019 — Slice 2A Boundary Statement (No Allocator, No Runtime)
 
 Slice 2A records, validates, and refuses Worktree Lease state; it
 does NOT yet allocate worktrees, does NOT mutate `git worktree`
@@ -750,9 +1046,17 @@ introduce a Hermes runtime hook, does NOT re-enable
 `.hermes/active-work-ledger/` runtime records, and does NOT solve
 cryptographic controller-identity binding. Runtime allocation is
 reserved for Slice 2R. Identity hardening is reserved for a
-separately ratified follow-on workstream. This statement MUST
-appear normatively in the schema description, the prose protocol,
-the architecture doc, and this spec.
+separately ratified follow-on workstream (Slice 2.5 — Controller
+Identity Substrate, paired with Slice 2R in the same gate per
+PCO-024 / PCO-027 below). This statement MUST appear normatively in
+the schema description, the prose protocol, the architecture doc,
+and this spec.
+
+The number `PCO-024` previously cited for this boundary statement is
+re-allocated to the Slice 2.5 `worktree_lease_signature` validator
+predicate below; the boundary statement itself is renumbered as
+`PCO-019` (a previously unused number in the PCO-NNN sequence) and
+its semantic content is unchanged.
 
 ### PCO-018 — Slice 1/2 Validator Discoverability
 
@@ -762,6 +1066,291 @@ The validator registry and CLI MUST expose the Slice 1/2 check as
 A focused CLI path such as
 `creator_engine_validator scan-active-work-ledger-conflicts <path>` MAY
 run the pre-launch layer alone.
+
+### PCO-024 — Worktree Lease Signature Predicate (Slice 2.5)
+
+The `active_work_ledger_conflicts` validator MUST gain a new refusal
+predicate, `worktree_lease_signature` (`PCO-024`), that fires once
+at least one controller-key record exists in the scanned tree.
+`PCO-024` MUST fail a live `worktree_lease` record when (a) its
+`controller_id` matches no controller-key record in the scanned
+tree, or (b) its embedded signature does not verify against the
+public key of the matching controller-key record. Trees with zero
+controller-key records MUST preserve Slice 2A behavior unchanged
+(backward-compatibility floor; see PCO-026).
+
+The signature field on `worktree_lease` records is introduced
+additively under `schemas/worktree-lease.schema.yaml`
+`schema_version: "2"`; Slice 2A v1 leases continue to validate
+unchanged in trees with zero key records. The exact
+serialization shape (canonical byte form over which the signature is
+computed, signature encoding, algorithm identifier) is a Slice 2.5
+schema-authoring concern and is bound by PCO-025 below; this spec
+fixes the predicate name and intent only.
+
+### PCO-025 — Controller-Key Record Schema (Slice 2.5)
+
+The tracked schema (provisionally
+`schemas/controller-key.schema.yaml`) defines the controller-key
+record contract: top-level `kind: controller-key-record`,
+`record_type: controller_key`, `schema_version: "1"`,
+`controller_id` (Slice 0 pattern `^[a-z][a-z0-9-]{2,63}$`),
+`public_key` (PEM or equivalent canonical encoding chosen at
+schema-authoring time), `key_algorithm` (e.g., `ed25519`),
+`issued_at` (ISO-8601 UTC), `issued_by` (a Feature 001 identity
+record pointer), and `key_custody_mode` (one of the operator-time
+decision values ratified per the Open Source Decisions section
+below). `unevaluatedProperties: false`. The
+`controller_key_schema` validator check validates one record at a
+time against this schema and cites the new prose contract
+(provisionally `docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md`).
+
+Slice 2.5 is **substrate-only** at the key-record layer:
+key generation, distribution, custody, and rotation remain
+operator-time decisions. The schema enforces shape only. No
+mechanical refusal predicate fires from `controller_key_schema`
+alone beyond malformed-record detection; the cross-record predicate
+that binds keys to leases is `PCO-024` above.
+
+### PCO-026 — Slice 2.5 Backward-Compatibility Floor
+
+`PCO-024` (`worktree_lease_signature`) MUST be gated on the
+discovery of at least one valid controller-key record in the
+scanned tree. Trees with zero controller-key records MUST validate
+identically to Slice 2A: lease records without a signature field
+continue to pass `PCO-020`; `active_work_ledger_conflicts` runs
+`PCO-021` / `PCO-022` / `PCO-023` exactly as today; the absence of
+a signature is not a `PCO-024` failure when no key substrate is
+present.
+
+This floor mirrors the gating discipline Slice 2A applied to
+`PCO-021` (`claim_requires_live_lease`): every additive substrate
+layer ships with an explicit zero-state behavior so the validator
+does not retroactively refuse every prior PCO tree.
+
+### PCO-027 — `pco-allocate` CLI Responsibilities (Slice 2R)
+
+`pco-allocate <envelope-ref> --lane <lane-id> [--branch <branch>]
+[--worktree-path <path>]` is the Slice 2R runtime entry point. Its
+responsibilities are exactly:
+
+1. Refuse to run from the root checkout per
+   [`../../docs/operations/ROOT_WORKTREE_INVARIANT.md`](../../docs/operations/ROOT_WORKTREE_INVARIANT.md).
+2. Resolve the target `controller_id` from the local Controller
+   identity context.
+3. Acquire an exclusive advisory `flock(LOCK_EX)` on
+   `.hermes/active-work-ledger/locks/<lane-id>.lock` for the
+   duration of the allocation.
+4. Run `active_work_ledger_conflicts` against the current tree +
+   the **proposed** post-allocation state. Exit non-zero with the
+   failing predicate cited if the validator would refuse.
+5. Atomically: issue `git worktree add` for the target path; write
+   a `worktree_lease` record (PCO-020-shape, plus PCO-024 signature
+   field when a key substrate is present); write an Active-Work
+   Ledger `claim` record (PCO-004-shape) bound to the lease; emit a
+   `claim_created` event (PCO-006-shape).
+6. On any mid-sequence failure: roll back partial state so that
+   the tree is observably indistinguishable from the pre-allocate
+   state.
+7. Release the advisory lock.
+
+`pco-allocate` MUST NOT mutate `origin/main`, MUST NOT push, MUST
+NOT create PRs, MUST NOT mutate GitHub state, MUST NOT mutate
+tracker state, and MUST NOT mutate any tracked file under the root
+checkout. All mutations are scoped to the new worktree and to local
+runtime under `.hermes/active-work-ledger/`.
+
+### PCO-028 — `pco-release` CLI Responsibilities (Slice 2R)
+
+`pco-release <claim-ref-or-lane-id>` is the Slice 2R teardown
+entry point. Its responsibilities are exactly:
+
+1. Refuse to run from the root checkout per the same invariant.
+2. Acquire the lane lock as in PCO-027.
+3. Atomically: mark the claim released (write `released_at` and
+   `release_reason` per PCO-004); remove the lease record; emit a
+   `claim_released` event (PCO-006); invoke `git worktree remove`
+   on the worktree path.
+4. On mid-sequence failure: leave a recoverable state that
+   `pco-release` can be re-invoked against; never leave an orphan
+   lease without a released claim.
+5. Release the advisory lock.
+
+`pco-release` MUST NOT delete or rename branches and MUST NOT push.
+Branch lifecycle remains operator-controlled and Source-ratified.
+
+### PCO-029 — Claim-Writes-Only-Under-Held-Lease Runtime Enforcement (Slice 2R)
+
+Any code path that writes a new Active-Work Ledger claim record
+under Slice 2R (including `pco-allocate`, future Hermes runtime
+hooks, and any operator script that uses the Slice 2R runtime
+library) MUST first read a live `worktree_lease` record under the
+writer's `controller_id` covering the claim's normalized
+`worktree_path`. Writes without a held lease MUST be refused at
+runtime, citing `PCO-021`. This is the runtime counterpart to Slice
+2A's `PCO-021` paper refusal; the Slice 1/2 + 2A validators remain
+the static refusal layer, while PCO-029 is the active layer.
+
+### PCO-030 — Pane Launch Is Gated by `active_work_ledger_conflicts` (Slice 2R)
+
+Any pane launch path that consumes a Slice 0 claim — Architect or
+Implementer pane spawn driven by Hermes, by `pco-allocate`'s
+post-allocate spawn hook (if any), or by an operator script — MUST
+refuse to spawn the pane when `active_work_ledger_conflicts` would
+refuse the current state. The launch refusal MUST cite the failing
+predicate by code and MUST emit a `gate_blocked` event per Slice
+0.5 (`PCO-014` Active-Work Ledger Additive Event Extension). The
+gating discipline applies to every predicate in the conflict
+validator's surface: `PCO-010`, `PCO-014` (reference integrity),
+`PCO-015` (live lane uniqueness), `PCO-016` (heartbeat
+monotonicity), `PCO-017` (event-id uniqueness), `PCO-021`,
+`PCO-022`, `PCO-023`, and `PCO-024`.
+
+### PCO-031 — Root Checkout Invariant Preservation (Slice 2R)
+
+`pco-allocate` and `pco-release` MUST refuse to operate when the
+controller's current working directory is the root checkout (per
+[`../../docs/operations/ROOT_WORKTREE_INVARIANT.md`](../../docs/operations/ROOT_WORKTREE_INVARIANT.md)).
+The root checkout is reserved for Source-supervised mutations; the
+allocator's job is to create and release isolated worktrees, not to
+mutate the root. This invariant is independent of `PCO-027` /
+`PCO-028` step ordering: it MUST be enforced before any other
+allocator action, and it MUST be enforced before any non-trivial
+side effect (no `git worktree add`, no lease write, no claim write,
+no event emission may precede the invariant check).
+
+### PCO-032 — Slice 2.5 + 2R Boundary Statement (No Autonomy Expansion)
+
+Slice 2.5 introduces a tracked controller-key substrate and an
+additive `worktree_lease_signature` predicate; Slice 2R introduces
+the `pco-allocate` / `pco-release` runtime allocator. Together they
+do NOT introduce a pane registry (Slice 3), do NOT introduce a
+side-effect ledger (Slice 4), do NOT introduce multi-lane fan-in
+(Slice 5), do NOT introduce a canonical-branch integration queue
+(Slice 6), do NOT introduce a tracker / GitHub-issue connector
+(Feature 008 in the architect report's team-mode roadmap), do NOT
+re-enable `pco-completion-gate` (Slice 0.5R), do NOT introduce
+distributed identity (Feature 009 in the architect report), do NOT
+introduce a Project Coordination Ledger (Feature 007 / TM-1 in the
+architect report), and do NOT authorize fully autonomous
+multi-controller or cross-workstation operation. The paired slice
+is **local-solo-developer runtime hardening**; team-mode operation
+remains a later, separately ratified workstream.
+
+This statement is normative. It MUST appear in this spec, in the
+companion architecture doc when Slice 2.5 + 2R land, and in the
+prose protocol(s) the implementation slice writes.
+
+---
+
+## Open Source Decisions (Slice 2.5 + 2R)
+
+The following decisions are explicitly **unresolved** in this spec
+authoring gate. They are policy choices Source must ratify before
+the Slice 2.5 + 2R implementation gate begins. This spec records the
+decision surface only; it does not invent policy.
+
+### OSD-1 — Controller key custody mode (Slice 2.5)
+
+Open question: how is the private signing key bound to a Controller?
+Three candidate modes:
+
+1. **Per-host key** — a private key generated locally on each
+   workstation, never exported. A developer who drives two
+   workstations holds two distinct Controller identities. Cheapest;
+   matches the architect report §11 Slice 2.5 sketch.
+2. **Per-developer tenant key** — a private key generated under a
+   tenant root, optionally shared across the developer's
+   workstations. A single developer is a single Controller identity
+   across hosts. Heavier custody; required for cross-workstation
+   team-mode work (Feature 009 in the architect report).
+3. **Both, declaratively** — the controller-key record's
+   `key_custody_mode` field declares which mode applies per record,
+   and the validator enforces only that the declared mode is
+   internally consistent. Most flexible; largest substrate surface.
+
+This spec does **not** select one; it adds a required
+`key_custody_mode` field to the controller-key schema (PCO-025) so
+that whichever mode Source ratifies is recordable. Until Source
+ratifies a mode, the Slice 2.5 implementation gate is blocked.
+
+### OSD-2 — Controller-key record location
+
+Open question: where do controller-key records live in the tree?
+Candidate paths:
+
+1. `tenants/<tenant>/controllers/<controller-id>.key.yaml` — sits
+   beside existing tenant fixtures (Feature 001 dogfood pattern).
+2. `governance/controller-keys/<controller-id>.key.yaml` — sits
+   beside other governance-class records.
+3. A per-workstation overlay path declared at deployment time —
+   honors the Feature 001 "deployment-time overlay decisions"
+   pattern for concrete bindings.
+
+This spec does **not** select one. The Slice 2.5 implementation
+gate is blocked on this decision because it determines which
+mutation class the key record falls under (`identity` vs
+`governance`) and therefore which ratification path applies.
+
+### OSD-3 — Signature serialization shape
+
+Open question: over what canonical byte form is the lease signature
+computed, and in what encoding is the signature stored on the lease
+record?
+
+Recommendation deferred to schema-authoring time, but the decision
+is load-bearing for `PCO-024` and must precede the Slice 2.5
+implementation gate. The architect report does not pre-select.
+
+### OSD-4 — `pco-allocate` pane-spawn handoff (Slice 2R)
+
+Open question: does `pco-allocate` spawn the Architect/Implementer
+pane directly after successful allocation, or does it stop after
+allocation and leave pane spawn to a separate operator step?
+Architect report §11 implies the latter (Slice 3 — Pane Registry —
+is the slice that introduces pane-identity-bound spawning). This
+spec defaults to the **separate spawn step** posture per `PCO-030`
+but records the question as an open decision so Source can ratify
+otherwise without re-opening the spec.
+
+---
+
+## Team-Mode Roadmap Note (Slice 2.5 + 2R Context)
+
+Slice 2.5 + Slice 2R together are **local-solo-developer runtime
+hardening** — they convert the existing read/validate/refuse
+substrate (Slice 0, 0.5, 1/2, 2A) into a runtime that allocates
+worktrees, signs leases, and refuses unsafe state mechanically on a
+single developer's workstation. They do **not** introduce team-mode
+operation across multiple developers or multiple workstations.
+
+Per the architect report (`SUMMARY.md` and
+`20260521T045722Z-architect-report.md` §§7, 13, 14) team-mode
+operation requires three additional substrate layers, each separately
+ratified after the Slice 2.5 + 2R gate:
+
+1. **Project Coordination Ledger (PCL) — Feature 007 (TM-1)**: the
+   team-mode equivalent of the Active-Work Ledger, tracked in the
+   repository (not under `.hermes/`), naming the intent to work on a
+   backlog item, the developer identity making the claim, the
+   workstation identity, the Controller identity, the
+   worktree+branch identifiers, and the lifecycle state.
+2. **Distributed Identity Substrate — Feature 009**: developer
+   identity + workstation identity + Controller identity binding,
+   with per-tenant key custody policy that productionizes Slice
+   2.5's per-host or per-tenant key into a multi-developer-aware
+   model.
+3. **Source-Host & Tracker Connectors — Feature 008**: governed
+   mirrors for GitHub Issues / Jira / Linear. **Tracker and GitHub
+   issues remain mirrors, not canonical authority, unless Source
+   later ratifies a different team-mode design.** Mirror writes
+   are side effects of PCL state transitions; mirror reads are
+   used to detect drift; mirror entries MUST NOT advance a PCL
+   state, ratify anything, or substitute for `BACKLOG.md`.
+
+The Slice 2.5 + 2R spec authoring gate authorizes none of the above
+workstreams. Their inclusion in the roadmap is a forward reference,
+not an implementation promise.
 
 ---
 
@@ -795,7 +1384,9 @@ for a specific reason:
 | Slice | Closes | Deferred because |
 |---|---|---|
 | Slice 1/2 — Conflict / Pre-Launch Validator | worktree-path collisions across live claims; live lane uniqueness per controller; heartbeat and event claim-reference integrity; heartbeat monotonicity where timestamps are parseable; event-id uniqueness within `(controller_id, lane_id, YYYY-MM-DD)` | Landed as a validator-only layer above Slice 0 schema records; it refuses unsafe pre-launch state without allocating worktrees or launching panes. |
-| Slice 2 — Worktree Allocator | automatic worktree allocation | Allocation requires a ratified conflict/pre-launch validator on which to base lease decisions. |
+| Slice 2A — Worktree Lease substrate | intent-to-write primitive; cross-controller lease contention refusal before claim writes | Landed as a record/validate/refuse layer above Slice 1/2; runtime allocation deferred to Slice 2R; identity hardening deferred to Slice 2.5. |
+| Slice 2.5 — Controller Identity Substrate | forgeable `controller_id` free-string risk that Slice 2A documents in §j; `worktree_lease_signature` (`PCO-024`) refusal of unsigned / mis-signed leases when key records exist | Paired with Slice 2R in the next ratified gate; productizing the allocator without identity hardening would ship an unauthenticated coordination protocol (architect report §11). |
+| Slice 2R — Worktree Allocator Runtime | atomic `git worktree add` + lease + claim + event flow under lane lock; claim-writes-only-under-held-lease enforcement; pane launch gated by conflict validator; root checkout invariant preservation | Paired with Slice 2.5 in the next ratified gate; converts the Slice 1/2 + 2A paper refusal into runtime block. |
 | Slice 3 — Pane Registry | visible-pane identity records | Pane identity is a privileged mutation class (Feature 001 FR-008-style) and requires its own ratified record contract. |
 | Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Side-effect tracking depends on a stable lane substrate (Slice 0) and on conflict/pre-launch validation (Slice 1/2). |
 | Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
@@ -814,6 +1405,27 @@ ratification-heavy, no autonomy expansion. The Slice 0 boundary
 statement (PCO-011) is itself a Phase 1 constraint — until later
 slices land *and* are independently ratified, multi-controller
 execution remains a Phase 1 manual discipline.
+
+**Slice 2.5 and Slice 2R are also Phase 1.** Per `PCO-032`, the
+paired Slice 2.5 + 2R gate hardens local-solo-developer runtime
+behavior; it does **not** authorize fully autonomous
+multi-controller operation, does **not** authorize
+cross-workstation operation, and does **not** ratify a team-mode
+posture. The Phase 1 Source-ratified governance discipline
+(privileged-class ratification per Feature 001 FR-008;
+author/approver separation per FR-007; Source ratification per
+Feature 002 FR-008/FR-016) is **preserved unchanged**: every Slice
+2R runtime mutation continues to descend from a Source-ratified
+Assignment Envelope; every Slice 2.5 controller-key record is an
+identity-class mutation under Feature 001 FR-008; and every Slice
+2R pane launch remains gated by the conflict validator (PCO-030).
+
+No fully autonomous multi-controller or cross-workstation
+operation is authorized by this spec authoring gate. Team-mode
+operation (architect report §§7, 13) requires the separately
+ratified Project Coordination Ledger (Feature 007), Distributed
+Identity Substrate (Feature 009), and governed Source-Host /
+Tracker Connectors (Feature 008).
 
 ---
 
@@ -842,3 +1454,22 @@ and the validator check + tests:
 8. The relationship to Assignment Envelopes, handoffs,
    recommended-prompts, and one-driver-per-worktree is preserved
    without weakening any upstream contract.
+9. The Slice 2.5 + 2R paired-gate posture: the Slice 2.5
+   controller-key substrate (PCO-024, PCO-025, PCO-026) and the
+   Slice 2R worktree allocator (PCO-027 through PCO-031) together
+   convert read/validate/refuse paper substrate into runtime
+   enforcement, with the boundary statement (PCO-032) preserving
+   the substrate-before-automation discipline against later slices
+   (3, 4, 5, 6, 0.5R) and against team-mode workstreams (Features
+   007 / 008 / 009).
+10. The Slice 2.5 + 2R Open Source Decisions surface (OSD-1 key
+    custody, OSD-2 record location, OSD-3 signature serialization,
+    OSD-4 pane-spawn handoff) is recorded; this spec authoring gate
+    does NOT invent policy for any of them. The Slice 2.5 + 2R
+    implementation gate is blocked on those decisions being
+    Source-ratified.
+11. The Team-Mode Roadmap Note: this paired slice is
+    local-solo-developer runtime hardening; team-mode operation
+    remains the separate Feature 007 / 008 / 009 workstream, and
+    tracker / GitHub issues remain mirrors (never canonical
+    authority) unless Source later ratifies a different design.
