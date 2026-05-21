@@ -211,13 +211,50 @@ Slice plan:
    `schema_version: "2"`. Records and validates only; the Hermes
    final-answer / send-blocking runtime hook is reserved for the
    follow-on slice 0.5R. `requires: Slice 0`.
-2. **Slice 1 — Conflict Validator.** Cross-record overlap detection:
-   worktree-path collisions, lane uniqueness per controller,
-   heartbeat monotonicity, event-id uniqueness within scope.
-3. **Slice 2 — Worktree Allocator.** Short-lived worktree leases that
-   line up with ledger claims; resolves contention before a claim is
-   written. Subsumes the Feature 005 worktree-lifecycle automation
-   line item.
+2. **Slice 1/2 — Conflict / Pre-Launch Validator** *(merged on
+   `main` via PR #54, merge commit `6b0a19e`)*. Cross-record overlap
+   detection: worktree-path collisions, lane uniqueness per
+   controller, heartbeat monotonicity, event-id uniqueness within
+   scope. Read-only refusal layer above Slice 0 schema records;
+   does not allocate worktrees or launch panes.
+2.5A. **Slice 2A — Worktree Lease substrate** *(merged on `main`
+   via merge commit `6660b90`)*. Adds the tracked Worktree Lease
+   record schema (`schemas/worktree-lease.schema.yaml`), the prose
+   protocol
+   ([`../operations/WORKTREE_LEASE_PROTOCOL.md`](../operations/WORKTREE_LEASE_PROTOCOL.md)),
+   and additive `active_work_ledger_conflicts` refusal predicates
+   (`PCO-021` claim-requires-live-lease, `PCO-022`
+   cross-controller lease conflict, `PCO-023` lease invalid
+   record). Substrate-only; runtime allocation deferred to Slice
+   2R; identity hardening deferred to Slice 2.5. Gated on
+   discovery of at least one valid lease record so trees with zero
+   lease records preserve Slice 1/2 behavior unchanged.
+2.5B. **Slice 2.5 — Controller Identity Substrate** *(next
+   ratified gate; paired with Slice 2R)*. Adds a tracked
+   controller-key record schema (provisionally
+   `schemas/controller-key.schema.yaml`), an additive lease
+   signature field under
+   `schemas/worktree-lease.schema.yaml`
+   `schema_version: "2"`, and a new
+   `worktree_lease_signature` validator predicate (`PCO-024`) that
+   refuses unsigned or mis-signed leases when at least one
+   controller-key record exists. Backward-compatibility floor:
+   trees with zero key records preserve Slice 2A behavior
+   unchanged. Key custody, key location, and signature
+   serialization remain open Source decisions per the spec's Open
+   Source Decisions section. `requires: Slice 2A`.
+3. **Slice 2R — Worktree Allocator Runtime** *(next ratified gate;
+   paired with Slice 2.5)*. Ships `pco-allocate` and `pco-release`
+   CLI; atomic `git worktree add` + lease + claim + event flow
+   under the lane's advisory lock; claim-writes-only-under-held-
+   lease runtime enforcement; pane launch gated by
+   `active_work_ledger_conflicts`; root checkout invariant
+   preservation. Converts the existing Slice 1/2 + 2A
+   read/validate/refuse substrate into runtime block. Subsumes the
+   Feature 005 worktree-lifecycle automation line item. Does NOT
+   introduce pane registry, side-effect ledger, fan-in, integration
+   queue, tracker connector, or runtime autonomy expansion.
+   `requires: Slice 2A, Slice 2.5`.
 4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
    Architect/Implementer pane is bound to which claim, on which host.
 5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
@@ -236,6 +273,29 @@ safe parallel runtime, taxonomy-routed conflict detection) is
 preserved as later-slice scope under PCO. Each later slice keeps the
 substrate-before-automation discipline: protocol and validator first,
 runtime tooling after.
+
+**Team-mode forward reference**: Slices 0 through 6 cover
+**local-solo-developer** parallel-Controller substrate and runtime.
+The paired Slice 2.5 + Slice 2R gate is local-solo-developer runtime
+hardening, not team-mode operation. Multi-developer /
+cross-workstation operation requires additional, separately ratified
+workstreams that this roadmap names but does not yet spec:
+
+- **Project Coordination Ledger (PCL)** — provisional Feature 007,
+  team-mode equivalent of the Active-Work Ledger, tracked in the
+  repository (not under `.hermes/`).
+- **Source-Host & Tracker Connectors** — provisional Feature 008,
+  governed mirrors for GitHub Issues / Jira / Linear. **Tracker and
+  GitHub-issue entries remain mirrors, not canonical authority**,
+  unless Source later ratifies a different team-mode design.
+- **Distributed Identity Substrate** — provisional Feature 009,
+  developer + workstation + Controller key binding that
+  productionizes Slice 2.5's per-host or per-tenant key into a
+  multi-developer-aware identity model.
+
+These workstreams are named here as forward references only; no
+implementation is promised by this ROADMAP entry, and the Slice
+2.5 + 2R authoring gate does not authorize them.
 
 **Deferral rationale**: Feature 002 specifies the manual protocol the
 orchestration substrate must obey. Building automation before the
