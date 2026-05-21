@@ -154,8 +154,46 @@ runtime tooling after.
    `pco-allocate` / `pco-release` CLI, advisory lease lock, and
    claim-writes-only-under-held-lease enforcement. Slice 2R is the
    runtime sibling of Slice 2A and is ratified separately.
+3.5. **Slice 2I — Worker Isolation Runtime (substrate authored;
+   runtime deferred).** Sibling/bridge slice authored between the
+   Slice 2.5 + 2R authoring gate and the Slice 2.5 + 2R
+   implementation gate. Introduces the worker-container substrate
+   that sits beneath the visible tmux pane: a tracked
+   worker-container policy record (role: `architect_research` |
+   `implementer` | `verification`), a tracked container-instance
+   record, a mount manifest, a secret-grant manifest without
+   secret values, a network (egress allowlist) policy record, an
+   artifact collection manifest, and termination /
+   garbage-collection event records. Declares the kernel/syscall
+   verb set (`allocate_worker`, `mount_workspace`,
+   `grant_path_capability`, `inject_secret`, `set_network_policy`,
+   `run_command`, `collect_artifacts`, `terminate_worker`,
+   `garbage_collect_worker`) and the substrate-level refusal
+   predicates `PCO-040` through `PCO-045`. Ratifies a default-deny
+   safety floor (read-only mounts by default; no host home mount;
+   no host SSH/GitHub/model-provider credentials by default; no
+   container engine socket inside a worker container; role-specific
+   egress; redaction + revocation expectations for secrets) and
+   the rule that the Slice 2.5 controller-key private key is
+   never injected into a worker container. Container engine,
+   image baseline, credential broker, egress enforcement
+   primitive, image separation by role, mount-grant authority,
+   and a per-container ephemeral controller-key amendment to
+   OSD-1 are recorded as Open Source Decisions. Slice 2I splits
+   into **Slice 2I-S** (substrate; contract authoring) and
+   **Slice 2I-R** (runtime; engine wiring, allocator extension
+   between PCO-027 steps 5 and 6, credential broker, egress
+   primitive — separately ratified, deferred). Slice 2I-S does
+   NOT amend `PCO-024` through `PCO-032`; does NOT containerize
+   the Controller; does NOT build, pull, run, or inspect any
+   container image; and does NOT expand Phase 1 / Phase 2
+   autonomy. Spec amendment lives at
+   [`../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`](../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md).
 4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
    Architect/Implementer pane is bound to which claim, on which host.
+   Pane identity binds to a container-instance id (when present) per
+   the Slice 2I-S substrate; Slice 3 should be authored against
+   Slice 2I-S to avoid a v2 migration.
 5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
    side effects per lane (CI runs, deploys, GitHub state mutations)
    as structured input for fan-in.
