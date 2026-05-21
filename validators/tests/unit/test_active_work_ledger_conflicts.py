@@ -7,12 +7,15 @@ import yaml
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.active_work_ledger_conflicts import (
     CHECK_NAME,
+    CODE_CLAIM_REQUIRES_LEASE,
     CODE_EVENT_ID_CONFLICT,
     CODE_EVENT_REF,
     CODE_HEARTBEAT_MONOTONIC,
     CODE_HEARTBEAT_REF,
     CODE_LANE_CONFLICT,
+    CODE_LEASE_INVALID_RECORD,
     CODE_WORKTREE_CONFLICT,
+    CODE_WORKTREE_LEASE_CONFLICT,
     run,
 )
 
@@ -285,6 +288,206 @@ def test_tmp_ledger_file_is_skipped_by_conflict_validator(tmp_path: Path):
     bad_claim = valid_claim_record()
     bad_claim["controller_id"] = "Bad_ID"
     _write_record(tmp_path / "claims" / "bad" / "claim.yaml.tmp.12345.abc", bad_claim)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+# ---------------------------------------------------------------------------
+# Slice 2A — worktree-lease additive predicates
+# ---------------------------------------------------------------------------
+
+
+def valid_lease_record() -> dict:
+    return {
+        "kind": "worktree-lease-record",
+        "record_type": "worktree_lease",
+        "schema_version": "1",
+        "controller_id": "hermes-primary",
+        "lane_id": "pco-slice2a-author",
+        "record_timestamp": "2026-05-21T03:08:08Z",
+        "lease_id": "lease-pco-slice2a-001",
+        "worktree_path": "/worktrees/pco-slice2a",
+        "acquired_at": "2026-05-21T03:08:08Z",
+        "lease_seconds": 3600,
+        "expires_at": "9999-01-01T00:00:00Z",
+    }
+
+
+def test_slice2a_codes_registered():
+    checks = registered_checks()
+    assert CHECK_NAME in checks
+    assert CODE_CLAIM_REQUIRES_LEASE in checks[CHECK_NAME].frs
+    assert CODE_WORKTREE_LEASE_CONFLICT in checks[CHECK_NAME].frs
+    assert CODE_LEASE_INVALID_RECORD in checks[CHECK_NAME].frs
+
+
+def test_tree_with_zero_lease_records_preserves_slice1_behavior(tmp_path: Path):
+    # Backward-compatibility floor: trees with no lease records continue
+    # to validate identically to Slice 1/2. A live claim with no lease
+    # present must NOT trigger PCO-021.
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-slice-a"
+    claim["worktree_path"] = "/worktrees/pco-slice-a"
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_live_claim_covered_by_live_lease_passes(tmp_path: Path):
+    lease = valid_lease_record()
+    lease["controller_id"] = "hermes-primary"
+    lease["lane_id"] = "pco-slice-a"
+    lease["worktree_path"] = "/worktrees/pco-slice-a"
+
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-slice-a"
+    claim["worktree_path"] = "/worktrees/pco-slice-a"
+
+    _write_record(tmp_path / "leases" / "hermes-primary" / "pco-slice-a.yaml", lease)
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_live_claim_without_lease_fails_pco_021(tmp_path: Path):
+    other_lease = valid_lease_record()
+    other_lease["controller_id"] = "hermes-primary"
+    other_lease["lane_id"] = "pco-other-lane"
+    other_lease["lease_id"] = "lease-other-001"
+    other_lease["worktree_path"] = "/worktrees/pco-other"
+    _write_record(tmp_path / "leases" / "hermes-primary" / "pco-other.yaml", other_lease)
+
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-slice-a"
+    claim["worktree_path"] = "/worktrees/pco-slice-a"
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_CLAIM_REQUIRES_LEASE for error in result.errors)
+
+
+def test_cross_controller_lease_conflict_fails_pco_022(tmp_path: Path):
+    lease_a = valid_lease_record()
+    lease_a["controller_id"] = "hermes-primary"
+    lease_a["lane_id"] = "pco-slice-a"
+    lease_a["lease_id"] = "lease-a-001"
+    lease_a["worktree_path"] = "/worktrees/shared"
+
+    lease_b = valid_lease_record()
+    lease_b["controller_id"] = "nefarious-laptop-a"
+    lease_b["lane_id"] = "pco-slice-b"
+    lease_b["lease_id"] = "lease-b-001"
+    lease_b["worktree_path"] = "/worktrees/shared/"
+
+    _write_record(tmp_path / "leases" / "hermes-primary" / "pco-slice-a.yaml", lease_a)
+    _write_record(tmp_path / "leases" / "nefarious-laptop-a" / "pco-slice-b.yaml", lease_b)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_WORKTREE_LEASE_CONFLICT for error in result.errors)
+    assert any("/worktrees/shared" in error.message for error in result.errors)
+
+
+def test_expired_lease_no_longer_covers_claim_fails_pco_021(tmp_path: Path):
+    expired_lease = valid_lease_record()
+    expired_lease["controller_id"] = "hermes-primary"
+    expired_lease["lane_id"] = "pco-slice-a"
+    expired_lease["lease_id"] = "lease-expired-001"
+    expired_lease["worktree_path"] = "/worktrees/pco-slice-a"
+    expired_lease["acquired_at"] = "2000-01-01T00:00:00Z"
+    expired_lease["expires_at"] = "2000-01-02T00:00:00Z"
+
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-slice-a"
+    claim["worktree_path"] = "/worktrees/pco-slice-a"
+
+    _write_record(tmp_path / "leases" / "hermes-primary" / "pco-slice-a.yaml", expired_lease)
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_CLAIM_REQUIRES_LEASE for error in result.errors)
+
+
+def test_same_controller_mismatched_lane_still_covers_worktree(tmp_path: Path):
+    # Lease covers worktree, not lane. Lane uniqueness is owned by
+    # PCO-016. A same-controller lease whose lane_id differs from the
+    # claim's lane_id must still satisfy PCO-021 because the worktree
+    # is covered under the same controller.
+    lease = valid_lease_record()
+    lease["controller_id"] = "hermes-primary"
+    lease["lane_id"] = "pco-slice-a-planner"
+    lease["lease_id"] = "lease-pco-slice-a-planner"
+    lease["worktree_path"] = "/worktrees/pco-slice-a"
+
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-slice-a"
+    claim["worktree_path"] = "/worktrees/pco-slice-a"
+
+    _write_record(tmp_path / "leases" / "hermes-primary" / "planner.yaml", lease)
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = run([tmp_path])
+
+    assert not any(
+        error.code == CODE_CLAIM_REQUIRES_LEASE for error in result.errors
+    ), [error.format() for error in result.errors]
+
+
+def test_cross_controller_claim_under_other_controllers_lease_fails(tmp_path: Path):
+    # A live lease held by controller A does NOT cover a claim by
+    # controller B on the same worktree; PCO-021 must fire on B's claim
+    # (and PCO-022 would fire only if B also held its own live lease).
+    lease_a = valid_lease_record()
+    lease_a["controller_id"] = "hermes-primary"
+    lease_a["lane_id"] = "pco-slice-a"
+    lease_a["lease_id"] = "lease-a-001"
+    lease_a["worktree_path"] = "/worktrees/pco-slice-a"
+
+    claim_b = valid_claim_record()
+    claim_b["controller_id"] = "nefarious-laptop-a"
+    claim_b["lane_id"] = "pco-slice-b"
+    claim_b["worktree_path"] = "/worktrees/pco-slice-a"
+
+    _write_record(tmp_path / "leases" / "hermes-primary" / "pco-slice-a.yaml", lease_a)
+    _write_record(_claim_path(tmp_path, "nefarious-laptop-a", "pco-slice-b"), claim_b)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_CLAIM_REQUIRES_LEASE for error in result.errors)
+
+
+def test_malformed_lease_record_in_conflict_scan_emits_pco_023(tmp_path: Path):
+    bad_lease = valid_lease_record()
+    bad_lease["controller_id"] = "Bad_ID"
+    _write_record(tmp_path / "leases" / "bad.yaml", bad_lease)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_LEASE_INVALID_RECORD for error in result.errors)
+
+
+def test_tmp_lease_file_is_skipped_by_conflict_validator(tmp_path: Path):
+    bad_lease = valid_lease_record()
+    bad_lease["controller_id"] = "Bad_ID"
+    _write_record(tmp_path / "leases" / "bad" / "lease.yaml.tmp.12345.abc", bad_lease)
 
     result = run([tmp_path])
 

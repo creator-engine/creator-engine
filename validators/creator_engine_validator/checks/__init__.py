@@ -51,6 +51,7 @@ from . import review_evidence_schema as review_evidence_schema  # noqa: E402,F40
 from . import architect_evidence_schema as architect_evidence_schema  # noqa: E402,F401
 from . import implementer_evidence_schema as implementer_evidence_schema  # noqa: E402,F401
 from . import active_work_ledger_schema as active_work_ledger_schema  # noqa: E402,F401
+from . import worktree_lease_schema as worktree_lease_schema  # noqa: E402,F401
 from . import active_work_ledger_conflicts as active_work_ledger_conflicts  # noqa: E402,F401
 from . import completion_report_schema as completion_report_schema  # noqa: E402,F401
 from . import completion_report_required_for_envelope as completion_report_required_for_envelope  # noqa: E402,F401

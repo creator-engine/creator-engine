@@ -1,0 +1,12 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice2a-author
+record_timestamp: "2026-05-21T03:08:09Z"
+worktree_path: /worktrees/pco-slice2a-covered
+envelope_ref: .hermes/envelopes/pco-slice2a.md
+lease_seconds: 3600
+claimed_at: "2026-05-21T03:08:09Z"
+last_heartbeat_at: "9999-01-01T00:00:00Z"
+pane_label: implementer

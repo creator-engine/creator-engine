@@ -1,0 +1,15 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice2a-uncovered
+record_timestamp: "2026-05-21T03:08:09Z"
+worktree_path: /worktrees/pco-slice2a-uncovered
+envelope_ref: .hermes/envelopes/pco-slice2a.md
+lease_seconds: 3600
+claimed_at: "2026-05-21T03:08:09Z"
+last_heartbeat_at: "9999-01-01T00:00:00Z"
+# This claim is live but the only lease in the directory
+# (lease-other.yaml) names a different worktree_path. The
+# claim_requires_live_lease predicate fires once at least one valid
+# lease record is discovered in the tree. Expected failure: PCO-021.

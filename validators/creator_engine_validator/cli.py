@@ -49,6 +49,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_ledger_conflicts.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_leases = sub.add_parser(
+        "scan-worktree-leases",
+        help="run only the worktree_lease_schema check against a path",
+    )
+    scan_leases.add_argument("path", nargs="?", default=".", help="path to scan")
+
     scan_completion = sub.add_parser(
         "scan-completion-reports",
         help="run the completion_report_schema / required_for_envelope / terminal_sections checks against a path",
@@ -120,6 +126,11 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/completion-reports/mismatched-sha.yaml"), False, "CR-002"),
         ("malformed", Path("examples/malformed/completion-reports/blocked-without-blocker.yaml"), False, "CR-001"),
         ("malformed", Path("examples/malformed/completion-reports/none-without-rationale.yaml"), False, "CR-001"),
+        ("malformed", Path("examples/malformed/worktree-leases/missing-required-fields.yaml"), False, "PCO-020"),
+        ("malformed", Path("examples/malformed/worktree-leases/bad-controller-id-pattern.yaml"), False, "PCO-020"),
+        ("malformed", Path("examples/malformed/worktree-leases/unknown-top-level-field.yaml"), False, "PCO-020"),
+        ("malformed", Path("examples/malformed/worktree-leases/cross-controller-conflict"), False, "PCO-022"),
+        ("malformed", Path("examples/malformed/worktree-leases/claim-without-live-lease"), False, "PCO-021"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -192,6 +203,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-active-work-ledger-conflicts":
         from .checks.active_work_ledger_conflicts import run as _run_ledger_conflicts
         result = _run_ledger_conflicts([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-worktree-leases":
+        from .checks.worktree_lease_schema import run as _run_lease
+        result = _run_lease([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "scan-completion-reports":
         from .checks.completion_report_schema import run as _run_cr_schema

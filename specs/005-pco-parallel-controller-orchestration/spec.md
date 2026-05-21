@@ -312,6 +312,157 @@ and the specific Slice 0.5 non-goal each closes.
 
 ---
 
+### User Story US-2A.1 — Controller Records a Worktree Lease Before Writing a Claim (Priority: P1)
+
+A Source-ratified Controller, before writing an Active-Work Ledger
+claim against a physical worktree under multi-Controller conditions,
+MUST be able to produce a worktree-lease record that validates
+against `schemas/worktree-lease.schema.yaml`. The lease names the
+Controller, the lane, the lease id, the worktree path, the
+acquisition timestamp, the lease duration, and the expiry timestamp.
+Optional fields are `pane_label`, `branch`, `envelope_ref`, and
+`note`.
+
+**Why this priority**: Without a tracked lease primitive, contention
+between two Source-ratified Controllers is detectable only *after*
+both ledger claims hit disk. The lease record closes the
+intent-to-write gap that Slice 1/2 left open (G1 in the architect
+report).
+
+**Independent Test**: A reviewer with `git clone` and the Slice 2A
+artifacts can write a golden lease record by hand, run
+`creator_engine_validator scan-worktree-leases examples/well-formed/worktree-leases`,
+and observe the `worktree_lease_schema` check pass.
+
+**Acceptance Scenarios**:
+
+1. **Given** the tracked schema and the prose protocol, **When** a
+   Controller authors a lease record with all required fields,
+   **Then** the validator's `worktree_lease_schema` check passes
+   for that record.
+2. **Given** a lease record missing a required field (e.g.,
+   `lease_id`, `worktree_path`, `acquired_at`, `lease_seconds`, or
+   `expires_at`), **When** the validator runs, **Then** a `PCO-020`
+   failure cites the missing field and the prose contract
+   `docs/operations/WORKTREE_LEASE_PROTOCOL.md`.
+3. **Given** a lease record carrying an unknown top-level field,
+   **When** the validator runs, **Then** the
+   `unevaluatedProperties: false` constraint rejects it with
+   `PCO-020`.
+
+---
+
+### User Story US-2A.2 — Live Claim Without a Live Lease Is Refused When Leases Exist (Priority: P1)
+
+When at least one valid `worktree_lease` record is discovered in the
+scanned tree, the Slice 1/2 `active_work_ledger_conflicts` validator
+MUST refuse any live ledger claim whose `worktree_path` is not
+covered by a live (non-expired) lease under the same
+`controller_id`. Trees that contain zero `worktree_lease` records
+MUST preserve Slice 1/2 behavior unchanged.
+
+**Why this priority**: The predicate is the substrate mechanism by
+which a Controller's claim is forced to descend from a prior
+intent-to-write. Without backward-compatible gating, every existing
+PCO tree would suddenly require a lease.
+
+**Independent Test**: A reviewer can stage a tree with one live
+lease covering `/worktrees/example` and one live claim for the same
+worktree under the same controller and observe the validator pass;
+removing the lease (or expiring it) causes the validator to fail
+with `PCO-021`. A tree with no lease records at all continues to
+validate identically to Slice 1/2.
+
+**Acceptance Scenarios**:
+
+1. **Given** a tree with one live lease under
+   `controller_id: hermes-primary` covering
+   `worktree_path: /worktrees/example` and one live ledger claim
+   under the same controller for the same worktree, **When**
+   `active_work_ledger_conflicts` runs, **Then** the check passes.
+2. **Given** a tree with at least one valid lease record but where
+   the only live claim names a worktree NOT covered by any live
+   lease under that controller, **When** the validator runs, **Then**
+   the check fails with `PCO-021` citing the lease prose contract.
+3. **Given** a tree with zero `worktree_lease` records, **When** the
+   validator runs, **Then** `PCO-021` does NOT fire (backward-
+   compatibility floor); Slice 1/2 invariants continue to apply
+   unchanged.
+4. **Given** a tree with a lease whose `expires_at` is in the past
+   and a live claim for the same worktree under the same controller,
+   **When** the validator runs, **Then** the check fails with
+   `PCO-021` because the lease is no longer live.
+
+---
+
+### User Story US-2A.3 — Cross-Controller Lease Contention Is Refused Before Claims Exist (Priority: P1)
+
+Two live `worktree_lease` records for the same normalized
+`worktree_path` under *different* `controller_id` values MUST fail
+the Slice 1/2 `active_work_ledger_conflicts` validator with
+`PCO-022` (`worktree_lease_conflict`), independently of whether
+either side has yet written a ledger claim. This is the
+contention-resolution primitive Slice 2A delivers.
+
+**Why this priority**: This is the predicate that lets two
+Source-ratified Controllers safely rehearse multi-lane authoring;
+without it, contention is only resolvable after a race lands on
+disk.
+
+**Independent Test**: A reviewer can stage two live leases under
+different controllers for the same `worktree_path` and observe
+`PCO-022`; the bundled
+`examples/malformed/worktree-leases/cross-controller-conflict/`
+fixture exercises this path.
+
+**Acceptance Scenarios**:
+
+1. **Given** two live leases on `/worktrees/shared` under
+   `controller_id: hermes-primary` and `controller_id: nefarious-laptop-a`,
+   **When** `active_work_ledger_conflicts` runs, **Then** the check
+   fails with `PCO-022`.
+2. **Given** a structurally invalid lease record surfaced during
+   the conflict scan, **When** the validator runs, **Then** a
+   `PCO-023` failure surfaces separately from `PCO-020` so the
+   schema-validity surface is not silently widened.
+
+---
+
+### User Story US-2A.4 — Slice 2A Defers Allocator Runtime, Pane Registry, and Identity Hardening (Priority: P1)
+
+Slice 2A is **record / validate / refuse only**. It does NOT
+allocate worktrees, does NOT mutate `git worktree` state, does NOT
+ship a `pco-allocate` / `pco-release` CLI, does NOT introduce a
+Hermes runtime hook, does NOT re-enable `pco-completion-gate`, does
+NOT add tracked `.hermes/active-work-ledger/` runtime records, and
+does NOT solve cryptographic controller-identity binding. Runtime
+allocation is reserved for Slice 2R. Identity hardening is reserved
+for a separately ratified follow-on workstream (provisionally
+"Slice 2.5 — Controller Identity Substrate").
+
+**Why this priority**: Keeping authoring and runtime on separate
+gates preserves the substrate-before-automation discipline that
+PCO Slice 0, Slice 0.5, and Slice 1/2 each held to.
+
+**Independent Test**: A reviewer reads
+[`../../docs/operations/WORKTREE_LEASE_PROTOCOL.md`](../../docs/operations/WORKTREE_LEASE_PROTOCOL.md)
+§§c, j, k, l and can name the deferred slices and the specific
+Slice 2A non-goal each closes.
+
+**Acceptance Scenarios**:
+
+1. **Given** the Slice 2A substrate, **When** a reviewer searches
+   for any `pco-allocate` / `pco-release` entry point or any code
+   that calls `git worktree`, **Then** none exists.
+2. **Given** the Slice 2A substrate, **When** a reviewer searches
+   the validator output for any `pco-completion-gate` mutation,
+   **Then** none exists.
+3. **Given** the Slice 2A substrate, **When** a reviewer searches
+   for any tracked file under `.hermes/active-work-ledger/`,
+   **Then** none exists.
+
+---
+
 ### User Story US-0.4 — Slice 0 Does Not Yet Enforce Execution (Priority: P1)
 
 The spec, the protocol doc, and the architecture doc explicitly state
@@ -546,6 +697,62 @@ Event `event_id` values MUST be unique within `(controller_id, lane_id,
 YYYY-MM-DD)` when `event_timestamp` can be resolved to a UTC day. This
 prevents duplicate event lifecycle records inside the scope already
 named by the schema.
+
+### PCO-020 — Worktree Lease Record Schema (Slice 2A)
+
+The tracked schema at `schemas/worktree-lease.schema.yaml` defines
+the Worktree Lease record contract: top-level `kind`
+(`worktree-lease-record`), `record_type` (`worktree_lease`),
+`schema_version` (`"1"`), `controller_id`, `lane_id`,
+`record_timestamp`, and the required lease-specific fields
+`lease_id`, `worktree_path`, `acquired_at`, `lease_seconds`,
+`expires_at`. Optional fields are `pane_label`, `branch`,
+`envelope_ref`, and `note`. `unevaluatedProperties: false`. The
+`worktree_lease_schema` validator check validates one record at a
+time against this schema and cites
+`docs/operations/WORKTREE_LEASE_PROTOCOL.md`.
+
+### PCO-021 — Claim Requires Live Worktree Lease (Slice 2A)
+
+When at least one valid `worktree_lease` record is discovered in the
+scanned tree, the `active_work_ledger_conflicts` validator MUST
+refuse any live ledger claim whose normalized `worktree_path` is not
+covered by a live (non-expired) lease under the same
+`controller_id`. The predicate is gated on the discovery of a valid
+lease record so trees with zero lease records preserve Slice 1/2
+behavior unchanged.
+
+### PCO-022 — Cross-Controller Worktree Lease Conflict (Slice 2A)
+
+Two live `worktree_lease` records for the same normalized
+`worktree_path` under *different* `controller_id` values MUST fail
+the `active_work_ledger_conflicts` validator with
+`worktree_lease_conflict`, independently of whether either
+controller has yet written a ledger claim. This is the
+contention-resolution predicate Slice 2A delivers.
+
+### PCO-023 — Worktree Lease Invalid Record (Slice 2A)
+
+A structurally invalid worktree-lease record discovered during the
+conflict scan MUST surface as `worktree_lease_invalid_record`
+(`PCO-023`) so the schema-validity surface is not silently widened
+by the conflict layer. Schema-level validation of single lease
+records is owned by `worktree_lease_schema` (`PCO-020`); resolve
+`PCO-020` first when both fire.
+
+### PCO-024 — Slice 2A Boundary Statement (No Allocator, No Runtime)
+
+Slice 2A records, validates, and refuses Worktree Lease state; it
+does NOT yet allocate worktrees, does NOT mutate `git worktree`
+state, does NOT ship a `pco-allocate` / `pco-release` CLI, does NOT
+introduce a Hermes runtime hook, does NOT re-enable
+`pco-completion-gate`, does NOT add tracked
+`.hermes/active-work-ledger/` runtime records, and does NOT solve
+cryptographic controller-identity binding. Runtime allocation is
+reserved for Slice 2R. Identity hardening is reserved for a
+separately ratified follow-on workstream. This statement MUST
+appear normatively in the schema description, the prose protocol,
+the architecture doc, and this spec.
 
 ### PCO-018 — Slice 1/2 Validator Discoverability
 
