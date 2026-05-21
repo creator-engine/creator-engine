@@ -1,0 +1,8 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice2a-author
+record_timestamp: "2026-05-21T03:08:08Z"
+# Intentionally missing: lease_id, worktree_path, acquired_at,
+# lease_seconds, expires_at. Expected failure: PCO-020.

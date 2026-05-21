@@ -1,4 +1,4 @@
-"""Active-Work Ledger cross-record conflict validation (PCO Slice 1/2).
+"""Active-Work Ledger cross-record conflict validation (PCO Slice 1/2 + 2A).
 
 This check sits above ``active_work_ledger_schema``.  The schema check
 continues to validate one record at a time; this module validates the
@@ -19,6 +19,17 @@ Implemented invariants:
   parseable heartbeat timestamps establish an order;
 * event ids MUST be unique within ``(controller_id, lane_id, YYYY-MM-DD)``;
 * orphaned atomic-write ``*.tmp.*`` files remain skipped by shared discovery.
+
+Slice 2A additive predicates (gated on the discovery of at least one
+valid ``worktree_lease`` record in the scanned tree, so trees with zero
+lease records preserve Slice 1/2 behavior unchanged):
+
+* a live claim's ``worktree_path`` MUST be covered by a live, non-expired
+  Worktree Lease record under the **same** ``controller_id`` (``PCO-021``);
+* two live leases for the same ``worktree_path`` under *different*
+  ``controller_id`` values is itself a conflict (``PCO-022``);
+* structurally invalid lease records surfaced during the conflict scan
+  emit ``PCO-023`` so the schema-validity surface is not silently widened.
 """
 
 from __future__ import annotations
@@ -36,6 +47,11 @@ from .active_work_ledger_schema import (
     iter_active_work_ledger_records,
     validate_active_work_ledger_record,
 )
+from .worktree_lease_schema import (
+    CONTRACT as LEASE_CONTRACT,
+    iter_worktree_lease_records,
+    validate_worktree_lease_record,
+)
 
 CHECK_NAME = "active_work_ledger_conflicts"
 CODE_WORKTREE_CONFLICT = "PCO-010"
@@ -45,6 +61,9 @@ CODE_EVENT_REF = "PCO-015"
 CODE_LANE_CONFLICT = "PCO-016"
 CODE_HEARTBEAT_MONOTONIC = "PCO-017"
 CODE_EVENT_ID_CONFLICT = "PCO-018"
+CODE_CLAIM_REQUIRES_LEASE = "PCO-021"
+CODE_WORKTREE_LEASE_CONFLICT = "PCO-022"
+CODE_LEASE_INVALID_RECORD = "PCO-023"
 
 
 @dataclass(frozen=True)
@@ -82,6 +101,64 @@ def _load_valid_ledger_records(paths: Iterable[Path]) -> list[LedgerRecord]:
             continue
         records.append(LedgerRecord(path=record_path, record=record))
     return records
+
+
+@dataclass(frozen=True)
+class LeaseRecord:
+    path: Path
+    record: dict[str, Any]
+
+
+def _load_lease_records(
+    paths: Iterable[Path],
+) -> tuple[list[LeaseRecord], list[ValidationError]]:
+    """Discover lease records, partitioning valid from invalid.
+
+    Invalid lease records surface as ``PCO-023`` so the conflict scan
+    fails loudly when malformed lease state would otherwise silently
+    disable the Slice 2A predicates. Schema-valid leases are returned
+    for the lease-aware predicates to operate on.
+    """
+    valid: list[LeaseRecord] = []
+    invalid: list[ValidationError] = []
+    for record_path in iter_worktree_lease_records(paths):
+        try:
+            record = load_yaml(record_path)
+        except LoaderError as exc:
+            invalid.append(
+                make_error(
+                    CODE_LEASE_INVALID_RECORD,
+                    record_path,
+                    "",
+                    f"worktree-lease record could not be loaded: {exc}",
+                    LEASE_CONTRACT,
+                )
+            )
+            continue
+        if not isinstance(record, dict):
+            invalid.append(
+                make_error(
+                    CODE_LEASE_INVALID_RECORD,
+                    record_path,
+                    "/",
+                    "worktree-lease record must be a YAML mapping",
+                    LEASE_CONTRACT,
+                )
+            )
+            continue
+        if validate_worktree_lease_record(record, record_path):
+            invalid.append(
+                make_error(
+                    CODE_LEASE_INVALID_RECORD,
+                    record_path,
+                    "/",
+                    "worktree-lease record fails schema validation; resolve PCO-020 first",
+                    LEASE_CONTRACT,
+                )
+            )
+            continue
+        valid.append(LeaseRecord(path=record_path, record=record))
+    return valid, invalid
 
 
 def _normalize_worktree_path(value: Any) -> str:
@@ -377,21 +454,123 @@ def _event_id_conflicts(records: Iterable[LedgerRecord]) -> list[ValidationError
     return errors
 
 
+def _lease_is_live(record: dict[str, Any], now: datetime) -> bool:
+    """A lease is live when ``now < expires_at``.
+
+    Source-controlled or commit-based ``expires_at`` values are not
+    resolvable against wall-clock ``now``; they default to live in the
+    same spirit that the ledger conflict layer leaves those timestamp
+    shapes structurally valid but advisory for time-axis predicates.
+    """
+    expires_at = record.get("expires_at")
+    parsed = _parse_utc(expires_at)
+    if parsed is None:
+        return True
+    return now < parsed
+
+
+def _lease_key(record: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(record.get("controller_id", "")),
+        _normalize_worktree_path(record.get("worktree_path")),
+    )
+
+
+def _worktree_lease_conflicts(
+    leases: Iterable[LeaseRecord], now: datetime
+) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    live_by_worktree: dict[str, LeaseRecord] = {}
+    for item in leases:
+        record = item.record
+        if not _lease_is_live(record, now):
+            continue
+        worktree = _normalize_worktree_path(record.get("worktree_path"))
+        if not worktree:
+            continue
+        existing = live_by_worktree.get(worktree)
+        if existing is None:
+            live_by_worktree[worktree] = item
+            continue
+        existing_controller = str(existing.record.get("controller_id", ""))
+        controller = str(record.get("controller_id", ""))
+        if controller != existing_controller:
+            errors.append(
+                make_error(
+                    CODE_WORKTREE_LEASE_CONFLICT,
+                    item.path,
+                    "worktree_path",
+                    (
+                        f"live worktree lease for {worktree!r} conflicts with "
+                        f"{existing.path} ({existing_controller})"
+                    ),
+                    LEASE_CONTRACT,
+                )
+            )
+    return errors
+
+
+def _claim_requires_live_lease(
+    claims: Iterable[LedgerRecord],
+    leases: Iterable[LeaseRecord],
+    now: datetime,
+) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    live_lease_coverage: set[tuple[str, str]] = {
+        _lease_key(lease.record)
+        for lease in leases
+        if _lease_is_live(lease.record, now)
+        and _normalize_worktree_path(lease.record.get("worktree_path"))
+    }
+    for item in claims:
+        record = item.record
+        if record.get("record_type") != "claim" or not _claim_is_live(record, now):
+            continue
+        worktree = _normalize_worktree_path(record.get("worktree_path"))
+        if not worktree:
+            continue
+        controller = str(record.get("controller_id", ""))
+        if (controller, worktree) in live_lease_coverage:
+            continue
+        errors.append(
+            make_error(
+                CODE_CLAIM_REQUIRES_LEASE,
+                item.path,
+                "worktree_path",
+                (
+                    f"live claim for worktree {worktree!r} under controller "
+                    f"{controller!r} is not covered by a live worktree-lease "
+                    "record under the same controller"
+                ),
+                LEASE_CONTRACT,
+            )
+        )
+    return errors
+
+
 def validate_active_work_ledger_conflicts(
     paths: Iterable[Path], *, now: datetime | None = None
 ) -> CheckResult:
     scan_paths = [Path(p) for p in paths]
     effective_now = now or datetime.now(UTC)
     records = _load_valid_ledger_records(scan_paths)
+    leases, lease_errors = _load_lease_records(scan_paths)
     roots = _scan_roots(scan_paths)
     claim_index = _build_claim_path_index(records, roots)
-    errors = [
+    errors: list[ValidationError] = [
         *_worktree_conflicts(records, effective_now),
         *_lane_conflicts(records, effective_now),
         *_reference_errors(records, claim_index),
         *_heartbeat_monotonic_errors(records, claim_index),
         *_event_id_conflicts(records),
     ]
+    # Slice 2A additive predicates are gated on the discovery of at
+    # least one valid worktree-lease record in the scanned tree so
+    # trees with zero lease records preserve Slice 1/2 behavior.
+    if leases:
+        errors.extend(_worktree_lease_conflicts(leases, effective_now))
+        errors.extend(_claim_requires_live_lease(records, leases, effective_now))
+    errors.extend(lease_errors)
     warnings = _stale_warnings(records, effective_now)
     return CheckResult(name=CHECK_NAME, errors=tuple(errors), warnings=tuple(warnings))
 
@@ -405,6 +584,9 @@ def validate_active_work_ledger_conflicts(
         CODE_LANE_CONFLICT,
         CODE_HEARTBEAT_MONOTONIC,
         CODE_EVENT_ID_CONFLICT,
+        CODE_CLAIM_REQUIRES_LEASE,
+        CODE_WORKTREE_LEASE_CONFLICT,
+        CODE_LEASE_INVALID_RECORD,
     ],
 )
 def run(paths: Iterable[Path]) -> CheckResult:

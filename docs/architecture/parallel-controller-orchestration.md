@@ -130,9 +130,30 @@ runtime tooling after.
    within the `(controller, lane, day)` scope. This is validator-only:
    it refuses unsafe pre-launch state but does not allocate worktrees
    or launch panes.
-3. **Slice 2 — Worktree Allocator.** Short-lived worktree leases
-   that line up with ledger claims; resolves contention before a
-   claim is written.
+2.5. **Slice 2A — Worktree Lease Substrate.** Tracked Worktree Lease
+   record schema (`schemas/worktree-lease.schema.yaml`) + prose
+   protocol ([`../operations/WORKTREE_LEASE_PROTOCOL.md`](../operations/WORKTREE_LEASE_PROTOCOL.md))
+   + well-formed and malformed examples + new
+   `worktree_lease_schema` validator check (`PCO-020`) +
+   additive predicates in `active_work_ledger_conflicts`:
+   `claim_requires_live_lease` (`PCO-021`),
+   `worktree_lease_conflict` (`PCO-022`), and
+   `worktree_lease_invalid_record` (`PCO-023`). The lease-aware
+   predicates are gated on the discovery of at least one valid
+   lease record in the scanned tree, so trees with zero lease
+   records preserve Slice 1/2 behavior unchanged. Slice 2A is
+   substrate-only: it does NOT allocate worktrees, does NOT
+   mutate `git worktree` state, does NOT ship a `pco-allocate` /
+   `pco-release` CLI, does NOT introduce a Hermes runtime hook,
+   does NOT re-enable `pco-completion-gate`, and does NOT solve
+   cryptographic controller-identity binding. Runtime allocation
+   is reserved for Slice 2R; identity hardening is reserved for a
+   separately ratified follow-on workstream.
+3. **Slice 2R — Worktree Allocator Runtime (deferred).** Short-lived
+   worktree leases bound to actual `git worktree` state; ships
+   `pco-allocate` / `pco-release` CLI, advisory lease lock, and
+   claim-writes-only-under-held-lease enforcement. Slice 2R is the
+   runtime sibling of Slice 2A and is ratified separately.
 4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
    Architect/Implementer pane is bound to which claim, on which host.
 5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
@@ -188,3 +209,17 @@ A fresh-clone reviewer must be able to:
    (one-driver-per-worktree, controller boundary policy, Feature 001
    ratification) and confirm that PCO layers onto, rather than
    replaces, that doctrine.
+
+## h. Slice 2A substrate boundary statement
+
+**Slice 2A records, validates, and refuses Worktree Lease state; it
+does NOT yet allocate worktrees, does NOT mutate `git worktree`
+state, does NOT ship a `pco-allocate` / `pco-release` CLI, does NOT
+re-enable `pco-completion-gate`, and does NOT solve cryptographic
+controller-identity binding. Runtime allocation is reserved for
+Slice 2R. Identity hardening is reserved for a separately ratified
+follow-on workstream.** This statement is normative and reproduced
+verbatim in
+[`../operations/WORKTREE_LEASE_PROTOCOL.md`](../operations/WORKTREE_LEASE_PROTOCOL.md)
+and in
+[`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).

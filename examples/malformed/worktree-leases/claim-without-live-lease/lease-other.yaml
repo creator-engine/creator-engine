@@ -1,0 +1,15 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice2a-other-lane
+record_timestamp: "2026-05-21T03:08:08Z"
+lease_id: lease-other-001
+worktree_path: /worktrees/pco-slice2a-other
+acquired_at: "2026-05-21T03:08:08Z"
+lease_seconds: 3600
+expires_at: "9999-01-01T00:00:00Z"
+# This lease's presence activates the Slice 2A claim_requires_live_lease
+# predicate for the scanned tree, but it does NOT cover the claim in
+# claim.yaml because the worktree_path differs. Expected failure on
+# the claim: PCO-021.

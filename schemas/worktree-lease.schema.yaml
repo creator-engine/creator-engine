@@ -1,0 +1,220 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/worktree-lease.schema.yaml"
+title: "Creator Engine Worktree Lease Record"
+description: |
+  Machine-readable schema for a single Worktree Lease record authored
+  under the Creator Engine Parallel Controller Orchestration (PCO)
+  substrate.
+
+  Prose contract:
+  `docs/operations/WORKTREE_LEASE_PROTOCOL.md`.
+
+  Architectural companion:
+  `docs/architecture/parallel-controller-orchestration.md`.
+
+  Feature spec:
+  `specs/005-pco-parallel-controller-orchestration/spec.md`.
+
+  A Worktree Lease record names an *intent to write* against a
+  physical worktree before a corresponding Active-Work Ledger claim
+  is produced. The lease lets a Controller resolve contention with
+  another Source-ratified Controller before either side writes a
+  ledger claim. The lease itself never allocates a worktree, never
+  mutates `git worktree` state, and never grants authority beyond
+  the Source-ratified envelope under which the lane operates.
+
+  Slice 2A boundary statement: this schema and its companion
+  validator `worktree_lease_schema` add the *record* contract and
+  the *refusal* predicates; they do NOT introduce a `pco-allocate`
+  CLI, do NOT mutate filesystem state, do NOT take or release
+  `git worktree` state, do NOT bind a Hermes runtime hook, and do
+  NOT re-enable `pco-completion-gate`. Runtime allocator mechanics
+  (Slice 2R), pane registry (Slice 3), side-effect ledger (Slice 4),
+  fan-in (Slice 5), and integration queue (Slice 6) are explicitly
+  out of scope.
+
+  The lease record is the substrate primitive a later Slice 2R
+  runtime allocator will operate on. The additive predicates in
+  `active_work_ledger_conflicts` only fire when at least one valid
+  `worktree_lease` record is discovered in the scanned tree, so
+  trees that pre-date Slice 2A continue to validate identically.
+
+  Controller-identity caveat: a `controller_id` value is only as
+  trustworthy as the operator+host pair behind it. This schema does
+  NOT solve cryptographic identity binding; per-host keying, a
+  signing surface, or any other forgery-hardening of `controller_id`
+  is reserved for a separately ratified Slice 2.5 / Controller
+  Identity Substrate workstream.
+
+  Concrete tool, model, CLI, SaaS account, runner, source-host
+  application, bot slug, or QA-harness identifiers MUST NOT appear
+  in lease records as normative upstream bindings; those remain
+  deployment-time overlay decisions per
+  `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md` §c precedent.
+  Real secrets, tokens, credentials, source-host installation ids,
+  durable actor ids, app slugs, account names, and machine-local
+  absolute paths beyond `worktree_path` (which is required and
+  treated as advisory, not as a secret) MUST NOT appear in lease
+  records.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - controller_id
+  - lane_id
+  - record_timestamp
+  - lease_id
+  - worktree_path
+  - acquired_at
+  - lease_seconds
+  - expires_at
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: worktree-lease-record
+    description: |
+      Discriminator constant. Records that do not carry this exact
+      value are not governed Worktree Lease records under this
+      contract and MUST NOT be validated by the
+      `worktree_lease_schema` check.
+  record_type:
+    type: string
+    const: worktree_lease
+    description: |
+      Sub-discriminator. Slice 2A defines exactly one record shape;
+      later slices MAY add additional record types via additive
+      extension under a new `schema_version`.
+  schema_version:
+    type: string
+    enum: ["1"]
+    description: |
+      Worktree Lease schema version. Slice 2A ships v1. Later
+      slices MAY extend additively via a further version bump
+      without breaking v1 readers.
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable identifier for the driving Controller. Same shape and
+      same caveats as in
+      `schemas/active-work-ledger.schema.yaml`: stable per physical
+      operator+host pair; MUST NOT embed secrets, tokens,
+      installation ids, durable actor ids, model identifiers, or
+      account names. Controller identity is structurally consistent
+      with the Active-Work Ledger; cryptographic identity binding is
+      not solved by this schema (see the controller-identity caveat
+      in the description).
+  lane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Coordination unit identifier the Controller intends to claim
+      under this lease. Typically `<feature-or-slice>-<short-suffix>`.
+      Lease coverage is keyed by `(controller_id, worktree_path)`,
+      not by `lane_id`; lane uniqueness remains owned by the
+      Slice 1/2 `active_work_ledger_conflicts` `PCO-016` predicate.
+  record_timestamp:
+    description: |
+      Either an ISO-8601 UTC timestamp (e.g.,
+      `2026-05-21T03:08:08Z`) or a source-controlled reference
+      (`commit:<sha>` or `source-controlled:<repo-relative-path>`).
+      A machine-local clock value MUST NOT be presented as
+      authoritative. Mirrors the shape used by the Active-Work
+      Ledger schema.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  lease_id:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]{2,63}$"
+    description: |
+      Lease identifier. Stable within
+      `(controller_id, lane_id, YYYY-MM-DD)` scope. Mirrors the
+      `event_id` shape from the Active-Work Ledger schema. Slice 2A
+      does not enforce cross-record uniqueness mechanically beyond
+      the schema's structural constraints; reuse of a `lease_id` is
+      operationally discouraged.
+  worktree_path:
+    type: string
+    minLength: 1
+    description: |
+      Repo-relative or absolute path of the physical worktree this
+      lease intends to claim. Treated as advisory (not a secret),
+      but required so that lease/lease and lease/claim coverage can
+      be checked mechanically. The `worktree_path` is the primary
+      contention key.
+  acquired_at:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) at
+      which the lease was acquired. Same shape as
+      `record_timestamp`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  lease_seconds:
+    type: integer
+    minimum: 60
+    maximum: 86400
+    description: |
+      Lease duration in seconds. Default value documented in the
+      protocol (3600); the schema validates the range only. A lease
+      is live when `now < expires_at`; an `expires_at` in the past
+      is the structural expiry signal.
+  expires_at:
+    description: |
+      ISO-8601 UTC timestamp (or source-controlled reference) at
+      which the lease expires. Same shape as `record_timestamp`. A
+      lease whose `expires_at` is in the past is considered expired
+      and no longer covers a claim under
+      `active_work_ledger_conflicts` `PCO-021`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  pane_label:
+    type: string
+    enum: [architect, implementer, controller, reviewer]
+    description: |
+      Optional generic role label of the visible pane this lease
+      describes. Same enum and same prohibition surface as in the
+      Active-Work Ledger schema. NOT a model, tool, CLI, account,
+      or runner binding.
+  branch:
+    type: string
+    minLength: 1
+    description: |
+      Optional branch name the lease intends to operate on.
+      Recommended but not required; pre-branch planning leases MAY
+      omit this.
+  envelope_ref:
+    description: |
+      Optional repo-relative path to the Assignment Envelope under
+      whose authority the lease is operating, or the literal `none`
+      for coordination lanes that operate without an envelope. The
+      envelope, not the lease, remains the substantive authority.
+    oneOf:
+      - type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+      - type: string
+        const: none
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional free-text status note. Advisory only; MUST NOT
+      contain secrets, tokens, credentials, or actor ids. Slice 2A
+      does not enforce this prohibition mechanically.

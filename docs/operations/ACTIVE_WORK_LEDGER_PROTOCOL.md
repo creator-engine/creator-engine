@@ -474,3 +474,46 @@ alone:
 7. The relationships to Assignment Envelopes, handoffs,
    recommended-prompts, and one-driver-per-worktree.
 8. The slice plan that closes each later-slice gap.
+
+## w. Slice 2A — Worktree Lease cross-reference (additive)
+
+Slice 2A introduces a sibling coordination primitive — the **Worktree
+Lease** — that names a Controller's intent-to-write against a
+physical worktree *before* a ledger claim is produced. The Worktree
+Lease primitive lives in:
+
+* tracked schema `schemas/worktree-lease.schema.yaml`;
+* prose contract [`./WORKTREE_LEASE_PROTOCOL.md`](./WORKTREE_LEASE_PROTOCOL.md);
+* runtime directory shape under
+  `.hermes/active-work-ledger/leases/<controller-id>/<lease-id>.yaml`
+  (still untracked; covered by the existing `.hermes/` ignore rule).
+
+The Slice 2A validator surface extends `active_work_ledger_conflicts`
+**additively**. The new predicates are:
+
+* `claim_requires_live_lease` (`PCO-021`) — a live ledger claim
+  whose `worktree_path` is not covered by a live worktree lease
+  under the **same** `controller_id` is refused;
+* `worktree_lease_conflict` (`PCO-022`) — two live worktree leases
+  for the same normalized `worktree_path` under *different*
+  `controller_id` values is refused;
+* `worktree_lease_invalid_record` (`PCO-023`) — a structurally
+  invalid lease record discovered during the conflict scan surfaces
+  separately from `PCO-020`.
+
+These predicates are **gated on the discovery of at least one valid
+`worktree_lease` record** in the scanned tree. Trees that contain
+zero lease records preserve Slice 1/2 behavior unchanged; this is
+the Slice 2A backward-compatibility floor.
+
+The Slice 1/2 worktree-collision predicate (`PCO-010`) remains in
+force when leases are present: even with coverage, two live ledger
+claims under different controllers on the same worktree still fail
+`PCO-010`. The lease layer is an *additional* refusal surface, not
+a replacement.
+
+Slice 2A does **not** modify the Active-Work Ledger schema, does
+**not** add tracked ledger records, and does **not** bump
+`schemas/active-work-ledger.schema.yaml`'s `schema_version`. The
+lease layer is a sibling primitive — not a child of `claims/`,
+`heartbeats/`, or `events/`.

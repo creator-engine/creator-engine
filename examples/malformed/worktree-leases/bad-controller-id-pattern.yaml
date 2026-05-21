@@ -1,0 +1,13 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+# Intentionally invalid: controller_id violates ^[a-z][a-z0-9-]{2,63}$.
+# Expected failure: PCO-020.
+controller_id: Bad_Controller_ID
+lane_id: pco-slice2a-author
+record_timestamp: "2026-05-21T03:08:08Z"
+lease_id: lease-bad-id-001
+worktree_path: /worktrees/pco-slice2a
+acquired_at: "2026-05-21T03:08:08Z"
+lease_seconds: 3600
+expires_at: "9999-01-01T00:00:00Z"
