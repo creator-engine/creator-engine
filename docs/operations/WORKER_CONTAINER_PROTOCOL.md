@@ -1,0 +1,267 @@
+# Worker-Container Protocol
+
+**Slice**: PCO Slice 2I-S (Worker Isolation Runtime — Substrate)
+**Status**: Substrate-only (record contracts, refusal predicates, safety
+defaults). Runtime implementation is deferred to Slice 2I-R.
+**Spec companion**:
+`specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`
+**Architectural companion**:
+`docs/architecture/parallel-controller-orchestration.md`
+
+---
+
+## 1. Purpose
+
+Slice 2I-S authors the substrate contracts for worker-container
+isolation in the Creator Engine. Every subsequent PCO slice (Slices 3,
+4, 5, 6) and every team-mode workstream (Features 007, 008, 009) is
+authored against this substrate.
+
+This protocol documents:
+
+1. The two tracked record kinds added by Slice 2I-S: **Worker-Container
+   Policy** and **Container-Instance**.
+2. The additive extension to the Active-Work Ledger schema
+   (`schema_version: "3"`, three new event kinds).
+3. The six refusal predicates (`PCO-040` through `PCO-045`), with the
+   validator check that enforces each.
+4. The OSD decisions binding this implementation.
+5. Explicit non-goals.
+
+---
+
+## 2. Record Kinds
+
+### 2a. Worker-Container Policy Record
+
+**Schema**: `schemas/worker-container-policy.schema.yaml`
+**Validator check**: `validators/creator_engine_validator/checks/worker_container_policy.py`
+**Kind discriminator**: `kind: worker-container-policy-record`
+**Predicate codes**: `PCO-040` (schema), `PCO-045` (forbidden mount / secret)
+
+A Worker-Container Policy record declares the isolation posture for one
+named worker role. It is a tracked, Source-ratified artifact — not a
+deployment secret or a runtime config file.
+
+**Required fields**:
+
+| Field | Purpose |
+|---|---|
+| `policy_id` | Stable slug identifier for this policy version. |
+| `policy_sha` | SHA256 hex of the canonical policy record. Bound into container-instance records. |
+| `role` | One of `architect_research`, `implementer`, `verification`. |
+| `runtime_engine` | `podman-rootless` (canonical v1) or `docker-rootless` (deployment overlay). |
+| `image_ref.name` | OCI image name (shape only; deployment overlay). |
+| `image_ref.sha` | Content-addressable image digest (`sha256:<hex64>`). Used by `PCO-044`. |
+| `mount_manifest` | Ordered list of paths to bind into the container. Default-deny. |
+| `egress_allowlist` | Per-rule egress shape. Empty array = no egress. |
+| `secret_allowlist` | Secret names (no values) allowed for injection. |
+| `grant_extensible` | Whether runtime mount extensions are permitted. |
+| `grant_authority` | `controller` or `source` per OSD-I-7. |
+
+**Per-role defaults** (from spec §d.2):
+
+| Role | Mount default | Egress default | Credential default |
+|---|---|---|---|
+| `architect_research` | Read-only allocated worktree + read-only `governance/` | Model-provider + documentation/web + source-host read API | Model-provider key; no write tokens; no SSH; no controller-key |
+| `implementer` | Read-write one allocated worktree + read-only `governance/` | Model-provider + dependency-registry + source-host write API (per-task PAT) | Model-provider key; per-task scoped PAT; no SSH; no controller-key |
+| `verification` | Read-only allocated worktree + read-only `governance/` | None by default | None by default |
+
+### 2b. Container-Instance Record
+
+**Schema**: `schemas/container-instance.schema.yaml`
+**Validator check**: `validators/creator_engine_validator/checks/container_instance.py`
+**Kind discriminator**: `kind: container-instance-record`
+**Predicate codes**: `PCO-041` (schema), `PCO-043` (outlives claim), `PCO-044` (image SHA mismatch)
+
+A Container-Instance record captures the runtime state of one allocated
+worker container. It is written by `allocate_worker` (Slice 2I-R) and
+updated by `terminate_worker` / `garbage_collect_worker`.
+
+**Required fields**:
+
+| Field | Purpose |
+|---|---|
+| `instance_id` | Stable slug per container instance. |
+| `policy_ref.policy_id` | Policy that governs this instance. |
+| `policy_ref.policy_sha` | Exact policy version in force at `allocate_worker`. |
+| `policy_ref.image_sha` | Image SHA from the policy at allocation time. Used by `PCO-044`. |
+| `image_sha` | Actual image SHA used at container start. |
+| `claim_id` | Bound Active-Work Ledger claim. |
+| `lease_id` | Worktree Lease live at allocation. |
+| `started_at` | Container start timestamp. |
+| `stopped_at` | Container stop timestamp, or `null` while running. Used by `PCO-043`. |
+| `exit_code` | Main process exit code, or `null` while running. |
+| `mount_manifest_applied` | Applied mount entries (path, mode, source). |
+| `secret_grants` | Injected secrets: names, modes, broker-grant ids, TTLs. **No values.** |
+| `egress_allowlist_applied` | Applied egress rules. |
+| `enforcement_primitive` | `pasta`, `slirp4netns`, `iptables`, `none`, or `unknown`. |
+| `policy_sha` | Top-level policy SHA for fast audit lookups (= `policy_ref.policy_sha`). |
+
+**Optional fields**:
+
+| Field | Purpose |
+|---|---|
+| `claim_released_at` | Claim release timestamp; when set with `stopped_at: null` triggers `PCO-043`. |
+| `note` | Advisory text. No secrets. |
+
+**Secret-grant entries** (`secret_grants` array) MUST NOT contain a
+`secret_value` or equivalent field. The schema enforces this via
+`unevaluatedProperties: false` on each entry.
+
+### 2c. Active-Work Ledger Extension (Slice 2I-S, schema_version "3")
+
+**Schema**: `schemas/active-work-ledger.schema.yaml`
+**Validator check**: `validators/creator_engine_validator/checks/active_work_ledger_schema.py`
+
+Three container event kinds are added additively:
+
+| Event kind | Emitted by | Details fields |
+|---|---|---|
+| `container_started` | `allocate_worker` | `instance_id`, `claim_id`, `summary` |
+| `container_stopped` | `terminate_worker` | `instance_id`, `claim_id`, `exit_code`, `reason`, `summary` |
+| `container_force_reaped` | `garbage_collect_worker` | `instance_id`, `claim_id`, `reason`, `elapsed_since_release_seconds`, `summary` |
+
+`reason` enum for `container_stopped` and `container_force_reaped`:
+`normal_release`, `claim_lapsed`, `validator_refusal`, `operator_abort`,
+`force_reap`.
+
+Prior `schema_version: "1"` and `"2"` records continue to validate
+unchanged. Container event kinds require `schema_version: "3"`.
+
+---
+
+## 3. Refusal Predicates
+
+### PCO-040 — Worker-Container Policy Schema
+
+**Check**: `worker_container_policy` (`CODE_SCHEMA = "PCO-040"`)
+**Surface**: every file with `kind: worker-container-policy-record`
+
+Every Worker-Container Policy record MUST validate against
+`schemas/worker-container-policy.schema.yaml`. Failures cite `PCO-040`
+and name the violated field.
+
+### PCO-041 — Container-Instance Record Schema
+
+**Check**: `container_instance` (`CODE_SCHEMA = "PCO-041"`)
+**Surface**: every file with `kind: container-instance-record`
+
+Every Container-Instance record MUST validate against
+`schemas/container-instance.schema.yaml`. Structural failures (not a
+YAML mapping) are distinguished from schema failures. Failures cite
+`PCO-041` and name the violated field.
+
+### PCO-042 — Container Required for Claim (Slice 2I-R, gated)
+
+`PCO-042` is a Slice 2I-R predicate. It will refuse a live claim record
+when the tree contains at least one worker-container policy record but
+the claim has no paired container-instance record. Trees without any
+worker-container policy record preserve Slice 2R behavior. The
+validator check is not shipped by Slice 2I-S.
+
+### PCO-043 — Container Outlives Claim
+
+**Check**: `container_instance` (`CODE_OUTLIVES_CLAIM = "PCO-043"`)
+**Surface**: every Container-Instance record
+
+Refuses a container-instance record where:
+- `claim_released_at` is present (the bound claim was released), AND
+- `stopped_at` is `null` (the container is still running).
+
+This is the static substrate surface that backs the
+`garbage_collect_worker` sweeper (spec §e.9). When PCO-043 fires the
+sweeper MUST call `terminate_worker` on the identified instance.
+
+### PCO-044 — Image SHA Matches Policy
+
+**Check**: `container_instance` (`CODE_IMAGE_SHA_MISMATCH = "PCO-044"`)
+**Surface**: every Container-Instance record
+
+Refuses a container-instance record where `image_sha` ≠
+`policy_ref.image_sha`. The allocator MUST NOT substitute a different
+image after the policy was ratified; a mismatch proves substitution
+occurred.
+
+### PCO-045 — Forbidden Mount Refusal
+
+**Check**: `worker_container_policy` (`CODE_FORBIDDEN_MOUNT = "PCO-045"`)
+**Surface**: every Worker-Container Policy record
+
+Refuses any policy whose mount manifest or secret allowlist violates
+the Slice 2I-S safety floor:
+
+**Forbidden mount paths**:
+- `$HOME`-prefixed or `~/`-prefixed paths (host home directory; spec §f.2)
+- `/var/run/docker.sock`, `/run/docker.sock` (Docker socket)
+- `/run/podman/podman.sock`, `/var/run/podman/podman.sock` (Podman socket)
+- Any path whose basename matches `podman.sock` (covers `XDG_RUNTIME_DIR`
+  variants; spec §f.4)
+
+**Forbidden secret names**:
+- Any name matching `controller.{0,10}key` (case-insensitive) — covers
+  `controller-private-key`, `hermes-controller-key`, etc. (spec §f.3)
+
+`PCO-045` is the single schema-level boundary against the most-violated
+container anti-patterns. It is a defense-in-depth predicate: the
+runtime engine MUST enforce the same rules at allocation time; the
+schema check catches mis-authored policies before they reach the
+allocator.
+
+---
+
+## 4. OSD Decisions Binding This Implementation
+
+The following OSD decisions from the architect report and Slice 2I-S
+spec are binding for this substrate implementation:
+
+| Decision | Binding choice | Spec ref |
+|---|---|---|
+| OSD-I-1 Runtime engine | `podman-rootless` canonical; `docker-rootless` overlay | §i.1 |
+| OSD-I-3 Controller containerization | Deferred; Controller stays on host | §i.3 |
+| OSD-I-7 Mount-grant authority | Per-grant rule in policy; governance-class requires Source (FR-008) | §i.7 |
+| Non-negotiable | Controller-key private key MUST NOT be injected into any worker | §f.3 |
+
+Decisions OSD-I-2 (image baseline), OSD-I-4 (credential broker),
+OSD-I-5 (egress enforcement primitive), OSD-I-6 (image separation by
+role), and OSD-1 (per-container ephemeral controller-key candidate) are
+not yet resolved and are deferred to Slice 2I-R / Slice 2.5+2R.
+
+---
+
+## 5. Non-Goals
+
+The following are explicitly NOT implemented by Slice 2I-S:
+
+- **No container runtime**: no `podman run`, `docker run`, `systemd-nspawn`,
+  or equivalent command is issued by this substrate.
+- **No image authoring**: no Dockerfile, Containerfile, image build,
+  push, pull, or registry interaction.
+- **No credential broker implementation**: `inject_secret` is defined as
+  a syscall contract; the broker is a Slice 2I-R deliverable.
+- **No `PCO-042` enforcement**: the "container required for claim" predicate
+  is named here but its validator check lands with Slice 2I-R.
+- **No Slice 2.5 controller-key schema/checks**: those remain in the
+  separately authorized Slice 2.5 gate.
+- **No Slice 2R allocator changes**: `pco-allocate` and `pco-release`
+  runtime code is unchanged; the allocator extension is Slice 2I-R.
+- **No Hermes runtime mutation**: no profile, hook, config, plugin, MCP,
+  model, or provider state is modified.
+- **No runtime Active-Work Ledger records**: this substrate validates
+  record shapes; it does not write `.hermes/active-work-ledger/` records.
+- **No deployment host inventory in egress rules**: the `egress_allowlist`
+  records rule shape only; concrete hosts are deployment-time overlay.
+
+---
+
+## 6. Predicate Mapping
+
+| Predicate | Validator check | FR/code | Scope |
+|---|---|---|---|
+| Worker-container policy schema | `worker_container_policy` | PCO-040 | Single policy record |
+| Container-instance record schema | `container_instance` | PCO-041 | Single instance record |
+| Container required for claim | *(Slice 2I-R)* | PCO-042 | Cross-record |
+| Container outlives claim | `container_instance` | PCO-043 | Single instance record |
+| Image SHA matches policy | `container_instance` | PCO-044 | Single instance record |
+| Forbidden mount refusal | `worker_container_policy` | PCO-045 | Single policy record |
+| Secret value leak | *(Slice 2I-R)* | *(future)* | Cross-artifact |

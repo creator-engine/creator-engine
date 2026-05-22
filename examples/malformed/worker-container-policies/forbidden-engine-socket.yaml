@@ -1,0 +1,23 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: bad-engine-socket-v1
+policy_sha: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+role: implementer
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/implementer:latest
+  sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+mount_manifest:
+  - path: /worktrees/my-feature
+    mode: rw
+    write_justification: "allocated worktree"
+  - path: /var/run/docker.sock
+    mode: ro
+    # PCO-045: container engine socket is forbidden in worker containers.
+    # Mounting the Docker/Podman socket is functionally equivalent to
+    # giving the worker root on the host.
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: controller

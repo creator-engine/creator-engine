@@ -1,0 +1,22 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: bad-home-mount-v1
+policy_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+role: implementer
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/implementer:latest
+  sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+mount_manifest:
+  - path: /worktrees/my-feature
+    mode: rw
+    write_justification: "allocated worktree"
+  - path: "$HOME/.ssh"
+    mode: ro
+    # PCO-045: host home-directory path is forbidden in worker containers.
+    # Workers MUST NOT have access to host SSH keys, config, or credentials.
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: controller

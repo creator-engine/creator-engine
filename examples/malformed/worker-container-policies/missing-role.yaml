@@ -1,0 +1,17 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: bad-missing-role-v1
+policy_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# role field is intentionally absent to demonstrate PCO-040 failure
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/implementer:latest
+  sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+mount_manifest:
+  - path: /worktrees/my-feature
+    mode: ro
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: controller

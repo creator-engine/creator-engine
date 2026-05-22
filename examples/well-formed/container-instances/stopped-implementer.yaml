@@ -1,0 +1,34 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-pco-slice2i-s-impl-002
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+claim_id: pco-slice2i-s-impl-prev
+lease_id: lease-slice2i-s-prev
+started_at: "2026-05-21T10:00:00Z"
+stopped_at: "2026-05-21T11:45:00Z"
+exit_code: 0
+mount_manifest_applied:
+  - path: /worktrees/pco-slice2i-s-substrate
+    mode: rw
+    source: policy
+  - path: governance
+    mode: ro
+    source: policy
+secret_grants:
+  - secret_name: model-provider-key
+    mode: env
+    broker_grant_id: grant-model-key-prev-001
+    granted_at: "2026-05-21T10:00:00Z"
+    revoked_at: "2026-05-21T11:45:00Z"
+    ttl_seconds: 3600
+egress_allowlist_applied:
+  - host: api.anthropic.com
+    protocol: https
+enforcement_primitive: pasta
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+claim_released_at: "2026-05-21T11:44:00Z"

@@ -1,4 +1,4 @@
-"""Active-Work Ledger schema validation (PCO Slice 0; Slice 0.5 additive extension).
+"""Active-Work Ledger schema validation (PCO Slice 0; Slice 0.5; Slice 2I-S additive extensions).
 
 Validates Active-Work Ledger records against
 ``schemas/active-work-ledger.schema.yaml``.
@@ -21,6 +21,16 @@ Slice 0.5 additive extension: the schema now accepts
 event log to the Completion Report substrate. The change is purely
 additive: v1 records continue to validate unchanged; this check's
 discovery/scoping behaviour is unchanged.
+
+Slice 2I-S additive extension: the schema now also accepts
+``schema_version`` ``"3"`` and recognises three additional
+``event_kind`` values — ``container_started``, ``container_stopped``,
+``container_force_reaped`` — that bind the event log to the Worker
+Container substrate. The ``details`` object additively accepts optional
+container-event fields (``instance_id``, ``claim_id``, ``exit_code``,
+``reason``, ``force_reaped_at``, ``elapsed_since_release_seconds``). The
+change is purely additive: v1 and v2 records continue to validate
+unchanged; this check's discovery/scoping behaviour is unchanged.
 
 A file is treated as a candidate Active-Work Ledger record when it
 satisfies all of:

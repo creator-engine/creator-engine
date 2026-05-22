@@ -1,0 +1,25 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-bad-image-sha-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+# image_sha differs from policy_ref.image_sha to demonstrate PCO-044 failure.
+# The allocator MUST NOT substitute a different image after the policy
+# was ratified. This record proves a substitution occurred.
+image_sha: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+claim_id: pco-bad-claim
+lease_id: lease-bad-002
+started_at: "2026-05-22T05:33:05Z"
+stopped_at: null
+exit_code: null
+mount_manifest_applied:
+  - path: /worktrees/my-feature
+    mode: rw
+    source: policy
+secret_grants: []
+egress_allowlist_applied: []
+enforcement_primitive: pasta
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"

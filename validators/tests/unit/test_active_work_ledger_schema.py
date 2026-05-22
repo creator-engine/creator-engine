@@ -281,3 +281,87 @@ def test_completion_report_ref_pattern_enforced(tmp_path: Path):
     errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
     assert errors
     assert any("completion_report_ref" in error.path for error in errors)
+
+
+# Slice 2I-S v3 additive extension tests
+
+
+def test_slice_2i_s_container_started_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "3"
+    record["event_kind"] = "container_started"
+    record["event_id"] = "container-started-001"
+    record["details"] = {
+        "summary": "worker container started",
+        "instance_id": "inst-pco-slice2i-001",
+        "claim_id": "pco-slice2i-impl",
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_2i_s_container_stopped_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "3"
+    record["event_kind"] = "container_stopped"
+    record["event_id"] = "container-stopped-001"
+    record["details"] = {
+        "summary": "worker container stopped",
+        "instance_id": "inst-pco-slice2i-001",
+        "claim_id": "pco-slice2i-impl",
+        "exit_code": 0,
+        "reason": "normal_release",
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_2i_s_container_force_reaped_event_kind_accepted(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "3"
+    record["event_kind"] = "container_force_reaped"
+    record["event_id"] = "container-force-reaped-001"
+    record["details"] = {
+        "summary": "container garbage collected",
+        "instance_id": "inst-pco-slice2i-001",
+        "claim_id": "pco-slice2i-impl",
+        "reason": "force_reap",
+        "elapsed_since_release_seconds": 120,
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors == []
+
+
+def test_slice_2i_s_v1_and_v2_records_still_validate(tmp_path: Path):
+    # Slice 2I-S MUST NOT break Slice 0 v1 or Slice 0.5 v2 records.
+    for version, kind in [
+        ("1", "claim_created"),
+        ("2", "gate_opened"),
+        ("2", "completion_report_emitted"),
+    ]:
+        record = valid_event_record()
+        record["schema_version"] = version
+        record["event_kind"] = kind
+        errors = validate_active_work_ledger_record(record, tmp_path / f"event-{version}-{kind}.yaml")
+        assert errors == [], f"version={version} kind={kind} unexpectedly failed: {errors}"
+
+
+def test_schema_version_3_accepted(tmp_path: Path):
+    record = valid_claim_record()
+    record["schema_version"] = "3"
+    errors = validate_active_work_ledger_record(record, tmp_path / "claim.yaml")
+    assert errors == []
+
+
+def test_container_event_details_unknown_reason_rejected(tmp_path: Path):
+    record = valid_event_record()
+    record["schema_version"] = "3"
+    record["event_kind"] = "container_stopped"
+    record["event_id"] = "container-stopped-bad-reason"
+    record["details"] = {
+        "instance_id": "inst-pco-slice2i-001",
+        "reason": "not_a_valid_reason",
+    }
+    errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
+    assert errors
+    assert any("reason" in error.path for error in errors)

@@ -1,0 +1,27 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: podman-verification-v1
+policy_sha: "3333333333333333333333333333333333333333333333333333333333333333"
+role: verification
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/verification:latest
+  sha: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+mount_manifest:
+  - path: /worktrees/pco-slice2i-s-substrate
+    mode: ro
+  - path: governance
+    mode: ro
+  - path: schemas
+    mode: ro
+  - path: validators
+    mode: ro
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: source
+note: >
+  Verification role policy. Read-only on allocated worktree and governance
+  tree; no egress by default (offline-cached dependencies); no secrets;
+  the principle is "tests should not need the internet."
