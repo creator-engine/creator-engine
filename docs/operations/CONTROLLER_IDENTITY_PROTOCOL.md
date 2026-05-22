@@ -55,7 +55,7 @@ If `status: revoked`, the record must include `revoked_at`.
 
 - OSD-1: v1 controller-key custody is `per_host`. Other custody modes are deferred. The per-container ephemeral controller-key candidate is future-only until Controller containerization.
 - OSD-2: controller-key records live under `tenants/<tenant>/controllers/<controller-id>.key.yaml`.
-- OSD-3: later lease signatures use Ed25519 over `creator-engine/worktree-lease-signature/v1` canonical UTF-8 JSON bytes with `algorithm`, `canonicalization`, `key_ref`, and unpadded base64url `value` fields. This protocol does not implement that verification.
+- OSD-3: worktree-lease signature verification (`PCO-024`) uses Ed25519 over `creator-engine/worktree-lease-signature/v1` canonical UTF-8 JSON bytes with `algorithm`, `canonicalization`, `key_ref`, and unpadded base64url `value` fields. The `worktree_lease_schema` check implements that verification for `schema_version: "2"` leases using the controller-key record located at `key_ref`. See `docs/operations/WORKTREE_LEASE_PROTOCOL.md` §j.
 - OSD-4: allocator pane spawn remains separate until Slice 3. This protocol does not implement allocation.
 
 ## Secret and private-key boundary
@@ -97,9 +97,7 @@ creator-engine-validator scan-controller-keys <path>
 This protocol does not authorize:
 
 - controller-key private-key generation, storage, rotation, or inspection;
-- `PCO-024` lease signature verification;
-- `schema_version: "2"` worktree leases;
-- `pco-allocate` or `pco-release` runtime implementation;
+- `pco-allocate` or `pco-release` runtime implementation beyond what PCO-024 substrate defines;
 - Docker/Podman build/run/pull/version probing;
 - worker image, credential broker, egress, mount-grant, or container runtime implementation;
 - Hermes runtime/profile/plugin/MCP/model-provider mutation;

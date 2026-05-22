@@ -133,7 +133,42 @@ def test_claim_without_live_lease_fixture_triggers_pco_021(capsys):
 def test_list_checks_includes_worktree_lease_schema(capsys):
     assert main(["--list-checks"]) == 0
     out = capsys.readouterr().out
-    assert "worktree_lease_schema: PCO-020" in out
+    assert "worktree_lease_schema" in out
+    assert "PCO-020" in out
+    assert "PCO-024" in out
+
+
+def test_well_formed_signed_lease_passes(capsys):
+    assert main(["scan-worktree-leases", "examples/well-formed/worktree-leases/signed-lease"]) == 0
+    out = capsys.readouterr().out
+    assert "PASS worktree_lease_schema" in out
+
+
+def test_signed_lease_bad_sig_triggers_pco024(capsys):
+    assert (
+        main(["check", "examples/malformed/worktree-leases/signed-lease-bad-sig"]) == 1
+    )
+    out = capsys.readouterr().out
+    assert "FAIL worktree_lease_schema" in out
+    assert "PCO-024" in out
+
+
+def test_signed_lease_revoked_key_triggers_pco024(capsys):
+    assert (
+        main(["check", "examples/malformed/worktree-leases/signed-lease-revoked-key"]) == 1
+    )
+    out = capsys.readouterr().out
+    assert "FAIL worktree_lease_schema" in out
+    assert "PCO-024" in out
+
+
+def test_signed_lease_unknown_key_triggers_pco024(capsys):
+    assert (
+        main(["check", "examples/malformed/worktree-leases/signed-lease-unknown-key.yaml"]) == 1
+    )
+    out = capsys.readouterr().out
+    assert "FAIL worktree_lease_schema" in out
+    assert "PCO-024" in out
 
 
 def test_check_examples_includes_worktree_lease_fixtures(capsys):
@@ -144,4 +179,7 @@ def test_check_examples_includes_worktree_lease_fixtures(capsys):
     assert "examples/malformed/worktree-leases/unknown-top-level-field.yaml" in out
     assert "examples/malformed/worktree-leases/cross-controller-conflict" in out
     assert "examples/malformed/worktree-leases/claim-without-live-lease" in out
+    assert "examples/malformed/worktree-leases/signed-lease-bad-sig" in out
+    assert "examples/malformed/worktree-leases/signed-lease-revoked-key" in out
+    assert "examples/malformed/worktree-leases/signed-lease-unknown-key.yaml" in out
     assert exit_code == 0
