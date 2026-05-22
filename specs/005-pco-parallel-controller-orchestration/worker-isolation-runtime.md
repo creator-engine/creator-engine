@@ -1018,3 +1018,562 @@ amendment together with the parent spec and the architect report:
     Hermes-side artifacts; the changed-file set is bounded to this
     sub-spec, ROADMAP.md, and (where present) the parallel-
     controller-orchestration architecture cross-reference.
+
+---
+
+# Slice 2I-R — Worker Isolation Runtime Mechanics (Spec Authoring, Deferred Gate)
+
+**Slice id**: `Slice 2I-R` (Worker Isolation Runtime — runtime gate)
+**Status**: Spec authoring only; no runtime implementation, image build,
+container execution, or credential issuance is produced by this gate.
+**Created**: 2026-05-22
+**Source-of-truth relationship**: This section is an **additive
+amendment** to the Slice 2I-S substrate above (§§a–k). It does NOT
+modify any prior PCO functional requirement (`PCO-001` through
+`PCO-043`). It authors the runtime mechanics that Slice 2I-R will
+implement, at prose/spec level only, making the extension points
+in §h.1 and §g.3 concrete enough to serve as an implementation
+specification. No runtime code, schema implementation, or container
+engine invocation is produced here.
+
+**Authoring boundary**: This gate edits only the two authorized
+tracked write surfaces listed in the ARCHITECT_HANDOFF:
+`specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`
+(this file) and
+`docs/architecture/parallel-controller-orchestration.md`.
+No `pco-allocate` / `pco-release` source, no schema YAML, no
+validator Python, no Dockerfile, no Hermes hook, no CI configuration,
+and no credential is touched.
+
+---
+
+## l. Runtime entry point contracts (Slice 2I-R)
+
+Slice 2I-S named two extension points (§h.1): PCO-027 step 5.b for
+`pco-allocate` and PCO-028 step 3.b for `pco-release`. This section
+authors those extension contracts in full. Both extensions are
+**conditional**: they execute only when at least one worker-container
+policy record is present in the scanned governance tree. Trees without
+any policy record preserve the existing PCO-027 / PCO-028 step
+sequences unchanged, providing the same backward-compatibility floor
+as the Slice 2A predicates.
+
+### l.1 `pco-allocate` extension (PCO-027 step 5.b, Slice 2I-R)
+
+After PCO-027 step 5 (worktree add + lease write + claim write +
+`claim_created` event) and before the lane lock is released, Slice
+2I-R inserts the following sub-sequence under the **same** advisory
+lane lock already held at step 3. Every sub-step must succeed before
+the next sub-step begins; failure at any sub-step triggers the
+extended rollback described in sub-step 10.
+
+1. **Select policy.** Resolve the ratified worker-container policy
+   record for the target worker role. The selector matches
+   `(controller_id, lane_id, worktree_path)` against each policy's
+   `lane_binding` field, preferring the most recently ratified
+   policy with a matching `role`. If no matching policy is found,
+   `pco-allocate` MUST exit non-zero with a typed error citing
+   `PCO-042` and the absence of a policy record for the role; it
+   MUST NOT leave the worktree in a partially allocated state without
+   a paired container instance.
+
+2. **Validate policy schema (PCO-040 pre-start check).** Run the
+   `PCO-040` worker-container policy schema check against the
+   selected policy record. Refuse on any schema violation; cite the
+   violated field, the violated invariant, and `PCO-040`.
+
+3. **Validate image SHA (PCO-044 pre-start check).** Confirm that
+   the policy's `image_ref.sha` resolves to a locally available
+   image and matches the policy's `image_sha` field exactly. Refuse
+   on mismatch; cite the policy's recorded SHA versus the observed
+   SHA and `PCO-044`. No image pull is triggered by this step; a
+   missing image is a pre-start failure.
+
+4. **Start container.** Invoke the runtime engine's container-start
+   primitive with `(policy_ref, image_sha, claim_id, lease_id)`.
+   The runtime engine is identified by the selected policy's
+   `runtime_engine` field (rootless Podman or rootless Docker per
+   OSD-I-1; §i.1). `pco-allocate` MUST NOT hard-code the engine
+   name; it reads the engine identifier from the policy record.
+   The container MUST start in a paused or network-isolated state
+   until `set_network_policy` completes (sub-step 6 below).
+
+5. **Mount worktree (invoke `mount_workspace`).** Call
+   `mount_workspace(claim_id, worktree_path, mode)` where `mode` is
+   read from the policy's `mount_manifest` for the worktree mount
+   class (typically `rw` for the implementer role, `ro` for
+   architect/research and verification). The runtime engine MUST
+   refuse to mount any path outside the allocated worktree, the
+   tmpfs scratch, or the read-only governance tree, without an
+   explicit `grant_path_capability`. The `mount_manifest_applied`
+   field of the container-instance record is populated by this step.
+
+6. **Apply network policy (invoke `set_network_policy`).** Call
+   `set_network_policy(instance_id, allowlist_ref)` where
+   `allowlist_ref` resolves to the policy's `egress_allowlist` for
+   the target role. The enforcement primitive (Pasta by default per
+   §o.1; Slirp4netns with custom configuration per §o.2 as acceptable
+   equivalent) MUST be fully configured on the container's network
+   namespace before sub-step 7 or any model / tool process starts.
+   The `egress_allowlist_applied` and `enforcement_primitive` fields
+   of the container-instance record are populated here.
+
+7. **Issue credentials (invoke `inject_secret` per name).** For each
+   `secret_name` in the policy's `secret_allowlist` for the target
+   role: call the host-side credential broker (§n) to mint a
+   claim-scoped, TTL-bounded credential; then call
+   `inject_secret(instance_id, secret_name)` to expose it inside the
+   container via the broker-declared injection mode (env or file).
+   The host operator's `GH_TOKEN` MUST NOT be passed; only a
+   per-task fine-grained GitHub PAT or GitHub App installation token,
+   scoped to the single branch and repository declared by the claim,
+   is acceptable for GitHub access. Secret values MUST NOT appear in
+   any tracked record; only `secret_name`, `broker_grant_id`,
+   injection mode, and `ttl_seconds` are recorded.
+
+8. **Write container-instance record.** Write one container-instance
+   record of the shape declared in §e.10 and validated by `PCO-041`,
+   under the same advisory lane lock. The record MUST include:
+   `instance_id`, `policy_ref` (policy id + policy SHA),
+   `image_sha`, `claim_id`, `lease_id`, `started_at`,
+   `mount_manifest_applied` (from sub-step 5),
+   `egress_allowlist_applied` (from sub-step 6),
+   `enforcement_primitive` (from sub-step 6). Fields `stopped_at`
+   and `exit_code` are null at this point.
+
+9. **Emit `container_started` event.** Append a `container_started`
+   event to the Active-Work Ledger event log under the same lane
+   lock. The event MUST include `instance_id`, `claim_id`,
+   `policy_ref`, and `started_at`. It MUST NOT include secret
+   values, injected credential content, or the broker grant values.
+   After this event is durably written, the lane lock may be
+   released and the container may be unpaused.
+
+10. **Extended rollback surface.** If any sub-step 1 through 9 fails,
+    `pco-allocate`'s existing step-6 rollback (which undoes the
+    worktree, lease, claim, and `claim_created` event) MUST
+    additionally: terminate the container if it was started (sub-step
+    4 succeeded); invoke the credential broker's revoke path for any
+    tokens minted in sub-step 7; and delete the container-instance
+    record if it was written in sub-step 8. After full rollback the
+    tree MUST be observably indistinguishable from the pre-allocate
+    state. `pco-allocate` MUST exit non-zero and MUST emit a
+    `gate_blocked` event citing the failing sub-step and predicate.
+
+The pane spawn (OSD-4; §i of the parent spec) MUST NOT proceed until
+PCO-027 step 5.b completes fully and the lane lock has been released
+from sub-step 9.
+
+### l.2 `pco-release` extension (PCO-028 step 3.b, Slice 2I-R)
+
+Before PCO-028 step 3 (`git worktree remove`) and while the advisory
+lane lock is held, Slice 2I-R inserts the following sub-sequence.
+The extension is conditional: if the released claim has no paired
+container-instance record (a claim from a pre-Slice-2I-R tree),
+the sub-sequence is skipped entirely and PCO-028 degrades gracefully
+to its existing five-step sequence.
+
+1. **Locate container instance.** Read the container-instance record
+   whose `claim_id` matches the released claim. If no such record
+   exists (pre-Slice-2I-R claim), skip sub-steps 2 through 6 and
+   proceed directly to PCO-028 step 3 (`git worktree remove`).
+
+2. **Verify terminal state.** Check whether the container instance is
+   already in a terminal state: `stopped_at` is set and at least one
+   of `container_stopped` or `container_force_reaped` event records
+   exists for `instance_id`. If already terminal, skip sub-steps 3
+   through 5 and proceed directly to sub-step 6 (credential
+   revocation).
+
+3. **Terminate container (invoke `terminate_worker`).** Call
+   `terminate_worker(instance_id, reason=normal_release)`. The
+   runtime engine MUST deliver `SIGTERM` to the container's init
+   process and wait for an orderly shutdown; after a configured grace
+   period it MUST deliver `SIGKILL` and reap the full process group.
+   If the runtime engine cannot confirm that the process tree is
+   reaped within the total configured timeout, `pco-release` MUST
+   fail immediately: it MUST NOT proceed to sub-step 4, 5, or 6, and
+   MUST NOT call `git worktree remove`. It MUST emit a `gate_blocked`
+   event citing `PCO-043` and the reason the terminal state could not
+   be established (engine error, timeout, or process-tree reap
+   failure). The operator may re-invoke `pco-release` once the
+   obstruction is cleared; the periodic sweeper handles permanently
+   unreachable instances via `garbage_collect_worker` (§e.9, §m.2).
+
+4. **Record exit status.** Write `stopped_at` and `exit_code` to the
+   container-instance record under the same lane lock. These fields
+   MUST be populated before the `container_stopped` event is emitted.
+
+5. **Emit `container_stopped` event.** Append a `container_stopped`
+   event to the Active-Work Ledger event log with `instance_id`,
+   `claim_id`, `stopped_at`, `exit_code`, and
+   `reason=normal_release`. After this event is durably written the
+   container instance is in a terminal state and the worktree can
+   safely be removed.
+
+6. **Revoke credentials.** Signal the credential broker (§n) to
+   revoke every token minted for the claim, identified by `claim_id`.
+   The broker MUST complete revocation synchronously before
+   acknowledging the call. The secret-grant manifest's `revoked_at`
+   field MUST be written as part of this step, before
+   `claim_released` is written in PCO-028 step 3.
+
+**Refusal on unverifiable terminal state.** PCO-028 MUST refuse to
+call `git worktree remove` (step 3) if the paired container instance
+is not in a terminal state and sub-step 3 has failed to establish
+one. The refusal MUST be expressed as a non-zero exit with a typed
+error citing `PCO-043`. Refusing the release and leaving the worktree
+allocated is the safer failure mode; orphan worktrees can be manually
+reviewed and re-released; prematurely removing a worktree with a live
+container process cannot be undone.
+
+## m. Runtime predicate refinement (PCO-042, PCO-043)
+
+Substrate declarations appear in §g.3 and §g.4. This section authors
+the validator implementation contract at the resolution the Slice
+2I-R implementation gate requires.
+
+### m.1 PCO-042 — Container Required for Claim (runtime validator, Slice 2I-R)
+
+PCO-042 is declared in §g.3 as a runtime-gate predicate whose
+substrate is ratified by Slice 2I-S and whose validator check lands
+with Slice 2I-R. The validator implementation MUST follow this
+cross-record traversal:
+
+1. Scan the scanned tree for at least one file under the ratified
+   governance path for worker-container policies that validates
+   against `PCO-040`.
+
+2. If no valid policy record exists: PCO-042 produces no violations.
+   Every active claim passes regardless of container state. This is
+   the backward-compatibility floor (pre-Slice-2I-R operation,
+   matching the floor in §g.3).
+
+3. If at least one valid policy record exists: for every claim record
+   in the scanned tree whose `released_at` field is null (a live
+   claim), the validator MUST assert that at least one
+   container-instance record exists with a matching `claim_id` and
+   a null `stopped_at` field (a running instance). Any live claim
+   without a paired running container-instance record is a PCO-042
+   violation.
+
+4. Each PCO-042 violation MUST include in its structured output:
+   `claim_id`, `lane_id`, `controller_id`, the predicate code
+   `PCO-042`, and the human-readable message
+   `"live claim has no paired running container instance"`. Violations
+   MUST cause `active_work_ledger_conflicts` to exit non-zero.
+
+5. PCO-042 is additionally enforced proactively at:
+   - `pco-allocate` sub-step 1 (refusal if no matching policy exists,
+     before container start); and
+   - the PCO-030 pre-launch gate (pane spawn is gated on the conflict
+     validator passing, which includes PCO-042 from the moment a
+     policy record is present in the tree).
+
+### m.2 PCO-043 — Container Outlives Claim (sweeper runtime, Slice 2I-R)
+
+PCO-043 is declared in §g.4 as a substrate-only static predicate
+(Slice 2I-S). Slice 2I-R adds the periodic sweeper that acts on
+PCO-043 hits:
+
+1. The periodic sweeper MUST invoke the PCO-043 cross-record scan
+   at a configurable interval (default: every heartbeat period, or
+   at a minimum once per `claim_lapsed` event). The scan is the
+   same as §g.4: container-instance records with a released claim
+   and no terminal event.
+
+2. For each hit, the sweeper MUST invoke
+   `garbage_collect_worker(claim_id)` (§e.9). `garbage_collect_worker`
+   MUST: deliver `SIGKILL` to the container's process group; wait for
+   the OS to confirm process-group exit; then write a
+   `container_force_reaped` event.
+
+3. The `container_force_reaped` event MUST include: `instance_id`,
+   `claim_id`, `force_reaped_at` (wall-clock timestamp of confirmed
+   reap), and `elapsed_since_release_seconds` (duration from the
+   `claim_released` or `claim_lapsed` event timestamp to
+   `force_reaped_at`).
+
+4. The static validator and the sweeper report different states:
+   a validator hit (`PCO-043_condition_present`) means the orphan
+   condition exists and the sweeper has not yet acted (or has failed).
+   A `container_force_reaped` event (`PCO-043_force_reaped`) means
+   the sweeper has acted. These MUST be distinguishable in validator
+   output.
+
+5. If `garbage_collect_worker` cannot deliver a confirmed kill (e.g.,
+   the runtime engine is unreachable), the sweeper MUST record the
+   failure as a `container_reap_failed` event (a new event kind,
+   additive to the event log schema) with the error reason and retry
+   count, and MUST retry on the next sweep interval. It MUST NOT
+   silence the PCO-043 validator hit.
+
+## n. Credential broker contract (spec level, Slice 2I-R)
+
+The credential broker is a host-side process or service that issues,
+manages, and revokes per-task credentials. Its concrete implementation
+technology is OSD-I-4 (§i.4): in-host process, dedicated service,
+GitHub App, or third-party secrets manager. This section specifies
+the behavioral contract the broker MUST honor regardless of
+technology choice. No broker is implemented by this spec authoring
+gate.
+
+### n.1 Broker responsibilities
+
+**Mint on demand.** When `inject_secret(instance_id, secret_name)`
+is called, the broker mints a credential for `secret_name` bounded
+to the current claim's `(repo, branch, claim_id)` context. The TTL
+MUST NOT exceed the claim's `expected_lifetime_seconds`; the broker
+SHOULD set the TTL to 90% of the remaining claim lifetime to leave
+a revocation window.
+
+**Supported credential types** (minimum set for Slice 2I-R):
+
+- **Per-task fine-grained GitHub PAT**: scoped to read/write exactly
+  the single repository and branch declared by the claim, no
+  additional scopes, claim-lifetime TTL. This MUST NOT be the
+  operator's long-lived `GH_TOKEN`.
+- **GitHub App installation token** (acceptable equivalent to the
+  fine-grained PAT): the same scoping and TTL contract applies.
+  Preferred over a PAT for team-mode operation because App tokens
+  are not tied to a personal account.
+- **Model-provider API key**: the broker surfaces the key identified
+  by `secret_name` from a local secrets store. Model-provider keys
+  are long-lived by nature; the broker's role is access-control
+  (gating which instances get the key), not rotation, for this type.
+
+**Withhold by default.** The broker MUST refuse any `inject_secret`
+call where `secret_name` is not listed in the worker-container
+policy's `secret_allowlist` for the target role. Even if the policy
+allowlist is broad, the broker MUST additionally refuse any call that
+requests the Slice 2.5 controller-key private key by any name; this
+is the defense-in-depth enforcement of §f.3 (the controller-key MUST
+NOT enter any worker container).
+
+**Host `GH_TOKEN` never enters a container.** The broker MUST NOT
+read from or pass the host operator's `GH_TOKEN` environment
+variable to any worker container, directly or indirectly. The
+per-task PAT or App installation token is the only GitHub credential
+the broker injects.
+
+**Revoke on release.** When signaled by `pco-release` sub-step 3.b.6,
+the broker MUST revoke every token minted for `claim_id`
+synchronously, before returning to the caller. Revocation MUST
+precede the `claim_released` event write in PCO-028 step 3. The
+secret-grant manifest's `revoked_at` field is set as part of this
+step.
+
+**Secret values never recorded.** Broker logs, broker database
+records, Active-Work Ledger records, container-instance records,
+secret-grant manifests, side-effect records, and any archived
+transcript file MUST NOT contain secret values (PAT strings, API key
+values, App token strings). The broker records only: `secret_name`,
+`broker_grant_id`, injection mode (`env` or `file`), `granted_at`,
+`ttl_seconds`, and (after revocation) `revoked_at`. A
+`secret_value_leak` predicate hit (§f.6) on any of these surfaces is
+a critical validator failure.
+
+### n.2 Broker integration points
+
+The following table maps each `pco-allocate` / `pco-release`
+sub-step to the broker call and the record updated.
+
+| Entry point | Broker call | Broker action | Record updated |
+|---|---|---|---|
+| `pco-allocate` sub-step 7 | `broker.mint(claim_id, secret_name, role, ttl)` | Mint credential; return `(broker_grant_id, injected_value)` | Secret-grant record: `secret_name`, `broker_grant_id`, mode, `granted_at`, `ttl_seconds` |
+| `inject_secret` (runtime engine) | `broker.inject(instance_id, broker_grant_id)` | Expose value via env or file inside container | No new record; the existing secret-grant record is the full substrate trace |
+| `pco-release` sub-step 3.b.6 | `broker.revoke(claim_id)` | Revoke all tokens for claim; return `revoked_at` per token | Secret-grant record: `revoked_at` |
+
+The injected value is the only moment the credential value crosses
+the broker→runtime boundary. It is never returned to the caller of
+`inject_secret`, never written to disk by the runtime engine, and
+never included in any event record.
+
+## o. Egress enforcement primitive (spec level, Slice 2I-R)
+
+The egress enforcement primitive confines a worker container's
+outbound network traffic to its policy's `egress_allowlist`. The
+concrete technology choice is OSD-I-5 (§i.5). This section authors
+the behavioral contract all acceptable primitives MUST honor and
+names the Slice 2I-R default. No egress primitive is configured or
+tested by this spec authoring gate.
+
+### o.1 Default primitive: Pasta
+
+Slice 2I-R designates **Pasta** as the default egress enforcement
+primitive. Pasta is a user-space network stack that does not require
+`root` or `CAP_NET_ADMIN`; it wraps the container's network namespace
+at start time and enforces a forwarding policy before the container's
+first packet. Pasta's allowlist is derived from the policy's
+`egress_allowlist` field, one forwarding rule per
+`(host, port, protocol)` tuple. Rules for the `verification` role's
+default empty allowlist result in zero forwarded connections (no
+outbound traffic).
+
+Pasta is selected because it is rootless-first, aligns with the
+rootless-Podman / rootless-Docker posture of OSD-I-1, and makes the
+allowlist observable at the process level without requiring iptables
+rules that require elevated privilege.
+
+### o.2 Acceptable equivalent: Slirp4netns with custom configuration
+
+Slirp4netns with a per-deployment outbound filter script is an
+acceptable equivalent to Pasta. When Slirp4netns is selected (a
+deployment overlay decision recorded in the policy's
+`runtime_engine_overlay` field, not a per-policy decision), the
+outbound filter script MUST implement the same
+`(host, port, protocol)` allowlist semantics as Pasta's forwarding
+policy. The filter script path MUST be recorded in the
+container-instance record's `enforcement_primitive` field under the
+identifier `slirp4netns-allowlist-v1` (or a versioned successor).
+
+### o.3 Invariants regardless of primitive
+
+The following invariants apply to every acceptable primitive:
+
+1. **No hidden flags.** The enforcement primitive MUST NOT be
+   configured with undocumented flags or environment variables that
+   alter allowlist behavior beyond what the policy's
+   `egress_allowlist` declares. Any such deviation is auditable from
+   the container-instance record and constitutes a `PCO-040` policy
+   violation.
+
+2. **No unrecorded engine flags.** Every non-default flag passed to
+   the enforcement primitive at container-start time MUST be recorded
+   in the container-instance record's `enforcement_primitive_flags`
+   field (an optional string list appended to the network policy
+   record). The absence of this field means only default flags were
+   used.
+
+3. **Pre-process enforcement.** The allowlist MUST be installed on
+   the container's network namespace before any model or tool process
+   is exec'd inside the container. `set_network_policy` (§e.5) is the
+   syscall that records completion of this step. The runtime engine
+   MUST refuse `run_command` for any instance whose
+   `set_network_policy` has not yet completed successfully.
+
+4. **Egress violations surfaced as typed events.** When the
+   enforcement primitive intercepts a connection attempt to a host
+   not on the allowlist, it MUST surface the violation as a typed
+   runtime error — not a silent packet drop — that the runtime engine
+   records as an `egress_violation` event. The event MUST include
+   `instance_id`, `attempted_host`, `attempted_port`, `protocol`,
+   and `timestamp`.
+
+5. **Empty allowlist means zero outbound.** The verification role's
+   `egress_allowlist` is empty by default (§d.2, §f.5). When the
+   allowlist is empty, the primitive MUST configure the network
+   namespace for zero outbound connections. An empty allowlist is not
+   the same as an unconfigured primitive; the runtime engine MUST
+   still call `set_network_policy` and still record the network
+   policy record with `egress_allowlist: []`.
+
+## p. Runtime syscall table (Slice 2I-R implementation map)
+
+The table below maps every substrate syscall (§e) to its runtime
+engine action, its tracked record, and its gating predicates. Slice
+2I-R MUST implement this mapping 1:1. A syscall that completes without
+emitting its corresponding tracked record is a runtime contract
+violation auditable by the PCO validator.
+
+| Syscall (§e ref) | Runtime engine action | Record emitted | Predicate gating |
+|---|---|---|---|
+| `allocate_worker` (§e.1) | Container-start under selected policy (rootless Podman or Docker per OSD-I-1; engine read from `policy.runtime_engine`) | Container-instance record (`PCO-041`); `container_started` event | PCO-040 (policy schema); PCO-041 (instance schema); PCO-044 (image SHA); PCO-042 (refusal if no policy matches role) |
+| `mount_workspace` (§e.2) | Bind-mount `worktree_path` at declared `mode` (`ro`/`rw`) into container filesystem namespace before process start | `mount_manifest_applied` field on container-instance record | PCO-021 (live lease required); PCO-030 (conflict gate); runtime mount-scope check (no path outside worktree/scratch/governance without `grant_path_capability`) |
+| `grant_path_capability` (§e.3) | Extend live container filesystem namespace with one additional bind-mount at declared `mode` | Mount-grant record (one per path, appended to `mount_manifest_applied`; includes `path`, `mode`, `source=grant`, `grant_ref`) | Policy `grant_extensible` field for this mount class; path-escape check (no `..` after normalization; must resolve within worktree realpath); `justification_ref` must resolve |
+| `inject_secret` (§e.4) | Call broker `mint` then `inject`; expose value as env var or file inside container | Secret-grant record (one per injection: `secret_name`, `broker_grant_id`, `mode`, `granted_at`, `ttl_seconds`; **value never recorded**) | Policy `secret_allowlist` membership; broker TTL ≤ claim remaining lifetime; hard refusal for controller-key private key regardless of allowlist |
+| `set_network_policy` (§e.5) | Configure Pasta (default) or Slirp4netns (§o.2) on container network namespace before first exec | Network policy record (embedded on container-instance record: `allowlist_sha`, `enforcement_primitive` identifier, `enforcement_primitive_flags`); `egress_allowlist_applied` field | Allowlist non-empty OR `egress: none` declared explicitly; primitive must reify every allowlist rule; `run_command` blocked until this call succeeds |
+| `run_command` (§e.6) | `exec` argv inside running container via runtime engine API | Command-evidence record (optional; ONLY for ratified-replay scenarios; NOT for ordinary interactive use) | Container in `running` state; `set_network_policy` previously completed; egress violation surfaced as `egress_violation` event on policy miss |
+| `collect_artifacts` (§e.7) | Copy `src` from container tmpfs / output bind to `dst` evidence path on host | Artifact-evidence record (one per copy: `instance_id`, `src`, `dst`, `artifact_sha256`) | `dst` within per-claim `evidence/` tree; `src` within container scratch or output tmpfs only |
+| `terminate_worker` (§e.8) | Deliver SIGTERM; wait grace period; deliver SIGKILL; reap process group; confirm exit | `container_stopped` event (`instance_id`, `claim_id`, `stopped_at`, `exit_code`, `reason`) | Required before PCO-028 step 3 (`git worktree remove`); `pco-release` refuses to proceed if this call fails to confirm terminal state |
+| `garbage_collect_worker` (§e.9) | Deliver SIGKILL to process group of orphaned instance; confirm exit | `container_force_reaped` event (`instance_id`, `claim_id`, `force_reaped_at`, `elapsed_since_release_seconds`) | PCO-043 condition (container-instance record for released claim, no terminal event); invoked by periodic sweeper only |
+
+## q. Non-goals (Slice 2I-R spec authoring gate)
+
+This gate is spec authoring only. It explicitly does NOT produce:
+
+* **No runtime implementation.** No `pco-allocate` / `pco-release`
+  source code is written, modified, or authorized. The extension
+  contracts in §l are behavioral specifications; their implementation
+  is the separately ratified Slice 2I-R implementation gate.
+
+* **No container image build.** No Dockerfile, Containerfile, image
+  build pipeline, image registry push, or `podman pull` / `docker
+  pull` is executed. Image SHA references in §p are illustrative of
+  what the runtime engine will do at implementation time; no actual
+  image exists at this gate.
+
+* **No container execution.** No `podman run`, `docker run`, or
+  equivalent container-start command is invoked. No container engine
+  socket is contacted.
+
+* **No credential issuance.** No PAT, GitHub App installation token,
+  or API key is minted, stored, injected, or revoked. The credential
+  broker contract in §n is behavioral specification; no broker process
+  is started or called.
+
+* **No schema implementation.** The record shapes cited in §e.10 and
+  refined in §l–§p are prose-level contracts. The concrete JSON
+  Schema / YAML Schema files, example records, and validator check
+  implementations are Slice 2I-R implementation-gate deliverables.
+
+* **No egress primitive configuration.** No Pasta process, no
+  Slirp4netns configuration, no iptables rule, and no network
+  namespace is created or modified.
+
+* **No Hermes-side mutation.** This gate edits only the two
+  authorized tracked write surfaces. No Hermes profile, hook,
+  MCP server configuration, model-provider setting, or runtime
+  config file is touched.
+
+* **No autonomy expansion.** PCO-032 remains in force. Every future
+  Slice 2I-R runtime mutation descends from a Source-ratified
+  Assignment Envelope; the Controller remains the only process
+  authorized to allocate or release workers; worker containers do
+  not acquire Controller authority. This spec does not change those
+  constraints.
+
+* **No schema implementation edits to existing artifacts.** Existing
+  `schemas/`, `validators/`, `examples/`, `tests/`, and `bin/` trees
+  are untouched.
+
+## r. Acceptance posture (Slice 2I-R spec)
+
+A fresh-clone reviewer can verify the following from this Slice 2I-R
+spec section together with the Slice 2I-S substrate above and the
+parent spec:
+
+1. §l.1 and §l.2 together name the exact insertion point in PCO-027
+   and PCO-028 respectively, include a numbered sub-step sequence,
+   and specify the failure mode (extended rollback in §l.1; refusal
+   on unverifiable terminal state in §l.2). The extensions are
+   conditional on the presence of policy records and do not break
+   pre-Slice-2I-R trees.
+
+2. §m.1 and §m.2 refine PCO-042 and PCO-043 to the level of a
+   validator implementation spec: traversal order, backward-
+   compatibility floor (§m.1 point 2), structured violation output
+   (§m.1 point 4), and sweeper-vs-validator state distinction
+   (§m.2 point 4).
+
+3. §n specifies what the credential broker MUST do (mint, withhold,
+   never pass `GH_TOKEN`, revoke synchronously, never record values)
+   and what it MUST NOT do (pass the controller-key, pass
+   `GH_TOKEN`, persist values), at a level that an OSD-I-4
+   technology choice can be evaluated against.
+
+4. §o specifies what the egress enforcement primitive MUST do (apply
+   the allowlist before first exec, surface violations as typed
+   events, treat empty allowlist as zero-outbound), names Pasta as
+   the Slice 2I-R default, and names Slirp4netns with custom
+   configuration as an acceptable equivalent. No Slirp4netns or
+   Pasta binary is invoked by this gate.
+
+5. §p maps each of the nine substrate syscalls (§e) to exactly one
+   runtime engine action and exactly one tracked record. The mapping
+   is 1:1; no syscall produces zero records.
+
+6. §q confirms that this gate produces no runtime code, no container
+   image, no container execution, no credential issuance, no schema
+   implementation, no egress primitive configuration, no Hermes-side
+   mutation, and no autonomy expansion.
