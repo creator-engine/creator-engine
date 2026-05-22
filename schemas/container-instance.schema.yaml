@@ -1,0 +1,312 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/container-instance.schema.yaml"
+title: "Creator Engine Container-Instance Record"
+description: |
+  Machine-readable schema for a single Container-Instance record
+  authored under the Creator Engine Parallel Controller Orchestration
+  (PCO) Slice 2I-S substrate.
+
+  Prose contract:
+  `docs/operations/WORKER_CONTAINER_PROTOCOL.md`.
+
+  Architectural companion:
+  `docs/architecture/parallel-controller-orchestration.md`.
+
+  Feature spec:
+  `specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`.
+
+  A Container-Instance record captures the runtime state of one
+  allocated worker container. It binds to exactly one Active-Work
+  Ledger claim and one Worktree Lease, records the policy and image
+  SHA under which the container was started, and tracks the applied
+  mount manifest, secret grants (names only — no values), and egress
+  allowlist.
+
+  Predicate-bearing fields (substrate-ratified):
+    - `policy_ref.image_sha` and `image_sha`: basis for `PCO-044`
+      image-SHA-matches-policy check.
+    - `claim_released_at` and `stopped_at`: basis for `PCO-043`
+      container-outlives-released-claim check.
+    - `secret_grants[*].secret_value`: explicitly FORBIDDEN by schema
+      (`unevaluatedProperties: false` on each grant entry, with no
+      `secret_value` property defined).
+
+  Slice 2I-S boundary statement: this schema records the *instance
+  shape*. Runtime allocation, container start/stop, process-tree
+  reaping, and credential-broker integration are deferred to Slice
+  2I-R. The `claim_released_at` and `stopped_at` fields are the
+  static substrate predicates the `garbage_collect_worker` sweeper
+  (§e.9 of the spec) operates against.
+
+  Secret values MUST NOT appear in any field of this record.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - instance_id
+  - policy_ref
+  - image_sha
+  - claim_id
+  - lease_id
+  - started_at
+  - stopped_at
+  - exit_code
+  - mount_manifest_applied
+  - secret_grants
+  - egress_allowlist_applied
+  - enforcement_primitive
+  - policy_sha
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: container-instance-record
+    description: |
+      Discriminator constant. Records that do not carry this exact
+      value are not governed Container-Instance records under this
+      contract and MUST NOT be validated by the
+      `container_instance` check.
+  record_type:
+    type: string
+    const: container_instance
+    description: |
+      Sub-discriminator. Slice 2I-S defines exactly one record
+      shape; later slices MAY add additional record types via
+      additive extension under a new `schema_version`.
+  schema_version:
+    type: string
+    enum: ["1"]
+    description: |
+      Container-Instance schema version. Slice 2I-S ships v1.
+  instance_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable identifier for this container instance. Unique within
+      `(controller_id, lane_id, YYYY-MM-DD)` scope per protocol.
+  policy_ref:
+    type: object
+    required: [policy_id, policy_sha, image_sha]
+    unevaluatedProperties: false
+    properties:
+      policy_id:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,63}$"
+        description: |
+          Stable identifier of the Worker-Container Policy record
+          that was in force at `allocate_worker` time.
+      policy_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          SHA256 hex digest of the policy record as it existed at
+          `allocate_worker` time. Binds this instance to the exact
+          policy version; `PCO-044` uses this to detect substitution.
+      image_sha:
+        type: string
+        pattern: "^sha256:[0-9a-f]{64}$"
+        description: |
+          The `image_ref.sha` from the policy record at
+          `allocate_worker` time. Stored here for `PCO-044`
+          audit without requiring a live policy-record lookup.
+    description: |
+      Reference to the Worker-Container Policy under which this
+      instance was allocated. Embeds the policy-declared image SHA
+      so `PCO-044` can verify the actual `image_sha` at the
+      instance-record level.
+  image_sha:
+    type: string
+    pattern: "^sha256:[0-9a-f]{64}$"
+    description: |
+      The actual OCI image SHA used when this container was
+      started. `PCO-044` checks this against `policy_ref.image_sha`;
+      a mismatch indicates the allocator used a different image than
+      the policy declared.
+  claim_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      The Active-Work Ledger claim this container is bound to.
+      A container instance is bound to exactly one claim; the claim
+      lifecycle governs the container lifetime per `PCO-043`.
+  lease_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      The Worktree Lease that was live at `allocate_worker` time.
+      Used by audit predicates to verify the container was started
+      under a valid lease.
+  started_at:
+    description: |
+      ISO-8601 UTC timestamp at which the container was started.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  stopped_at:
+    description: |
+      ISO-8601 UTC timestamp at which the container was stopped,
+      or `null` if the container is still running. Null while
+      running; set on `terminate_worker` or `garbage_collect_worker`.
+      `PCO-043` fires when `claim_released_at` is present and this
+      is `null`.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+      - type: "null"
+  exit_code:
+    description: |
+      Process exit code of the container's main process, or `null`
+      while the container is running.
+    oneOf:
+      - type: integer
+      - type: "null"
+  mount_manifest_applied:
+    type: array
+    items:
+      $ref: "#/$defs/applied_mount_entry"
+    description: |
+      The set of paths actually bound into the container at start
+      time, distinguishing policy-declared from runtime-granted
+      entries. Subset of (or equal to) the policy's `mount_manifest`
+      plus any runtime-granted extensions.
+  secret_grants:
+    type: array
+    items:
+      $ref: "#/$defs/secret_grant_entry"
+    description: |
+      The set of secret names injected into this container via the
+      credential broker, with broker-grant ids and TTLs. Values
+      MUST NOT appear here or anywhere in this record.
+  egress_allowlist_applied:
+    type: array
+    items:
+      $ref: "#/$defs/egress_rule"
+    description: |
+      The egress allowlist as actually installed on the worker's
+      network namespace, naming the enforcement primitive SHA and
+      per-rule shape.
+  enforcement_primitive:
+    type: string
+    enum: [pasta, slirp4netns, iptables, none, unknown]
+    description: |
+      Egress enforcement primitive used for this instance. `none`
+      for verification containers that declare no egress. `unknown`
+      records cases where the runtime engine did not surface the
+      primitive identifier.
+  policy_sha:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      Top-level policy SHA for fast audit lookups. MUST equal
+      `policy_ref.policy_sha`. Redundant but required so every
+      container-instance record carries `policy_sha` at its top
+      level per the spec §e.10 invariant.
+  claim_released_at:
+    description: |
+      ISO-8601 UTC timestamp at which the Active-Work Ledger claim
+      bound to this container was released (or `null` if the claim
+      is still live). When present and `stopped_at` is `null`,
+      `PCO-043` fires: the container has outlived its claim and
+      MUST be garbage-collected.
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+      - type: "null"
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional free-text note. Advisory only; MUST NOT contain
+      secrets, tokens, credentials, or actor ids.
+$defs:
+  applied_mount_entry:
+    type: object
+    required: [path, mode, source]
+    unevaluatedProperties: false
+    properties:
+      path:
+        type: string
+        minLength: 1
+      mode:
+        type: string
+        enum: [ro, rw]
+      source:
+        type: string
+        enum: [policy, grant]
+      grant_ref:
+        type: string
+        minLength: 1
+  secret_grant_entry:
+    type: object
+    required: [secret_name, mode, broker_grant_id, granted_at, revoked_at, ttl_seconds]
+    unevaluatedProperties: false
+    description: |
+      One secret injected into the container. Values MUST NOT appear
+      here; `unevaluatedProperties: false` enforces that no
+      `secret_value` or equivalent field can be added.
+    properties:
+      secret_name:
+        type: string
+        minLength: 1
+        description: Name of the injected secret (advisory label only).
+      mode:
+        type: string
+        enum: [env, file]
+        description: Whether the secret was injected as an environment variable or mounted file.
+      broker_grant_id:
+        type: string
+        minLength: 1
+        description: Opaque identifier issued by the credential broker for this grant.
+      granted_at:
+        oneOf:
+          - type: string
+            pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          - type: string
+            pattern: "^commit:[0-9a-f]{7,40}$"
+        description: Timestamp at which the broker issued this grant.
+      revoked_at:
+        oneOf:
+          - type: string
+            pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          - type: "null"
+        description: |
+          Timestamp at which the broker revoked this grant, or null
+          if still live. Set during `terminate_worker` before the
+          `container_stopped` event is written.
+      ttl_seconds:
+        type: integer
+        minimum: 1
+        description: |
+          Requested TTL in seconds, no greater than the claim's
+          expected lifetime.
+  egress_rule:
+    type: object
+    required: [host]
+    unevaluatedProperties: false
+    properties:
+      host:
+        type: string
+        minLength: 1
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+      protocol:
+        type: string
+        enum: [tcp, udp, https, http, any]
+      rate_limit_class:
+        type: string
+        minLength: 1

@@ -1,0 +1,27 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-bad-outlives-claim-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+claim_id: pco-released-claim
+lease_id: lease-released-001
+started_at: "2026-05-22T05:00:00Z"
+# stopped_at is null: the container is still running.
+stopped_at: null
+exit_code: null
+mount_manifest_applied:
+  - path: /worktrees/my-feature
+    mode: rw
+    source: policy
+secret_grants: []
+egress_allowlist_applied: []
+enforcement_primitive: pasta
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+# claim_released_at is set: the claim was released but the container
+# is still running (stopped_at is null). PCO-043 fires here — the
+# garbage_collect_worker sweeper must reap this instance.
+claim_released_at: "2026-05-22T05:30:00Z"

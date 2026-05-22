@@ -73,15 +73,18 @@ properties:
       applies. Drives the `oneOf` per-shape required-field sets.
   schema_version:
     type: string
-    enum: ["1", "2"]
+    enum: ["1", "2", "3"]
     description: |
       Active-Work Ledger schema version. Slice 0 ships v1; Slice 0.5
       adds four event_kind values (`gate_opened`, `gate_closed`,
       `completion_report_emitted`, `gate_blocked`) as an additive
-      extension and accepts records carrying either version. Older
-      readers (v1-only) ignore unknown event kinds; v2 readers accept
-      either set. Later slices MAY extend further via additional
-      additive optional fields and a further version bump.
+      extension and accepts records carrying either version. Slice
+      2I-S adds three container event kinds (`container_started`,
+      `container_stopped`, `container_force_reaped`) and accepts v1,
+      v2, or v3 records. Older readers ignore unknown event kinds; v3
+      readers accept all three sets. Later slices MAY extend further
+      via additional additive optional fields and a further version
+      bump.
   controller_id:
     type: string
     pattern: "^[a-z][a-z0-9-]{2,63}$"
@@ -265,6 +268,9 @@ properties:
       - gate_closed
       - completion_report_emitted
       - gate_blocked
+      - container_started
+      - container_stopped
+      - container_force_reaped
     description: |
       Event log discriminator. Required on `event` records. The
       Slice 0 set (`claim_created`, `claim_released`, `claim_lapsed`,
@@ -280,9 +286,21 @@ properties:
           via `details.completion_report_ref`;
         * `gate_blocked` — a Source-ratified gate was blocked or
           aborted; pairs with a class-F Completion Report.
-      The additive event-kind extension travels with
-      `schema_version: "2"`; v1 records continue to validate as
-      before.
+      Slice 2I-S adds three additive container-substrate event kinds:
+        * `container_started` — `allocate_worker` started a
+          container instance bound to a claim under a ratified
+          worker-container policy; `details.instance_id` and
+          `details.claim_id` name the instance and claim;
+        * `container_stopped` — `terminate_worker` stopped the
+          container and reaped its process tree; `details.instance_id`,
+          `details.exit_code`, and `details.reason` record the
+          termination;
+        * `container_force_reaped` — `garbage_collect_worker` reaped
+          a container that outlived its claim; `details.instance_id`
+          and `details.elapsed_since_release_seconds` record the
+          event.
+      Slice 2I-S event kinds travel with `schema_version: "3"`.
+      v1 and v2 records continue to validate unchanged.
   event_id:
     type: string
     pattern: "^[a-z0-9][a-z0-9-]{2,63}$"
@@ -344,12 +362,53 @@ properties:
           event kinds `completion_report_emitted` and `gate_blocked`
           to bind the event log to the schema-validated report
           packet.
+      instance_id:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,63}$"
+        description: |
+          Optional container-instance identifier. Used by Slice 2I-S
+          event kinds `container_started`, `container_stopped`, and
+          `container_force_reaped`.
+      claim_id:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,63}$"
+        description: |
+          Optional claim identifier the container event is associated
+          with. Used by Slice 2I-S container event kinds.
+      exit_code:
+        type: integer
+        description: |
+          Optional process exit code for `container_stopped` events.
+      reason:
+        type: string
+        enum:
+          - normal_release
+          - claim_lapsed
+          - validator_refusal
+          - operator_abort
+          - force_reap
+        description: |
+          Optional termination reason for `container_stopped` and
+          `container_force_reaped` events.
+      force_reaped_at:
+        type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+        description: |
+          Optional timestamp for `container_force_reaped` events
+          recording when garbage collection ran.
+      elapsed_since_release_seconds:
+        type: integer
+        minimum: 0
+        description: |
+          Optional elapsed seconds since the claim was released,
+          for `container_force_reaped` events.
     description: |
       Optional structured event details. Slice 0 keeps this surface
-      narrow; Slice 0.5 adds the additive optional
-      `completion_report_ref` pointer used by completion-report
-      substrate events. Later slices MAY extend via additional
-      additive optional fields and a schema-version bump.
+      narrow; Slice 0.5 adds `completion_report_ref`; Slice 2I-S
+      adds optional container-event detail fields (`instance_id`,
+      `claim_id`, `exit_code`, `reason`, `force_reaped_at`,
+      `elapsed_since_release_seconds`). All are additive optional
+      fields; prior records continue to validate unchanged.
 oneOf:
   - description: |
       Claim record shape — required when `record_type == claim`.

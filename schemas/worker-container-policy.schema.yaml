@@ -1,0 +1,289 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/worker-container-policy.schema.yaml"
+title: "Creator Engine Worker-Container Policy Record"
+description: |
+  Machine-readable schema for a single Worker-Container Policy record
+  authored under the Creator Engine Parallel Controller Orchestration
+  (PCO) Slice 2I-S substrate.
+
+  Prose contract:
+  `docs/operations/WORKER_CONTAINER_PROTOCOL.md`.
+
+  Architectural companion:
+  `docs/architecture/parallel-controller-orchestration.md`.
+
+  Feature spec:
+  `specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`.
+
+  A Worker-Container Policy record declares the isolation posture for
+  one named role: the role enum, the runtime engine, the image
+  reference, the mount manifest (default-deny, read-only unless
+  explicitly declared rw), the egress allowlist shape, the secret
+  injection allowlist (names only, no values), and the grant-
+  extensibility surface per OSD-I-7.
+
+  Slice 2I-S boundary statement: this schema defines the *record
+  shape* only. It does NOT allocate a container, does NOT invoke
+  Podman/Docker, does NOT build or push images, and does NOT implement
+  a credential broker. Runtime engine wiring is deferred to Slice
+  2I-R. Safety-default enforcement is via `PCO-040` (schema) and
+  `PCO-045` (forbidden-mount validator predicate).
+
+  Non-negotiable invariant: the controller-key private key MUST NOT
+  appear in `secret_allowlist` and MUST NOT be injected into any
+  worker container. `PCO-045` enforces this at the predicate level.
+
+  Concrete tool, model, CLI, SaaS account, runner, source-host
+  application, bot slug, or QA-harness identifiers MUST NOT appear
+  here as normative upstream bindings; those remain deployment-time
+  overlay decisions. The `egress_allowlist` records shape only — not
+  a concrete host inventory.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - policy_id
+  - policy_sha
+  - role
+  - runtime_engine
+  - image_ref
+  - mount_manifest
+  - egress_allowlist
+  - secret_allowlist
+  - grant_extensible
+  - grant_authority
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: worker-container-policy-record
+    description: |
+      Discriminator constant. Records that do not carry this exact
+      value are not governed Worker-Container Policy records under
+      this contract and MUST NOT be validated by the
+      `worker_container_policy` check.
+  record_type:
+    type: string
+    const: worker_container_policy
+    description: |
+      Sub-discriminator. Slice 2I-S defines exactly one record
+      shape; later slices MAY add additional record types via
+      additive extension under a new `schema_version`.
+  schema_version:
+    type: string
+    enum: ["1"]
+    description: |
+      Worker-Container Policy schema version. Slice 2I-S ships v1.
+      Later slices MAY extend additively via a further version bump
+      without breaking v1 readers.
+  policy_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable identifier for this policy record. Matches the
+      slug pattern used by controller_id and lane_id throughout
+      the PCO substrate.
+  policy_sha:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      SHA256 hex digest (64 lowercase hex characters) of the
+      canonical JSON representation of this policy record. Used by
+      container-instance records and audit predicates to bind
+      instances to the exact policy version in force at
+      `allocate_worker` time.
+  role:
+    type: string
+    enum: [architect_research, implementer, verification]
+    description: |
+      Role enum. Exactly three roles are normative in Slice 2I-S.
+      Additional roles (e.g., connector workers per Feature 008)
+      MUST be ratified as additive schema changes; this schema
+      fixes only the three above.
+  runtime_engine:
+    type: string
+    enum: [podman-rootless, docker-rootless]
+    description: |
+      Runtime engine identifier. `podman-rootless` is the canonical
+      v1 engine (OSD-I-1 decision); `docker-rootless` is the
+      deployment-time overlay for environments where rootless Docker
+      is operationally preferred. Both run unmodified OCI images in
+      a rootless / user-namespace mode. The concrete engine selection
+      is recorded here so audit predicates can verify the policy was
+      executed under the intended engine.
+  image_ref:
+    type: object
+    required: [name, sha]
+    unevaluatedProperties: false
+    properties:
+      name:
+        type: string
+        minLength: 1
+        description: |
+          Image name (registry/repository:tag). Shape only; the
+          concrete registry and tag are deployment-time overlay.
+          MUST NOT contain credential material.
+      sha:
+        type: string
+        pattern: "^sha256:[0-9a-f]{64}$"
+        description: |
+          Image content-addressable digest in `sha256:<hex64>`
+          format. `PCO-044` verifies that the container-instance
+          record's `image_sha` matches this value.
+    description: |
+      Image reference combining name and content-addressable SHA.
+      The SHA is normative for policy binding; the name is advisory.
+  mount_manifest:
+    type: array
+    items:
+      $ref: "#/$defs/mount_entry"
+    description: |
+      Ordered list of filesystem paths to bind into the worker
+      container. Default-deny posture: paths not listed here are
+      NOT accessible inside the container. `PCO-045` refuses
+      policies whose mount manifest contains forbidden paths (host
+      home directory, container engine sockets, SSH/GPG agent
+      sockets).
+  egress_allowlist:
+    type: array
+    items:
+      $ref: "#/$defs/egress_rule"
+    description: |
+      Per-role egress rules. Shape only — not a deployment host
+      inventory. The concrete host list is a deployment-time
+      overlay per the architect report §7.c boundary. An empty
+      array declares no-egress (appropriate for verification role).
+  secret_allowlist:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Names of secrets the runtime engine is permitted to inject
+      into this worker via the credential broker. Names only — no
+      values, no paths, no raw credential material. `PCO-045`
+      refuses any policy whose allowlist names the controller-key
+      private key or any equivalent.
+  grant_extensible:
+    type: boolean
+    description: |
+      When `true`, the Controller MAY invoke `grant_path_capability`
+      at runtime to extend this policy's mount manifest with
+      additional paths. When `false`, the mount manifest is sealed.
+      Per OSD-I-7, governance-class grants additionally require
+      Source ratification via Feature 001 FR-008.
+  grant_authority:
+    type: string
+    enum: [controller, source]
+    description: |
+      Authority required to approve runtime mount grants for this
+      policy. `controller`: Controller alone may approve per-grant
+      extensions. `source`: Source ratification is required
+      (governance-class grants, per OSD-I-7). Used by audit
+      predicates to verify `justification_ref` resolves to the
+      correct authority.
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Optional: the Controller that authored this policy. Same
+      slug pattern as in the Active-Work Ledger schema.
+  lane_binding:
+    type: object
+    unevaluatedProperties: false
+    required: [controller_id, lane_id, worktree_path]
+    properties:
+      controller_id:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,63}$"
+      lane_id:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,63}$"
+      worktree_path:
+        type: string
+        minLength: 1
+    description: |
+      Optional binding to a specific lane and worktree. When
+      present, the policy is scoped to that lane; when absent the
+      policy is reusable across lanes.
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional free-text note. Advisory only; MUST NOT contain
+      secrets, tokens, credentials, or actor ids. Slice 2I-S does
+      not enforce this prohibition mechanically.
+$defs:
+  mount_entry:
+    type: object
+    required: [path, mode]
+    unevaluatedProperties: false
+    properties:
+      path:
+        type: string
+        minLength: 1
+        description: |
+          Filesystem path to bind into the container. Relative paths
+          are interpreted as repo-relative. `PCO-045` refuses paths
+          under the host home directory, container engine sockets,
+          SSH/GPG agent sockets.
+      mode:
+        type: string
+        enum: [ro, rw]
+        description: |
+          Mount mode. `ro` (read-only) is the default-safe posture;
+          `rw` (read-write) requires `write_justification`.
+      write_justification:
+        type: string
+        minLength: 1
+        description: |
+          Required when `mode` is `rw`. Records the rationale for
+          granting write access to this path.
+      source:
+        type: string
+        enum: [policy, grant]
+        default: policy
+        description: |
+          Whether this mount was declared statically in the policy
+          (`policy`) or extended at runtime via
+          `grant_path_capability` (`grant`). Defaults to `policy`.
+      grant_ref:
+        type: string
+        minLength: 1
+        description: |
+          When `source` is `grant`, the repo-relative path to the
+          ratification record authorizing this mount extension.
+          Optional when `source` is `policy`.
+  egress_rule:
+    type: object
+    required: [host]
+    unevaluatedProperties: false
+    properties:
+      host:
+        type: string
+        minLength: 1
+        description: |
+          Target host pattern. Shape only — not a deployment host
+          inventory. MUST NOT embed IP addresses or private
+          hostnames as normative upstream bindings; those remain
+          deployment-time overlay.
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: |
+          Optional target port. When absent the rule applies to
+          all ports on the named host.
+      protocol:
+        type: string
+        enum: [tcp, udp, https, http, any]
+        description: |
+          Optional transport/application protocol. When absent the
+          rule applies to all protocols.
+      rate_limit_class:
+        type: string
+        minLength: 1
+        description: |
+          Optional rate-limit tier identifier. Deployment-time
+          overlay; the schema records shape only.

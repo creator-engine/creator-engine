@@ -56,3 +56,5 @@ from . import active_work_ledger_conflicts as active_work_ledger_conflicts  # no
 from . import completion_report_schema as completion_report_schema  # noqa: E402,F401
 from . import completion_report_required_for_envelope as completion_report_required_for_envelope  # noqa: E402,F401
 from . import completion_report_terminal_sections as completion_report_terminal_sections  # noqa: E402,F401
+from . import worker_container_policy as worker_container_policy  # noqa: E402,F401
+from . import container_instance as container_instance  # noqa: E402,F401

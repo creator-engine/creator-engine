@@ -1,0 +1,34 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: podman-architect-research-v1
+policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+role: architect_research
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/architect-research:latest
+  sha: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+mount_manifest:
+  - path: /worktrees/pco-slice2i-research
+    mode: ro
+  - path: governance
+    mode: ro
+  - path: schemas
+    mode: ro
+  - path: validators
+    mode: ro
+egress_allowlist:
+  - host: api.anthropic.com
+    protocol: https
+  - host: docs.anthropic.com
+    protocol: https
+  - host: github.com
+    protocol: https
+secret_allowlist:
+  - model-provider-key
+grant_extensible: false
+grant_authority: source
+note: >
+  Architect/research role policy. Read-only on allocated worktree and
+  governance tree; broad egress to model-provider and documentation
+  hosts; model-provider key only; no controller-key.

@@ -1,0 +1,24 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-bad-missing-sha-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+claim_id: pco-bad-claim
+lease_id: lease-bad-001
+started_at: "2026-05-22T05:33:05Z"
+stopped_at: null
+exit_code: null
+mount_manifest_applied:
+  - path: /worktrees/my-feature
+    mode: rw
+    source: policy
+secret_grants: []
+egress_allowlist_applied: []
+enforcement_primitive: pasta
+# policy_sha field intentionally absent to demonstrate PCO-041 failure.
+# Every container-instance record MUST carry top-level policy_sha for
+# audit lookups per spec §e.10.

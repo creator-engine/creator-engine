@@ -1,0 +1,49 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-pco-slice2i-s-impl-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+claim_id: pco-slice2i-s-impl
+lease_id: lease-slice2i-s-001
+started_at: "2026-05-22T05:33:05Z"
+stopped_at: null
+exit_code: null
+mount_manifest_applied:
+  - path: /worktrees/pco-slice2i-s-substrate
+    mode: rw
+    source: policy
+  - path: governance
+    mode: ro
+    source: policy
+  - path: schemas
+    mode: ro
+    source: policy
+  - path: validators
+    mode: ro
+    source: policy
+secret_grants:
+  - secret_name: model-provider-key
+    mode: env
+    broker_grant_id: grant-model-key-abc-001
+    granted_at: "2026-05-22T05:33:05Z"
+    revoked_at: null
+    ttl_seconds: 3600
+  - secret_name: per-task-scoped-pat
+    mode: env
+    broker_grant_id: grant-pat-abc-002
+    granted_at: "2026-05-22T05:33:05Z"
+    revoked_at: null
+    ttl_seconds: 3600
+egress_allowlist_applied:
+  - host: api.anthropic.com
+    protocol: https
+  - host: pypi.org
+    protocol: https
+  - host: github.com
+    protocol: https
+enforcement_primitive: pasta
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"

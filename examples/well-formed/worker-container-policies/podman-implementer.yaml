@@ -1,0 +1,37 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: podman-implementer-v1
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+role: implementer
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/implementer:latest
+  sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+mount_manifest:
+  - path: /worktrees/pco-slice2i-s-substrate
+    mode: rw
+    write_justification: "allocated worktree for Slice 2I-S implementation"
+  - path: governance
+    mode: ro
+  - path: schemas
+    mode: ro
+  - path: validators
+    mode: ro
+egress_allowlist:
+  - host: api.anthropic.com
+    protocol: https
+  - host: pypi.org
+    protocol: https
+  - host: github.com
+    protocol: https
+secret_allowlist:
+  - model-provider-key
+  - per-task-scoped-pat
+grant_extensible: false
+grant_authority: controller
+note: >
+  Implementer role policy. Read-write on exactly the allocated worktree;
+  read-only governance/schemas/validators; dependency-registry and
+  source-host egress; model-provider key and per-task scoped PAT
+  (never long-lived host PAT); no controller-key.
