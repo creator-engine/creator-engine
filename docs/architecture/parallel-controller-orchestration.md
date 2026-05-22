@@ -261,3 +261,64 @@ verbatim in
 [`../operations/WORKTREE_LEASE_PROTOCOL.md`](../operations/WORKTREE_LEASE_PROTOCOL.md)
 and in
 [`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).
+
+## i. Slice 2I-R runtime boundary statement
+
+**Slice 2I-R** is the runtime gate for the Worker Isolation Runtime.
+It is separately ratified and deferred from the Slice 2I-S substrate
+authoring gate. The Slice 2I-R spec (prose level only, no
+implementation produced) is authored in §§l–r of
+[`../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`](../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md).
+
+The Slice 2I-R runtime mechanics extend two existing PCO entry points:
+
+- **`pco-allocate` extension (PCO-027 step 5.b)**: after step 5
+  (worktree add + lease + claim + `claim_created` event) and before
+  the lane lock is released, Slice 2I-R conditionally selects the
+  ratified worker-container policy, starts the container under that
+  policy, mounts the worktree, applies the network egress policy,
+  injects per-task scoped credentials, writes the container-instance
+  record, and emits a `container_started` event — all under the same
+  lane lock. The extension is conditional on the presence of at least
+  one worker-container policy record in the scanned tree; trees
+  without policy records preserve PCO-027 unchanged.
+
+- **`pco-release` extension (PCO-028 step 3.b)**: before step 3
+  (`git worktree remove`), Slice 2I-R conditionally terminates the
+  paired container, records exit status, emits `container_stopped`,
+  and revokes all claim-scoped credentials — under the same lane
+  lock. `pco-release` MUST refuse `git worktree remove` if the
+  paired container cannot be brought to a confirmed terminal state.
+  The extension degrades gracefully for pre-Slice-2I-R claims with
+  no container-instance record.
+
+PCO-042 (`container_required_for_claim`) is the runtime-gate
+predicate that enforces the pairing between live claims and running
+container instances when a policy record is present. PCO-043
+(`container_outlives_claim`) is the static-surface predicate that
+backs the periodic sweeper that force-reaps orphaned container
+instances. Both are declared in §g of the Slice 2I-S substrate and
+refined to implementation-spec level in §m of the Slice 2I-R section.
+
+The credential broker contract (§n of the runtime spec) specifies
+that the broker is host-side, issues per-task fine-grained GitHub PATs
+or App installation tokens bounded to one branch/repo/claim/TTL, and
+revokes all tokens synchronously on release. The host operator's
+`GH_TOKEN` MUST NOT enter any worker container. Secret values MUST
+NOT appear in any tracked record.
+
+The egress enforcement primitive (§o of the runtime spec) designates
+Pasta as the Slice 2I-R default, with Slirp4netns with custom
+configuration as an acceptable equivalent. Both primitives MUST
+enforce the policy's `egress_allowlist` before the container's first
+exec, surface violations as typed `egress_violation` events, and
+record every non-default flag in the container-instance record.
+
+**Slice 2I-R spec authoring gate non-goals** (normative, reproduced
+from §q of the runtime spec): this gate produces no runtime code, no
+container image, no container execution, no credential issuance, no
+schema or validator implementation, no egress primitive
+configuration, no Hermes-side mutation, and no autonomy expansion.
+PCO-032 remains in force. This statement MUST be preserved in this
+architecture doc when the Slice 2I-R implementation gate subsequently
+lands.
