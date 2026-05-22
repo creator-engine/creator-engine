@@ -1,0 +1,16 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "2"
+controller_id: hermes-primary
+lane_id: pco-024-signed-example
+record_timestamp: "2026-05-22T16:00:00Z"
+lease_id: lease-signed-example-001
+worktree_path: /worktrees/pco-024-signed
+acquired_at: "2026-05-22T16:00:00Z"
+lease_seconds: 3600
+expires_at: "9999-01-01T00:00:00Z"
+worktree_lease_signature:
+  algorithm: ed25519
+  canonicalization: creator-engine/worktree-lease-signature/v1
+  key_ref: tenants/dogfood/controllers/hermes-primary.key.yaml
+  value: JsL8fPIm6dM_ahcTB5sWFPuM0Fuf9xwAtVj6sZqpk_WoZnew7yf6pATGEin7YIHCj4k8cbaLtGtgdmWd4B42Aw

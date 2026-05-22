@@ -8,6 +8,13 @@ def test_list_checks_includes_identity(capsys):
     assert "FR-001" in out
 
 
+def test_list_checks_includes_pco024(capsys):
+    assert main(["--list-checks"]) == 0
+    out = capsys.readouterr().out
+    assert "worktree_lease_schema" in out
+    assert "PCO-024" in out
+
+
 def test_check_well_formed_identity_returns_zero(capsys):
     assert main(["check", "examples/well-formed/identity-record.yml"]) == 0
     assert "PASS identity" in capsys.readouterr().out

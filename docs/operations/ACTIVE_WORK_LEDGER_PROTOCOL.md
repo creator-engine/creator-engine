@@ -517,3 +517,13 @@ Slice 2A does **not** modify the Active-Work Ledger schema, does
 `schemas/active-work-ledger.schema.yaml`'s `schema_version`. The
 lease layer is a sibling primitive — not a child of `claims/`,
 `heartbeats/`, or `events/`.
+
+PCO-024 (Slice 2.5B) adds Ed25519 signature verification for
+`schema_version: "2"` worktree-lease records via the
+`worktree_lease_schema` check. Signature errors surface as `PCO-024`
+and are separate from the structural `PCO-020` / `PCO-023` surface.
+The `active_work_ledger_conflicts` predicates (`PCO-021` / `PCO-022`
+/ `PCO-023`) operate on schema-valid leases regardless of signature
+status; a signed lease with an invalid signature still participates
+in conflict detection. See `docs/operations/WORKTREE_LEASE_PROTOCOL.md`
+§j for the signature substrate specification.

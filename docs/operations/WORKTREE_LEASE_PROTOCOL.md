@@ -74,7 +74,9 @@ Slice 2A does **not**:
 * introduce a Hermes runtime hook;
 * launch panes;
 * re-enable `pco-completion-gate`;
-* solve cryptographic controller-identity binding (see §j);
+* fully solve cryptographic controller-identity binding; PCO-024 (§j) adds Ed25519
+  lease-signature substrate for `schema_version: "2"` leases, but full identity
+  hardening (key issuance, key-trust enforcement) remains reserved for later workstreams;
 * fold in public-launch readiness, dirty-root cleanup, pane registry,
   side-effect ledger, fan-in, or integration queue work.
 
@@ -238,24 +240,75 @@ architect lane and an implementer lane on the same physical
 worktree). Lane uniqueness across live claims remains owned by
 Slice 1/2 `PCO-016`.
 
-## j. Controller-identity caveat
+## j. PCO-024 Lease signature substrate (Slice 2.5B)
 
-Lease records are only as trustworthy as the `controller_id` that
-claims them. This protocol does **not** solve cryptographic identity
-binding: any operator+host pair that can write under
-`.hermes/active-work-ledger/leases/<controller-id>/` can in principle
-forge a lease in another Controller's name. Slice 2A documents this
-caveat and intentionally defers forgery hardening to a separately
-ratified workstream (provisionally "Slice 2.5 — Controller Identity
-Substrate" or equivalent).
+PCO-024 extends the worktree-lease record with an optional
+`worktree_lease_signature` field that binds the lease to a landed
+controller-key record (`PCO-025`). A signed lease carries
+`schema_version: "2"`; unsigned v1 leases remain valid.
 
-In multi-Controller rehearsals where forgery risk is operationally
-material, the Controller boundary policy
+### Signature record shape
+
+```yaml
+worktree_lease_signature:
+  algorithm: ed25519
+  canonicalization: creator-engine/worktree-lease-signature/v1
+  key_ref: tenants/<tenant>/controllers/<controller-id>.key.yaml
+  value: <unpadded base64url Ed25519 signature bytes>
+```
+
+### Signing payload
+
+The payload is the canonical UTF-8 JSON encoding of the lease record
+**with `worktree_lease_signature` removed**: compact separators
+(`","` / `":"`), keys sorted lexicographically (RFC 8785 spirit).
+
+```
+canonicalization: creator-engine/worktree-lease-signature/v1
+payload = json.dumps({k: v for k, v in record.items()
+                      if k != "worktree_lease_signature"},
+                     sort_keys=True, separators=(",", ":")).encode("utf-8")
+```
+
+### PCO-024 refusal predicates
+
+The `worktree_lease_schema` check (`PCO-020`) additionally enforces
+`PCO-024` for signed leases:
+
+* **malformed signature bytes** — value is not valid unpadded
+  base64url, or decodes to other than 64 bytes.
+* **missing / unknown controller-key** — `key_ref` does not resolve
+  to a discovered `controller-key-record` in the scanned tree.
+* **revoked controller-key** — resolved key has `status: revoked`.
+* **key_ref / controller_id binding mismatch** — the controller-key
+  record's `controller_id` does not match the lease's `controller_id`.
+* **signature verification failure** — Ed25519 signature verification
+  against the resolved public key fails.
+
+Schema errors (v2 lease missing the field, or v1 lease carrying it)
+still surface as `PCO-020`.
+
+### Private-key prohibition
+
+The controller private key MUST NOT enter worker containers.
+PCO-024 is substrate-only: it validates signatures using landed public
+keys; it does not generate, inspect, store, or log private keys or
+real credentials.
+
+## k. Controller-identity caveat (pre-PCO-024)
+
+Unsigned v1 lease records are only as trustworthy as the
+`controller_id` that claims them. For signed v2 leases, the
+controller-key substrate (`PCO-025`, `PCO-024`) binds the lease to
+a Source-ratified per-host keypair.
+
+In multi-Controller rehearsals the Controller boundary policy
 ([`./CONTROLLER_BOUNDARY_POLICY.md`](./CONTROLLER_BOUNDARY_POLICY.md))
 and Source ratification continue to apply. The lease layer is a
-coordination primitive, not an authentication primitive.
+coordination primitive; PCO-024 adds a signature verification
+layer but does not replace Source ratification.
 
-## k. Relationship to future slices
+## l. Relationship to future slices
 
 * **Slice 2R — Worktree Allocator Runtime**: ships `pco-allocate` /
   `pco-release` CLI, `git worktree` binding, advisory lease lock,
@@ -278,7 +331,7 @@ coordination primitive, not an authentication primitive.
 Each slice keeps the substrate-before-automation discipline: protocol
 and validator first, runtime tooling after.
 
-## l. Slice 2A boundary statement
+## m. Slice 2A / PCO-024 boundary statement
 
 **Slice 2A records, validates, and refuses Worktree Lease state; it
 does NOT yet allocate worktrees, does NOT mutate `git worktree`
@@ -288,13 +341,21 @@ controller-identity binding. Runtime allocation is reserved for
 Slice 2R. Identity hardening is reserved for a separately ratified
 follow-on workstream.**
 
+PCO-024 (§j, Slice 2.5B) adds Ed25519 lease-signature verification for
+`schema_version: "2"` leases within this substrate. The "does NOT solve
+cryptographic controller-identity binding" clause in the statement above
+refers to full identity hardening (per-host key issuance, key-trust
+enforcement); PCO-024 provides the verification layer, not the issuance
+or trust-root layer. That narrower reading is consistent with the
+statement; the normative text is preserved verbatim.
+
 This statement is normative. Reviewers MUST see it preserved
 verbatim in this document, in the schema description, in
 [`../architecture/parallel-controller-orchestration.md`](../architecture/parallel-controller-orchestration.md),
 and in
 [`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).
 
-## m. Prohibited surfaces
+## n. Prohibited surfaces
 
 Lease records MUST NOT carry:
 
@@ -310,7 +371,7 @@ Slice 2A does not enforce it mechanically beyond the schema's
 structural constraints (`unevaluatedProperties: false`, enum on
 `pane_label`); the broader discipline is operational.
 
-## n. Acceptance posture
+## o. Acceptance posture
 
 A fresh-clone reviewer can verify the following from this document
 alone:

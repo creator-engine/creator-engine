@@ -88,11 +88,12 @@ properties:
       extension under a new `schema_version`.
   schema_version:
     type: string
-    enum: ["1"]
+    enum: ["1", "2"]
     description: |
-      Worktree Lease schema version. Slice 2A ships v1. Later
-      slices MAY extend additively via a further version bump
-      without breaking v1 readers.
+      Worktree Lease schema version. Slice 2A ships v1. PCO-024
+      (Slice 2.5B) ships v2, which adds the ``worktree_lease_signature``
+      field. v1 records remain valid; v2 records must carry a
+      ``worktree_lease_signature``. v1 records must not carry it.
   controller_id:
     type: string
     pattern: "^[a-z][a-z0-9-]{2,63}$"
@@ -218,3 +219,49 @@ properties:
       Optional free-text status note. Advisory only; MUST NOT
       contain secrets, tokens, credentials, or actor ids. Slice 2A
       does not enforce this prohibition mechanically.
+  worktree_lease_signature:
+    type: object
+    description: |
+      PCO-024 lease signature block. Required for schema_version "2";
+      must be absent for schema_version "1". The signing payload is
+      the canonical UTF-8 JSON encoding (compact, sorted keys) of the
+      lease record with this field removed.
+      Canonicalization identifier:
+        ``creator-engine/worktree-lease-signature/v1``
+    required: [algorithm, canonicalization, key_ref, value]
+    additionalProperties: false
+    properties:
+      algorithm:
+        type: string
+        const: ed25519
+        description: Signature algorithm. Only ``ed25519`` is supported.
+      canonicalization:
+        type: string
+        const: creator-engine/worktree-lease-signature/v1
+        description: |
+          Canonicalization identifier. Only
+          ``creator-engine/worktree-lease-signature/v1`` is supported.
+      key_ref:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9_./-]+$"
+        description: |
+          Repo-relative path to the controller-key record whose public
+          key verifies this signature. Canonical form:
+          ``tenants/<tenant>/controllers/<controller-id>.key.yaml``.
+      value:
+        type: string
+        minLength: 1
+        description: |
+          Unpadded base64url-encoded Ed25519 signature bytes (64 raw
+          bytes encode to 86 unpadded base64url characters).
+if:
+  properties:
+    schema_version:
+      const: "2"
+  required: [schema_version]
+then:
+  required: [worktree_lease_signature]
+else:
+  not:
+    required: [worktree_lease_signature]
