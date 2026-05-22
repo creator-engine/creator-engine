@@ -58,6 +58,37 @@ A reusable rule, schema, or template belongs upstream. A fact about what is
 running right now in one instance belongs in that instance's ignored local
 state.
 
+## Stateless-per-invocation controllers
+
+Some controllers are **stateless-per-invocation**: each new session begins
+with no in-memory state from prior sessions. The four-role boundary in
+[`./CONTROLLER_BOUNDARY_POLICY.md`](./CONTROLLER_BOUNDARY_POLICY.md) §c is
+defined by action under the envelope, not by host runtime statefulness; the
+substrate is indifferent to whether a controller is a persistent process or
+a fresh per-invocation instance.
+
+A stateless-per-invocation controller MUST execute the Start-of-session
+checklist below before any envelope mutation, including reading
+`.hermes/session-state/STATE.md` and reconciling it against observed Git
+state. The four-condition root invariant declared in
+[`./ROOT_WORKTREE_INVARIANT.md`](./ROOT_WORKTREE_INVARIANT.md) §c MUST be
+verified at session start per the session-start check in
+[`./ROOT_WORKTREE_INVARIANT.md`](./ROOT_WORKTREE_INVARIANT.md) §f.
+Stateless controllers are exactly the case where the root invariant is
+most likely to be violated unnoticed, because no persistent process
+retains memory of the prior session's cleanup state.
+
+Supplementary memory tooling — auto-injected session summaries,
+prior-conversation embeddings, vendor-specific continuity layers, or
+equivalents — is **permitted but non-canonical**. If supplementary memory
+disagrees with committed upstream repository content, observed Git state,
+or `.hermes/session-state/STATE.md`, the supplementary surface is ignored
+or amended. If `.hermes/session-state/STATE.md` disagrees with observed
+Git state, the controller reconciles that discrepancy before mutation
+under the Start-of-session checklist. Committed upstream repository
+content remains canonical for protocols, schemas, templates, validators,
+and governance per `## Source of truth` (1).
+
 ## Start-of-session checklist
 
 At the beginning of any fresh Creator Engine instance session:

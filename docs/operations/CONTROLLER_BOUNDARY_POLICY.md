@@ -68,6 +68,14 @@ hard-coded as upstream constants per
 [`../delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`](../delivery/REVIEWER_IDENTITY_REQUIREMENTS.md)
 §c.
 
+A controller's runtime statefulness — persistent controller process versus
+stateless-per-invocation instance — is likewise not a role binding.
+Stateless-per-invocation controllers operate under additional session-start
+discipline declared in
+[`./session-continuity-protocol.md`](./session-continuity-protocol.md)
+`## Stateless-per-invocation controllers`; that discipline supplements the
+role definition without re-binding it to a specific tool or model.
+
 ## d. Hardcoded boundary
 
 The boundary MUST hold absolutely for every governed batch:
