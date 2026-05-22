@@ -1,0 +1,13 @@
+kind: controller-key-record
+record_type: controller_key
+schema_version: "1"
+tenant_id: dogfood
+controller_id: Bad_ID
+key_algorithm: ed25519
+public_key:
+  encoding: base64url-no-padding
+  value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+issued_at: "2026-05-22T00:00:00Z"
+issued_by: source-controlled:tenants/dogfood/identity.yaml
+key_custody_mode: per_host
+status: active

@@ -55,6 +55,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_leases.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_controller_keys = sub.add_parser(
+        "scan-controller-keys",
+        help="run only the controller_key_schema check against a path",
+    )
+    scan_controller_keys.add_argument("path", nargs="?", default=".", help="path to scan")
+
     scan_completion = sub.add_parser(
         "scan-completion-reports",
         help="run the completion_report_schema / required_for_envelope / terminal_sections checks against a path",
@@ -131,6 +137,9 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/worktree-leases/unknown-top-level-field.yaml"), False, "PCO-020"),
         ("malformed", Path("examples/malformed/worktree-leases/cross-controller-conflict"), False, "PCO-022"),
         ("malformed", Path("examples/malformed/worktree-leases/claim-without-live-lease"), False, "PCO-021"),
+        ("malformed", Path("examples/malformed/controller-keys/missing-required-fields.yaml"), False, "PCO-025"),
+        ("malformed", Path("examples/malformed/controller-keys/bad-controller-id-pattern.yaml"), False, "PCO-025"),
+        ("malformed", Path("examples/malformed/controller-keys/private-key-material.yaml"), False, "PCO-025"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -207,6 +216,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-worktree-leases":
         from .checks.worktree_lease_schema import run as _run_lease
         result = _run_lease([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-controller-keys":
+        from .checks.controller_key_schema import run as _run_controller_keys
+        result = _run_controller_keys([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "scan-completion-reports":
         from .checks.completion_report_schema import run as _run_cr_schema

@@ -1,0 +1,72 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://creator.engine/schemas/controller-key.schema.yaml
+title: Controller Key Record
+description: >-
+  PCO-025 controller-key record contract. Slice 2.5A is substrate-only:
+  records bind a controller_id to public-key metadata, while private key
+  generation, custody, rotation, and lease-signature verification remain
+  separately ratified work.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - tenant_id
+  - controller_id
+  - key_algorithm
+  - public_key
+  - issued_at
+  - issued_by
+  - key_custody_mode
+  - status
+properties:
+  kind:
+    const: controller-key-record
+  record_type:
+    const: controller_key
+  schema_version:
+    enum: ['1']
+  tenant_id:
+    type: string
+    pattern: ^[a-z][a-z0-9-]{2,63}$
+  controller_id:
+    type: string
+    pattern: ^[a-z][a-z0-9-]{2,63}$
+  key_algorithm:
+    enum: [ed25519]
+  public_key:
+    type: object
+    required:
+      - encoding
+      - value
+    properties:
+      encoding:
+        const: base64url-no-padding
+      value:
+        type: string
+        minLength: 1
+        pattern: ^[A-Za-z0-9_-]+$
+    unevaluatedProperties: false
+  issued_at:
+    type: string
+    pattern: ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z|source-controlled:.+)$
+  issued_by:
+    type: string
+    pattern: ^source-controlled:[A-Za-z0-9._/-]+$
+  key_custody_mode:
+    enum: [per_host]
+  status:
+    enum: [active, revoked]
+  revoked_at:
+    type: string
+    pattern: ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z|source-controlled:.+)$
+if:
+  properties:
+    status:
+      const: revoked
+  required:
+    - status
+then:
+  required:
+    - revoked_at
+unevaluatedProperties: false
