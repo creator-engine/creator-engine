@@ -1,7 +1,7 @@
 # Creator Engine Parallel Controller Orchestration (PCO)
 
-**Status**: Reference. Slice 0 substrate authored under PCO Slice 0
-(Active-Work Ledger).
+**Status**: Reference. PCO slices 0 through 5 are reflected through
+the `pco-fanin` spec/protocol authoring boundary.
 
 **Source-of-truth relationship**: REFERENCE. This document defers to
 the Feature 001 governance substrate, the Feature 002 operating
@@ -11,8 +11,8 @@ model, [`./agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md),
 for the underlying SDLC mechanics, actor patterns, and the
 one-driver-per-worktree rule. It is authoritative for the
 multi-Controller coordination substrate within Feature 005's scope,
-and it is the architectural companion to the prose protocol at
-[`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md).
+and it is the architectural companion to the PCO prose protocols
+listed below.
 
 ## a. Status and source-of-truth
 
@@ -26,6 +26,7 @@ and it is the architectural companion to the prose protocol at
 | [`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md) | Prose protocol companion (Slice 0). |
 | [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md) | Prose protocol companion for visible-pane identity (Slice 3). |
 | [`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md) | Prose protocol companion for side-effect evidence (Slice 4). |
+| [`../operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md) | Prose protocol companion for fan-in verification (Slice 5). |
 | [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md) | Controller / Implementer boundary policy. |
 | `schemas/active-work-ledger.schema.yaml` | Tracked machine-readable record contract. |
 
@@ -48,8 +49,9 @@ The unsolved coordination question is:
 
 This document specifies the architectural substrate that answers that
 question. The substrate is **Parallel Controller Orchestration
-(PCO)**. Slice 0 introduces the schema and protocol primitives;
-later slices add validators, allocators, and integration tooling.
+(PCO)**. Slices 0 through 5 define the ledger/report/evidence and
+fan-in verification surfaces; Slice 6 adds Integration Queue ordering,
+and runtime follow-ons remain separately ratified.
 
 ## c. Canonical doctrine the model preserves
 
