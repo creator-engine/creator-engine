@@ -1,0 +1,11 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice3-impl
+record_timestamp: "source-controlled:examples/well-formed/pane-registry/leases/hermes-primary/pco-slice3-impl.yaml"
+lease_id: lease-slice3-001
+worktree_path: /worktrees/pco-slice3-impl
+acquired_at: "source-controlled:examples/well-formed/pane-registry/leases/hermes-primary/pco-slice3-impl.yaml"
+lease_seconds: 3600
+expires_at: "source-controlled:examples/well-formed/pane-registry/leases/hermes-primary/pco-slice3-impl.yaml"

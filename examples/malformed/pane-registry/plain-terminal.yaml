@@ -1,0 +1,16 @@
+kind: pane-registry-record
+record_type: pane_identity
+schema_version: '1'
+controller_id: hermes-primary
+lane_id: pco-slice3-impl
+claim_ref: claims/hermes-primary/pco-slice3-impl.yaml
+host_id: workstation-a
+pane_id: pane-pco-slice3-impl-001
+role: implementer
+status: active
+record_timestamp: '2026-05-23T07:45:00Z'
+visibility: operator_visible
+terminal:
+  kind: plain_terminal
+registered_at: '2026-05-23T07:40:00Z'
+last_seen_at: source-controlled:pane-registry/plain-terminal.yaml

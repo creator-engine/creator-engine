@@ -1,0 +1,181 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/pane-registry.schema.yaml"
+title: "Creator Engine Pane Registry Record"
+description: |
+  Machine-readable schema for a single Pane Registry record authored
+  under the Creator Engine Parallel Controller Orchestration (PCO)
+  Slice 3 substrate.
+
+  Prose contract:
+  `docs/operations/PANE_REGISTRY_PROTOCOL.md`.
+
+  The Pane Registry is a read-only substrate surface: it records which
+  operator-visible terminal pane is bound to a Controller lane, role,
+  Active-Work Ledger claim, and optional container instance. It does
+  not launch terminals, allocate panes, or grant provider authority.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - controller_id
+  - lane_id
+  - claim_ref
+  - host_id
+  - pane_id
+  - role
+  - status
+  - record_timestamp
+  - registered_at
+  - last_seen_at
+  - visibility
+  - terminal
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: pane-registry-record
+  record_type:
+    type: string
+    const: pane_identity
+  schema_version:
+    type: string
+    enum: ["1"]
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  lane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  claim_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  host_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Generic operator host identifier. MUST NOT encode durable
+      account, model, provider, token, secret, or credential authority.
+  pane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable pane identity for this registry entry. This is a
+      substrate-local pane id, not a provider, model, account, or
+      credential binding.
+  role:
+    type: string
+    enum: [architect, implementer, reviewer, verification]
+  status:
+    type: string
+    enum: [starting, active, blocked, closing, closed, aborted]
+  record_timestamp:
+    $ref: "#/$defs/timestamp"
+  registered_at:
+    $ref: "#/$defs/timestamp"
+  last_seen_at:
+    $ref: "#/$defs/timestamp"
+  visibility:
+    type: string
+    enum: [operator_visible]
+  terminal:
+    type: object
+    required: [kind]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        enum: [tmux, plain_terminal, unknown]
+      session_id:
+        type: string
+        minLength: 1
+      window_id:
+        type: string
+        minLength: 1
+      pane_id:
+        type: string
+        minLength: 1
+      pane_tty:
+        type: string
+        minLength: 1
+      pane_pid:
+        oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            pattern: "^[0-9]+$"
+  claim_record_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  closed_at:
+    $ref: "#/$defs/timestamp"
+  close_reason:
+    type: string
+    enum: [completed, aborted, lapsed, handed_off, operator_closed]
+  worktree_path:
+    type: string
+    minLength: 1
+  branch:
+    type: string
+    minLength: 1
+  envelope_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  handoff_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  recommended_prompt_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  container_instance_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  container_instance_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  note:
+    type: string
+    maxLength: 1024
+allOf:
+  - if:
+      properties:
+        terminal:
+          properties:
+            kind:
+              const: tmux
+    then:
+      properties:
+        terminal:
+          required: [session_id, window_id, pane_id]
+  - if:
+      properties:
+        status:
+          enum: [closed, aborted]
+    then:
+      required: [closed_at, close_reason]
+  - if:
+      required: [closed_at]
+    then:
+      properties:
+        status:
+          enum: [closed, aborted]
+  - if:
+      required: [close_reason]
+    then:
+      properties:
+        status:
+          enum: [closed, aborted]
+$defs:
+  timestamp:
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"

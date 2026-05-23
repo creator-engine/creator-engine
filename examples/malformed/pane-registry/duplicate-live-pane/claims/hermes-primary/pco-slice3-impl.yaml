@@ -1,0 +1,11 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice3-impl
+record_timestamp: "source-controlled:examples/malformed/pane-registry/duplicate-live-pane/claims/hermes-primary/pco-slice3-impl.yaml"
+worktree_path: /worktrees/pco-slice3-impl
+envelope_ref: .hermes/envelopes/pco-slice3.md
+lease_seconds: 3600
+claimed_at: "source-controlled:examples/malformed/pane-registry/duplicate-live-pane/claims/hermes-primary/pco-slice3-impl.yaml"
+last_heartbeat_at: "source-controlled:examples/malformed/pane-registry/duplicate-live-pane/claims/hermes-primary/pco-slice3-impl.yaml"

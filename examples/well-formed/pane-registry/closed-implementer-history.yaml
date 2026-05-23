@@ -1,0 +1,21 @@
+kind: pane-registry-record
+record_type: pane_identity
+schema_version: '1'
+controller_id: hermes-primary
+lane_id: pco-slice3-impl
+claim_ref: claims/hermes-primary/pco-slice3-impl.yaml
+host_id: workstation-a
+pane_id: pane-pco-slice3-impl-002
+role: implementer
+status: closed
+record_timestamp: '2026-05-23T08:10:00Z'
+visibility: operator_visible
+terminal:
+  kind: tmux
+  session_id: ce-pco
+  window_id: slice3
+  pane_id: '2'
+closed_at: '2026-05-23T08:00:00Z'
+registered_at: '2026-05-23T07:40:00Z'
+last_seen_at: source-controlled:pane-registry/closed-implementer-history.yaml
+close_reason: completed

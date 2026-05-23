@@ -1,0 +1,294 @@
+"""Unit tests for Pane Registry substrate checks (PCO-046..PCO-053)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from creator_engine_validator.checks import registered_checks
+from creator_engine_validator.checks.pane_registry import (
+    CHECK_NAME,
+    CODE_CONTAINER_BINDING,
+    CODE_DUPLICATE_LIVE_PANE,
+    CODE_ID_FORMAT,
+    CODE_LEDGER_BINDING,
+    CODE_OPERATOR_VISIBLE,
+    CODE_ROLE_STATUS,
+    CODE_SCHEMA,
+    run,
+    validate_pane_registry_record,
+)
+
+
+def valid_pane_record() -> dict:
+    return {
+        "kind": "pane-registry-record",
+        "record_type": "pane_identity",
+        "schema_version": "1",
+        "controller_id": "hermes-primary",
+        "lane_id": "pco-slice3-impl",
+        "claim_ref": "claims/hermes-primary/pco-slice3-impl.yaml",
+        "host_id": "workstation-a",
+        "pane_id": "pane-pco-slice3-impl-001",
+        "role": "implementer",
+        "status": "active",
+        "record_timestamp": "2026-05-23T07:45:00Z",
+        "registered_at": "2026-05-23T07:40:00Z",
+        "last_seen_at": "source-controlled:pane-registry/pane-pco-slice3-impl-001.yaml",
+        "visibility": "operator_visible",
+        "terminal": {
+            "kind": "tmux",
+            "session_id": "ce-pco",
+            "window_id": "slice3",
+            "pane_id": "1",
+        },
+    }
+
+
+def _write(path: Path, record: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record), encoding="utf-8")
+    return path
+
+
+def valid_claim_record() -> dict:
+    return {
+        "kind": "active-work-ledger-record",
+        "record_type": "claim",
+        "schema_version": "1",
+        "controller_id": "hermes-primary",
+        "lane_id": "pco-slice3-impl",
+        "record_timestamp": "source-controlled:claims/hermes-primary/pco-slice3-impl.yaml",
+        "worktree_path": "/worktrees/pco-slice3-impl",
+        "envelope_ref": ".hermes/envelopes/pco-slice3.md",
+        "lease_seconds": 3600,
+        "claimed_at": "source-controlled:claims/hermes-primary/pco-slice3-impl.yaml",
+        "last_heartbeat_at": "source-controlled:claims/hermes-primary/pco-slice3-impl.yaml",
+    }
+
+
+def valid_container_record() -> dict:
+    image_sha = "sha256:" + "b" * 64
+    policy_sha = "a" * 64
+    return {
+        "kind": "container-instance-record",
+        "record_type": "container_instance",
+        "schema_version": "1",
+        "instance_id": "inst-pco-slice3-001",
+        "policy_ref": {
+            "policy_id": "podman-implementer-v1",
+            "policy_sha": policy_sha,
+            "image_sha": image_sha,
+        },
+        "image_sha": image_sha,
+        "claim_id": "pco-slice3-impl",
+        "lease_id": "lease-slice3-001",
+        "started_at": "2026-05-23T07:41:00Z",
+        "stopped_at": None,
+        "exit_code": None,
+        "mount_manifest_applied": [],
+        "secret_grants": [],
+        "egress_allowlist_applied": [],
+        "enforcement_primitive": "pasta",
+        "policy_sha": policy_sha,
+    }
+
+
+def test_check_registered():
+    checks = registered_checks()
+    assert CHECK_NAME in checks
+    for code in (
+        CODE_SCHEMA,
+        CODE_ID_FORMAT,
+        CODE_ROLE_STATUS,
+        CODE_OPERATOR_VISIBLE,
+        CODE_LEDGER_BINDING,
+        CODE_DUPLICATE_LIVE_PANE,
+        CODE_CONTAINER_BINDING,
+    ):
+        assert code in checks[CHECK_NAME].frs
+
+
+def test_well_formed_pane_record_passes_schema_and_local_predicates(tmp_path: Path):
+    assert validate_pane_registry_record(valid_pane_record(), tmp_path / "pane.yaml") == []
+
+
+def test_spec_protocol_optional_fields_are_admitted_by_strict_schema(tmp_path: Path):
+    record = valid_pane_record()
+    record.update(
+        {
+            "status": "starting",
+            "claim_record_sha256": "0" * 64,
+            "worktree_path": "/worktrees/pco-slice3-impl",
+            "branch": "implementer/pco-slice3-pane-registry-substrate-implementation-20260523T074004Z",
+            "envelope_ref": "envelopes/pco-slice3.md",
+            "handoff_ref": "handoffs/pco-slice3.md",
+            "recommended_prompt_ref": "prompts/next.md",
+            "container_instance_id": "inst-pco-slice3-001",
+            "container_instance_ref": "containers/inst-pco-slice3-001.yaml",
+        }
+    )
+
+    assert validate_pane_registry_record(record, tmp_path / "pane.yaml") == []
+
+
+def test_missing_registered_or_last_seen_fails_pco_046(tmp_path: Path):
+    record = valid_pane_record()
+    del record["registered_at"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+    record = valid_pane_record()
+    del record["last_seen_at"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_unknown_top_level_field_fails_pco_053(tmp_path: Path):
+    record = valid_pane_record()
+    record["unexpected"] = "not allowed"
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_forbidden_host_identity_surface_fails_pco_047(tmp_path: Path):
+    record = valid_pane_record()
+    record["host_id"] = "gpt-5-provider"
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_ID_FORMAT for error in errors)
+
+
+def test_plain_terminal_does_not_satisfy_operator_visible_pco_049(tmp_path: Path):
+    record = valid_pane_record()
+    record["terminal"] = {"kind": "plain_terminal"}
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
+def test_terminal_status_requires_close_reason_pco_048(tmp_path: Path):
+    record = valid_pane_record()
+    record["status"] = "closed"
+    record["closed_at"] = "2026-05-23T08:00:00Z"
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_ROLE_STATUS for error in errors)
+
+
+def test_terminal_status_with_close_reason_passes_pco_048(tmp_path: Path):
+    record = valid_pane_record()
+    record["status"] = "closed"
+    record["closed_at"] = "2026-05-23T08:00:00Z"
+    record["close_reason"] = "completed"
+    assert validate_pane_registry_record(record, tmp_path / "pane.yaml") == []
+
+
+def test_invented_terminal_reason_field_is_refused_pco_053(tmp_path: Path):
+    record = valid_pane_record()
+    record["status"] = "closed"
+    record["closed_at"] = "2026-05-23T08:00:00Z"
+    record["terminal_reason"] = "completed"
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_live_pane_must_bind_to_matching_live_claim_pco_050(tmp_path: Path):
+    pane = valid_pane_record()
+    _write(tmp_path / "panes" / "pane.yaml", pane)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_LEDGER_BINDING for error in result.errors)
+
+
+def test_live_pane_matching_live_claim_passes_pco_050(tmp_path: Path):
+    pane = valid_pane_record()
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    _write(tmp_path / "panes" / "pane.yaml", pane)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_duplicate_active_claim_role_fails_pco_051(tmp_path: Path):
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    _write(tmp_path / "panes" / "pane-a.yaml", valid_pane_record())
+    pane_b = valid_pane_record()
+    pane_b["pane_id"] = "pane-pco-slice3-impl-002"
+    _write(tmp_path / "panes" / "pane-b.yaml", pane_b)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_DUPLICATE_LIVE_PANE for error in result.errors)
+
+
+def test_terminal_history_duplicate_role_passes_pco_051(tmp_path: Path):
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    _write(tmp_path / "panes" / "pane-a.yaml", valid_pane_record())
+    pane_b = valid_pane_record()
+    pane_b["pane_id"] = "pane-pco-slice3-impl-002"
+    pane_b["status"] = "closed"
+    pane_b["closed_at"] = "2026-05-23T08:00:00Z"
+    pane_b["close_reason"] = "completed"
+    _write(tmp_path / "panes" / "pane-b.yaml", pane_b)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_container_binding_must_match_existing_container_pco_052(tmp_path: Path):
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    pane = valid_pane_record()
+    pane["container_instance_ref"] = "containers/inst-pco-slice3-001.yaml"
+    pane["container_instance_id"] = "inst-pco-slice3-001"
+    _write(tmp_path / "panes" / "pane.yaml", pane)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_CONTAINER_BINDING for error in result.errors)
+
+
+def test_container_binding_matching_container_passes_pco_052(tmp_path: Path):
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    _write(tmp_path / "containers" / "inst-pco-slice3-001.yaml", valid_container_record())
+    pane = valid_pane_record()
+    pane["container_instance_ref"] = "containers/inst-pco-slice3-001.yaml"
+    pane["container_instance_id"] = "inst-pco-slice3-001"
+    _write(tmp_path / "panes" / "pane.yaml", pane)
+
+    result = run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_container_binding_claim_context_mismatch_fails_pco_052(tmp_path: Path):
+    claim_path = tmp_path / "claims" / "hermes-primary" / "pco-slice3-impl.yaml"
+    _write(claim_path, valid_claim_record())
+    container = valid_container_record()
+    container["claim_id"] = "other-claim"
+    _write(tmp_path / "containers" / "inst-pco-slice3-001.yaml", container)
+    pane = valid_pane_record()
+    pane["container_instance_ref"] = "containers/inst-pco-slice3-001.yaml"
+    pane["container_instance_id"] = "inst-pco-slice3-001"
+    _write(tmp_path / "panes" / "pane.yaml", pane)
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    assert any(error.code == CODE_CONTAINER_BINDING for error in result.errors)
