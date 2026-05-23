@@ -138,7 +138,7 @@ properties:
       coordination lanes that operate without an envelope (e.g.,
       architect-only planning). Required on `claim` records. The
       envelope, not the ledger, remains the substantive authority.
-    oneOf:
+    anyOf:
       - type: string
         minLength: 1
         pattern: "^[A-Za-z0-9_./-]+$"

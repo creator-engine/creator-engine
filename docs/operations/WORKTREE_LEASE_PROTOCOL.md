@@ -313,7 +313,9 @@ layer but does not replace Source ratification.
 * **Slice 2R — Worktree Allocator Runtime**: ships `pco-allocate` /
   `pco-release` CLI, `git worktree` binding, advisory lease lock,
   and claim-writes-only-under-held-lease enforcement. Slice 2A is
-  the substrate Slice 2R operates on.
+  the substrate Slice 2R operates on. **Slice 2R is now implemented.**
+  The prose contract and boundary statement are at
+  [`./WORKTREE_ALLOCATOR_PROTOCOL.md`](./WORKTREE_ALLOCATOR_PROTOCOL.md).
 * **Slice 2.5 — Controller Identity Substrate** *(provisional)*:
   hardens `controller_id` against forgery (per-host keying, signing
   surface, etc.). Slice 2A explicitly defers this.

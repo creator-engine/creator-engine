@@ -492,3 +492,74 @@ def test_tmp_lease_file_is_skipped_by_conflict_validator(tmp_path: Path):
     result = run([tmp_path])
 
     assert result.ok, [error.format() for error in result.errors]
+
+
+# ---------------------------------------------------------------------------
+# Slice 2R — PCO-030: callable runtime guard for pane-launch gating
+# ---------------------------------------------------------------------------
+
+
+def test_validate_active_work_ledger_conflicts_is_directly_callable(tmp_path: Path):
+    """PCO-030: the conflict validator MUST be importable and callable as a
+    pure read-only function so that callers can gate pane launch without
+    any subprocess or network side effect."""
+    from creator_engine_validator.checks.active_work_ledger_conflicts import (
+        validate_active_work_ledger_conflicts,
+    )
+
+    result = validate_active_work_ledger_conflicts([tmp_path])
+    assert result.ok
+
+
+def test_runtime_guard_passes_clean_ledger(tmp_path: Path):
+    """PCO-030: guard returns ok when no live conflicts exist."""
+    from creator_engine_validator.checks.active_work_ledger_conflicts import (
+        validate_active_work_ledger_conflicts,
+    )
+
+    claim = valid_claim_record()
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+
+    result = validate_active_work_ledger_conflicts([tmp_path])
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_runtime_guard_blocks_launch_on_worktree_conflict(tmp_path: Path):
+    """PCO-030: guard returns non-ok when cross-controller worktree conflict
+    exists, allowing callers to block pane launch."""
+    from creator_engine_validator.checks.active_work_ledger_conflicts import (
+        validate_active_work_ledger_conflicts,
+    )
+
+    claim_a = valid_claim_record()
+    claim_a["controller_id"] = "hermes-primary"
+    claim_a["lane_id"] = "pco-lane-a"
+    claim_a["worktree_path"] = "/worktrees/contested"
+
+    claim_b = valid_claim_record()
+    claim_b["controller_id"] = "nefarious-laptop-a"
+    claim_b["lane_id"] = "pco-lane-b"
+    claim_b["worktree_path"] = "/worktrees/contested"
+
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-lane-a"), claim_a)
+    _write_record(_claim_path(tmp_path, "nefarious-laptop-a", "pco-lane-b"), claim_b)
+
+    result = validate_active_work_ledger_conflicts([tmp_path])
+    assert not result.ok
+    assert any(e.code == CODE_WORKTREE_CONFLICT for e in result.errors)
+
+
+def test_runtime_guard_has_no_filesystem_side_effects(tmp_path: Path):
+    """PCO-030: calling the guard MUST NOT write, delete, or modify any file."""
+    from creator_engine_validator.checks.active_work_ledger_conflicts import (
+        validate_active_work_ledger_conflicts,
+    )
+
+    claim = valid_claim_record()
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-slice-a"), claim)
+    files_before = sorted(p.as_posix() for p in tmp_path.rglob("*") if p.is_file())
+
+    validate_active_work_ledger_conflicts([tmp_path])
+
+    files_after = sorted(p.as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    assert files_before == files_after

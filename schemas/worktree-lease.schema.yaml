@@ -206,7 +206,7 @@ properties:
       whose authority the lease is operating, or the literal `none`
       for coordination lanes that operate without an envelope. The
       envelope, not the lease, remains the substantive authority.
-    oneOf:
+    anyOf:
       - type: string
         minLength: 1
         pattern: "^[A-Za-z0-9_./-]+$"

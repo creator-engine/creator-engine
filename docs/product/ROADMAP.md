@@ -243,17 +243,19 @@ Slice plan:
    unchanged. Key custody, key location, and signature
    serialization remain open Source decisions per the spec's Open
    Source Decisions section. `requires: Slice 2A`.
-3. **Slice 2R — Worktree Allocator Runtime** *(next ratified gate;
-   paired with Slice 2.5)*. Ships `pco-allocate` and `pco-release`
-   CLI; atomic `git worktree add` + lease + claim + event flow
-   under the lane's advisory lock; claim-writes-only-under-held-
-   lease runtime enforcement; pane launch gated by
-   `active_work_ledger_conflicts`; root checkout invariant
-   preservation. Converts the existing Slice 1/2 + 2A
-   read/validate/refuse substrate into runtime block. Subsumes the
-   Feature 005 worktree-lifecycle automation line item. Does NOT
-   introduce pane registry, side-effect ledger, fan-in, integration
-   queue, tracker connector, or runtime autonomy expansion.
+3. **Slice 2R — Worktree Allocator Runtime** *(implemented in this
+   gate; paired with Slice 2.5)*. Ships `pco-allocate` and
+   `pco-release` CLI; atomic `git worktree add` + lease + claim +
+   event flow under the lane's advisory lock;
+   claim-writes-only-under-held-lease runtime enforcement (PCO-029);
+   callable pane-launch guard (PCO-030); root checkout invariant
+   preservation (PCO-031); Slice 2R boundary statement (PCO-032).
+   Converts the existing Slice 1/2 + 2A read/validate/refuse
+   substrate into runtime block. Subsumes the Feature 005
+   worktree-lifecycle automation line item. Does NOT introduce pane
+   registry, side-effect ledger, fan-in, integration queue, tracker
+   connector, or runtime autonomy expansion. Prose contract:
+   [`docs/operations/WORKTREE_ALLOCATOR_PROTOCOL.md`](../operations/WORKTREE_ALLOCATOR_PROTOCOL.md).
    `requires: Slice 2A, Slice 2.5`.
 3.5. **Slice 2I — Worker Isolation Runtime** *(spec amendment
    authored; runtime deferred; bridges between Slice 2.5 + 2R

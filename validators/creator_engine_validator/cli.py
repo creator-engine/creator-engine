@@ -73,6 +73,31 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_attribution.add_argument("--base", required=True, help="base commit (e.g., origin/main)")
     verify_attribution.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
+    pco_allocate = sub.add_parser(
+        "pco-allocate",
+        help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
+    )
+    pco_allocate.add_argument("--lane-id", required=True, help="lane identifier (e.g., pco-slice2r-implementer)")
+    pco_allocate.add_argument("--worktree-path", required=True, help="path for the new git worktree")
+    pco_allocate.add_argument("--branch", required=True, help="new branch name to create in the worktree")
+    pco_allocate.add_argument("--envelope-ref", required=True, help="repo-relative path to the Assignment Envelope (or 'none')")
+    pco_allocate.add_argument("--controller-id", default=None, help="controller_id override (resolved from local conventions if omitted)")
+    pco_allocate.add_argument("--ledger-root", default=None, help="path to .hermes/active-work-ledger (auto-resolved if omitted)")
+    pco_allocate.add_argument("--repo-root", default=None, help="repo root path (defaults to cwd)")
+    pco_allocate.add_argument("--lease-seconds", type=int, default=3600, help="lease duration in seconds (default: 3600)")
+    pco_allocate.add_argument("--pane-label", choices=["architect", "implementer", "controller", "reviewer"], default=None, help="optional pane role label")
+
+    pco_release = sub.add_parser(
+        "pco-release",
+        help="PCO-028: release a worktree lane (mark claim released, remove lease, emit event, git worktree remove)",
+    )
+    pco_release.add_argument("--lane-id", required=True, help="lane identifier to release")
+    pco_release.add_argument("--controller-id", default=None, help="controller_id override (resolved from local conventions if omitted)")
+    pco_release.add_argument("--ledger-root", default=None, help="path to .hermes/active-work-ledger (auto-resolved if omitted)")
+    pco_release.add_argument("--repo-root", default=None, help="repo root path (defaults to cwd)")
+    pco_release.add_argument("--release-reason", default="completed", choices=["completed", "aborted", "lapsed", "handed_off"], help="reason for release (default: completed)")
+
     return parser
 
 
@@ -143,6 +168,8 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/controller-keys/missing-required-fields.yaml"), False, "PCO-025"),
         ("malformed", Path("examples/malformed/controller-keys/bad-controller-id-pattern.yaml"), False, "PCO-025"),
         ("malformed", Path("examples/malformed/controller-keys/private-key-material.yaml"), False, "PCO-025"),
+        ("well-formed", Path("examples/well-formed/worktree-allocator/successful-state"), True, None),
+        ("malformed", Path("examples/malformed/worktree-allocator/pre-existing-conflict"), False, "PCO-010"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -238,9 +265,104 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
+    if subcommand == "pco-allocate":
+        return _pco_allocate(args)
+    if subcommand == "pco-release":
+        return _pco_release(args)
 
     parser.print_usage(sys.stderr)
     return 2
+
+
+def _resolve_ledger_root(args_ledger_root: str | None, repo_root_path: Path) -> Path:
+    if args_ledger_root:
+        return Path(args_ledger_root)
+    return repo_root_path / ".hermes" / "active-work-ledger"
+
+
+def _pco_allocate(args) -> int:
+    from .pco_allocator import (
+        PcoAllocatorError,
+        PcoConflictError,
+        RootCheckoutRefused,
+        allocate,
+        resolve_controller_id,
+    )
+
+    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    ledger_root = _resolve_ledger_root(args.ledger_root, repo_root)
+    controller_id = args.controller_id or resolve_controller_id(repo_root)
+    if not controller_id:
+        print(
+            "ERROR: pco-allocate: controller_id could not be resolved. "
+            f"Set {__import__('creator_engine_validator.pco_allocator', fromlist=['CONTROLLER_ID_ENV']).CONTROLLER_ID_ENV} "
+            "or provide --controller-id.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        allocate(
+            repo_root=repo_root,
+            ledger_root=ledger_root,
+            lane_id=args.lane_id,
+            worktree_path=Path(args.worktree_path),
+            envelope_ref=args.envelope_ref,
+            branch=args.branch,
+            controller_id=controller_id,
+            lease_seconds=args.lease_seconds,
+            pane_label=args.pane_label,
+        )
+    except RootCheckoutRefused as exc:
+        print(f"ERROR: pco-allocate refused — root checkout: {exc}", file=sys.stderr)
+        return 1
+    except PcoConflictError as exc:
+        print(f"ERROR: pco-allocate refused — conflict: {exc}", file=sys.stderr)
+        return 1
+    except PcoAllocatorError as exc:
+        print(f"ERROR: pco-allocate failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"pco-allocate: lane {args.lane_id!r} allocated at {args.worktree_path}")
+    return 0
+
+
+def _pco_release(args) -> int:
+    from .pco_allocator import (
+        PcoAllocatorError,
+        RootCheckoutRefused,
+        release,
+        resolve_controller_id,
+    )
+
+    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    ledger_root = _resolve_ledger_root(args.ledger_root, repo_root)
+    controller_id = args.controller_id or resolve_controller_id(repo_root)
+    if not controller_id:
+        print(
+            "ERROR: pco-release: controller_id could not be resolved. "
+            "Provide --controller-id.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        release(
+            repo_root=repo_root,
+            ledger_root=ledger_root,
+            lane_id=args.lane_id,
+            controller_id=controller_id,
+            release_reason=args.release_reason,
+        )
+    except RootCheckoutRefused as exc:
+        print(f"ERROR: pco-release refused — root checkout: {exc}", file=sys.stderr)
+        return 1
+    except PcoAllocatorError as exc:
+        print(f"ERROR: pco-release failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"pco-release: lane {args.lane_id!r} released")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
