@@ -1433,6 +1433,93 @@ This statement is normative. It MUST appear in this spec, in the
 companion architecture doc, and in
 [`../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
 
+### PCO-065 — Fan-In Evidence Packet Input Manifest (Slice 5, reserved)
+
+The future fan-in evidence packet MUST include an input manifest that
+binds every consumed Source-ratified envelope, tracked artifact,
+Active-Work Ledger record, Worktree Lease record, Pane Registry
+record, Completion Report, Side-Effect Ledger record, validator log,
+and Git/GitHub evidence snapshot by path/URL/id and SHA256 when exact
+bytes are available.
+
+### PCO-066 — Candidate Integrated State Reconstruction (Slice 5, reserved)
+
+Fan-in MUST reconstruct the candidate integrated state from tracked
+artifacts and Git/ref evidence. It MUST NOT accept a lane statement
+such as "complete", "safe", or "tests passed" as sufficient evidence
+without the corresponding tracked artifact and validator-output
+binding.
+
+### PCO-067 — Validator Output Freshness (Slice 5, reserved)
+
+Validator output is usable fan-in evidence only when the command,
+tree/ref or candidate patch set, timestamp or run id, and output hash
+are bound to the candidate integrated state. Stale validator output
+MUST be classified separately from failing validator output.
+
+### PCO-068 — Lane Authority Binding (Slice 5, reserved)
+
+Every governed lane consumed by fan-in MUST bind to a Source-ratified
+Assignment Envelope or prompt pointer and to a discovered Active-Work
+Ledger claim. Inputs that lack that binding MAY be summarized as
+advisory context, but they MUST NOT carry integration authority.
+
+### PCO-069 — Completion Report Closure (Slice 5, reserved)
+
+Every governed lane consumed by fan-in MUST have a Completion Report
+or an explicit blocked/interrupted closure record. Missing closure
+blocks any `ready_for_source_review` classification because the lane's
+ratified gate has undefined return state.
+
+### PCO-070 — Side-Effect Ledger Reconciliation (Slice 5, reserved)
+
+Fan-in MUST reconcile externally observable effects against
+Side-Effect Ledger records and cited evidence. Effects relevant to
+integration that are absent, unresolved, or redaction-limited MUST be
+classified explicitly and MUST NOT be treated as silently clean.
+
+### PCO-071 — Cross-Lane Overlap Classification (Slice 5, reserved)
+
+Fan-in MUST classify changed-path, ref, source-host, tracker, runtime,
+provider/config, network/CI/deploy, and credential-adjacent overlaps
+across lanes as `clean`, `expected_overlap`, `stale_artifact`,
+`missing_evidence`, `conflict`, or `redaction_limited` before any
+integration-readiness statement is emitted.
+
+### PCO-072 — Lane Self-Report Exclusion (Slice 5, reserved)
+
+Lane self-report is advisory evidence only. A fan-in verifier MUST
+cross-check lane claims against tracked artifacts, validator output,
+ledger records, Completion Reports, Side-Effect Ledger records, and
+cited external evidence before treating the claim as verified.
+
+### PCO-073 — Fan-In Redaction-Safe Evidence Posture (Slice 5, reserved)
+
+Fan-in packets MUST NOT contain secrets, raw credentials, private
+keys, session cookies, provider API key material, unredacted private
+payloads, or logs that expose secret-shaped strings. Packets SHOULD
+use paths, hashes, opaque ids, URLs, and redaction notes instead of
+copied payloads.
+
+### PCO-074 — Slice 5 Boundary Statement (No Automation)
+
+Slice 5 `pco-fanin` spec/protocol authoring defines integration
+verification under multi-lane authorship, the evidence inputs fan-in
+must reconstruct, the prose fan-in evidence packet shape,
+self-report-exclusion rules, side-effect reconciliation expectations,
+conflict/drift classifications, serialized integration preservation,
+and the future predicate range `PCO-065` through `PCO-073`. It does
+NOT introduce schema files, examples, validator code, tests, CLI
+commands, a `pco-fanin` executable, runtime hooks, side-effect
+observation automation, GitHub/CI/deploy/provider/MCP/plugin
+mutations, credential issuance, secret capture, Slice 6 Integration
+Queue behavior, Source-ratification substitution, Phase 2 autonomy
+expansion, or team-mode Features 007 / 008 / 009.
+
+This statement is normative. It MUST appear in this spec, in the
+companion architecture doc, and in
+[`../../docs/operations/PCO_FANIN_PROTOCOL.md`](../../docs/operations/PCO_FANIN_PROTOCOL.md).
+
 ---
 
 ## Open Source Decisions (Slice 2.5 + 2R)
@@ -1581,7 +1668,7 @@ for a specific reason:
 | Slice 2R — Worktree Allocator Runtime | atomic `git worktree add` + lease + claim + event flow under lane lock; claim-writes-only-under-held-lease enforcement; pane launch gated by conflict validator; root checkout invariant preservation | Paired with Slice 2.5 in the next ratified gate; converts the Slice 1/2 + 2A paper refusal into runtime block. |
 | Slice 3 — Pane Registry | visible-pane identity records | Pane identity is a privileged mutation class (Feature 001 FR-008-style) and requires its own ratified record contract. |
 | Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Prose/protocol boundary is authored; schema/examples/validator/tests/CLI/runtime observation and external mutations remain deferred. |
-| Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
+| Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Authored as prose/protocol in this gate; schema/examples/validator/CLI/runtime implementation is deferred. Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
 | Slice 6 — Integration Queue | serialized canonical-branch landing order across lanes | Integration ordering depends on fan-in verification (Slice 5) and on Source-ratified gate definitions. |
 
 The previously-planned Feature 005 dispatch / worktree / sandbox
@@ -1672,10 +1759,16 @@ and the validator check + tests:
     distinct from Slice 2I-S container policy roles, and schema /
     examples / validator / CLI / tests / pane-spawn automation are
     deferred to a later gate.
-13. The Slice 4 Side-Effect Ledger spec/protocol posture: future
-    predicate codes reserve `PCO-055` through `PCO-063`, records are
-    lane-bound evidence inputs for GitHub/git/tracker/runtime/
-    container/provider/network/CI/deploy/credential-adjacent side
-    effects, secret and private payload material is excluded, and
-    schema / examples / validator / CLI / tests / runtime observation
+13. The Slice 4 Side-Effect Ledger substrate posture: predicate
+    codes reserve `PCO-055` through `PCO-063`, records are lane-bound
+    evidence inputs for GitHub/git/tracker/runtime/container/provider/
+    network/CI/deploy/credential-adjacent side effects, secret and
+    private payload material is excluded, and runtime observation
     automation / external mutations are deferred to a later gate.
+14. The Slice 5 `pco-fanin` spec/protocol posture: future predicate
+    codes reserve `PCO-065` through `PCO-073`, fan-in reconstructs
+    candidate integrated state from tracked artifacts, validator
+    output, ledgers, reports, pane records, and side-effect records
+    rather than lane self-report, and schema / examples / validator /
+    CLI / runtime implementation / Integration Queue behavior are
+    deferred to later gates.

@@ -317,22 +317,30 @@ Slice plan:
    [`docs/operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
    Deferred: schema, examples, validator, tests, CLI discoverability,
    and pane-spawn automation.
-5. **Slice 4 — Side-Effect Ledger** *(spec/protocol authored;
-   schema and validator deferred)*. Defines lane-bound records for
-   externally observable side effects: GitHub/git mutations,
-   tracked-file changes, external tracker/document mutations,
-   runtime/process/container actions, provider/MCP/plugin/config
-   changes, network/CI/deploy actions, and credential/secret-adjacent
-   events recorded without secrets. Future predicate codes reserve
-   `PCO-055` through `PCO-063`. Prose contract:
+5. **Slice 4 — Side-Effect Ledger** *(substrate landed on
+   `main` via PR #67, merge commit `94bd7ac`)*. Defines and validates
+   lane-bound records for externally observable side effects:
+   GitHub/git mutations, tracked-file changes, external
+   tracker/document mutations, runtime/process/container actions,
+   provider/MCP/plugin/config changes, network/CI/deploy actions, and
+   credential/secret-adjacent events recorded without secrets. Adds
+   `schemas/side-effect-ledger.schema.yaml`, well-formed/malformed
+   examples, `side_effect_ledger_schema` validation, focused CLI
+   discoverability, and predicate codes `PCO-055` through `PCO-063`.
+   Prose contract:
    [`docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
-   Deferred: schema, examples, validator, tests, CLI discoverability,
-   runtime hooks, side-effect observation automation, fan-in
-   implementation, Integration Queue implementation, and all
+   Deferred: runtime hooks, side-effect observation automation,
+   fan-in implementation, Integration Queue implementation, and all
    GitHub/CI/deploy/provider/MCP/plugin mutations.
-6. **Slice 5 — `pco-fanin`.** Integration verification under
-   multi-lane authorship; reconstructs the integrated state from
-   tracked artifacts and validator output, not from lane self-report.
+6. **Slice 5 — `pco-fanin`** *(spec/protocol authoring; this gate)*.
+   Defines integration verification under multi-lane authorship:
+   reconstructs integrated state from tracked artifacts, validator
+   output, Active-Work Ledger records, Worktree Lease records, Pane
+   Registry records, Completion Reports, and Side-Effect Ledger
+   records — not from lane self-report. Reserves future predicate
+   codes `PCO-065` through `PCO-073`; serialized canonical-branch
+   landing remains Slice 6 Integration Queue scope. Prose contract:
+   [`docs/operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md).
 7. **Slice 6 — Integration Queue.** Serialized canonical-branch
    landing order across lanes; Source-ratified. Subsumes the
    conflict-detection-and-routing line item previously planned for
