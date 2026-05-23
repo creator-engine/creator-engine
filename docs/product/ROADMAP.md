@@ -298,11 +298,25 @@ Slice plan:
    authoring, but Slice 2.5 + 2R *implementation* should not
    proceed before Slice 2I-S is ratified and OSD-1 is resolved
    compatibly with §f.3 of the Slice 2I-S amendment).
-4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
-   Architect/Implementer pane is bound to which claim, on which host.
-   Pane identity binds to a container-instance id (when present) per
-   the Slice 2I-S substrate, so Slice 3 should be authored against
-   Slice 2I-S to avoid a v2 migration.
+4. **Slice 3 — Pane Registry** *(spec/protocol authored; schema and
+   validator deferred)*. Defines visible-pane identity records:
+   which `architect`, `implementer`, `reviewer`, or `verification`
+   pane is bound to which claim, on which host. Runtime records live
+   as ignored local state under
+   `.hermes/active-work-ledger/panes/<controller-id>/<lane-id>.yaml`
+   with discriminators `kind: pane-registry-record`,
+   `record_type: pane_identity`, and `schema_version: "1"`.
+   Operator-visible compliance requires tmux identity; `plain_terminal`
+   and `unknown` are transitional or legacy evidence categories only.
+   Pane Registry roles are distinct from Slice 2I-S worker-container
+   policy roles (`architect_research`, `implementer`,
+   `verification`). Optional container-instance binding is valid only
+   when it matches the pane's claim context; non-container visible
+   panes remain valid. Future predicate codes reserve `PCO-046`
+   through `PCO-053`. Prose contract:
+   [`docs/operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
+   Deferred: schema, examples, validator, tests, CLI discoverability,
+   and pane-spawn automation.
 5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
    side effects per lane (CI runs, deploys, GitHub state mutations).
 6. **Slice 5 — `pco-fanin`.** Integration verification under

@@ -1241,6 +1241,99 @@ This statement is normative. It MUST appear in this spec, in the
 companion architecture doc when Slice 2.5 + 2R land, and in the
 prose protocol(s) the implementation slice writes.
 
+### PCO-046 — Pane Registry Record Schema (Slice 3, reserved)
+
+The future tracked schema (provisionally
+`schemas/pane-registry.schema.yaml`) defines the Pane Registry record
+contract: top-level `kind` (`pane-registry-record`), `record_type`
+(`pane_identity`), `schema_version` (`"1"`), `controller_id`,
+`lane_id`, `claim_ref`, `host_id`, `pane_id`, `role`, `status`,
+`record_timestamp`, `registered_at`, and `last_seen_at`. Optional
+fields are `claim_record_sha256`, `closed_at`, `close_reason`,
+`terminal`, `worktree_path`, `branch`, `envelope_ref`, `handoff_ref`,
+`recommended_prompt_ref`, `container_instance_id`, and
+`container_instance_ref`. Runtime records live under
+`.hermes/active-work-ledger/panes/<controller-id>/<lane-id>.yaml`
+and remain ignored local runtime state. The future
+`pane_registry_schema` validator check validates one record at a
+time and cites
+[`../../docs/operations/PANE_REGISTRY_PROTOCOL.md`](../../docs/operations/PANE_REGISTRY_PROTOCOL.md).
+
+### PCO-047 — Pane Registry Id Formats (Slice 3, reserved)
+
+Pane Registry `controller_id` and `lane_id` use the same formats and
+caveats as the Active-Work Ledger. `host_id` and `pane_id` MUST be
+stable non-secret identifiers sufficient to distinguish panes on one
+host without embedding secrets, durable account ids, model names, or
+provider/tool authority.
+
+### PCO-048 — Pane Registry Role and Status Enums (Slice 3, reserved)
+
+Pane Registry roles are `architect`, `implementer`, `reviewer`, and
+`verification` unless a later Source-ratified protocol amendment
+justifies an addition. These roles identify visible-pane function and
+are distinct from Slice 2I-S worker-container policy roles
+(`architect_research`, `implementer`, `verification`). Status values
+are `starting`, `active`, `blocked`, `closing`, `closed`, and
+`aborted`; terminal statuses require `closed_at` and `close_reason`.
+
+### PCO-049 — Operator-Visible Tmux Identity (Slice 3, reserved)
+
+When a Pane Registry record claims `visibility: operator_visible` or
+equivalent visible/operator-supervised compliance, the future
+validator MUST require `terminal.kind: tmux` with `session_id`,
+`window_id`, and `pane_id`. `plain_terminal` and `unknown` are
+transitional or legacy evidence categories only and do not satisfy
+visible/operator-supervised compliance.
+
+### PCO-050 — Active Pane Requires Live Claim (Slice 3, reserved)
+
+An `active`, `blocked`, or `closing` Pane Registry record MUST bind
+to a discovered unreleased Active-Work Ledger claim whose
+`controller_id`, `lane_id`, and `claim_ref` match the pane record.
+The Pane Registry does not replace claim lifecycle authority; it
+records pane identity bound to that authority.
+
+### PCO-051 — Duplicate Active Pane Refusal (Slice 3, reserved)
+
+Where the Pane Registry contract forbids duplicate live panes for
+the same claim and role, the future validator MUST refuse duplicate
+`active` records for that `(claim_ref, role)` pair while preserving
+the ability to represent transitional or terminal history in later
+record versions if separately ratified.
+
+### PCO-052 — Optional Container Binding Match (Slice 3, reserved)
+
+When `container_instance_id` or `container_instance_ref` is present,
+the future validator MUST require the referenced Slice 2I-S / 2I-R
+container-instance record to exist and to match the Pane Registry
+record's `controller_id`, `lane_id`, and `claim_ref` context.
+Non-container visible panes remain valid.
+
+### PCO-053 — Pane Registry Strict Field Posture (Slice 3, reserved)
+
+The future Pane Registry schema MUST reject unknown top-level fields
+so terminal identity, claim binding, and optional container binding
+remain auditable. The validator MUST tolerate orphaned `*.tmp.*`
+files under the Pane Registry runtime directory by skipping them.
+
+### PCO-054 — Slice 3 Boundary Statement (No Automation)
+
+Slice 3 Pane Registry spec/protocol authoring defines visible-pane
+identity records, lifecycle semantics, optional container-instance
+binding semantics, and the future predicate range `PCO-046` through
+`PCO-053`. It does NOT introduce schema files, examples, validator
+code, tests, CLI commands, pane-spawn automation, Hermes runtime
+hooks, runtime/provider/MCP/plugin configuration changes, Slice 4
+Side-Effect Ledger behavior, Slice 5 `pco-fanin`, Slice 6
+Integration Queue behavior, Slice 2I-R container runtime /
+credential / egress / image work, or team-mode Features 007 / 008 /
+009.
+
+This statement is normative. It MUST appear in this spec, in the
+companion architecture doc, and in
+[`../../docs/operations/PANE_REGISTRY_PROTOCOL.md`](../../docs/operations/PANE_REGISTRY_PROTOCOL.md).
+
 ---
 
 ## Open Source Decisions (Slice 2.5 + 2R)
@@ -1473,3 +1566,10 @@ and the validator check + tests:
     remains the separate Feature 007 / 008 / 009 workstream, and
     tracker / GitHub issues remain mirrors (never canonical
     authority) unless Source later ratifies a different design.
+12. The Slice 3 Pane Registry spec/protocol posture: runtime records
+    live under `.hermes/active-work-ledger/panes/`, future predicate
+    codes reserve `PCO-046` through `PCO-053`, operator-visible
+    compliance requires tmux identity, Pane Registry roles are
+    distinct from Slice 2I-S container policy roles, and schema /
+    examples / validator / CLI / tests / pane-spawn automation are
+    deferred to a later gate.
