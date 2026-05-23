@@ -1668,7 +1668,7 @@ for a specific reason:
 | Slice 2R — Worktree Allocator Runtime | atomic `git worktree add` + lease + claim + event flow under lane lock; claim-writes-only-under-held-lease enforcement; pane launch gated by conflict validator; root checkout invariant preservation | Paired with Slice 2.5 in the next ratified gate; converts the Slice 1/2 + 2A paper refusal into runtime block. |
 | Slice 3 — Pane Registry | visible-pane identity records | Pane identity is a privileged mutation class (Feature 001 FR-008-style) and requires its own ratified record contract. |
 | Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Prose/protocol boundary is authored; schema/examples/validator/tests/CLI/runtime observation and external mutations remain deferred. |
-| Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Authored as prose/protocol in this gate; schema/examples/validator/CLI/runtime implementation is deferred. Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
+| Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Landed as prose/protocol via PR #68; schema/examples/validator/CLI/runtime implementation is deferred. Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
 | Slice 6 — Integration Queue | serialized canonical-branch landing order across lanes | Integration ordering depends on fan-in verification (Slice 5) and on Source-ratified gate definitions. |
 
 The previously-planned Feature 005 dispatch / worktree / sandbox

@@ -170,8 +170,9 @@ and ratification, since identity is itself a privileged mutation class.
 
 ## e. Feature 005 — Parallel Controller Orchestration (PCO) (scope summary)
 
-**Status**: In progress. Slice 0 (Active-Work Ledger) is the first
-coordination-substrate slice; later slices remain deferred.
+**Status**: In progress. Slices 0 through 5 have landed through the
+`pco-fanin` spec/protocol authoring gate; Slice 6 Integration Queue
+and runtime follow-ons remain deferred.
 
 Feature 005 establishes the parallel-controller orchestration
 substrate that lets multiple Source-ratified Controllers coordinate
@@ -332,7 +333,8 @@ Slice plan:
    Deferred: runtime hooks, side-effect observation automation,
    fan-in implementation, Integration Queue implementation, and all
    GitHub/CI/deploy/provider/MCP/plugin mutations.
-6. **Slice 5 — `pco-fanin`** *(spec/protocol authoring; this gate)*.
+6. **Slice 5 — `pco-fanin`** *(spec/protocol authored; landed via
+   PR #68, merge commit `e26a169`)*.
    Defines integration verification under multi-lane authorship:
    reconstructs integrated state from tracked artifacts, validator
    output, Active-Work Ledger records, Worktree Lease records, Pane
