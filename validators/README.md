@@ -38,6 +38,7 @@ python -m creator_engine_validator check examples/well-formed/
 python -m creator_engine_validator check-examples
 python -m creator_engine_validator scan-no-limitless
 python -m creator_engine_validator scan-pane-registry examples/well-formed/pane-registry
+python -m creator_engine_validator scan-side-effect-ledger examples/well-formed/side-effect-ledger
 ```
 
 ## Exit codes
@@ -60,6 +61,20 @@ The `pane_registry` check validates PCO Slice 3 Pane Registry records:
 - `PCO-051` duplicate active panes for the same `(claim_ref, role)` are refused while transitional and terminal history is allowed.
 - `PCO-052` optional `container_instance_id` / `container_instance_ref` bindings must resolve to a matching `container-instance-record` whose claim context matches the Pane Registry claim context.
 - `PCO-053` unknown fields are refused.
+
+## Side-Effect Ledger
+
+The `side_effect_ledger` check validates PCO Slice 4 Side-Effect Ledger records:
+
+- `PCO-055` strict schema validation for `kind: side-effect-ledger-record`, `record_type: side_effect`, schema version, controller/lane/claim/effect identity, timestamps, summary, and protocol-declared optional references.
+- `PCO-056` every scanned record must bind to a discovered Active-Work Ledger claim with matching controller and lane.
+- `PCO-057` `effect_id` must be unique within `(controller_id, lane_id, UTC day)` based on `occurred_at`.
+- `PCO-058` `effect_kind` and `effect_status` must match the protocol enums.
+- `PCO-059` records refuse obvious secret-bearing fields and secret-shaped payloads; use redaction-safe references instead.
+- `PCO-060` optional `pane_ref`, when resolvable, must match controller, lane, and claim context.
+- `PCO-061` optional `completion_report_ref`, when resolvable, must match controller/lane context and hash-match `completion_report_sha256` when supplied.
+- `PCO-062` `integration_queue_ref` is reserved before Slice 6; unresolved refs emit a clear deferred warning, while resolvable records are checked for matching context when they carry context fields.
+- `PCO-063` unknown fields are refused and `*.tmp.*` side-effect artifacts are skipped.
 
 ## `role_boundary_attribution` scope and limitations
 
