@@ -25,6 +25,7 @@ and it is the architectural companion to the prose protocol at
 | [`./agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md) | Operating-model state machine. |
 | [`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md) | Prose protocol companion (Slice 0). |
 | [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md) | Prose protocol companion for visible-pane identity (Slice 3). |
+| [`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md) | Prose protocol companion for side-effect evidence (Slice 4). |
 | [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md) | Controller / Implementer boundary policy. |
 | `schemas/active-work-ledger.schema.yaml` | Tracked machine-readable record contract. |
 
@@ -212,9 +213,18 @@ runtime tooling after.
    are reserved for the later schema/validator gate. Prose
    contract:
    [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
-5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
-   side effects per lane (CI runs, deploys, GitHub state mutations)
-   as structured input for fan-in.
+5. **Slice 4 — Side-Effect Ledger.** Spec/protocol authored for
+   externally observable side effects per lane: GitHub/git
+   mutations, tracked-file changes, external tracker/document
+   mutations, runtime/process/container actions, provider/MCP/plugin
+   or configuration changes, network/CI/deploy actions, and
+   credential/secret-adjacent events recorded without secrets.
+   Future predicate codes reserve `PCO-055` through `PCO-063` for
+   the later schema/examples/validator gate. Prose contract:
+   [`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
+   Deferred: schema, examples, validator, tests, CLI discoverability,
+   runtime hooks, side-effect observation automation, and all
+   GitHub/CI/deploy/provider/MCP/plugin mutations.
 6. **Slice 5 — `pco-fanin`.** Integration verification under
    multi-lane authorship; reconstructs the integrated state from
    tracked artifacts and validator output, not from lane self-report.
@@ -370,3 +380,19 @@ credential / egress / image work, or team-mode Features 007 / 008 /
 
 The prose contract is at
 [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
+
+## l. Slice 4 Side-Effect Ledger Boundary Statement
+
+**Slice 4 Side-Effect Ledger spec/protocol authoring defines the
+purpose, authoring authority, prose record shape, side-effect
+taxonomy, redaction rules, linkage to Active-Work Ledger claims, Pane
+Registry records, Completion Reports, and future Integration Queue
+entries, and the future predicate range `PCO-055` through `PCO-063`.
+It does NOT introduce schema files, examples, validator code, tests,
+CLI commands, runtime hooks, side-effect observation automation,
+GitHub/CI/deploy/provider/MCP/plugin mutations, credential issuance,
+secret capture, Slice 5 `pco-fanin`, Slice 6 Integration Queue
+behavior, or team-mode Features 007 / 008 / 009.**
+
+The prose contract is at
+[`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
