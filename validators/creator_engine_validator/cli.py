@@ -67,6 +67,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_completion.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_pane_registry = sub.add_parser(
+        "scan-pane-registry",
+        help="run only the pane_registry check against a path",
+    )
+    scan_pane_registry.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -261,6 +267,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             _run_cr_terminal([Path(args.path)]),
         ]
         return _emit_results(results, args.json_output)
+    if subcommand == "scan-pane-registry":
+        from .checks.pane_registry import run as _run_pane_registry
+        result = _run_pane_registry([Path(args.path)])
+        return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)

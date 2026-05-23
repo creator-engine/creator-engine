@@ -37,6 +37,7 @@ python -m creator_engine_validator --list-checks
 python -m creator_engine_validator check examples/well-formed/
 python -m creator_engine_validator check-examples
 python -m creator_engine_validator scan-no-limitless
+python -m creator_engine_validator scan-pane-registry examples/well-formed/pane-registry
 ```
 
 ## Exit codes
@@ -46,6 +47,19 @@ python -m creator_engine_validator scan-no-limitless
 - `2`: invocation error.
 
 Each validation failure cites the violated FR or contract clause, the specific field/path, and the contract document to consult.
+
+## Pane Registry
+
+The `pane_registry` check validates PCO Slice 3 Pane Registry records:
+
+- `PCO-046` schema validation for `kind: pane-registry-record`, `record_type: pane_identity`, schema version, controller/lane/claim/host/pane identity, role/status, `record_timestamp`, `registered_at`, `last_seen_at`, visibility, terminal identity, and protocol-declared optional fields.
+- `PCO-047` identifier format constraints for controller, lane, claim, host, and pane identifiers; host and pane ids must not encode secret, durable account, model, or provider authority.
+- `PCO-048` role/status enum and terminal lifecycle requirements, including `starting` and `closed`/`aborted` records requiring `closed_at` plus `close_reason`.
+- `PCO-049` operator-visible compliance: only `terminal.kind: tmux` with `session_id`, `window_id`, and `pane_id` satisfies the contract.
+- `PCO-050` live pane records must bind to a live unreleased Active-Work Ledger claim with matching controller and lane.
+- `PCO-051` duplicate active panes for the same `(claim_ref, role)` are refused while transitional and terminal history is allowed.
+- `PCO-052` optional `container_instance_id` / `container_instance_ref` bindings must resolve to a matching `container-instance-record` whose claim context matches the Pane Registry claim context.
+- `PCO-053` unknown fields are refused.
 
 ## `role_boundary_attribution` scope and limitations
 

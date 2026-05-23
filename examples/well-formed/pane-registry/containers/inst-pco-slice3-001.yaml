@@ -1,0 +1,19 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+instance_id: inst-pco-slice3-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  image_sha: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+image_sha: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+claim_id: pco-slice3-impl
+lease_id: lease-slice3-001
+started_at: "2026-05-23T07:41:00Z"
+stopped_at: null
+exit_code: null
+mount_manifest_applied: []
+secret_grants: []
+egress_allowlist_applied: []
+enforcement_primitive: pasta
+policy_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
