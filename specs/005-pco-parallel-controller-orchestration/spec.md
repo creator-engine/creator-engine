@@ -1334,6 +1334,105 @@ This statement is normative. It MUST appear in this spec, in the
 companion architecture doc, and in
 [`../../docs/operations/PANE_REGISTRY_PROTOCOL.md`](../../docs/operations/PANE_REGISTRY_PROTOCOL.md).
 
+### PCO-055 — Side-Effect Ledger Record Schema (Slice 4, reserved)
+
+The future tracked schema (provisionally
+`schemas/side-effect-ledger.schema.yaml`) defines the Side-Effect
+Ledger record contract: top-level `kind`
+(`side-effect-ledger-record`), `record_type` (`side_effect`),
+`schema_version` (`"1"`), `controller_id`, `lane_id`, `claim_ref`,
+`effect_id`, `effect_kind`, `effect_status`, `occurred_at`,
+`record_timestamp`, and `summary`. Optional fields include
+`actor_role`, `pane_ref`, `pane_record_sha256`,
+`active_work_ledger_ref`, `active_work_ledger_record_sha256`,
+`completion_report_ref`, `completion_report_sha256`,
+`integration_queue_ref`, `subject_ref`, `subject_sha256`,
+`evidence_refs`, `redactions`, and `details`. The future
+`side_effect_ledger_schema` validator check validates one record at
+a time and cites
+[`../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
+
+### PCO-056 — Side-Effect Ledger Requires Lane Binding (Slice 4, reserved)
+
+Every Side-Effect Ledger record MUST bind to a discovered
+Active-Work Ledger claim through `controller_id`, `lane_id`, and
+`claim_ref`. The Side-Effect Ledger is evidence input for the lane;
+it does not grant authority, replace the claim lifecycle, or replace
+the Assignment Envelope.
+
+### PCO-057 — Side-Effect Effect Id Scoped Uniqueness (Slice 4, reserved)
+
+`effect_id` values MUST be unique within `(controller_id, lane_id,
+YYYY-MM-DD)` when `occurred_at` can be resolved to a UTC day. This
+preserves append-only event readability without requiring global ids.
+
+### PCO-058 — Side-Effect Taxonomy and Status Enums (Slice 4, reserved)
+
+The future schema MUST reserve stable taxonomy values for
+`github_mutation`, `git_mutation`, `tracked_file_change`,
+`external_tracker_mutation`, `runtime_process_action`,
+`container_action`, `provider_mcp_plugin_config_change`,
+`network_ci_deploy_action`, and
+`credential_secret_adjacent_event`. Status values are `requested`,
+`started`, `succeeded`, `failed`, `cancelled`, `observed`, and
+`unknown`.
+
+### PCO-059 — Side-Effect Evidence Redaction Posture (Slice 4, reserved)
+
+Side-Effect Ledger records MUST NOT contain secrets, tokens, raw
+credentials, provider API key material, private keys, session
+cookies, unredacted private payloads, or logs that expose secret-
+shaped strings. Records SHOULD use paths, hashes, opaque ids, URLs,
+and redaction notes instead of copied payloads. Credential-adjacent
+events may record non-secret scope and lifecycle metadata only.
+
+### PCO-060 — Optional Pane Registry Binding Match (Slice 4, reserved)
+
+When `pane_ref` or `pane_record_sha256` is present, the future
+validator MUST require the referenced Pane Registry record to exist
+when resolvable and to match the Side-Effect Ledger record's
+`controller_id`, `lane_id`, and `claim_ref` context.
+
+### PCO-061 — Optional Completion Report Binding Match (Slice 4, reserved)
+
+When `completion_report_ref` is present and resolves to a local file,
+the future validator MUST require `completion_report_sha256`, if
+present, to match the referenced bytes. The binding is evidence
+linkage only; Completion Reports remain the deterministic gate return
+packet.
+
+### PCO-062 — Future Integration Queue Binding Match (Slice 4, reserved)
+
+When `integration_queue_ref` is present after Slice 6 exists, the
+future validator MUST require the Integration Queue entry to match
+the Side-Effect Ledger record's lane context. Before Slice 6 exists,
+the field is reserved prose scope only.
+
+### PCO-063 — Side-Effect Ledger Strict Field Posture (Slice 4, reserved)
+
+The future Side-Effect Ledger schema MUST reject unknown top-level
+fields so side-effect taxonomy, evidence references, and redaction
+posture remain auditable. The validator MUST tolerate orphaned
+`*.tmp.*` files under the Side-Effect Ledger runtime directory by
+skipping them.
+
+### PCO-064 — Slice 4 Boundary Statement (No Automation)
+
+Slice 4 Side-Effect Ledger spec/protocol authoring defines
+side-effect purpose, authoring authority, prose record shape,
+taxonomy, redaction rules, linkage to Active-Work Ledger claims, Pane
+Registry records, Completion Reports, future Integration Queue
+entries, and the future predicate range `PCO-055` through `PCO-063`.
+It does NOT introduce schema files, examples, validator code, tests,
+CLI commands, runtime hooks, side-effect observation automation,
+GitHub/CI/deploy/provider/MCP/plugin mutations, credential issuance,
+secret capture, Slice 5 `pco-fanin`, Slice 6 Integration Queue
+behavior, or team-mode Features 007 / 008 / 009.
+
+This statement is normative. It MUST appear in this spec, in the
+companion architecture doc, and in
+[`../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../../docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
+
 ---
 
 ## Open Source Decisions (Slice 2.5 + 2R)
@@ -1481,7 +1580,7 @@ for a specific reason:
 | Slice 2.5 — Controller Identity Substrate | forgeable `controller_id` free-string risk that Slice 2A documents in §j; `worktree_lease_signature` (`PCO-024`) refusal of unsigned / mis-signed leases when key records exist | Paired with Slice 2R in the next ratified gate; productizing the allocator without identity hardening would ship an unauthenticated coordination protocol (architect report §11). |
 | Slice 2R — Worktree Allocator Runtime | atomic `git worktree add` + lease + claim + event flow under lane lock; claim-writes-only-under-held-lease enforcement; pane launch gated by conflict validator; root checkout invariant preservation | Paired with Slice 2.5 in the next ratified gate; converts the Slice 1/2 + 2A paper refusal into runtime block. |
 | Slice 3 — Pane Registry | visible-pane identity records | Pane identity is a privileged mutation class (Feature 001 FR-008-style) and requires its own ratified record contract. |
-| Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Side-effect tracking depends on a stable lane substrate (Slice 0) and on conflict/pre-launch validation (Slice 1/2). |
+| Slice 4 — Side-Effect Ledger | externally observable side effects per lane | Prose/protocol boundary is authored; schema/examples/validator/tests/CLI/runtime observation and external mutations remain deferred. |
 | Slice 5 — `pco-fanin` | integration verification under multi-lane authorship | Fan-in cannot trust lane self-report; it depends on Slices 1–4 to reconstruct ground truth. |
 | Slice 6 — Integration Queue | serialized canonical-branch landing order across lanes | Integration ordering depends on fan-in verification (Slice 5) and on Source-ratified gate definitions. |
 
@@ -1573,3 +1672,10 @@ and the validator check + tests:
     distinct from Slice 2I-S container policy roles, and schema /
     examples / validator / CLI / tests / pane-spawn automation are
     deferred to a later gate.
+13. The Slice 4 Side-Effect Ledger spec/protocol posture: future
+    predicate codes reserve `PCO-055` through `PCO-063`, records are
+    lane-bound evidence inputs for GitHub/git/tracker/runtime/
+    container/provider/network/CI/deploy/credential-adjacent side
+    effects, secret and private payload material is excluded, and
+    schema / examples / validator / CLI / tests / runtime observation
+    automation / external mutations are deferred to a later gate.
