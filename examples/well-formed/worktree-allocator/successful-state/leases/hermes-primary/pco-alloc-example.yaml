@@ -1,0 +1,12 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-alloc-example
+record_timestamp: "2026-05-23T00:00:00Z"
+lease_id: lease-pco-alloc-example-001
+worktree_path: /worktrees/pco-alloc-example
+acquired_at: "2026-05-23T00:00:00Z"
+lease_seconds: 3600
+expires_at: "9999-01-01T00:00:00Z"
+envelope_ref: .hermes/envelopes/pco-027-example.md

@@ -1,0 +1,11 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-lane-a
+record_timestamp: source-controlled:.hermes/active-work-ledger/claims/hermes-primary/pco-lane-a.yaml
+worktree_path: /worktrees/contested-worktree
+envelope_ref: .hermes/envelopes/pco-lane-a.md
+lease_seconds: 3600
+claimed_at: source-controlled:.hermes/active-work-ledger/claims/hermes-primary/pco-lane-a.yaml
+last_heartbeat_at: source-controlled:.hermes/active-work-ledger/claims/hermes-primary/pco-lane-a.yaml

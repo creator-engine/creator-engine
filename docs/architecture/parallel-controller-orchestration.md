@@ -149,11 +149,18 @@ runtime tooling after.
    cryptographic controller-identity binding. Runtime allocation
    is reserved for Slice 2R; identity hardening is reserved for a
    separately ratified follow-on workstream.
-3. **Slice 2R — Worktree Allocator Runtime (deferred).** Short-lived
-   worktree leases bound to actual `git worktree` state; ships
-   `pco-allocate` / `pco-release` CLI, advisory lease lock, and
-   claim-writes-only-under-held-lease enforcement. Slice 2R is the
-   runtime sibling of Slice 2A and is ratified separately.
+3. **Slice 2R — Worktree Allocator Runtime.** Ships `pco-allocate` /
+   `pco-release` CLI, advisory lane lock, atomic `git worktree add` +
+   lease + claim + event flow, claim-writes-only-under-held-lease
+   enforcement, callable pane-launch guard, and root-checkout
+   refusal. Slice 2R is the runtime sibling of Slice 2A. Prose
+   contract:
+   [`../operations/WORKTREE_ALLOCATOR_PROTOCOL.md`](../operations/WORKTREE_ALLOCATOR_PROTOCOL.md).
+   **Slice 2R does NOT ship a Hermes runtime hook, does NOT
+   containerize the Controller, does NOT launch visible tmux panes,
+   does NOT introduce a pane registry, does NOT mutate GitHub settings
+   or branch configuration beyond the new worktree branch, and does
+   NOT expand Phase 1 / Phase 2 autonomy.**
 3.5. **Slice 2I — Worker Isolation Runtime (substrate authored;
    runtime deferred).** Sibling/bridge slice authored between the
    Slice 2.5 + 2R authoring gate and the Slice 2.5 + 2R
@@ -261,6 +268,20 @@ verbatim in
 [`../operations/WORKTREE_LEASE_PROTOCOL.md`](../operations/WORKTREE_LEASE_PROTOCOL.md)
 and in
 [`../../specs/005-pco-parallel-controller-orchestration/spec.md`](../../specs/005-pco-parallel-controller-orchestration/spec.md).
+
+## j. Slice 2R runtime boundary statement (PCO-032)
+
+**Slice 2R ships `pco-allocate` and `pco-release`, the advisory lane
+lock, and claim-writes-only-under-held-lease enforcement. It does NOT
+ship a Hermes runtime hook, does NOT containerize the Controller, does
+NOT launch visible tmux panes, does NOT introduce a pane registry,
+does NOT mutate GitHub settings or branch configuration beyond the new
+worktree branch, and does NOT expand Phase 1 / Phase 2 autonomy. Each
+`pco-allocate` and `pco-release` execution is a discrete, manually
+invoked CLI call under a Source-ratified envelope; no autonomous
+execution sequence is introduced.** The prose contract is at
+[`../operations/WORKTREE_ALLOCATOR_PROTOCOL.md`](../operations/WORKTREE_ALLOCATOR_PROTOCOL.md)
+§k.
 
 ## i. Slice 2I-R runtime boundary statement
 

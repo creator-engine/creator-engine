@@ -27,3 +27,28 @@ def test_check_examples_returns_zero_when_example_expectations_hold(capsys):
     assert "examples/malformed/identity-record.missing-fields.yml" in out
     assert "examples/malformed/spec.creator-engine.missing-acceptance.yml" in out
     assert "examples/malformed/duplicate-spec-id" in out
+
+
+# ---------------------------------------------------------------------------
+# PCO-027 / PCO-028: pco-allocate / pco-release CLI subcommands
+# ---------------------------------------------------------------------------
+
+
+def test_pco_allocate_help_exits_zero(capsys):
+    """pco-allocate subcommand must be registered and print help without error."""
+    import pytest
+    with pytest.raises(SystemExit) as exc_info:
+        main(["pco-allocate", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--lane-id" in out
+
+
+def test_pco_release_help_exits_zero(capsys):
+    """pco-release subcommand must be registered and print help without error."""
+    import pytest
+    with pytest.raises(SystemExit) as exc_info:
+        main(["pco-release", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--lane-id" in out

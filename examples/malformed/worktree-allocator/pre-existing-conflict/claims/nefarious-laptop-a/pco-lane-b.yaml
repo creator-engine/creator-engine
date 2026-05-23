@@ -1,0 +1,11 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: nefarious-laptop-a
+lane_id: pco-lane-b
+record_timestamp: source-controlled:.hermes/active-work-ledger/claims/nefarious-laptop-a/pco-lane-b.yaml
+worktree_path: /worktrees/contested-worktree
+envelope_ref: .hermes/envelopes/pco-lane-b.md
+lease_seconds: 3600
+claimed_at: source-controlled:.hermes/active-work-ledger/claims/nefarious-laptop-a/pco-lane-b.yaml
+last_heartbeat_at: source-controlled:.hermes/active-work-ledger/claims/nefarious-laptop-a/pco-lane-b.yaml
