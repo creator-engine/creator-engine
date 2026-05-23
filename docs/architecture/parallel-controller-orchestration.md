@@ -24,6 +24,7 @@ and it is the architectural companion to the prose protocol at
 | [`./agent-interaction-model.md`](./agent-interaction-model.md) | Actor-to-actor visible-pane patterns. |
 | [`./agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md) | Operating-model state machine. |
 | [`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md) | Prose protocol companion (Slice 0). |
+| [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md) | Prose protocol companion for visible-pane identity (Slice 3). |
 | [`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md) | Controller / Implementer boundary policy. |
 | `schemas/active-work-ledger.schema.yaml` | Tracked machine-readable record contract. |
 
@@ -196,11 +197,21 @@ runtime tooling after.
    container image; and does NOT expand Phase 1 / Phase 2
    autonomy. Spec amendment lives at
    [`../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`](../../specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md).
-4. **Slice 3 — Pane Registry.** Visible-pane identity records — which
-   Architect/Implementer pane is bound to which claim, on which host.
-   Pane identity binds to a container-instance id (when present) per
-   the Slice 2I-S substrate; Slice 3 should be authored against
-   Slice 2I-S to avoid a v2 migration.
+4. **Slice 3 — Pane Registry.** Spec/protocol authored for
+   visible-pane identity records: which Architect, Implementer,
+   Reviewer, or Verification pane is bound to which claim, on which
+   host. Runtime records are ignored local state under
+   `.hermes/active-work-ledger/panes/<controller-id>/<lane-id>.yaml`.
+   Operator-visible compliance requires tmux identity
+   (`session_id`, `window_id`, `pane_id`); `plain_terminal` and
+   `unknown` remain transitional or legacy evidence categories only.
+   Pane Registry roles are distinct from Slice 2I-S
+   worker-container policy roles. Pane identity may bind to a
+   container-instance id when present, but non-container visible
+   panes remain valid. Predicate codes `PCO-046` through `PCO-053`
+   are reserved for the later schema/validator gate. Prose
+   contract:
+   [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
 5. **Slice 4 — Side-Effect Ledger.** Tracks externally observable
    side effects per lane (CI runs, deploys, GitHub state mutations)
    as structured input for fan-in.
@@ -343,3 +354,19 @@ configuration, no Hermes-side mutation, and no autonomy expansion.
 PCO-032 remains in force. This statement MUST be preserved in this
 architecture doc when the Slice 2I-R implementation gate subsequently
 lands.
+
+## k. Slice 3 Pane Registry Boundary Statement (PCO-054)
+
+**Slice 3 Pane Registry spec/protocol authoring defines
+visible-pane identity records, lifecycle semantics, optional
+container-instance binding semantics, and the future predicate range
+`PCO-046` through `PCO-053`. It does NOT introduce schema files,
+examples, validator code, tests, CLI commands, pane-spawn automation,
+Hermes runtime hooks, runtime/provider/MCP/plugin configuration
+changes, Slice 4 Side-Effect Ledger behavior, Slice 5 `pco-fanin`,
+Slice 6 Integration Queue behavior, Slice 2I-R container runtime /
+credential / egress / image work, or team-mode Features 007 / 008 /
+009.**
+
+The prose contract is at
+[`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
