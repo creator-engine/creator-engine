@@ -1,0 +1,20 @@
+kind: side-effect-ledger-record
+record_type: side_effect
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice4-impl
+claim_ref: claims/hermes-primary/pco-slice4-impl.yaml
+effect_id: effect-tracked-file-change-001
+effect_kind: tracked_file_change
+effect_status: succeeded
+occurred_at: "2026-05-23T12:10:00Z"
+record_timestamp: "2026-05-23T12:11:00Z"
+summary: Created a Side-Effect Ledger schema file.
+actor_role: implementer
+subject_ref: schemas/side-effect-ledger.schema.yaml
+evidence_refs:
+  - git diff -- schemas/side-effect-ledger.schema.yaml
+redactions:
+  - No private payloads were recorded.
+details:
+  path_count: 1

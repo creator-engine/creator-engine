@@ -1,0 +1,12 @@
+kind: worktree-lease-record
+record_type: worktree_lease
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice4-impl
+record_timestamp: "2026-05-23T12:00:00Z"
+lease_id: lease-pco-slice4-impl-001
+worktree_path: /worktrees/pco-slice4-impl
+acquired_at: "2026-05-23T12:00:00Z"
+lease_seconds: 3600
+expires_at: "9999-01-01T00:00:00Z"
+envelope_ref: .hermes/envelopes/pco-slice4.md

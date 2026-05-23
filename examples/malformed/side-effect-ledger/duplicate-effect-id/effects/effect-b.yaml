@@ -1,0 +1,12 @@
+kind: side-effect-ledger-record
+record_type: side_effect
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice4-impl
+claim_ref: claims/hermes-primary/pco-slice4-impl.yaml
+effect_id: effect-duplicate-001
+effect_kind: tracked_file_change
+effect_status: succeeded
+occurred_at: "2026-05-23T13:10:00Z"
+record_timestamp: "2026-05-23T13:11:00Z"
+summary: Duplicate effect id within the same controller, lane, and UTC day.

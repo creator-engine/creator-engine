@@ -1,0 +1,146 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/side-effect-ledger.schema.yaml"
+title: "Creator Engine Side-Effect Ledger Record"
+description: |
+  Machine-readable schema for a single Side-Effect Ledger record
+  authored under the Creator Engine Parallel Controller Orchestration
+  (PCO) Slice 4 substrate.
+
+  Prose contract:
+  `docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`.
+
+  The Side-Effect Ledger is a read-only evidence index. It records
+  redaction-safe references to externally observable effects caused,
+  requested, observed, or verified while a Source-ratified PCO lane is
+  active. It does not observe runtime effects automatically, launch
+  panes, mutate GitHub/CI/deploy/provider/MCP/plugin configuration,
+  capture secrets, or implement fan-in/integration queue behavior.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - controller_id
+  - lane_id
+  - claim_ref
+  - effect_id
+  - effect_kind
+  - effect_status
+  - occurred_at
+  - record_timestamp
+  - summary
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: side-effect-ledger-record
+  record_type:
+    type: string
+    const: side_effect
+  schema_version:
+    type: string
+    const: "1"
+  controller_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  lane_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  claim_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  effect_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,127}$"
+  effect_kind:
+    type: string
+    enum:
+      - github_mutation
+      - git_mutation
+      - tracked_file_change
+      - external_tracker_mutation
+      - runtime_process_action
+      - container_action
+      - provider_mcp_plugin_config_change
+      - network_ci_deploy_action
+      - credential_secret_adjacent_event
+  effect_status:
+    type: string
+    enum: [requested, started, succeeded, failed, cancelled, observed, unknown]
+  occurred_at:
+    $ref: "#/$defs/timestamp"
+  record_timestamp:
+    $ref: "#/$defs/timestamp"
+  summary:
+    type: string
+    minLength: 1
+    maxLength: 2048
+  actor_role:
+    type: string
+    enum: [controller, architect, implementer, reviewer, verification]
+  pane_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  pane_record_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  active_work_ledger_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  active_work_ledger_record_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  completion_report_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  completion_report_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  integration_queue_ref:
+    type: string
+    minLength: 1
+    pattern: "^[A-Za-z0-9_./-]+$"
+  subject_ref:
+    type: string
+    minLength: 1
+    maxLength: 2048
+  subject_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  evidence_refs:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+      maxLength: 2048
+  redactions:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+      maxLength: 2048
+  details:
+    type: object
+    additionalProperties:
+      anyOf:
+        - type: string
+          maxLength: 2048
+        - type: integer
+        - type: number
+        - type: boolean
+        - type: "null"
+$defs:
+  timestamp:
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"

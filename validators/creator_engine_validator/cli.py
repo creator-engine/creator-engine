@@ -73,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_pane_registry.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_side_effect_ledger = sub.add_parser(
+        "scan-side-effect-ledger",
+        help="run only the side_effect_ledger check against a path",
+    )
+    scan_side_effect_ledger.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -176,6 +182,11 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/controller-keys/private-key-material.yaml"), False, "PCO-025"),
         ("well-formed", Path("examples/well-formed/worktree-allocator/successful-state"), True, None),
         ("malformed", Path("examples/malformed/worktree-allocator/pre-existing-conflict"), False, "PCO-010"),
+        ("well-formed", Path("examples/well-formed/side-effect-ledger"), True, None),
+        ("malformed", Path("examples/malformed/side-effect-ledger/missing-claim"), False, "PCO-056"),
+        ("malformed", Path("examples/malformed/side-effect-ledger/duplicate-effect-id"), False, "PCO-057"),
+        ("malformed", Path("examples/malformed/side-effect-ledger/secret-payload.yaml"), False, "PCO-059"),
+        ("malformed", Path("examples/malformed/side-effect-ledger/unknown-field.yaml"), False, "PCO-063"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -270,6 +281,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-pane-registry":
         from .checks.pane_registry import run as _run_pane_registry
         result = _run_pane_registry([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-side-effect-ledger":
+        from .checks.side_effect_ledger import run as _run_side_effect_ledger
+        result = _run_side_effect_ledger([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution

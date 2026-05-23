@@ -1,0 +1,11 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice4-impl
+record_timestamp: source-controlled:examples/malformed/side-effect-ledger/duplicate-effect-id/claims/hermes-primary/pco-slice4-impl.yaml
+worktree_path: /worktrees/pco-slice4-impl
+envelope_ref: .hermes/envelopes/pco-slice4.md
+lease_seconds: 3600
+claimed_at: source-controlled:examples/malformed/side-effect-ledger/duplicate-effect-id/claims/hermes-primary/pco-slice4-impl.yaml
+last_heartbeat_at: source-controlled:examples/malformed/side-effect-ledger/duplicate-effect-id/claims/hermes-primary/pco-slice4-impl.yaml

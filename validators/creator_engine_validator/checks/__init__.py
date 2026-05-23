@@ -60,3 +60,4 @@ from . import completion_report_terminal_sections as completion_report_terminal_
 from . import worker_container_policy as worker_container_policy  # noqa: E402,F401
 from . import container_instance as container_instance  # noqa: E402,F401
 from . import pane_registry as pane_registry  # noqa: E402,F401
+from . import side_effect_ledger as side_effect_ledger  # noqa: E402,F401
