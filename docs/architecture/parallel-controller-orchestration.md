@@ -89,9 +89,11 @@ The following invariants remain in force unchanged:
 
 ## d. Coordination primitives
 
-PCO introduces five coordination primitives. Slice 0 introduces the
-**schema and protocol** for the first four; Slice 0.5 adds the fifth
-(Completion Report). Runtime mechanics arrive in later slices.
+PCO introduces five record/report coordination primitives plus one
+verification primitive. Slice 0 introduces the **schema and protocol**
+for the first four; Slice 0.5 adds the fifth (Completion Report);
+Slice 5 defines the `pco-fanin` verification primitive. Runtime
+mechanics arrive in later slices.
 
 | Primitive | Purpose | Slice substance |
 |---|---|---|
@@ -100,6 +102,7 @@ PCO introduces five coordination primitives. Slice 0 introduces the
 | **Lane** | The coordination unit that claims and heartbeats reference. | Slice 0: `lane_id` pattern in schema; ledger protocol §g. |
 | **Event log** | Append-only record of `claim_created`, `claim_released`, `claim_lapsed`, `heartbeat_emitted`, `lane_handoff_announced`, `lane_handoff_received`. Slice 0.5 adds `gate_opened`, `gate_closed`, `completion_report_emitted`, `gate_blocked`. | Slice 0 + 0.5 additive: tracked record shape; validator; ledger protocol §j, §n, §n.1. |
 | **Completion Report** | Deterministic return packet for every Source-ratified gate. Binds envelope+SHA to outcome, evidence, and the next ratifiable prompt pointer. | Slice 0.5: tracked schema (`schemas/completion-report.schema.yaml`); prose protocol [`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md); per-class templates; CR-001/CR-002/CR-003 validators. |
+| **Fan-in verification** | Reconstructs candidate integrated state from lane artifacts, validator output, ledgers, reports, pane records, and side-effect records rather than lane self-report. | Slice 5: prose protocol [`../operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md); schema/examples/validator/CLI/runtime implementation deferred. |
 
 The runtime directory shape (`.hermes/active-work-ledger/`), the
 atomic-write rule (temp + fsync + rename), the advisory-lock rule
@@ -213,21 +216,31 @@ runtime tooling after.
    are reserved for the later schema/validator gate. Prose
    contract:
    [`../operations/PANE_REGISTRY_PROTOCOL.md`](../operations/PANE_REGISTRY_PROTOCOL.md).
-5. **Slice 4 — Side-Effect Ledger.** Spec/protocol authored for
-   externally observable side effects per lane: GitHub/git
-   mutations, tracked-file changes, external tracker/document
-   mutations, runtime/process/container actions, provider/MCP/plugin
-   or configuration changes, network/CI/deploy actions, and
-   credential/secret-adjacent events recorded without secrets.
-   Future predicate codes reserve `PCO-055` through `PCO-063` for
-   the later schema/examples/validator gate. Prose contract:
+5. **Slice 4 — Side-Effect Ledger.** Substrate landed on `main`
+   via PR #67: tracked schema, well-formed/malformed examples,
+   focused CLI discoverability, and `side_effect_ledger_schema`
+   validation for externally observable side effects per lane:
+   GitHub/git mutations, tracked-file changes, external
+   tracker/document mutations, runtime/process/container actions,
+   provider/MCP/plugin or configuration changes, network/CI/deploy
+   actions, and credential/secret-adjacent events recorded without
+   secrets. Predicate codes reserve `PCO-055` through `PCO-063`.
+   Prose contract:
    [`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
-   Deferred: schema, examples, validator, tests, CLI discoverability,
-   runtime hooks, side-effect observation automation, and all
+   Deferred: runtime hooks, side-effect observation automation, fan-in
+   implementation, Integration Queue implementation, and all
    GitHub/CI/deploy/provider/MCP/plugin mutations.
-6. **Slice 5 — `pco-fanin`.** Integration verification under
-   multi-lane authorship; reconstructs the integrated state from
-   tracked artifacts and validator output, not from lane self-report.
+6. **Slice 5 — `pco-fanin`.** Spec/protocol authored for integration
+   verification under multi-lane authorship. It reconstructs the
+   integrated state from tracked artifacts, validator output,
+   Active-Work Ledger records, Worktree Lease records, Pane Registry
+   records, Completion Reports, and Side-Effect Ledger records — not
+   from lane self-report. Future predicate codes reserve `PCO-065`
+   through `PCO-073`. Prose contract:
+   [`../operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md).
+   Deferred: schema, examples, validator, tests, CLI discoverability,
+   runtime hooks, fan-in executable behavior, and Slice 6 Integration
+   Queue behavior.
 7. **Slice 6 — Integration Queue.** Serialized canonical-branch
    landing order across lanes; Source-ratified.
 
@@ -396,3 +409,21 @@ behavior, or team-mode Features 007 / 008 / 009.**
 
 The prose contract is at
 [`../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md`](../operations/SIDE_EFFECT_LEDGER_PROTOCOL.md).
+
+## m. Slice 5 `pco-fanin` Boundary Statement
+
+**Slice 5 `pco-fanin` spec/protocol authoring defines integration
+verification under multi-lane authorship, the evidence inputs fan-in
+must reconstruct, the prose fan-in evidence packet shape,
+self-report-exclusion rules, side-effect reconciliation expectations,
+conflict/drift classifications, serialized integration preservation,
+and the future predicate range `PCO-065` through `PCO-073`. It does
+NOT introduce schema files, examples, validator code, tests, CLI
+commands, a `pco-fanin` executable, runtime hooks, side-effect
+observation automation, GitHub/CI/deploy/provider/MCP/plugin
+mutations, credential issuance, secret capture, Slice 6 Integration
+Queue behavior, Source-ratification substitution, Phase 2 autonomy
+expansion, or team-mode Features 007 / 008 / 009.**
+
+The prose contract is at
+[`../operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md).
