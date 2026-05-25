@@ -119,9 +119,23 @@ def test_worker_allocate_happy_path(tmp_path, monkeypatch, capsys):
     assert "run_detached" in runner.calls
 
 
-def test_worker_allocate_fails_closed_without_podman(tmp_path, capsys):
+def test_worker_allocate_fails_closed_without_podman(tmp_path, monkeypatch, capsys):
     env = _setup(tmp_path)
-    # Default factories → real PodmanCommandRunner → podman unavailable here.
+    # Force the Podman-unavailable condition test-side so this assertion does not
+    # depend on the ambient host/CI runner lacking Podman (GitHub runners ship it).
+    # We keep the real PodmanCommandRunner and the real allocate code path via the
+    # default factories: only the command resolver it consults (`shutil.which`) is
+    # forced to report podman absent — exactly the seam that
+    # ``PodmanCommandRunner.available()`` gates the fail-closed refusal on.
+    real_which = worker_runtime.shutil.which
+    monkeypatch.setattr(
+        worker_runtime.shutil,
+        "which",
+        lambda cmd, *args, **kwargs: (
+            None if cmd == "podman" else real_which(cmd, *args, **kwargs)
+        ),
+    )
+
     rc = ce_cli.main(_allocate_argv(env))
     assert rc == 1
     err = capsys.readouterr().err
