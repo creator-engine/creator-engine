@@ -563,3 +563,193 @@ def test_runtime_guard_has_no_filesystem_side_effects(tmp_path: Path):
 
     files_after = sorted(p.as_posix() for p in tmp_path.rglob("*") if p.is_file())
     assert files_before == files_after
+
+
+# ---------------------------------------------------------------------------
+# PCO-042 — Container Required for Claim (Slice 2I-R runtime-gate predicate)
+#
+# Spec: specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md §m.1
+# Gate: fires only when at least one PCO-040-valid worker-container policy
+#       record exists UNDER THE RATIFIED GOVERNANCE PATH
+#       (governance/policies/worker-container/, §g.1). Example fixtures under
+#       examples/ are NOT at the governance path, so check-examples stays green.
+# ---------------------------------------------------------------------------
+
+_PCO042 = "PCO-042"
+_POLICY_SHA = "c" * 64
+_POLICY_IMAGE_SHA = "sha256:" + "d" * 64
+
+
+def valid_worker_policy_record() -> dict:
+    return {
+        "kind": "worker-container-policy-record",
+        "record_type": "worker_container_policy",
+        "schema_version": "1",
+        "policy_id": "podman-implementer-v1",
+        "policy_sha": _POLICY_SHA,
+        "role": "implementer",
+        "runtime_engine": "podman-rootless",
+        "image_ref": {"name": "ghcr.io/example/impl:latest", "sha": _POLICY_IMAGE_SHA},
+        "mount_manifest": [{"path": "governance", "mode": "ro"}],
+        "egress_allowlist": [],
+        "secret_allowlist": ["model-provider-key"],
+        "grant_extensible": False,
+        "grant_authority": "controller",
+    }
+
+
+def valid_running_container_instance(claim_id: str) -> dict:
+    return {
+        "kind": "container-instance-record",
+        "record_type": "container_instance",
+        "schema_version": "1",
+        "instance_id": f"inst-{claim_id}",
+        "policy_ref": {
+            "policy_id": "podman-implementer-v1",
+            "policy_sha": _POLICY_SHA,
+            "image_sha": _POLICY_IMAGE_SHA,
+        },
+        "image_sha": _POLICY_IMAGE_SHA,
+        "claim_id": claim_id,
+        "lease_id": "lease-001",
+        "started_at": "2026-05-25T05:33:05Z",
+        "stopped_at": None,
+        "exit_code": None,
+        "mount_manifest_applied": [{"path": "governance", "mode": "ro", "source": "policy"}],
+        "secret_grants": [],
+        "egress_allowlist_applied": [],
+        "enforcement_primitive": "none",
+        "policy_sha": _POLICY_SHA,
+    }
+
+
+def _governance_policy_path(root: Path) -> Path:
+    return root / "governance" / "policies" / "worker-container" / "podman-implementer.yaml"
+
+
+def _live_claim(root: Path, lane_id: str, controller_id: str = "hermes-primary") -> Path:
+    claim = valid_claim_record()
+    claim["controller_id"] = controller_id
+    claim["lane_id"] = lane_id
+    claim["worktree_path"] = f"/worktrees/{lane_id}"
+    return _write_record(_claim_path(root, controller_id, lane_id), claim)
+
+
+def test_pco042_registered_on_conflicts_check():
+    checks = registered_checks()
+    assert _PCO042 in checks[CHECK_NAME].frs
+
+
+def test_pco042_live_claim_without_container_instance_fails(tmp_path: Path):
+    _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    _live_claim(tmp_path, "pco-slice2ir-worker")
+
+    result = run([tmp_path])
+
+    assert not result.ok
+    pco042 = [e for e in result.errors if e.code == _PCO042]
+    assert pco042, "expected a PCO-042 violation for the unpaired live claim"
+    msg = pco042[0].format()
+    assert "pco-slice2ir-worker" in msg  # claim_id / lane_id
+    assert "hermes-primary" in msg       # controller_id
+    assert "live claim has no paired running container instance" in msg
+
+
+def test_pco042_live_claim_with_running_instance_passes(tmp_path: Path):
+    _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    _live_claim(tmp_path, "pco-slice2ir-worker")
+    _write_record(
+        tmp_path / "container-instances" / "inst.yaml",
+        valid_running_container_instance("pco-slice2ir-worker"),
+    )
+
+    result = run([tmp_path])
+
+    assert not any(e.code == _PCO042 for e in result.errors)
+
+
+def test_pco042_no_policy_preserves_slice2r_floor(tmp_path: Path):
+    # A live claim with NO worker-container policy anywhere stays green.
+    _live_claim(tmp_path, "pco-slice2ir-worker")
+
+    result = run([tmp_path])
+
+    assert not any(e.code == _PCO042 for e in result.errors)
+
+
+def test_pco042_stopped_instance_does_not_satisfy(tmp_path: Path):
+    _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    _live_claim(tmp_path, "pco-slice2ir-worker")
+    stopped = valid_running_container_instance("pco-slice2ir-worker")
+    stopped["stopped_at"] = "2026-05-25T06:00:00Z"
+    stopped["exit_code"] = 0
+    _write_record(tmp_path / "container-instances" / "inst.yaml", stopped)
+
+    result = run([tmp_path])
+
+    assert any(e.code == _PCO042 for e in result.errors)
+
+
+def test_pco042_policy_outside_governance_path_does_not_gate(tmp_path: Path):
+    # A worker-container policy that is NOT under the ratified governance path
+    # (e.g., an examples/ fixture) MUST NOT arm PCO-042. This is precisely why
+    # `check examples/well-formed` stays green even though it bundles policies
+    # and unpaired live claims in one scanned tree.
+    fixture = tmp_path / "examples" / "well-formed" / "worker-container-policies" / "p.yaml"
+    _write_record(fixture, valid_worker_policy_record())
+    _live_claim(tmp_path, "pco-slice2ir-worker")
+
+    result = run([tmp_path])
+
+    assert not any(e.code == _PCO042 for e in result.errors)
+
+
+def test_pco042_released_claim_not_subject(tmp_path: Path):
+    _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    claim = valid_claim_record()
+    claim["controller_id"] = "hermes-primary"
+    claim["lane_id"] = "pco-released-worker"
+    claim["worktree_path"] = "/worktrees/pco-released-worker"
+    claim["released_at"] = "2026-05-25T07:00:00Z"
+    _write_record(_claim_path(tmp_path, "hermes-primary", "pco-released-worker"), claim)
+
+    result = run([tmp_path])
+
+    assert not any(e.code == _PCO042 for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# PCO-042 — bundled example fixtures (expected-fail harness, not a final scan)
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_malformed_orphan_claim_fixture_fails_pco042_with_governance_policy(tmp_path: Path):
+    gov_policy = _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    orphan = _REPO_ROOT / "examples/malformed/active-work-ledger/live-claim-without-container-instance.yaml"
+
+    result = run([gov_policy, orphan])
+
+    assert not result.ok
+    assert any(e.code == _PCO042 for e in result.errors)
+
+
+def test_malformed_orphan_claim_fixture_passes_without_governance_policy():
+    # Slice 2R floor: scanned alone (no governance policy present), the orphan
+    # claim is NOT subject to PCO-042.
+    orphan = _REPO_ROOT / "examples/malformed/active-work-ledger/live-claim-without-container-instance.yaml"
+
+    result = run([orphan])
+
+    assert not any(e.code == _PCO042 for e in result.errors)
+
+
+def test_well_formed_paired_claim_fixture_satisfies_pco042(tmp_path: Path):
+    gov_policy = _write_record(_governance_policy_path(tmp_path), valid_worker_policy_record())
+    claim = _REPO_ROOT / "examples/well-formed/active-work-ledger/claim-with-container-instance.yaml"
+    instance = _REPO_ROOT / "examples/well-formed/container-instances/runtime-started-implementer.yaml"
+
+    result = run([gov_policy, claim, instance])
+
+    assert not any(e.code == _PCO042 for e in result.errors)

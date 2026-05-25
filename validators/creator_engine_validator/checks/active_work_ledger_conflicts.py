@@ -47,6 +47,15 @@ from .active_work_ledger_schema import (
     iter_active_work_ledger_records,
     validate_active_work_ledger_record,
 )
+from .container_instance import (
+    iter_container_instance_records,
+    validate_container_instance,
+)
+from .worker_container_policy import (
+    CONTRACT as WORKER_CONTRACT,
+    iter_worker_container_policy_records,
+    validate_worker_container_policy,
+)
 from .worktree_lease_schema import (
     CONTRACT as LEASE_CONTRACT,
     iter_worktree_lease_records,
@@ -64,6 +73,14 @@ CODE_EVENT_ID_CONFLICT = "PCO-018"
 CODE_CLAIM_REQUIRES_LEASE = "PCO-021"
 CODE_WORKTREE_LEASE_CONFLICT = "PCO-022"
 CODE_LEASE_INVALID_RECORD = "PCO-023"
+CODE_CONTAINER_REQUIRED = "PCO-042"
+
+# §g.1: the ratified governance path for worker-container policy records. Only
+# PCO-040-valid policies under this path arm the PCO-042 runtime gate; policies
+# that live elsewhere (e.g. illustrative examples/ fixtures) do NOT, which keeps
+# `check examples/well-formed` green even though it bundles policies and
+# unpaired live claims in a single scanned tree.
+GOVERNANCE_POLICY_SEGMENTS = ("governance", "policies", "worker-container")
 
 
 @dataclass(frozen=True)
@@ -548,6 +565,96 @@ def _claim_requires_live_lease(
     return errors
 
 
+def _is_governance_policy_path(path: Path) -> bool:
+    """True when ``path`` sits under ``governance/policies/worker-container/``."""
+    parts = path.parts
+    width = len(GOVERNANCE_POLICY_SEGMENTS)
+    return any(
+        parts[index : index + width] == GOVERNANCE_POLICY_SEGMENTS
+        for index in range(len(parts))
+    )
+
+
+def _governance_policy_present(paths: Iterable[Path]) -> bool:
+    """PCO-042 arming gate: a PCO-040-valid policy under the governance path."""
+    for policy_path in iter_worker_container_policy_records(paths):
+        if not _is_governance_policy_path(policy_path):
+            continue
+        try:
+            record = load_yaml(policy_path)
+        except LoaderError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if validate_worker_container_policy(record, policy_path):
+            # A malformed governance policy is owned by PCO-040; it does not
+            # silently arm (or silently disarm) the PCO-042 runtime gate here.
+            continue
+        return True
+    return False
+
+
+def _running_instance_claim_ids(paths: Iterable[Path]) -> set[str]:
+    """claim_ids of schema-valid container-instance records still running.
+
+    A running instance is one whose ``stopped_at`` is null. The instance's
+    ``claim_id`` is the lane_id of the claim it is paired with (claims are keyed
+    by ``(controller_id, lane_id)`` and carry no separate ``claim_id`` field).
+    """
+    running: set[str] = set()
+    for instance_path in iter_container_instance_records(paths):
+        try:
+            record = load_yaml(instance_path)
+        except LoaderError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if validate_container_instance(record, instance_path):
+            continue
+        if record.get("stopped_at") is not None:
+            continue
+        claim_id = record.get("claim_id")
+        if isinstance(claim_id, str) and claim_id:
+            running.add(claim_id)
+    return running
+
+
+def _container_required_errors(
+    records: Iterable[LedgerRecord], running_claim_ids: set[str]
+) -> list[ValidationError]:
+    """PCO-042: every live claim must be paired with a running container.
+
+    Applies only when the arming gate (governance policy present) has fired.
+    A live claim is one whose ``released_at`` is null; the claim's identity for
+    pairing is its ``lane_id``.
+    """
+    errors: list[ValidationError] = []
+    for item in records:
+        record = item.record
+        if record.get("record_type") != "claim" or _is_released(record):
+            continue
+        controller_id = str(record.get("controller_id", ""))
+        lane_id = str(record.get("lane_id", ""))
+        if lane_id in running_claim_ids:
+            continue
+        errors.append(
+            make_error(
+                CODE_CONTAINER_REQUIRED,
+                item.path,
+                "claim_id",
+                (
+                    "live claim has no paired running container instance "
+                    f"(claim_id={lane_id!r}, lane_id={lane_id!r}, "
+                    f"controller_id={controller_id!r}); a ratified worker-container "
+                    "policy is present, so the lane MUST allocate a worker via "
+                    "allocate_worker before launch (PCO-042, §m.1)"
+                ),
+                WORKER_CONTRACT,
+            )
+        )
+    return errors
+
+
 def validate_active_work_ledger_conflicts(
     paths: Iterable[Path], *, now: datetime | None = None
 ) -> CheckResult:
@@ -571,6 +678,12 @@ def validate_active_work_ledger_conflicts(
         errors.extend(_worktree_lease_conflicts(leases, effective_now))
         errors.extend(_claim_requires_live_lease(records, leases, effective_now))
     errors.extend(lease_errors)
+    # PCO-042 (Slice 2I-R runtime gate): armed only when a PCO-040-valid
+    # worker-container policy is present under the ratified governance path.
+    # Trees without such a policy preserve Slice 2R behavior unchanged.
+    if _governance_policy_present(scan_paths):
+        running_claim_ids = _running_instance_claim_ids(scan_paths)
+        errors.extend(_container_required_errors(records, running_claim_ids))
     warnings = _stale_warnings(records, effective_now)
     return CheckResult(name=CHECK_NAME, errors=tuple(errors), warnings=tuple(warnings))
 
@@ -587,6 +700,7 @@ def validate_active_work_ledger_conflicts(
         CODE_CLAIM_REQUIRES_LEASE,
         CODE_WORKTREE_LEASE_CONFLICT,
         CODE_LEASE_INVALID_RECORD,
+        CODE_CONTAINER_REQUIRED,
     ],
 )
 def run(paths: Iterable[Path]) -> CheckResult:

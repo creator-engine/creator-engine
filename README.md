@@ -25,6 +25,49 @@ ratified by explicit authority rules. v1.0 is the integration target:
 an end-to-end governed agentic SDLC loop with every privileged gate
 human-ratified.
 
+## v1.0 command-line runtime (`ce`)
+
+v1.0 adds a daemonless, repo-native, local command-line runtime, `ce`. It runs
+on demand against repository-local `.hermes/` state and tracked substrate
+artifacts, then exits — no long-running daemon and no web server. `ce` does not
+rename or replace the validator distribution: it is added as a second console
+script to `creator-engine-validator` (DP-1 = A), and `ce check` wraps the
+retained `creator-engine-validator` conformance checks.
+
+The as-built v1.0 `ce` command surface is exactly these groups:
+
+| Command | Purpose |
+|---|---|
+| `ce check` | run the `creator-engine-validator` conformance checks (wraps the validator) |
+| `ce doctor` | governed-environment guard preflight; refuses ungoverned host drift (DP-3 = B) |
+| `ce init` | idempotently initialize local `.hermes/` kernel state; refuses ungoverned state |
+| `ce launch` | open/attach the visible Controller-seat tmux launcher (DP-2 = B) |
+| `ce hud` | alias/seam label for `ce launch` — **not** a CE-native TUI |
+| `ce lane` | governed visible lane-launch primitive (`launch`/`status`/`verify`/`archive`) |
+| `ce worker` | worker isolation runtime over rootless Podman + credential broker |
+| `ce ledger` | Side-Effect Ledger runtime (append-only hash chain: `record`/`verify`) |
+| `ce fanin` | build/inspect a local read-only evidence fan-in packet (no authority) |
+| `ce queue` | Integration Queue **dry-run** landing preview (`dry-run`/`inspect`); no authority |
+
+There is **no `ce dev` command in v1.0**. The `ce dev …` namespace is reserved
+for the deferred project-dev container (`ce dev shell` / `ce dev run`), which is
+a v1.1 / post-v1 seam — deferred, not rejected (see
+[`docs/governance/V1_DEV_CONTAINER_SEAM_CONTRACT.md`](./docs/governance/V1_DEV_CONTAINER_SEAM_CONTRACT.md)).
+The Integration Queue is a local serialized **dry-run** landing preview only in
+v1.0; live landing is POST-V1 (see
+[`docs/operations/INTEGRATION_QUEUE_DRY_RUN.md`](./docs/operations/INTEGRATION_QUEUE_DRY_RUN.md)).
+
+### Install (Option B packaging)
+
+v1.0 targets **Python `>=3.14`** (target 3.14.x). The install surface is a source
+checkout (`git clone`) plus an **offline, uv-first** install with a pip
+`--no-index` fallback against the checked-in cp314 wheelhouse — the `uvx`
+one-line operator install is POST-V1 (B3). `validators/uv.lock` is the primary
+lock; `validators/requirements.txt` is the lockstep `uv export` fallback;
+runtime dependencies are pinned at **PyYAML 6.0.3** and **jsonschema 4.26.0**.
+See [`validators/README.md`](./validators/README.md) for the full offline
+install and the `ce` / validator quickstart.
+
 ## v0.1 scope
 
 v0.1 ships only files inside a git repository. Two layers compose it:

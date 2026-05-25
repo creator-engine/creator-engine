@@ -1,0 +1,10 @@
+kind: state-version-record
+schema_version: "1"
+description: >-
+  Malformed: migration_status uses a value outside the constrained enum
+  (not-required | pending | applied | blocked). Expected refusal: RV1-022.
+state_namespace: hermes-local
+state_version: 1
+migration_id: migrate-0001-bootstrap
+migration_status: completed
+record_timestamp: "2026-05-25T00:00:00Z"

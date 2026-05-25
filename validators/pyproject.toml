@@ -6,14 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "creator-engine-validator"
 version = "0.1.0"
 description = "Offline validator for the Creator Engine v0.1 governance substrate"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
-  "PyYAML==6.0.2",
-  "jsonschema==4.23.0",
+  "PyYAML==6.0.3",
+  "jsonschema==4.26.0",
 ]
 
 [project.scripts]
 creator-engine-validator = "creator_engine_validator.cli:main"
+ce = "creator_engine_validator.ce_cli:main"
 
 [tool.setuptools]
 packages = ["creator_engine_validator", "creator_engine_validator.checks"]

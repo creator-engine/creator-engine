@@ -152,13 +152,32 @@ Every Container-Instance record MUST validate against
 YAML mapping) are distinguished from schema failures. Failures cite
 `PCO-041` and name the violated field.
 
-### PCO-042 — Container Required for Claim (Slice 2I-R, gated)
+### PCO-042 — Container Required for Claim (Slice 2I-R, SHIPPED)
 
-`PCO-042` is a Slice 2I-R predicate. It will refuse a live claim record
-when the tree contains at least one worker-container policy record but
-the claim has no paired container-instance record. Trees without any
-worker-container policy record preserve Slice 2R behavior. The
-validator check is not shipped by Slice 2I-S.
+**Check**: `active_work_ledger_conflicts` (`CODE_CONTAINER_REQUIRED = "PCO-042"`)
+**Surface**: cross-record (claims × policies × container-instances)
+
+Shipped by Slice 2I-R (this gate). PCO-042 refuses a **live** claim
+record (one whose `released_at` is null) that has no paired **running**
+container-instance record — a container-instance whose `claim_id`
+equals the claim's `lane_id` and whose `stopped_at` is null.
+
+**Arming gate (governance path).** PCO-042 only fires when the scanned
+tree contains at least one `PCO-040`-valid worker-container policy
+record under the **ratified governance path**
+`governance/policies/worker-container/` (§g.1). Trees without such a
+policy preserve Slice 2R behavior unchanged (the same
+backward-compatibility floor pattern as `PCO-026`). Worker-container
+policy records that live elsewhere — notably the illustrative
+`examples/…` fixtures — do **not** arm PCO-042; this is exactly why
+`check examples/well-formed` stays green even though it bundles policies
+and unpaired live claims in one scanned tree.
+
+Each violation names the offending `claim_id`, `lane_id`, and
+`controller_id` and exits `active_work_ledger_conflicts` non-zero. The
+allocate-time refusal (no matching policy for the role) is enforced by
+the `allocate_worker` runtime; the static cross-record refusal here is
+the auditable surface.
 
 ### PCO-043 — Container Outlives Claim
 
@@ -239,8 +258,10 @@ The following are explicitly NOT implemented by Slice 2I-S:
   push, pull, or registry interaction.
 - **No credential broker implementation**: `inject_secret` is defined as
   a syscall contract; the broker is a Slice 2I-R deliverable.
-- **No `PCO-042` enforcement**: the "container required for claim" predicate
-  is named here but its validator check lands with Slice 2I-R.
+- **No `PCO-042` enforcement** *(superseded — shipped in Slice 2I-R)*: the
+  "container required for claim" predicate is shipped in the
+  `active_work_ledger_conflicts` check by Slice 2I-R (governance-path-armed,
+  §m.1). Slice 2I-S itself ships no such check.
 - **No Slice 2.5 controller-key schema/checks**: those remain in the
   separately authorized Slice 2.5 gate.
 - **No Slice 2R allocator changes**: `pco-allocate` and `pco-release`
@@ -260,8 +281,29 @@ The following are explicitly NOT implemented by Slice 2I-S:
 |---|---|---|---|
 | Worker-container policy schema | `worker_container_policy` | PCO-040 | Single policy record |
 | Container-instance record schema | `container_instance` | PCO-041 | Single instance record |
-| Container required for claim | *(Slice 2I-R)* | PCO-042 | Cross-record |
+| Container required for claim | `active_work_ledger_conflicts` | PCO-042 | Cross-record (governance-path-armed) |
 | Container outlives claim | `container_instance` | PCO-043 | Single instance record |
 | Image SHA matches policy | `container_instance` | PCO-044 | Single instance record |
 | Forbidden mount refusal | `worker_container_policy` | PCO-045 | Single policy record |
-| Secret value leak | *(Slice 2I-R)* | *(future)* | Cross-artifact |
+| Secret value leak (runtime refusal) | `worker_runtime` (`G5-SECRET-REFUSED`) | runtime | Runtime allocate/terminate |
+
+## 7. `ce worker` runtime surface (Slice 2I-R)
+
+The `worker_runtime` module + `ce worker` command family turn the substrate
+above into a local runtime:
+
+| Command | Entry point | Behavior |
+|---|---|---|
+| `ce worker allocate` | `allocate_worker` (§e.1) | bind a live claim + lease under a ratified policy; rootless `podman run --detach` via an injectable runner; write a `PCO-041/043/044`-valid container-instance record after start; record a `container_started` side effect |
+| `ce worker terminate` | `terminate_worker` (§e.8) | revoke broker grants, stop the container, write the stopped record, record a `container_stopped` side effect |
+| `ce worker gc` | `garbage_collect_worker` (§e.9) | reap container-instance records that hit the PCO-043 condition; update them deterministically |
+| `ce worker status` | local read | read a single container-instance record (read-only) |
+
+Runtime invariants: the container engine and credential broker are reached
+**only** through injectable seams (`PodmanCommandRunner`, `NullCredentialBroker`);
+the live CLI fails closed when `podman` is unavailable (`G5-PODMAN-UNAVAILABLE`);
+secret values never enter argv, records, side-effect details, or broker metadata
+(names/ids/TTLs only); the controller-key private key is refused
+(`G5-CONTROLLER-KEY-REFUSED`); a non-empty egress allowlist with no proven
+enforcement primitive is refused before container start (`G5-EGRESS-UNENFORCEABLE`);
+and every refusal raises before any side effect.

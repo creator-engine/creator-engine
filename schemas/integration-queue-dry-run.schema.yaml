@@ -1,0 +1,130 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/integration-queue-dry-run.schema.yaml"
+title: "Creator Engine Integration Queue Dry-Run Landing Preview"
+description: |
+  Machine-readable schema for a Gate 8 (RV1-082) Integration Queue **dry-run**
+  landing preview authored by `ce queue dry-run` under an ignored runtime root
+  (e.g. `.hermes/integration-queue/`).
+
+  Prose contract:
+  `docs/operations/INTEGRATION_QUEUE_DRY_RUN.md`.
+
+  The Integration Queue (Slice 6) owns serialized canonical-branch landing
+  order across lanes. In v1.0 the queue exists ONLY as a local serialized
+  landing *preview*: it reconstructs a deterministic landing order from
+  verified fan-in packet evidence and performs NO live landing, enqueue,
+  merge, PR, branch, remote, GitHub, tracker, CI, deploy, provider, or
+  credential mutation.
+
+  The preview carries NO authority: `has_authority` is constrained to `false`
+  and `mode` is constrained to `dry-run`, so a document asserting live
+  authority fails schema validation. The body contains no wall-clock fields
+  so identical inputs serialize byte-identically; `content_hash` is the SHA256
+  of the canonical preview bytes computed with the `content_hash` field
+  removed.
+
+  CE-event, PCL (Project Coordination Ledger), and distributed-identity remain
+  recorded here only as `deferred-not-rejected` seam stubs, never as active
+  integrations.
+type: object
+required:
+  - kind
+  - schema_version
+  - preview_id
+  - mode
+  - has_authority
+  - source_ratification
+  - landing_order
+  - seam_stubs
+  - content_hash
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: integration-queue-dry-run-preview
+  schema_version:
+    type: string
+    const: "1"
+  preview_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,127}$"
+  mode:
+    description: |
+      v1.0 supports only the local dry-run preview; this field is constrained
+      to `dry-run` so a preview asserting a live mode fails schema validation.
+    type: string
+    const: dry-run
+  has_authority:
+    description: |
+      A dry-run landing preview never grants authority; constrained to `false`
+      so a preview asserting authority fails schema validation.
+    type: boolean
+    const: false
+  source_ratification:
+    type: object
+    required: [prompt_ref, sha256]
+    unevaluatedProperties: false
+    properties:
+      prompt_ref:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+  landing_order:
+    description: |
+      The serialized canonical-branch landing order across lanes, as a
+      preview. Positions are contiguous from 1; each entry pins the verified
+      fan-in packet content hash for the lane it represents.
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [position, lane_ref, fanin_packet_ref, fanin_content_hash]
+      unevaluatedProperties: false
+      properties:
+        position:
+          type: integer
+          minimum: 1
+        lane_ref:
+          type: string
+          minLength: 1
+          maxLength: 256
+        fanin_packet_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        fanin_content_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+  seam_stubs:
+    description: |
+      Deferred-not-rejected team-mode / post-v1 seams recorded alongside the
+      preview. They are stubs only: no active integration is implied.
+    type: object
+    required: [ce_event, pcl, distributed_identity]
+    unevaluatedProperties: false
+    properties:
+      ce_event:
+        $ref: "#/$defs/seam_stub"
+      pcl:
+        $ref: "#/$defs/seam_stub"
+      distributed_identity:
+        $ref: "#/$defs/seam_stub"
+  content_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+$defs:
+  seam_stub:
+    type: object
+    required: [status, note]
+    unevaluatedProperties: false
+    properties:
+      status:
+        type: string
+        const: deferred-not-rejected
+      note:
+        type: string
+        minLength: 1
+        maxLength: 1024

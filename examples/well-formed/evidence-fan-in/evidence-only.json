@@ -1,0 +1,33 @@
+{
+  "content_hash": "adb5a4abebbfc79f5398938fdea5d2169b2f9139f79d93c8c01636159e8d4f39",
+  "evidence": [
+    {
+      "entries": [
+        {
+          "path": "evidence/controller_post_success_verification.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "path": "evidence/gate7_focus_paths.txt",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "entry_count": 2,
+      "manifest_ref": "evidence/SHA256SUMS_GATE7_RUNTIME.txt",
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "has_authority": false,
+  "kind": "evidence-fan-in-packet",
+  "packet_id": "pco-v1-g7-evidence-only",
+  "schema_version": "1",
+  "side_effect_ledger": {
+    "chains": [],
+    "root_ref": null,
+    "verified": false
+  },
+  "source_ratification": {
+    "prompt_ref": ".hermes/research/pco-v1/gate7-prompt-authoring/recommended-next/NEXT_PCO_V1_G7_PROMPT.md",
+    "sha256": "df4e56aee5fa4c9a7b586dd19228ecd58dfa01250185bf96d8052a4008392bd1"
+  }
+}

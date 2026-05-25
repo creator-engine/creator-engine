@@ -1,0 +1,23 @@
+kind: state-boundary-contract
+schema_version: "1"
+description: >-
+  Malformed: declares that the governed runtime state root is NOT ignored by
+  Git. If .hermes/ is tracked, governed runtime state would be committed. The
+  check refuses governed state that would be tracked. Expected refusal:
+  RV1-021-IGNORE.
+state_root: .hermes/
+allowed_write_roots:
+  - .hermes/
+forbidden_write_roots:
+  - docs/
+  - specs/
+  - schemas/
+  - templates/
+  - validators/
+tracked_artifact_policy: refuse
+secret_policy:
+  mode: names-and-references-only
+  recorded_secret_names:
+    - GH_TOKEN
+state_root_gitignored: false
+record_timestamp: "2026-05-25T00:00:00Z"

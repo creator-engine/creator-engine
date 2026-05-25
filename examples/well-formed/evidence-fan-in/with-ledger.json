@@ -1,0 +1,37 @@
+{
+  "content_hash": "7543995c062ec279769b464f5b959ff077c2a3e9309d34696d4e2a6357cbf6ef",
+  "evidence": [
+    {
+      "entries": [
+        {
+          "path": "evidence/gate7_runtime_manifest.txt",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "entry_count": 1,
+      "manifest_ref": "evidence/SHA256SUMS_GATE7_RUNTIME.txt",
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "has_authority": false,
+  "kind": "evidence-fan-in-packet",
+  "packet_id": "pco-v1-g7-with-ledger",
+  "schema_version": "1",
+  "side_effect_ledger": {
+    "chains": [
+      {
+        "controller_id": "hermes-primary",
+        "head_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "lane_id": "pco-g7-fanin",
+        "last_record_ref": "hermes-primary/pco-g7-fanin/2026-05-25/000002-effect-b.json",
+        "record_count": 2
+      }
+    ],
+    "root_ref": ".hermes/side-effect-ledger",
+    "verified": true
+  },
+  "source_ratification": {
+    "prompt_ref": ".hermes/research/pco-v1/gate7-prompt-authoring/recommended-next/NEXT_PCO_V1_G7_PROMPT.md",
+    "sha256": "df4e56aee5fa4c9a7b586dd19228ecd58dfa01250185bf96d8052a4008392bd1"
+  }
+}

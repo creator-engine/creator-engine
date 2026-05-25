@@ -1,0 +1,83 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/state-boundary-contract.schema.yaml"
+title: "Creator Engine State Boundary Contract"
+description: |
+  RV1-021 State Boundary Contract record for the Creator Engine v1.0 local
+  governed runtime kernel (PCO v1 Gate 2).
+
+  Prose contract:
+  `docs/operations/STATE_BOUNDARY_PROTOCOL.md`.
+
+  The record enforces that governed runtime writes target only the ignored
+  `.hermes/` state root, never tracked governance/doc/spec/schema/template/
+  validator/source/package surfaces, and that config carries secret names or
+  references only — never secret values. The check is read-only: it does not
+  create `.hermes/` runtime files and does not modify `.gitignore`.
+type: object
+required:
+  - kind
+  - schema_version
+  - state_root
+  - allowed_write_roots
+  - forbidden_write_roots
+  - tracked_artifact_policy
+  - secret_policy
+  - record_timestamp
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: state-boundary-contract
+  schema_version:
+    type: string
+    const: "1"
+  description:
+    type: string
+    maxLength: 2048
+  state_root:
+    type: string
+    const: .hermes/
+  allowed_write_roots:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+  forbidden_write_roots:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+  tracked_artifact_policy:
+    const: refuse
+  secret_policy:
+    type: object
+    required:
+      - mode
+    properties:
+      mode:
+        const: names-and-references-only
+      recorded_secret_names:
+        type: array
+        items:
+          type: string
+          minLength: 1
+          maxLength: 256
+      description:
+        type: string
+        maxLength: 2048
+    unevaluatedProperties: false
+  state_root_gitignored:
+    type: boolean
+  record_timestamp:
+    $ref: "#/$defs/timestamp"
+$defs:
+  timestamp:
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"

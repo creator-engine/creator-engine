@@ -1,0 +1,109 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/controller-runtime-contract.schema.yaml"
+title: "Creator Engine Controller Runtime Contract"
+description: |
+  RV1-020 Controller Runtime Contract record for the Creator Engine v1.0
+  local governed runtime kernel (PCO v1 Gate 2).
+
+  Prose contract:
+  `docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md`.
+
+  The record classifies the Controller seat and harness boundary. It is
+  declarative and validated only: it does not launch a pane, call Claude,
+  call GitHub, call network APIs, or mutate runtime state, and it must never
+  embed local secrets or durable account/provider authority.
+type: object
+required:
+  - kind
+  - schema_version
+  - controller_seat
+  - harness
+  - authority_boundary
+  - state_boundary
+  - record_timestamp
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: controller-runtime-contract
+  schema_version:
+    type: string
+    const: "1"
+  description:
+    type: string
+    maxLength: 2048
+  controller_seat:
+    type: object
+    required:
+      - authority_locality
+      - seat
+    properties:
+      authority_locality:
+        const: host-local
+      seat:
+        const: controller
+    unevaluatedProperties: false
+  harness:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        enum: [hermes, claude-code, codex]
+    unevaluatedProperties: false
+  authority_boundary:
+    type: object
+    required:
+      - in_seat_harnesses
+      - seam_harnesses
+      - unauthorized_authorities
+    properties:
+      in_seat_harnesses:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/authority_class"
+      seam_harnesses:
+        type: array
+        items:
+          $ref: "#/$defs/authority_class"
+      unauthorized_authorities:
+        type: array
+        items:
+          $ref: "#/$defs/authority_class"
+    unevaluatedProperties: false
+  state_boundary:
+    type: object
+    required:
+      - state_root
+      - durable_account_authority
+      - provider_authority
+    properties:
+      state_root:
+        const: .hermes/
+      durable_account_authority:
+        const: none
+      provider_authority:
+        const: none
+    unevaluatedProperties: false
+  record_timestamp:
+    $ref: "#/$defs/timestamp"
+$defs:
+  authority_class:
+    type: string
+    enum:
+      - hermes
+      - claude-code
+      - codex
+      - openclaw
+      - hosted-service
+      - saas
+      - github-connector
+  timestamp:
+    oneOf:
+      - type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+      - type: string
+        pattern: "^commit:[0-9a-f]{7,40}$"
+      - type: string
+        pattern: "^source-controlled:[A-Za-z0-9_./-]+$"

@@ -1,0 +1,21 @@
+kind: integration-queue-dry-run-request
+lanes:
+- declared_order: 2
+  fanin_packet_ref: ../evidence-fan-in/evidence-only.json
+  lane_ref: pco-lane-evidence-only
+- declared_order: 1
+  fanin_packet_ref: ../evidence-fan-in/with-ledger.json
+  lane_ref: pco-lane-with-ledger
+preview_id: pco-v1-g8-queue-dry-run-example
+schema_version: '1'
+seam_stubs:
+  ce_event:
+    note: CE-event signed-block protocol is a team-mode seam; not implemented in v1.0.
+  distributed_identity:
+    note: Distributed identity substrate is a post-v1 seam; not implemented in v1.0.
+  pcl:
+    note: Project Coordination Ledger (PCL) is a team-mode seam; not implemented in
+      v1.0.
+source_ratification:
+  prompt_ref: .hermes/research/.../NEXT_PCO_V1_G8_..._VISIBLE_LANE_PROMPT.md
+  sha256: 5dc2f4aa2dd4882c7b9db5664b727c35a628a20351f7cb5e655d990412643f52

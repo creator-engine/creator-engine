@@ -1,0 +1,23 @@
+kind: state-boundary-contract
+schema_version: "1"
+description: >-
+  Malformed: lists a tracked governance surface (docs/governance/) as a governed
+  runtime write root. Governed runtime writes may target only the ignored
+  .hermes/ state root. Expected refusal: RV1-021-WRITE.
+state_root: .hermes/
+allowed_write_roots:
+  - .hermes/
+  - docs/governance/
+forbidden_write_roots:
+  - docs/
+  - specs/
+  - schemas/
+  - templates/
+  - validators/
+tracked_artifact_policy: refuse
+secret_policy:
+  mode: names-and-references-only
+  recorded_secret_names:
+    - GH_TOKEN
+state_root_gitignored: true
+record_timestamp: "2026-05-25T00:00:00Z"

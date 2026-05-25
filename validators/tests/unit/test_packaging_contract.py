@@ -1,0 +1,152 @@
+"""RV1-060 — Source Option B v1.0 packaging-contract tests (strict TDD).
+
+These assert the locked Option B / 1B packaging contract over the *actual*
+tracked packaging artifacts plus the introspection helpers in
+``creator_engine_validator.packaging_runtime`` that ``ce doctor`` reuses for the
+dependency/wheelhouse-drift guard clause (RV1-061 / RED-G-6).
+
+Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
+
+* ``requires-python = ">=3.14"`` (floor); tested/target band is **3.14.x**.
+* runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
+* cp314-only x86-64 offline wheelhouse — **no** cp311/cp312/cp313 artifacts.
+* ``uv.lock`` is the primary lock; ``requirements.txt`` is a lockstep export.
+* build backend ``setuptools.build_meta``; both ``creator-engine-validator`` and
+  ``ce`` console scripts retained; distribution **not** renamed (DP-1 = A).
+"""
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from creator_engine_validator import packaging_runtime as pkg
+
+
+@pytest.fixture()
+def validators_dir(repo_root: Path) -> Path:
+    return repo_root / "validators"
+
+
+# ---------------------------------------------------------------------------
+# packaging_runtime pure helpers (interpreter target band)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version_info", [(3, 14, 0), (3, 14, 5), (3, 14, 9)])
+def test_interpreter_in_contract_accepts_target_band(version_info):
+    assert pkg.interpreter_in_contract(version_info) is True
+
+
+@pytest.mark.parametrize("version_info", [(3, 13, 13), (3, 12, 8), (3, 11, 15), (3, 15, 0)])
+def test_interpreter_in_contract_refuses_out_of_contract(version_info):
+    # 3.13/3.15 are the named out-of-contract interpreters (RED-G-1).
+    assert pkg.interpreter_in_contract(version_info) is False
+
+
+def test_normalize_name_pep503():
+    assert pkg.normalize_name("PyYAML") == "pyyaml"
+    assert pkg.normalize_name("jsonschema-specifications") == "jsonschema-specifications"
+    assert pkg.normalize_name("rpds_py") == "rpds-py"
+
+
+# ---------------------------------------------------------------------------
+# pyproject.toml contract
+# ---------------------------------------------------------------------------
+
+
+def test_pyproject_requires_python_floor(validators_dir: Path):
+    data = tomllib.loads((validators_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["requires-python"] == ">=3.14"
+
+
+def test_pyproject_pins_runtime_dependencies(validators_dir: Path):
+    data = tomllib.loads((validators_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = {pkg.normalize_name(d.split("==")[0]): d.split("==")[1] for d in data["project"]["dependencies"]}
+    assert deps["pyyaml"] == "6.0.3"
+    assert deps["jsonschema"] == "4.26.0"
+
+
+def test_pyproject_retains_both_console_scripts(validators_dir: Path):
+    data = tomllib.loads((validators_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = data["project"]["scripts"]
+    assert scripts["creator-engine-validator"] == "creator_engine_validator.cli:main"
+    assert scripts["ce"] == "creator_engine_validator.ce_cli:main"
+
+
+def test_pyproject_keeps_setuptools_build_meta(validators_dir: Path):
+    data = tomllib.loads((validators_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["build-system"]["build-backend"] == "setuptools.build_meta"
+
+
+def test_pyproject_does_not_rename_distribution(validators_dir: Path):
+    data = tomllib.loads((validators_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["name"] == "creator-engine-validator"
+
+
+# ---------------------------------------------------------------------------
+# wheelhouse: cp314-only
+# ---------------------------------------------------------------------------
+
+
+def test_wheelhouse_has_no_stale_non_cp314_abi_wheels(validators_dir: Path):
+    wheels = pkg.wheelhouse_wheels(validators_dir / "wheelhouse")
+    offenders = [w for w in wheels if any(tag in w for tag in pkg.FORBIDDEN_ABI_TAGS)]
+    assert offenders == [], f"non-cp314 ABI wheels must be removed: {offenders}"
+
+
+def test_wheelhouse_contains_cp314_abi_wheels(validators_dir: Path):
+    wheels = pkg.wheelhouse_wheels(validators_dir / "wheelhouse")
+    cp314 = [w for w in wheels if "cp314" in w]
+    assert cp314, "wheelhouse must contain at least one cp314 ABI wheel (e.g. PyYAML/rpds-py)"
+
+
+def test_wheelhouse_covers_runtime_dependencies(validators_dir: Path):
+    names = {pkg.normalize_name(n) for n in pkg.wheelhouse_distribution_names(validators_dir / "wheelhouse")}
+    for required in ("pyyaml", "jsonschema", "attrs", "jsonschema-specifications", "referencing", "rpds-py"):
+        assert required in names, f"wheelhouse missing offline wheel for {required}: have {sorted(names)}"
+
+
+# ---------------------------------------------------------------------------
+# uv.lock primary + requirements.txt lockstep export
+# ---------------------------------------------------------------------------
+
+
+def test_uv_lock_present_and_pins_contract(validators_dir: Path):
+    lock = pkg.parse_uv_lock(validators_dir / "uv.lock")
+    assert lock["pyyaml"] == "6.0.3"
+    assert lock["jsonschema"] == "4.26.0"
+
+
+def test_requirements_export_is_lockstep_with_uv_lock(validators_dir: Path):
+    violations = pkg.lockstep_violations(
+        validators_dir / "requirements.txt", validators_dir / "uv.lock"
+    )
+    assert violations == [], f"requirements.txt drifted from uv.lock: {violations}"
+
+
+def test_requirements_has_no_stale_pins(validators_dir: Path):
+    reqs = pkg.parse_requirements(validators_dir / "requirements.txt")
+    assert reqs.get("pyyaml") == "6.0.3"
+    assert reqs.get("jsonschema") == "4.26.0"
+    # the old cp311-era transitive pins must be gone
+    assert reqs.get("attrs") != "24.2.0"
+    assert reqs.get("rpds-py") != "0.22.3"
+
+
+# ---------------------------------------------------------------------------
+# aggregate contract verifier (used by the guard)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
+    result = pkg.verify_packaging_contract(repo_root)
+    assert result.ok, f"packaging contract violations: {result.violations}"
+
+
+def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):
+    # an empty/absent packaging tree must be reported as drift, not crash
+    result = pkg.verify_packaging_contract(tmp_path)
+    assert not result.ok
+    assert result.violations

@@ -1,13 +1,37 @@
 # Creator Engine Validator
 
-Offline, repository-local validator for the Creator Engine v0.1 governance substrate.
+Offline, repository-local validator for the Creator Engine governance substrate,
+and the home of the v1.0 `ce` command-line runtime (`ce` is a second console
+script on this same distribution — DP-1 = A, no rename).
+
+## Language and packaging contract (Option B)
+
+- **Python `>=3.14`** (floor and target 3.14.x); `ce doctor` refuses an
+  out-of-contract interpreter.
+- **uv-first** offline install with a **pip `--no-index` fallback**.
+- `validators/uv.lock` is the primary lockfile; `validators/requirements.txt`
+  is the lockstep `uv export`-derived fallback.
+- Runtime dependencies are pinned at **PyYAML 6.0.3** and **jsonschema 4.26.0**.
+- The checked-in `validators/wheelhouse/` is a **cp314**, x86-64 offline
+  wheelhouse with a `SHA256SUMS` manifest. The `uvx` one-line operator install
+  is POST-V1 (B3); the v1.0 install surface is a source checkout.
 
 ## Offline runtime install
 
-From a fresh clone, create a virtualenv and install only the validator runtime dependencies from the checked-in runtime wheelhouse:
+From a fresh clone, install only the validator runtime dependencies from the
+checked-in cp314 wheelhouse, with no network access.
+
+**uv-first (primary):**
 
 ```bash
-python -m venv .venv
+uv venv --python 3.14
+UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+```
+
+**pip fallback:**
+
+```bash
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
@@ -75,6 +99,90 @@ The `side_effect_ledger` check validates PCO Slice 4 Side-Effect Ledger records:
 - `PCO-061` optional `completion_report_ref`, when resolvable, must match controller/lane context and hash-match `completion_report_sha256` when supplied.
 - `PCO-062` `integration_queue_ref` is reserved before Slice 6; unresolved refs emit a clear deferred warning, while resolvable records are checked for matching context when they carry context fields.
 - `PCO-063` unknown fields are refused and `*.tmp.*` side-effect artifacts are skipped.
+
+### `ce ledger` runtime (RV1-040/041/042)
+
+The `ce` kernel exposes the append-only Side-Effect Ledger runtime that writes
+and verifies records validated by the `side_effect_ledger` check above. Records
+are deterministic stdlib-JSON bytes grouped by `controller_id/lane_id/<UTC-day>/`
+with a per-lane hash chain (`sequence` + `previous_record_sha256`) and a
+`_head.json` manifest. It adds no dependency and performs no GitHub/git/CI/
+deploy/provider/MCP/plugin/container/network mutation, no pane spawn, and no
+automatic observation. See `docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md` §11.
+
+```bash
+# Append one redaction-safe record bound to a live Active-Work Ledger claim.
+ce ledger record \
+  --controller-id hermes-primary --lane-id pco-slice4-impl \
+  --claim-ref claims/hermes-primary/pco-slice4-impl.yaml \
+  --effect-id effect-tracked-file-change-001 \
+  --effect-kind tracked_file_change --effect-status succeeded \
+  --summary "Created a schema file." --occurred-at 2026-05-25T12:10:00Z \
+  --repo-root . \
+  --side-effect-ledger-root .hermes/side-effect-ledger \
+  --active-work-ledger-root .hermes/active-work-ledger
+
+# Validate the hash chain + claim binding and emit a deterministic replay summary.
+ce ledger verify \
+  --side-effect-ledger-root .hermes/side-effect-ledger \
+  --active-work-ledger-root .hermes/active-work-ledger --json
+```
+
+`ce ledger record` refuses — before any write, leaving no partial record/head —
+on secret-shaped fields, non-object `--details-json`, a missing/invalid/
+mismatched/released claim, or a filename collision. `ce ledger verify` exits
+non-zero on schema violations, a broken `previous_record_sha256` link, a
+sequence gap (tampered or deleted record), head/manifest drift, or an unbound
+claim when `--active-work-ledger-root` is supplied.
+
+### `ce worker` runtime (RV1-050..054; Slice 2I-R)
+
+The `ce` kernel exposes the worker isolation runtime that turns the Slice 2I-S
+worker-container substrate into a local rootless-Podman surface. The container
+engine and credential broker are reached **only** through injectable seams
+(`PodmanCommandRunner`, `NullCredentialBroker`); the live CLI fails closed
+(`G5-PODMAN-UNAVAILABLE`) when `podman` is unavailable. It performs no image
+build/pull/push, no registry login, and no Podman installation. See
+`docs/operations/WORKER_CONTAINER_PROTOCOL.md` §7.
+
+```bash
+# Allocate a worker container bound to a live claim + lease under a ratified policy.
+ce worker allocate \
+  --policy governance/policies/worker-container/podman-implementer.yaml \
+  --controller-id hermes-primary --lane-id pco-slice2ir-worker \
+  --claim-ref claims/hermes-primary/pco-slice2ir-worker.yaml \
+  --lease-ref leases/hermes-primary/pco-slice2ir-worker.yaml \
+  --active-work-ledger-root .hermes/active-work-ledger \
+  --container-instance-root .hermes/container-instances \
+  --instance-id inst-pco-slice2ir-worker-001 \
+  --side-effect-ledger-root .hermes/side-effect-ledger --repo-root .
+
+# Revoke broker grants, stop the container, write the stopped record.
+ce worker terminate \
+  --instance-id inst-pco-slice2ir-worker-001 --claim-id pco-slice2ir-worker \
+  --container-instance-root .hermes/container-instances --reason normal_release
+
+# Reap container-instance records that outlived a released claim (PCO-043).
+ce worker gc --container-instance-root .hermes/container-instances
+
+# Read a single container-instance record (read-only).
+ce worker status --container-instance-root .hermes/container-instances \
+  --claim-id pco-slice2ir-worker --instance-id inst-pco-slice2ir-worker-001
+```
+
+`ce worker allocate` refuses — before any broker grant, `podman run`, or record
+write — on a missing/invalid policy, a controller-key secret name
+(`G5-CONTROLLER-KEY-REFUSED`), secret-shaped `--details-json`
+(`G5-SECRET-REFUSED`), a missing/released/mismatched claim or lease, a non-empty
+`egress_allowlist` with no proven enforcement primitive
+(`G5-EGRESS-UNENFORCEABLE`), or absent Podman (`G5-PODMAN-UNAVAILABLE`). Secret
+values never enter argv, container-instance records, secret-grant manifests, or
+side-effect details (names/grant-ids/TTLs only). The cross-record companion
+predicate **PCO-042** (`active_work_ledger_conflicts`) refuses a live claim with
+no running container-instance, but only when a `PCO-040`-valid worker-container
+policy is present under the ratified governance path
+`governance/policies/worker-container/`; trees without such a policy preserve
+Slice 2R behavior.
 
 ## `role_boundary_attribution` scope and limitations
 

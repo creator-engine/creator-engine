@@ -1,0 +1,19 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+controller_id: hermes-primary
+lane_id: pco-slice2ir-worker
+record_timestamp: "2026-05-25T05:33:00Z"
+# Covered by examples/well-formed/worktree-leases/minimal-lease.yaml
+# (controller hermes-primary, worktree /worktrees/pco-slice2a) so PCO-021 holds
+# in the bundled well-formed scan.
+worktree_path: /worktrees/pco-slice2a
+envelope_ref: .hermes/envelopes/pco-slice2ir-worker.md
+lease_seconds: 3600
+claimed_at: "2026-05-25T05:33:00Z"
+last_heartbeat_at: "9999-01-01T00:00:00Z"
+pane_label: implementer
+# Paired (by claim_id == lane_id) with the running container-instance
+# examples/well-formed/container-instances/runtime-started-implementer.yaml, so
+# PCO-042 is satisfied for this live claim when a ratified worker-container
+# policy is present.

@@ -1,0 +1,40 @@
+{
+  "content_hash": "1ab16c26ef22c0115a833ed4f66f7a53448ed252067e48935e7173c06a57a5e9",
+  "has_authority": true,
+  "kind": "integration-queue-dry-run-preview",
+  "landing_order": [
+    {
+      "fanin_content_hash": "7543995c062ec279769b464f5b959ff077c2a3e9309d34696d4e2a6357cbf6ef",
+      "fanin_packet_ref": "../evidence-fan-in/with-ledger.json",
+      "lane_ref": "pco-lane-with-ledger",
+      "position": 1
+    },
+    {
+      "fanin_content_hash": "adb5a4abebbfc79f5398938fdea5d2169b2f9139f79d93c8c01636159e8d4f39",
+      "fanin_packet_ref": "../evidence-fan-in/evidence-only.json",
+      "lane_ref": "pco-lane-evidence-only",
+      "position": 2
+    }
+  ],
+  "mode": "dry-run",
+  "preview_id": "pco-v1-g8-queue-dry-run-example",
+  "schema_version": "1",
+  "seam_stubs": {
+    "ce_event": {
+      "note": "CE-event signed-block protocol is a team-mode seam; not implemented in v1.0.",
+      "status": "deferred-not-rejected"
+    },
+    "distributed_identity": {
+      "note": "Distributed identity substrate is a post-v1 seam; not implemented in v1.0.",
+      "status": "deferred-not-rejected"
+    },
+    "pcl": {
+      "note": "Project Coordination Ledger (PCL) is a team-mode seam; not implemented in v1.0.",
+      "status": "deferred-not-rejected"
+    }
+  },
+  "source_ratification": {
+    "prompt_ref": ".hermes/research/.../NEXT_PCO_V1_G8_..._VISIBLE_LANE_PROMPT.md",
+    "sha256": "5dc2f4aa2dd4882c7b9db5664b727c35a628a20351f7cb5e655d990412643f52"
+  }
+}

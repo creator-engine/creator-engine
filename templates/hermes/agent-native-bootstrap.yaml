@@ -1,0 +1,67 @@
+# Creator Engine v1.0 — agent-native bootstrap (RV1-064).
+#
+# Machine-readable bootstrap contract for an agent harness preparing to run the
+# local governed runtime kernel (`ce`). It is read-only configuration consumed
+# by an agent; it grants no hosted/team-mode/GitHub authority and starts no
+# daemon. Preflight is `ce doctor --json`; a non-zero preflight yields a
+# blocked report and stops (there is no hidden fallback).
+#
+# Prose contract: docs/operations/AGENT_NATIVE_BOOTSTRAP.md
+kind: agent-native-bootstrap
+schema_version: "1"
+product: creator-engine
+product_version: "1.0"
+
+authority_model:
+  direction: one-directional
+  # Authority flows one way: Operator/Controller seat -> launched agent lane.
+  # The agent lane never gains authority over the Controller seat and never
+  # escalates to hosted/team/GitHub authority; it returns results as evidence
+  # for ratification only.
+  hosted_team_github_authority: false
+  description: >-
+    Authority transfers one-directionally from the host-local Operator/Controller
+    seat to the launched agent lane. The lane cannot ratify its own work, cannot
+    promote itself to a hosted/team/GitHub authority, and hands all results back
+    to the Controller seat as evidence for ratification.
+
+preflight:
+  command: ["ce", "doctor", "--json"]
+  required: true
+  on_failure: blocked-report
+  blocked_report:
+    stop: true
+    semantics: >-
+      If `ce doctor --json` exits non-zero, the bootstrap MUST stop and emit a
+      blocked report that names the refused governed-environment guard clauses
+      (RED-G-1 .. RED-G-6). It MUST NOT continue, MUST NOT ratify in-flight work,
+      and MUST NOT fall back to a hidden/headless continuation.
+
+install:
+  contract: uv-first-with-pip-fallback
+  python_floor: ">=3.14"
+  wheelhouse: validators/wheelhouse
+  network: forbidden
+  uv_first:
+    - ["uv", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "creator-engine-validator"]
+  pip_fallback:
+    - ["python", "-m", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "creator-engine-validator"]
+
+launch:
+  command: ["ce", "launch", "--json"]
+  visible: true
+  hidden_fallback: false
+  hud_alias: ["ce", "hud", "--json"]
+
+boundaries:
+  hosted_service: false
+  team_mode: false
+  github_connector: false
+  daemon: false
+  network_at_runtime: false
+
+references:
+  - docs/operations/AGENT_NATIVE_BOOTSTRAP.md
+  - docs/governance/V1_PRODUCT_CONTRACT.md
+  - docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md
+  - docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md

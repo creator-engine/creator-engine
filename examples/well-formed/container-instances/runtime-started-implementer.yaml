@@ -1,0 +1,52 @@
+kind: container-instance-record
+record_type: container_instance
+schema_version: "1"
+# Shape of a container-instance record as written by allocate_worker (§e.1)
+# AFTER a successful rootless-Podman start. Paired (by claim_id) with
+# examples/well-formed/active-work-ledger/claim-with-container-instance.yaml.
+instance_id: inst-pco-slice2ir-worker-001
+policy_ref:
+  policy_id: podman-implementer-v1
+  policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+  image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+image_sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+claim_id: pco-slice2ir-worker
+lease_id: lease-minimal-001
+started_at: "2026-05-25T05:33:05Z"
+stopped_at: null
+exit_code: null
+mount_manifest_applied:
+  - path: /worktrees/pco-slice2a
+    mode: rw
+    source: policy
+  - path: governance
+    mode: ro
+    source: policy
+  - path: schemas
+    mode: ro
+    source: policy
+  - path: validators
+    mode: ro
+    source: policy
+secret_grants:
+  - secret_name: model-provider-key
+    mode: env
+    broker_grant_id: grant-model-key-ir-001
+    granted_at: "2026-05-25T05:33:05Z"
+    revoked_at: null
+    ttl_seconds: 3240
+  - secret_name: per-task-scoped-pat
+    mode: env
+    broker_grant_id: grant-pat-ir-002
+    granted_at: "2026-05-25T05:33:05Z"
+    revoked_at: null
+    ttl_seconds: 3240
+egress_allowlist_applied:
+  - host: api.anthropic.com
+    protocol: https
+  - host: pypi.org
+    protocol: https
+  - host: github.com
+    protocol: https
+enforcement_primitive: pasta
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
