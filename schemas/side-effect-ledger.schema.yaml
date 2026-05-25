@@ -135,6 +135,20 @@ properties:
         - type: number
         - type: boolean
         - type: "null"
+  sequence:
+    description: |
+      Append-order position of this record within its
+      (controller_id, lane_id) Side-Effect Ledger runtime chain. Written
+      by `ce ledger record`; absent on hand-authored substrate examples.
+    type: integer
+    minimum: 1
+  previous_record_sha256:
+    description: |
+      SHA256 of the previous runtime record's exact file bytes, binding
+      this record to the append-only hash chain. The genesis record uses
+      the all-zero sentinel. Written by `ce ledger record`.
+    type: string
+    pattern: "^[0-9a-f]{64}$"
 $defs:
   timestamp:
     oneOf:

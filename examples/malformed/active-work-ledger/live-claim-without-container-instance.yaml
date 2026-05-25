@@ -1,0 +1,20 @@
+kind: active-work-ledger-record
+record_type: claim
+schema_version: "1"
+# This record is schema-VALID as an Active-Work Ledger claim. It is "malformed"
+# only in the PCO-042 cross-record sense: it is a LIVE claim (released_at null)
+# that has NO paired running container-instance record. When the scanned tree
+# also contains a PCO-040-valid worker-container policy under the ratified
+# governance path (governance/policies/worker-container/), the
+# active_work_ledger_conflicts check MUST refuse it with PCO-042 and exit
+# non-zero. Scanned alone (no governance policy in the tree) it preserves the
+# Slice 2R backward-compatibility floor and passes.
+controller_id: hermes-primary
+lane_id: pco-orphan-worker
+record_timestamp: "2026-05-25T05:40:00Z"
+worktree_path: /worktrees/pco-orphan-worker
+envelope_ref: .hermes/envelopes/pco-orphan-worker.md
+lease_seconds: 3600
+claimed_at: "2026-05-25T05:40:00Z"
+last_heartbeat_at: "9999-01-01T00:00:00Z"
+pane_label: implementer

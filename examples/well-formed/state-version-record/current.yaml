@@ -1,0 +1,8 @@
+kind: state-version-record
+schema_version: "1"
+description: Well-formed State Version record for the current v1.0 .hermes/ governed state layout.
+state_namespace: hermes-local
+state_version: 1
+migration_id: none
+migration_status: not-required
+record_timestamp: "2026-05-25T00:00:00Z"

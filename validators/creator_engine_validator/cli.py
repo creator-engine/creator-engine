@@ -79,6 +79,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_side_effect_ledger.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_controller_runtime_contract = sub.add_parser(
+        "scan-controller-runtime-contract",
+        help="run only the controller_runtime_contract check (RV1-020) against a path",
+    )
+    scan_controller_runtime_contract.add_argument("path", nargs="?", default=".", help="path to scan")
+
+    scan_state_boundary_contract = sub.add_parser(
+        "scan-state-boundary-contract",
+        help="run only the state_boundary_contract check (RV1-021) against a path",
+    )
+    scan_state_boundary_contract.add_argument("path", nargs="?", default=".", help="path to scan")
+
+    scan_state_version_record = sub.add_parser(
+        "scan-state-version-record",
+        help="run only the state_version_record check (RV1-022) against a path",
+    )
+    scan_state_version_record.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -187,6 +205,16 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/side-effect-ledger/duplicate-effect-id"), False, "PCO-057"),
         ("malformed", Path("examples/malformed/side-effect-ledger/secret-payload.yaml"), False, "PCO-059"),
         ("malformed", Path("examples/malformed/side-effect-ledger/unknown-field.yaml"), False, "PCO-063"),
+        ("well-formed", Path("examples/well-formed/controller-runtime-contract"), True, None),
+        ("malformed", Path("examples/malformed/controller-runtime-contract/misclassified-hosted-authority.yaml"), False, "RV1-020-AUTH"),
+        ("malformed", Path("examples/malformed/controller-runtime-contract/secret-value.yaml"), False, "RV1-020-SECRET"),
+        ("well-formed", Path("examples/well-formed/state-boundary-contract"), True, None),
+        ("malformed", Path("examples/malformed/state-boundary-contract/tracked-write-root.yaml"), False, "RV1-021-WRITE"),
+        ("malformed", Path("examples/malformed/state-boundary-contract/secret-config-value.yaml"), False, "RV1-021-SECRET"),
+        ("malformed", Path("examples/malformed/state-boundary-contract/hermes-not-ignored.yaml"), False, "RV1-021-IGNORE"),
+        ("well-formed", Path("examples/well-formed/state-version-record"), True, None),
+        ("malformed", Path("examples/malformed/state-version-record/stale-version.yaml"), False, "RV1-022-STALE"),
+        ("malformed", Path("examples/malformed/state-version-record/invalid-status.yaml"), False, "RV1-022"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -285,6 +313,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-side-effect-ledger":
         from .checks.side_effect_ledger import run as _run_side_effect_ledger
         result = _run_side_effect_ledger([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-controller-runtime-contract":
+        from .checks.controller_runtime_contract import run as _run_controller_runtime_contract
+        result = _run_controller_runtime_contract([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-state-boundary-contract":
+        from .checks.state_boundary_contract import run as _run_state_boundary_contract
+        result = _run_state_boundary_contract([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-state-version-record":
+        from .checks.state_version_record import run as _run_state_version_record
+        result = _run_state_version_record([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution

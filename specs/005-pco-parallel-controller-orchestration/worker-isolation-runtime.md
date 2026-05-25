@@ -1270,6 +1270,20 @@ cross-record traversal:
      validator passing, which includes PCO-042 from the moment a
      policy record is present in the tree).
 
+**As-built (Slice 2I-R implementation).** The "ratified governance
+path for worker-container policies" of step 1 is selected as
+`governance/policies/worker-container/` (the §g.1 default location).
+The validator (`active_work_ledger_conflicts`,
+`CODE_CONTAINER_REQUIRED = "PCO-042"`) arms only on a `PCO-040`-valid
+policy under that path; a policy elsewhere in the tree (e.g. an
+`examples/…` fixture) does not arm the gate, preserving the Slice 2R
+floor for the bundled example bundle while still failing a real
+governed tree. Matching is `container_instance.claim_id ==
+claim.lane_id` with `stopped_at` null (claims carry no separate
+`claim_id` field; the lane id is the claim identity). The runtime
+entry point `worker_runtime.allocate_worker` is the proactive
+`pco-allocate` sub-step 1 surface.
+
 ### m.2 PCO-043 — Container Outlives Claim (sweeper runtime, Slice 2I-R)
 
 PCO-043 is declared in §g.4 as a substrate-only static predicate

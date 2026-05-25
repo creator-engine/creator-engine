@@ -1,0 +1,24 @@
+kind: controller-runtime-contract
+schema_version: "1"
+description: Minimal well-formed Controller Runtime Contract for the v1.0 local governed kernel.
+controller_seat:
+  authority_locality: host-local
+  seat: controller
+harness:
+  name: claude-code
+authority_boundary:
+  in_seat_harnesses:
+    - hermes
+    - claude-code
+    - codex
+  seam_harnesses:
+    - openclaw
+  unauthorized_authorities:
+    - hosted-service
+    - saas
+    - github-connector
+state_boundary:
+  state_root: .hermes/
+  durable_account_authority: none
+  provider_authority: none
+record_timestamp: "2026-05-25T00:00:00Z"

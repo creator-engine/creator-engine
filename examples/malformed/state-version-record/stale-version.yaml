@@ -1,0 +1,12 @@
+kind: state-version-record
+schema_version: "1"
+description: >-
+  Malformed: declares a state_version (0) below the minimum supported v1.0
+  governed state layout. Version 0 is the pre-bootstrap layout and must be
+  migrated forward before the state is treated as live. Expected refusal:
+  RV1-022-STALE.
+state_namespace: hermes-local
+state_version: 0
+migration_id: none
+migration_status: not-required
+record_timestamp: "2026-05-25T00:00:00Z"

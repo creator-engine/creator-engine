@@ -1,0 +1,21 @@
+kind: state-boundary-contract
+schema_version: "1"
+description: Minimal well-formed State Boundary Contract for the v1.0 local governed kernel.
+state_root: .hermes/
+allowed_write_roots:
+  - .hermes/
+forbidden_write_roots:
+  - docs/
+  - specs/
+  - schemas/
+  - templates/
+  - validators/
+  - .github/
+tracked_artifact_policy: refuse
+secret_policy:
+  mode: names-and-references-only
+  recorded_secret_names:
+    - GH_TOKEN
+    - ANTHROPIC_API_KEY
+state_root_gitignored: true
+record_timestamp: "2026-05-25T00:00:00Z"

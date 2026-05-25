@@ -1,0 +1,387 @@
+"""Unit tests for the Gate 3 governed lane-launch runtime (RV1-030/031/032).
+
+These exercise ``lane_runtime`` directly with a tmux test double. The full
+CLI surface and a real-tmux launch are covered by the CLI / integration
+suites. No production worktree, ledger, or tmux session is mutated; all
+state lives under pytest ``tmp_path``.
+"""
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import pytest
+import yaml
+
+from creator_engine_validator import lane_runtime
+from creator_engine_validator.checks.pane_registry import validate_pane_registry_record
+from creator_engine_validator.tmux_adapter import TmuxPane
+
+
+# ---------------------------------------------------------------------------
+# Test doubles + fixtures
+# ---------------------------------------------------------------------------
+
+
+class FakeAdapter:
+    """In-memory tmux adapter double: records spawns, never touches tmux."""
+
+    kind = "tmux"
+
+    def __init__(self, *, available: bool = True):
+        self._available = available
+        self.spawned: list[tuple[str, str, list[str]]] = []
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def ensure_pane(self, *, session, window, command):
+        self.spawned.append((session, window, list(command)))
+        return TmuxPane(
+            session_id="$1",
+            window_id="@2",
+            pane_id="%3",
+            pane_tty="/dev/pts/9",
+            pane_pid=4242,
+        )
+
+
+def _write_prompt(tmp_path: Path, text: str = "governed gate prompt body\n") -> tuple[Path, str]:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(text, encoding="utf-8")
+    sha = hashlib.sha256(prompt.read_bytes()).hexdigest()
+    return prompt, sha
+
+
+def _ledger_root(tmp_path: Path) -> Path:
+    root = tmp_path / ".hermes" / "active-work-ledger"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_claim(
+    ledger_root: Path,
+    controller_id: str,
+    lane_id: str,
+    *,
+    worktree_path: str = "/worktrees/gate3-lane",
+    branch: str = "implementer/gate3-lane",
+    envelope_ref: str = "envelopes/gate3.md",
+    released: bool = False,
+) -> Path:
+    record = {
+        "kind": "active-work-ledger-record",
+        "record_type": "claim",
+        "schema_version": "1",
+        "controller_id": controller_id,
+        "lane_id": lane_id,
+        "record_timestamp": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "worktree_path": worktree_path,
+        "envelope_ref": envelope_ref,
+        "branch": branch,
+        "lease_seconds": 3600,
+        "claimed_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "last_heartbeat_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+    }
+    if released:
+        record["released_at"] = "2026-05-25T04:05:00Z"
+        record["release_reason"] = "completed"
+    path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _launch(tmp_path, **overrides):
+    prompt, sha = overrides.pop("prompt_and_sha", _write_prompt(tmp_path))
+    ledger = overrides.pop("ledger_root", _ledger_root(tmp_path))
+    kwargs = dict(
+        controller_id="hermes-primary",
+        lane_id="gate3-lane",
+        role="implementer",
+        prompt=prompt,
+        prompt_sha=sha,
+        repo_root=tmp_path,
+        ledger_root=ledger,
+        tmux_adapter=FakeAdapter(),
+    )
+    kwargs.update(overrides)
+    return lane_runtime.launch(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Success path: pane record bound to a live claim
+# ---------------------------------------------------------------------------
+
+
+def test_launch_writes_pane_record_bound_to_live_claim(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(tmp_path, ledger_root=ledger)
+
+    pane_path = ledger / "panes" / "hermes-primary" / "gate3-lane.yaml"
+    assert pane_path.is_file()
+    assert result.pane_path == pane_path
+    record = yaml.safe_load(pane_path.read_text(encoding="utf-8"))
+    assert record["kind"] == "pane-registry-record"
+    assert record["controller_id"] == "hermes-primary"
+    assert record["lane_id"] == "gate3-lane"
+    assert record["role"] == "implementer"
+    assert record["visibility"] == "operator_visible"
+    assert record["terminal"]["kind"] == "tmux"
+    assert record["terminal"]["session_id"] == "$1"
+    assert record["terminal"]["window_id"] == "@2"
+    assert record["terminal"]["pane_id"] == "%3"
+    # bound to the claim
+    assert record["claim_ref"] == "claims/hermes-primary/gate3-lane.yaml"
+    assert record["worktree_path"] == "/worktrees/gate3-lane"
+    assert record["branch"] == "implementer/gate3-lane"
+    assert record["envelope_ref"] == "envelopes/gate3.md"
+
+
+def test_written_pane_record_passes_pane_registry_schema(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(tmp_path, ledger_root=ledger)
+    errors = validate_pane_registry_record(result.record, result.pane_path)
+    assert errors == [], [e.format() for e in errors]
+
+
+def test_no_tmp_artifact_left_after_pane_write(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _launch(tmp_path, ledger_root=ledger)
+    leftover = list((ledger / "panes").rglob("*.tmp.*"))
+    assert leftover == []
+
+
+# ---------------------------------------------------------------------------
+# Refusals BEFORE side effects (no pane file, no tmux spawn)
+# ---------------------------------------------------------------------------
+
+
+def _assert_no_pane(ledger: Path, controller="hermes-primary", lane="gate3-lane"):
+    assert not (ledger / "panes" / controller / f"{lane}.yaml").exists()
+
+
+def test_launch_refuses_prompt_sha_mismatch_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    prompt, _ = _write_prompt(tmp_path)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.PromptShaMismatch):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            prompt_and_sha=(prompt, "0" * 64),
+            tmux_adapter=adapter,
+        )
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_missing_prompt_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.PromptMissing):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            prompt_and_sha=(tmp_path / "does-not-exist.md", "0" * 64),
+            tmux_adapter=adapter,
+        )
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_missing_live_claim_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)  # no claim written
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaimMissing):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_released_claim_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane", released=True)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaimReleased):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_controller_lane_mismatch_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    # claim file path matches lane but records a different lane_id internally
+    path = ledger / "claims" / "hermes-primary" / "gate3-lane.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "kind": "active-work-ledger-record",
+        "record_type": "claim",
+        "schema_version": "1",
+        "controller_id": "hermes-primary",
+        "lane_id": "some-other-lane",
+        "record_timestamp": "2026-05-25T04:00:00Z",
+        "worktree_path": "/worktrees/x",
+        "envelope_ref": "none",
+        "lease_seconds": 3600,
+        "claimed_at": "2026-05-25T04:00:00Z",
+        "last_heartbeat_at": "2026-05-25T04:00:00Z",
+    }
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaimMismatch):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_headless_for_visibility_required_role(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.VisibilityRefused):
+        _launch(tmp_path, ledger_root=ledger, terminal_kind="headless", tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_tmux_unavailable_before_pane_write(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter(available=False)
+    with pytest.raises(lane_runtime.TmuxUnavailableError):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_on_conflict_guard_before_pane_write(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    # Two live claims, different controllers, same worktree_path -> PCO-010 conflict.
+    _write_claim(ledger, "hermes-primary", "gate3-lane", worktree_path="/worktrees/shared")
+    _write_claim(ledger, "other-controller", "other-lane", worktree_path="/worktrees/shared")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ConflictGuardRefused):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_handoff_sha_mismatch_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("handoff body\n", encoding="utf-8")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.HandoffShaMismatch):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            handoff=handoff,
+            handoff_sha="0" * 64,
+            tmux_adapter=adapter,
+        )
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_does_not_launch_provider_by_default(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
+    assert adapter.spawned, "a pane should have been spawned"
+    _, _, command = adapter.spawned[0]
+    joined = " ".join(command).lower()
+    for forbidden in ("claude", "openai", "gpt", "anthropic", "codex", "--api-key"):
+        assert forbidden not in joined
+
+
+# ---------------------------------------------------------------------------
+# status / verify
+# ---------------------------------------------------------------------------
+
+
+def test_status_reads_live_pane_record(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _launch(tmp_path, ledger_root=ledger)
+    info = lane_runtime.status(
+        controller_id="hermes-primary", lane_id="gate3-lane", ledger_root=ledger
+    )
+    assert info["record"]["status"] in lane_runtime.LIVE_STATUSES
+    assert info["record"]["terminal"]["kind"] == "tmux"
+
+
+def test_status_missing_record_raises(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    with pytest.raises(lane_runtime.LaneStatusError):
+        lane_runtime.status(
+            controller_id="hermes-primary", lane_id="absent-lane", ledger_root=ledger
+        )
+
+
+def test_verify_ok_when_stop_line_present(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _launch(tmp_path, ledger_root=ledger)
+    transcript = tmp_path / "transcript.txt"
+    stop = "CE_PCO_V1_G3_GOVERNED_LANE_LAUNCH_READY_FOR_SOURCE_RATIFICATION"
+    transcript.write_text(f"...work...\n{stop}\n", encoding="utf-8")
+    result = lane_runtime.verify(
+        controller_id="hermes-primary",
+        lane_id="gate3-lane",
+        ledger_root=ledger,
+        transcript=transcript,
+        stop_line=stop,
+    )
+    assert result["ok"] is True
+
+
+def test_verify_refuses_missing_stop_line(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _launch(tmp_path, ledger_root=ledger)
+    transcript = tmp_path / "transcript.txt"
+    transcript.write_text("work happened but no terminal line\n", encoding="utf-8")
+    with pytest.raises(lane_runtime.LaneVerifyError):
+        lane_runtime.verify(
+            controller_id="hermes-primary",
+            lane_id="gate3-lane",
+            ledger_root=ledger,
+            transcript=transcript,
+            stop_line="CE_PCO_V1_G3_GOVERNED_LANE_LAUNCH_READY_FOR_SOURCE_RATIFICATION",
+        )
+
+
+def test_verify_refuses_missing_transcript(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _launch(tmp_path, ledger_root=ledger)
+    with pytest.raises(lane_runtime.LaneVerifyError):
+        lane_runtime.verify(
+            controller_id="hermes-primary",
+            lane_id="gate3-lane",
+            ledger_root=ledger,
+            transcript=tmp_path / "missing.txt",
+            stop_line="X",
+        )
+
+
+def test_verify_refuses_missing_pane_record(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    transcript = tmp_path / "transcript.txt"
+    transcript.write_text("STOP\n", encoding="utf-8")
+    with pytest.raises(lane_runtime.LaneVerifyError):
+        lane_runtime.verify(
+            controller_id="hermes-primary",
+            lane_id="gate3-lane",
+            ledger_root=ledger,
+            transcript=transcript,
+            stop_line="STOP",
+        )

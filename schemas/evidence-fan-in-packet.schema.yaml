@@ -1,0 +1,132 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/evidence-fan-in-packet.schema.yaml"
+title: "Creator Engine Local Read-Only Evidence Fan-In Packet"
+description: |
+  Machine-readable schema for a Gate 7 local read-only evidence fan-in
+  packet authored by `ce fanin build` under the ignored `.hermes/fan-in/`
+  runtime root (RV1-070 / RV1-071).
+
+  Prose contract:
+  `docs/operations/EVIDENCE_FAN_IN_PROTOCOL.md`.
+
+  A fan-in packet is a deterministic, content-hashed aggregation of local
+  evidence manifests and Side-Effect Ledger references. It carries NO
+  authority: `has_authority` is constrained to `false`, and the runtime
+  refuses any ratify/enqueue/land attempt. The packet body contains no
+  wall-clock fields so identical inputs serialize byte-identically; the
+  `content_hash` is the SHA256 of the canonical packet bytes computed with
+  the `content_hash` field removed.
+type: object
+required:
+  - kind
+  - schema_version
+  - packet_id
+  - has_authority
+  - source_ratification
+  - evidence
+  - side_effect_ledger
+  - content_hash
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: evidence-fan-in-packet
+  schema_version:
+    type: string
+    const: "1"
+  packet_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,127}$"
+  has_authority:
+    description: |
+      A fan-in packet never grants authority; this field is constrained to
+      `false` so a packet asserting authority fails schema validation.
+    type: boolean
+    const: false
+  source_ratification:
+    type: object
+    required: [prompt_ref, sha256]
+    unevaluatedProperties: false
+    properties:
+      prompt_ref:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+  evidence:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [manifest_ref, manifest_sha256, entry_count, entries]
+      unevaluatedProperties: false
+      properties:
+        manifest_ref:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        manifest_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        entry_count:
+          type: integer
+          minimum: 0
+        entries:
+          type: array
+          items:
+            type: object
+            required: [path, sha256]
+            unevaluatedProperties: false
+            properties:
+              path:
+                type: string
+                minLength: 1
+                maxLength: 4096
+              sha256:
+                type: string
+                pattern: "^[0-9a-f]{64}$"
+  side_effect_ledger:
+    type: object
+    required: [root_ref, verified, chains]
+    unevaluatedProperties: false
+    properties:
+      root_ref:
+        oneOf:
+          - type: "null"
+          - type: string
+            minLength: 1
+            maxLength: 2048
+      verified:
+        type: boolean
+      chains:
+        type: array
+        items:
+          type: object
+          required: [controller_id, lane_id, record_count, head_sha256, last_record_ref]
+          unevaluatedProperties: false
+          properties:
+            controller_id:
+              type: string
+              pattern: "^[a-z][a-z0-9-]{2,63}$"
+            lane_id:
+              type: string
+              pattern: "^[a-z][a-z0-9-]{2,63}$"
+            record_count:
+              type: integer
+              minimum: 0
+            head_sha256:
+              oneOf:
+                - type: "null"
+                - type: string
+                  pattern: "^[0-9a-f]{64}$"
+            last_record_ref:
+              oneOf:
+                - type: "null"
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+  content_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"

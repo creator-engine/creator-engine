@@ -1,0 +1,29 @@
+{
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "evidence": [
+    {
+      "entries": [
+        {
+          "path": "evidence/x.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "entry_count": 1,
+      "manifest_ref": "evidence/SHA256SUMS.txt",
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "has_authority": false,
+  "kind": "evidence-fan-in-packet",
+  "packet_id": "pco-v1-g7-tampered",
+  "schema_version": "1",
+  "side_effect_ledger": {
+    "chains": [],
+    "root_ref": null,
+    "verified": false
+  },
+  "source_ratification": {
+    "prompt_ref": ".hermes/research/pco-v1/PROMPT.md",
+    "sha256": "df4e56aee5fa4c9a7b586dd19228ecd58dfa01250185bf96d8052a4008392bd1"
+  }
+}

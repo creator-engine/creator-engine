@@ -145,6 +145,23 @@ def test_well_formed_record_passes_schema_and_local_predicates(tmp_path: Path):
     assert validate_side_effect_ledger_record(valid_side_effect_record(), tmp_path / "effect.yaml") == []
 
 
+def test_record_without_runtime_chain_fields_still_validates(tmp_path: Path):
+    # Backward compatibility: the optional runtime hash-chain fields are absent
+    # in the landed substrate examples and must remain valid.
+    record = valid_side_effect_record()
+    assert "sequence" not in record and "previous_record_sha256" not in record
+    assert validate_side_effect_ledger_record(record, tmp_path / "effect.yaml") == []
+
+
+def test_runtime_chain_fields_are_schema_accepted(tmp_path: Path):
+    # The runtime adds an append-order sequence and a previous-record hash link;
+    # the strict schema must accept them as optional fields.
+    record = valid_side_effect_record()
+    record["sequence"] = 7
+    record["previous_record_sha256"] = "a" * 64
+    assert validate_side_effect_ledger_record(record, tmp_path / "effect.yaml") == []
+
+
 def test_missing_required_field_fails_pco_055(tmp_path: Path):
     record = valid_side_effect_record()
     del record["summary"]

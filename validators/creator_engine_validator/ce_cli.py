@@ -1,0 +1,936 @@
+"""``ce`` kernel CLI — governed lane-launch + Side-Effect Ledger runtime.
+
+Exposes the v1.0 ``ce`` entrypoint with two command families:
+
+```text
+ce lane launch       # spawn/attach a visible tmux lane bound to a live claim
+ce lane status       # read live lane state
+ce lane verify       # check stop line + optional completion report
+ce lane archive      # hash/archive a transcript per TRANSCRIPT_ARCHIVE_PROTOCOL.md
+ce ledger record     # append one redaction-safe Side-Effect Ledger record (RV1-040/041)
+ce ledger verify     # validate the hash chain + replay deterministically (RV1-041)
+ce worker allocate   # start a rootless-Podman worker container bound to a live claim
+ce worker terminate  # revoke broker grants, stop the container, write a stopped record
+ce worker gc         # reap container-instance records that outlived a released claim
+ce worker status     # read a local container-instance record
+ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
+ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
+ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
+ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
+```
+
+This kernel is intentionally narrow. It does NOT implement ``ce launch`` /
+``ce hud`` (Gate 6), image build/pull/push, or any provider/credential setup.
+The worker runtime reaches the container engine and credential broker only via
+injectable seams and fails closed when ``podman`` is unavailable. It never
+prints secrets or environment variables.
+
+Prose contracts: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``,
+``docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md``, and
+``docs/operations/WORKER_CONTAINER_PROTOCOL.md``.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import Sequence
+
+from . import (
+    doctor_runtime,
+    fanin_runtime,
+    init_runtime,
+    integration_queue_dry_run,
+    lane_runtime,
+    launch_runtime,
+    side_effect_ledger_runtime,
+    transcript_archive,
+    worker_runtime,
+)
+from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
+from .tmux_adapter import TmuxAdapter
+
+
+def _make_tmux_adapter():
+    """Factory for the tmux adapter (monkeypatchable in tests)."""
+    return TmuxAdapter()
+
+
+def _make_worker_runner():
+    """Factory for the worker container-engine runner (monkeypatchable in tests)."""
+    return worker_runtime.PodmanCommandRunner()
+
+
+def _make_worker_broker():
+    """Factory for the worker credential broker (monkeypatchable in tests)."""
+    return worker_runtime.NullCredentialBroker()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="ce", description="Creator Engine kernel (v1.0 Gate 3 lane-launch surface)"
+    )
+    groups = parser.add_subparsers(dest="group")
+
+    lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
+    lane_sub = lane.add_subparsers(dest="lane_cmd")
+
+    launch = lane_sub.add_parser("launch", help="spawn/attach a visible tmux lane bound to a live claim")
+    launch.add_argument("--controller-id", required=True)
+    launch.add_argument("--lane-id", required=True)
+    launch.add_argument(
+        "--role", required=True, choices=sorted(lane_runtime.VISIBILITY_REQUIRED_ROLES)
+    )
+    launch.add_argument("--prompt", required=True, help="path to the consumed prompt pointer")
+    launch.add_argument("--prompt-sha", required=True, help="expected byte-level SHA256 of --prompt")
+    launch.add_argument("--repo-root", required=True)
+    launch.add_argument("--ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    launch.add_argument("--handoff", default=None, help="optional consumed handoff pointer path")
+    launch.add_argument("--handoff-sha", default=None, help="expected byte-level SHA256 of --handoff")
+    launch.add_argument(
+        "--command",
+        default=None,
+        help="optional local command to run in the pane (defaults to a safe inert placeholder)",
+    )
+    launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
+    launch.add_argument("--pane-id", default=None)
+    launch.add_argument("--session", default=None, help="tmux session name")
+    launch.add_argument("--window", default=None, help="tmux window name")
+    launch.add_argument("--worktree-path", default=None)
+    launch.add_argument("--branch", default=None)
+    launch.add_argument("--envelope-ref", default=None)
+    launch.add_argument(
+        "--no-tmux",
+        action="store_true",
+        help="refuse-only flag: request a non-visible terminal (always refused for visible roles)",
+    )
+
+    st = lane_sub.add_parser("status", help="read the live Pane Registry record for a lane")
+    st.add_argument("--controller-id", required=True)
+    st.add_argument("--lane-id", required=True)
+    st.add_argument("--ledger-root", required=True)
+    st.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    vf = lane_sub.add_parser("verify", help="verify a lane closeout (stop line + completion report)")
+    vf.add_argument("--controller-id", required=True)
+    vf.add_argument("--lane-id", required=True)
+    vf.add_argument("--ledger-root", required=True)
+    vf.add_argument("--transcript", required=True)
+    vf.add_argument("--stop-line", required=True)
+    vf.add_argument("--completion-report", default=None)
+    vf.add_argument("--json", action="store_true", dest="json_output")
+
+    ar = lane_sub.add_parser("archive", help="archive + hash a transcript under an ignored root")
+    ar.add_argument("--transcript", required=True)
+    ar.add_argument("--archive-root", required=True)
+    ar.add_argument("--batch-slug", required=True)
+    ar.add_argument("--role", required=True)
+    ar.add_argument("--repo-root", default=None, help="repo root for the git-ignore check")
+    ar.add_argument("--json", action="store_true", dest="json_output")
+
+    ledger = groups.add_parser("ledger", help="Side-Effect Ledger runtime (append-only hash chain)")
+    ledger_sub = ledger.add_subparsers(dest="ledger_cmd")
+
+    rec = ledger_sub.add_parser("record", help="append one redaction-safe Side-Effect Ledger record")
+    rec.add_argument("--controller-id", required=True)
+    rec.add_argument("--lane-id", required=True)
+    rec.add_argument("--claim-ref", required=True, help="claim path relative to --active-work-ledger-root")
+    rec.add_argument("--effect-id", required=True)
+    rec.add_argument("--effect-kind", required=True, choices=sorted(EFFECT_KINDS))
+    rec.add_argument("--effect-status", required=True, choices=sorted(EFFECT_STATUSES))
+    rec.add_argument("--summary", required=True)
+    rec.add_argument("--occurred-at", required=True, help="ISO-8601 UTC timestamp or source-controlled ref")
+    rec.add_argument("--repo-root", required=True)
+    rec.add_argument("--side-effect-ledger-root", required=True)
+    rec.add_argument("--active-work-ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    rec.add_argument("--actor-role", default=None, choices=["controller", "architect", "implementer", "reviewer", "verification"])
+    rec.add_argument("--pane-ref", default=None)
+    rec.add_argument("--subject-ref", default=None)
+    rec.add_argument("--evidence-ref", action="append", dest="evidence_refs", default=None, help="repeatable redaction-safe evidence reference")
+    rec.add_argument("--redaction", action="append", dest="redactions", default=None, help="repeatable redaction note")
+    rec.add_argument("--details-json", default=None, help="non-secret metadata as a JSON object (arrays/scalars rejected)")
+    rec.add_argument("--json", action="store_true", dest="json_output")
+
+    lv = ledger_sub.add_parser("verify", help="validate the Side-Effect Ledger hash chain and replay it")
+    lv.add_argument("--side-effect-ledger-root", required=True)
+    lv.add_argument("--active-work-ledger-root", default=None, help="optional: bind each record to a live claim")
+    lv.add_argument("--controller-id", default=None, help="optional: restrict verification to one controller")
+    lv.add_argument("--lane-id", default=None, help="optional: restrict verification to one lane")
+    lv.add_argument("--json", action="store_true", dest="json_output")
+
+    worker = groups.add_parser("worker", help="worker isolation runtime (rootless Podman + credential broker)")
+    worker_sub = worker.add_subparsers(dest="worker_cmd")
+
+    wa = worker_sub.add_parser("allocate", help="start a worker container bound to a live claim under a ratified policy")
+    wa.add_argument("--policy", required=True, help="path to the ratified worker-container policy record")
+    wa.add_argument("--controller-id", required=True)
+    wa.add_argument("--lane-id", required=True)
+    wa.add_argument("--claim-ref", required=True, help="claim path relative to --active-work-ledger-root")
+    wa.add_argument("--lease-ref", required=True, help="lease path relative to --active-work-ledger-root")
+    wa.add_argument("--active-work-ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    wa.add_argument("--container-instance-root", required=True, help="root for container-instance records")
+    wa.add_argument("--instance-id", required=True)
+    wa.add_argument("--started-at", default=None, help="ISO-8601 UTC start timestamp (defaults to now)")
+    wa.add_argument("--details-json", default=None, help="non-secret metadata as a JSON object (secret-shaped values refused)")
+    wa.add_argument("--side-effect-ledger-root", default=None, help="optional: record a container_started side effect")
+    wa.add_argument("--repo-root", default=None, help="repo root (required with --side-effect-ledger-root)")
+    wa.add_argument("--json", action="store_true", dest="json_output")
+
+    wt = worker_sub.add_parser("terminate", help="revoke broker grants, stop the container, write a stopped record")
+    wt.add_argument("--instance-id", required=True)
+    wt.add_argument("--claim-id", required=True)
+    wt.add_argument("--container-instance-root", required=True)
+    wt.add_argument(
+        "--reason",
+        required=True,
+        choices=["normal_release", "claim_lapsed", "validator_refusal", "operator_abort", "force_reap"],
+    )
+    wt.add_argument("--exit-code", type=int, default=0)
+    wt.add_argument("--controller-id", default=None)
+    wt.add_argument("--lane-id", default=None)
+    wt.add_argument("--claim-ref", default=None, help="claim path relative to --active-work-ledger-root")
+    wt.add_argument("--active-work-ledger-root", default=None)
+    wt.add_argument("--side-effect-ledger-root", default=None, help="optional: record a container_stopped side effect")
+    wt.add_argument("--repo-root", default=None)
+    wt.add_argument("--json", action="store_true", dest="json_output")
+
+    wg = worker_sub.add_parser("gc", help="reap container-instance records that outlived a released claim (PCO-043)")
+    wg.add_argument("--container-instance-root", required=True)
+    wg.add_argument("--claim-id", default=None, help="optional: scope the sweep to one claim")
+    wg.add_argument("--json", action="store_true", dest="json_output")
+
+    ws = worker_sub.add_parser("status", help="read a local container-instance record (read-only)")
+    ws.add_argument("--container-instance-root", required=True)
+    ws.add_argument("--claim-id", required=True)
+    ws.add_argument("--instance-id", required=True)
+    ws.add_argument("--json", action="store_true", dest="json_output")
+
+    # ce fanin — local read-only evidence fan-in packet (Gate 7, RV1-070/071).
+    fanin = groups.add_parser(
+        "fanin", help="build/inspect a local read-only evidence fan-in packet (no authority)"
+    )
+    fanin_sub = fanin.add_subparsers(dest="fanin_cmd")
+
+    fb = fanin_sub.add_parser(
+        "build", help="aggregate local evidence into a deterministic content-hashed packet"
+    )
+    fb.add_argument("--request", required=True, help="path to the fan-in request (YAML/JSON)")
+    fb.add_argument(
+        "--packet-root",
+        required=True,
+        help="ignored output root for the packet (e.g. .hermes/fan-in/)",
+    )
+    fb.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
+    fb.add_argument("--packet-id", default=None, help="override the request's packet_id")
+    # Refusal-only authority flags: a fan-in packet never grants authority.
+    fb.add_argument(
+        "--ratify",
+        action="store_true",
+        help="refuse-only flag: ratification is never granted by fan-in (always refused)",
+    )
+    fb.add_argument(
+        "--enqueue",
+        action="store_true",
+        help="refuse-only flag: integration-queue enqueue is never granted by fan-in (always refused)",
+    )
+    fb.add_argument(
+        "--land",
+        action="store_true",
+        help="refuse-only flag: landing is never granted by fan-in (always refused)",
+    )
+    fb.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    fi = fanin_sub.add_parser("inspect", help="verify a packet's content hash + shape (read-only)")
+    fi.add_argument("--packet", required=True, help="path to an existing fan-in packet")
+    fi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce queue — Integration Queue dry-run seam (Gate 8, RV1-082). Local
+    # serialized landing preview only; live enqueue/land/merge is refused.
+    queue = groups.add_parser(
+        "queue",
+        help="preview/inspect an Integration Queue dry-run landing order (no authority)",
+    )
+    queue_sub = queue.add_subparsers(dest="queue_cmd")
+
+    qd = queue_sub.add_parser(
+        "dry-run",
+        help="reconstruct a deterministic serialized landing preview from verified fan-in evidence",
+    )
+    qd.add_argument("--request", required=True, help="path to the dry-run request (YAML/JSON)")
+    qd.add_argument(
+        "--preview-root",
+        required=True,
+        help="ignored output root for the preview (e.g. .hermes/integration-queue/)",
+    )
+    qd.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
+    qd.add_argument("--preview-id", default=None, help="override the request's preview_id")
+    # Refusal-only authority flags: the dry-run seam never lands/enqueues/merges.
+    qd.add_argument(
+        "--enqueue",
+        action="store_true",
+        help="refuse-only flag: live enqueue is never granted by the dry-run seam (always refused)",
+    )
+    qd.add_argument(
+        "--land",
+        action="store_true",
+        help="refuse-only flag: live landing is never granted by the dry-run seam (always refused)",
+    )
+    qd.add_argument(
+        "--merge",
+        action="store_true",
+        help="refuse-only flag: live merge is never granted by the dry-run seam (always refused)",
+    )
+    qd.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    qi = queue_sub.add_parser("inspect", help="verify a preview's content hash + shape (read-only)")
+    qi.add_argument("--preview", required=True, help="path to an existing dry-run landing preview")
+    qi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce check — umbrella wrapper over the retained creator-engine-validator
+    # conformance checks (DP-1 = A: ce wraps the validator subcommands).
+    check = groups.add_parser(
+        "check", help="run creator-engine-validator conformance checks (wraps the validator)"
+    )
+    check.add_argument("paths", nargs="*", default=["."], help="paths to validate")
+    check.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    check.add_argument("--tenant", default=None, help="restrict cross-artifact checks to one tenant")
+    check.add_argument("--list-checks", action="store_true", help="list enabled checks and their FRs")
+
+    # ce doctor — governed-environment guard preflight (DP-3 = B, RV1-061).
+    doctor = groups.add_parser(
+        "doctor", help="governed-environment guard preflight; refuses ungoverned host drift"
+    )
+    doctor.add_argument("--repo-root", default=".", help="repo root to preflight (default: cwd)")
+    doctor.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    doctor.add_argument(
+        "--require-visible-launch",
+        action="store_true",
+        help="treat a missing visible tmux terminal as a refusal (PCO-049)",
+    )
+    doctor.add_argument(
+        "--require-worker",
+        action="store_true",
+        help="treat missing rootless Podman (or rootful Podman) as a refusal (PCO-045)",
+    )
+    doctor.add_argument(
+        "--no-check-packaging",
+        action="store_true",
+        help="skip the dependency/wheelhouse contract clause (RED-G-6)",
+    )
+
+    # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
+    init = groups.add_parser(
+        "init", help="idempotently initialize local .hermes/ kernel state (refuses ungoverned state)"
+    )
+    init.add_argument("--repo-root", default=".", help="repo root to initialize (default: cwd)")
+    init.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce launch / ce hud — deterministic visible Controller-seat launcher
+    # (DP-2 = B, RV1-063). ce hud is an alias/seam label for the same launcher.
+    def _add_launch_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--harness", default=launch_runtime.DEFAULT_HARNESS, help="Controller-seat harness")
+        p.add_argument("--session", default=launch_runtime.DEFAULT_SESSION, help="tmux session name")
+        p.add_argument("--window", default=launch_runtime.DEFAULT_WINDOW, help="tmux window name")
+        p.add_argument("--resume", action="store_true", help="attach an existing launcher session")
+        p.add_argument("--dry-run", action="store_true", help="plan only; no tmux spawn, no provider login")
+        p.add_argument(
+            "--no-tmux",
+            action="store_true",
+            help="refuse-only flag: request a non-visible/headless seat (always refused)",
+        )
+        p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    launch = groups.add_parser(
+        "launch", help="open/attach the visible Controller-seat tmux launcher (DP-2=B)"
+    )
+    _add_launch_args(launch)
+    hud = groups.add_parser("hud", help="alias/seam label for `ce launch` (not a CE-native TUI)")
+    _add_launch_args(hud)
+
+    return parser
+
+
+def _lane_launch(args) -> int:
+    command = args.command.split() if args.command else None
+    terminal_kind = "headless" if args.no_tmux else lane_runtime.TMUX_TERMINAL_KIND
+    try:
+        result = lane_runtime.launch(
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+            role=args.role,
+            prompt=args.prompt,
+            prompt_sha=args.prompt_sha,
+            repo_root=args.repo_root,
+            ledger_root=args.ledger_root,
+            handoff=args.handoff,
+            handoff_sha=args.handoff_sha,
+            command=command,
+            terminal_kind=terminal_kind,
+            host_id=args.host_id,
+            pane_id=args.pane_id,
+            session=args.session,
+            window=args.window,
+            worktree_path=args.worktree_path,
+            branch=args.branch,
+            envelope_ref=args.envelope_ref,
+            tmux_adapter=_make_tmux_adapter(),
+        )
+    except lane_runtime.LaneLaunchError as exc:
+        print(f"ERROR: ce lane launch refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    term = result.record["terminal"]
+    print(
+        f"ce lane launch: wrote {result.pane_path} "
+        f"(tmux session={term['session_id']} window={term['window_id']} pane={term['pane_id']})"
+    )
+    return 0
+
+
+def _lane_status(args) -> int:
+    try:
+        info = lane_runtime.status(
+            controller_id=args.controller_id, lane_id=args.lane_id, ledger_root=args.ledger_root
+        )
+    except lane_runtime.LaneStatusError as exc:
+        print(f"ERROR: ce lane status [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(info, indent=2, sort_keys=True))
+    else:
+        print(info["summary"])
+    return 0
+
+
+def _lane_verify(args) -> int:
+    try:
+        result = lane_runtime.verify(
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+            ledger_root=args.ledger_root,
+            transcript=args.transcript,
+            stop_line=args.stop_line,
+            completion_report=args.completion_report,
+        )
+    except lane_runtime.LaneVerifyError as exc:
+        print(f"ERROR: ce lane verify [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"ce lane verify: OK (stop line present in {result['transcript']})")
+    return 0
+
+
+def _lane_archive(args) -> int:
+    try:
+        result = transcript_archive.archive(
+            transcript=args.transcript,
+            archive_root=args.archive_root,
+            batch_slug=args.batch_slug,
+            role=args.role,
+            repo_root=args.repo_root,
+        )
+    except transcript_archive.ArchiveError as exc:
+        print(f"ERROR: ce lane archive refused: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps({"archive_path": str(result.archive_path), "sha256": result.sha256}, indent=2, sort_keys=True))
+    else:
+        print(f"ce lane archive: {result.archive_path}")
+        print(f"sha256: {result.sha256}")
+    return 0
+
+
+def _ledger_record(args) -> int:
+    details = None
+    if args.details_json is not None:
+        try:
+            details = json.loads(args.details_json)
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: ce ledger record: --details-json is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+    try:
+        result = side_effect_ledger_runtime.record(
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+            claim_ref=args.claim_ref,
+            effect_id=args.effect_id,
+            effect_kind=args.effect_kind,
+            effect_status=args.effect_status,
+            summary=args.summary,
+            occurred_at=args.occurred_at,
+            repo_root=args.repo_root,
+            side_effect_ledger_root=args.side_effect_ledger_root,
+            active_work_ledger_root=args.active_work_ledger_root,
+            actor_role=args.actor_role,
+            pane_ref=args.pane_ref,
+            subject_ref=args.subject_ref,
+            evidence_refs=args.evidence_refs,
+            redactions=args.redactions,
+            details=details,
+        )
+    except side_effect_ledger_runtime.LedgerRecordError as exc:
+        print(f"ERROR: ce ledger record refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "record_path": str(result.record_path),
+                "head_path": str(result.head_path),
+                "sequence": result.sequence,
+                "record_sha256": result.record_sha256,
+                "previous_record_sha256": result.previous_record_sha256,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce ledger record: wrote {result.record_path} (sequence={result.sequence})")
+        print(f"record_sha256: {result.record_sha256}")
+    return 0
+
+
+def _ledger_verify(args) -> int:
+    try:
+        result = side_effect_ledger_runtime.verify(
+            side_effect_ledger_root=args.side_effect_ledger_root,
+            active_work_ledger_root=args.active_work_ledger_root,
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+        )
+    except side_effect_ledger_runtime.LedgerVerifyError as exc:
+        print(f"ERROR: ce ledger verify [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.summary, indent=2, sort_keys=True))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce ledger verify: {status} ({result.summary['record_count']} record(s))")
+        for chain in result.summary["chains"]:
+            print(
+                f"  chain {chain['controller_id']}/{chain['lane_id']}: "
+                f"{chain['record_count']} record(s), head={chain['head_sha256']}"
+            )
+        for error in result.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _worker_allocate(args) -> int:
+    details = None
+    if args.details_json is not None:
+        try:
+            details = json.loads(args.details_json)
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: ce worker allocate: --details-json is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+    try:
+        result = worker_runtime.allocate_worker(
+            policy_path=args.policy,
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+            claim_ref=args.claim_ref,
+            lease_ref=args.lease_ref,
+            active_work_ledger_root=args.active_work_ledger_root,
+            container_instance_root=args.container_instance_root,
+            instance_id=args.instance_id,
+            started_at=args.started_at,
+            details=details,
+            side_effect_ledger_root=args.side_effect_ledger_root,
+            repo_root=args.repo_root,
+            runner=_make_worker_runner(),
+            broker=_make_worker_broker(),
+        )
+    except worker_runtime.WorkerRuntimeError as exc:
+        print(f"ERROR: ce worker allocate refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "instance_path": str(result.instance_path),
+                "container_id": result.container_id,
+                "enforcement_primitive": result.record["enforcement_primitive"],
+                "secret_grant_count": len(result.secret_grants),
+                "side_effect_path": str(result.side_effect_path) if result.side_effect_path else None,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce worker allocate: started {args.instance_id} -> {result.instance_path}")
+        print(f"enforcement_primitive: {result.record['enforcement_primitive']}")
+    return 0
+
+
+def _worker_terminate(args) -> int:
+    try:
+        result = worker_runtime.terminate_worker(
+            instance_id=args.instance_id,
+            claim_id=args.claim_id,
+            container_instance_root=args.container_instance_root,
+            reason=args.reason,
+            exit_code=args.exit_code,
+            controller_id=args.controller_id,
+            lane_id=args.lane_id,
+            claim_ref=args.claim_ref,
+            active_work_ledger_root=args.active_work_ledger_root,
+            side_effect_ledger_root=args.side_effect_ledger_root,
+            repo_root=args.repo_root,
+            runner=_make_worker_runner(),
+            broker=_make_worker_broker(),
+        )
+    except worker_runtime.WorkerRuntimeError as exc:
+        print(f"ERROR: ce worker terminate refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "instance_path": str(result.instance_path),
+                "stopped_at": result.record["stopped_at"],
+                "side_effect_path": str(result.side_effect_path) if result.side_effect_path else None,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce worker terminate: stopped {args.instance_id} ({args.reason})")
+    return 0
+
+
+def _worker_gc(args) -> int:
+    try:
+        result = worker_runtime.garbage_collect_worker(
+            container_instance_root=args.container_instance_root,
+            claim_id=args.claim_id,
+            runner=_make_worker_runner(),
+            broker=_make_worker_broker(),
+        )
+    except worker_runtime.WorkerRuntimeError as exc:
+        print(f"ERROR: ce worker gc refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps({"reaped_instance_ids": result.reaped_instance_ids}, indent=2, sort_keys=True))
+    else:
+        if result.reaped_instance_ids:
+            print(f"ce worker gc: reaped {len(result.reaped_instance_ids)} instance(s): "
+                  + ", ".join(result.reaped_instance_ids))
+        else:
+            print("ce worker gc: no orphaned container instances to reap")
+    return 0
+
+
+def _worker_status(args) -> int:
+    instance_path = (
+        worker_runtime.Path(args.container_instance_root) / args.claim_id / f"{args.instance_id}.yaml"
+    )
+    if not instance_path.is_file():
+        print(f"ERROR: ce worker status: no container-instance record at {instance_path}", file=sys.stderr)
+        return 1
+    record = worker_runtime.load_yaml(instance_path)
+    if getattr(args, "json_output", False):
+        print(json.dumps(record, indent=2, sort_keys=True))
+    else:
+        running = record.get("stopped_at") is None
+        print(
+            f"ce worker status: {args.instance_id} claim={record.get('claim_id')} "
+            f"state={'running' if running else 'stopped'} "
+            f"enforcement_primitive={record.get('enforcement_primitive')}"
+        )
+    return 0
+
+
+def _fanin_build(args) -> int:
+    authority_action = next(
+        (name for name in ("ratify", "enqueue", "land") if getattr(args, name, False)), None
+    )
+    try:
+        result = fanin_runtime.build(
+            request=args.request,
+            packet_root=args.packet_root,
+            repo_root=args.repo_root,
+            packet_id=args.packet_id,
+            authority_action=authority_action,
+        )
+    except fanin_runtime.FaninBuildError as exc:
+        print(f"ERROR: ce fanin build refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "packet_path": str(result.packet_path),
+                "content_hash": result.content_hash,
+                "evidence_count": result.evidence_count,
+                "ledger_chain_count": result.ledger_chain_count,
+                "has_authority": False,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce fanin build: wrote {result.packet_path}")
+        print(f"content_hash: {result.content_hash}")
+        print(
+            f"aggregated {result.evidence_count} evidence manifest(s), "
+            f"{result.ledger_chain_count} ledger chain(s); has_authority=false"
+        )
+    return 0
+
+
+def _fanin_inspect(args) -> int:
+    try:
+        result = fanin_runtime.inspect(packet=args.packet)
+    except fanin_runtime.FaninInspectError as exc:
+        print(f"ERROR: ce fanin inspect [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "ok": result.ok,
+                "packet_path": str(result.packet_path),
+                "content_hash": result.content_hash,
+                "packet_id": result.packet.get("packet_id"),
+                "issues": list(result.issues),
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce fanin inspect: {status} ({result.packet_path})")
+        print(f"content_hash: {result.content_hash}")
+        for issue in result.issues:
+            print(f"  ERROR: {issue}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _queue_dry_run(args) -> int:
+    live_action = next(
+        (name for name in ("enqueue", "land", "merge") if getattr(args, name, False)), None
+    )
+    try:
+        result = integration_queue_dry_run.build(
+            request=args.request,
+            preview_root=args.preview_root,
+            repo_root=args.repo_root,
+            preview_id=args.preview_id,
+            live_action=live_action,
+        )
+    except integration_queue_dry_run.QueueBuildError as exc:
+        print(f"ERROR: ce queue dry-run refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "preview_path": str(result.preview_path),
+                "content_hash": result.content_hash,
+                "lane_count": result.lane_count,
+                "mode": result.preview["mode"],
+                "has_authority": False,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce queue dry-run: wrote {result.preview_path}")
+        print(f"content_hash: {result.content_hash}")
+        print(
+            f"previewed serialized landing order across {result.lane_count} lane(s); "
+            "mode=dry-run has_authority=false"
+        )
+    return 0
+
+
+def _queue_inspect(args) -> int:
+    try:
+        result = integration_queue_dry_run.inspect(preview=args.preview)
+    except integration_queue_dry_run.QueueInspectError as exc:
+        print(f"ERROR: ce queue inspect [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "ok": result.ok,
+                "preview_path": str(result.preview_path),
+                "content_hash": result.content_hash,
+                "preview_id": result.preview.get("preview_id"),
+                "issues": list(result.issues),
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce queue inspect: {status} ({result.preview_path})")
+        print(f"content_hash: {result.content_hash}")
+        for issue in result.issues:
+            print(f"  ERROR: {issue}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _check(args) -> int:
+    """Wrap the retained creator-engine-validator conformance checks."""
+    from . import cli as validator_cli
+
+    prefix: list[str] = []
+    if getattr(args, "json_output", False):
+        prefix.append("--json")
+    if getattr(args, "tenant", None):
+        prefix.extend(["--tenant", args.tenant])
+    if getattr(args, "list_checks", False):
+        return validator_cli.main([*prefix, "--list-checks"])
+    paths = list(args.paths) if args.paths else ["."]
+    return validator_cli.main([*prefix, "check", *paths])
+
+
+def _init(args) -> int:
+    try:
+        result = init_runtime.init_repo(args.repo_root)
+    except init_runtime.InitRefused as exc:
+        print(f"ERROR: ce init refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    except init_runtime.InitError as exc:
+        print(f"ERROR: ce init failed [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            f"ce init: {len(result.created)} dir(s) created, "
+            f"{len(result.existing)} present -> {result.marker_path}"
+        )
+    return 0
+
+
+def _launch(args, invoked_as: str = "launch") -> int:
+    try:
+        result = launch_runtime.launch(
+            harness=args.harness,
+            session=args.session,
+            window=args.window,
+            invoked_as=invoked_as,
+            resume=args.resume,
+            dry_run=args.dry_run,
+            visible=not args.no_tmux,
+            tmux_adapter=_make_tmux_adapter(),
+        )
+    except launch_runtime.LaunchError as exc:
+        print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        if result.plan.dry_run:
+            print(
+                f"ce {invoked_as} (dry-run): would {result.plan.mode} {result.plan.harness} "
+                f"in tmux session={result.plan.session} window={result.plan.window} "
+                f"(visibility={result.plan.visibility})"
+            )
+        elif result.attached:
+            print(f"ce {invoked_as}: attached visible Controller seat in session={result.plan.session}")
+        else:
+            term = result.terminal or {}
+            print(
+                f"ce {invoked_as}: spawned visible Controller seat "
+                f"(session={term.get('session_id')} window={term.get('window_id')} pane={term.get('pane_id')})"
+            )
+    return 0
+
+
+def _doctor(args) -> int:
+    report = doctor_runtime.run_doctor(
+        args.repo_root,
+        require_visible_launch=args.require_visible_launch,
+        require_worker=args.require_worker,
+        check_packaging=not args.no_check_packaging,
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(report.payload, indent=2, sort_keys=True))
+    else:
+        print(doctor_runtime.render_human(report))
+    return 0 if report.ok else 1
+
+
+_LANE_DISPATCH = {
+    "launch": _lane_launch,
+    "status": _lane_status,
+    "verify": _lane_verify,
+    "archive": _lane_archive,
+}
+
+_LEDGER_DISPATCH = {
+    "record": _ledger_record,
+    "verify": _ledger_verify,
+}
+
+_WORKER_DISPATCH = {
+    "allocate": _worker_allocate,
+    "terminate": _worker_terminate,
+    "gc": _worker_gc,
+    "status": _worker_status,
+}
+
+_FANIN_DISPATCH = {
+    "build": _fanin_build,
+    "inspect": _fanin_inspect,
+}
+
+_QUEUE_DISPATCH = {
+    "dry-run": _queue_dry_run,
+    "inspect": _queue_inspect,
+}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.group == "lane":
+        lane_cmd = getattr(args, "lane_cmd", None)
+        handler = _LANE_DISPATCH.get(lane_cmd)
+        if handler is None:
+            parser.parse_args(["lane", "--help"])  # prints lane help, exits
+            return 2
+        return handler(args)
+    if args.group == "ledger":
+        ledger_cmd = getattr(args, "ledger_cmd", None)
+        handler = _LEDGER_DISPATCH.get(ledger_cmd)
+        if handler is None:
+            parser.parse_args(["ledger", "--help"])  # prints ledger help, exits
+            return 2
+        return handler(args)
+    if args.group == "worker":
+        worker_cmd = getattr(args, "worker_cmd", None)
+        handler = _WORKER_DISPATCH.get(worker_cmd)
+        if handler is None:
+            parser.parse_args(["worker", "--help"])  # prints worker help, exits
+            return 2
+        return handler(args)
+    if args.group == "fanin":
+        fanin_cmd = getattr(args, "fanin_cmd", None)
+        handler = _FANIN_DISPATCH.get(fanin_cmd)
+        if handler is None:
+            parser.parse_args(["fanin", "--help"])  # prints fanin help, exits
+            return 2
+        return handler(args)
+    if args.group == "queue":
+        queue_cmd = getattr(args, "queue_cmd", None)
+        handler = _QUEUE_DISPATCH.get(queue_cmd)
+        if handler is None:
+            parser.parse_args(["queue", "--help"])  # prints queue help, exits
+            return 2
+        return handler(args)
+    if args.group == "check":
+        return _check(args)
+    if args.group == "doctor":
+        return _doctor(args)
+    if args.group == "init":
+        return _init(args)
+    if args.group in ("launch", "hud"):
+        return _launch(args, invoked_as=args.group)
+
+    parser.print_usage(sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
