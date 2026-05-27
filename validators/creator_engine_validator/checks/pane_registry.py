@@ -462,6 +462,61 @@ def _container_binding_errors(
     return errors
 
 
+@dataclass(frozen=True)
+class PostureResult:
+    """Resolved governed-posture predicate (CC-G-A contract §7).
+
+    ``posture`` is ``"governed"`` or ``"ungoverned"``. ``pane`` and
+    ``claim`` carry the binding records when present. ``ambiguous_fell_closed``
+    is True when no clean pane↔claim binding existed but a live unreleased
+    claim did, so the predicate failed closed to governed.
+    """
+
+    posture: str
+    pane: RegistryRecord | None = None
+    claim: ClaimRecord | None = None
+    ambiguous_fell_closed: bool = False
+
+
+def evaluate_posture(paths: Iterable[Path]) -> PostureResult:
+    """Resolve the §7 governed-posture predicate over posture-input roots.
+
+    Governed iff a live ``terminal.kind: tmux`` pane binds to a live
+    unreleased Active-Work claim (PCO-050) whose ``controller_id`` and
+    ``lane_id`` match. When no clean binding resolves but at least one live
+    unreleased claim exists, the posture is ambiguous *inside a lane with a
+    live claim* and fails **closed** (governed). Otherwise ungoverned.
+
+    Reuses the same pane/claim loading and reference-resolution helpers the
+    ``pane_registry`` check uses so the in-band hook bridge and the post-hoc
+    validator never diverge on what "governed" means.
+    """
+    path_list = [Path(p) for p in paths]
+    roots = _scan_roots(path_list)
+    now = datetime.now(UTC)
+    panes, _ = _load_valid_panes(path_list)
+    claim_index = _load_live_claim_index(path_list, roots, now)
+    for pane in panes:
+        if pane.record.get("status") not in LIVE_STATUSES:
+            continue
+        terminal = pane.record.get("terminal")
+        if not isinstance(terminal, dict) or terminal.get("kind") != "tmux":
+            continue
+        claim = _resolve_ref(pane.record.get("claim_ref"), claim_index)
+        if claim is None:
+            continue
+        if claim.record.get("controller_id") == pane.record.get("controller_id") and claim.record.get(
+            "lane_id"
+        ) == pane.record.get("lane_id"):
+            return PostureResult(posture="governed", pane=pane, claim=claim)
+    if claim_index:
+        # A live claim exists but no clean pane binding resolved: ambiguous
+        # inside a lane with a live claim → fail closed (governed).
+        any_claim = next(iter(claim_index.values()))
+        return PostureResult(posture="governed", claim=any_claim, ambiguous_fell_closed=True)
+    return PostureResult(posture="ungoverned")
+
+
 @register(
     CHECK_NAME,
     [

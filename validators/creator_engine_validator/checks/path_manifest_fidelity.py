@@ -320,6 +320,43 @@ def scan_document(text: str, path: str | Path) -> list[ValidationError]:
     return errors
 
 
+def extract_manifest_paths(text: str) -> list[str]:
+    """Return the normalized path lines from the first fenced ``text`` manifest
+    block following a ``*_PATHS_COUNT=`` / ``*_PATHS_SHA256=`` declaration.
+
+    This reuses the exact fence-location logic ``scan_document`` uses for
+    fidelity verification, so the in-band hook bridge (CC-G-B) and the
+    post-hoc fidelity check never disagree about which path lines the
+    ratified manifest contains. Returns ``[]`` when the document declares no
+    manifest or the fenced block is absent.
+    """
+    declarations = list(COUNT_PATTERN.finditer(text))
+    hashes = {h.group("name"): h for h in HASH_PATTERN.finditer(text)}
+    for count_match in declarations:
+        name = count_match.group("name")
+        hash_match = hashes.get(name)
+        search_from = (
+            count_match.end() if hash_match is None else max(count_match.end(), hash_match.end())
+        )
+        fence = _find_first_fence_after(text, search_from)
+        if fence is None:
+            continue
+        body = text[fence[0] : fence[1]]
+        if body.endswith("\n"):
+            body = body[:-1]
+        return [line.strip() for line in body.split("\n") if line.strip()]
+    return []
+
+
+def extract_manifest_paths_from_file(path: Path) -> list[str]:
+    """Read ``path`` and return its declared manifest path lines (or [])."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    return extract_manifest_paths(text)
+
+
 @register(CHECK_NAME, ["R-012", "WH-001"])
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []

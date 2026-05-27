@@ -118,6 +118,25 @@ def _build_parser() -> argparse.ArgumentParser:
     pco_allocate.add_argument("--lease-seconds", type=int, default=3600, help="lease duration in seconds (default: 3600)")
     pco_allocate.add_argument("--pane-label", choices=["architect", "implementer", "controller", "reviewer"], default=None, help="optional pane role label")
 
+    hook_check_p = sub.add_parser(
+        "hook-check",
+        help="evaluate a Claude hook event (JSON) and emit a machine-readable allow/deny/block decision",
+    )
+    hook_check_src = hook_check_p.add_mutually_exclusive_group(required=True)
+    hook_check_src.add_argument("--input-json", help="path to a Claude hook event JSON file")
+    hook_check_src.add_argument("--stdin", action="store_true", help="read the hook event JSON from stdin")
+    hook_check_p.add_argument(
+        "--posture",
+        choices=["auto", "governed", "ungoverned"],
+        default="auto",
+        help="posture override; 'auto' resolves the §7 predicate from .hermes posture inputs",
+    )
+    hook_check_p.add_argument("--posture-root", default=None, help="root to resolve .hermes posture inputs (default: event cwd)")
+    hook_check_p.add_argument("--manifest-doc", default=None, help="handoff/prompt doc carrying the fenced ALLOWED_PATHS manifest")
+    hook_check_p.add_argument("--evidence-root", default=None, help="ignored evidence-root prefix the gate may write under")
+    hook_check_p.add_argument("--closeout-file", default=None, help="path to the Stop closeout text to verify")
+    hook_check_p.add_argument("--completion-report", default=None, help="completion-report artifact to validate on Stop")
+
     pco_release = sub.add_parser(
         "pco-release",
         help="PCO-028: release a worktree lane (mark claim released, remove lease, emit event, git worktree remove)",
@@ -330,6 +349,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
+    if subcommand == "hook-check":
+        return _hook_check(args)
     if subcommand == "pco-allocate":
         return _pco_allocate(args)
     if subcommand == "pco-release":
@@ -337,6 +358,47 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.print_usage(sys.stderr)
     return 2
+
+
+def _hook_check(args) -> int:
+    """Evaluate a Claude hook event and emit a JSON decision.
+
+    Exit ``0`` for any evaluated allow/deny/block decision (a denial is a
+    hook decision, not a CLI failure); non-zero only for invalid input or
+    arguments.
+    """
+    from . import hook_check as hc
+
+    if args.stdin:
+        raw = sys.stdin.read()
+    else:
+        try:
+            raw = Path(args.input_json).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"ERROR: hook-check: cannot read --input-json: {exc}", file=sys.stderr)
+            return 2
+
+    try:
+        event = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: hook-check: invalid event JSON: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(event, dict):
+        print("ERROR: hook-check: event JSON must be an object", file=sys.stderr)
+        return 2
+
+    context = hc.build_context(
+        event,
+        posture=args.posture,
+        posture_root=args.posture_root,
+        manifest_doc=args.manifest_doc,
+        evidence_root=args.evidence_root,
+        closeout_file=args.closeout_file,
+        completion_report=args.completion_report,
+    )
+    decision = hc.evaluate(event, context)
+    print(json.dumps(decision.to_dict(), indent=2, sort_keys=True))
+    return 0
 
 
 def _resolve_ledger_root(args_ledger_root: str | None, repo_root_path: Path) -> Path:
