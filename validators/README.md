@@ -120,11 +120,41 @@ the existing validator surfaces — it is not a parallel shell-only policy engin
   referenced completion-report artifact that fails `completion_report_schema` /
   `completion_report_required_for_envelope` blocks.
 
-Output is Claude-hook-compatible JSON (`hookSpecificOutput.permissionDecision`
-for `PreToolUse`; `decision: "block"` for `Stop`). An evaluated allow/deny/block
-exits `0` (a denial is a decision, not a CLI failure); only invalid input or
-arguments exit non-zero. This gate ships no `.claude/settings.json` or
-`.claude/hooks/**` — those are CC-G-C.
+By default (`--format raw`) the CLI emits the full CC-G-B decision dict. An
+evaluated allow/deny/block exits `0` (a denial is a decision, not a CLI
+failure); only invalid input or arguments exit non-zero.
+
+### `--format claude` presentation seam (CC-G-C)
+
+`hook-check --format {raw,claude}` (default `raw`) selects the output shape.
+`--format claude` is an **additive presentation seam** — it changes no decision
+semantics — that renders the minimal Claude Code hook output the committed
+hook-pack passes through verbatim:
+
+- **PreToolUse** → `{"hookSpecificOutput": {"hookEventName": "PreToolUse",
+  "permissionDecision": "deny"|"allow", "permissionDecisionReason": …}}`. An
+  ungoverned *advisory* deny maps to `permissionDecision: "allow"` (an
+  ungoverned lane is never hard-denied), with the advisory context kept in the
+  reason.
+- **Stop** block → `{"decision": "block", "reason": …}`; a Stop allow/advisory
+  emits no `decision` key.
+
+`--format raw` (the default) is byte-for-byte backward-compatible with CC-G-B;
+`HookDecision.to_claude_hook_dict()` backs the `claude` shape.
+
+## Claude hook-pack (`.claude/`, CC-G-C)
+
+CC-G-C ships the committed Ring 1 hook-pack that calls this bridge in-band:
+`.claude/settings.json` (PreToolUse for `Edit|Write|MultiEdit|Read|Bash` plus an
+advisory Stop hook) and the POSIX-sh wrappers `.claude/hooks/ce-hook-common.sh`,
+`ce-pretooluse.sh`, and `ce-stop.sh`. The wrappers fail open by contract and the
+Stop hook is advisory/observability-only in v1.0. The pack is **RUNTIME
+(launch-pinned) and defeasible — not HARD**; the HARD floor and the Stop
+arming/`--setting-sources` pinning are the Ring 0 kernel's job (CC-G-D). See
+[`docs/operations/CLAUDE_CODE_HOOK_PACK.md`](../docs/operations/CLAUDE_CODE_HOOK_PACK.md)
+and the three-ring model in
+[`docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md`](../docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md)
+(§8).
 
 ## Side-Effect Ledger
 

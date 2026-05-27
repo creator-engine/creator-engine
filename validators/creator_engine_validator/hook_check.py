@@ -96,6 +96,37 @@ class HookDecision:
             "hookSpecificOutput": dict(self.hook_specific_output),
         }
 
+    def to_claude_hook_dict(self) -> dict[str, Any]:
+        """Render the minimal Claude Code hook output for this decision.
+
+        This is an *additive* CC-G-C presentation seam; it changes no CC-G-B
+        decision semantics. The mapping is:
+
+        * ``PreToolUse`` → ``{"hookSpecificOutput": {"hookEventName":
+          "PreToolUse", "permissionDecision": "deny"|"allow",
+          "permissionDecisionReason": ...}}``. An ungoverned *advisory* deny
+          already carries ``decision == "allow"`` here, so it maps to
+          ``permissionDecision: "allow"`` — an ungoverned lane is never
+          hard-denied — with the advisory context preserved in the reason.
+        * ``Stop`` block → ``{"decision": "block", "reason": ...}``. A Stop
+          allow/advisory emits no ``decision`` key (no-decision == allow).
+        * any other event → ``{}`` (no Claude-actionable output).
+        """
+        if self.hook_event_name == "Stop":
+            if self.decision == "block":
+                return {"decision": "block", "reason": self.reason}
+            return {}
+        if self.hook_event_name == "PreToolUse":
+            permission = "deny" if self.decision == "deny" else "allow"
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": permission,
+                    "permissionDecisionReason": self.reason,
+                }
+            }
+        return {}
+
 
 # --------------------------------------------------------------------------
 # Secret classification (PreToolUse Read)

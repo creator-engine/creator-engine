@@ -11,3 +11,9 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 .venv/
+
+# Claude Code local settings override (CC-G-C / D4). A gitignored local-override
+# source must never be committed: it could silently weaken or disable the
+# committed Ring 1 hook-pack. Governed launches also pin `--setting-sources
+# project` to exclude `local`. See docs/operations/CLAUDE_CODE_HOOK_PACK.md.
+.claude/settings.local.json
