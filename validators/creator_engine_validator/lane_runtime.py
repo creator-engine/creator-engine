@@ -22,6 +22,7 @@ Prose contract: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import uuid
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from typing import Any, Sequence
 
 import yaml
 
+from . import claude_launch_spec
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
 from .loader import LoaderError, load_yaml
@@ -114,6 +116,12 @@ class TmuxUnavailableError(LaneLaunchError):
     code = "G3-TMUX-UNAVAILABLE"
 
 
+class ClaudeLaunchRefused(LaneLaunchError):
+    """CC-G-D Ring 0: a governed Claude lane surface is refused before side effects."""
+
+    code = "G3-CLAUDE-REFUSED"
+
+
 class LaneStatusError(LaneError):
     code = "G3-STATUS-ERROR"
 
@@ -133,6 +141,12 @@ class LaunchResult:
     record: dict[str, Any]
     pane: TmuxPane
     claim_path: Path
+    # CC-G-D: governed-Claude audit + deterministic closeout pointers. ``None``
+    # for non-Claude lanes. These ride the LaunchResult and an ignored sidecar —
+    # they are deliberately NOT written into the schema-validated pane record,
+    # because ``schemas/pane-registry.schema.yaml`` pins ``unevaluatedProperties:
+    # false`` and is outside the CC-G-D allowlist.
+    claude_governance: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +177,35 @@ def _pane_path(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
     return ledger_root / "panes" / controller_id / f"{lane_id}.yaml"
 
 
+def _governance_sidecar_path(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
+    """Ignored sidecar holding CC-G-D governed-Claude audit + closeout pointers.
+
+    Lives next to the Pane Registry record under ignored ``.hermes`` state. The
+    pointers are kept here (and on :class:`LaunchResult`) rather than in the
+    schema-validated pane record, which pins ``unevaluatedProperties: false``.
+    """
+    return ledger_root / "panes" / controller_id / f"{lane_id}.claude-governance.json"
+
+
+def _is_claude_command(command: Sequence[str]) -> bool:
+    """True when ``command`` invokes the Claude harness (basename ``claude``)."""
+    if not command:
+        return False
+    head = str(command[0])
+    return head == "claude" or head.rsplit("/", 1)[-1] == "claude"
+
+
+def _confirm_pack(repo_root: Path | str | None) -> bool:
+    """Seam: confirm the committed hook-pack is loaded (monkeypatchable in tests).
+
+    Delegates to :func:`hook_pack_confirm.confirm_hook_pack`. Never launches
+    Claude and never makes a network call.
+    """
+    from . import hook_pack_confirm
+
+    return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
+
+
 # ---------------------------------------------------------------------------
 # ce lane launch
 # ---------------------------------------------------------------------------
@@ -190,6 +233,9 @@ def launch(
     envelope_ref: str | None = None,
     tmux_adapter: Any | None = None,
     now: datetime | None = None,
+    mcp_config_path: str | None = None,
+    closeout_file: str | None = None,
+    completion_report_ref: str | None = None,
 ) -> LaunchResult:
     """Launch a governed visible lane and write its Pane Registry record.
 
@@ -261,7 +307,53 @@ def launch(
             f"Active-Work Ledger conflict guard refuses launch: {codes}"
         )
 
-    # 6. tmux must be available for a tmux lane — before pane write (RV1-030).
+    # 6. CC-G-D Ring 0: when the command is a Claude invocation, refuse prohibited
+    #    surfaces and pin the governed command BEFORE any side effect (no tmux
+    #    spawn, no Pane Registry write). Non-Claude lanes are untouched.
+    launch_command = list(command) if command else list(INERT_PLACEHOLDER_COMMAND)
+    claude_governance: dict[str, Any] | None = None
+    if _is_claude_command(launch_command):
+        requested = list(launch_command[1:])
+        spec = claude_launch_spec.parse_claude_argv(requested)
+        confirmed = _confirm_pack(repo_root) if spec.skip_permissions else False
+        spec_result = claude_launch_spec.evaluate_claude_launch(
+            spec, hook_pack_confirmed=confirmed
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise ClaudeLaunchRefused(
+                f"refusing governed Claude lane launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        resolved_mcp = mcp_config_path or f".hermes/{lane_id}/mcp/ce-mcp.json"
+        try:
+            launch_command = claude_launch_spec.build_governed_claude_command(
+                base_argv=requested,
+                mcp_config_path=resolved_mcp,
+                closeout_file=closeout_file,
+                completion_report_ref=completion_report_ref,
+            )
+        except claude_launch_spec.GovernedCommandError as exc:
+            clause = (
+                claude_launch_spec.CLAUSE_MCP
+                if "MCP config" in str(exc)
+                else claude_launch_spec.CLAUSE_LOCAL_SETTINGS
+            )
+            raise ClaudeLaunchRefused(
+                f"refusing governed Claude lane launch: {clause} — {exc}"
+            ) from exc
+        claude_governance = {
+            "harness": "claude",
+            "hook_pack_confirmed": bool(confirmed) if spec.skip_permissions else None,
+            "setting_sources_pinned": True,
+            "strict_mcp_config": True,
+            "mcp_config_path": resolved_mcp,
+            "closeout_ref": closeout_file,
+            "completion_report_ref": completion_report_ref,
+        }
+
+    # 6b. tmux must be available for a tmux lane — before pane write (RV1-030).
     adapter = tmux_adapter if tmux_adapter is not None else TmuxAdapter()
     if terminal_kind == TMUX_TERMINAL_KIND and not adapter.is_available():
         raise TmuxUnavailableError(
@@ -270,10 +362,9 @@ def launch(
 
     # --- Side effects begin here ---
 
-    # 7. Spawn/attach the tmux pane running the requested local command.
+    # 7. Spawn/attach the tmux pane running the (possibly governed) command.
     session_name = session or DEFAULT_SESSION
     window_name = window or lane_id
-    launch_command = list(command) if command else list(INERT_PLACEHOLDER_COMMAND)
     try:
         pane = adapter.ensure_pane(
             session=session_name, window=window_name, command=launch_command
@@ -331,7 +422,19 @@ def launch(
         )
     _atomic_write(pane_path, yaml.safe_dump(record, sort_keys=True))
 
-    return LaunchResult(pane_path=pane_path, record=record, pane=pane, claim_path=claim_path)
+    # 9. CC-G-D: persist the governed-Claude audit + deterministic closeout
+    #    pointers to an ignored sidecar (never the tracked-shape pane record).
+    if claude_governance is not None:
+        sidecar = _governance_sidecar_path(ledger_root, controller_id, lane_id)
+        _atomic_write(sidecar, json.dumps(claude_governance, indent=2, sort_keys=True))
+
+    return LaunchResult(
+        pane_path=pane_path,
+        record=record,
+        pane=pane,
+        claim_path=claim_path,
+        claude_governance=claude_governance,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -409,3 +512,37 @@ def verify(
         "stop_line": stop_line,
         "completion_report_ok": completion_report_ok,
     }
+
+
+# ---------------------------------------------------------------------------
+# CC-G-D — Ring 0 closeout verification (Ring 2 Stop logic; committed hook stays advisory)
+# ---------------------------------------------------------------------------
+
+
+def verify_closeout(
+    *,
+    closeout_file: str | None = None,
+    completion_report: str | None = None,
+    posture: str = "governed",
+) -> dict[str, Any]:
+    """Evaluate a deterministic closeout against the Ring 2 Stop logic.
+
+    CC-G-D injects the deterministic closeout / ``completion_report_ref``
+    pointers (Ring 0 facts) and feeds them to the existing
+    :mod:`hook_check` Stop decision so post-hoc verification and the in-band hook
+    never diverge. This is a Ring 0 *fact* only: it returns the Claude-hook Stop
+    decision shape (``{"decision": "block", ...}`` when a governed closeout is
+    incomplete) but **does not** modify or arm the committed advisory Stop hook
+    ``.claude/hooks/ce-stop.sh`` — arming hard Stop blocking is a separate gate.
+    """
+    from . import hook_check
+
+    event = {"hook_event_name": "Stop"}
+    context = hook_check.build_context(
+        event,
+        posture=posture,
+        closeout_file=closeout_file,
+        completion_report=completion_report,
+    )
+    decision = hook_check.evaluate(event, context)
+    return decision.to_claude_hook_dict()

@@ -141,3 +141,97 @@ def test_launch_result_to_dict_is_json_safe():
     result = launch_runtime.launch(harness="claude", dry_run=True, tmux_adapter=adapter)
     json.dumps(result.to_dict())
     assert result.to_dict()["plan"]["mode"] == "launch"
+
+
+# ---------------------------------------------------------------------------
+# CC-G-D — Ring 0 Claude launch refusal + governed command in `ce launch`
+# ---------------------------------------------------------------------------
+
+
+def test_claude_launch_refuses_bare_before_side_effects(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    with pytest.raises(launch_runtime.LaunchRefused) as exc:
+        launch_runtime.launch(harness="claude", extra_args=["--bare"], tmux_adapter=adapter)
+    assert exc.value.code == "G6-LAUNCH-CLAUDE-REFUSED"
+    assert "CC-D-1" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_claude_launch_refuses_skip_perms_without_confirmed_pack(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: False)
+    with pytest.raises(launch_runtime.LaunchRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            extra_args=["--dangerously-skip-permissions"],
+            tmux_adapter=adapter,
+        )
+    assert "CC-D-6" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_claude_launch_pins_setting_sources_and_strict_mcp(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    launch_runtime.launch(
+        harness="claude",
+        session="s",
+        tmux_adapter=adapter,
+        mcp_config_path=".hermes/s/mcp/ce-mcp.json",
+    )
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert cmd[0] == "claude"
+    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
+
+
+def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    launch_runtime.launch(
+        harness="claude",
+        session="s",
+        extra_args=["--dangerously-skip-permissions"],
+        tmux_adapter=adapter,
+        mcp_config_path=".hermes/s/mcp/ce-mcp.json",
+    )
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert "--dangerously-skip-permissions" in cmd
+    assert "--setting-sources" in cmd and "project" in cmd
+
+
+def test_non_claude_harness_command_unchanged(monkeypatch):
+    # A non-Claude harness must not get the governed Claude command injected.
+    adapter = FakeAdapter()
+    launch_runtime.launch(harness="codex", session="s", extra_args=["--foo"], tmux_adapter=adapter)
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert cmd == ["codex", "--foo"]
+
+
+def test_claude_launch_refuses_uncontrolled_mcp_config_flag(monkeypatch):
+    # An operator-supplied --mcp-config outside the governed roots must refuse
+    # (LaunchRefused), never crash with a raw GovernedCommandError.
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    with pytest.raises(launch_runtime.LaunchRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            session="s",
+            tmux_adapter=adapter,
+            mcp_config_path="/etc/global/mcp.json",
+        )
+    assert "CC-D-7" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_claude_dry_run_does_not_confirm_pack_when_no_skip_perms(monkeypatch):
+    # Dry-run with no skip-perms must not invoke the (possibly impure) pack probe.
+    adapter = FakeAdapter()
+
+    def _boom(repo_root):
+        raise AssertionError("_confirm_pack must not be called without skip-permissions")
+
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", _boom)
+    result = launch_runtime.launch(harness="claude", dry_run=True, tmux_adapter=adapter)
+    assert result.plan.dry_run is True
+    assert adapter.spawned == []

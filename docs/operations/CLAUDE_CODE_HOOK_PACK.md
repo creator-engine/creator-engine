@@ -83,29 +83,47 @@ Inferring them from the transcript in-band would be both unreliable and a
 boundary violation. The Ring 2 bridge already implements the Stop block logic;
 CC-G-C simply does not arm it. CC-G-D will inject the pointers and arm it.
 
-## CC-G-D (Ring 0) dependencies
+## CC-G-D (Ring 0) dependencies — satisfied by CC-G-D
 
-The committed hook-pack is defense-in-depth *inside* the lane. The following
-remain the responsibility of the Ring 0 kernel (`ce launch` / `ce lane launch`,
-CC-G-D) and are **not** provided by Ring 1:
+The committed hook-pack is defense-in-depth *inside* the lane and remains
+**RUNTIME (launch-pinned), DEFEASIBLE** — CC-G-D does **not** make it HARD or
+non-overridable. What CC-G-D builds is the **HARD Ring 0 launch/accept refusal**
+that runs *before Claude starts*, in the kernel (`ce launch` / `ce lane launch`).
+The following Ring 0 responsibilities are now implemented (HARD; refused before
+any side effect), not provided by Ring 1:
 
-- pin `--setting-sources project` so `settings.local.json` cannot weaken the
-  posture, and verify it;
-- refuse `--bare` (defeats the entire enforcement layer);
-- refuse `-p` / `--print` headless mode for governed authoring lanes;
-- refuse background `agents` sessions and `--remote-control` /
-  `remoteControlAtStartup` (invisible/unarchivable, outside the visible-pane
-  model);
-- **confirm the hook-pack is loaded and the validator is reachable before
-  permitting `--dangerously-skip-permissions`** (skip-permissions is safe only
-  once the pack is confirmed active);
-- bind the live, visible tmux pane to an Active-Work claim and Pane Registry
-  record (§7 governed-posture predicate, `PCO-049`/`PCO-050`);
-- inject the deterministic closeout / completion-report pointers that arm hard
-  Stop blocking (D2);
-- mint and verify the future explicit side-effect authority token that opens
-  the restricted-mechanics seam (until then, restricted mechanics are denied
-  under governed posture with no authority present).
+- **[satisfied]** pin `--setting-sources project` so `settings.local.json` cannot
+  weaken the posture, and refuse a `--setting-sources` that omits `project` or
+  includes `local` (`CC-D-5`) — `claude_launch_spec.build_governed_claude_command`
+  + `evaluate_claude_launch`;
+- **[satisfied]** refuse `--bare` (`CC-D-1`);
+- **[satisfied]** refuse `-p` / `--print` headless mode for governed authoring
+  lanes (`CC-D-2`);
+- **[satisfied]** refuse background `agents` sessions / `--agents` (`CC-D-3`) and
+  `--remote-control` / `remoteControlAtStartup` (`CC-D-4`);
+- **[satisfied]** **confirm the hook-pack is present/parseable/registered and the
+  validator is reachable before permitting `--dangerously-skip-permissions`**
+  (`CC-D-6`) — `hook_pack_confirm.confirm_hook_pack`; skip-permissions is safe
+  only once the pack is confirmed active;
+- **[satisfied]** constrain MCP to a CE-owned config with `--strict-mcp-config`
+  and refuse uncontrolled/global MCP inheritance (`CC-D-7`); CC-G-D launches no
+  MCP server (config-posture only);
+- **[reused]** bind the live, visible tmux pane to an Active-Work claim and Pane
+  Registry record (§7 governed-posture predicate, `PCO-049`/`PCO-050`) — the
+  shipped `lane_runtime.launch` binding, unchanged;
+- **[satisfied — Ring 0 facts only]** inject the deterministic closeout /
+  completion-report pointers and verify them via the Ring 2 Stop logic
+  (`lane_runtime.verify_closeout`). This supplies the facts that *would* arm hard
+  Stop blocking but **does not arm it**: the committed advisory Stop hook
+  `.claude/hooks/ce-stop.sh` is unchanged. Arming hard Stop blocking is a separate
+  follow-on gate (CC-G-E / a ratified CC-G-D Slice 2);
+- **[deferred]** mint and verify the future explicit side-effect authority token
+  that opens the restricted-mechanics seam (until then, restricted mechanics are
+  denied under governed posture with no authority present).
+
+Code: `validators/creator_engine_validator/{claude_launch_spec,hook_pack_confirm}.py`,
+wired into `launch_runtime.launch` (`ce launch`, code `G6-LAUNCH-CLAUDE-REFUSED`)
+and `lane_runtime.launch` (`ce lane launch`, code `G3-CLAUDE-REFUSED`).
 
 ## Decision shapes emitted to Claude
 
