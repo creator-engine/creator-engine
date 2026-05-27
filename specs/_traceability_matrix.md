@@ -124,6 +124,27 @@ spine.
 
 ---
 
+## CC-G-D — Ring 0 Claude Code launcher/kernel (SVC+RUN; strict TDD)
+
+Extends (does not rewrite) the shipped Gate 3 (`ce lane launch`) and Gate 6
+(`ce launch`/`ce hud`) launch substrate. **HARD claim is only the Ring 0
+launch/accept refusal before side effects**; the committed CC-G-C hook-pack
+remains **RUNTIME/DEFEASIBLE** and is not strengthened to HARD here, and hard
+Stop blocking is **not** armed (`.claude/hooks/ce-stop.sh` unchanged).
+
+| Req | Requirement | Design ref | Test plan | Evidence | Status |
+|---|---|---|---|---|---|
+| RV1-CC-D-1 | Ring 0 refuses ungoverned Claude surfaces **before Claude starts**: `--bare` (`CC-D-1`), `-p`/`--print` for a governed authoring lane (`CC-D-2`), `agents`/`--agents` (`CC-D-3`), `--remote-control`/`remoteControlAtStartup` (`CC-D-4`), `settings.local.json` weakening / `--setting-sources` omitting `project` or including `local` (`CC-D-5`), `--dangerously-skip-permissions` without a confirmed hook-pack (`CC-D-6`), uncontrolled/global MCP (`CC-D-7`) | seat contract §5; `environment_guard` pure-predicate pattern | RED→GREEN per-clause unit refusals + per-surface end-to-end CLI sweep; each refuses before any tmux spawn / Pane Registry write | `creator_engine_validator/claude_launch_spec.py`; `tests/unit/test_claude_launch_spec.py` (24); `tests/integration/test_claude_launch_refusal.py` (10) | **CC-G-D complete / ready for Source ratification** |
+| RV1-CC-D-2 | Governed command pins `--setting-sources project` + `--strict-mcp-config` + CE-owned `--mcp-config`; hook-pack confirmation validates `.claude/settings.json` parse, PreToolUse/Stop registrations, exec-bit, validator reachability (injectable probe; never launches Claude/network) | seat contract §4/§6 | RED→GREEN builder idempotency + conflict refusal; confirm present/parse/registration/exec/probe fail-closed | `claude_launch_spec.build_governed_claude_command`; `hook_pack_confirm.confirm_hook_pack`; `tests/unit/test_hook_pack_confirm.py` (7) | **CC-G-D complete / ready for Source ratification** |
+| RV1-CC-D-3 | Refusals wired into `launch_runtime.launch` (`G6-LAUNCH-CLAUDE-REFUSED`) and `lane_runtime.launch` (`G3-CLAUDE-REFUSED`) before side effects; non-Claude launch/lane behavior unchanged; deterministic closeout pointers injected to `LaunchResult` + ignored sidecar and verified via Ring 2 Stop logic (`lane_runtime.verify_closeout`) **without** arming `ce-stop.sh` | Gate 3/Gate 6 runtimes; `hook_check` Ring 2 decision reuse | RED→GREEN refusal-before-spawn + governed-command pin + non-Claude regression; closeout block/allow/advisory | `launch_runtime.py`, `lane_runtime.py`, `ce_cli.py` (`--claude-arg`/`--mcp-config`/`--completion-report-ref`/`--closeout-file`); `tests/unit/{test_launch_runtime,test_lane_runtime,test_ce_launch_cli}.py` + integration CLI suites | **CC-G-D complete / ready for Source ratification** |
+
+> CC-G-D authors implementation only; the pane-registry record stays schema-clean
+> (`schemas/pane-registry.schema.yaml` pins `unevaluatedProperties: false` and is
+> outside the CC-G-D allowlist), so governed-Claude audit + closeout pointers ride
+> `LaunchResult` and an ignored sidecar rather than the tracked-shape record.
+
+---
+
 ## Cross-cutting recorded contracts
 
 - **Two ledgers are distinct primitives** (load-bearing, verification requirement): Active-Work Ledger

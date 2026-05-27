@@ -19,11 +19,16 @@ ce queue dry-run     # preview a serialized canonical-branch landing order, no a
 ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
 ```
 
-This kernel is intentionally narrow. It does NOT implement ``ce launch`` /
-``ce hud`` (Gate 6), image build/pull/push, or any provider/credential setup.
-The worker runtime reaches the container engine and credential broker only via
-injectable seams and fails closed when ``podman`` is unavailable. It never
-prints secrets or environment variables.
+This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
+deterministic visible Controller-seat launcher — and the CC-G-D Ring 0 governed
+Claude surfaces (``--claude-arg``/``--mcp-config``/``--completion-report-ref``/
+``--closeout-file`` on ``launch`` and ``lane launch``) that refuse prohibited
+Claude flags and pin ``--setting-sources project`` + strict MCP before any side
+effect. It does NOT implement image build/pull/push or any provider/credential
+setup, and CC-G-D launches no MCP server (config-posture only). The worker
+runtime reaches the container engine and credential broker only via injectable
+seams and fails closed when ``podman`` is unavailable. It never prints secrets
+or environment variables.
 
 Prose contracts: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``,
 ``docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md``, and
@@ -91,6 +96,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--command",
         default=None,
         help="optional local command to run in the pane (defaults to a safe inert placeholder)",
+    )
+    # CC-G-D Ring 0 governed-Claude surfaces for a lane whose --command is `claude`.
+    launch.add_argument(
+        "--claude-arg",
+        action="append",
+        dest="claude_arg",
+        default=None,
+        help="repeatable extra arg appended to a claude --command (use --claude-arg=<value> for dashed values)",
+    )
+    launch.add_argument(
+        "--mcp-config",
+        dest="mcp_config",
+        default=None,
+        help="CE-owned MCP config path inside the repo / .hermes (pins --strict-mcp-config)",
+    )
+    launch.add_argument(
+        "--completion-report-ref",
+        dest="completion_report_ref",
+        default=None,
+        help="deterministic completion-report pointer for Ring 0 closeout verification",
+    )
+    launch.add_argument(
+        "--closeout-file",
+        dest="closeout_file",
+        default=None,
+        help="deterministic closeout file pointer for Ring 0 closeout verification",
     )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
@@ -338,6 +369,33 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="refuse-only flag: request a non-visible/headless seat (always refused)",
         )
+        # CC-G-D Ring 0 governed-Claude surfaces. Pass dashed values with `=`
+        # (e.g. --claude-arg=--dangerously-skip-permissions).
+        p.add_argument(
+            "--claude-arg",
+            action="append",
+            dest="claude_arg",
+            default=None,
+            help="repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values)",
+        )
+        p.add_argument(
+            "--mcp-config",
+            dest="mcp_config",
+            default=None,
+            help="CE-owned MCP config path inside the repo / .hermes (pins --strict-mcp-config)",
+        )
+        p.add_argument(
+            "--completion-report-ref",
+            dest="completion_report_ref",
+            default=None,
+            help="deterministic completion-report pointer recorded for Ring 0 closeout verification",
+        )
+        p.add_argument(
+            "--closeout-file",
+            dest="closeout_file",
+            default=None,
+            help="deterministic closeout file pointer recorded for Ring 0 closeout verification",
+        )
         p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     launch = groups.add_parser(
@@ -352,6 +410,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _lane_launch(args) -> int:
     command = args.command.split() if args.command else None
+    claude_arg = getattr(args, "claude_arg", None)
+    if command is not None and claude_arg:
+        command = [*command, *claude_arg]
     terminal_kind = "headless" if args.no_tmux else lane_runtime.TMUX_TERMINAL_KIND
     try:
         result = lane_runtime.launch(
@@ -373,6 +434,9 @@ def _lane_launch(args) -> int:
             worktree_path=args.worktree_path,
             branch=args.branch,
             envelope_ref=args.envelope_ref,
+            mcp_config_path=getattr(args, "mcp_config", None),
+            closeout_file=getattr(args, "closeout_file", None),
+            completion_report_ref=getattr(args, "completion_report_ref", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:
@@ -811,6 +875,10 @@ def _launch(args, invoked_as: str = "launch") -> int:
             resume=args.resume,
             dry_run=args.dry_run,
             visible=not args.no_tmux,
+            extra_args=getattr(args, "claude_arg", None),
+            mcp_config_path=getattr(args, "mcp_config", None),
+            closeout_file=getattr(args, "closeout_file", None),
+            completion_report_ref=getattr(args, "completion_report_ref", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except launch_runtime.LaunchError as exc:

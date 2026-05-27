@@ -750,3 +750,64 @@ live Integration Queue authority.
   the separately-ratified landing/Integration-Queue steps. Gate 9 holds no landing authority.
 
 Gate 9 stop line: `CE_PCO_V1_G9_FINAL_PACKAGING_LANDING_READINESS_READY_FOR_SOURCE_RATIFICATION`.
+
+## 17. CC-G-D status — Ring 0 Claude Code launcher/kernel (SVC+RUN; strict TDD; this gate)
+
+CC-G-D turns the CC-G-C hook-pack from a locally-defeasible posture into a
+**governed launch surface** by making the Ring 0 kernel (`ce launch` /
+`ce lane launch`) refuse ungoverned Claude surfaces *before Claude starts*. It
+**extends, does not rewrite**, the shipped Gate 3 / Gate 6 launch substrate.
+
+- **HARD-vs-RUNTIME framing (load-bearing).** CC-G-D's **HARD** claim is **only**
+  the Ring 0 launch/accept refusal before any side effect. The committed CC-G-C
+  hook-pack stays **RUNTIME (launch-pinned), DEFEASIBLE** and is **never**
+  described as HARD/non-overridable. Hard Stop blocking is **not** armed:
+  `.claude/hooks/ce-stop.sh` is **unchanged**; CC-G-D injects + verifies the
+  deterministic closeout pointers (Ring 0 facts) via the Ring 2 Stop logic only.
+  Arming hard Stop is a follow-on gate (CC-G-E / a ratified CC-G-D Slice 2).
+- **New pure modules.** `claude_launch_spec.py` (offline parser + fail-closed
+  refusal evaluator with stable clauses `CC-D-1..7` + governed-command builder)
+  and `hook_pack_confirm.py` (present/parse/PreToolUse+Stop registration/exec-bit
+  + injectable validator probe — never launches Claude, never hits the network).
+- **Refusal surfaces (seat contract §5).** `--bare` (`CC-D-1`), `-p`/`--print`
+  for a governed authoring lane (`CC-D-2`), `agents`/`--agents` (`CC-D-3`),
+  `--remote-control`/`remoteControlAtStartup` (`CC-D-4`), `settings.local.json`
+  weakening / `--setting-sources` omitting `project` or including `local`
+  (`CC-D-5`), `--dangerously-skip-permissions` without a confirmed pack
+  (`CC-D-6`), uncontrolled/global MCP (`CC-D-7`). Governed launches pin
+  `--setting-sources project` + `--strict-mcp-config` + a CE-owned `--mcp-config`;
+  CC-G-D launches **no** MCP server (config-posture only).
+- **Wiring.** `launch_runtime.launch` (Controller seat, `LaunchRefused`,
+  `G6-LAUNCH-CLAUDE-REFUSED`) and `lane_runtime.launch` (governed lane,
+  `ClaudeLaunchRefused`, `G3-CLAUDE-REFUSED`) evaluate + build the governed
+  command **before** any tmux spawn / Pane Registry write. Non-Claude launch/lane
+  behavior is byte-for-byte unchanged (regression-guarded). `ce_cli` gains
+  `--claude-arg`/`--mcp-config`/`--completion-report-ref`/`--closeout-file` on
+  `launch` and `lane launch`; the stale `ce_cli` docstring (`ce launch` "not
+  implemented") is refreshed.
+- **Pane-registry schema preservation (narrowing, with reason).**
+  `schemas/pane-registry.schema.yaml` pins `unevaluatedProperties: false` and is
+  **outside the CC-G-D allowlist**, so the governed-Claude audit fields
+  (`hook_pack_confirmed`, `setting_sources_pinned`) and the closeout/completion
+  pointers are surfaced on `LaunchResult.claude_governance` + an ignored
+  `*.claude-governance.json` sidecar **instead of** mutating the tracked-shape
+  record — the written pane record still validates clean against the unchanged
+  schema. This is the documented narrower-than-illustrated implementation the
+  architect plan authorized.
+- **Validation (Python 3.11 `.venv-test` + Python 3.14).** New/changed suites
+  green: `test_claude_launch_spec.py` (24), `test_hook_pack_confirm.py` (7),
+  `test_launch_runtime.py` (18), `test_lane_runtime.py` (27),
+  `test_claude_launch_refusal.py` (10), `ce launch`/`ce lane` CLI suites. New
+  CC-G-D tests are interpreter-agnostic (no `skipif`/`xfail`). The only sanctioned
+  full-suite exception is the pre-existing `RED-G-1` interpreter-contract floor
+  (`>=3.14`): under the 3.11 `.venv-test` the `ce doctor`/`environment_guard`
+  contract assertions fail by design; CC-G-D adds **no** new version skips.
+- **Scope discipline.** No stage/commit/push/PR/review/merge/branch mutation; no
+  GitHub/secret/branch-protection mutation; no package/wheelhouse mutation; no
+  live `ce launch`/`ce lane launch` against a real Claude binary; no live
+  Integration Queue mutation; no hard Stop arming; no credential/secret value
+  printed. Tracked writes confined to the CC-G-D allowlist; evidence under ignored
+  `.hermes/cc-g-d-implementation/20260527T163526Z/`.
+- **Next boundary after CC-G-D:** Source ratification of this implementation
+  evidence packet, then **local commit mechanics by the Controller** (not by this
+  Engineer pane).

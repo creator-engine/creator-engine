@@ -105,3 +105,51 @@ def test_launch_resume_attaches_existing(use_fake_tmux, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["plan"]["mode"] == "resume"
     assert payload["attached"] is True
+
+
+# ---------------------------------------------------------------------------
+# CC-G-D — Ring 0 governed Claude surfaces via the CLI
+# ---------------------------------------------------------------------------
+
+
+def test_cli_launch_refuses_claude_bare(use_fake_tmux, monkeypatch, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(ce_cli.launch_runtime, "_confirm_pack", lambda r: True)
+    ret = ce_cli.main(["launch", "--harness", "claude", "--claude-arg=--bare"])
+    assert ret != 0
+    assert adapter.spawned == []
+    err = capsys.readouterr().err
+    assert "G6-LAUNCH-CLAUDE-REFUSED" in err
+    assert "CC-D-1" in err
+
+
+def test_cli_launch_refuses_claude_skip_perms_without_pack(use_fake_tmux, monkeypatch, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(ce_cli.launch_runtime, "_confirm_pack", lambda r: False)
+    ret = ce_cli.main(
+        ["launch", "--harness", "claude", "--claude-arg=--dangerously-skip-permissions"]
+    )
+    assert ret != 0
+    assert adapter.spawned == []
+    assert "CC-D-6" in capsys.readouterr().err
+
+
+def test_cli_launch_pins_governed_command(use_fake_tmux, monkeypatch):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(ce_cli.launch_runtime, "_confirm_pack", lambda r: True)
+    ret = ce_cli.main(
+        ["launch", "--harness", "claude", "--mcp-config", ".hermes/s/mcp/ce-mcp.json"]
+    )
+    assert ret == 0
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
+
+
+def test_cli_launch_dry_run_still_pure(use_fake_tmux):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    assert ce_cli.main(["launch", "--harness", "claude", "--dry-run", "--json"]) == 0
+    assert adapter.spawned == []

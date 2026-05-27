@@ -201,10 +201,18 @@ hook-pack is non-overridable *without* managed settings, that is a defect to hal
 The three concentric rings, kernel-anchored:
 
 - **Ring 0 — KERNEL (`ce lane launch` / `ce launch`). HARD.** Repo-native, local, daemonless. The hard
-  boundary even if every inner ring is bypassed. *(Later gate: CC-G-D.)*
+  boundary even if every inner ring is bypassed. *(Ring 0 launch/accept refusal **built: CC-G-D** —
+  `claude_launch_spec` + `hook_pack_confirm` wired into `ce launch` (`G6-LAUNCH-CLAUDE-REFUSED`) and
+  `ce lane launch` (`G3-CLAUDE-REFUSED`); clauses `CC-D-1..7` refuse `--bare`, `-p`/`--print`,
+  `agents`/`--agents`, `--remote-control`/`remoteControlAtStartup`, `settings.local.json` weakening,
+  `--dangerously-skip-permissions` without a confirmed pack, and uncontrolled MCP, before any side
+  effect. CC-G-D supplies the deterministic closeout pointers and verifies them via the Ring 2 Stop
+  logic but does **not** arm hard Stop blocking — `.claude/hooks/ce-stop.sh` stays advisory; arming it
+  is a follow-on gate, CC-G-E.)*
 - **Ring 1 — CLAUDE HOOK-PACK (committed `.claude/settings.json` + `.claude/hooks/*.sh`). RUNTIME
-  (launch-pinned), in-band, defeasible.** *(Later gate: CC-G-C, powered by the CC-G-B `hook-check`
-  bridge.)*
+  (launch-pinned), in-band, defeasible.** *(Built: CC-G-C, powered by the CC-G-B `hook-check`
+  bridge. CC-G-D pins the Ring 0 facts that make Ring 1 reliable but does **not** strengthen Ring 1 to
+  HARD — that requires the v1.1 managed-settings FUTURE SEAM.)*
 - **Ring 2 — VALIDATOR (`creator_engine_validator`). VALIDATOR, post-hoc and shared.** The single
   source of scope/role/manifest truth that the hooks call in-band so Ring 1 and post-hoc verification
   never diverge.

@@ -8,6 +8,7 @@ state lives under pytest ``tmp_path``.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -385,3 +386,131 @@ def test_verify_refuses_missing_pane_record(tmp_path):
             transcript=transcript,
             stop_line="STOP",
         )
+
+
+# ---------------------------------------------------------------------------
+# CC-G-D — Ring 0 Claude refusal + governed command in `ce lane launch`
+# ---------------------------------------------------------------------------
+
+
+def test_lane_launch_refuses_claude_skip_perms_without_pack(tmp_path, monkeypatch):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: False)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaudeLaunchRefused) as exc:
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            command=["claude", "--dangerously-skip-permissions"],
+            tmux_adapter=adapter,
+        )
+    assert exc.value.code == "G3-CLAUDE-REFUSED"
+    assert "CC-D-6" in str(exc.value)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_lane_launch_refuses_claude_bare_even_with_pack(tmp_path, monkeypatch):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaudeLaunchRefused):
+        _launch(tmp_path, ledger_root=ledger, command=["claude", "--bare"], tmux_adapter=adapter)
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_lane_launch_pins_governed_command_for_claude(tmp_path, monkeypatch):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    adapter = FakeAdapter()
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["claude", "--model", "claude-opus-4-7"],
+        tmux_adapter=adapter,
+    )
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert cmd[0] == "claude"
+    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
+    assert "--model" in cmd and "claude-opus-4-7" in cmd
+    # The written pane record stays schema-clean (no extra CC-G-D fields).
+    assert validate_pane_registry_record(result.record, result.pane_path) == []
+
+
+def test_lane_launch_non_claude_command_unchanged(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["sh", "-c", "echo hi"],
+        tmux_adapter=adapter,
+    )
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert cmd == ["sh", "-c", "echo hi"]
+
+
+# ---------------------------------------------------------------------------
+# CC-G-D — Task 8: closeout pointer injection + Ring 0 closeout verification
+# ---------------------------------------------------------------------------
+
+
+def test_launch_writes_closeout_pointer_sidecar(tmp_path, monkeypatch):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["claude", "--setting-sources", "project"],
+        completion_report_ref="reports/cc-g-d.yaml",
+        closeout_file=".hermes/x/closeout.md",
+        tmux_adapter=FakeAdapter(),
+    )
+    # Deterministic pointers ride the result.
+    assert result.claude_governance["completion_report_ref"] == "reports/cc-g-d.yaml"
+    assert result.claude_governance["closeout_ref"] == ".hermes/x/closeout.md"
+    # ... and are persisted to an ignored sidecar (NOT the schema-validated record).
+    sidecar = lane_runtime._governance_sidecar_path(ledger, "hermes-primary", "gate3-lane")
+    assert sidecar.is_file()
+    written = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert written["completion_report_ref"] == "reports/cc-g-d.yaml"
+    # The tracked-shape pane record stays schema-clean.
+    assert validate_pane_registry_record(result.record, result.pane_path) == []
+
+
+def test_verify_closeout_blocks_on_missing_terminal_sections(tmp_path):
+    bad = tmp_path / "closeout.md"
+    bad.write_text("done.\n", encoding="utf-8")
+    decision = lane_runtime.verify_closeout(
+        closeout_file=str(bad), completion_report=None, posture="governed"
+    )
+    assert decision["decision"] == "block"  # Ring 0 fact; committed hook stays advisory
+
+
+def test_verify_closeout_allows_complete_closeout(tmp_path):
+    good = tmp_path / "closeout.md"
+    good.write_text(
+        "## Summary\nwork done\n\n"
+        "## Recommended immediate next step\nratify\n\n"
+        "## Exact next Source prompt pointer+SHA256\npath + sha\n",
+        encoding="utf-8",
+    )
+    decision = lane_runtime.verify_closeout(
+        closeout_file=str(good), completion_report=None, posture="governed"
+    )
+    assert decision.get("decision") != "block"
+
+
+def test_verify_closeout_ungoverned_never_blocks(tmp_path):
+    bad = tmp_path / "closeout.md"
+    bad.write_text("done.\n", encoding="utf-8")
+    decision = lane_runtime.verify_closeout(
+        closeout_file=str(bad), completion_report=None, posture="ungoverned"
+    )
+    assert decision.get("decision") != "block"
