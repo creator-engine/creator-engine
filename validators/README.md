@@ -63,6 +63,8 @@ python -m creator_engine_validator check-examples
 python -m creator_engine_validator scan-no-limitless
 python -m creator_engine_validator scan-pane-registry examples/well-formed/pane-registry
 python -m creator_engine_validator scan-side-effect-ledger examples/well-formed/side-effect-ledger
+echo '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"README.md"},"ce":{"posture":"governed","manifest_paths":["schemas/x.yaml"]}}' \
+  | python -m creator_engine_validator hook-check --stdin
 ```
 
 ## Exit codes
@@ -85,6 +87,44 @@ The `pane_registry` check validates PCO Slice 3 Pane Registry records:
 - `PCO-051` duplicate active panes for the same `(claim_ref, role)` are refused while transitional and terminal history is allowed.
 - `PCO-052` optional `container_instance_id` / `container_instance_ref` bindings must resolve to a matching `container-instance-record` whose claim context matches the Pane Registry claim context.
 - `PCO-053` unknown fields are refused.
+
+## Claude hook bridge (`hook-check`, CC-G-B)
+
+`creator_engine_validator hook-check` is the Ring 2 (VALIDATOR) bridge that a
+future Ring 1 Claude `command`-type hook-pack (CC-G-C) calls in-band. It reads
+a single Claude hook event as JSON (`--stdin` or `--input-json <path>`) and
+emits a machine-readable allow/deny/block decision so that real-time enforcement
+and post-hoc verification never diverge. The decision logic is **reused** from
+the existing validator surfaces — it is not a parallel shell-only policy engine:
+
+- **Posture** (`docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md` §7) is
+  resolved via `checks.pane_registry.evaluate_posture`: governed iff a live
+  `terminal.kind: tmux` pane binds to a live unreleased Active-Work claim with
+  matching controller/lane; ambiguous-inside-a-lane fails **closed** (governed);
+  otherwise ungoverned (advisory/allow, but still reports what would be denied).
+- **Scope** (`Edit`/`Write`/`MultiEdit`): tracked paths outside the ratified
+  manifest are denied under governed posture. The manifest is parsed by
+  `checks.path_manifest_fidelity.extract_manifest_paths` from the active
+  handoff's fenced `ALLOWED_PATHS` block; `.hermes/**` writes are allowed only
+  under the gate's `--evidence-root`.
+- **Mechanics** (`Bash`): `git push`, `gh pr merge/review/comment`, branch
+  deletion, force push, package publish, and live Integration-Queue commands are
+  denied unless the event carries an explicit (future) side-effect authority
+  token. Mappable verbs anchor to `checks.mutation_class.RESERVED_RESTRICTED`.
+- **Secrets** (`Read`): `.env`, `.env.*`, `secrets/**`, private keys/certs, and
+  credential stores are denied. Decision reasons name the matched rule class and
+  never read or echo secret bytes.
+- **Stop / completion**: a `Stop` event whose closeout lacks the canonical
+  terminal sections (`Summary`, `Recommended immediate next step`, the next
+  Source pointer/SHA **or** an explicit no-next-gate statement) blocks; a
+  referenced completion-report artifact that fails `completion_report_schema` /
+  `completion_report_required_for_envelope` blocks.
+
+Output is Claude-hook-compatible JSON (`hookSpecificOutput.permissionDecision`
+for `PreToolUse`; `decision: "block"` for `Stop`). An evaluated allow/deny/block
+exits `0` (a denial is a decision, not a CLI failure); only invalid input or
+arguments exit non-zero. This gate ships no `.claude/settings.json` or
+`.claude/hooks/**` — those are CC-G-C.
 
 ## Side-Effect Ledger
 
