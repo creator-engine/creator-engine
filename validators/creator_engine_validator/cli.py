@@ -131,6 +131,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="posture override; 'auto' resolves the §7 predicate from .hermes posture inputs",
     )
+    hook_check_p.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["raw", "claude"],
+        default="raw",
+        help="output shape: 'raw' (default, full CC-G-B decision dict) or 'claude' (minimal Claude Code hook dict)",
+    )
     hook_check_p.add_argument("--posture-root", default=None, help="root to resolve .hermes posture inputs (default: event cwd)")
     hook_check_p.add_argument("--manifest-doc", default=None, help="handoff/prompt doc carrying the fenced ALLOWED_PATHS manifest")
     hook_check_p.add_argument("--evidence-root", default=None, help="ignored evidence-root prefix the gate may write under")
@@ -397,7 +404,11 @@ def _hook_check(args) -> int:
         completion_report=args.completion_report,
     )
     decision = hc.evaluate(event, context)
-    print(json.dumps(decision.to_dict(), indent=2, sort_keys=True))
+    if getattr(args, "output_format", "raw") == "claude":
+        payload = decision.to_claude_hook_dict()
+    else:
+        payload = decision.to_dict()
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
