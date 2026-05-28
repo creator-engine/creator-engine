@@ -154,12 +154,101 @@ lands, merges, pushes, or approves. New fan-in output is authored as stdlib JSON
 
 ### Source ratification
 
-The privileged act by which **Source** accepts a gate's baseline/contract/evidence at a named
-ratification boundary. Review, CI, fan-in, and harness output **inform** Source; they **do not**
-ratify. Privileged mutation classes require Source ratification at the points named per gate. No gate
-skips its ratification boundary.
+The privileged act by which the **Operator** (v1 machine value `source`; product-facing display
+label `Operator`) accepts a gate's baseline/contract/evidence at a named ratification boundary.
+Review, CI, fan-in, and harness output **inform** the Operator; they **do not** ratify. Privileged
+mutation classes require Operator ratification at the points named per gate. No gate skips its
+ratification boundary.
 
-## 6. Governed-environment terms
+The historical phrase "Source ratification" is preserved as legacy terminology for v1.x
+compatibility; new product-facing prose uses **Operator ratification** (see §9 below and
+`docs/adr/ADR-0002-operator-terminology-reconciliation.md`).
+
+## 6. Operator terminology and Controller taxonomy (per ADR-0002)
+
+`docs/adr/ADR-0002-operator-terminology-reconciliation.md` ratifies the product-facing terminology
+policy. The definitions in this section are the central terminology lock for that policy. ADR-0002
+is the controlling authority; this section summarizes without redefining.
+
+### Operator
+
+The product-facing apex human authority term in Creator Engine. `Operator` is the primary label for
+the human party who holds apex authority — the role historically named `Source` in internal prose
+and v1 machine surfaces. `Operator` is used in new product-facing docs, prompts, completion reports,
+CLI/runtime text, examples, and templates governed by the in-scope path-glob list defined in
+ADR-0002 §7.
+
+The v1 machine enum value remains **`source`** (see "v1 machine value `source` (display-label `Operator`)" below) through the entire v1.x line. The
+display label that renders that machine value to humans is **`Operator`**. No machine enum
+hard-rename occurs in v1.x.
+
+### Human Ratifier
+
+Precision-only governance terminology. `Human Ratifier` is used where governance prose must
+disambiguate human ratification from agent/CI/review work. It is **not** the primary product-facing
+label; that role belongs to `Operator`.
+
+### Operator ratification
+
+The new canonical name for the privileged act formerly described as "Source ratification". The
+acting party is the Operator; the act, surfaces, invariants, author/approver separation rule, and
+human-anchor property are unchanged. See `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` for
+the ratifier taxonomy and the SDLC transition → ratifier link table.
+
+**Ratification-line compatibility.** Canonical-attestation parsers MUST accept both
+`Operator ratifies prompt:` and `Source ratifies prompt:` for the entire v1.x line. Only the
+canonical emit form changes to `Operator ratifies prompt:` after the migration lands. Removal of
+legacy acceptance is deferred to v2/schema-version. This compatibility clause is binding on every
+gate that touches the canonical-attestation parser or the Controller↔Operator communication path.
+
+### v1 machine value `source` (display-label `Operator`)
+
+`source` is the v1 machine value for the apex authority. It is preserved through the entire v1.x
+line in `role_category`, `required_ratifier_role`, `merged_by_role`, `grant_authority`, and any
+other v1 contract that encodes the apex authority. The product-facing display label rendered for
+this machine value is `Operator`. See `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` for the
+compatibility / display-label note on the role-category table.
+
+### Controller agent
+
+The active agent occupying the Controller seat at a given moment. The referent is an **agent**,
+not tooling. Generic CE prose uses `Controller agent` for the active agent class regardless of
+which harness underlies the seat. `Controller agent` replaces internal-persona naming wherever the
+referent is the active agent (see ADR-0002 §5 for the per-referent replacement policy and fixture
+ID conventions).
+
+### Controller harness
+
+The tooling / runtime / profile / template / wrapper layer that supports a Controller seat. The
+referent is **tooling**, not an agent. `ce launch` is part of the Controller harness syscall
+surface. Generic CE prose uses `Controller harness` for harness/tooling references.
+
+### Hermes Agent (explicit supported integration name)
+
+Reserved exclusively for the explicit supported Hermes integration / profile / template / harness.
+The referent is a specific named integration, not generic CE language. Integration docs and
+integration-scoped tests (e.g., `validator-hermes` integration tests) MAY use `Hermes Agent` when
+naming the supported integration. Generic CE product-facing prose does **not** use `Hermes Agent`
+as a synonym for `Controller agent` or `Controller harness`.
+
+### `source-controlled:` provenance (exclusion from authority terminology)
+
+The token `source-controlled:` is **source-control / provenance terminology**, not apex-authority
+terminology. The prefix `source-` here denotes source control, not the apex authority formerly
+named `Source`. `source-controlled:` is **preserved unchanged** by ADR-0002 and by every later
+migration gate that consumes ADR-0002. Renaming to `repo-controlled:` or `fixture-controlled:`
+requires a separate compatibility-scoped gate.
+
+Worked example:
+
+```text
+source-controlled: true
+```
+
+states the artifact is under source-control determinism. It is not the apex-authority `Source` and
+is not migrated by the Operator-terminology policy.
+
+## 7. Governed-environment terms
 
 ### governed environment
 
@@ -177,7 +266,7 @@ containerization. **Gate 1 records it as a requirement + RED test plan only** (R
 (RV1-061). It is designed to be forward-compatible so a future v1.1 governed dev-container is a
 detectable, validatable PASS branch.
 
-## 7. Inclusion / exclusion classification terms
+## 8. Inclusion / exclusion classification terms
 
 ### IN / SEAM / POST-V1
 
@@ -190,12 +279,17 @@ The v1.0 surface-classification vocabulary (roadmap §3; `docs/governance/V1_PRO
 (`POST-V1 / v1.1` denotes a surface deferred specifically to the v1.1 line, e.g. the CE-native HUD/TUI
 and the `ce dev shell` / `ce dev run` project-dev container — deferred, not rejected.)
 
-## 8. References
+## 9. References
 
 - `docs/adr/ADR-0001-v1-baseline-and-product-form.md` — DP-1 = A / DP-2 = B / DP-3 = B + Option B lock.
+- `docs/adr/ADR-0002-operator-terminology-reconciliation.md` — Operator terminology policy/ADR;
+  authority basis for §6 above and for the compatibility / display-label note in
+  `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md`.
 - `docs/governance/V1_PRODUCT_CONTRACT.md` — v1.0 product boundary + IN/SEAM/POST-V1 table.
 - `docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md` — guard predicate requirement + RED plan.
 - `docs/governance/V1_DEV_CONTAINER_SEAM_CONTRACT.md` — v1.1 dev-container seam.
+- `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` — authority matrix summary and
+  compatibility / display-label note for the v1 machine value `source` ↔ display label `Operator`.
 - `specs/_traceability_matrix.md` — RV1-010 (this doc) and RV1-011..013.
 - `specs/_assumptions.md` §3–§4 — two-ledgers distinction + Side-Effect Ledger live-main correction.
 - Option B re-issued roadmap §2.3, §4 — `5a7e5ba7…`.
