@@ -148,15 +148,9 @@ merge, this board is regenerated per
 
 ### Backlog
 
-*(No items currently in this column. The Codex identity record authoring
-envelope has landed (PR #31 / `78b57a4`), Batch 2D.1 review-evidence
-schema has landed (PR #34 / `e1f5ffc`, head `2a8fe0f`), Batch 2D.2
-architect-evidence schema has landed (PR #36 / `51a2134`, head
-`451be39`), Batch 2D.3 implementer-evidence schema has landed
-(PR #38 / `01f21a5`, head `0b630be`), Gate 2 Lane A has landed
-(PR #40 / `a63304a`), and Gate 2 Lane B has landed (PR #41 /
-`8dd18a0`); see `Done` table below and
-[`./BACKLOG.md`](./BACKLOG.md) §e.18–§e.19.)*
+| id | scope (one line) | readiness path |
+|---|---|---|
+| `post-sprint-0/hermes-fork-upstream-sync` | Long-term remediation for the Hermes fork/upstream sync incident: decide and implement CE-owned hosting/deployment for the standalone PCO completion-gate plugin so upstream Hermes updates no longer depend on CE-only plugin commits on the active Hermes fork's tracked `main`. | Source ratification required before this item advances past `Backlog`; see [`./BACKLOG.md`](./BACKLOG.md) §e.22 and [`../operations/HERMES_FORK_UPSTREAM_SYNC.md`](../operations/HERMES_FORK_UPSTREAM_SYNC.md). |
 
 ### Ready
 
