@@ -58,6 +58,42 @@ categories. The Feature 002 matrix supplements the Feature 001 contract
 with operating-model presence categories; it does not override the
 baseline matrix.
 
+### a.1 Operator display-label / compatibility note (per ADR-0002)
+
+`docs/adr/ADR-0002-operator-terminology-reconciliation.md` ratifies
+the product-facing terminology policy. This note is the compatibility
+/ display-label record next to the role-category table; ADR-0002 is
+the controlling authority and this note summarizes without
+redefining. The note changes no schema name, no enum value, and no
+authority semantic.
+
+- **`role_category: source` is preserved** as the v1 machine value
+  for the apex authority through the entire v1.x line. The same
+  preservation applies to other v1 contract fields that encode the
+  apex authority (e.g., `required_ratifier_role: source`,
+  `merged_by_role: source`, `grant_authority: source`).
+- **The product-facing display label** rendered for the v1 machine
+  value `source` is **`Operator`** in new product-facing prose
+  (docs, prompts, completion reports, CLI/runtime text, examples,
+  templates governed by the in-scope path-glob list in ADR-0002 §7).
+- **`source` enum compatibility is preserved through v1.x.** No
+  machine enum hard-rename occurs in v1.x; removal or hard
+  deprecation is deferred to a future v2/schema-version decision.
+- **Human / agent / CI ratification invariants are unchanged.** The
+  ratifier taxonomy in §b, the privileged mutation classes in §c,
+  and the review-vs-ratification invariants in §d are unaffected by
+  the display-label change. The acting party named `Source` in this
+  document and named `Operator` in new product-facing prose denote
+  the same authority role.
+- **Agents, CI, GitHub, fan-in, and reviewers still do not ratify.**
+  The two-tier author/approver separation rule applies to every
+  ratification regardless of which display label is in use.
+- **Ratification-line compatibility.** Canonical-attestation parsers
+  MUST accept both `Operator ratifies prompt:` and `Source ratifies
+  prompt:` for the entire v1.x line. Only the canonical emit form
+  changes to `Operator ratifies prompt:` after the migration lands.
+  Removal of legacy acceptance is deferred to v2/schema-version.
+
 ## b. Ratifier role taxonomy
 
 Two role categories may ratify under v0.1:
