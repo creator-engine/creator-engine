@@ -1580,6 +1580,49 @@ recorded as §e.8 and §e.9.
   This row's durable evidence is the live remote state plus the
   post-flight verification gate, not a tracked-file commit.
 
+### e.22 Post-Sprint-0 substrate — Hermes fork/upstream sync remediation
+
+- **id**: `post-sprint-0/hermes-fork-upstream-sync`
+- **parent**: —
+- **status**: `Backlog` — Source ratification is required before this
+  item advances past `Backlog`.
+- **source-of-truth / ratification flag**:
+  [`../operations/HERMES_FORK_UPSTREAM_SYNC.md`](../operations/HERMES_FORK_UPSTREAM_SYNC.md)
+  records the incident and decision surface; the owning runtime
+  artifact is the PCO completion-gate plugin manifest (`plugin.yaml`,
+  `kind: standalone`). No ROADMAP/spec source of truth currently owns
+  this Hermes-tooling / development-environment work, so §f Rule 1
+  requires explicit Source ratification before readiness promotion or
+  implementation.
+- **scope**: Long-term remediation for the Hermes fork/upstream sync
+  incident: decide and implement a CE-owned hosting/deployment path for
+  the standalone PCO completion-gate plugin so Hermes upstream updates
+  no longer skip because CE-only plugin commits live on the active
+  Hermes fork's tracked `main`. Recommended path is Option A from the
+  operational record: host the plugin in this repository, deploy it
+  through Hermes's user-plugin mechanism, and record deployed plugin
+  provenance before resetting/retiring any fork-coupled copy. This row
+  records the future work only; the current docs-only tracking PR does
+  not implement relocation, enable a plugin, reset a fork, or mutate any
+  Hermes install/config/runtime state.
+- **acceptance gate**: Separately Source-ratified envelope lands the
+  chosen long-term remediation on the canonical branch; the PCO
+  completion-gate plugin is versioned in a CE-owned source location;
+  the active Hermes runtime loads the plugin from outside the Hermes
+  fork; plugin tests and runtime hook smoke checks pass from the new
+  location; deployed plugin provenance is recorded; and Hermes upstream
+  update behavior no longer depends on carrying CE-only plugin commits
+  on the active Hermes fork's tracked `main`.
+- **dependencies / blockers**: Source ratification of the long-term
+  remediation option and implementation envelope. This item MUST remain
+  `Backlog` until that ratification exists.
+- **anticipated mutation class**: `code` / `docs` / `governance`
+  (future remediation); this tracking PR is `docs` only.
+- **owner role**: `implementer` (future remediation); `controller` /
+  `architect` for shaping and evidence review.
+- **ratifier role**: `source`
+- **external tracker reference**: —
+
 ## f. Maintenance rules
 
 1. New backlog entries MUST cite their owning source of truth (Sprint
