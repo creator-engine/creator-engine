@@ -9,7 +9,7 @@ gate human-ratified. Spec/plan/tasks artifacts, schemas, templates,
 and the offline validator may change without backward compatibility
 guarantees until v1.0. Privileged operations (deploys, governance
 amendments, identity/security/attestation/redaction changes, repo
-settings, branch protection, visibility flips) remain Source-ratified
+settings, branch protection, visibility flips) remain Operator-ratified
 regardless of release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
 
 LIMITLESS is the named public dogfood tenant; generic paths in the
@@ -179,7 +179,7 @@ Feature 002 canonical docs (above) > tenant fixtures
 
 Amendments to the constitution, the Feature 001 substrate, or the
 Feature 002 operating model are themselves Creator-Engine-governed
-mutations: a spec/plan/tasks triple under explicit Source approval,
+mutations: a spec/plan/tasks triple under explicit Operator approval,
 versioned per the constitution's Governance section.
 
 ## License
