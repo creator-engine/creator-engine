@@ -50,3 +50,27 @@ def test_ce_init_end_to_end_idempotent_and_ignored(governed_repo: Path, capsys):
     # Marker is real and JSON-parseable.
     marker = init_runtime.marker_path(governed_repo)
     assert json.loads(marker.read_text(encoding="utf-8"))["kind"] == "ce-init-marker"
+
+
+def test_ce_init_creates_default_controller_mcp_config(governed_repo: Path, capsys):
+    assert ce_cli.main(["init", "--repo-root", str(governed_repo), "--json"]) == 0
+    capsys.readouterr()
+
+    mcp_config = governed_repo / ".hermes" / "launch" / "ce-controller" / "mcp" / "ce-mcp.json"
+    assert mcp_config.is_file()
+    assert json.loads(mcp_config.read_text(encoding="utf-8")) == {"mcpServers": {}}
+
+    status = _git(["status", "--porcelain"], governed_repo).stdout.strip()
+    assert status == "", f"ce init left tracked changes: {status!r}"
+
+
+def test_ce_init_preserves_existing_controller_mcp_config(governed_repo: Path, capsys):
+    mcp_config = governed_repo / ".hermes" / "launch" / "ce-controller" / "mcp" / "ce-mcp.json"
+    mcp_config.parent.mkdir(parents=True)
+    existing = {"mcpServers": {"local-test": {"command": "true"}}}
+    mcp_config.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert ce_cli.main(["init", "--repo-root", str(governed_repo), "--json"]) == 0
+    capsys.readouterr()
+
+    assert json.loads(mcp_config.read_text(encoding="utf-8")) == existing

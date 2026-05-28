@@ -32,9 +32,14 @@ KERNEL_STATE_DIRS: tuple[str, ...] = (
     ".hermes/transcripts",
     ".hermes/handoffs",
     ".hermes/session-state",
+    ".hermes/launch",
+    ".hermes/launch/ce-controller",
+    ".hermes/launch/ce-controller/mcp",
 )
 
 MARKER_NAME = ".ce-init.json"
+DEFAULT_CONTROLLER_MCP_CONFIG = ".hermes/launch/ce-controller/mcp/ce-mcp.json"
+DEFAULT_MCP_CONFIG_PAYLOAD = {"mcpServers": {}}
 
 
 class InitError(Exception):
@@ -63,6 +68,24 @@ class InitResult:
 
 def marker_path(repo_root: Path | str) -> Path:
     return Path(repo_root) / ".hermes" / MARKER_NAME
+
+
+def default_controller_mcp_config_path(repo_root: Path | str) -> Path:
+    return Path(repo_root) / DEFAULT_CONTROLLER_MCP_CONFIG
+
+
+def _write_default_mcp_config_if_missing(repo_root: Path) -> None:
+    target = default_controller_mcp_config_path(repo_root)
+    if target.exists():
+        if not target.is_file():
+            raise InitRefused(
+                f"refusing to overwrite non-file at default MCP config path: {DEFAULT_CONTROLLER_MCP_CONFIG}"
+            )
+        return
+    target.write_text(
+        json.dumps(DEFAULT_MCP_CONFIG_PAYLOAD, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _git(repo_root: Path, args: Sequence[str]):
@@ -141,6 +164,11 @@ def init_repo(repo_root: Path | str, *, now: datetime | None = None) -> InitResu
         else:
             target.mkdir(parents=True, exist_ok=True)
             created.append(rel)
+
+    # CE-owned default MCP config for strict governed Claude launches. Preserve
+    # user/operator edits on re-init; the file is config-posture only and
+    # intentionally inherits no global/user MCP servers.
+    _write_default_mcp_config_if_missing(root)
 
     # CE-owned machine marker (ignored state; safe to (re)write idempotently).
     timestamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
