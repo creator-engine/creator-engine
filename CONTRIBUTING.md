@@ -46,7 +46,7 @@ External contributors are welcome to:
 Large architectural changes, new mutation classes, modifications to
 the constitution, the Feature 001 governance substrate, the Feature 002
 operating model, or anything that crosses a privileged-class boundary
-require explicit Source/maintainer authorization before
+require explicit Operator/maintainer authorization before
 implementation. These changes are themselves Creator-Engine-governed
 mutations, not ordinary pull requests, and will not be merged from
 unsolicited PRs.
@@ -55,10 +55,10 @@ unsolicited PRs.
 
 Creator Engine distinguishes between work that CI verifies and work
 that humans ratify. Contributors should not attempt privileged
-operations without explicit Source/maintainer authorization. The full
+operations without explicit Operator/maintainer authorization. The full
 taxonomy is in
 [`docs/governance/MUTATION_CLASS_MODEL.md`](./docs/governance/MUTATION_CLASS_MODEL.md);
-the privileged classes that require Source ratification include:
+the privileged classes that require Operator ratification include:
 
 - `deploy`
 - `governance`

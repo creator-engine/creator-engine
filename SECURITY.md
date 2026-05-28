@@ -3,7 +3,7 @@
 Creator Engine is a pre-1.0 governance substrate. Security and privacy
 are constitutional design constraints, not afterthoughts (see
 [`docs/security/SECURITY_MODEL.md`](./docs/security/SECURITY_MODEL.md)),
-and the project operates under a Source-ratified governance model
+and the project operates under an Operator-ratified governance model
 (see [`GOVERNANCE.md`](./GOVERNANCE.md)).
 
 ## Supported versions

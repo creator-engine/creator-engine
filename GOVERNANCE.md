@@ -52,20 +52,24 @@ The source-of-truth hierarchy (Feature 002 FR-019) is:
 
 Amendments to the constitution, the Feature 001 substrate, or the
 Feature 002 operating model are themselves Creator-Engine-governed
-mutations: a spec/plan/tasks triple, ratified by Source, versioned
+mutations: a spec/plan/tasks triple, ratified by the Operator, versioned
 per the constitution's Governance section.
 
 ## Roles
 
-- **Source.** The human governance authority for this repository.
-  Source ratifies privileged mutations (see below), accepts or
+- **Operator.** The human governance authority for this repository
+  (v1 machine value `source`; see
+  [`docs/governance/V1_CANONICAL_TERMINOLOGY.md`](./docs/governance/V1_CANONICAL_TERMINOLOGY.md)
+  §6 and
+  [`docs/adr/ADR-0002-operator-terminology-reconciliation.md`](./docs/adr/ADR-0002-operator-terminology-reconciliation.md)).
+  The Operator ratifies privileged mutations (see below), accepts or
   rejects amendments to the constitution and the canonical document
   set, and authorizes any operation that crosses a privileged-class
   boundary.
 - **Maintainers.** Humans with commit/merge authority on the
   repository. Maintainers triage issues and pull requests, perform
   non-privileged merges that CI has verified, and escalate
-  privileged-class changes to Source.
+  privileged-class changes to the Operator.
 - **Contributors.** Anyone (human or agent) authoring a change.
   Contributors propose work through issues and pull requests
   consistent with [`CONTRIBUTING.md`](./CONTRIBUTING.md).
@@ -80,7 +84,7 @@ Every governed mutation declares a mutation class. The baseline
 taxonomy and reserved-action vocabulary are in
 [`docs/governance/MUTATION_CLASS_MODEL.md`](./docs/governance/MUTATION_CLASS_MODEL.md).
 
-The six **privileged classes** require Source ratification:
+The six **privileged classes** require Operator ratification:
 
 - `deploy`
 - `governance`
@@ -117,7 +121,7 @@ followed; they do not by themselves authorize a privileged action.
 ## Privileged repo and platform operations
 
 The following operations remain privileged regardless of who proposes
-them, and must not be performed without explicit Source/maintainer
+them, and must not be performed without explicit Operator/maintainer
 authorization:
 
 - Repository visibility changes (private ↔ public).
@@ -134,7 +138,7 @@ authorization:
 
 Pull requests that attempt any of the above without prior
 authorization will be closed pending the appropriate spec/plan/tasks
-triple and Source ratification.
+triple and Operator ratification.
 
 ## How to engage
 
