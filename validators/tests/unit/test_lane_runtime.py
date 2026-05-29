@@ -36,14 +36,16 @@ class FakeAdapter:
     def is_available(self) -> bool:
         return self._available
 
-    def ensure_pane(self, *, session, window, command):
+    def ensure_pane(self, *, session, window, command, cwd=None):
         self.spawned.append((session, window, list(command)))
+        self.last_cwd = cwd
         return TmuxPane(
             session_id="$1",
             window_id="@2",
             pane_id="%3",
             pane_tty="/dev/pts/9",
             pane_pid=4242,
+            pane_cwd=(str(cwd) if cwd else None),
         )
 
 
@@ -271,6 +273,31 @@ def test_launch_refuses_on_conflict_guard_before_pane_write(tmp_path):
         _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter)
     _assert_no_pane(ledger)
     assert adapter.spawned == []
+
+
+def test_launch_refuses_nondir_worktree_path_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.WorktreePathInvalid):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            worktree_path=str(tmp_path / "no-such-worktree"),
+            tmux_adapter=adapter,
+        )
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+
+
+def test_launch_enforces_explicit_worktree_as_pane_cwd(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    adapter = FakeAdapter()
+    _launch(tmp_path, ledger_root=ledger, worktree_path=str(wt), tmux_adapter=adapter)
+    assert adapter.last_cwd == str(wt)
 
 
 def test_launch_refuses_handoff_sha_mismatch_before_side_effects(tmp_path):
