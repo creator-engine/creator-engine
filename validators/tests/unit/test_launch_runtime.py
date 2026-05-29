@@ -235,3 +235,70 @@ def test_claude_dry_run_does_not_confirm_pack_when_no_skip_perms(monkeypatch):
     result = launch_runtime.launch(harness="claude", dry_run=True, tmux_adapter=adapter)
     assert result.plan.dry_run is True
     assert adapter.spawned == []
+
+
+# --- CE Ring 0 Hermes harness governance (round: Hermes governance TDD) ---
+
+
+def test_hermes_dry_run_emits_governed_profile_pinned_command():
+    result = launch_runtime.launch(harness="hermes", dry_run=True)
+    # no longer a bare ["hermes"]; profile is pinned and visible in the plan
+    assert result.plan.command == ["hermes", "--profile", "creator-engine"]
+    assert result.plan.dry_run is True
+
+
+def test_hermes_launch_refuses_yolo_before_side_effect():
+    adapter = FakeAdapter(available=True)
+    with pytest.raises(launch_runtime.LaunchRefused):
+        launch_runtime.launch(harness="hermes", extra_args=["--yolo"], tmux_adapter=adapter)
+
+
+def test_hermes_launch_refuses_profile_override_before_side_effect():
+    adapter = FakeAdapter(available=True)
+    with pytest.raises(launch_runtime.LaunchRefused):
+        launch_runtime.launch(
+            harness="hermes", extra_args=["--profile", "mythos"], tmux_adapter=adapter
+        )
+
+
+def test_hermes_launch_refuses_resume_continue_before_side_effect():
+    adapter = FakeAdapter(available=True)
+    for argv in (["--resume", "s"], ["-c"]):
+        with pytest.raises(launch_runtime.LaunchRefused):
+            launch_runtime.launch(harness="hermes", extra_args=argv, tmux_adapter=adapter)
+
+
+def test_claude_governance_not_regressed_by_hermes_branch():
+    # the Claude harness still pins --setting-sources project + --strict-mcp-config
+    result = launch_runtime.launch(harness="claude", dry_run=True)
+    cmd = result.plan.command
+    assert cmd[0] == "claude"
+    assert "--setting-sources" in cmd and "project" in cmd
+    assert "--strict-mcp-config" in cmd
+
+
+class _SpawnTrackingAdapter:
+    kind = "tmux"
+    def __init__(self): self.spawned = []
+    def is_available(self): return True
+    def ensure_pane(self, *, session, window, command, cwd=None):
+        self.spawned.append((session, window, list(command), cwd))
+        return TmuxPane(session_id="$1", window_id="@2", pane_id="%3")
+
+
+@pytest.mark.parametrize("argv", [["--res"], ["-rabc"], ["--cont"], ["-cabc"], ["--yol"], ["--acc"], ["--ignore-r"], ["--prof", "mythos"]])
+def test_hermes_refuses_abbreviated_bypass_with_no_spawn(argv):
+    adapter = _SpawnTrackingAdapter()
+    with pytest.raises(launch_runtime.LaunchRefused):
+        launch_runtime.launch(harness="hermes", extra_args=argv, tmux_adapter=adapter)
+    assert adapter.spawned == []
+
+
+def test_hermes_refusal_uses_hermes_code_not_claude():
+    adapter = _SpawnTrackingAdapter()
+    try:
+        launch_runtime.launch(harness="hermes", extra_args=["--yolo"], tmux_adapter=adapter)
+        assert False, "expected refusal"
+    except launch_runtime.LaunchRefused as exc:
+        assert getattr(exc, "code", "") == "G6-LAUNCH-HERMES-REFUSED"
+    assert adapter.spawned == []
