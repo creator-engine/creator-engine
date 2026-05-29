@@ -14,14 +14,25 @@ Prose contract: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``.
 """
 from __future__ import annotations
 
+import os
 import subprocess
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from typing import Callable, Sequence
 
 TMUX_BIN = "tmux"
 
-# Tab-separated identity format expanded by tmux ``-F``.
+# Tab-separated identity format expanded by tmux ``-F`` at creation. This carries
+# *identity only*. ``pane_current_path`` is deliberately NOT taken from this
+# creation-time snapshot: tmux honours ``-c`` but the pane's reported
+# ``pane_current_path`` settles a moment after creation, so the snapshot can
+# still read the server's cwd. The cwd is instead verified post-spawn by polling
+# ``display-message`` (see ``_poll_pane_cwd``).
 _IDENTITY_FORMAT = "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_tty}\t#{pane_pid}"
+
+# Bounded poll for the pane to settle into its ``-c`` start directory.
+_CWD_POLL_ATTEMPTS = 20
+_CWD_POLL_INTERVAL = 0.25  # seconds; ~5s worst case
 
 
 class TmuxError(Exception):
@@ -30,6 +41,10 @@ class TmuxError(Exception):
 
 class TmuxUnavailable(TmuxError):
     """tmux is not available, so a visible lane cannot be launched."""
+
+
+class TmuxCwdMismatch(TmuxError):
+    """The spawned pane did not start in the requested working directory."""
 
 
 @dataclass(frozen=True)
@@ -41,6 +56,7 @@ class TmuxPane:
     pane_id: str
     pane_tty: str | None = None
     pane_pid: int | None = None
+    pane_cwd: str | None = None
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -55,9 +71,20 @@ class TmuxAdapter:
 
     kind = "tmux"
 
-    def __init__(self, *, runner: Runner | None = None, tmux_bin: str = TMUX_BIN):
+    def __init__(
+        self,
+        *,
+        runner: Runner | None = None,
+        tmux_bin: str = TMUX_BIN,
+        cwd_poll_attempts: int = _CWD_POLL_ATTEMPTS,
+        cwd_poll_interval: float = _CWD_POLL_INTERVAL,
+        sleeper: Callable[[float], None] | None = None,
+    ):
         self._runner = runner or _default_runner
         self._tmux_bin = tmux_bin
+        self._cwd_poll_attempts = max(1, int(cwd_poll_attempts))
+        self._cwd_poll_interval = cwd_poll_interval
+        self._sleeper = sleeper or time.sleep
 
     def is_available(self) -> bool:
         """Return True when the tmux binary responds to ``-V``."""
@@ -71,12 +98,24 @@ class TmuxAdapter:
         proc = self._runner([self._tmux_bin, "has-session", "-t", session], check=False)
         return proc.returncode == 0
 
-    def ensure_pane(self, *, session: str, window: str, command: Sequence[str]) -> TmuxPane:
+    def ensure_pane(
+        self,
+        *,
+        session: str,
+        window: str,
+        command: Sequence[str],
+        cwd: str | os.PathLike[str] | None = None,
+    ) -> TmuxPane:
         """Spawn or attach a tmux pane/window running ``command``; return its identity.
 
         Creates ``session`` with the requested window when it does not exist,
         otherwise adds a new window to the live session. ``command`` is a local
         command vector; no provider/model is launched.
+
+        When ``cwd`` is given, the pane's start directory is *enforced* via tmux
+        ``-c <cwd>`` and then *verified* against the pane's reported
+        ``pane_current_path``; a mismatch raises :class:`TmuxCwdMismatch` so a
+        lane can never silently run outside its allocated worktree.
         """
         if not self.is_available():
             raise TmuxUnavailable(
@@ -84,10 +123,12 @@ class TmuxAdapter:
             )
 
         command = list(command)
+        cwd_args = ["-c", str(cwd)] if cwd is not None else []
         if self._session_exists(session):
             argv = [
                 self._tmux_bin, "new-window", "-d",
                 "-t", session, "-n", window,
+                *cwd_args,
                 "-P", "-F", _IDENTITY_FORMAT,
                 *command,
             ]
@@ -95,11 +136,60 @@ class TmuxAdapter:
             argv = [
                 self._tmux_bin, "new-session", "-d",
                 "-s", session, "-n", window,
+                *cwd_args,
                 "-P", "-F", _IDENTITY_FORMAT,
                 *command,
             ]
         proc = self._runner(argv)
-        return self._parse_identity(proc.stdout)
+        pane = self._parse_identity(proc.stdout)
+
+        # When a cwd is requested, tmux enforces it via ``-c`` but the pane's
+        # ``pane_current_path`` settles a moment after creation. Poll
+        # ``display-message`` (bounded) until it reports the requested cwd; refuse
+        # with :class:`TmuxCwdMismatch` if it never does — BEFORE the caller writes
+        # any Pane Registry record or injects a prompt — so a lane can never run
+        # outside its allocated worktree. The just-spawned pane is killed on
+        # refusal to avoid an orphaned pane in the wrong directory.
+        if cwd is not None:
+            want = os.path.realpath(str(cwd))
+            observed = self._poll_pane_cwd(pane.pane_id, want)
+            if observed is None:
+                self._kill_pane(pane.pane_id)
+                raise TmuxCwdMismatch(
+                    f"pane {pane.pane_id} never reported the requested cwd {str(cwd)!r} "
+                    f"(resolved {want!r}) within "
+                    f"{self._cwd_poll_attempts} polls; refusing before pane-registry "
+                    "write / prompt injection"
+                )
+            pane = replace(pane, pane_cwd=observed)
+        return pane
+
+    def _poll_pane_cwd(self, pane_id: str, want_realpath: str) -> str | None:
+        """Poll ``display-message`` for the pane's settled cwd; return it on match.
+
+        Returns the observed (raw) ``pane_current_path`` once its realpath equals
+        ``want_realpath``, or ``None`` if it never matches within the bounded poll.
+        """
+        last: str | None = None
+        for attempt in range(self._cwd_poll_attempts):
+            proc = self._runner(
+                [self._tmux_bin, "display-message", "-p", "-t", pane_id,
+                 "#{pane_current_path}"],
+                check=False,
+            )
+            last = (proc.stdout or "").strip()
+            if last and os.path.realpath(last) == want_realpath:
+                return last
+            if attempt < self._cwd_poll_attempts - 1:
+                self._sleeper(self._cwd_poll_interval)
+        return None
+
+    def _kill_pane(self, pane_id: str) -> None:
+        """Best-effort kill of a just-spawned pane (used when cwd verification fails)."""
+        try:
+            self._runner([self._tmux_bin, "kill-pane", "-t", pane_id], check=False)
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
+            pass
 
     @staticmethod
     def _parse_identity(stdout: str) -> TmuxPane:

@@ -112,6 +112,10 @@ class ConflictGuardRefused(LaneLaunchError):
     code = "G3-CONFLICT-GUARD"
 
 
+class WorktreePathInvalid(LaneLaunchError):
+    code = "G3-WORKTREE-INVALID"
+
+
 class TmuxUnavailableError(LaneLaunchError):
     code = "G3-TMUX-UNAVAILABLE"
 
@@ -307,6 +311,17 @@ def launch(
             f"Active-Work Ledger conflict guard refuses launch: {codes}"
         )
 
+    # 5b. When an explicit ``--worktree-path`` is supplied, refuse a missing /
+    #     non-directory path BEFORE any side effect and enforce it as the pane cwd
+    #     (tmux ``-c``) so the lane runs in its allocated worktree, not the
+    #     controller's cwd. The claim's own ``worktree_path`` stays record metadata
+    #     only (it may name a host-agnostic path that need not exist here).
+    if worktree_path and not Path(worktree_path).is_dir():
+        raise WorktreePathInvalid(
+            f"worktree path {str(worktree_path)!r} is not an existing directory; "
+            "refusing lane launch before any side effect"
+        )
+
     # 6. CC-G-D Ring 0: when the command is a Claude invocation, refuse prohibited
     #    surfaces and pin the governed command BEFORE any side effect (no tmux
     #    spawn, no Pane Registry write). Non-Claude lanes are untouched.
@@ -367,7 +382,10 @@ def launch(
     window_name = window or lane_id
     try:
         pane = adapter.ensure_pane(
-            session=session_name, window=window_name, command=launch_command
+            session=session_name,
+            window=window_name,
+            command=launch_command,
+            cwd=worktree_path or None,
         )
     except TmuxUnavailable as exc:
         raise TmuxUnavailableError(str(exc)) from exc
