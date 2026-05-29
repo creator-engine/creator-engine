@@ -1,0 +1,4 @@
+# MALFORMED fixture (ce_terminology_v2): `.hermes` under active_write_root /
+# active_write_roots keys. Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+active_write_root: .hermes/
+active_write_roots: [.hermes]

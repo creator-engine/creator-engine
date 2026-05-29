@@ -1,0 +1,12 @@
+# MALFORMED fixture (ce_terminology_v2): nested / key-encoded legacy `source` role
+# shapes. A new v2 artifact must NOT emit the legacy `source` role in any nested
+# structured form (dict value, list-of-dict, or as a map key). Expected:
+# VAL-TERMINOLOGY-SOURCE-ROLE.
+roles:
+  primary: source
+human_authority:
+  machine: source
+role:
+  name: source
+authority_roles:
+  - name: source

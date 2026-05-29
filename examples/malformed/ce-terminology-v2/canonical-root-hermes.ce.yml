@@ -1,0 +1,5 @@
+# MALFORMED: .hermes/ under canonical_*_root keys. Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+canonical_write_root: .hermes/
+canonical_write_roots: [.hermes/]
+canonical_state_root: .hermes/
+canonical_state_roots: [.hermes/]

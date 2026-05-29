@@ -1,0 +1,6 @@
+# MALFORMED fixture (ce_terminology_v2): structured legacy-role emission shapes.
+# A new v2 artifact must NOT emit the legacy `source` human-authority role, in
+# any of these structured forms. Expected: VAL-TERMINOLOGY-SOURCE-ROLE.
+roles: [source]
+human_authority: source
+authority: source

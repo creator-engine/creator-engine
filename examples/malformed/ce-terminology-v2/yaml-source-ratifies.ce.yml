@@ -1,0 +1,7 @@
+# MALFORMED fixture (ce_terminology_v2): legacy ratification line emitted in
+# structured YAML (scalar, nested, and list). Expected: VAL-TERMINOLOGY-SOURCE-RATIFIES.
+ratification_line: "Source ratifies prompt:/home/nefarious/example/prompt.md"
+authority:
+  ratification_line: "Source ratifies prompt:/home/nefarious/example/prompt.md"
+ratification_lines:
+  - "Source ratifies prompt:/home/nefarious/example/prompt.md"

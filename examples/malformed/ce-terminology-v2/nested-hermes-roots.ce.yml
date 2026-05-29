@@ -1,0 +1,9 @@
+# MALFORMED fixture (ce_terminology_v2): nested .hermes/ active/write roots.
+# A new v2 artifact must NOT declare `.hermes/` as an active/write state root,
+# including nested structured forms. Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+write_roots:
+  primary: .hermes/
+active_state_root:
+  path: .hermes/active-work-ledger/
+allowed_write_roots:
+  - root: .hermes/

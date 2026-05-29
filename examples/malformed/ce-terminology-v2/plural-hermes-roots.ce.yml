@@ -1,0 +1,6 @@
+# MALFORMED fixture (ce_terminology_v2): plural .hermes/ active/write root keys.
+# A new v2 artifact must NOT declare `.hermes/` as an active/write state root,
+# including the natural plural key variants. Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+active_state_roots: [.hermes/]
+state_roots: [.hermes/]
+active_roots: [.hermes/]

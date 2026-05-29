@@ -363,6 +363,14 @@ required_validation:
     description: Reject new v2 artifacts that write active CE state to `.hermes/`.
     planned_slice: G2.001.1
     planned_validator: ce_path_namespace
+    status: implemented                       # G2.001.1: `.hermes/`-active emission half
+    implemented_slice: G2.001.1
+    implemented_validator: ce_terminology_v2
+    implemented_codes: [VAL-WRITE-FREEZE-HERMES-ACTIVE]
+    implementation_note: >-
+      ce_terminology_v2 fails closed when a new v2 artifact under specs/v2/
+      declares `.hermes/` as an active/write state root in a structured field;
+      the broader ce_path_namespace runtime-write enforcement remains planned.
   - id: VAL-IMPORTER-READONLY
     description: Importer never mutates `.hermes/`.
     planned_slice: G2.001.0
@@ -379,6 +387,16 @@ required_validation:
     description: Reject emitted legacy `source`/`Source`/`.hermes/`-active terminology in new v2 artifacts.
     planned_slice: G2.001.1
     planned_validator: ce_terminology_v2
+    status: implemented                       # G2.001.1
+    implemented_slice: G2.001.1
+    implemented_validator: ce_terminology_v2
+    implemented_codes: [VAL-TERMINOLOGY-SOURCE-ROLE, VAL-TERMINOLOGY-SOURCE-RATIFIES]
+    fixtures:
+      well_formed:
+        - examples/well-formed/ce-terminology-v2/canonical-spec.ce.yml
+      malformed:
+        - examples/malformed/ce-terminology-v2/emits-source-role.ce.yml
+        - examples/malformed/ce-terminology-v2/source-ratifies-line.md
   - id: VAL-PRIVILEGED-FLOOR
     description: Refuse any mode/policy that relaxes the Operator-only privileged floor or delegates emergency override.
     planned_slice: G2.001.2
@@ -407,10 +425,77 @@ required_validation:
     description: Keep legacy `source`/`.hermes/` readable for import/crosswalk/archive/history; destructive removal needs a separate ratified gate.
     planned_slice: G2.001.1
     planned_validator: ce_terminology_v2 (alias-accept) + policy note
+    status: partially-implemented             # G2.001.1: alias-accept half implemented
+    implemented_slice: G2.001.1
+    implemented_validator: ce_terminology_v2
+    implementation_note: >-
+      The alias-accept half is implemented: ce_terminology_v2 accepts legacy
+      `source`/`Source`/`.hermes/` forms in clearly-marked
+      import/crosswalk/archive/historical context (filename `_crosswalk.yml`,
+      an archive/legacy/historical/imported path segment, or an explicit
+      `ce_terminology_context` / `<!-- ce-terminology-context: ... -->` marker)
+      and never removes them. Any destructive removal of legacy aliases still
+      requires a separately Operator-ratified deprecation/removal gate.
+    accept_fixture: examples/well-formed/ce-terminology-v2/import-alias.ce.yml
   - id: VAL-AUTHORING-SCOPE
     description: This gate authors tracked spec/governance docs only; no runtime/code/side-effect mutation.
     planned_slice: G2.001.0
     planned_validator: gate-scope review (manual + completion report)
+
+# --- v2 terminology canon (G2.001.1; OD-06/OD-06A/OD-21/OD-24, Q-O5) ------------
+# Authored at G2.001.1 and made machine-enforceable by the ce_terminology_v2
+# validator. Pins, for new v2 artifacts, the canonical emitted forms and the
+# legacy forms that are accepted on import only and never destructively removed.
+# Kept in this sidecar (OD-24 / Q-C2): the standard Spec Kit Markdown stays free
+# of CE metadata.
+terminology_canon:
+  decision_refs: [OD-06, OD-06A, OD-21, OD-24, Q-O5]
+  requirement_refs: [RV2-001-007, RV2-001-011, RV2-001-012, RV2-001-016]
+  enforced_by: ce_terminology_v2
+  enforced_slice: G2.001.1
+  scope: new v2 artifacts under specs/v2/ (Markdown + *.ce.yml / YAML governance)
+  pins:
+    human_authority:
+      canonical_emit: operator                # only canonical emitted machine role
+      legacy_alias: source                    # accepted on import only
+      emit_legacy_in_v2: false
+      accept_on_import_only: true
+      requirement: RV2-001-011                # FR-011
+    ratification_line:
+      canonical_emit: "Operator ratifies prompt:"
+      legacy_alias: "Source ratifies prompt:"
+      emit_legacy_in_v2: false
+      accept_on_import_only: true
+      requirement: RV2-001-012                # FR-012
+    active_state_root_axis:
+      canonical_emit: .ce/                     # only canonical active-state root
+      legacy_read_only: .hermes/               # read-only legacy/import; never active
+      emit_hermes_active_in_v2: false
+      accept_on_import_only: true
+      requirement: RV2-001-007                # FR-007 (write-freeze)
+    sidecar_filename:
+      canonical_emit: "*.ce.yml"
+      legacy_alias: "*.creator-engine.yml"     # import alias only
+      emit_legacy_in_v2: false
+      accept_on_import_only: true
+      requirement: RV2-001-016                # FR-016
+  legacy_accept_contexts:
+    note: >-
+      Clearly-marked import/crosswalk/archive/historical context in which the
+      legacy forms above remain readable and are NOT removed (Q-O5 /
+      VAL-NO-DESTRUCTIVE-REMOVAL). ce_terminology_v2 accepts legacy forms here.
+    markers:
+      - filename `_crosswalk.yml` (the canonical crosswalk register)
+      - an `archive`/`legacy`/`historical`/`imported` path segment
+      - explicit `ce_terminology_context:` key in a YAML artifact
+      - explicit `<!-- ce-terminology-context: ... -->` marker in Markdown
+    recognized_context_values: [import, import-alias, crosswalk, archive, historical, legacy, legacy-import]
+  enforcement_boundary: >-
+    Role and active-state-root emission is enforced on structured YAML field
+    values; ratification-line emission is enforced on Markdown statements.
+    Descriptive prose mentions of legacy forms (e.g. the import-alias rule
+    itself) and permitted `.hermes/` research/historical read citations are not
+    emission and are accepted.
 
 # --- Tracked-vs-instance `.ce/` boundary (Q-O1) --------------------------------
 state_boundary:

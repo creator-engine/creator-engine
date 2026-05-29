@@ -1,0 +1,9 @@
+# Malformed: a new v2 artifact (no legacy-context marker) emits the legacy
+# `source` human-authority role value. ce_terminology_v2 MUST fail closed with
+# VAL-TERMINOLOGY-SOURCE-ROLE (FR-011 / RV2-001-011).
+schema: creator-engine/spec.ce.yml
+ce_metadata_kind: spec-ce-sidecar
+authority:
+  required_ratifier_role: source            # <- forbidden legacy emission
+state_boundary:
+  canonical_active_root: .ce/

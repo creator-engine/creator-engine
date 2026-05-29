@@ -1,0 +1,8 @@
+# MALFORMED fixture (ce_terminology_v2): legacy `source` role emitted under broad
+# descriptor-like keys inside a role-bearing field. These are emissions, not the
+# canon's exact `legacy_alias` self-description, and must fail closed.
+# Expected: VAL-TERMINOLOGY-SOURCE-ROLE.
+roles:
+  legacy: source
+  alias: source
+  aliases: [source]
