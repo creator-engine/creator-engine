@@ -1,0 +1,581 @@
+# Creator Engine v2 Spec Sidecar (CE metadata)
+#
+# CE-governed redo of G2.001.0 under the true CE-governed Claude Code Controller
+# (Ring 0 launcher, CE hook pack, --strict-mcp-config). This sidecar carries the
+# CE-specific governance metadata for the v2 foundation-substrate spec. Per
+# OD-24 / Q-C2 the standard Spec Kit Markdown (spec.md) stays free of CE
+# metadata; all CE metadata lives here, in specs/v2/_crosswalk.yml, and in
+# specs/v2/adrs/ADR-V2-001-*.
+#
+# BOOTSTRAP NOTE: The formal *.ce.yml sidecar JSON Schema is authored in a later
+# foundation slice (G2.001.3). This file is a forward-declared bootstrap
+# sidecar; field names anticipate that schema and will be machine-validated once
+# it lands. schema_status records that bootstrap state explicitly.
+
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: forward-declared-bootstrap   # formal schema lands at G2.001.3
+ce_metadata_kind: spec-ce-sidecar
+
+# --- Spec & gate identity (Q-C1, Q-C4, OD-08) ----------------------------------
+spec:
+  id: specs/v2/001-v2-foundation-substrate
+  spec_number: "001"
+  title: Creator Engine v2.0 Foundation Substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation             # OD-23: v2.0 foundation line, not v1.x arc
+gate:
+  id: G2.001.0
+  feature_binding: specs/v2/001             # Q-C1: <feature> binds to specs/v2/NNN
+  slice: "0"
+  title: ".ce namespace + state-boundary contract"
+  layer: 0                                  # Layer 0 — v2 foundation substrate
+  remaining_foundation_slices:
+    - id: G2.001.1
+      title: v2 terminology canon + ce_terminology_v2 validator
+    - id: G2.001.2
+      title: role-enum expansion + role_enum_v2 validator
+    - id: G2.001.3
+      title: v2 spec sidecar shape + risk_inventory + sidecar/risk validators
+    - id: G2.001.4
+      title: v1->v2 crosswalk register + crosswalk_register validator
+
+# --- Authority basis (verified by SHA256 before authoring) ---------------------
+authority_basis:
+  note: >-
+    This spec is authored under an Operator-ratified spec-authoring prompt,
+    re-run under true CE-governed Controller conditions. Authority for the
+    encoded decisions rests with the Operator decision ledgers below; this
+    sidecar records and applies them and ratifies nothing.
+  ce_governed_redo:
+    controller_prompt:
+      path: .hermes/research/phase-2-v2-ce-governed-controller-redo-prelaunch-20260529T041857Z/recommended-next/NEXT_OPERATOR_TRUE_CE_GOVERNED_CLAUDE_CONTROLLER_G20010_REDO_PROMPT.md
+      sha256: e0b3f7bfb8bb142324a9c496a2ad1ae6cc31359cac370d33770c065ffcb2c100
+    launch_posture: operator_visible Ring 0 governed (--setting-sources project, --strict-mcp-config, CE hook pack)
+    baseline_relationship: clean redo of the prior non-CE-governed output (archived for comparison, not edited).
+  ratified_prompt:
+    path: .hermes/research/phase-2-v2-roadmap-review-20260529T032445Z/recommended-next/NEXT_HERMES_CONTROLLER_PHASE_2_V2_FOUNDATION_SPEC_AUTHORING_PROMPT.md
+    sha256: 92403e29fb504e3458295f7772eec2a0d7b836155bb957c3122a9c69b83226a0
+  decision_ledgers:
+    - path: .hermes/research/ce-phase-2-distributed-platform-architect-20260528T145107Z/OPERATOR_PHASE_2_DECISION_LEDGER.md
+      sha256: 514b537f175eb92f3c8780ebb934f8ec1ecad26a8362c0b18efd4b74a7f2835c
+      covers: [OD-01..OD-24, OD-06A]
+    - path: .hermes/research/phase-2-v2-opus-4-8-architect-reframe-handoff-20260528T181939Z/OPERATOR_PHASE_2_V2_ROADMAP_REVIEW_DECISION_LEDGER.md
+      sha256: dadedc719f16b676802ff5f9334113fc484eb324f4451b644ec410a5b8d48d65
+      covers: [Q-O1..Q-O7, Q-C1..Q-C8]
+  research_inputs:
+    - path: .hermes/research/phase-2-v2-opus-4-8-architect-reframe-handoff-20260528T181939Z/ARCHITECT_PHASE_2_V2_ROADMAP.md
+      sha256: 80b34c88e1a8e48673452979865987c5dfe30080ed64c3126690c1f9a181659c
+    - path: .hermes/research/phase-2-v2-opus-4-8-architect-reframe-handoff-20260528T181939Z/ARCHITECT_PHASE_2_V2_DEVELOPMENT_MAP.md
+      sha256: a2ce11aa339b46c6336b8ba2da5c46dfa69efb6bc06acef4fb0d96359e7fcb00
+    - path: .hermes/research/phase-2-v2-opus-4-8-architect-reframe-handoff-20260528T181939Z/ARCHITECT_PHASE_2_V2_RISK_AND_OPEN_QUESTIONS.md
+      sha256: 6848cbe5febf7131c617e1e373a9c6898005c691f45fa2dfbb546edfcb61558b
+    - path: .hermes/research/phase-2-v2-roadmap-review-20260529T032445Z/OPERATOR_PHASE_2_V2_ROADMAP_REVIEW_PACKET.md
+      sha256: 57f5af4686f39b3633623356941b792204c582ab9b1cb0629d6a9866eb53150f
+
+# --- Operating-mode relevance (OD-01) ------------------------------------------
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]       # OD-01 canonical enum (lowercase)
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict   # Q-O6
+  notes: >-
+    This spec is foundation/governance authoring. It is mode-relevant because it
+    defines the substrate on which operating-mode machinery (specs/v2/002) is
+    later built. The Operator-only privileged floor holds in every mode (OD-02).
+
+# --- Authority & mutation classes ----------------------------------------------
+authority:
+  mutation_classes: [governance, identity]   # foundation substrate touches both
+  privileged: true                           # both classes are privileged (OD-02)
+  required_ratifier_role: operator           # OD-02/OD-06/OD-21
+  agent_reviewer: advisory_only              # Q-O4: evidence-bearing, non-ratifying
+  agent_ratifier: reserved_inactive          # Q-O7: rejected for any active binding
+  emergency_override: operator_only          # OD-22
+  authoring_authority_boundary: >-
+    Spec authoring only. This artifact does not implement runtime code, commit,
+    push, open PRs, merge, change GitHub settings, produce external side effects,
+    or activate any autonomy. It records ratified Operator decisions and applies
+    them to the v2 foundation spec; it ratifies nothing.
+
+# --- Requirements (Q-C4: RV2-<specNNN>-<reqNNN>) -------------------------------
+# Each requirement links to the standard Spec Kit functional requirement in
+# spec.md (spec_md_ref) and to the risks it addresses (risk_refs).
+requirements:
+  - id: RV2-001-001
+    spec_md_ref: FR-001
+    statement: Canonical v2 active-state/governance root `.ce/`, distinct from `.hermes/`.
+    decisions: [OD-06A, Q-O1]
+    risk_refs: [RISK-RV2-001-NS]
+  - id: RV2-001-002
+    spec_md_ref: FR-002
+    statement: State-boundary contract enumerating tracked-vs-instance `.ce/` subtrees.
+    decisions: [Q-O1, OD-20]
+    risk_refs: [RISK-RV2-001-BOUNDARY]
+  - id: RV2-001-003
+    spec_md_ref: FR-003
+    statement: Tracked governance/configuration subtrees of `.ce/` enumerated and validator-visible.
+    decisions: [Q-O1]
+    risk_refs: [RISK-RV2-001-BOUNDARY]
+  - id: RV2-001-004
+    spec_md_ref: FR-004
+    statement: Ignored runtime/instance/credential-adjacent subtrees of `.ce/` enumerated.
+    decisions: [Q-O1]
+    risk_refs: [RISK-RV2-001-BOUNDARY, RISK-RV2-001-SECRET]
+  - id: RV2-001-005
+    spec_md_ref: FR-005
+    statement: CE-event/PCL canonical records distinguished from local spool/cache.
+    decisions: [Q-O1]
+    risk_refs: [RISK-RV2-001-BOUNDARY]
+  - id: RV2-001-006
+    spec_md_ref: FR-006
+    statement: Boundary fails closed on secret-bearing/runtime-only files in tracked governance paths.
+    decisions: [Q-O1]
+    risk_refs: [RISK-RV2-001-SECRET]
+  - id: RV2-001-007
+    spec_md_ref: FR-007
+    statement: "`.hermes/` hard write-freeze for active v2 state; read-only legacy/import only."
+    decisions: [Q-O2, OD-06A]
+    risk_refs: [RISK-RV2-001-DRIFT]
+  - id: RV2-001-008
+    spec_md_ref: FR-008
+    statement: Read-only v1->v2 importer contract; maps through crosswalk; never mutates `.hermes/`.
+    decisions: [Q-O3]
+    risk_refs: [RISK-RV2-001-IMPORT, RISK-RV2-001-IDENTITY]
+  - id: RV2-001-009
+    spec_md_ref: FR-009
+    statement: Importer exits cleanly with explicit no-op when no importable v1 artifacts.
+    decisions: [Q-O3]
+    risk_refs: [RISK-RV2-001-IMPORT]
+  - id: RV2-001-010
+    spec_md_ref: FR-010
+    statement: Imported records carry provenance/crosswalk metadata; never reintroduce `.hermes/` as active state.
+    decisions: [Q-O3, Q-O2]
+    risk_refs: [RISK-RV2-001-DRIFT, RISK-RV2-001-IDENTITY]
+  - id: RV2-001-011
+    spec_md_ref: FR-011
+    statement: New v2 artifacts emit `operator`; `source` accepted as import alias only.
+    decisions: [OD-06, OD-21, Q-O5]
+    risk_refs: [RISK-RV2-001-TERMINOLOGY]
+  - id: RV2-001-012
+    spec_md_ref: FR-012
+    statement: Emit `Operator ratifies prompt:`; accept `Source ratifies prompt:` on import only.
+    decisions: [OD-06, OD-21]
+    risk_refs: [RISK-RV2-001-TERMINOLOGY]
+  - id: RV2-001-013
+    spec_md_ref: FR-013
+    statement: "`agent_reviewer` is active advisory; may not ratify privileged classes."
+    decisions: [Q-O4, OD-06]
+    risk_refs: [RISK-RV2-001-PRIVILEGE]
+  - id: RV2-001-014
+    spec_md_ref: FR-014
+    statement: "`agent_ratifier` reserved-inactive; reject any active authority binding in v2."
+    decisions: [Q-O7, OD-06]
+    risk_refs: [RISK-RV2-001-RATIFIER]
+  - id: RV2-001-015
+    spec_md_ref: FR-015
+    statement: Privileged mutation classes and emergency override remain Operator-only in every mode.
+    decisions: [OD-02, OD-22]
+    risk_refs: [RISK-RV2-001-PRIVILEGE]
+  - id: RV2-001-016
+    spec_md_ref: FR-016
+    statement: CE metadata in `*.ce.yml` sidecars only; standard Markdown stays clean; `*.creator-engine.yml` import alias only.
+    decisions: [OD-24, Q-C2]
+    risk_refs: [RISK-RV2-001-INLINE]
+  - id: RV2-001-017
+    spec_md_ref: FR-017
+    statement: Authoritative `risk_inventory` in `spec.ce.yml`; required for risk-bearing specs; required_validation linted against risks.
+    decisions: [OD-20, Q-C7]
+    risk_refs: [RISK-RV2-001-RISKGAP]
+  - id: RV2-001-018
+    spec_md_ref: FR-018
+    statement: "`specs/v2/_crosswalk.yml` authoritative; `.ce/crosswalks/` derived only."
+    decisions: [Q-C3, OD-08]
+    risk_refs: [RISK-RV2-001-CROSSWALK]
+  - id: RV2-001-019
+    spec_md_ref: FR-019
+    statement: Requirement IDs use scoped `RV2-<specNNN>-<reqNNN>`.
+    decisions: [Q-C4]
+    risk_refs: [RISK-RV2-001-CROSSWALK]
+  - id: RV2-001-020
+    spec_md_ref: FR-020
+    statement: Gate IDs `G2.<feature>.<slice>` bind `<feature>` to `specs/v2/NNN`.
+    decisions: [Q-C1, OD-07, OD-08]
+    risk_refs: [RISK-RV2-001-CROSSWALK]
+  - id: RV2-001-021
+    spec_md_ref: FR-021
+    statement: v2 ADRs `ADR-V2-NNN` under `specs/v2/adrs/`; reference ledgers; ratify nothing.
+    decisions: [Q-C8]
+    risk_refs: [RISK-RV2-001-CROSSWALK]
+  - id: RV2-001-022
+    spec_md_ref: FR-022
+    statement: Migrated v1 tenants default to `strict`; auto/transcendence opt-in via Operator-ratified policy.
+    decisions: [Q-O6, OD-01, OD-02]
+    risk_refs: [RISK-RV2-001-AUTONOMY]
+  - id: RV2-001-023
+    spec_md_ref: FR-023
+    statement: No destructive v1 removal in v2.0; legacy aliases readable for import/crosswalk/archive/history.
+    decisions: [Q-O5]
+    risk_refs: [RISK-RV2-001-COMPAT]
+  - id: RV2-001-024
+    spec_md_ref: FR-024
+    statement: Spec-authoring only; no runtime implementation in this gate.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-001-SCOPE]
+
+# --- Risk inventory (OD-20 / Q-C7) ---------------------------------------------
+# This spec is governance-, identity-, privileged-class-, migration-, and
+# state-boundary-relevant, so a non-empty risk_inventory is mandatory. Each risk
+# maps to one or more required_validation entries below.
+risk_inventory:
+  - id: RISK-RV2-001-NS
+    title: Namespace ambiguity between `.ce/` and `.hermes/`.
+    relevance: [governance, state-boundary, migration]
+    description: >-
+      Tools or records target the wrong state root during the migration window,
+      fragmenting authority and evidence.
+    severity: high
+    required_validation_refs: [VAL-NS-BOUNDARY, VAL-WRITE-FREEZE]
+  - id: RISK-RV2-001-BOUNDARY
+    title: Tracked-vs-instance split done wrong.
+    relevance: [governance, state-boundary, security]
+    description: >-
+      Runtime/instance state is committed, or tracked governance is lost,
+      because the `.ce/` zone split is mis-specified.
+    severity: high
+    required_validation_refs: [VAL-NS-BOUNDARY]
+  - id: RISK-RV2-001-SECRET
+    title: Secret material entering tracked governance paths.
+    relevance: [security, identity, state-boundary]
+    description: >-
+      Credential-adjacent or secret-bearing files reach a tracked `.ce/`
+      governance subtree.
+    severity: critical
+    required_validation_refs: [VAL-NS-BOUNDARY, VAL-SECRET-FAILCLOSED]
+  - id: RISK-RV2-001-DRIFT
+    title: Dual-namespace drift / `.hermes/` written as active v2 state.
+    relevance: [governance, state-boundary, migration]
+    description: >-
+      A v2 flow writes active state to `.hermes/`, violating the write-freeze.
+    severity: high
+    required_validation_refs: [VAL-WRITE-FREEZE]
+  - id: RISK-RV2-001-IMPORT
+    title: Importer mutates legacy state or fails on empty input.
+    relevance: [migration, governance]
+    description: >-
+      The v1->v2 importer writes `.hermes/`, drops provenance, or errors rather
+      than producing a clean no-op when nothing is importable.
+    severity: high
+    required_validation_refs: [VAL-IMPORTER-READONLY, VAL-IMPORTER-PROVENANCE, VAL-IMPORTER-NOOP]
+  - id: RISK-RV2-001-IDENTITY
+    title: Re-binding archived identity records on import.
+    relevance: [identity, security, migration]
+    description: >-
+      Imported identity material is silently re-bound to active v2 authority
+      without provenance or Operator ratification.
+    severity: critical
+    required_validation_refs: [VAL-IMPORTER-PROVENANCE, VAL-AUTONOMY-DEFAULT]
+  - id: RISK-RV2-001-TERMINOLOGY
+    title: Legacy `source`/`Source` emission leakage.
+    relevance: [governance, identity]
+    description: >-
+      New v2 artifacts emit legacy terminology because the parser still accepts
+      it.
+    severity: medium
+    required_validation_refs: [VAL-TERMINOLOGY]
+  - id: RISK-RV2-001-PRIVILEGE
+    title: Privileged-class ratification delegated to an agent.
+    relevance: [governance, identity, security, privileged-class]
+    description: >-
+      A mode or policy delegates a privileged-class mutation or emergency
+      override to an agent instead of the Operator.
+    severity: critical
+    required_validation_refs: [VAL-PRIVILEGED-FLOOR]
+  - id: RISK-RV2-001-RATIFIER
+    title: Accidental `agent_ratifier` activation.
+    relevance: [governance, identity, privileged-class]
+    description: >-
+      A policy/envelope/runtime record binds active authority to the reserved
+      `agent_ratifier` role.
+    severity: critical
+    required_validation_refs: [VAL-RATIFIER-REJECT]
+  - id: RISK-RV2-001-INLINE
+    title: CE metadata embedded in standard Spec Kit Markdown.
+    relevance: [governance]
+    description: >-
+      Pressure to embed CE fields in spec.md/plan.md/tasks.md violates OD-24.
+    severity: medium
+    required_validation_refs: [VAL-SIDECAR-NO-INLINE]
+  - id: RISK-RV2-001-RISKGAP
+    title: Risk-bearing spec without risk-to-validation coverage.
+    relevance: [governance]
+    description: >-
+      A declared risk has no mapped required validation, so risk-bearing work
+      ships unverified.
+    severity: medium
+    required_validation_refs: [VAL-RISK-COVERAGE]
+  - id: RISK-RV2-001-CROSSWALK
+    title: Crosswalk rot / forked mappings.
+    relevance: [governance, migration]
+    description: >-
+      The v1->v2 mapping diverges from reality or a derived `.ce/crosswalks/`
+      copy silently supersedes the tracked register.
+    severity: medium
+    required_validation_refs: [VAL-CROSSWALK-AUTHORITATIVE]
+  - id: RISK-RV2-001-AUTONOMY
+    title: Autonomy inferred from migration.
+    relevance: [governance, privileged-class, migration]
+    description: >-
+      Import grants `auto`/`transcendence` by default instead of `strict`.
+    severity: high
+    required_validation_refs: [VAL-AUTONOMY-DEFAULT]
+  - id: RISK-RV2-001-COMPAT
+    title: Over-applied clean-foundation breaks legitimate v1 import.
+    relevance: [migration, governance]
+    description: >-
+      "Not a backward-compatibility chain" is misread as "drop v1 import,"
+      breaking archive readability.
+    severity: medium
+    required_validation_refs: [VAL-NO-DESTRUCTIVE-REMOVAL]
+  - id: RISK-RV2-001-SCOPE
+    title: Scope creep into runtime implementation.
+    relevance: [governance]
+    description: >-
+      A spec-authoring gate begins implementing runtime code or external side
+      effects.
+    severity: high
+    required_validation_refs: [VAL-AUTHORING-SCOPE]
+
+# --- Required validation (OD-20 / Q-C7: mapped to each declared risk) ----------
+# These name the validation each later foundation slice must implement. They are
+# specified here, not implemented in this gate.
+required_validation:
+  - id: VAL-NS-BOUNDARY
+    description: State-boundary contract for `.ce/` validates tracked-vs-instance zoning; extends v1 state_boundary_contract to `.ce/`.
+    planned_slice: G2.001.0
+    planned_validator: ce_path_namespace / state_boundary_contract(.ce/ extension)
+  - id: VAL-SECRET-FAILCLOSED
+    description: Fail closed when secret-bearing/runtime-only files target tracked `.ce/` governance paths.
+    planned_slice: G2.001.0
+    planned_validator: state_boundary_contract(secret_policy)
+  - id: VAL-WRITE-FREEZE
+    description: Reject new v2 artifacts that write active CE state to `.hermes/`.
+    planned_slice: G2.001.1
+    planned_validator: ce_path_namespace
+  - id: VAL-IMPORTER-READONLY
+    description: Importer never mutates `.hermes/`.
+    planned_slice: G2.001.0
+    planned_validator: importer-contract conformance (read-only)
+  - id: VAL-IMPORTER-PROVENANCE
+    description: Imported records carry provenance/crosswalk metadata.
+    planned_slice: G2.001.0
+    planned_validator: importer-contract conformance (provenance)
+  - id: VAL-IMPORTER-NOOP
+    description: Importer exits clean no-op on empty input.
+    planned_slice: G2.001.0
+    planned_validator: importer-contract conformance (no-op)
+  - id: VAL-TERMINOLOGY
+    description: Reject emitted legacy `source`/`Source`/`.hermes/`-active terminology in new v2 artifacts.
+    planned_slice: G2.001.1
+    planned_validator: ce_terminology_v2
+  - id: VAL-PRIVILEGED-FLOOR
+    description: Refuse any mode/policy that relaxes the Operator-only privileged floor or delegates emergency override.
+    planned_slice: G2.001.2
+    planned_validator: role_enum_v2 / operating_mode_policy
+  - id: VAL-RATIFIER-REJECT
+    description: Reject any active authority binding to `agent_ratifier`.
+    planned_slice: G2.001.2
+    planned_validator: role_enum_v2
+  - id: VAL-SIDECAR-NO-INLINE
+    description: Fail closed on CE-specific metadata blocks inside standard Spec Kit Markdown.
+    planned_slice: G2.001.3
+    planned_validator: sidecar_no_inline_metadata
+  - id: VAL-RISK-COVERAGE
+    description: Require non-empty risk_inventory for risk-bearing specs and lint required_validation against declared risks.
+    planned_slice: G2.001.3
+    planned_validator: risk_inventory
+  - id: VAL-CROSSWALK-AUTHORITATIVE
+    description: Require live crosswalk entry for v2 specs that supersede/import v1; tracked register authoritative over derived material.
+    planned_slice: G2.001.4
+    planned_validator: crosswalk_register
+  - id: VAL-AUTONOMY-DEFAULT
+    description: Migrated tenants default to `strict`; reject inferred auto/transcendence on import.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+  - id: VAL-NO-DESTRUCTIVE-REMOVAL
+    description: Keep legacy `source`/`.hermes/` readable for import/crosswalk/archive/history; destructive removal needs a separate ratified gate.
+    planned_slice: G2.001.1
+    planned_validator: ce_terminology_v2 (alias-accept) + policy note
+  - id: VAL-AUTHORING-SCOPE
+    description: This gate authors tracked spec/governance docs only; no runtime/code/side-effect mutation.
+    planned_slice: G2.001.0
+    planned_validator: gate-scope review (manual + completion report)
+
+# --- Tracked-vs-instance `.ce/` boundary (Q-O1) --------------------------------
+state_boundary:
+  decision_ref: Q-O1
+  canonical_active_root: .ce/
+  legacy_root: .hermes/                       # read-only legacy/import/archive (Q-O2)
+  model: two-zone (tracked governance/config vs gitignored runtime/instance)
+  tracked_governance_subtrees:
+    - .ce/policy/
+    - .ce/contracts/
+    - .ce/directive-packs/
+    - .ce/extensions/
+    - .ce/hooks/
+    - .ce/connector-contracts/
+    - .ce/authority/
+    - .ce/schemas/
+    - .ce/templates/
+    - .ce/crosswalks/                         # derived only; not authoritative (Q-C3)
+  gitignored_instance_subtrees:
+    - .ce/runtime/
+    - .ce/session-state/
+    - .ce/pane-registry/
+    - .ce/worktree-leases/
+    - .ce/active-work-ledger/
+    - .ce/side-effect-ledger/
+    - .ce/cache/
+    - .ce/tmp/
+    - .ce/secrets/
+    - .ce/credentials/
+    - .ce/local/
+  split_storage:
+    ce_events:
+      canonical_tracked_or_synced: .ce/ce-events/records/
+      gitignored_local: .ce/ce-events/spool/
+    pcl:
+      canonical_tracked_or_synced: .ce/pcl/records/
+      gitignored_local: .ce/pcl/cache/
+  fail_closed:
+    - Secret-bearing files MUST NOT enter tracked `.ce/` governance paths.
+    - Runtime-only files MUST NOT enter tracked `.ce/` governance paths.
+
+# --- `.hermes/` v2 write-freeze (Q-O2) -----------------------------------------
+hermes_write_freeze:
+  decision_ref: Q-O2
+  rule: Hard write-freeze; new v2 CE artifacts MUST NOT write active CE state to `.hermes/`.
+  permitted_read_contexts:
+    - archived v1 material
+    - import/parser compatibility source
+    - historical citation / research location
+    - migration source input
+    - Hermes-controller infrastructure outside CE product governance
+  enforcement: VAL-WRITE-FREEZE (ce_path_namespace), authored at G2.001.1.
+
+# --- Read-only importer contract (Q-O3) ----------------------------------------
+importer_contract:
+  decision_ref: Q-O3
+  scope: bounded read-only migration contract + dry-run/import surface in G2.001.0
+  reads: [.hermes/, v1 artifacts]
+  maps_through: specs/v2/_crosswalk.yml
+  emits: [canonical .ce/ outputs, dry-run migration report with provenance]
+  invariants:
+    - MUST never mutate `.hermes/`.
+    - MUST exit cleanly with explicit no-op when no importable v1 artifacts exist.
+    - Imported records MUST carry provenance/crosswalk metadata.
+    - MUST NOT reintroduce `.hermes/` as active v2 state.
+    - Real tenant migration activation is separately Operator-ratified.
+
+# --- Role constraints (Q-O4, Q-O7) ---------------------------------------------
+role_constraints:
+  agent_reviewer:
+    decision_ref: Q-O4
+    status: active-advisory
+    may:
+      - review specs/plans/diffs/tests/evidence/ledgers/risk-inventories/policy
+      - produce advisory approve/request-changes/blocker findings
+      - participate in review quorums for non-privileged work under ratified tenant policy
+      - act as procedural automation gate for non-privileged auto/transcendence workflows
+      - recommend emergency override or privileged ratification
+      - prepare evidence packets for Operator/delegated human ratifier
+    may_not:
+      - ratify privileged-class mutations
+      - authorize emergency governed override
+      - satisfy Operator-only requirements
+      - activate or bind authority to agent_ratifier
+      - bypass human ratifier requirements (except a narrow non-privileged procedural gate explicitly delegated by Operator-ratified tenant policy)
+  agent_ratifier:
+    decision_ref: Q-O7
+    status: reserved-inactive
+    rule: >-
+      Schema-present placeholder only. Validators MUST reject any active
+      authority binding, policy, envelope, runtime record, connector action,
+      ledger entry, or privileged/non-privileged ratification act using
+      agent_ratifier in v2.
+    future_activation_milestone: AOS-RATIFIER-MILESTONE   # post-v2; separately ratified
+
+# --- No destructive v1 removal (Q-O5) ------------------------------------------
+no_destructive_v1_removal:
+  decision_ref: Q-O5
+  rule: >-
+    v2.0 performs no destructive v1 removals. New v2 emissions use canonical v2
+    terminology/paths, but legacy v1 aliases/artifacts remain readable for
+    import/parser compatibility, migration crosswalks, archival review, and
+    historical citation.
+  readable_aliases:
+    - source (import/parser alias for v1; operator is the only canonical v2 emitted role)
+    - .hermes/ (legacy/import/historical; .ce/ is the only canonical active v2 state)
+  future_removal: requires a separately Operator-ratified deprecation/removal gate.
+
+# --- Migrated-v1 default mode (Q-O6) -------------------------------------------
+migrated_v1_default_mode:
+  decision_ref: Q-O6
+  default: strict
+  rule: >-
+    Import/migration MUST NOT infer or grant auto/transcendence. Elevated
+    autonomy is opt-in per tenant under explicit Operator-ratified policy,
+    preferably scoped by mutation class, connector capability, and autonomy
+    class. Privileged-class mutations remain Operator-only in every mode.
+  indeterminate_posture: >-
+    If prior autonomy posture cannot be determined, the importer selects strict,
+    records the uncertainty in provenance/evidence, and requires Operator
+    ratification before enabling delegated autonomy.
+
+# --- Sidecar / crosswalk / ADR decisions (Q-C1..Q-C8) --------------------------
+controller_decidable_decisions:
+  Q-C1:
+    decision: G2.<feature>.<slice> binds <feature> to canonical specs/v2/NNN.
+    applied: gate.id = G2.001.0 for specs/v2/001.
+  Q-C2:
+    decision: Adjacent *.ce.yml sidecars (spec.ce.yml/plan.ce.yml/tasks.ce.yml); no inline CE metadata; *.creator-engine.yml import alias only.
+    applied: this file is spec.ce.yml; spec.md carries no CE metadata.
+  Q-C3:
+    decision: Canonical v1->v2 crosswalk is specs/v2/_crosswalk.yml; .ce/crosswalks/ derived/runtime/tenant-expanded only.
+    applied: crosswalk_ref below points to specs/v2/_crosswalk.yml.
+  Q-C4:
+    decision: Requirement IDs scoped RV2-<specNNN>-<reqNNN>.
+    applied: requirements above use RV2-001-NNN.
+  Q-C5:
+    decision: Extension Contracts include identity/entrypoint/capability/permissions/mutation-class/authority/activation/evidence/side-effect/risk; declaration grants no authority.
+    applied: noted for specs/v2/006; not authored in this gate.
+  Q-C6:
+    decision: Context Directive Records require tenant scope, signal-gate fields, evidence, verification/freshness, import/publication metadata, ratification refs, supersession/revocation links.
+    applied: noted for specs/v2/008; not authored in this gate.
+  Q-C7:
+    decision: risk_inventory lives in CE sidecars, primarily spec.ce.yml; validators lint required_validation against declared risks.
+    applied: risk_inventory + required_validation present above.
+  Q-C8:
+    decision: v2 ADRs use ADR-V2-NNN under specs/v2/adrs/; document rationale; ratify nothing.
+    applied: ADR-V2-001 authored under specs/v2/adrs/.
+
+# --- Preserved ratified floors -------------------------------------------------
+preserved_floors:
+  OD-01: Operating modes strict | auto | transcendence (lowercase enum).
+  OD-02: Privileged-class ratification is Operator-only in every mode.
+  OD-22: Emergency governed override is Operator-only.
+  OD-06: operator canonical machine role; source import/parser alias only.
+  OD-21: New v2 artifacts use canonical v2 terminology/namespaces from inception.
+  OD-06A: .ce/ canonical active state; .hermes/ legacy/import only.
+  OD-08: specs/v2/NNN spec namespace.
+  OD-07: G2.<feature>.<slice> gate numbering.
+  OD-20: risk_inventory + required_validation coverage linting.
+  OD-23: v2.0 foundation line, not v1.x arc.
+  OD-24: standard Spec Kit Markdown stays free of CE metadata; use sidecars.
+  Q-O7: agent_ratifier reserved-inactive; no active use in v2.
+
+# --- Cross-references ----------------------------------------------------------
+crosswalk_ref: specs/v2/_crosswalk.yml
+adr_refs:
+  - specs/v2/adrs/ADR-V2-001-v2-foundation-substrate.md

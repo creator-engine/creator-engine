@@ -1,0 +1,244 @@
+# Creator Engine v1 -> v2 Crosswalk Register (canonical)
+#
+# CE-governed redo of G2.001.0. Decision basis: Q-C3 (single tracked canonical
+# crosswalk at specs/v2/_crosswalk.yml), OD-06/OD-06A/OD-08/OD-21/OD-23.
+#
+# This file is the authoritative spec-level v1->v2 crosswalk. Importers,
+# validators, roadmap artifacts, and migration tooling MUST treat it as
+# authoritative. Derived/runtime/tenant-expanded crosswalk material may live
+# under .ce/crosswalks/, but MUST NOT silently supersede this register.
+#
+# BOOTSTRAP NOTE: The formal crosswalk_register JSON Schema + validator land at
+# G2.001.4. This file is a forward-declared bootstrap register; its shape
+# anticipates that schema.
+
+schema: creator-engine/crosswalk-register
+schema_version: "2.0.0-draft"
+schema_status: forward-declared-bootstrap    # formal schema/validator land at G2.001.4
+authoritative: true
+derived_material_note: >-
+  .ce/crosswalks/ may hold derived, runtime, tenant-specific, or expanded
+  crosswalk material, but this tracked register is authoritative and is not
+  superseded by derived material.
+
+decision_refs: [Q-C3, OD-06, OD-06A, OD-08, OD-21, OD-23]
+
+# --- Role / terminology mappings (source -> operator) --------------------------
+roles:
+  - source: source
+    operator: operator
+    axis: human-authority-machine-role
+    disposition: import-alias-only            # OD-06/OD-21: source accepted on import; never emitted by new v2
+    emit_in_v2: false
+    accept_on_import: true
+    notes: operator is the only canonical v2 emitted human-authority machine role.
+  - source: agent_reviewer
+    operator: agent_reviewer
+    axis: agent-role
+    disposition: new-active-role              # Q-O4: active advisory; non-ratifying
+    emit_in_v2: true
+  - source: agent_ratifier
+    operator: agent_ratifier
+    axis: agent-role
+    disposition: reserved-inactive            # Q-O7: schema-present; validator-rejected for active authority
+    emit_in_v2: schema-placeholder-only
+    future_activation_milestone: AOS-RATIFIER-MILESTONE
+
+ratification_line:
+  v1_accepted: ["Operator ratifies prompt:", "Source ratifies prompt:"]
+  v2_emit: "Operator ratifies prompt:"
+  accept_source_on_import: true               # ADR-0002 §3 compatibility preserved on import only
+
+# --- State-path mappings (.hermes/ -> .ce/) ------------------------------------
+state_paths:
+  active_state_root:
+    v1: .hermes/
+    v2: .ce/
+    disposition: retarget                     # OD-06A
+    legacy_restriction: >-
+      .hermes/ is read-only legacy/import/archive/historical/Hermes-controller
+      infrastructure context. v2 flows MUST NOT write active CE state to
+      .hermes/ (Q-O2 write-freeze).
+  subtrees:
+    - v1: .hermes/active-work-ledger/
+      v2: .ce/active-work-ledger/
+      disposition: retarget
+      zone: gitignored-instance
+    - v1: .hermes/side-effect-ledger/
+      v2: .ce/side-effect-ledger/
+      disposition: retarget
+      zone: gitignored-instance
+    - v1: .hermes/pcl/
+      v2: .ce/pcl/
+      disposition: retarget
+      zone: split                             # records/ tracked-or-synced; cache/ gitignored
+    - v1: .hermes/ce-events/
+      v2: .ce/ce-events/
+      disposition: retarget
+      zone: split                             # records/ tracked-or-synced; spool/ gitignored
+    - v1: .hermes/directive-packs/
+      v2: .ce/directive-packs/
+      disposition: retarget
+      zone: tracked-governance
+  import_rules:
+    - The v1->v2 importer MAY read .hermes/ but MUST emit canonical .ce/ outputs (Q-O3).
+    - The importer MUST never mutate .hermes/.
+    - Imported records MUST carry provenance + crosswalk metadata and MUST NOT reintroduce .hermes/ as active v2 state.
+    - Empty input yields an explicit clean no-op.
+
+# --- Feature-label mappings (old Feature 008-021 -> specs/v2/NNN) --------------
+# OD-08 establishes specs/v2/NNN. The old Architect Feature 008-021 working
+# labels are stale pre-OD-08 references mapped here for import/traceability only.
+feature_labels:
+  - v1_label: "(none - new; the v2 reset)"
+    v2: specs/v2/001
+    name: v2 foundation substrate
+    layer: 0
+    disposition: new-v2-foundation
+  - v1_label: Feature 014
+    v2: specs/v2/002
+    name: Operating-mode machinery + autonomy classes
+    layer: 1
+    disposition: remap
+  - v1_label: Feature 009
+    v2: specs/v2/003
+    name: CE-event protocol (signed blocks)
+    layer: 2
+    disposition: remap
+  - v1_label: Feature 010
+    v2: specs/v2/004
+    name: PCL + federated identity + distributed claim
+    layer: 2
+    disposition: remap
+  - v1_label: Feature 008
+    v2: specs/v2/005
+    name: Connector substrate + source-host/tracker + Mission-Brief
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 012
+    v2: specs/v2/006
+    name: Extension + hook contract
+    layer: 0/3
+    disposition: remap
+  - v1_label: Feature 017
+    v2: specs/v2/007
+    name: Harness seat-contract + hook-pack template
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 011
+    v2: specs/v2/008
+    name: Directive Pack
+    layer: 2/3
+    disposition: remap
+  - v1_label: Feature 016
+    v2: specs/v2/009
+    name: Observability + safety + emergency governed override
+    layer: 1/2
+    disposition: remap
+  - v1_label: Feature 015
+    v2: specs/v2/010
+    name: Live Integration Queue
+    layer: 1/2
+    disposition: remap
+  - v1_label: Feature 013
+    v2: specs/v2/011
+    name: CI/CD connector
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 018
+    v2: specs/v2/012
+    name: Internal-tools / chat connector
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 019
+    v2: specs/v2/013
+    name: Observability backend connector
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 020
+    v2: specs/v2/014
+    name: Infrastructure connector
+    layer: 3
+    disposition: remap
+  - v1_label: Feature 021
+    v2: specs/v2/015
+    name: Local-environment connector (ce dev)
+    layer: 3
+    disposition: remap
+
+spec_namespace_note:
+  v1_proposed: specs/008...021
+  v2: specs/v2/001...015
+  disposition: rejected-to-v2                 # OD-08
+
+# --- Sidecar filename mappings (*.creator-engine.yml -> *.ce.yml) --------------
+sidecars:
+  - v1: spec.creator-engine.yml
+    v2: spec.ce.yml
+    disposition: rename
+    accept_v1_as_import_alias: true           # Q-C2
+  - v1: plan.creator-engine.yml
+    v2: plan.ce.yml
+    disposition: rename
+    accept_v1_as_import_alias: true
+  - v1: tasks.creator-engine.yml
+    v2: tasks.ce.yml
+    disposition: rename
+    accept_v1_as_import_alias: true
+
+sidecar_inline_metadata_rule: >-
+  CE metadata MUST live in *.ce.yml sidecars, never inline in standard Spec Kit
+  Markdown (OD-24 / Q-C2).
+
+# --- Other axis mappings -------------------------------------------------------
+other_axes:
+  - axis: requirement-id
+    v1: RV1-NNN
+    v2: RV2-<specNNN>-<reqNNN>
+    disposition: new-namespace                # Q-C4
+  - axis: gate-numbering
+    v1: "G0..G8 / PCO Slice 0..6"
+    v2: "G2.<feature>.<slice>"
+    disposition: distinct-generation          # OD-07
+  - axis: adr-namespace
+    v1: ADR-000N (docs/adr/)
+    v2: ADR-V2-NNN (specs/v2/adrs/)
+    disposition: new-namespace                # Q-C8
+  - axis: task-autonomy-field
+    v1: "[SYNC]/[ASYNC] (external import only)"
+    v2: "operating_mode + autonomy_class"
+    disposition: ce-native                    # OD-13
+  - axis: release-vehicle
+    v1: "v1.5-v1.9 arc (proposed)"
+    v2: "CE v2.0 foundation line"
+    disposition: rejected-to-v2               # OD-23
+
+# --- v1 archived/import context vs v2 canonical emission context ---------------
+context_disposition:
+  v1_archived_import_context:
+    description: >-
+      Material whose only valid v2 role is read-only import, parser
+      compatibility, migration source, archival review, or historical citation.
+    includes:
+      - .hermes/ active-state paths (read-only)
+      - source / Source role values and ratification lines (accept on import)
+      - "*.creator-engine.yml sidecars (accept as import alias)"
+      - old Feature 008-021 working labels
+      - specs/008...021 proposed namespace
+    rules:
+      - Readable, never emitted by new v2 artifacts.
+      - Never written/mutated by v2 flows.
+      - No destructive removal in v2.0 (Q-O5).
+  v2_canonical_emission_context:
+    description: The only context new v2 artifacts emit into.
+    includes:
+      - .ce/ active-state paths
+      - operator role value and "Operator ratifies prompt:" line
+      - "*.ce.yml sidecars"
+      - specs/v2/NNN spec namespace
+      - G2.<feature>.<slice> gate IDs
+      - RV2-<specNNN>-<reqNNN> requirement IDs
+      - ADR-V2-NNN under specs/v2/adrs/
+    rules:
+      - Canonical for all new Phase 2+ artifacts (OD-21).
+      - Privileged-class ratification + emergency override remain Operator-only (OD-02/OD-22).
