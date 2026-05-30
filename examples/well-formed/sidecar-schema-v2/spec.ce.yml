@@ -1,0 +1,39 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+spec:
+  id: specs/v2/example
+  spec_number: "999"
+  title: Example v2 Sidecar Schema Fixture
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+gate:
+  id: G2.999.0
+  feature_binding: specs/v2/999
+  slice: "0"
+  title: Example fixture
+  layer: 0
+authority:
+  mutation_classes: [governance]
+  privileged: true
+  required_ratifier_role: operator
+requirements:
+  - id: RV2-999-001
+    spec_md_ref: FR-001
+    statement: Example requirement.
+    decisions: [Q-C7]
+    risk_refs: [RISK-RV2-999-GAP]
+risk_inventory:
+  - id: RISK-RV2-999-GAP
+    title: Example mapped risk.
+    relevance: [governance]
+    description: Example risk description.
+    severity: medium
+    required_validation_refs: [VAL-EXAMPLE-COVERAGE]
+required_validation:
+  - id: VAL-EXAMPLE-COVERAGE
+    description: Example validation mapped from the risk inventory.
+    planned_slice: G2.999.0
+    planned_validator: sidecar_schema_v2

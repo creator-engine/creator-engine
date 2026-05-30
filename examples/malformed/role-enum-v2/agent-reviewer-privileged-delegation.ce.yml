@@ -1,0 +1,6 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+policy:
+  mutation_class: governance
+  privileged: true
+  required_ratifier_role: agent_reviewer

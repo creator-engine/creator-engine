@@ -1,0 +1,32 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+spec:
+  id: specs/v2/missing-risk-inventory
+  spec_number: "998"
+  title: Missing Risk Inventory Fixture
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+gate:
+  id: G2.998.0
+  feature_binding: specs/v2/998
+  slice: "0"
+  title: Missing risk inventory fixture
+  layer: 0
+authority:
+  mutation_classes: [governance]
+  privileged: true
+  required_ratifier_role: operator
+requirements:
+  - id: RV2-998-001
+    spec_md_ref: FR-001
+    statement: Risk-bearing requirement without a risk inventory.
+    decisions: [Q-C7]
+    risk_refs: [RISK-RV2-998-MISSING]
+required_validation:
+  - id: VAL-MISSING-RISK-COVERAGE
+    description: Present validation cannot satisfy absent risk inventory.
+    planned_slice: G2.998.0
+    planned_validator: sidecar_schema_v2

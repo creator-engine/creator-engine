@@ -1,0 +1,167 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/spec-ce-sidecar.schema.yaml"
+title: "Creator Engine v2 Spec CE Sidecar"
+description: >-
+  Formal G2.001.3 schema for v2 spec.ce.yml sidecars. This schema covers the
+  validator-visible shape currently used by specs/v2/001-v2-foundation-substrate/spec.ce.yml.
+type: object
+required:
+  - schema
+  - schema_version
+  - schema_status
+  - ce_metadata_kind
+  - spec
+  - gate
+properties:
+  schema:
+    const: creator-engine/spec.ce.yml
+  schema_version:
+    type: string
+    minLength: 1
+  schema_status:
+    type: string
+    enum: [formalized, forward-declared-bootstrap]
+  ce_metadata_kind:
+    const: spec-ce-sidecar
+  spec:
+    type: object
+    required: [id, spec_number, title, namespace, spec_md, status]
+    properties:
+      id: {type: string, minLength: 1}
+      spec_number: {type: string, pattern: "^[0-9]{3}$"}
+      title: {type: string, minLength: 1}
+      namespace: {type: string, pattern: "^specs/v2$"}
+      spec_md: {type: string, pattern: "^spec\\.md$"}
+      status: {type: string, minLength: 1}
+      release_line: {type: string, minLength: 1}
+    additionalProperties: true
+  gate:
+    type: object
+    required: [id, feature_binding, slice, title, layer]
+    properties:
+      id: {type: string, pattern: "^G2\\.[0-9]{3}\\.[0-9]+$"}
+      feature_binding: {type: string, pattern: "^specs/v2/[0-9]{3}$"}
+      slice: {type: string, minLength: 1}
+      title: {type: string, minLength: 1}
+      layer: {type: integer, minimum: 0}
+      remaining_foundation_slices:
+        type: array
+        items:
+          type: object
+          required: [id, title]
+          properties:
+            id: {type: string, minLength: 1}
+            title: {type: string, minLength: 1}
+          additionalProperties: true
+    additionalProperties: true
+  authority_basis:
+    type: object
+    additionalProperties: true
+  operating_mode_relevance:
+    type: object
+    additionalProperties: true
+  authority:
+    type: object
+    properties:
+      mutation_classes:
+        type: array
+        items: {type: string, minLength: 1}
+      privileged: {type: boolean}
+      required_ratifier_role: {type: string, minLength: 1}
+    additionalProperties: true
+  requirements:
+    type: array
+    items:
+      type: object
+      required: [id, spec_md_ref, statement]
+      properties:
+        id: {type: string, pattern: "^RV2-[0-9]{3}-[0-9]{3}$"}
+        spec_md_ref: {type: string, pattern: "^FR-[0-9]{3}$"}
+        statement: {type: string, minLength: 1}
+        decisions:
+          type: array
+          items: {type: string, minLength: 1}
+        risk_refs:
+          type: array
+          items: {type: string, minLength: 1}
+      additionalProperties: true
+  risk_inventory:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, title, relevance, description, severity, required_validation_refs]
+      properties:
+        id: {type: string, pattern: "^RISK-[A-Z0-9-]+$"}
+        title: {type: string, minLength: 1}
+        relevance:
+          type: array
+          minItems: 1
+          items: {type: string, minLength: 1}
+        description: {type: string, minLength: 1}
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        required_validation_refs:
+          type: array
+          minItems: 1
+          items: {type: string, pattern: "^VAL-[A-Z0-9-]+$"}
+      additionalProperties: true
+  required_validation:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, description, planned_slice, planned_validator]
+      properties:
+        id: {type: string, pattern: "^VAL-[A-Z0-9-]+$"}
+        description: {type: string, minLength: 1}
+        planned_slice: {type: string, minLength: 1}
+        planned_validator: {type: string, minLength: 1}
+        status: {type: string, minLength: 1}
+        implemented_slice: {type: string, minLength: 1}
+        implemented_validator: {type: string, minLength: 1}
+        implemented_codes:
+          type: array
+          items: {type: string, minLength: 1}
+        fixtures:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+  terminology_canon:
+    type: object
+    additionalProperties: true
+  state_boundary:
+    type: object
+    additionalProperties: true
+  hermes_write_freeze:
+    type: object
+    additionalProperties: true
+  importer_contract:
+    type: object
+    additionalProperties: true
+  role_enum_v2:
+    type: object
+    additionalProperties: true
+  role_constraints:
+    type: object
+    additionalProperties: true
+  no_destructive_v1_removal:
+    type: object
+    additionalProperties: true
+  migrated_v1_default_mode:
+    type: object
+    additionalProperties: true
+  controller_decidable_decisions:
+    type: object
+    additionalProperties: true
+  preserved_floors:
+    type: object
+    additionalProperties: true
+  crosswalk_ref:
+    type: string
+    minLength: 1
+  adr_refs:
+    type: array
+    items: {type: string, minLength: 1}
+additionalProperties: false

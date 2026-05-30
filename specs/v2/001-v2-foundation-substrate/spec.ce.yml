@@ -7,14 +7,13 @@
 # metadata; all CE metadata lives here, in specs/v2/_crosswalk.yml, and in
 # specs/v2/adrs/ADR-V2-001-*.
 #
-# BOOTSTRAP NOTE: The formal *.ce.yml sidecar JSON Schema is authored in a later
-# foundation slice (G2.001.3). This file is a forward-declared bootstrap
-# sidecar; field names anticipate that schema and will be machine-validated once
-# it lands. schema_status records that bootstrap state explicitly.
+# G2.001.3 NOTE: The formal spec.ce.yml sidecar JSON Schema is now validator-visible
+# at schemas/spec-ce-sidecar.schema.yaml. This sidecar remains the authoritative
+# v2 foundation metadata record and is checked by sidecar_schema_v2.
 
 schema: creator-engine/spec.ce.yml
 schema_version: "2.0.0-draft"
-schema_status: forward-declared-bootstrap   # formal schema lands at G2.001.3
+schema_status: formalized                    # G2.001.3: schemas/spec-ce-sidecar.schema.yaml
 ce_metadata_kind: spec-ce-sidecar
 
 # --- Spec & gate identity (Q-C1, Q-C4, OD-08) ----------------------------------
@@ -401,18 +400,56 @@ required_validation:
     description: Refuse any mode/policy that relaxes the Operator-only privileged floor or delegates emergency override.
     planned_slice: G2.001.2
     planned_validator: role_enum_v2 / operating_mode_policy
+    status: implemented                       # G2.001.2: privileged-class and emergency-override floor
+    implemented_slice: G2.001.2
+    implemented_validator: role_enum_v2
+    implemented_codes: [VAL-PRIVILEGED-FLOOR-AGENT-DELEGATION]
+    fixtures:
+      well_formed:
+        - examples/well-formed/role-enum-v2/canonical-role-policy.ce.yml
+      malformed:
+        - examples/malformed/role-enum-v2/agent-reviewer-privileged-delegation.ce.yml
+        - examples/malformed/role-enum-v2/emergency-override-agent.ce.yml
   - id: VAL-RATIFIER-REJECT
     description: Reject any active authority binding to `agent_ratifier`.
     planned_slice: G2.001.2
     planned_validator: role_enum_v2
+    status: implemented                       # G2.001.2
+    implemented_slice: G2.001.2
+    implemented_validator: role_enum_v2
+    implemented_codes: [VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE]
+    fixtures:
+      well_formed:
+        - examples/well-formed/role-enum-v2/canonical-role-policy.ce.yml
+      malformed:
+        - examples/malformed/role-enum-v2/agent-ratifier-active-binding.ce.yml
   - id: VAL-SIDECAR-NO-INLINE
     description: Fail closed on CE-specific metadata blocks inside standard Spec Kit Markdown.
     planned_slice: G2.001.3
-    planned_validator: sidecar_no_inline_metadata
+    planned_validator: sidecar_schema_v2
+    status: implemented                       # G2.001.3
+    implemented_slice: G2.001.3
+    implemented_validator: sidecar_schema_v2
+    implemented_codes: [VAL-SIDECAR-NO-INLINE, VAL-SIDECAR-SCHEMA]
+    fixtures:
+      well_formed:
+        - examples/well-formed/sidecar-schema-v2/spec.ce.yml
+      malformed:
+        - examples/malformed/sidecar-schema-v2/inline-ce-metadata/spec.md
   - id: VAL-RISK-COVERAGE
     description: Require non-empty risk_inventory for risk-bearing specs and lint required_validation against declared risks.
     planned_slice: G2.001.3
-    planned_validator: risk_inventory
+    planned_validator: sidecar_schema_v2
+    status: implemented                       # G2.001.3
+    implemented_slice: G2.001.3
+    implemented_validator: sidecar_schema_v2
+    implemented_codes: [VAL-RISK-COVERAGE]
+    fixtures:
+      well_formed:
+        - examples/well-formed/sidecar-schema-v2/spec.ce.yml
+      malformed:
+        - examples/malformed/sidecar-schema-v2/missing-risk-inventory/spec.ce.yml
+        - examples/malformed/sidecar-schema-v2/unmapped-risk-validation/spec.ce.yml
   - id: VAL-CROSSWALK-AUTHORITATIVE
     description: Require live crosswalk entry for v2 specs that supersede/import v1; tracked register authoritative over derived material.
     planned_slice: G2.001.4
@@ -562,6 +599,43 @@ importer_contract:
     - Imported records MUST carry provenance/crosswalk metadata.
     - MUST NOT reintroduce `.hermes/` as active v2 state.
     - Real tenant migration activation is separately Operator-ratified.
+
+# --- v2 role enum (G2.001.2; Q-O4, Q-O7, OD-02/06/22) --------------------------
+# Authored at G2.001.2 and made machine-enforceable by the role_enum_v2
+# validator. Pins the machine roles that may appear in v2 authority surfaces
+# while preserving the Operator-only privileged floor.
+role_enum_v2:
+  decision_refs: [Q-O4, Q-O7, OD-02, OD-06, OD-22]
+  requirement_refs: [RV2-001-013, RV2-001-014, RV2-001-015]
+  enforced_by: role_enum_v2
+  enforced_slice: G2.001.2
+  scope: new v2 artifacts under specs/v2/ (YAML authority / policy surfaces)
+  privileged_mutation_classes: [deploy, governance, identity, security, attestation, redaction]
+  roles:
+    - id: operator
+      status: active
+      authority: human_authority
+      may_ratify_privileged_classes: true
+      may_authorize_emergency_override: true
+      requirement_refs: [RV2-001-015]
+    - id: agent_reviewer
+      status: active_advisory
+      authority: advisory_only
+      may: [review, test, critique, recommend, prepare_evidence]
+      may_not: [ratify_privileged_mutation, authorize_emergency_override, satisfy_operator_only_requirement, activate_agent_ratifier]
+      requirement_refs: [RV2-001-013]
+    - id: agent_ratifier
+      status: reserved_inactive
+      authority_binding: none
+      activation: AOS-RATIFIER-MILESTONE
+      active_use_rejected_by: VAL-RATIFIER-REJECT
+      requirement_refs: [RV2-001-014]
+  operator_only_floor:
+    privileged_mutation_classes: [deploy, governance, identity, security, attestation, redaction]
+    emergency_override: operator_only
+    required_ratifier_role: operator
+    agent_roles_may_satisfy: false
+    enforced_by: VAL-PRIVILEGED-FLOOR
 
 # --- Role constraints (Q-O4, Q-O7) ---------------------------------------------
 role_constraints:

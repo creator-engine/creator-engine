@@ -130,16 +130,15 @@ Establish the v2.0 foundation substrate as specified in
   substrate; tracked governance is validator-visible; runtime/secret state
   cannot leak into tracked paths; v1 history stays importable and reversible;
   terminology/role/authority debt is prevented at inception.
-- **Cost / obligations.** Six foundation validators are specified for later
-  slices (`ce_path_namespace`, `ce_terminology_v2`, `role_enum_v2`,
-  `sidecar_no_inline_metadata`, `crosswalk_register`, `risk_inventory`); the
-  crosswalk is a living artifact requiring freshness discipline; the
-  tracked-vs-instance split must be implemented exactly to avoid mis-tracking.
-- **Bootstrap note.** The formal `*.ce.yml` sidecar schema (`G2.001.3`) and the
-  crosswalk register schema/validator (`G2.001.4`) are authored after this gate.
-  This spec's `spec.ce.yml` and `specs/v2/_crosswalk.yml` are therefore
-  forward-declared bootstrap artifacts that those later schemas will validate;
-  each records `schema_status: forward-declared-bootstrap`.
+- **Cost / obligations.** Foundation validators are specified across the slice
+  sequence (`ce_path_namespace`, `ce_terminology_v2`, `role_enum_v2`,
+  `sidecar_schema_v2`, `crosswalk_register`); the crosswalk is a living artifact
+  requiring freshness discipline; the tracked-vs-instance split must be
+  implemented exactly to avoid mis-tracking.
+- **Bootstrap note.** `G2.001.3` formalizes the `spec.ce.yml` sidecar schema and
+  risk-coverage validator. The crosswalk register schema/validator (`G2.001.4`)
+  remains a later foundation slice; `specs/v2/_crosswalk.yml` therefore remains
+  forward-declared until that gate.
 - **Sequencing.** `G2.001.0` establishes the namespace, boundary, write-freeze,
   and importer contract; `G2.001.1`–`G2.001.4` add the terminology canon, role
   enum, sidecar schema, and crosswalk validator. Feature work (`specs/v2/002+`)

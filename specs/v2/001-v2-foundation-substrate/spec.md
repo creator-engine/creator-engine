@@ -401,14 +401,14 @@ policy.
 - The v1 substrate (existing schemas, validators, `ce` runtime, and `.hermes/`
   archive) remains in place and readable; v2 is a clean foundation layered
   beside it, not a destructive replacement.
-- Later foundation slices (`G2.001.1`–`G2.001.4`) author the terminology
-  validator, role-enum schema, v2 sidecar schema, and crosswalk validator that
-  make the rules in this spec machine-enforceable; this gate (`G2.001.0`)
-  establishes the namespace, state-boundary contract, write-freeze, and importer
-  contract that those slices build on.
-- The formal `spec.ce.yml` schema is authored in a later foundation slice
-  (`G2.001.3`); this spec's own `spec.ce.yml` is a forward-declared bootstrap
-  sidecar that the later schema will validate.
+- Foundation slices (`G2.001.1`–`G2.001.4`) incrementally author the
+  terminology validator, role-enum schema, v2 sidecar schema, and crosswalk
+  validator that make the rules in this spec machine-enforceable; the original
+  `G2.001.0` gate established the namespace, state-boundary contract,
+  write-freeze, and importer contract that those slices build on.
+- The formal `spec.ce.yml` schema is authored in `G2.001.3`; this spec's own
+  `spec.ce.yml` is now validated by `sidecar_schema_v2`, while the crosswalk
+  register schema remains a later `G2.001.4` foundation slice.
 - Real tenant migration activation is a separate Operator-ratified decision; the
   importer defined here is read-only and dry-run-capable only.
 - This is a documentation/spec-authoring gate; no runtime code, commit, push,

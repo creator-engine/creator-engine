@@ -1,0 +1,6 @@
+policy:
+  mutation_class: governance
+  privileged: true
+  agent_reviewer: required
+  ratification_policy:
+    agent_ratifier: required
