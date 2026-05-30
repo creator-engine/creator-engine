@@ -1,0 +1,82 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/ce-event-block.schema.yaml"
+title: "Creator Engine CE-event signed block substrate"
+description: >-
+  G2.003.0 schema for shape-only CE-event signed blocks. Cryptographic signing,
+  key custody, live emission, and queue/connector runtime remain deferred.
+type: object
+oneOf:
+  - required: [ce_event_block]
+  - required: [ce_event_chain]
+properties:
+  ce_event_block:
+    $ref: "#/$defs/block"
+  ce_event_chain:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/block"
+additionalProperties: false
+$defs:
+  hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  block:
+    type: object
+    required: [block_id, sequence, parent_hash, content_hash, emitting_role, operating_mode, recorded_at, event, signature]
+    properties:
+      block_id:
+        type: string
+        pattern: "^ceevt-[a-z0-9][a-z0-9-]{3,96}$"
+      sequence:
+        type: integer
+        minimum: 0
+      parent_hash:
+        anyOf:
+          - $ref: "#/$defs/hash"
+          - type: "null"
+      content_hash:
+        $ref: "#/$defs/hash"
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      event:
+        type: object
+        required: [kind, subject, summary]
+        properties:
+          kind:
+            type: string
+            pattern: "^[a-z][a-z0-9_:-]{1,64}$"
+          subject:
+            type: string
+            minLength: 1
+          summary:
+            type: string
+            minLength: 1
+          payload:
+            type: object
+            additionalProperties: true
+        additionalProperties: true
+      signature:
+        type: object
+        required: [scheme, key_id, value]
+        properties:
+          scheme:
+            type: string
+            enum: [reserved-shape-only]
+          key_id:
+            type: string
+            minLength: 1
+          value:
+            type: string
+            enum: [reserved-inactive]
+        additionalProperties: false
+    additionalProperties: false
