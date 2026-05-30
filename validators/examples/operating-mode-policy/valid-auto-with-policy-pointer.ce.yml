@@ -1,0 +1,20 @@
+operating_mode_policy:
+  operating_mode: auto
+  autonomy_class: delegated_non_privileged
+  default_for_migrated_v1_tenants: strict
+  operator_policy_ref:
+    ratified_prompt: .hermes/research/example/OPERATOR_AUTO_MODE_POLICY.md
+    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  privileged_floor:
+    privileged_mutation_classes: [governance, security]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      activation_requires: AOS-RATIFIER-MILESTONE
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  risk_coverage:
+    required_validation_refs: [VAL-AUTO-REQUIRES-OPERATOR-POLICY]
