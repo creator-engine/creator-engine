@@ -1,0 +1,14 @@
+# Well-formed: legacy forms ACCEPTED because this file is clearly marked as
+# import-alias context. Demonstrates VAL-NO-DESTRUCTIVE-REMOVAL (Q-O5): the
+# legacy source role, the legacy ratification line, and .hermes/ active paths
+# remain readable on import and are NOT removed or rejected here.
+ce_terminology_context: import-alias        # <- clearly-marked legacy/import context
+schema: creator-engine/import-record
+imported_from: .hermes/                      # legacy read source
+imported_record:
+  required_ratifier_role: source             # legacy role value, accepted on import only
+  active_state_root: .hermes/active-work-ledger/
+  ratification_line: "Source ratifies prompt:/legacy/prompt.md with SHA:deadbeef"
+crosswalk_target:
+  required_ratifier_role: operator
+  active_state_root: .ce/active-work-ledger/

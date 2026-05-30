@@ -1,0 +1,3 @@
+# MALFORMED: a new v2 artifact using the legacy *.creator-engine.yml sidecar filename.
+# Expected: VAL-TERMINOLOGY-SIDECAR-ALIAS.
+schema: creator-engine/spec.ce.yml

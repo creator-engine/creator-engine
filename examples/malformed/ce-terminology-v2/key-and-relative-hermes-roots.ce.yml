@@ -1,0 +1,8 @@
+# MALFORMED fixture (ce_terminology_v2): `.hermes` active/write root encoded as a
+# map KEY, plus repo-relative `./.hermes` spellings. A new v2 artifact must NOT
+# declare `.hermes` as an active/write state root in any of these encodings.
+# Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+write_roots:
+  .hermes/: active
+active_state_root: ./.hermes/
+active_state_roots: [./.hermes]

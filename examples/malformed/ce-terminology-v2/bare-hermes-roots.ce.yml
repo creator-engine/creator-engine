@@ -1,0 +1,7 @@
+# MALFORMED fixture (ce_terminology_v2): bare `.hermes` (no trailing slash) active/
+# write roots, in direct, nested, and plural forms. A new v2 artifact must NOT declare
+# `.hermes` as an active/write state root. Expected: VAL-WRITE-FREEZE-HERMES-ACTIVE.
+active_state_root: .hermes
+write_roots:
+  primary: .hermes
+active_state_roots: [.hermes]

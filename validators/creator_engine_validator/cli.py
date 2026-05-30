@@ -97,6 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_state_version_record.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_terminology_v2 = sub.add_parser(
+        "scan-terminology-v2",
+        help="run only the ce_terminology_v2 check (G2.001.1) against a path",
+    )
+    scan_terminology_v2.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -241,6 +247,25 @@ def _check_examples(json_output: bool) -> int:
         ("well-formed", Path("examples/well-formed/state-version-record"), True, None),
         ("malformed", Path("examples/malformed/state-version-record/stale-version.yaml"), False, "RV1-022-STALE"),
         ("malformed", Path("examples/malformed/state-version-record/invalid-status.yaml"), False, "RV1-022"),
+        ("well-formed", Path("examples/well-formed/ce-terminology-v2"), True, None),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/emits-source-role.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/hermes-active-root.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/source-ratifies-line.md"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/structured-source-roles.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/nested-hermes-roots.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/plural-hermes-roots.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/nested-source-roles.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/ordered-list-source-ratifies.md"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/bare-hermes-roots.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/key-and-relative-hermes-roots.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/descriptor-key-source-roles.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/task-list-source-ratifies.md"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/yaml-source-ratifies.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/active-write-root-hermes.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/canonical-root-hermes.ce.yml"), False, "VAL-WRITE-FREEZE-HERMES-ACTIVE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/plural-ratifiers-source.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/block-scalar-source-ratifies.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
+        ("malformed", Path("examples/malformed/ce-terminology-v2/forbidden-sidecar.creator-engine.yml"), False, "VAL-TERMINOLOGY-SIDECAR-ALIAS"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -351,6 +376,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-state-version-record":
         from .checks.state_version_record import run as _run_state_version_record
         result = _run_state_version_record([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-terminology-v2":
+        from .checks.ce_terminology_v2 import run as _run_terminology_v2
+        result = _run_terminology_v2([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution

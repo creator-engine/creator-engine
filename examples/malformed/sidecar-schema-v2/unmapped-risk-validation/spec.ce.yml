@@ -1,0 +1,39 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+spec:
+  id: specs/v2/unmapped-risk-validation
+  spec_number: "997"
+  title: Unmapped Risk Validation Fixture
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+gate:
+  id: G2.997.0
+  feature_binding: specs/v2/997
+  slice: "0"
+  title: Unmapped risk validation fixture
+  layer: 0
+authority:
+  mutation_classes: [governance]
+  privileged: true
+  required_ratifier_role: operator
+requirements:
+  - id: RV2-997-001
+    spec_md_ref: FR-001
+    statement: Risk and validation maps must be bidirectional.
+    decisions: [Q-C7]
+    risk_refs: [RISK-RV2-997-GAP]
+risk_inventory:
+  - id: RISK-RV2-997-GAP
+    title: Risk references missing validation.
+    relevance: [governance]
+    description: Risk points at a required validation id not declared below.
+    severity: medium
+    required_validation_refs: [VAL-MISSING]
+required_validation:
+  - id: VAL-ORPHAN
+    description: Required validation is not referenced by any risk.
+    planned_slice: G2.997.0
+    planned_validator: sidecar_schema_v2

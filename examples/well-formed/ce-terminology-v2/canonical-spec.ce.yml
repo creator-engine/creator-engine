@@ -1,0 +1,13 @@
+# Well-formed: a new v2 artifact emitting only canonical v2 terminology.
+# ce_terminology_v2 (G2.001.1) MUST pass this file.
+schema: creator-engine/spec.ce.yml
+ce_metadata_kind: spec-ce-sidecar
+authority:
+  required_ratifier_role: operator          # canonical human-authority role (FR-011)
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+state_boundary:
+  canonical_active_root: .ce/               # only canonical active-state root (FR-007)
+  legacy_root: .hermes/                     # named legacy/read-only root — not active emission
+ratification_line:
+  canonical_emit: "Operator ratifies prompt:"

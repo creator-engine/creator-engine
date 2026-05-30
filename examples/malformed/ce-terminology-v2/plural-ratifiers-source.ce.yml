@@ -1,0 +1,4 @@
+# MALFORMED: legacy `source` under plural ratifier role fields. Expected: VAL-TERMINOLOGY-SOURCE-ROLE.
+ratifiers: [source]
+required_ratifiers: [source]
+allowed_ratifiers: [source]

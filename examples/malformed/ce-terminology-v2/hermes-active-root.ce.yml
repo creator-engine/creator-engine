@@ -1,0 +1,9 @@
+# Malformed: a new v2 artifact (no legacy-context marker) declares `.hermes/`
+# as an active state root, violating the write-freeze. ce_terminology_v2 MUST
+# fail closed with VAL-WRITE-FREEZE-HERMES-ACTIVE (FR-007 / RV2-001-007).
+schema: creator-engine/spec.ce.yml
+ce_metadata_kind: spec-ce-sidecar
+authority:
+  required_ratifier_role: operator
+state_boundary:
+  canonical_active_root: .hermes/           # <- forbidden: .hermes/ as active root

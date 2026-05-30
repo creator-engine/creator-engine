@@ -1,0 +1,4 @@
+# MALFORMED: legacy ratification line inside a YAML block scalar. Expected: VAL-TERMINOLOGY-SOURCE-RATIFIES.
+note: |
+  intro line
+  Source ratifies prompt:/home/nefarious/example/prompt.md

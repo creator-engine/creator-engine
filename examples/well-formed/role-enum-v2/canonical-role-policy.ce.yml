@@ -1,0 +1,23 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+role_enum_v2:
+  roles:
+    - id: operator
+      status: active
+      authority: human_authority
+      privileged_floor: required
+    - id: agent_reviewer
+      status: active_advisory
+      authority: advisory_only
+      may: [review, test, critique, recommend]
+      may_not: [ratify_privileged_mutation, authorize_emergency_override]
+    - id: agent_ratifier
+      status: reserved_inactive
+      authority_binding: none
+      activation: AOS-RATIFIER-MILESTONE
+policy:
+  privileged_mutation_classes: [deploy, governance, identity, security, attestation, redaction]
+  required_ratifier_role: operator
+  emergency_override: operator_only
+  reviewer_role: agent_reviewer
+  reviewer_authority: advisory_only
