@@ -68,8 +68,10 @@ authority:
   agent_ratifier: reserved_inactive
   emergency_override: operator_only
   authoring_authority_boundary: >-
-    Docs, schema, validator, examples, and spec substrate only. No runtime
-    carrier propagation, G2.001.4 crosswalk work, PR review, approval, or merge.
+    Docs, schema, validator, examples, spec substrate, Assignment Envelope
+    carrier representation, Active-Work Ledger carrier fields, and ce lane launch
+    default/refusal behavior only. No G2.001.4 crosswalk work, PR review,
+    approval, or merge.
 
 operating_mode_policy:
   operating_mode: strict
