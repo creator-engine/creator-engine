@@ -22,13 +22,13 @@ class FakeAdapter:
 
     def __init__(self, *, available: bool = True):
         self._available = available
-        self.spawned: list[tuple[str, str, list[str]]] = []
+        self.spawned: list[tuple[str, str, list[str], str | None]] = []
 
     def is_available(self) -> bool:
         return self._available
 
-    def ensure_pane(self, *, session, window, command):
-        self.spawned.append((session, window, list(command)))
+    def ensure_pane(self, *, session, window, command, cwd=None):
+        self.spawned.append((session, window, list(command), cwd))
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3", pane_tty="/dev/pts/9", pane_pid=4242)
 
 

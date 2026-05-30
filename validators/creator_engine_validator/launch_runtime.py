@@ -26,7 +26,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import claude_launch_spec
+from . import claude_launch_spec, hermes_launch_spec
 
 DEFAULT_HARNESS = "claude"
 DEFAULT_SESSION = "ce-controller"
@@ -59,6 +59,15 @@ class LaunchRefused(LaunchError):
     """CC-G-D Ring 0: a governed Claude launch surface is refused before side effects."""
 
     code = "G6-LAUNCH-CLAUDE-REFUSED"
+
+
+class HermesLaunchRefused(LaunchRefused):
+    """CE Ring 0: a governed Hermes launch surface is refused before side effects.
+
+    Subclasses ``LaunchRefused`` (so existing ``except LaunchRefused`` handlers still
+    catch it) but carries a Hermes-specific code instead of the Claude one."""
+
+    code = "G6-LAUNCH-HERMES-REFUSED"
 
 
 def _confirm_pack(repo_root: Path | str | None) -> bool:
@@ -233,6 +242,26 @@ def launch(
                 f"refusing governed Claude launch: {clause} — {exc}"
             ) from exc
         plan = replace(plan, command=governed)
+
+    # CE Ring 0 Hermes governance: pin the creator-engine profile and refuse
+    # prohibited Hermes surfaces BEFORE any side effect. (Hermes has no
+    # --strict-mcp-config equivalent; none is invented — see the gate closeout.)
+    elif harness == "hermes":
+        requested = list(extra_args) if extra_args else []
+        spec_result = hermes_launch_spec.evaluate_hermes_launch(
+            hermes_launch_spec.parse_hermes_argv(requested)
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise HermesLaunchRefused(
+                f"refusing governed Hermes launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        plan = replace(
+            plan,
+            command=hermes_launch_spec.build_governed_hermes_command(base_argv=requested),
+        )
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
