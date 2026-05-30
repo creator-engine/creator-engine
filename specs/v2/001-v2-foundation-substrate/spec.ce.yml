@@ -454,6 +454,25 @@ required_validation:
     description: Require live crosswalk entry for v2 specs that supersede/import v1; tracked register authoritative over derived material.
     planned_slice: G2.001.4
     planned_validator: crosswalk_register
+    status: implemented                       # G2.001.4
+    implemented_slice: G2.001.4
+    implemented_validator: crosswalk_register
+    implemented_codes: [VAL-CROSSWALK-SCHEMA-IDENTITY, VAL-CROSSWALK-AUTHORITATIVE, VAL-CROSSWALK-CANONICAL-MAPPING, VAL-CROSSWALK-DERIVED-SUPERSEDES, VAL-CROSSWALK-CONTEXT-DISPOSITION]
+    implementation_note: >-
+      crosswalk_register validates specs/v2/_crosswalk.yml (and well-formed
+      crosswalk-register fixtures) against schemas/crosswalk-register.schema.yaml
+      plus four predicates the schema alone cannot express: the register asserts
+      authoritative: true, carries the canonical mapping groups (roles,
+      state_paths, feature_labels, sidecars), declares no derived material that
+      supersedes the tracked register, and never emits the archived/import
+      context from new v2 artifacts.
+    fixtures:
+      well_formed:
+        - examples/well-formed/crosswalk-register/canonical-crosswalk.yml
+      malformed:
+        - examples/malformed/crosswalk-register/missing-authoritative.yml
+        - examples/malformed/crosswalk-register/missing-canonical-mappings.yml
+        - examples/malformed/crosswalk-register/derived-supersedes-authoritative.yml
   - id: VAL-AUTONOMY-DEFAULT
     description: Migrated tenants default to `strict`; reject inferred auto/transcendence on import.
     planned_slice: G2.002.0

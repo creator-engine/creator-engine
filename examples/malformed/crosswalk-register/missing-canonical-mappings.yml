@@ -1,0 +1,21 @@
+# Malformed crosswalk-register fixture (G2.001.4 / FR-018).
+#
+# Defect: the register omits the canonical mapping groups (roles, state_paths,
+# feature_labels, sidecars). It is otherwise well-formed, so the
+# crosswalk_register check must fail closed with exactly
+# VAL-CROSSWALK-CANONICAL-MAPPING.
+
+schema: creator-engine/crosswalk-register
+schema_version: "2.0.0-draft"
+authoritative: true
+derived_material_note: >-
+  This tracked register is authoritative and is not superseded by derived
+  material.
+
+context_disposition:
+  v1_archived_import_context:
+    rules:
+      - Readable, never emitted by new v2 artifacts.
+  v2_canonical_emission_context:
+    rules:
+      - Canonical for all new Phase 2+ artifacts.

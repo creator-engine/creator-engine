@@ -1,0 +1,38 @@
+# Malformed crosswalk-register fixture (G2.001.4 / FR-018).
+#
+# Defect: the register does NOT assert authoritative: true. Everything else is
+# well-formed, so the crosswalk_register check must fail closed with exactly
+# VAL-CROSSWALK-AUTHORITATIVE.
+
+schema: creator-engine/crosswalk-register
+schema_version: "2.0.0-draft"
+authoritative: false
+derived_material_note: >-
+  This tracked register is authoritative and is not superseded by derived
+  material.
+
+roles:
+  - source: source
+    operator: operator
+    disposition: import-alias-only
+
+state_paths:
+  active_state_root:
+    v1: .hermes/
+    v2: .ce/
+
+feature_labels:
+  - v1_label: Feature 008
+    v2: specs/v2/005
+
+sidecars:
+  - v1: spec.creator-engine.yml
+    v2: spec.ce.yml
+
+context_disposition:
+  v1_archived_import_context:
+    rules:
+      - Readable, never emitted by new v2 artifacts.
+  v2_canonical_emission_context:
+    rules:
+      - Canonical for all new Phase 2+ artifacts.
