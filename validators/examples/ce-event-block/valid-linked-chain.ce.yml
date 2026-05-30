@@ -1,0 +1,31 @@
+ce_event_chain:
+- block_id: ceevt-g20030-0000
+  sequence: 0
+  parent_hash: null
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-30T16:00:00Z'
+  event:
+    kind: genesis
+    subject: G2.003.0
+    summary: CE-event chain genesis
+  content_hash: 1b8ec85542520b5493c7304d31b57bf8745153dde8e2f7782bdc48f4d80f7054
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+- block_id: ceevt-g20030-0001
+  sequence: 1
+  parent_hash: 1b8ec85542520b5493c7304d31b57bf8745153dde8e2f7782bdc48f4d80f7054
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-30T16:00:01Z'
+  event:
+    kind: gate_progress
+    subject: G2.003.0
+    summary: Linked CE-event block
+  content_hash: 27c04490914a5ffcf07fa48bb1eb78ac92953380ccc37b14f9844cf9f97b8047
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

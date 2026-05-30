@@ -1,0 +1,16 @@
+ce_event_block:
+  block_id: ceevt-g20030-0000
+  sequence: 0
+  parent_hash: null
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-30T16:00:00Z'
+  event:
+    kind: write
+    subject: .hermes/ce-events/active.yml
+    summary: attempted legacy active-state write
+  content_hash: d74db4ce142ffe679b49c48e00b4ed5d6c86c3da48cfadfddb3705a1ef6023f5
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

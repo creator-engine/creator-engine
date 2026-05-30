@@ -1,0 +1,218 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/003-ce-event-protocol
+  spec_number: "003"
+  title: Creator Engine v2.0 CE-event protocol signed-block substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.003.0
+  feature_binding: specs/v2/003
+  slice: "0"
+  title: CE-event protocol signed-block substrate
+  layer: 2
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/parallel-roadmap-architect-handoff-20260530T154503Z/recommended-next/NEXT_OPERATOR_G20030_AUTOMODE_CONTROLLER_EXECUTION_PROMPT_REVIEWED_20260530T155842Z.md
+    sha256: 074d78ba76064d7b4d2707173ff0d0766b706472bb0e2147dd9cebcf91e170fe
+  architect_plan:
+    path: .hermes/research/parallel-roadmap-architect-handoff-20260530T154503Z/architect-output/G20030_EXECUTION_PLAN.md
+    sha256: 31cf98af40e68f8d375d93e47254accb17299777030d15e3c06725a883405acd
+  note: >-
+    This sidecar records G2.003.0 substrate authority only. It ratifies nothing
+    and does not activate live event emission or elevated autonomy.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    CE-event blocks may record operating-mode context, but G2.003.0 does not
+    activate or propagate runtime operating mode.
+
+authority:
+  mutation_classes: [governance, attestation]
+  privileged: true
+  required_ratifier_role: operator
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, examples, tests, and spec substrate only. No live
+    emission, key custody, PCL, connector, CI, deploy, review, approval, or merge.
+
+state_boundary:
+  canonical_future_event_home: .ce/ce-events/
+  substrate_writes_event_state: false
+  legacy_event_home_write_freeze: .hermes/ce-events/
+  notes: >-
+    This gate defines shape and validation only. Runtime event records are a
+    later, separately ratified gate.
+
+requirements:
+  - id: RV2-003-001
+    spec_md_ref: FR-001
+    statement: Define canonical CE-event block record fields.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-SHAPE]
+  - id: RV2-003-002
+    spec_md_ref: FR-002
+    statement: Enforce deterministic content addressing.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-HASH]
+  - id: RV2-003-003
+    spec_md_ref: FR-003
+    statement: Enforce hash-chain linkage.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-CHAIN]
+  - id: RV2-003-004
+    spec_md_ref: FR-004
+    statement: Validate signature field shape while deferring cryptography.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-SIGNATURE]
+  - id: RV2-003-005
+    spec_md_ref: FR-005
+    statement: Preserve Operator-only privileged floor and reserved-inactive agent ratifier.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-003-ROLE]
+  - id: RV2-003-006
+    spec_md_ref: FR-006
+    statement: Record operating-mode context without activation.
+    decisions: [OD-01, OD-23]
+    risk_refs: [RISK-RV2-003-MODE]
+  - id: RV2-003-007
+    spec_md_ref: FR-007
+    statement: Keep CE metadata in spec.ce.yml sidecars.
+    decisions: [OD-24]
+    risk_refs: [RISK-RV2-003-INLINE]
+  - id: RV2-003-008
+    spec_md_ref: FR-008
+    statement: Preserve .ce/ce-events as future home and freeze .hermes/ce-events active writes.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-WRITE]
+  - id: RV2-003-009
+    spec_md_ref: FR-009
+    statement: Provide fail-closed validator coverage.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-VALIDATOR]
+  - id: RV2-003-010
+    spec_md_ref: FR-010
+    statement: Stop before live emission, key custody, distributed PCL, queue, connector, CI, deploy, or runtime autonomy activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-003-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-003-SHAPE
+    title: Ambiguous event block shape.
+    relevance: [governance, attestation]
+    description: Consumers cannot validate or replay CE events deterministically.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-SCHEMA]
+  - id: RISK-RV2-003-HASH
+    title: Forged or unstable content hash.
+    relevance: [attestation]
+    description: A block claims a digest that does not match canonical content.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-CONTENT-ADDRESS]
+  - id: RISK-RV2-003-CHAIN
+    title: Broken event chain.
+    relevance: [audit]
+    description: Event order can be forked, reordered, or detached.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-CHAIN-LINK]
+  - id: RISK-RV2-003-SIGNATURE
+    title: Signature semantics activated early.
+    relevance: [identity, attestation]
+    description: Shape-only signature fields are mistaken for live key custody.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-SIGNATURE-SHAPE]
+  - id: RISK-RV2-003-ROLE
+    title: Reserved agent ratifier emits privileged event.
+    relevance: [governance, identity]
+    description: Reserved ratification role is treated as active authority.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-ROLE-FLOOR]
+  - id: RISK-RV2-003-MODE
+    title: Unknown operating-mode context.
+    relevance: [governance, autonomy]
+    description: Event context names an unratified or ambiguous autonomy mode.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-MODE-ENUM]
+  - id: RISK-RV2-003-INLINE
+    title: Inline CE-event metadata in Markdown.
+    relevance: [metadata]
+    description: CE metadata leaks into Spec Kit prose instead of sidecars/examples.
+    severity: medium
+    required_validation_refs: [VAL-CE-EVENT-NO-INLINE]
+  - id: RISK-RV2-003-WRITE
+    title: Legacy event-state write.
+    relevance: [state-boundary]
+    description: A v2 event block targets .hermes/ce-events as active runtime state.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-WRITE-FREEZE]
+  - id: RISK-RV2-003-VALIDATOR
+    title: Validator coverage gap.
+    relevance: [quality]
+    description: A malformed block reaches PR review without fail-closed evidence.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-SCHEMA, VAL-CE-EVENT-CONTENT-ADDRESS, VAL-CE-EVENT-CHAIN-LINK]
+  - id: RISK-RV2-003-SCOPE
+    title: Runtime bundled into substrate gate.
+    relevance: [governance, runtime]
+    description: Live emission or key custody is implemented before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-WRITE-FREEZE]
+
+required_validation:
+  - id: VAL-CE-EVENT-SCHEMA
+    description: Reject malformed CE-event block records.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-CONTENT-ADDRESS
+    description: Reject content_hash values that do not match canonical block material.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-CHAIN-LINK
+    description: Reject chains with missing or incorrect parent_hash linkage.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-MODE-ENUM
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-SIGNATURE-SHAPE
+    description: Validate shape-only signature fields and reserved-inactive value.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-NO-INLINE
+    description: Reject inline CE-event metadata in Markdown.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+  - id: VAL-CE-EVENT-WRITE-FREEZE
+    description: Reject active writes targeting .hermes/ce-events.
+    planned_slice: G2.003.0
+    planned_validator: ce_event_block
+    status: implemented
+
+crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/003
+adr_refs:
+  - specs/v2/adrs/ADR-V2-003-ce-event-protocol.md
