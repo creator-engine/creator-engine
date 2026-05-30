@@ -192,6 +192,28 @@ A claim record (`record_type: claim`) carries:
   `{ completed, aborted, lapsed, handed_off }`; required iff
   `released_at` is present.
 
+G2.002.1 adds four **optional, additive** operating-mode runtime-carrier
+fields (available on any record kind; `schema_version: "4"` when carried).
+They record posture only and mint no authority — the Assignment Envelope and
+Operator ratification remain the substantive authority:
+
+* `operating_mode` — optional; one of `strict | auto | transcendence`.
+  Absent resolves to `strict`; migration never infers elevation.
+* `autonomy_class` — optional; the G2.002.0 autonomy enum.
+  `reserved_future_agent_ratification` is a placeholder and MUST NOT be an
+  active carrier autonomy.
+* `lane_kind` — optional; one of
+  `read-only | implementation | review | approval | merge | audit`.
+  Distinct from `pane_label`. Lets a downstream reviewer/approver/merger lane
+  be a different lane kind from the implementer lane; G2.002.1 only carries the
+  field — PR-review, approval, and merge enforcement are **downstream**.
+* `ratification_evidence_ref` — optional inherited ratification-evidence
+  pointer (path/reference string or structured mapping), required by the
+  `operating_mode_runtime_carriers` validator for elevated modes
+  (`auto`/`transcendence`) and privileged lane kinds (`approval`/`merge`).
+
+Pre-v4 (`"1"`–`"3"`) records carry none of these and validate unchanged.
+
 ## i. Heartbeat record fields
 
 A heartbeat record (`record_type: heartbeat`) carries:

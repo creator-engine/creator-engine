@@ -73,7 +73,7 @@ properties:
       applies. Drives the `oneOf` per-shape required-field sets.
   schema_version:
     type: string
-    enum: ["1", "2", "3"]
+    enum: ["1", "2", "3", "4"]
     description: |
       Active-Work Ledger schema version. Slice 0 ships v1; Slice 0.5
       adds four event_kind values (`gate_opened`, `gate_closed`,
@@ -81,8 +81,12 @@ properties:
       extension and accepts records carrying either version. Slice
       2I-S adds three container event kinds (`container_started`,
       `container_stopped`, `container_force_reaped`) and accepts v1,
-      v2, or v3 records. Older readers ignore unknown event kinds; v3
-      readers accept all three sets. Later slices MAY extend further
+      v2, or v3 records. Slice G2.002.1 adds four additive optional
+      operating-mode runtime-carrier fields (`operating_mode`,
+      `autonomy_class`, `lane_kind`, `ratification_evidence_ref`) and
+      accepts v1, v2, v3, or v4 records. Older readers ignore unknown
+      event kinds; the carrier fields are optional, so pre-v4 records
+      continue to validate unchanged. Later slices MAY extend further
       via additional additive optional fields and a further version
       bump.
   controller_id:
@@ -115,6 +119,53 @@ properties:
         pattern: "^commit:[0-9a-f]{7,40}$"
       - type: string
         pattern: "^source-controlled:[A-Za-z0-9_./-]+$"
+  # Operating-mode runtime carriers (G2.002.1; additive optional, schema_version "4").
+  # These are PURE CARRIERS: they record posture only and mint no authority. The
+  # Assignment Envelope and Operator ratification remain the substantive authority.
+  # Absent carriers resolve to `strict`; floor enforcement and elevation rules live
+  # in the `operating_mode_runtime_carriers` validator, not in this shape layer.
+  operating_mode:
+    type: string
+    enum: [strict, auto, transcendence]
+    description: |
+      Optional declared operating mode for the lane/record. Absent
+      resolves to `strict`; migration never infers elevation. Elevation
+      to `auto`/`transcendence` requires an Operator-ratified policy and
+      a `ratification_evidence_ref` (enforced by the carrier validator,
+      not by this schema).
+  autonomy_class:
+    type: string
+    enum:
+      - manual
+      - supervised
+      - delegated_non_privileged
+      - operator_ratified_privileged
+      - reserved_future_agent_ratification
+    description: |
+      Optional declared autonomy class. `reserved_future_agent_ratification`
+      is a schema-visible placeholder only and MUST NOT be an active
+      autonomy (enforced by the carrier validator).
+  lane_kind:
+    type: string
+    enum: [read-only, implementation, review, approval, merge, audit]
+    description: |
+      Optional lane kind, distinct from `pane_label`. Lets a downstream
+      reviewer/approver/merger lane be a different lane kind from the
+      implementer lane. G2.002.1 only carries the field; PR-review,
+      approval, and merge enforcement are downstream.
+  ratification_evidence_ref:
+    description: |
+      Optional inherited ratification-evidence pointer for elevated modes
+      or privileged lane kinds. Either a repo-relative path/reference
+      string or a structured pointer mapping. The pointer is advisory
+      carriage; it confers no authority by itself.
+    oneOf:
+      - type: string
+        minLength: 1
+        pattern: "\\S"
+      - type: object
+        minProperties: 1
+        additionalProperties: true
   # Claim-only fields
   worktree_path:
     type: string

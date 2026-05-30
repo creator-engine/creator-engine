@@ -1,0 +1,24 @@
+# G2.002.1 reference fixture: the policy block is valid, but a runtime carrier
+# elevates to `auto` without an inherited Operator ratification-evidence pointer.
+# The `operating_mode_runtime_carriers` check rejects it with
+# VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION.
+operating_mode_policy:
+  operating_mode: strict
+  autonomy_class: operator_ratified_privileged
+  default_for_migrated_v1_tenants: strict
+  privileged_floor:
+    privileged_mutation_classes: [governance, identity]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  risk_coverage:
+    required_validation_refs: [VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION]
+runtime_carriers:
+  - operating_mode: auto
+    autonomy_class: operator_ratified_privileged
+    lane_kind: implementation
