@@ -2,15 +2,18 @@
 
 ## Status and stability
 
-Creator Engine is pre-1.0. v0.1 ships only files inside a git
-repository (see "v0.1 scope" below); v1.0 is the integration target
-for an end-to-end governed agentic SDLC loop with every privileged
-gate human-ratified. Spec/plan/tasks artifacts, schemas, templates,
-and the offline validator may change without backward compatibility
-guarantees until v1.0. Privileged operations (deploys, governance
-amendments, identity/security/attestation/redaction changes, repo
-settings, branch protection, visibility flips) remain Operator-ratified
-regardless of release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
+Creator Engine's v1.0 governed runtime is **runtime-complete and
+pre-release** — landed on `main` but not yet cut or tagged (version
+`0.1.0`; the G0–G9 delivery gates are ready for Operator ratification).
+The v0.1 file-only substrate (see "v0.1 scope" below) composes beneath
+it, and v1.0 remains the integration target: an end-to-end governed
+agentic SDLC loop with every privileged gate human-ratified.
+Spec/plan/tasks artifacts, schemas, templates, and the offline validator
+may change without backward-compatibility guarantees until v1.0 is
+released. Privileged operations (deploys, governance amendments,
+identity/security/attestation/redaction changes, repo settings, branch
+protection, visibility flips) remain Operator-ratified regardless of
+release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
 
 LIMITLESS is the named public dogfood tenant; generic paths in the
 substrate must not hardcode it (enforced by the offline validator's
@@ -21,9 +24,11 @@ substrate must not hardcode it (enforced by the offline validator's
 Creator Engine is a repo-native agentic SDLC governance substrate. It
 makes agent-authored software work auditable, spec-driven,
 identity-aware, mutation-class governed, verified by evidence, and
-ratified by explicit authority rules. v1.0 is the integration target:
-an end-to-end governed agentic SDLC loop with every privileged gate
-human-ratified.
+ratified by explicit authority rules. The **Operator** — the apex human
+authority — ratifies every privileged gate; review, CI, fan-in, and
+harness output inform the Operator but never ratify on the Operator's
+behalf. v1.0 is the integration target: an end-to-end governed agentic
+SDLC loop with every privileged gate human-ratified.
 
 ## v1.0 command-line runtime (`ce`)
 
@@ -49,6 +54,13 @@ The as-built v1.0 `ce` command surface is exactly these groups:
 | `ce fanin` | build/inspect a local read-only evidence fan-in packet (no authority) |
 | `ce queue` | Integration Queue **dry-run** landing preview (`dry-run`/`inspect`); no authority |
 
+`ce launch` opens or attaches a visible Controller seat through the chosen
+Controller harness; the active agent occupying that seat is the Controller
+agent. The launcher is part of the Controller harness surface and is not a
+CE-native TUI (see
+[`docs/governance/V1_CANONICAL_TERMINOLOGY.md`](./docs/governance/V1_CANONICAL_TERMINOLOGY.md)
+for the Controller agent / Controller harness distinction).
+
 There is **no `ce dev` command in v1.0**. The `ce dev …` namespace is reserved
 for the deferred project-dev container (`ce dev shell` / `ce dev run`), which is
 a v1.1 / post-v1 seam — deferred, not rejected (see
@@ -56,6 +68,10 @@ a v1.1 / post-v1 seam — deferred, not rejected (see
 The Integration Queue is a local serialized **dry-run** landing preview only in
 v1.0; live landing is POST-V1 (see
 [`docs/operations/INTEGRATION_QUEUE_DRY_RUN.md`](./docs/operations/INTEGRATION_QUEUE_DRY_RUN.md)).
+
+The v1.0 `ce` runtime is **runtime-complete and pre-release**: every gate
+(G0–G9) is landed on `main` and ready for Operator ratification, but no
+release has been cut or tagged. The pinned package version is `0.1.0`.
 
 ### Install (Option B packaging)
 
@@ -90,14 +106,51 @@ Phase 2 autonomy (low-risk auto-merge, autonomous batch-pulling) and
 v1.0 end-to-end automation are integration targets, not v0.1
 deliverables.
 
+## Next horizon: v2.0 foundation substrate (Draft, spec-only)
+
+Work has begun on the **Creator Engine v2.0 foundation substrate**. It is
+currently a **Draft, spec-authoring-only direction** — tracked specification,
+schema, and governance documentation with **no v2 runtime shipped**. It does
+not change the v1.0 `ce` runtime described above. The foundation spec
+([`specs/v2/001-v2-foundation-substrate/spec.md`](./specs/v2/001-v2-foundation-substrate/spec.md),
+its [`spec.ce.yml`](./specs/v2/001-v2-foundation-substrate/spec.ce.yml) sidecar,
+the [`specs/v2/_crosswalk.yml`](./specs/v2/_crosswalk.yml) register, and
+[`ADR-V2-001`](./specs/v2/adrs/ADR-V2-001-v2-foundation-substrate.md)) frames a
+clean v2 foundation:
+
+- a canonical `.ce/` active-state and governance namespace with an enforceable
+  tracked-vs-instance boundary, replacing wholesale-ignored `.hermes/` for v2
+  flows;
+- a hard `.hermes/` write-freeze for v2 flows (`.hermes/` stays readable only as
+  legacy/import/archive context);
+- a **read-only**, dry-run-capable v1→v2 importer contract that never mutates
+  `.hermes/`;
+- the authoritative v1→v2 crosswalk register;
+- operating modes `strict` / `auto` / `transcendence`, with migrated v1 tenants
+  defaulting to `strict`;
+- an `agent_reviewer` role (active, advisory/evidence-bearing, non-ratifying)
+  and an `agent_ratifier` role (reserved-inactive, validator-rejected for any
+  active authority binding).
+
+The **Operator-only privileged floor is preserved in every v2 mode**:
+privileged-class ratification and emergency governed override route only to the
+Operator, never to any agent role. v2 introduces no destructive removal of v1
+artifacts; legacy `source` values and `.hermes/` material remain readable for
+import, crosswalk, archive, and history. Treat v2 as the next horizon, not as
+shipped runtime.
+
 ## Repository layout
 
 - `.specify/memory/constitution.md` — highest-authority governance
   document.
 - `specs/` — Spec Kit feature specifications, including Feature 001
   (governance substrate), Feature 002 (canonical docs and operating
-  model), and the Sprint 0 minimum viable delivery system note.
+  model), the Sprint 0 minimum viable delivery system note, and the
+  `specs/v2/` v2.0 foundation specifications (Draft).
 - `docs/contracts/` — Feature 001 governance contract documents.
+- `docs/adr/` — architecture decision records, including
+  `ADR-0002-operator-terminology-reconciliation.md` (Operator
+  terminology policy).
 - `docs/product/`, `docs/architecture/`, `docs/governance/`,
   `docs/quality/`, `docs/devops/`, `docs/security/` — the canonical
   Creator Engine document set indexed below.
@@ -107,7 +160,7 @@ deliverables.
   indexed below.
 - `schemas/`, `templates/`, `validators/`, `examples/`, `tenants/` —
   Feature 001 substrate artifacts and tenant fixtures.
-- `.hermes/` — Session continuity protocol and state for the operator.
+- `.hermes/` — Session continuity protocol and state for the Operator.
 - `validators/README.md` — substrate validator quickstart.
 
 See [`validators/README.md`](./validators/README.md) for the offline
