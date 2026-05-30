@@ -1,0 +1,16 @@
+ce_event_block:
+  block_id: ceevt-g20030-0000
+  sequence: 0
+  parent_hash: null
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-30T16:00:00Z'
+  event:
+    kind: genesis
+    subject: G2.003.0
+    summary: CE-event chain genesis
+  content_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
