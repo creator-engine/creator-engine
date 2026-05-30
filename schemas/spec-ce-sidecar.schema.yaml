@@ -146,6 +146,9 @@ properties:
   role_constraints:
     type: object
     additionalProperties: true
+  operating_mode_policy:
+    type: object
+    additionalProperties: true
   no_destructive_v1_removal:
     type: object
     additionalProperties: true

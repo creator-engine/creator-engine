@@ -1,0 +1,241 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/002-operating-mode-substrate
+  spec_number: "002"
+  title: Creator Engine v2.0 Operating-mode Substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.002.0
+  feature_binding: specs/v2/002
+  slice: "0"
+  title: operating-mode substrate schema and validator
+  layer: 0
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/g20020-automode-architect-run-20260530T045800Z/recommended-next/NEXT_OPERATOR_G20020_AUTOMODE_CONTROLLER_EXECUTION_PROMPT_CONTROLLER_FINAL_20260530T052006Z.md
+    sha256: 6d4ffefeb28ade5d20125689a70a31c0bd40071ead53a098de91f9acf9d9f884
+  design_sketch:
+    path: .hermes/research/g20020-operating-mode-readonly-prep-20260530T040137Z/G20020_OPERATING_MODE_DESIGN_SKETCH.md
+    sha256: bcae3b4566dee264a18197490a74d197a3753fcff8dcc6ec2583e984c23f8331
+  validation_matrix:
+    path: .hermes/research/g20020-operating-mode-readonly-prep-20260530T040137Z/VALIDATION_MATRIX.md
+    sha256: 7addcf95b84b1fe1b22e97811d10785f01895aa1193ec9a498034b2108995780
+  note: >-
+    This sidecar records G2.002.0 substrate authority only. It ratifies nothing
+    and does not activate auto-mode for runtime surfaces.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    G2.002.0 defines policy shape and validation for operating modes while
+    preserving the Operator-only privileged floor in every mode.
+
+authority:
+  mutation_classes: [governance, identity]
+  privileged: true
+  required_ratifier_role: operator
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, examples, and spec substrate only. No runtime
+    carrier propagation, G2.001.4 crosswalk work, PR review, approval, or merge.
+
+operating_mode_policy:
+  operating_mode: strict
+  autonomy_class: operator_ratified_privileged
+  default_for_migrated_v1_tenants: strict
+  privileged_floor:
+    privileged_mutation_classes: [deploy, governance, identity, security, attestation, redaction]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      activation_requires: AOS-RATIFIER-MILESTONE
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  emergency_override: operator_only
+  risk_coverage:
+    required_validation_refs:
+      - VAL-OPERATING-MODE-ENUM
+      - VAL-AUTONOMY-DEFAULT
+      - VAL-AUTO-REQUIRES-OPERATOR-POLICY
+      - VAL-TRANSCENDENCE-REQUIRES-OPERATOR-POLICY
+      - VAL-PRIVILEGED-FLOOR-AGENT-DELEGATION
+      - VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE
+      - VAL-EMERGENCY-OVERRIDE-OPERATOR-ONLY
+
+requirements:
+  - id: RV2-002-001
+    spec_md_ref: FR-001
+    statement: Define operating_mode enum values strict, auto, and transcendence.
+    decisions: [OD-01]
+    risk_refs: [RISK-RV2-002-MODE]
+  - id: RV2-002-002
+    spec_md_ref: FR-002
+    statement: Define autonomy_class enum values including a reserved future agent-ratification placeholder.
+    decisions: [Q-O7]
+    risk_refs: [RISK-RV2-002-RATIFIER]
+  - id: RV2-002-003
+    spec_md_ref: FR-003
+    statement: Migrated v1 tenants default to strict.
+    decisions: [Q-O6]
+    risk_refs: [RISK-RV2-002-DEFAULT]
+  - id: RV2-002-004
+    spec_md_ref: FR-004
+    statement: Auto mode requires an Operator-ratified policy pointer before activation.
+    decisions: [OD-01, OD-02]
+    risk_refs: [RISK-RV2-002-AUTO]
+  - id: RV2-002-005
+    spec_md_ref: FR-005
+    statement: Transcendence mode requires an Operator-ratified policy pointer before activation.
+    decisions: [OD-01, OD-02]
+    risk_refs: [RISK-RV2-002-AUTO]
+  - id: RV2-002-006
+    spec_md_ref: FR-006
+    statement: Privileged mutation classes require Operator ratification in every mode.
+    decisions: [OD-02, OD-22]
+    risk_refs: [RISK-RV2-002-PRIVILEGE]
+  - id: RV2-002-007
+    spec_md_ref: FR-007
+    statement: Agent reviewers are advisory-only for privileged classes.
+    decisions: [Q-O4]
+    risk_refs: [RISK-RV2-002-PRIVILEGE]
+  - id: RV2-002-008
+    spec_md_ref: FR-008
+    statement: Agent ratifier remains reserved-inactive and rejected for active bindings.
+    decisions: [Q-O7]
+    risk_refs: [RISK-RV2-002-RATIFIER]
+  - id: RV2-002-009
+    spec_md_ref: FR-009
+    statement: Emergency override remains Operator-only.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-002-OVERRIDE]
+  - id: RV2-002-010
+    spec_md_ref: FR-010
+    statement: Operating-mode metadata lives in sidecars, not inline Markdown metadata.
+    decisions: [OD-24, Q-C2]
+    risk_refs: [RISK-RV2-002-INLINE]
+  - id: RV2-002-011
+    spec_md_ref: FR-011
+    statement: G2.002.0 stops at docs, schema, validator, examples, and spec substrate.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-SCOPE]
+  - id: RV2-002-012
+    spec_md_ref: FR-012
+    statement: Runtime carrier propagation remains G2.002.1+ work.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-002-MODE
+    title: Unknown or ambiguous operating mode.
+    relevance: [governance, autonomy]
+    description: A sidecar activates an undefined operating mode and bypasses fail-closed validation.
+    severity: high
+    required_validation_refs: [VAL-OPERATING-MODE-ENUM]
+  - id: RISK-RV2-002-DEFAULT
+    title: Migrated v1 tenant defaults to auto.
+    relevance: [migration, autonomy]
+    description: A migrated tenant inherits more autonomy than Operator ratified.
+    severity: critical
+    required_validation_refs: [VAL-AUTONOMY-DEFAULT]
+  - id: RISK-RV2-002-AUTO
+    title: Auto or transcendence mode without Operator policy pointer.
+    relevance: [governance, autonomy]
+    description: A higher-autonomy mode activates without a ratified Operator policy.
+    severity: critical
+    required_validation_refs: [VAL-AUTO-REQUIRES-OPERATOR-POLICY, VAL-TRANSCENDENCE-REQUIRES-OPERATOR-POLICY]
+  - id: RISK-RV2-002-PRIVILEGE
+    title: Privileged floor delegated to agent role.
+    relevance: [governance, identity, security]
+    description: An agent reviewer or other agent role satisfies privileged ratification.
+    severity: critical
+    required_validation_refs: [VAL-PRIVILEGED-FLOOR-AGENT-DELEGATION]
+  - id: RISK-RV2-002-RATIFIER
+    title: Agent ratifier activated prematurely.
+    relevance: [governance, identity]
+    description: Reserved future agent ratification becomes active before AOS ratifier milestone.
+    severity: critical
+    required_validation_refs: [VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE]
+  - id: RISK-RV2-002-OVERRIDE
+    title: Emergency override not Operator-only.
+    relevance: [governance, security]
+    description: Emergency governed override is delegated to an agent or automatic policy.
+    severity: critical
+    required_validation_refs: [VAL-EMERGENCY-OVERRIDE-OPERATOR-ONLY]
+  - id: RISK-RV2-002-INLINE
+    title: Operating-mode metadata embedded in Markdown.
+    relevance: [governance, metadata]
+    description: CE metadata leaks into standard Spec Kit Markdown instead of sidecars.
+    severity: medium
+    required_validation_refs: [VAL-OPERATING-MODE-NO-INLINE]
+  - id: RISK-RV2-002-SCOPE
+    title: Runtime carrier work bundled into G2.002.0.
+    relevance: [governance, runtime]
+    description: Runtime lane/ledger/envelope propagation is implemented before separate ratification.
+    severity: high
+    required_validation_refs: [VAL-OPERATING-MODE-SCOPE]
+
+required_validation:
+  - id: VAL-OPERATING-MODE-ENUM
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-AUTONOMY-DEFAULT
+    description: Reject migrated v1 defaults other than strict.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-AUTO-REQUIRES-OPERATOR-POLICY
+    description: Reject auto mode without an Operator-ratified policy pointer.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-TRANSCENDENCE-REQUIRES-OPERATOR-POLICY
+    description: Reject transcendence mode without an Operator-ratified policy pointer.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-PRIVILEGED-FLOOR-AGENT-DELEGATION
+    description: Reject agent roles as privileged ratifiers.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE
+    description: Reject active agent_ratifier authority bindings.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-EMERGENCY-OVERRIDE-OPERATOR-ONLY
+    description: Reject emergency overrides that are not Operator-only.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-OPERATING-MODE-NO-INLINE
+    description: Reject operating_mode_policy metadata in standard Markdown.
+    planned_slice: G2.002.0
+    planned_validator: operating_mode_policy
+    status: implemented
+  - id: VAL-OPERATING-MODE-SCOPE
+    description: Verify G2.002.0 does not implement runtime carrier propagation.
+    planned_slice: G2.002.0
+    planned_validator: manifest review
+    status: manual-review-required
+
+adr_refs:
+  - specs/v2/adrs/ADR-V2-002-operating-mode-substrate.md

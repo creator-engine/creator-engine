@@ -1,0 +1,148 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/operating-mode-policy.schema.yaml"
+title: "Creator Engine v2 Operating Mode Policy"
+description: >-
+  G2.002.0 operating-mode substrate policy. This schema defines the sidecar
+  policy shape only; runtime propagation is G2.002.1+ work.
+type: object
+required:
+  - operating_mode
+  - autonomy_class
+  - default_for_migrated_v1_tenants
+  - privileged_floor
+  - policy_authority
+$defs:
+  nonEmptyString:
+    type: string
+    minLength: 1
+    pattern: "\\S"
+  operatorPolicyPointer:
+    oneOf:
+      - $ref: "#/$defs/nonEmptyString"
+      - type: object
+        minProperties: 1
+        anyOf:
+          - required: [path]
+            properties:
+              path:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [prompt]
+            properties:
+              prompt:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [ratified_prompt]
+            properties:
+              ratified_prompt:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [sha256]
+            properties:
+              sha256:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [operator_policy_ref]
+            properties:
+              operator_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [operator_ratified_policy_ref]
+            properties:
+              operator_ratified_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [ratified_policy_ref]
+            properties:
+              ratified_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [activation_record]
+            properties:
+              activation_record:
+                $ref: "#/$defs/operatorPolicyPointer"
+        additionalProperties: true
+properties:
+  operating_mode:
+    type: string
+    enum: [strict, auto, transcendence]
+  autonomy_class:
+    type: string
+    enum:
+      - manual
+      - supervised
+      - delegated_non_privileged
+      - operator_ratified_privileged
+      - reserved_future_agent_ratification
+  default_for_migrated_v1_tenants:
+    type: string
+    const: strict
+  operator_policy_ref:
+    $ref: "#/$defs/operatorPolicyPointer"
+  operator_ratified_policy_ref:
+    $ref: "#/$defs/operatorPolicyPointer"
+  ratified_policy_ref:
+    $ref: "#/$defs/operatorPolicyPointer"
+  activation_record:
+    $ref: "#/$defs/operatorPolicyPointer"
+  privileged_floor:
+    type: object
+    required:
+      - privileged_mutation_classes
+      - required_ratifier_role
+      - agent_reviewer
+      - agent_ratifier
+    properties:
+      privileged_mutation_classes:
+        type: array
+        minItems: 1
+        items:
+          type: string
+          enum: [deploy, governance, identity, security, attestation, redaction]
+      required_ratifier_role:
+        type: string
+        const: operator
+      agent_reviewer:
+        type: string
+        enum: [advisory_only, advisory-only]
+      agent_ratifier:
+        type: object
+        required: [status, active_authority]
+        properties:
+          status:
+            type: string
+            enum: [reserved-inactive, reserved_inactive]
+          activation_requires:
+            type: string
+            minLength: 1
+          active_authority:
+            type: string
+            enum: [none, no_active_binding, no-active-binding]
+        additionalProperties: true
+    additionalProperties: true
+  policy_authority:
+    type: object
+    required:
+      - ratification_required_for_modes
+      - activation_record_required
+    properties:
+      ratification_required_for_modes:
+        type: array
+        items:
+          type: string
+          enum: [auto, transcendence]
+        contains:
+          const: auto
+      activation_record_required:
+        type: boolean
+        const: true
+    additionalProperties: true
+  emergency_override:
+    type: string
+    enum: [operator_only, operator-only]
+  risk_coverage:
+    type: object
+    additionalProperties: true
+  risk_inventory:
+    oneOf:
+      - type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: true
+      - type: object
+        additionalProperties: true
+additionalProperties: true
