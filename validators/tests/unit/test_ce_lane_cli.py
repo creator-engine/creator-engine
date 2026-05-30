@@ -291,3 +291,102 @@ def test_ce_lane_archive_hashes_transcript_bytes(tmp_path, capsys):
     out = capsys.readouterr().out
     expected = hashlib.sha256(body).hexdigest()
     assert expected in out
+
+
+# ---------------------------------------------------------------------------
+# G2.002.1 operating-mode runtime carriers (CLI surface)
+# ---------------------------------------------------------------------------
+
+
+_VALID_AUTO_TENANT_POLICY = """
+operating_mode_policy:
+  operating_mode: auto
+  autonomy_class: operator_ratified_privileged
+  default_for_migrated_v1_tenants: strict
+  operator_policy_ref:
+    ratified_prompt: .hermes/research/example/OPERATOR_AUTO.md
+    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  privileged_floor:
+    privileged_mutation_classes: [governance, security]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  risk_coverage:
+    required_validation_refs: [VAL-AUTO-REQUIRES-OPERATOR-POLICY]
+"""
+
+
+def test_ce_lane_launch_defaults_strict_and_succeeds(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha))
+    assert ret == 0
+
+
+def test_ce_lane_launch_accepts_carrier_flags(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path,
+            ledger,
+            prompt,
+            sha,
+            operating_mode="strict",
+            autonomy_class="operator_ratified_privileged",
+            lane_kind="implementation",
+        )
+    )
+    assert ret == 0
+
+
+def test_ce_lane_launch_refuses_auto_without_tenant_policy(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha, operating_mode="auto"))
+    assert ret == 1
+    assert "G2-AUTO-WITHOUT-OPERATOR-POLICY" in capsys.readouterr().err
+
+
+def test_ce_lane_launch_allows_auto_with_operator_ratified_tenant_policy(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    policy = tmp_path / "tenant-policy.ce.yml"
+    policy.write_text(_VALID_AUTO_TENANT_POLICY, encoding="utf-8")
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path,
+            ledger,
+            prompt,
+            sha,
+            operating_mode="auto",
+            autonomy_class="operator_ratified_privileged",
+            tenant_policy=str(policy),
+        )
+    )
+    assert ret == 0
+
+
+def test_ce_lane_launch_refuses_agent_ratifier_active_tenant_policy(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    policy = tmp_path / "bad-policy.ce.yml"
+    policy.write_text(
+        _VALID_AUTO_TENANT_POLICY.replace("active_authority: none", "active_authority: privileged_governance"),
+        encoding="utf-8",
+    )
+    ret = ce_cli.main(
+        _launch_argv(tmp_path, ledger, prompt, sha, operating_mode="auto", tenant_policy=str(policy))
+    )
+    assert ret == 1
+    assert "G2-AGENT-RATIFIER-ACTIVE" in capsys.readouterr().err

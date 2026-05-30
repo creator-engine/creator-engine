@@ -83,6 +83,26 @@ field below: **review evidence is not Source ratification**, per
 [`./REVIEW_GATE.md`](./REVIEW_GATE.md) §m.1 and Feature 002 FR-013 /
 FR-017.
 
+#### c.2.1 Operating-mode carriers *(optional; G2.002.1 pure carriers)*
+
+These fields **carry** operating-mode posture from the
+[operating-mode substrate](../../specs/v2/002-operating-mode-substrate/spec.md)
+into the envelope. They are **pure carriers**: they record posture and **mint
+no authority**. They do not relax §c.2 ratification, §c.3 mutation classes, or
+the Operator-only privileged floor. Absent fields resolve to `strict`.
+
+| Field | Semantics |
+|---|---|
+| `operating_mode` | Optional; `strict | auto | transcendence`. Default `strict`. `auto`/`transcendence` require an Operator-ratified policy and a `ratification_evidence_ref`; migration never infers elevation. |
+| `autonomy_class` | Optional; the operating-mode autonomy enum. `reserved_future_agent_ratification` is reserved-inactive and MUST NOT be an active autonomy. |
+| `lane_kind` | Optional; `read-only | implementation | review | approval | merge | audit`. Lets a downstream reviewer/approver/merger lane be a distinct lane kind; PR-review/approval/merge enforcement is downstream, not in this carrier. |
+| `ratification_evidence_ref` | Optional inherited ratification-evidence pointer required for elevated modes or privileged (`approval`/`merge`) lane kinds. Advisory carriage; confers no authority by itself. |
+
+These carriers travel on the Active-Work Ledger record under the lane's
+`envelope_ref` (see
+[`../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md`](../operations/ACTIVE_WORK_LEDGER_PROTOCOL.md)
+§h); G2.002.1 introduces no standalone assignment-envelope schema.
+
 ### c.3 Mutation classes (REQUIRED)
 
 | Field | Semantics |

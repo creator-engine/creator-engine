@@ -541,3 +541,165 @@ def test_verify_closeout_ungoverned_never_blocks(tmp_path):
         closeout_file=str(bad), completion_report=None, posture="ungoverned"
     )
     assert decision.get("decision") != "block"
+
+
+# ---------------------------------------------------------------------------
+# G2.002.1 operating-mode runtime carriers: ce lane launch default + refusals
+# ---------------------------------------------------------------------------
+
+
+def _write_tenant_policy(tmp_path, body: str, name: str = "tenant-policy.ce.yml"):
+    p = tmp_path / name
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+VALID_AUTO_TENANT_POLICY = """
+operating_mode_policy:
+  operating_mode: auto
+  autonomy_class: operator_ratified_privileged
+  default_for_migrated_v1_tenants: strict
+  operator_policy_ref:
+    ratified_prompt: .hermes/research/example/OPERATOR_AUTO.md
+    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  privileged_floor:
+    privileged_mutation_classes: [governance, security]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  risk_coverage:
+    required_validation_refs: [VAL-AUTO-REQUIRES-OPERATOR-POLICY]
+"""
+
+AGENT_RATIFIER_ACTIVE_TENANT_POLICY = VALID_AUTO_TENANT_POLICY.replace(
+    "active_authority: none", "active_authority: privileged_governance"
+)
+
+ADVISORY_AS_RATIFIER_TENANT_POLICY = VALID_AUTO_TENANT_POLICY.replace(
+    "required_ratifier_role: operator", "required_ratifier_role: agent_reviewer"
+)
+
+
+def test_launch_defaults_to_strict_operating_mode(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(tmp_path, ledger_root=ledger)
+    assert result.operating_mode == "strict"
+
+
+def test_launch_accepts_explicit_strict_and_carrier_fields(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        operating_mode="strict",
+        autonomy_class="operator_ratified_privileged",
+        lane_kind="implementation",
+    )
+    assert result.operating_mode == "strict"
+    assert result.lane_kind == "implementation"
+
+
+def test_launch_refuses_invalid_operating_mode_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.OperatingModeInvalid) as exc:
+        _launch(tmp_path, ledger_root=ledger, operating_mode="permissive", tmux_adapter=adapter)
+    assert exc.value.code == "G2-OPERATING-MODE-INVALID"
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_invalid_lane_kind_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.LaneKindInvalid):
+        _launch(tmp_path, ledger_root=ledger, lane_kind="deploy-and-merge", tmux_adapter=adapter)
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_reserved_autonomy_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ReservedAutonomyActive):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            autonomy_class="reserved_future_agent_ratification",
+            tmux_adapter=adapter,
+        )
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_auto_without_tenant_policy_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.AutoWithoutOperatorPolicy) as exc:
+        _launch(tmp_path, ledger_root=ledger, operating_mode="auto", tmux_adapter=adapter)
+    assert exc.value.code == "G2-AUTO-WITHOUT-OPERATOR-POLICY"
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_transcendence_without_tenant_policy_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.TranscendenceWithoutOperatorPolicy):
+        _launch(tmp_path, ledger_root=ledger, operating_mode="transcendence", tmux_adapter=adapter)
+    assert adapter.spawned == []
+
+
+def test_launch_allows_auto_with_operator_ratified_tenant_policy(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    policy = _write_tenant_policy(tmp_path, VALID_AUTO_TENANT_POLICY)
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        operating_mode="auto",
+        autonomy_class="operator_ratified_privileged",
+        tenant_policy=policy,
+    )
+    assert result.operating_mode == "auto"
+
+
+def test_launch_refuses_agent_ratifier_active_tenant_policy_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    policy = _write_tenant_policy(tmp_path, AGENT_RATIFIER_ACTIVE_TENANT_POLICY)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.AgentRatifierActive) as exc:
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            operating_mode="auto",
+            tenant_policy=policy,
+            tmux_adapter=adapter,
+        )
+    assert exc.value.code == "G2-AGENT-RATIFIER-ACTIVE"
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_advisory_role_as_ratifier_tenant_policy_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    policy = _write_tenant_policy(tmp_path, ADVISORY_AS_RATIFIER_TENANT_POLICY)
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.PrivilegedRatifierInvalid):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            operating_mode="auto",
+            tenant_policy=policy,
+            tmux_adapter=adapter,
+        )
+    assert adapter.spawned == []

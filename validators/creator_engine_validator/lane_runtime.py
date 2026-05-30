@@ -33,6 +33,7 @@ from typing import Any, Sequence
 import yaml
 
 from . import claude_launch_spec
+from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
 from .loader import LoaderError, load_yaml
@@ -42,6 +43,13 @@ from .tmux_adapter import TmuxAdapter, TmuxPane, TmuxUnavailable
 # Pane Registry role enum is exactly the visibility-required role set.
 VISIBILITY_REQUIRED_ROLES = frozenset({"architect", "implementer", "reviewer", "verification"})
 LIVE_STATUSES = frozenset({"active", "blocked", "closing"})
+
+# G2.002.1 operating-mode runtime carriers. `strict` is the default; elevation
+# fails closed unless an Operator-ratified tenant policy ratifies the mode.
+OPERATING_MODES = frozenset({"strict", "auto", "transcendence"})
+ELEVATED_MODES = frozenset({"auto", "transcendence"})
+DEFAULT_OPERATING_MODE = "strict"
+LANE_KINDS = frozenset({"read-only", "implementation", "review", "approval", "merge", "audit"})
 
 DEFAULT_HOST_ID = "operator-host"
 DEFAULT_SESSION = "ce-lane"
@@ -126,6 +134,43 @@ class ClaudeLaunchRefused(LaneLaunchError):
     code = "G3-CLAUDE-REFUSED"
 
 
+# G2.002.1 operating-mode runtime-carrier refusals. Each is raised before any
+# side effect (no tmux spawn, no Pane Registry write, no ledger write), mirroring
+# the G3-* ordering. They preserve — never relax — the Operator-only floor.
+
+
+class OperatingModeInvalid(LaneLaunchError):
+    code = "G2-OPERATING-MODE-INVALID"
+
+
+class AutonomyClassInvalid(LaneLaunchError):
+    code = "G2-AUTONOMY-CLASS-INVALID"
+
+
+class LaneKindInvalid(LaneLaunchError):
+    code = "G2-LANE-KIND-INVALID"
+
+
+class ReservedAutonomyActive(LaneLaunchError):
+    code = "G2-RESERVED-AUTONOMY-ACTIVE"
+
+
+class AutoWithoutOperatorPolicy(LaneLaunchError):
+    code = "G2-AUTO-WITHOUT-OPERATOR-POLICY"
+
+
+class TranscendenceWithoutOperatorPolicy(LaneLaunchError):
+    code = "G2-TRANSCENDENCE-WITHOUT-OPERATOR-POLICY"
+
+
+class PrivilegedRatifierInvalid(LaneLaunchError):
+    code = "G2-PRIVILEGED-RATIFIER-INVALID"
+
+
+class AgentRatifierActive(LaneLaunchError):
+    code = "G2-AGENT-RATIFIER-ACTIVE"
+
+
 class LaneStatusError(LaneError):
     code = "G3-STATUS-ERROR"
 
@@ -151,6 +196,12 @@ class LaunchResult:
     # because ``schemas/pane-registry.schema.yaml`` pins ``unevaluatedProperties:
     # false`` and is outside the CC-G-D allowlist.
     claude_governance: dict[str, Any] | None = None
+    # G2.002.1: resolved operating-mode posture for this launch. Carried in-memory
+    # for observability; NOT written into the schema-validated pane record (whose
+    # schema pins unevaluatedProperties: false and is outside this gate's surface).
+    operating_mode: str = DEFAULT_OPERATING_MODE
+    autonomy_class: str | None = None
+    lane_kind: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +261,105 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
     return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
 
 
+@dataclass(frozen=True)
+class OperatingModeResolution:
+    operating_mode: str
+    autonomy_class: str | None
+    lane_kind: str | None
+    ratification_evidence_ref: str | None
+
+
+def _evaluate_operating_mode(
+    *,
+    operating_mode: str | None,
+    autonomy_class: str | None,
+    lane_kind: str | None,
+    tenant_policy: Path | str | None,
+    ratification_evidence_ref: str | None,
+) -> OperatingModeResolution:
+    """Evaluate the G2.002.1 operating-mode floor for a lane launch.
+
+    Raises a typed ``G2-*`` refusal (subclass of :class:`LaneLaunchError`) when a
+    floor is breached. Returns the resolved posture otherwise. Pure evaluation:
+    performs no side effect, so callers raise this before any tmux spawn / Pane
+    Registry write / ledger write. ``strict`` is the default; ``auto`` /
+    ``transcendence`` are refused unless an Operator-ratified tenant policy
+    ratifies the requested mode.
+    """
+    mode = (str(operating_mode).strip().lower() if operating_mode else DEFAULT_OPERATING_MODE)
+    if mode not in OPERATING_MODES:
+        raise OperatingModeInvalid(
+            f"operating_mode {operating_mode!r} is not one of {sorted(OPERATING_MODES)}"
+        )
+
+    autonomy_norm: str | None = None
+    if autonomy_class is not None:
+        autonomy_norm = _omp._normalize_token(autonomy_class)
+        if autonomy_norm not in _omp.AUTONOMY_CLASSES:
+            raise AutonomyClassInvalid(
+                f"autonomy_class {autonomy_class!r} is not a recognized G2.002.0 value"
+            )
+        if autonomy_norm == "reserved_future_agent_ratification":
+            raise ReservedAutonomyActive(
+                "reserved_future_agent_ratification is reserved-inactive and MUST NOT be an active lane autonomy"
+            )
+
+    lane_kind_norm: str | None = None
+    if lane_kind is not None:
+        lane_kind_norm = str(lane_kind).strip().lower()
+        if lane_kind_norm not in LANE_KINDS:
+            raise LaneKindInvalid(
+                f"lane_kind {lane_kind!r} is not one of {sorted(LANE_KINDS)}"
+            )
+
+    # When a tenant policy is supplied, the Operator-only floor is enforced in
+    # every mode (including strict): a policy that binds an active agent_ratifier
+    # or names an advisory/agent role as the privileged ratifier is refused.
+    policy: dict[str, Any] | None = None
+    policy_codes: set[str] = set()
+    if tenant_policy is not None:
+        try:
+            data = load_yaml(Path(tenant_policy))
+        except LoaderError:
+            data = None
+        policy = data.get("operating_mode_policy") if isinstance(data, dict) else None
+        if isinstance(policy, dict):
+            policy_codes = {e.code for e in _omp._validate_policy(policy, Path(tenant_policy))}
+            if _omp.CODE_AGENT_RATIFIER_ACTIVE in policy_codes:
+                raise AgentRatifierActive(
+                    f"tenant policy {str(tenant_policy)!r} binds an active agent_ratifier; the reserved-inactive floor holds in every mode"
+                )
+            if _omp.CODE_PRIVILEGED_FLOOR_AGENT in policy_codes:
+                raise PrivilegedRatifierInvalid(
+                    f"tenant policy {str(tenant_policy)!r} names an agent/advisory role as a privileged ratifier; privileged classes require required_ratifier_role: operator"
+                )
+
+    if mode in ELEVATED_MODES:
+        refusal = (
+            AutoWithoutOperatorPolicy if mode == "auto" else TranscendenceWithoutOperatorPolicy
+        )
+        if policy is None:
+            raise refusal(
+                f"operating_mode {mode!r} requires an Operator-ratified tenant policy (--tenant-policy) that ratifies {mode!r}"
+            )
+        if policy_codes:
+            raise refusal(
+                f"tenant policy for {mode!r} fails operating_mode_policy validation; refusing elevation"
+            )
+        policy_mode = _omp._normalize_token(policy.get("operating_mode", ""))
+        if policy_mode != mode or not _omp._operator_policy_pointer_present(policy):
+            raise refusal(
+                f"tenant policy does not ratify operating_mode {mode!r} with an Operator policy pointer"
+            )
+
+    return OperatingModeResolution(
+        operating_mode=mode,
+        autonomy_class=autonomy_norm,
+        lane_kind=lane_kind_norm,
+        ratification_evidence_ref=ratification_evidence_ref,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ce lane launch
 # ---------------------------------------------------------------------------
@@ -240,6 +390,11 @@ def launch(
     mcp_config_path: str | None = None,
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
+    operating_mode: str | None = None,
+    autonomy_class: str | None = None,
+    lane_kind: str | None = None,
+    tenant_policy: Path | str | None = None,
+    ratification_evidence_ref: str | None = None,
 ) -> LaunchResult:
     """Launch a governed visible lane and write its Pane Registry record.
 
@@ -248,6 +403,18 @@ def launch(
     """
     prompt = Path(prompt)
     ledger_root = Path(ledger_root)
+
+    # 0. G2.002.1 operating-mode floor. `strict` is the default; auto/transcendence
+    #    are refused without an Operator-ratified tenant policy, and a tenant policy
+    #    that names agent_ratifier / an advisory role as ratifier is refused. All of
+    #    this raises before any side effect.
+    mode_resolution = _evaluate_operating_mode(
+        operating_mode=operating_mode,
+        autonomy_class=autonomy_class,
+        lane_kind=lane_kind,
+        tenant_policy=tenant_policy,
+        ratification_evidence_ref=ratification_evidence_ref,
+    )
 
     # 1. Prompt pointer must exist and match its SHA (RV1-031) — before side effects.
     if not prompt.is_file():
@@ -452,6 +619,9 @@ def launch(
         pane=pane,
         claim_path=claim_path,
         claude_governance=claude_governance,
+        operating_mode=mode_resolution.operating_mode,
+        autonomy_class=mode_resolution.autonomy_class,
+        lane_kind=mode_resolution.lane_kind,
     )
 
 

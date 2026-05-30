@@ -60,9 +60,24 @@ Required arguments: `--controller-id`, `--lane-id`, `--role`, `--prompt`,
 `--prompt-sha`, `--repo-root`, `--ledger-root`. Optional: `--handoff` +
 `--handoff-sha`, `--command`, `--host-id`, `--pane-id`, `--session`,
 `--window`, `--worktree-path`, `--branch`, `--envelope-ref`, `--no-tmux`.
+G2.002.1 operating-mode carriers (optional): `--operating-mode` (default
+`strict`), `--autonomy-class`, `--lane-kind`, `--tenant-policy`,
+`--ratification-evidence`.
 
 The launch sequence, **with every refusal raised before any side effect**:
 
+0. **Operating-mode floor (G2.002.1).** `--operating-mode` defaults to `strict`.
+   An unknown mode, autonomy class, or lane kind is refused
+   (`G2-OPERATING-MODE-INVALID` / `G2-AUTONOMY-CLASS-INVALID` /
+   `G2-LANE-KIND-INVALID`), as is an active `reserved_future_agent_ratification`
+   autonomy (`G2-RESERVED-AUTONOMY-ACTIVE`). `auto` / `transcendence` are refused
+   (`G2-AUTO-WITHOUT-OPERATOR-POLICY` / `G2-TRANSCENDENCE-WITHOUT-OPERATOR-POLICY`)
+   unless `--tenant-policy` names an Operator-ratified operating-mode policy that
+   ratifies the requested mode. A tenant policy that binds an active
+   `agent_ratifier` (`G2-AGENT-RATIFIER-ACTIVE`) or names an agent/advisory role
+   as a privileged ratifier (`G2-PRIVILEGED-RATIFIER-INVALID`) is refused in
+   every mode. These carriers record posture only and mint no authority; the
+   Operator-only privileged floor is preserved unchanged.
 1. **Prompt pointer + SHA (RV1-031).** The `--prompt` path must exist; its
    byte-level SHA256 must equal `--prompt-sha`. Refuse on missing path or
    mismatch.
