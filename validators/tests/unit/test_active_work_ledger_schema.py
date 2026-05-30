@@ -365,3 +365,79 @@ def test_container_event_details_unknown_reason_rejected(tmp_path: Path):
     errors = validate_active_work_ledger_record(record, tmp_path / "event.yaml")
     assert errors
     assert any("reason" in error.path for error in errors)
+
+
+# ---------------------------------------------------------------------------
+# G2.002.1 operating-mode runtime carriers (additive, schema_version "4")
+# ---------------------------------------------------------------------------
+
+
+def valid_v4_carrier_claim_record() -> dict:
+    record = valid_claim_record()
+    record["schema_version"] = "4"
+    record["operating_mode"] = "strict"
+    record["autonomy_class"] = "operator_ratified_privileged"
+    record["lane_kind"] = "implementation"
+    record["ratification_evidence_ref"] = ".hermes/research/example/RATIFIED.md"
+    return record
+
+
+def test_v4_schema_version_validates(tmp_path: Path):
+    record = valid_claim_record()
+    record["schema_version"] = "4"
+    assert validate_active_work_ledger_record(record, tmp_path / "claim.yaml") == []
+
+
+def test_v4_carrier_claim_record_passes(tmp_path: Path):
+    record = valid_v4_carrier_claim_record()
+    assert validate_active_work_ledger_record(record, tmp_path / "claim.yaml") == []
+
+
+def test_carrier_fields_optional_on_pre_v4_records(tmp_path: Path):
+    # Backward compatibility: v1/v2/v3 records carry no carrier fields and stay valid.
+    for version in ("1", "2", "3"):
+        record = valid_claim_record()
+        record["schema_version"] = version
+        assert validate_active_work_ledger_record(record, tmp_path / "claim.yaml") == [], version
+    assert validate_active_work_ledger_record(valid_heartbeat_record(), tmp_path / "hb.yaml") == []
+    assert validate_active_work_ledger_record(valid_event_record(), tmp_path / "ev.yaml") == []
+
+
+def test_lane_kind_enum_accepts_all_six_values(tmp_path: Path):
+    for kind in ("read-only", "implementation", "review", "approval", "merge", "audit"):
+        record = valid_v4_carrier_claim_record()
+        record["lane_kind"] = kind
+        assert validate_active_work_ledger_record(record, tmp_path / "claim.yaml") == [], kind
+
+
+def test_unknown_operating_mode_carrier_rejected(tmp_path: Path):
+    record = valid_v4_carrier_claim_record()
+    record["operating_mode"] = "permissive"
+    errors = validate_active_work_ledger_record(record, tmp_path / "claim.yaml")
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_unknown_lane_kind_carrier_rejected(tmp_path: Path):
+    record = valid_v4_carrier_claim_record()
+    record["lane_kind"] = "deploy-and-merge"
+    errors = validate_active_work_ledger_record(record, tmp_path / "claim.yaml")
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_unknown_autonomy_class_carrier_rejected(tmp_path: Path):
+    record = valid_v4_carrier_claim_record()
+    record["autonomy_class"] = "fully_autonomous"
+    errors = validate_active_work_ledger_record(record, tmp_path / "claim.yaml")
+    assert any(error.code == CODE_SCHEMA for error in errors)
+
+
+def test_carriers_accepted_on_heartbeat_and_event(tmp_path: Path):
+    hb = valid_heartbeat_record()
+    hb["schema_version"] = "4"
+    hb["operating_mode"] = "strict"
+    hb["lane_kind"] = "implementation"
+    assert validate_active_work_ledger_record(hb, tmp_path / "hb.yaml") == []
+    ev = valid_event_record()
+    ev["schema_version"] = "4"
+    ev["operating_mode"] = "strict"
+    assert validate_active_work_ledger_record(ev, tmp_path / "ev.yaml") == []

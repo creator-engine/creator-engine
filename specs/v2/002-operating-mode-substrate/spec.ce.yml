@@ -13,11 +13,22 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.002.0
+  id: G2.002.1
   feature_binding: specs/v2/002
-  slice: "0"
-  title: operating-mode substrate schema and validator
+  slice: "1"
+  title: operating-mode runtime carriers
   layer: 0
+  predecessor_gate:
+    id: G2.002.0
+    slice: "0"
+    title: operating-mode substrate schema and validator
+    status: merged
+  note: >-
+    G2.002.0 landed the policy substrate (PR #85, merged). G2.002.1 is the
+    active slice: it propagates that substrate into runtime carriers
+    (Assignment Envelope representation, Active-Work Ledger records, and the
+    `ce lane launch` default/refusal behavior). It ratifies nothing and
+    activates no elevated mode.
 
 authority_basis:
   ratified_prompt:
@@ -29,9 +40,17 @@ authority_basis:
   validation_matrix:
     path: .hermes/research/g20020-operating-mode-readonly-prep-20260530T040137Z/VALIDATION_MATRIX.md
     sha256: 7addcf95b84b1fe1b22e97811d10785f01895aa1193ec9a498034b2108995780
+  g20021_runtime_carriers:
+    ratified_execution_prompt:
+      path: .hermes/research/g20021-operating-mode-runtime-carriers-automode-architect-20260530T142428Z/recommended-next/NEXT_OPERATOR_G20021_AUTOMODE_CONTROLLER_EXECUTION_PROMPT_REVIEWED_20260530T145048Z.md
+      sha256: a487fed7230f5b2f8ded90e234f6d5e30edfd4377f8c5ec0011b813bd040571d
+    architect_execution_plan:
+      path: .hermes/research/g20021-operating-mode-runtime-carriers-automode-architect-20260530T142428Z/architect-output/G20021_EXECUTION_PLAN.md
+      sha256: 8abfe4df44bd54e8a73174fe22ee5d4779fb7ddcbba901689c7adf292cd23f8d
   note: >-
-    This sidecar records G2.002.0 substrate authority only. It ratifies nothing
-    and does not activate auto-mode for runtime surfaces.
+    This sidecar records G2.002.0 substrate authority and the G2.002.1
+    runtime-carrier scope. It ratifies nothing, activates no elevated mode,
+    and binds no agent ratifier.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -139,6 +158,61 @@ requirements:
     statement: Runtime carrier propagation remains G2.002.1+ work.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-002-SCOPE]
+  - id: RV2-002-013
+    spec_md_ref: FR-013
+    statement: Active-Work Ledger records carry optional operating_mode, autonomy_class, and lane_kind carrier fields.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-CARRIER-ENUM, RISK-RV2-002-CARRIER-COMPAT]
+  - id: RV2-002-014
+    spec_md_ref: FR-014
+    statement: lane_kind enumerates read-only, implementation, review, approval, merge, and audit.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-ROLE-SEP]
+  - id: RV2-002-015
+    spec_md_ref: FR-015
+    statement: Carrier records may carry an inherited ratification-evidence pointer for elevated modes and privileged lane kinds.
+    decisions: [OD-01, OD-02]
+    risk_refs: [RISK-RV2-002-CARRIER-ELEVATION]
+  - id: RV2-002-016
+    spec_md_ref: FR-016
+    statement: ce lane launch defaults operating_mode to strict.
+    decisions: [Q-O6, OD-23]
+    risk_refs: [RISK-RV2-002-CLI-DEFAULT]
+  - id: RV2-002-017
+    spec_md_ref: FR-017
+    statement: ce lane launch refuses auto or transcendence without an Operator-ratified tenant policy, before any side effect.
+    decisions: [OD-01, OD-02]
+    risk_refs: [RISK-RV2-002-CLI-DEFAULT, RISK-RV2-002-CARRIER-ELEVATION]
+  - id: RV2-002-018
+    spec_md_ref: FR-018
+    statement: ce lane launch refuses a privileged class naming agent_ratifier or an advisory role as ratifier, before any side effect.
+    decisions: [OD-02, OD-22, Q-O7]
+    risk_refs: [RISK-RV2-002-CLI-RATIFIER]
+  - id: RV2-002-019
+    spec_md_ref: FR-019
+    statement: Runtime carriers preserve the Operator-only privileged floor in every mode.
+    decisions: [OD-02, OD-22]
+    risk_refs: [RISK-RV2-002-PRIVILEGE, RISK-RV2-002-OVERRIDE]
+  - id: RV2-002-020
+    spec_md_ref: FR-020
+    statement: Absent or migrated operating-mode carriers resolve to strict; migration never infers elevation.
+    decisions: [Q-O6]
+    risk_refs: [RISK-RV2-002-DEFAULT]
+  - id: RV2-002-021
+    spec_md_ref: FR-021
+    statement: The carrier extension is additive; schema_version includes "4" and pre-v4 records validate unchanged.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-CARRIER-COMPAT]
+  - id: RV2-002-022
+    spec_md_ref: FR-022
+    statement: Review/approval/merge lane kinds are representable and documented as downstream-enforced; PR-review enforcement is not implemented here.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-ROLE-SEP]
+  - id: RV2-002-023
+    spec_md_ref: FR-023
+    statement: The Assignment Envelope representation carries operating mode, autonomy class, and ratification pointer as pure carriers introducing no new authority.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-002-CARRIER-ELEVATION]
 
 risk_inventory:
   - id: RISK-RV2-002-MODE
@@ -152,7 +226,7 @@ risk_inventory:
     relevance: [migration, autonomy]
     description: A migrated tenant inherits more autonomy than Operator ratified.
     severity: critical
-    required_validation_refs: [VAL-AUTONOMY-DEFAULT]
+    required_validation_refs: [VAL-AUTONOMY-DEFAULT, VAL-CARRIER-MIGRATED-DEFAULT-STRICT]
   - id: RISK-RV2-002-AUTO
     title: Auto or transcendence mode without Operator policy pointer.
     relevance: [governance, autonomy]
@@ -170,7 +244,7 @@ risk_inventory:
     relevance: [governance, identity]
     description: Reserved future agent ratification becomes active before AOS ratifier milestone.
     severity: critical
-    required_validation_refs: [VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE]
+    required_validation_refs: [VAL-RATIFIER-REJECT-AGENT-RATIFIER-ACTIVE, VAL-CARRIER-RESERVED-AUTONOMY-ACTIVE]
   - id: RISK-RV2-002-OVERRIDE
     title: Emergency override not Operator-only.
     relevance: [governance, security]
@@ -189,6 +263,42 @@ risk_inventory:
     description: Runtime lane/ledger/envelope propagation is implemented before separate ratification.
     severity: high
     required_validation_refs: [VAL-OPERATING-MODE-SCOPE]
+  - id: RISK-RV2-002-CARRIER-ENUM
+    title: Unknown carrier operating mode, autonomy class, or lane kind.
+    relevance: [governance, runtime, autonomy]
+    description: A runtime-carrier record carries an undefined operating_mode, autonomy_class, or lane_kind and bypasses fail-closed validation.
+    severity: high
+    required_validation_refs: [VAL-CARRIER-MODE-ENUM, VAL-CARRIER-LANE-KIND-ENUM, VAL-CARRIER-AUTONOMY-ENUM]
+  - id: RISK-RV2-002-CARRIER-ELEVATION
+    title: Elevated carrier without inherited ratification evidence.
+    relevance: [governance, autonomy, runtime]
+    description: A carrier record or lane launch elevates to auto/transcendence or a privileged lane kind without an Operator-ratified ratification-evidence pointer.
+    severity: critical
+    required_validation_refs: [VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION, VAL-LANE-LAUNCH-ELEVATION-REFUSED]
+  - id: RISK-RV2-002-CARRIER-COMPAT
+    title: Carrier extension breaks pre-v4 records.
+    relevance: [migration, runtime]
+    description: The additive carrier fields or schema_version bump invalidates existing v1-v3 Active-Work Ledger records.
+    severity: high
+    required_validation_refs: [VAL-CARRIER-BACKWARD-COMPAT]
+  - id: RISK-RV2-002-CLI-DEFAULT
+    title: Lane launch default not strict or elevated mode allowed without policy.
+    relevance: [governance, autonomy, runtime]
+    description: ce lane launch defaults to a non-strict mode, or activates auto/transcendence without an Operator-ratified tenant policy.
+    severity: critical
+    required_validation_refs: [VAL-LANE-LAUNCH-DEFAULT-STRICT, VAL-LANE-LAUNCH-ELEVATION-REFUSED]
+  - id: RISK-RV2-002-CLI-RATIFIER
+    title: Privileged ratifier misuse at lane launch.
+    relevance: [governance, identity, security]
+    description: ce lane launch accepts a privileged class naming agent_ratifier or an advisory role as the ratifier.
+    severity: critical
+    required_validation_refs: [VAL-LANE-LAUNCH-RATIFIER-REFUSED, VAL-CARRIER-AGENT-RATIFIER-ACTIVE]
+  - id: RISK-RV2-002-ROLE-SEP
+    title: PR-review role separation not carried.
+    relevance: [governance, runtime]
+    description: Review/approval/merge lane kinds cannot be distinguished from implementation lanes in carrier records.
+    severity: medium
+    required_validation_refs: [VAL-CARRIER-ROLE-SEPARATION]
 
 required_validation:
   - id: VAL-OPERATING-MODE-ENUM
@@ -236,6 +346,102 @@ required_validation:
     planned_slice: G2.002.0
     planned_validator: manifest review
     status: manual-review-required
+  - id: VAL-CARRIER-MODE-ENUM
+    description: Reject unknown operating_mode carrier values on runtime-carrier records.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-MODE-ENUM]
+  - id: VAL-CARRIER-AUTONOMY-ENUM
+    description: Reject unknown autonomy_class carrier values on runtime-carrier records.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-AUTONOMY-ENUM]
+  - id: VAL-CARRIER-LANE-KIND-ENUM
+    description: Reject unknown lane_kind carrier values on runtime-carrier records.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-LANE-KIND-ENUM]
+  - id: VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION
+    description: Reject auto/transcendence carriers, or privileged lane kinds, lacking an inherited ratification-evidence pointer.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION]
+  - id: VAL-CARRIER-RESERVED-AUTONOMY-ACTIVE
+    description: Reject reserved_future_agent_ratification as an active carrier autonomy class.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-RESERVED-AUTONOMY-ACTIVE]
+  - id: VAL-CARRIER-AGENT-RATIFIER-ACTIVE
+    description: Reject active agent_ratifier authority bindings inside runtime carriers.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-AGENT-RATIFIER-ACTIVE]
+  - id: VAL-CARRIER-MIGRATED-DEFAULT-STRICT
+    description: Verify absent or migrated carrier operating mode resolves to strict, never inferred elevation.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-MIGRATED-DEFAULT-STRICT]
+  - id: VAL-CARRIER-BACKWARD-COMPAT
+    description: Verify pre-v4 Active-Work Ledger records validate unchanged after the additive carrier extension.
+    planned_slice: G2.002.1
+    planned_validator: active_work_ledger_schema
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: active_work_ledger_schema
+    implemented_codes: [PCO-001]
+  - id: VAL-CARRIER-ROLE-SEPARATION
+    description: Verify review/approval/merge lane kinds are representable as carriers, documented as downstream-enforced.
+    planned_slice: G2.002.1
+    planned_validator: operating_mode_runtime_carriers
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: operating_mode_runtime_carriers
+    implemented_codes: [VAL-CARRIER-ROLE-SEPARATION]
+  - id: VAL-LANE-LAUNCH-DEFAULT-STRICT
+    description: Verify ce lane launch defaults operating_mode to strict.
+    planned_slice: G2.002.1
+    planned_validator: lane_runtime
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: lane_runtime
+  - id: VAL-LANE-LAUNCH-ELEVATION-REFUSED
+    description: Verify ce lane launch refuses auto/transcendence without an Operator-ratified tenant policy, before any side effect.
+    planned_slice: G2.002.1
+    planned_validator: lane_runtime
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: lane_runtime
+    implemented_codes: [G2-AUTO-WITHOUT-OPERATOR-POLICY, G2-TRANSCENDENCE-WITHOUT-OPERATOR-POLICY]
+  - id: VAL-LANE-LAUNCH-RATIFIER-REFUSED
+    description: Verify ce lane launch refuses a privileged class naming agent_ratifier or an advisory role as ratifier, before any side effect.
+    planned_slice: G2.002.1
+    planned_validator: lane_runtime
+    status: implemented
+    implemented_slice: G2.002.1
+    implemented_validator: lane_runtime
+    implemented_codes: [G2-PRIVILEGED-RATIFIER-INVALID, G2-AGENT-RATIFIER-ACTIVE]
 
 adr_refs:
   - specs/v2/adrs/ADR-V2-002-operating-mode-substrate.md
+  - specs/v2/adrs/ADR-V2-002-1-operating-mode-runtime-carriers.md

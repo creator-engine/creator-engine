@@ -1,0 +1,47 @@
+# G2.002.1 reference fixture: a valid operating-mode policy that also carries a
+# `runtime_carriers` block. The policy block satisfies the G2.002.0
+# `operating_mode_policy` check; the carrier block satisfies the G2.002.1
+# `operating_mode_runtime_carriers` check. Carriers mint no authority.
+operating_mode_policy:
+  operating_mode: strict
+  autonomy_class: operator_ratified_privileged
+  default_for_migrated_v1_tenants: strict
+  privileged_floor:
+    privileged_mutation_classes: [deploy, governance, identity, security, attestation, redaction]
+    required_ratifier_role: operator
+    agent_reviewer: advisory_only
+    agent_ratifier:
+      status: reserved-inactive
+      activation_requires: AOS-RATIFIER-MILESTONE
+      active_authority: none
+  policy_authority:
+    ratification_required_for_modes: [auto, transcendence]
+    activation_record_required: true
+  emergency_override: operator_only
+  risk_coverage:
+    required_validation_refs:
+      - VAL-CARRIER-MODE-ENUM
+      - VAL-CARRIER-ELEVATION-REQUIRES-RATIFICATION
+runtime_carriers:
+  # Default posture: strict implementation lane, no elevation.
+  - operating_mode: strict
+    autonomy_class: operator_ratified_privileged
+    lane_kind: implementation
+  # Read-only and advisory lane kinds need no ratification pointer.
+  - operating_mode: strict
+    lane_kind: read-only
+  - operating_mode: strict
+    lane_kind: review
+  # Elevated mode carries an inherited Operator ratification-evidence pointer.
+  - operating_mode: auto
+    autonomy_class: operator_ratified_privileged
+    lane_kind: implementation
+    ratification_evidence_ref:
+      ratified_prompt: .hermes/research/example/OPERATOR_AUTO_POLICY.md
+      sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  # Privileged lane kind carries an inherited ratification pointer and an
+  # Operator-ratified-privileged autonomy class (no delegation).
+  - operating_mode: strict
+    autonomy_class: operator_ratified_privileged
+    lane_kind: approval
+    ratification_evidence_ref: .hermes/research/example/OPERATOR_APPROVAL.md

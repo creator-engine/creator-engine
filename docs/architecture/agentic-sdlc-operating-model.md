@@ -302,6 +302,47 @@ Claude Code MUST NOT self-assign envelopes. Hermes authors and scopes
 envelopes; Claude consumes them; Source ratifies privileged
 integration. A self-assigned envelope is malformed.
 
+### d.8 Operating-mode runtime carriers (G2.002.1)
+
+G2.002.0 landed the operating-mode policy substrate (the `strict` /
+`auto` / `transcendence` mode enum, the `autonomy_class` enum, the
+`operating-mode-policy` schema and validator). G2.002.1 propagates that
+substrate into the runtime as **pure carriers** — they record posture
+and never mint authority:
+
+- **Assignment Envelope representation.** The envelope's declared
+  operating mode, autonomy class, and (for elevated modes or privileged
+  lane kinds) an inherited ratification-evidence pointer ride the
+  Active-Work Ledger carrier fields below; no standalone
+  assignment-envelope schema is introduced. The Assignment Envelope and
+  Operator ratification remain the substantive authority.
+- **Active-Work Ledger records.** The record schema carries optional
+  `operating_mode`, `autonomy_class`, `lane_kind`, and
+  `ratification_evidence_ref` fields, with `schema_version` extended to
+  `"4"`. The fields are additive; pre-v4 records validate unchanged.
+- **`lane_kind`** enumerates `read-only`, `implementation`, `review`,
+  `approval`, `merge`, and `audit` — distinct from `pane_label`. It lets
+  a downstream reviewer/approver/merger lane be a *different* lane kind
+  from the implementer lane. G2.002.1 only carries the field;
+  **PR-review, approval, and merge enforcement are downstream** and are
+  not implemented here. Author/approver separation continues to be
+  preserved operationally by an implementer lane stopping at PR creation.
+- **`ce lane launch` default and refusals.** `--operating-mode` defaults
+  to `strict`. `auto`/`transcendence` are refused unless an
+  Operator-ratified tenant policy ratifies the requested mode, and a
+  privileged class naming `agent_ratifier` or an advisory role as the
+  ratifier is refused. Every such refusal is raised *before* any tmux
+  spawn, Pane Registry write, or ledger write (the `G2-*` refusal family,
+  mirroring the existing `G3-*` ordering).
+
+The Operator-only privileged floor holds in every mode: no privileged
+relaxation, no agent ratification, advisory-only `agent_reviewer`,
+reserved-inactive `agent_ratifier`, and Operator-only emergency override.
+Absent or migrated carriers resolve to `strict`; migration never infers
+elevation. The `operating_mode_runtime_carriers` validator enforces this
+floor, reusing the `operating_mode_policy` substrate helpers. See
+[`../../specs/v2/adrs/ADR-V2-002-1-operating-mode-runtime-carriers.md`](../../specs/v2/adrs/ADR-V2-002-1-operating-mode-runtime-carriers.md).
+
 ## e. Actor/tool ownership matrix linkage
 
 The full actor/tool ownership matrix lives in

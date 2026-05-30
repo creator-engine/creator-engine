@@ -123,6 +123,40 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="deterministic closeout file pointer for Ring 0 closeout verification",
     )
+    # G2.002.1 operating-mode runtime carriers. `strict` is the default; elevated
+    # modes are refused without an Operator-ratified tenant policy.
+    launch.add_argument(
+        "--operating-mode",
+        dest="operating_mode",
+        default="strict",
+        choices=sorted(lane_runtime.OPERATING_MODES),
+        help="lane operating mode (default: strict); auto/transcendence require --tenant-policy",
+    )
+    launch.add_argument(
+        "--autonomy-class",
+        dest="autonomy_class",
+        default=None,
+        help="optional autonomy class carrier (G2.002.0 enum)",
+    )
+    launch.add_argument(
+        "--lane-kind",
+        dest="lane_kind",
+        default=None,
+        choices=sorted(lane_runtime.LANE_KINDS),
+        help="optional lane kind carrier (read-only/implementation/review/approval/merge/audit)",
+    )
+    launch.add_argument(
+        "--tenant-policy",
+        dest="tenant_policy",
+        default=None,
+        help="path to an Operator-ratified operating-mode-policy sidecar that ratifies an elevated mode",
+    )
+    launch.add_argument(
+        "--ratification-evidence",
+        dest="ratification_evidence_ref",
+        default=None,
+        help="inherited ratification-evidence pointer carried for elevated modes / privileged lane kinds",
+    )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
     launch.add_argument("--session", default=None, help="tmux session name")
@@ -437,6 +471,11 @@ def _lane_launch(args) -> int:
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
+            operating_mode=getattr(args, "operating_mode", None),
+            autonomy_class=getattr(args, "autonomy_class", None),
+            lane_kind=getattr(args, "lane_kind", None),
+            tenant_policy=getattr(args, "tenant_policy", None),
+            ratification_evidence_ref=getattr(args, "ratification_evidence_ref", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:
