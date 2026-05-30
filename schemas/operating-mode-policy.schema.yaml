@@ -11,6 +11,50 @@ required:
   - default_for_migrated_v1_tenants
   - privileged_floor
   - policy_authority
+$defs:
+  nonEmptyString:
+    type: string
+    minLength: 1
+    pattern: "\\S"
+  operatorPolicyPointer:
+    oneOf:
+      - $ref: "#/$defs/nonEmptyString"
+      - type: object
+        minProperties: 1
+        anyOf:
+          - required: [path]
+            properties:
+              path:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [prompt]
+            properties:
+              prompt:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [ratified_prompt]
+            properties:
+              ratified_prompt:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [sha256]
+            properties:
+              sha256:
+                $ref: "#/$defs/nonEmptyString"
+          - required: [operator_policy_ref]
+            properties:
+              operator_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [operator_ratified_policy_ref]
+            properties:
+              operator_ratified_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [ratified_policy_ref]
+            properties:
+              ratified_policy_ref:
+                $ref: "#/$defs/operatorPolicyPointer"
+          - required: [activation_record]
+            properties:
+              activation_record:
+                $ref: "#/$defs/operatorPolicyPointer"
+        additionalProperties: true
 properties:
   operating_mode:
     type: string
@@ -27,34 +71,13 @@ properties:
     type: string
     const: strict
   operator_policy_ref:
-    description: Operator-ratified policy pointer required to activate auto/transcendence.
-    oneOf:
-      - type: string
-        minLength: 1
-      - type: object
-        minProperties: 1
-        additionalProperties: true
+    $ref: "#/$defs/operatorPolicyPointer"
   operator_ratified_policy_ref:
-    oneOf:
-      - type: string
-        minLength: 1
-      - type: object
-        minProperties: 1
-        additionalProperties: true
+    $ref: "#/$defs/operatorPolicyPointer"
   ratified_policy_ref:
-    oneOf:
-      - type: string
-        minLength: 1
-      - type: object
-        minProperties: 1
-        additionalProperties: true
+    $ref: "#/$defs/operatorPolicyPointer"
   activation_record:
-    oneOf:
-      - type: string
-        minLength: 1
-      - type: object
-        minProperties: 1
-        additionalProperties: true
+    $ref: "#/$defs/operatorPolicyPointer"
   privileged_floor:
     type: object
     required:

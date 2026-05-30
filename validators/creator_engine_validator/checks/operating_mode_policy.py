@@ -142,13 +142,28 @@ def _operator_policy_pointer_present(policy: dict[str, Any]) -> bool:
         policy.get("ratified_policy_ref"),
         policy.get("activation_record"),
     ]
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return True
-        if isinstance(candidate, dict):
-            values = [str(v).strip() for v in candidate.values() if v is not None]
-            if values and any("operator" in k or "ratified" in k or k in {"sha256", "path", "prompt", "ratified_prompt"} for k in candidate):
+    return any(_has_meaningful_policy_pointer(candidate) for candidate in candidates)
+
+
+def _policy_pointer_key(key: Any) -> bool:
+    normalized = _normalize_token(key)
+    return (
+        "operator" in normalized
+        or "ratified" in normalized
+        or normalized in {"sha256", "path", "prompt", "ratified_prompt"}
+    )
+
+
+def _has_meaningful_policy_pointer(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if _policy_pointer_key(key) and _has_meaningful_policy_pointer(child):
                 return True
+        return False
+    if isinstance(value, list):
+        return any(_has_meaningful_policy_pointer(child) for child in value)
     return False
 
 

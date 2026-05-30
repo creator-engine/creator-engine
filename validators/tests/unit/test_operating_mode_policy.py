@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.operating_mode_policy import (
     CHECK_NAME,
@@ -122,6 +124,34 @@ def test_rejects_auto_without_operator_policy_pointer(tmp_path: Path):
     body = VALID_STRICT.replace("operating_mode: strict", "operating_mode: auto")
     path = _write_policy(tmp_path, body)
     assert CODE_AUTO_REQUIRES_POLICY in _codes(validate_file(path))
+
+
+@pytest.mark.parametrize(
+    "pointer_yaml",
+    [
+        'operator_policy_ref: ""',
+        'operator_policy_ref: "   "',
+        "operator_policy_ref: {}",
+        'operator_policy_ref:\n    sha256: ""',
+        'operator_policy_ref:\n    path: "   "\n    sha256: ""',
+    ],
+)
+def test_rejects_auto_operator_policy_pointer_with_only_empty_values(tmp_path: Path, pointer_yaml: str):
+    body = VALID_AUTO.replace(
+        "operator_policy_ref:\n    ratified_prompt: .hermes/research/example/POLICY.md\n    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        pointer_yaml,
+    )
+    path = _write_policy(tmp_path, body)
+    assert CODE_AUTO_REQUIRES_POLICY in _codes(validate_file(path))
+
+
+def test_rejects_transcendence_operator_policy_pointer_with_only_empty_values(tmp_path: Path):
+    body = VALID_AUTO.replace("operating_mode: auto", "operating_mode: transcendence").replace(
+        "operator_policy_ref:\n    ratified_prompt: .hermes/research/example/POLICY.md\n    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        'operator_policy_ref:\n    sha256: ""',
+    )
+    path = _write_policy(tmp_path, body)
+    assert CODE_TRANSCENDENCE_REQUIRES_POLICY in _codes(validate_file(path))
 
 
 def test_rejects_transcendence_without_operator_policy_pointer(tmp_path: Path):
