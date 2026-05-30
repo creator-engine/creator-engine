@@ -22,7 +22,8 @@ def _build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="run all enabled checks")
     check.add_argument("paths", nargs="*", default=["."], help="paths to validate")
 
-    sub.add_parser("check-examples", help="validate bundled well-formed/malformed examples")
+    check_examples = sub.add_parser("check-examples", help="validate bundled well-formed/malformed examples")
+    check_examples.add_argument("examples_root", nargs="?", default="examples", help="examples root to validate (default: examples)")
     sub.add_parser("scan-no-limitless", help="run only the no-LIMITLESS generic-path scan")
 
     scan_handoffs = sub.add_parser(
@@ -96,6 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run only the state_version_record check (RV1-022) against a path",
     )
     scan_state_version_record.add_argument("path", nargs="?", default=".", help="path to scan")
+
+    scan_crosswalk_register = sub.add_parser(
+        "scan-crosswalk-register",
+        help="run only the crosswalk_register check (G2.001.4 / FR-018) against a path",
+    )
+    scan_crosswalk_register.add_argument("path", nargs="?", default=".", help="path to scan")
 
     scan_terminology_v2 = sub.add_parser(
         "scan-terminology-v2",
@@ -266,6 +273,10 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/ce-terminology-v2/plural-ratifiers-source.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-ROLE"),
         ("malformed", Path("examples/malformed/ce-terminology-v2/block-scalar-source-ratifies.ce.yml"), False, "VAL-TERMINOLOGY-SOURCE-RATIFIES"),
         ("malformed", Path("examples/malformed/ce-terminology-v2/forbidden-sidecar.creator-engine.yml"), False, "VAL-TERMINOLOGY-SIDECAR-ALIAS"),
+        ("well-formed", Path("examples/well-formed/crosswalk-register"), True, None),
+        ("malformed", Path("examples/malformed/crosswalk-register/missing-authoritative.yml"), False, "VAL-CROSSWALK-AUTHORITATIVE"),
+        ("malformed", Path("examples/malformed/crosswalk-register/missing-canonical-mappings.yml"), False, "VAL-CROSSWALK-CANONICAL-MAPPING"),
+        ("malformed", Path("examples/malformed/crosswalk-register/derived-supersedes-authoritative.yml"), False, "VAL-CROSSWALK-DERIVED-SUPERSEDES"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -376,6 +387,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-state-version-record":
         from .checks.state_version_record import run as _run_state_version_record
         result = _run_state_version_record([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-crosswalk-register":
+        from .checks.crosswalk_register import run as _run_crosswalk_register
+        result = _run_crosswalk_register([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "scan-terminology-v2":
         from .checks.ce_terminology_v2 import run as _run_terminology_v2

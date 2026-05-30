@@ -1,0 +1,52 @@
+# Well-formed crosswalk-register fixture (G2.001.4 / FR-018).
+#
+# A minimal but valid v1 -> v2 crosswalk register: it declares the schema
+# identity, asserts authoritative: true, carries the canonical mapping groups
+# (roles, state_paths, feature_labels, sidecars), keeps derived material
+# non-superseding, and never declares the archived/import context as emitted by
+# new v2 artifacts. The crosswalk_register check must report zero errors here.
+
+schema: creator-engine/crosswalk-register
+schema_version: "2.0.0-draft"
+schema_status: fixture
+authoritative: true
+derived_material_note: >-
+  .ce/crosswalks/ may hold derived, runtime, or tenant-expanded crosswalk
+  material, but this tracked register is authoritative and is not superseded by
+  derived material.
+
+roles:
+  - source: source
+    operator: operator
+    axis: human-authority-machine-role
+    disposition: import-alias-only
+    emit_in_v2: false
+    accept_on_import: true
+
+state_paths:
+  active_state_root:
+    v1: .hermes/
+    v2: .ce/
+    disposition: retarget
+
+feature_labels:
+  - v1_label: Feature 008
+    v2: specs/v2/005
+    disposition: remap
+
+sidecars:
+  - v1: spec.creator-engine.yml
+    v2: spec.ce.yml
+    disposition: rename
+    accept_v1_as_import_alias: true
+
+context_disposition:
+  v1_archived_import_context:
+    description: Material whose only valid v2 role is read-only import or archival citation.
+    rules:
+      - Readable, never emitted by new v2 artifacts.
+      - Never written or mutated by v2 flows.
+  v2_canonical_emission_context:
+    description: The only context new v2 artifacts emit into.
+    rules:
+      - Canonical for all new Phase 2+ artifacts.

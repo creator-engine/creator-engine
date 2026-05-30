@@ -67,4 +67,5 @@ from . import state_version_record as state_version_record  # noqa: E402,F401
 from . import ce_terminology_v2 as ce_terminology_v2  # noqa: E402,F401
 from . import role_enum_v2 as role_enum_v2  # noqa: E402,F401
 from . import sidecar_schema_v2 as sidecar_schema_v2  # noqa: E402,F401
+from . import crosswalk_register as crosswalk_register  # noqa: E402,F401
 from . import operating_mode_policy as operating_mode_policy  # noqa: E402,F401
