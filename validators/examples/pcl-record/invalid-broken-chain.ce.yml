@@ -1,0 +1,31 @@
+pcl_chain:
+- record_id: pcl-g20040-0000
+  record_kind: gate_opened
+  sequence: 0
+  parent_hash: null
+  content_hash: 594a5902253eb8b907fbdc0cda7be3819c4b644d0a25bdbd9607d4629a8fc668
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T07:00:00Z'
+  body:
+    gate_id: G2.004.0
+    summary: PCL substrate gate opened
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+- record_id: pcl-g20040-0001
+  record_kind: lane_claim
+  sequence: 1
+  parent_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  content_hash: a38ffd7d47304f1f2d23b88fd9f33f169a6e335cd9d6fb016e277ba55c3ba1d2
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T07:00:01Z'
+  body:
+    lane_id: g20040-pcl-substrate
+    summary: parent points nowhere
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

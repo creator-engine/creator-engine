@@ -1,0 +1,13 @@
+pcl_record:
+  record_id: pcl-g20040-0000
+  record_kind: gate_opened
+  sequence: 0
+  parent_hash: null
+  content_hash: 183dbfe8eac6bd6e5e7949709c55738f6a14f224709b4dca26763793435f3ab4
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T07:00:00Z'
+  body:
+    summary: signature missing shape fields
+  signature:
+    scheme: ed25519

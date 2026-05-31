@@ -1,0 +1,254 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/004-pcl-substrate
+  spec_number: "004"
+  title: Creator Engine v2.0 PCL (Project Coordination Ledger) record substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.004.0
+  feature_binding: specs/v2/004
+  slice: "0"
+  title: PCL record substrate
+  layer: 2
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/parallel-g20031-g20040-architect-planning-20260531T061635Z/recommended-next/NEXT_OPERATOR_G20040_PCL_SUBSTRATE_AUTOMODE_EXECUTION_PROMPT_CONTROLLER_REVIEWED_20260531T065115Z.md
+    sha256: 85dd562e09279922131a1f6a4c00038d22b45b872c55cdda4e35c24c44a90ab7
+  architect_plan:
+    path: .hermes/research/parallel-g20031-g20040-architect-planning-20260531T061635Z/architect-output/G20040_PCL_SUBSTRATE_AUTOMODE_EXECUTION_PLAN.md
+    sha256: f5acfea5395122db42c0c99e2f7d599916475a92ed510a582c1b26742036ab4e
+  note: >-
+    This sidecar records G2.004.0 substrate authority only. It ratifies nothing
+    and does not activate the ce pcl runtime, .ce/pcl/ live writes, federated
+    identity, or distributed claim.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    PCL records may record operating-mode context, but G2.004.0 does not activate
+    or propagate runtime operating mode.
+
+authority:
+  mutation_classes: [governance, attestation]
+  privileged: true
+  required_ratifier_role: operator
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, examples, tests, and spec substrate only. No ce pcl
+    runtime, no .ce/pcl/ live writes, no federated identity, no distributed
+    claim, no connector, CI, deploy, review, approval, or merge.
+
+state_boundary:
+  canonical_future_pcl_home: .ce/pcl/
+  substrate_writes_pcl_state: false
+  legacy_pcl_home_write_freeze: .hermes/pcl/
+  notes: >-
+    This gate defines shape and validation only. Runtime ledger records are a
+    later, separately ratified gate (G2.004.1). The future .ce/pcl/ home is
+    split per the G2.001.0 state boundary: records/ is tracked-or-synced and
+    cache/ is gitignored. Active PCL state MUST NOT be written under .hermes/pcl/.
+
+requirements:
+  - id: RV2-004-001
+    spec_md_ref: FR-001
+    statement: Define canonical PCL record fields with a record_kind discriminator.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-SHAPE]
+  - id: RV2-004-002
+    spec_md_ref: FR-002
+    statement: Enforce deterministic content addressing.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-HASH]
+  - id: RV2-004-003
+    spec_md_ref: FR-003
+    statement: Enforce hash-chain linkage.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-CHAIN]
+  - id: RV2-004-004
+    spec_md_ref: FR-004
+    statement: Discriminate records by a closed record_kind enum.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-KIND]
+  - id: RV2-004-005
+    spec_md_ref: FR-005
+    statement: Preserve Operator-only privileged floor; PCL never ratifies and agent_ratifier stays reserved-inactive.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-004-ROLE]
+  - id: RV2-004-006
+    spec_md_ref: FR-006
+    statement: Record operating-mode context without activation.
+    decisions: [OD-01, OD-23]
+    risk_refs: [RISK-RV2-004-MODE]
+  - id: RV2-004-007
+    spec_md_ref: FR-007
+    statement: Reference CE-event blocks only by opaque 64-hex content hash with no CE-event import.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-POINTER]
+  - id: RV2-004-008
+    spec_md_ref: FR-008
+    statement: Validate signature field shape while deferring cryptography.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-SIGNATURE]
+  - id: RV2-004-009
+    spec_md_ref: FR-009
+    statement: Keep CE metadata in spec.ce.yml sidecars.
+    decisions: [OD-24]
+    risk_refs: [RISK-RV2-004-INLINE]
+  - id: RV2-004-010
+    spec_md_ref: FR-010
+    statement: Preserve .ce/pcl as future home and freeze .hermes/pcl active writes.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-WRITE]
+  - id: RV2-004-011
+    spec_md_ref: FR-011
+    statement: Provide fail-closed validator coverage.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-VALIDATOR]
+  - id: RV2-004-012
+    spec_md_ref: FR-012
+    statement: Stop before live ledger emission, ce pcl runtime, .ce/pcl/ live writes, federated identity, distributed claim, connector, CI, deploy, or runtime autonomy activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-004-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-004-SHAPE
+    title: Ambiguous PCL record shape.
+    relevance: [governance, attestation]
+    description: Consumers cannot validate or replay PCL records deterministically.
+    severity: high
+    required_validation_refs: [VAL-PCL-SCHEMA]
+  - id: RISK-RV2-004-HASH
+    title: Forged or unstable content hash.
+    relevance: [attestation]
+    description: A record claims a digest that does not match canonical content.
+    severity: critical
+    required_validation_refs: [VAL-PCL-CONTENT-ADDRESS]
+  - id: RISK-RV2-004-CHAIN
+    title: Broken coordination chain.
+    relevance: [audit]
+    description: Record order can be forked, reordered, or detached.
+    severity: critical
+    required_validation_refs: [VAL-PCL-CHAIN-LINK]
+  - id: RISK-RV2-004-KIND
+    title: Unknown record kind.
+    relevance: [governance]
+    description: A record declares a coordination kind outside the canonical enum.
+    severity: high
+    required_validation_refs: [VAL-PCL-RECORD-KIND]
+  - id: RISK-RV2-004-ROLE
+    title: Reserved ratifier or non-canonical role emits a coordination record.
+    relevance: [governance, identity]
+    description: Reserved ratification role is treated as active authority or PCL is used to ratify.
+    severity: critical
+    required_validation_refs: [VAL-PCL-ROLE-FLOOR]
+  - id: RISK-RV2-004-MODE
+    title: Unknown operating-mode context.
+    relevance: [governance, autonomy]
+    description: A record context names an unratified or ambiguous autonomy mode.
+    severity: high
+    required_validation_refs: [VAL-PCL-MODE-ENUM]
+  - id: RISK-RV2-004-POINTER
+    title: Malformed or coupling CE-event pointer.
+    relevance: [attestation, state-boundary]
+    description: An event_block_pointer omits the opaque 64-hex hash or couples PCL to CE-event internals.
+    severity: high
+    required_validation_refs: [VAL-PCL-POINTER-SHAPE]
+  - id: RISK-RV2-004-SIGNATURE
+    title: Signature semantics activated early.
+    relevance: [identity, attestation]
+    description: Shape-only signature fields are mistaken for live key custody.
+    severity: high
+    required_validation_refs: [VAL-PCL-SIGNATURE-SHAPE]
+  - id: RISK-RV2-004-INLINE
+    title: Inline PCL metadata in Markdown.
+    relevance: [metadata]
+    description: PCL metadata leaks into Spec Kit prose instead of sidecars/examples.
+    severity: medium
+    required_validation_refs: [VAL-PCL-NO-INLINE]
+  - id: RISK-RV2-004-WRITE
+    title: Legacy ledger-state write.
+    relevance: [state-boundary]
+    description: A v2 PCL record targets .hermes/pcl as active runtime state.
+    severity: high
+    required_validation_refs: [VAL-PCL-WRITE-FREEZE]
+  - id: RISK-RV2-004-VALIDATOR
+    title: Validator coverage gap.
+    relevance: [quality]
+    description: A malformed record reaches PR review without fail-closed evidence.
+    severity: high
+    required_validation_refs: [VAL-PCL-SCHEMA, VAL-PCL-CONTENT-ADDRESS, VAL-PCL-CHAIN-LINK]
+  - id: RISK-RV2-004-SCOPE
+    title: Runtime bundled into substrate gate.
+    relevance: [governance, runtime]
+    description: Live ledger emission or ce pcl runtime is implemented before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-PCL-WRITE-FREEZE]
+
+required_validation:
+  - id: VAL-PCL-SCHEMA
+    description: Reject malformed PCL record records.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-CONTENT-ADDRESS
+    description: Reject content_hash values that do not match canonical record material.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-CHAIN-LINK
+    description: Reject chains with missing or incorrect parent_hash linkage.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-RECORD-KIND
+    description: Reject record_kind values outside the canonical PCL enum.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-MODE-ENUM
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-POINTER-SHAPE
+    description: Reject event_block_pointer records without an opaque 64-hex ce_event_content_hash.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-SIGNATURE-SHAPE
+    description: Validate shape-only signature fields and reserved-inactive value.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-NO-INLINE
+    description: Reject inline PCL metadata in Markdown.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+  - id: VAL-PCL-WRITE-FREEZE
+    description: Reject active writes targeting .hermes/pcl.
+    planned_slice: G2.004.0
+    planned_validator: pcl_record
+    status: implemented
+
+crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/004
+adr_refs:
+  - specs/v2/adrs/ADR-V2-004-pcl-substrate.md
