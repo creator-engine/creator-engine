@@ -9,9 +9,18 @@ and the project operates under an Operator-ratified governance model
 ## Supported versions
 
 Creator Engine has not reached v1.0. There is no long-term-support
-branch. The default branch (`main`) is the only version that receives
-security fixes. Pre-1.0 spec/plan/tasks artifacts and the offline
-validator may change without backward compatibility guarantees.
+branch and no stable-support guarantee. Until the first public product
+tag is published, the default branch (`main`) is the only line that
+receives security fixes.
+
+The first public product tag direction is `v0.1.0`, coupled to the
+`creator-engine-validator` package version `0.1.0`. After a later,
+separate Operator-ratified publication gate publishes a pre-1.0 tag,
+security support applies to the latest published pre-1.0 line. Older
+pre-1.0 tags may be superseded without long-term maintenance guarantees.
+Pre-1.0 spec/plan/tasks artifacts, G2.* internal gate material, draft v2
+substrate, and the offline validator may change without backward
+compatibility guarantees.
 
 ## Reporting a vulnerability
 
