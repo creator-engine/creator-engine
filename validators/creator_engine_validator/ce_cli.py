@@ -17,6 +17,11 @@ ce fanin build       # aggregate local evidence into a deterministic fan-in pack
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
 ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
+ce event append      # append a shape-only-signed CE-event block to a local chain (G2.003.1)
+ce event verify      # validate an on-disk CE-event chain + head manifest, read-only
+ce event sign        # refresh a draft block's shape-only signature + content hash (no crypto)
+ce event replay      # deterministic ordered read-only projection of a CE-event chain
+ce event index       # deterministic content-hashed read-only index of a CE-event chain
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -42,6 +47,7 @@ import sys
 from typing import Sequence
 
 from . import (
+    ce_event_runtime,
     doctor_runtime,
     fanin_runtime,
     init_runtime,
@@ -350,6 +356,63 @@ def _build_parser() -> argparse.ArgumentParser:
     qi = queue_sub.add_parser("inspect", help="verify a preview's content hash + shape (read-only)")
     qi.add_argument("--preview", required=True, help="path to an existing dry-run landing preview")
     qi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce event — G2.003.1 CE-event runtime. Local, daemonless, network-free
+    # append-only signed-block chains under the ignored .ce/ce-events/spool/
+    # root. No cryptography/key custody; signature stays reserved-inactive.
+    event = groups.add_parser(
+        "event", help="append/verify/sign/replay/index local CE-event chains (G2.003.1)"
+    )
+    event_sub = event.add_subparsers(dest="event_cmd")
+
+    ea = event_sub.add_parser(
+        "append", help="append a shape-only-signed CE-event block to a local chain"
+    )
+    ea.add_argument("--stream", required=True, help="chain stream name (path-safe slug)")
+    ea.add_argument("--event-root", required=True, help="CE-event home (e.g. .ce/ce-events)")
+    ea.add_argument("--block-id", required=True, help="block id (pattern ceevt-<slug>)")
+    ea.add_argument("--emitting-role", required=True, help="canonical non-ratifying emitting role")
+    ea.add_argument(
+        "--operating-mode",
+        required=True,
+        help="operating-mode context strict|auto|transcendence (recorded only; "
+        "an unknown mode is refused by the runtime with G2-EVENT-MODE-INVALID)",
+    )
+    ea.add_argument("--recorded-at", required=True, help="UTC timestamp YYYY-MM-DDThh:mm:ssZ")
+    ea.add_argument("--event-json", required=True, help="event mapping as JSON (kind/subject/summary[/payload])")
+    ea.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
+    ea.add_argument("--key-id", default=ce_event_runtime.DEFAULT_KEY_ID, help="shape-only signature key_id")
+    ea.add_argument(
+        "--signature-value",
+        default=ce_event_runtime.SIGNATURE_VALUE,
+        help="refuse-guarded: must stay reserved-inactive (no cryptography)",
+    )
+    ea.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    ev = event_sub.add_parser("verify", help="validate an on-disk CE-event chain + head manifest")
+    ev.add_argument("--stream", required=True)
+    ev.add_argument("--event-root", required=True)
+    ev.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    es = event_sub.add_parser("sign", help="refresh a draft block's shape-only signature + content hash")
+    es.add_argument("--block-json", required=True, help="draft CE-event block mapping as JSON")
+    es.add_argument("--key-id", default=None, help="shape-only signature key_id")
+    es.add_argument(
+        "--signature-value",
+        default=ce_event_runtime.SIGNATURE_VALUE,
+        help="refuse-guarded: must stay reserved-inactive (no cryptography)",
+    )
+    es.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    er = event_sub.add_parser("replay", help="deterministic ordered read-only projection of a chain")
+    er.add_argument("--stream", required=True)
+    er.add_argument("--event-root", required=True)
+    er.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    ei = event_sub.add_parser("index", help="deterministic content-hashed read-only index of a chain")
+    ei.add_argument("--stream", required=True)
+    ei.add_argument("--event-root", required=True)
+    ei.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce check — umbrella wrapper over the retained creator-engine-validator
     # conformance checks (DP-1 = A: ce wraps the validator subcommands).
@@ -870,6 +933,120 @@ def _queue_inspect(args) -> int:
     return 0 if result.ok else 1
 
 
+def _event_append(args) -> int:
+    try:
+        event = json.loads(args.event_json)
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: ce event append: --event-json is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    try:
+        result = ce_event_runtime.append(
+            stream=args.stream,
+            event_root=args.event_root,
+            block_id=args.block_id,
+            emitting_role=args.emitting_role,
+            operating_mode=args.operating_mode,
+            event=event,
+            recorded_at=args.recorded_at,
+            repo_root=args.repo_root,
+            key_id=args.key_id,
+            signature_value=args.signature_value,
+        )
+    except ce_event_runtime.CeEventRuntimeError as exc:
+        print(f"ERROR: ce event append refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "block_path": str(result.block_path),
+                "head_path": str(result.head_path),
+                "stream": result.stream,
+                "sequence": result.sequence,
+                "content_hash": result.content_hash,
+                "parent_hash": result.parent_hash,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce event append: wrote {result.block_path} (stream={result.stream} sequence={result.sequence})")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
+def _event_verify(args) -> int:
+    try:
+        result = ce_event_runtime.verify(stream=args.stream, event_root=args.event_root)
+    except ce_event_runtime.CeEventRuntimeError as exc:
+        print(f"ERROR: ce event verify [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.summary, indent=2, sort_keys=True))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce event verify: {status} (stream={result.stream}, {result.summary['block_count']} block(s))")
+        for error in result.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _event_sign(args) -> int:
+    try:
+        block = json.loads(args.block_json)
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: ce event sign: --block-json is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    try:
+        signed = ce_event_runtime.sign(
+            block=block, key_id=args.key_id, signature_value=args.signature_value
+        )
+    except ce_event_runtime.CeEventRuntimeError as exc:
+        print(f"ERROR: ce event sign refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(signed, indent=2, sort_keys=True))
+    else:
+        print(f"ce event sign: content_hash={signed['content_hash']} signature={signed['signature']['value']}")
+    return 0
+
+
+def _event_replay(args) -> int:
+    try:
+        result = ce_event_runtime.replay(stream=args.stream, event_root=args.event_root)
+    except ce_event_runtime.CeEventRuntimeError as exc:
+        print(f"ERROR: ce event replay [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "stream": result.stream,
+                "content_hash": result.content_hash,
+                "block_count": result.projection["block_count"],
+                "blocks": list(result.blocks),
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce event replay: stream={result.stream} ({result.projection['block_count']} block(s))")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
+def _event_index(args) -> int:
+    try:
+        result = ce_event_runtime.index(stream=args.stream, event_root=args.event_root)
+    except ce_event_runtime.CeEventRuntimeError as exc:
+        print(f"ERROR: ce event index [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.index, indent=2, sort_keys=True))
+    else:
+        print(f"ce event index: stream={result.stream} ({result.index['block_count']} block(s))")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -986,6 +1163,14 @@ _QUEUE_DISPATCH = {
     "inspect": _queue_inspect,
 }
 
+_EVENT_DISPATCH = {
+    "append": _event_append,
+    "verify": _event_verify,
+    "sign": _event_sign,
+    "replay": _event_replay,
+    "index": _event_index,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -1024,6 +1209,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _QUEUE_DISPATCH.get(queue_cmd)
         if handler is None:
             parser.parse_args(["queue", "--help"])  # prints queue help, exits
+            return 2
+        return handler(args)
+    if args.group == "event":
+        event_cmd = getattr(args, "event_cmd", None)
+        handler = _EVENT_DISPATCH.get(event_cmd)
+        if handler is None:
+            parser.parse_args(["event", "--help"])  # prints event help, exits
             return 2
         return handler(args)
     if args.group == "check":
