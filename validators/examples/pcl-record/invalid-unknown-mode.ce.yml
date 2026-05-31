@@ -1,0 +1,15 @@
+pcl_record:
+  record_id: pcl-g20040-0000
+  record_kind: gate_opened
+  sequence: 0
+  parent_hash: null
+  content_hash: 5d02eeb189b0460fed66dded4ac8accc29b84243776db2c74e9e965c02187388
+  emitting_role: controller
+  operating_mode: permissive
+  recorded_at: '2026-05-31T07:00:00Z'
+  body:
+    summary: unknown mode context
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

@@ -1,0 +1,16 @@
+pcl_record:
+  record_id: pcl-g20040-0000
+  record_kind: lane_claim
+  sequence: 0
+  parent_hash: null
+  content_hash: 13be9509edeebb82ff060f1db8c927df89bd4f5c2b60b7c511feacdd0de65218
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T07:00:00Z'
+  body:
+    summary: attempted legacy active-state write
+    write_target: .hermes/pcl/active.yml
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

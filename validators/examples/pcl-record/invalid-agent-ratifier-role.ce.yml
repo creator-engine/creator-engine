@@ -1,0 +1,15 @@
+pcl_record:
+  record_id: pcl-g20040-0000
+  record_kind: gate_opened
+  sequence: 0
+  parent_hash: null
+  content_hash: 257b2ec1a5751605e65905714def718a1093eea13f0f3a6c47e26e9d886d9ab7
+  emitting_role: agent_ratifier
+  operating_mode: strict
+  recorded_at: '2026-05-31T07:00:00Z'
+  body:
+    summary: reserved ratifier may not emit
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
