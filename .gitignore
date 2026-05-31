@@ -17,3 +17,10 @@ __pycache__/
 # committed Ring 1 hook-pack. Governed launches also pin `--setting-sources
 # project` to exclude `local`. See docs/operations/CLAUDE_CODE_HOOK_PACK.md.
 .claude/settings.local.json
+
+# G2.003.1 CE-event runtime instance state. `.ce/ce-events/spool/` is the
+# local, generated append-only CE-event chain zone the `ce event` runtime writes
+# (head manifests + per-block files). It is instance-local runtime state, never
+# tracked. This is a minimal, additive instance-zone line: do NOT wholesale-
+# ignore `.ce/` — governance subtrees under `.ce/` must remain trackable.
+.ce/ce-events/spool/

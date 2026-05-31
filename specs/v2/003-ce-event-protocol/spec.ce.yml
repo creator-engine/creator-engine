@@ -13,11 +13,24 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.003.0
+  id: G2.003.1
   feature_binding: specs/v2/003
-  slice: "0"
-  title: CE-event protocol signed-block substrate
+  slice: "1"
+  title: CE-event protocol runtime
   layer: 2
+  predecessor_gate:
+    id: G2.003.0
+    slice: "0"
+    title: CE-event protocol signed-block substrate
+    status: merged
+  note: >-
+    G2.003.0 landed the signed-block substrate (PR #91, ab2ce39, merged):
+    schema, ce_event_block validator, examples, and spec/sidecar/ADR. G2.003.1
+    is the active slice: it turns that substrate into the local, daemonless,
+    network-free `ce event {sign,verify,append,replay,index}` runtime writing
+    append-only chains under the ignored `.ce/ce-events/spool/` zone. It adds no
+    new validator and no schema change, introduces no cryptography or key
+    custody, activates no autonomy, and ratifies nothing.
 
 authority_basis:
   ratified_prompt:
@@ -26,9 +39,19 @@ authority_basis:
   architect_plan:
     path: .hermes/research/parallel-roadmap-architect-handoff-20260530T154503Z/architect-output/G20030_EXECUTION_PLAN.md
     sha256: 31cf98af40e68f8d375d93e47254accb17299777030d15e3c06725a883405acd
+  runtime_slice:
+    gate: G2.003.1
+    ratified_prompt:
+      path: .hermes/research/g20031-ce-event-runtime-current-main-reconcile-20260531T103710Z/recommended-next/NEXT_OPERATOR_G20031_CE_EVENT_RUNTIME_AUTOMODE_EXECUTION_CURRENT_MAIN_PROMPT_20260531T103710Z.md
+      sha256: b9fc653c8e777357ffc8f75667434d73d2baed8cce778b99ab5783c25f29a627
+    architect_plan:
+      path: .hermes/research/parallel-g20031-g20040-architect-planning-20260531T061635Z/architect-output/G20031_CE_EVENT_RUNTIME_AUTOMODE_EXECUTION_PLAN.md
+      sha256: 71aab9982ca842c904d6f5ec31fbcd0cdbd0fca19ff132024ef632fc33aa304a
   note: >-
-    This sidecar records G2.003.0 substrate authority only. It ratifies nothing
-    and does not activate live event emission or elevated autonomy.
+    This sidecar records G2.003.0 substrate authority and the G2.003.1 runtime
+    slice authority. It ratifies nothing, activates no live distributed emission
+    or elevated autonomy, and introduces no cryptography, key custody, or
+    credential handling.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -52,10 +75,17 @@ authority:
 state_boundary:
   canonical_future_event_home: .ce/ce-events/
   substrate_writes_event_state: false
+  runtime_writes_event_state: true
+  runtime_event_home: .ce/ce-events/spool/
+  runtime_event_home_ignored: true
   legacy_event_home_write_freeze: .hermes/ce-events/
   notes: >-
-    This gate defines shape and validation only. Runtime event records are a
-    later, separately ratified gate.
+    G2.003.0 defines shape and validation only. The G2.003.1 runtime writes
+    append-only event chains under the ignored `.ce/ce-events/spool/` zone, never
+    under the frozen `.hermes/ce-events/` path, and refuses to write when the
+    spool root is not git-ignored inside a repository. The minimal additive
+    `.gitignore` line is a G2.003.1-owned precursor and does not pre-empt the
+    full G2.001.0 `.ce/` namespace gate.
 
 requirements:
   - id: RV2-003-001
@@ -108,6 +138,41 @@ requirements:
     statement: Stop before live emission, key custody, distributed PCL, queue, connector, CI, deploy, or runtime autonomy activation.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-003-SCOPE]
+  - id: RV2-003-011
+    spec_md_ref: FR-011
+    statement: Append a CE-event block to a local chain with genesis sequence 0, monotonic sequence, parent-hash linkage, and an agreeing head manifest.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-RT-CHAIN]
+  - id: RV2-003-012
+    spec_md_ref: FR-012
+    statement: Compute content_hash byte-identical to the G2.003.0 canonical rule so a runtime-produced block passes the unchanged ce_event_block validator.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-RT-CHAIN]
+  - id: RV2-003-013
+    spec_md_ref: FR-013
+    statement: Verify reuses the landed validator plus head agreement; replay and index are deterministic read-only projections.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-RT-CHAIN]
+  - id: RV2-003-014
+    spec_md_ref: FR-014
+    statement: Preserve the privileged floor at runtime; refuse agent_ratifier/source and non-reserved signature values; no cryptography or key custody.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-003-RT-FLOOR]
+  - id: RV2-003-015
+    spec_md_ref: FR-015
+    statement: Record operating-mode context only; refuse unknown modes and activate no autonomy.
+    decisions: [OD-01, OD-23]
+    risk_refs: [RISK-RV2-003-RT-FLOOR]
+  - id: RV2-003-016
+    spec_md_ref: FR-016
+    statement: Write only under the ignored .ce/ce-events/spool/ zone, refuse an un-ignored root and any .hermes/ce-events target, and fail closed before any write.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-003-RT-STATE]
+  - id: RV2-003-017
+    spec_md_ref: FR-017
+    statement: Route writes through an injectable transport seam defaulting to local/git-file semantics; defer network transports, PCL, queue, connector, identity, and CI/deploy.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-003-RT-STATE]
 
 risk_inventory:
   - id: RISK-RV2-003-SHAPE
@@ -170,6 +235,24 @@ risk_inventory:
     description: Live emission or key custody is implemented before separate ratification.
     severity: critical
     required_validation_refs: [VAL-CE-EVENT-WRITE-FREEZE]
+  - id: RISK-RV2-003-RT-CHAIN
+    title: Runtime chain integrity drift.
+    relevance: [attestation, audit, runtime]
+    description: A runtime-produced chain forks, reorders, or diverges by one byte from the G2.003.0 canonical block the validator accepts.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-RUNTIME-APPEND, VAL-CE-EVENT-RUNTIME-HASH-PARITY, VAL-CE-EVENT-RUNTIME-VERIFY]
+  - id: RISK-RV2-003-RT-FLOOR
+    title: Runtime relaxes the privileged floor.
+    relevance: [governance, identity, autonomy]
+    description: The runtime emits a reserved/forbidden role, activates a signature, or treats an unknown operating mode as authority.
+    severity: critical
+    required_validation_refs: [VAL-CE-EVENT-RUNTIME-ROLE-FLOOR, VAL-CE-EVENT-RUNTIME-SIGNATURE-RESERVED, VAL-CE-EVENT-RUNTIME-MODE]
+  - id: RISK-RV2-003-RT-STATE
+    title: Runtime event state escapes the ignored zone.
+    relevance: [state-boundary, runtime]
+    description: Runtime writes reach the tracked tree, target the frozen .hermes/ce-events path, or partially write on a refusal.
+    severity: high
+    required_validation_refs: [VAL-CE-EVENT-RUNTIME-WRITE-FREEZE, VAL-CE-EVENT-RUNTIME-IGNORED-ROOT]
 
 required_validation:
   - id: VAL-CE-EVENT-SCHEMA
@@ -212,7 +295,71 @@ required_validation:
     planned_slice: G2.003.0
     planned_validator: ce_event_block
     status: implemented
+  - id: VAL-CE-EVENT-RUNTIME-APPEND
+    description: Append builds a canonical content-addressed block with genesis sequence 0, monotonic sequence, parent-hash linkage, and an agreeing head manifest.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-CHAIN-LINK]
+  - id: VAL-CE-EVENT-RUNTIME-HASH-PARITY
+    description: Runtime content_hash is byte-identical to the G2.003.0 canonical rule and the produced block passes the unchanged ce_event_block validator.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+  - id: VAL-CE-EVENT-RUNTIME-VERIFY
+    description: Verify reuses the landed validator plus head agreement and rejects forged hashes, broken links, unknown modes, and activated signatures.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-VERIFY-ERROR]
+  - id: VAL-CE-EVENT-RUNTIME-ROLE-FLOOR
+    description: Append refuses agent_ratifier/source and non-canonical emitting roles before any write.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-ROLE-FLOOR]
+  - id: VAL-CE-EVENT-RUNTIME-SIGNATURE-RESERVED
+    description: Signature stays shape-only reserved-inactive; a non-reserved value is refused; no cryptography or key custody.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-SIGNATURE-RESERVED]
+  - id: VAL-CE-EVENT-RUNTIME-MODE
+    description: Append refuses unknown operating_mode values; mode is context only and activates nothing.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-MODE-INVALID]
+  - id: VAL-CE-EVENT-RUNTIME-WRITE-FREEZE
+    description: Append refuses an event targeting the frozen .hermes/ce-events path before any write.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-WRITE-FREEZE]
+  - id: VAL-CE-EVENT-RUNTIME-IGNORED-ROOT
+    description: Append refuses to write when the spool root is not git-ignored inside a repository; all runtime state lands under the ignored .ce/ce-events/spool/ zone.
+    planned_slice: G2.003.1
+    planned_validator: ce_event_runtime
+    status: implemented
+    implemented_slice: G2.003.1
+    implemented_validator: ce_event_runtime
+    implemented_codes: [G2-EVENT-ROOT-NOT-IGNORED]
 
 crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/003
 adr_refs:
   - specs/v2/adrs/ADR-V2-003-ce-event-protocol.md
+  - specs/v2/adrs/ADR-V2-003-1-ce-event-runtime.md
