@@ -15,6 +15,14 @@ identity/security/attestation/redaction changes, repo settings, branch
 protection, visibility flips) remain Operator-ratified regardless of
 release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
 
+Release surface pointers: `v0.1.0` is the first public product tag direction,
+with `creator-engine-validator` kept at `0.1.0` for the initial public cut. See
+[`CHANGELOG.md`](./CHANGELOG.md) and
+[`docs/delivery/VERSIONING_AND_RELEASE_POLICY.md`](./docs/delivery/VERSIONING_AND_RELEASE_POLICY.md)
+for the changelog and versioning policy. G2.* identifiers remain internal gate
+numbers, and draft v2 substrate remains roadmap material rather than shipped v2
+runtime.
+
 LIMITLESS is the named public dogfood tenant; generic paths in the
 substrate must not hardcode it (enforced by the offline validator's
 `scan-no-limitless` check).
