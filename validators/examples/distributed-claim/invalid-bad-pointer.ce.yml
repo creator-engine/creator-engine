@@ -1,0 +1,16 @@
+distributed_claim:
+  record_id: dc-g20042-9300
+  record_kind: claim_open
+  sequence: 0
+  parent_hash: null
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:08:00Z'
+  body:
+    claim_subject: lane:g20042-distributed-identity-substrate
+    binding_ref: not-a-valid-hash
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: a92797efd2b72d366faa9c8be34a764e363f9047da906c108f40e354ea603141
