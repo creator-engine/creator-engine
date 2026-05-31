@@ -1,0 +1,37 @@
+federated_identity_chain:
+- record_id: fib-g20042-0000
+  record_kind: federated_identity_binding
+  sequence: 0
+  parent_hash: null
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:00:00Z'
+  body:
+    principal_id: prn-operator-001
+    repo_bindings:
+    - repo_id: repo-creator-engine
+      identity_ref: idref-operator-ce
+    - repo_id: repo-downstream-tenant
+      identity_ref: idref-operator-dt
+    summary: Bind the operator principal across the canonical repo and a downstream
+      tenant repo
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+- record_id: fib-g20042-0001
+  record_kind: binding_revocation
+  sequence: 1
+  parent_hash: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:00:01Z'
+  body:
+    revokes_binding: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+    reason: key-rotation
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: 3b892794fc122bf9a7100b9999fcabfd861460eae351783386b062d3ca80352c
