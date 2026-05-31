@@ -1,0 +1,52 @@
+distributed_claim_chain:
+- record_id: dc-g20042-0000
+  record_kind: claim_open
+  sequence: 0
+  parent_hash: null
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:05:00Z'
+  body:
+    claim_subject: lane:g20042-distributed-identity-substrate
+    binding_ref: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+    ce_event_content_hash: e43ba15b01b6a38431e55498e0ea4f006eceb12161e739f1a9e74b218f7e3821
+    pcl_content_hash: 4f6c5023093ba49ad3e600e9537f0ed990c643340f98fea68fe178c33d35197d
+    summary: Open a distributed claim for the g20042 lane bound to the operator federated
+      identity
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: f7558b87c2810fe5b5c758afc7b1b48466202f9014b14207c2d5557aa0ce7279
+- record_id: dc-g20042-0001
+  record_kind: claim_renew
+  sequence: 1
+  parent_hash: f7558b87c2810fe5b5c758afc7b1b48466202f9014b14207c2d5557aa0ce7279
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:05:01Z'
+  body:
+    claim_subject: lane:g20042-distributed-identity-substrate
+    binding_ref: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+    summary: Renew the distributed claim
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: 2653a53691f435107c5febdebcb4ae9d0fe16a4729d2b9b10fb11c7d71ac24d3
+- record_id: dc-g20042-0002
+  record_kind: claim_release
+  sequence: 2
+  parent_hash: 2653a53691f435107c5febdebcb4ae9d0fe16a4729d2b9b10fb11c7d71ac24d3
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:05:02Z'
+  body:
+    claim_subject: lane:g20042-distributed-identity-substrate
+    binding_ref: e8e05c13bc0339a775552f7e3372b3f3a681b0033fcf7d82bdf6ba441043a7da
+    release_reason: completed
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: 2a2610daa3f205a13438436cef8f0338e28455fee4018aab0b781fd93280fa14

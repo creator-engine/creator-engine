@@ -1,0 +1,20 @@
+federated_identity_binding:
+  record_id: fib-g20042-9001
+  record_kind: federated_identity_binding
+  sequence: 0
+  parent_hash: null
+  emitting_role: agent_ratifier
+  operating_mode: strict
+  recorded_at: '2026-05-31T11:00:00Z'
+  body:
+    principal_id: prn-x
+    repo_bindings:
+    - repo_id: repo-a
+      identity_ref: id-a
+    - repo_id: repo-b
+      identity_ref: id-b
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive
+  content_hash: 714ad78de7ad328b72e72ee1a6593e78a76100989553fd67051620524203da25

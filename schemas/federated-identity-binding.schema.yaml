@@ -1,0 +1,79 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/federated-identity-binding.schema.yaml"
+title: "Creator Engine federated identity binding record substrate"
+description: >-
+  G2.004.2 schema for shape-only federated identity binding records. A federated
+  identity binding asserts, as coordination/attestation state only, that a named
+  principal in one repository is the same principal as named identities in one or
+  more other repositories. Bindings are content-addressed and hash-chained and are
+  discriminated by record_kind. Federated identity bindings never ratify;
+  agent_ratifier stays reserved-inactive and cannot emit. Identities and repos are
+  referenced by opaque, stable identifiers only — no secret material and no key
+  bytes. The signature field is shape-only; real signing, key custody, federated
+  identity runtime, and distributed claim runtime remain deferred to a later,
+  separately ratified gate.
+type: object
+oneOf:
+  - required: [federated_identity_binding]
+  - required: [federated_identity_chain]
+properties:
+  federated_identity_binding:
+    $ref: "#/$defs/record"
+  federated_identity_chain:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/record"
+additionalProperties: false
+$defs:
+  hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  record:
+    type: object
+    required: [record_id, record_kind, sequence, parent_hash, content_hash, emitting_role, operating_mode, recorded_at, body, signature]
+    properties:
+      record_id:
+        type: string
+        pattern: "^fib-[a-z0-9][a-z0-9-]{3,96}$"
+      record_kind:
+        type: string
+        enum: [federated_identity_binding, binding_revocation]
+      sequence:
+        type: integer
+        minimum: 0
+      parent_hash:
+        anyOf:
+          - $ref: "#/$defs/hash"
+          - type: "null"
+      content_hash:
+        $ref: "#/$defs/hash"
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      body:
+        type: object
+        additionalProperties: true
+      signature:
+        type: object
+        required: [scheme, key_id, value]
+        properties:
+          scheme:
+            type: string
+            enum: [reserved-shape-only]
+          key_id:
+            type: string
+            minLength: 1
+          value:
+            type: string
+            enum: [reserved-inactive]
+        additionalProperties: false
+    additionalProperties: false

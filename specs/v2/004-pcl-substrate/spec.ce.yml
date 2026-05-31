@@ -13,11 +13,24 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.004.0
+  id: G2.004.2
   feature_binding: specs/v2/004
-  slice: "0"
-  title: PCL record substrate
+  slice: "2"
+  title: federated identity binding + distributed claim substrate
   layer: 2
+  predecessor_gate:
+    id: G2.004.0
+    slice: "0"
+    title: PCL record substrate
+    status: merged
+  note: >-
+    G2.004.0 landed the PCL record substrate (PR #94, merged). G2.004.2 is the
+    active slice: it adds the federated identity binding and distributed claim
+    shape-only record families. It depends only on G2.004.0, is authored in
+    parallel with the CE-event runtime gate G2.003.1, ratifies nothing, activates
+    no runtime, and binds no active authority. The PCL runtime gate G2.004.1
+    (depends on G2.004.0 and G2.003.1) and the federated-identity / distributed-
+    claim runtime remain separate, deferred, Operator-ratified gates.
 
 authority_basis:
   ratified_prompt:
@@ -26,10 +39,13 @@ authority_basis:
   architect_plan:
     path: .hermes/research/parallel-g20031-g20040-architect-planning-20260531T061635Z/architect-output/G20040_PCL_SUBSTRATE_AUTOMODE_EXECUTION_PLAN.md
     sha256: f5acfea5395122db42c0c99e2f7d599916475a92ed510a582c1b26742036ab4e
+  ratified_prompt_g2_004_2:
+    path: .hermes/research/g20042-distributed-identity-substrate-planning-20260531T105922Z/recommended-next/NEXT_OPERATOR_G20042_DISTRIBUTED_IDENTITY_SUBSTRATE_AUTOMODE_EXECUTION_PROMPT_20260531T105922Z.md
+    sha256: 707c6e6023768e5d68da033123feeae5a342181e8bb59ed3435e19cde5757ba0
   note: >-
-    This sidecar records G2.004.0 substrate authority only. It ratifies nothing
-    and does not activate the ce pcl runtime, .ce/pcl/ live writes, federated
-    identity, or distributed claim.
+    This sidecar records G2.004.0 and G2.004.2 substrate authority only. It
+    ratifies nothing and does not activate the ce pcl runtime, .ce/pcl/ live
+    writes, the federated-identity runtime, or the distributed-claim runtime.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -122,6 +138,56 @@ requirements:
     statement: Stop before live ledger emission, ce pcl runtime, .ce/pcl/ live writes, federated identity, distributed claim, connector, CI, deploy, or runtime autonomy activation.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-004-SCOPE]
+  - id: RV2-004-013
+    spec_md_ref: FR-013
+    statement: Define the canonical federated identity binding record fields with a record_kind discriminator.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-FIB-SHAPE]
+  - id: RV2-004-014
+    spec_md_ref: FR-014
+    statement: Require a cross-repo binding shape with opaque identifiers and at least two repo bindings; revocations reference the prior binding by opaque hash.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-FIB-SHAPE]
+  - id: RV2-004-015
+    spec_md_ref: FR-015
+    statement: Define the canonical distributed claim record fields with a record_kind discriminator.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-DC-SHAPE]
+  - id: RV2-004-016
+    spec_md_ref: FR-016
+    statement: Bind claims to a federated identity binding and reference CE-event/PCL artifacts only by opaque 64-hex hashes with no code import.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-DC-POINTER, RISK-RV2-004-DECOUPLE]
+  - id: RV2-004-017
+    spec_md_ref: FR-017
+    statement: Enforce deterministic content addressing and hash-chain linkage for both families.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-DI-HASH, RISK-RV2-004-DI-CHAIN]
+  - id: RV2-004-018
+    spec_md_ref: FR-018
+    statement: Preserve the Operator-only privileged floor; these records never ratify and agent_ratifier stays reserved-inactive.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-004-DI-ROLE]
+  - id: RV2-004-019
+    spec_md_ref: FR-019
+    statement: Record operating-mode context only, validate signature shape, and forbid inline metadata in Markdown.
+    decisions: [OD-01, OD-24]
+    risk_refs: [RISK-RV2-004-DI-SIGNATURE, RISK-RV2-004-DI-INLINE]
+  - id: RV2-004-020
+    spec_md_ref: FR-020
+    statement: Preserve .ce/ as the future home and freeze active writes under legacy .hermes/ paths.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-DI-WRITE]
+  - id: RV2-004-021
+    spec_md_ref: FR-021
+    statement: Provide fail-closed validator coverage for both families with targeted VAL-FIB-* and VAL-DC-* codes.
+    decisions: [OD-08]
+    risk_refs: [RISK-RV2-004-DI-VALIDATOR]
+  - id: RV2-004-022
+    spec_md_ref: FR-022
+    statement: Stop before distributed-identity/claim runtime, .ce/ live writes, signing, key custody, connector, queue, CI, deploy, or runtime autonomy activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-004-DI-SCOPE]
 
 risk_inventory:
   - id: RISK-RV2-004-SHAPE
@@ -196,6 +262,90 @@ risk_inventory:
     description: Live ledger emission or ce pcl runtime is implemented before separate ratification.
     severity: critical
     required_validation_refs: [VAL-PCL-WRITE-FREEZE]
+  - id: RISK-RV2-004-FIB-SHAPE
+    title: Ambiguous federated identity binding shape.
+    relevance: [governance, identity]
+    description: A cross-repo binding cannot be validated deterministically or omits the multi-repo binding shape.
+    severity: high
+    required_validation_refs: [VAL-FIB-SCHEMA, VAL-FIB-BINDING-SHAPE]
+  - id: RISK-RV2-004-DC-SHAPE
+    title: Ambiguous distributed claim shape.
+    relevance: [governance]
+    description: A distributed claim cannot be validated or replayed deterministically.
+    severity: high
+    required_validation_refs: [VAL-DC-SCHEMA]
+  - id: RISK-RV2-004-DC-POINTER
+    title: Malformed claim pointer.
+    relevance: [attestation, state-boundary]
+    description: A claim omits the opaque 64-hex binding_ref or carries a non-64-hex CE-event/PCL pointer.
+    severity: high
+    required_validation_refs: [VAL-DC-POINTER-SHAPE]
+  - id: RISK-RV2-004-DECOUPLE
+    title: Coupling to CE-event or PCL internals.
+    relevance: [state-boundary]
+    description: The substrate imports CE-event or PCL code/schema instead of referencing by opaque hash, breaking G2.003.1 parallel-safety.
+    severity: critical
+    required_validation_refs: [VAL-DC-POINTER-SHAPE]
+  - id: RISK-RV2-004-DI-HASH
+    title: Forged or unstable content hash.
+    relevance: [attestation]
+    description: A record claims a digest that does not match canonical content.
+    severity: critical
+    required_validation_refs: [VAL-FIB-CONTENT-ADDRESS, VAL-DC-CONTENT-ADDRESS]
+  - id: RISK-RV2-004-DI-CHAIN
+    title: Broken coordination chain.
+    relevance: [audit]
+    description: Record order can be forked, reordered, or detached.
+    severity: critical
+    required_validation_refs: [VAL-FIB-CHAIN-LINK, VAL-DC-CHAIN-LINK]
+  - id: RISK-RV2-004-DI-ROLE
+    title: Reserved ratifier or non-canonical role emits a record.
+    relevance: [governance, identity]
+    description: A reserved ratification role is treated as active authority or these records are used to ratify.
+    severity: critical
+    required_validation_refs: [VAL-FIB-ROLE-FLOOR, VAL-DC-ROLE-FLOOR]
+  - id: RISK-RV2-004-DI-SIGNATURE
+    title: Signature semantics activated early.
+    relevance: [identity, attestation]
+    description: Shape-only signature fields are mistaken for live key custody.
+    severity: high
+    required_validation_refs: [VAL-FIB-SIGNATURE-SHAPE, VAL-DC-SIGNATURE-SHAPE]
+  - id: RISK-RV2-004-DI-INLINE
+    title: Inline distributed-identity metadata in Markdown.
+    relevance: [metadata]
+    description: Record metadata leaks into Spec Kit prose instead of sidecars/examples.
+    severity: medium
+    required_validation_refs: [VAL-FIB-NO-INLINE, VAL-DC-NO-INLINE]
+  - id: RISK-RV2-004-DI-WRITE
+    title: Legacy active-state write.
+    relevance: [state-boundary]
+    description: A v2 record targets a legacy .hermes/ path as active coordination/identity state.
+    severity: high
+    required_validation_refs: [VAL-FIB-WRITE-FREEZE, VAL-DC-WRITE-FREEZE]
+  - id: RISK-RV2-004-DI-VALIDATOR
+    title: Validator coverage gap.
+    relevance: [quality]
+    description: A malformed record reaches PR review without fail-closed evidence.
+    severity: high
+    required_validation_refs: [VAL-FIB-SCHEMA, VAL-DC-SCHEMA]
+  - id: RISK-RV2-004-DI-SCOPE
+    title: Runtime bundled into the distributed-identity substrate gate.
+    relevance: [governance, runtime]
+    description: Distributed-identity/claim runtime or signing is implemented before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-FIB-WRITE-FREEZE, VAL-DC-WRITE-FREEZE]
+  - id: RISK-RV2-004-DI-KIND
+    title: Unknown distributed-identity record kind.
+    relevance: [governance]
+    description: A binding or claim declares a record kind outside its canonical enum.
+    severity: high
+    required_validation_refs: [VAL-FIB-RECORD-KIND, VAL-DC-RECORD-KIND]
+  - id: RISK-RV2-004-DI-MODE
+    title: Unknown operating-mode context on a distributed-identity record.
+    relevance: [governance, autonomy]
+    description: A binding or claim context names an unratified or ambiguous autonomy mode.
+    severity: high
+    required_validation_refs: [VAL-FIB-MODE-ENUM, VAL-DC-MODE-ENUM]
 
 required_validation:
   - id: VAL-PCL-SCHEMA
@@ -248,7 +398,108 @@ required_validation:
     planned_slice: G2.004.0
     planned_validator: pcl_record
     status: implemented
+  - id: VAL-FIB-SCHEMA
+    description: Reject malformed federated identity binding records.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-CONTENT-ADDRESS
+    description: Reject federated identity binding content_hash values that do not match canonical material.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-CHAIN-LINK
+    description: Reject federated identity binding chains with missing or incorrect parent_hash linkage.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-RECORD-KIND
+    description: Reject federated identity binding record_kind values outside the canonical enum.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles on bindings.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-MODE-ENUM
+    description: Reject unknown operating_mode values on bindings.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-BINDING-SHAPE
+    description: Reject bindings without the cross-repo principal/repo_bindings shape or revocations without an opaque revokes_binding hash.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-SIGNATURE-SHAPE
+    description: Validate shape-only binding signature fields and the reserved-inactive value.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-NO-INLINE
+    description: Reject inline federated identity binding metadata in Markdown.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-FIB-WRITE-FREEZE
+    description: Reject binding records targeting legacy .hermes/ active state.
+    planned_slice: G2.004.2
+    planned_validator: federated_identity_binding
+    status: implemented
+  - id: VAL-DC-SCHEMA
+    description: Reject malformed distributed claim records.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-CONTENT-ADDRESS
+    description: Reject distributed claim content_hash values that do not match canonical material.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-CHAIN-LINK
+    description: Reject distributed claim chains with missing or incorrect parent_hash linkage.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-RECORD-KIND
+    description: Reject distributed claim record_kind values outside the canonical enum.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles on claims.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-MODE-ENUM
+    description: Reject unknown operating_mode values on claims.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-POINTER-SHAPE
+    description: Reject claims without an opaque 64-hex binding_ref or with non-64-hex CE-event/PCL pointers.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-SIGNATURE-SHAPE
+    description: Validate shape-only claim signature fields and the reserved-inactive value.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-NO-INLINE
+    description: Reject inline distributed claim metadata in Markdown.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
+  - id: VAL-DC-WRITE-FREEZE
+    description: Reject claim records targeting legacy .hermes/ active state.
+    planned_slice: G2.004.2
+    planned_validator: distributed_claim
+    status: implemented
 
 crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/004
 adr_refs:
   - specs/v2/adrs/ADR-V2-004-pcl-substrate.md
+  - specs/v2/adrs/ADR-V2-005-distributed-identity-substrate.md

@@ -72,3 +72,4 @@ from . import operating_mode_policy as operating_mode_policy  # noqa: E402,F401
 from . import ce_event_block as ce_event_block  # noqa: E402,F401
 from . import operating_mode_runtime_carriers as operating_mode_runtime_carriers  # noqa: E402,F401
 from . import pcl_record as pcl_record  # noqa: E402,F401
+from . import distributed_identity as distributed_identity  # noqa: E402,F401
