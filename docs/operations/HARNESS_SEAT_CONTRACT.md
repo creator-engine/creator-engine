@@ -52,9 +52,17 @@ full permissions are safe only once Ring 0 has verified the hook-pack is active.
 
 **Harness-specific accommodation.** Implementation varies by harness; CE keeps the
 generalization (`full_permission_mode`) while recording the concrete flag in
-`permission_mode_flag`. The validator binds it for known harnesses
+`permission_mode_flag`. The validator binds it for known **in-seat** harnesses
 (`VAL-SEAT-PERMISSION-FLAG`): `claude_code` ⟹ `--dangerously-skip-permissions`; `codex` ⟹
-`--yolo`. `hermes`/`openclaw` accept any flag until `G2.007.1` promotes them.
+`--yolo`; `hermes` ⟹ `--profile creator-engine` (promoted in `G2.007.1`). **Hermes** does
+not have a skip-approval flag — it realizes its governed full-permission posture through the
+**pinned `creator-engine` profile**, and the `--yolo` approval-bypass is *refused* by Hermes
+governance (`hermes_launch_spec.py`, clause `HM-D-2`). **OpenClaw** is a **SEAM** harness
+(never in-seat): it attaches *through* the Controller-seat seam rather than occupying the
+seat, so it runs **no in-seat `full_permission_mode`** (`full_permission_mode: false`) and
+binds **no** `permission_mode_flag`, while still satisfying the rest of the governed posture
+(`ring_0`, `model_pin`, `strict_mcp_config`, `operator_visible`, the refused-modes floor, a
+`ring_1` defeasible required hook-pack).
 
 ## 5. Required hook-pack (§6)
 

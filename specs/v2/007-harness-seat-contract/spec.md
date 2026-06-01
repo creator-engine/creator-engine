@@ -137,3 +137,62 @@ hook behavior MUST be unchanged (only the one loose-token test is updated). The 
   taxonomy unchanged; no secret committed.
 - PR review/approval/merge remain separate ratified batches; this gate's own PR lands via a one-time
   logged Operator override (bootstrap), after which the seam is used legitimately.
+
+# G2.007.1 — Codex / Hermes / OpenClaw harness promotions
+
+## Goal
+
+G2.007.1 promotes the remaining harnesses (`codex`/`hermes`/`openclaw`) onto the
+harness-agnostic seat-contract shape landed in G2.007.0: it binds the per-harness
+`permission_mode_flag` for the in-seat harnesses and ships a valid seat-contract instance for
+each. It depends on the merged `G2.007.0` (substrate) and `G2.007.2` (reviewer-venue authority
+seam), is class O (`governance`+`identity`; per-harness landing; OD-15), and closes the 007
+harness line. The schema is unchanged — its `harness` enum already admits all four harnesses —
+so this is a validator-binding + examples + docs slice, with no new `VAL-SEAT-*` code.
+
+## Scope
+
+Extends `HARNESS_FULL_PERMISSION_FLAGS` in the `harness_seat_contract` validator (adds the
+Hermes binding) and adds three valid example seat-contracts (`codex`/`hermes`/`openclaw`) plus
+one invalid fixture, this spec section, the `spec.ce.yml` slice update, and `ADR-V2-010`.
+**No** schema change, **no** new check/`VAL-SEAT-*` code, **no** `checks/__init__.py` change,
+**no** runtime/`ce`/`ce launch`/launcher change, and **no** modification of `.claude/**`,
+`hook_check.py`, the `reviewer_authority_envelope` surface, the G2.006.0
+`extension_hook_contract` check, or any other existing schema/check. Carries no secret values.
+
+## Functional requirements
+
+### FR-010 — Per-harness promotions
+
+- **Codex** ⟹ `--yolo` (bound in G2.007.0): a valid Codex seat-contract with
+  `full_permission_mode: true` and `permission_mode_flag: --yolo` passes
+  (`VAL-SEAT-PERMISSION-FLAG` enforces the bound flag).
+- **Hermes** ⟹ `--profile creator-engine`: Hermes realizes `full_permission_mode` through its
+  **pinned governed profile**, not a skip-approval flag — the `--yolo` approval-bypass is
+  *refused* by Hermes governance (`hermes_launch_spec.py`, `HM-D-2`). The validator binds
+  `hermes ⟹ --profile creator-engine` (`VAL-SEAT-PERMISSION-FLAG`); a Hermes seat in
+  `full_permission_mode` declaring any other flag (e.g. `--yolo`) is rejected.
+- **OpenClaw** is a **SEAM** harness (never in-seat): it runs **no in-seat
+  `full_permission_mode`** (`full_permission_mode: false`) and binds **no**
+  `permission_mode_flag` (intentionally absent from `HARNESS_FULL_PERMISSION_FLAGS`), while
+  still satisfying the rest of the governed posture. (A stricter rule rejecting any
+  `openclaw` + `full_permission_mode: true` seat — `VAL-SEAT-SEAM` — is a deferred follow-up.)
+
+All G2.007.0 invariants (required posture, refused-modes floor, the
+`full_permission_mode ⟹ ring0_hook_pack_confirmed` headline invariant, the `ring_1` defeasible
+required hook-pack, role/mode/secret/inline floors) hold unchanged for every promoted harness.
+
+## Success criteria (G2.007.1)
+
+- `ce check validators/examples/harness-seat-contract` + the tests: the new
+  `valid-codex-seat.ce.yml` / `valid-hermes-seat.ce.yml` / `valid-openclaw-seat.ce.yml` pass;
+  `invalid-hermes-flag-mismatch.ce.yml` is refused with `VAL-SEAT-PERMISSION-FLAG`; the
+  `claude_code` reference example and all prior G2.007.0 fixtures stay green.
+- `--list-checks` is unchanged (still `harness_seat_contract`; no new check or `VAL-SEAT-*`
+  code); the full validator suite introduces no new failures.
+- No schema change; no existing check changed beyond the `HARNESS_FULL_PERMISSION_FLAGS`
+  dict + docstring; no `.claude/**`/`hook_check.py`/`checks/__init__.py`/`ce_cli.py` change;
+  `specs/v2/_crosswalk.yml` + the v0.1 baseline taxonomy unchanged; no secret committed.
+- PR review/approval/merge remain separate ratified batches; the review runs in a distinct
+  CE-governed reviewer venue and is the first to submit through the now-live
+  `reviewer_authority_envelope` seam (not an Operator override).

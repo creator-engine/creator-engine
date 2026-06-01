@@ -28,8 +28,14 @@ def _codes(name: str) -> set[str]:
     return {err.code for err in h.run_harness_seat_contract([EXAMPLES / name]).errors}
 
 
-def test_valid_example_passes():
-    assert h.run_harness_seat_contract([EXAMPLES / "valid-claude-code-seat.ce.yml"]).errors == ()
+@pytest.mark.parametrize("name", [
+    "valid-claude-code-seat.ce.yml",   # G2.007.0 reference instance
+    "valid-codex-seat.ce.yml",         # G2.007.1: codex binds --yolo
+    "valid-hermes-seat.ce.yml",        # G2.007.1: hermes binds --profile creator-engine
+    "valid-openclaw-seat.ce.yml",      # G2.007.1: openclaw SEAM (full_permission_mode: false)
+])
+def test_valid_examples_pass(name):
+    assert h.run_harness_seat_contract([EXAMPLES / name]).errors == ()
 
 
 @pytest.mark.parametrize("name,code", [
@@ -38,6 +44,7 @@ def test_valid_example_passes():
     ("invalid-permission-flag-mismatch.ce.yml", "VAL-SEAT-PERMISSION-FLAG"),
     ("invalid-permits-prohibited-flag.ce.yml", "VAL-SEAT-PROHIBITED"),
     ("invalid-nondefeasible-hookpack.ce.yml", "VAL-SEAT-HOOKPACK"),
+    ("invalid-hermes-flag-mismatch.ce.yml", "VAL-SEAT-PERMISSION-FLAG"),  # G2.007.1 hermes binding
 ])
 def test_invalid_examples_emit_expected_code(name, code):
     assert code in _codes(name)
