@@ -75,3 +75,4 @@ from . import pcl_record as pcl_record  # noqa: E402,F401
 from . import distributed_identity as distributed_identity  # noqa: E402,F401
 from . import connector_substrate as connector_substrate  # noqa: E402,F401
 from . import extension_hook_contract as extension_hook_contract  # noqa: E402,F401
+from . import harness_seat_contract as harness_seat_contract  # noqa: E402,F401
