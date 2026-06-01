@@ -256,3 +256,74 @@ authority. The G2.005.1 read path and its tests are unchanged.
 - The new `write-plan`/`submit` subcommands are documented (README) and the offline
   wheel is reconciled.
 - PR review, approval, merge, and cleanup remain separate Operator-ratified gates.
+
+# G2.005.3 — tracker connector (read-only: Jira + GitLab)
+
+## Goal
+
+G2.005.3 generalizes the connector read runtime from GitHub-only to **multi-provider**
+by adding read-only **Jira** and **GitLab** (REST) adapters over the merged G2.005.1
+read runtime + G2.005.0 substrate. The read plan, client seam, and receipt are already
+provider-agnostic; this gate adds the provider-specific read adapters plus runtime
+provider selection. It depends only on `G2.005.0` (substrate) and reuses its validator.
+Linear (GraphQL) and the tracker write runtime are explicit, named deferrals.
+
+## Scope
+
+Extends `validators/creator_engine_validator/connector_runtime.py` additively (a
+`PROVIDER_READ_CLIENTS` registry + `UrllibJiraReadClient`/`UrllibGitLabReadClient` read
+adapters + provider selection in `fetch`) and adds a `--provider {github,jira,gitlab}`
+flag to `ce connector fetch` (default `github`). Read-only only; provider selected at
+invocation (no descriptor `provider` field, no schema change); credentials by
+reference; network only through the injectable opener seam (tests network-free);
+imports no CE-event/PCL/distributed-identity code; does not modify the connector/
+Mission-Brief schemas, the `connector_substrate` check, the read-plan/receipt
+contracts, or the G2.005.1/G2.005.2 behavior.
+
+## Functional requirements
+
+### FR-026 — Provider read-client registry + selection
+
+`fetch` MUST select the default read adapter from a `PROVIDER_READ_CLIENTS` registry
+keyed by `provider` (`github`/`jira`/`gitlab`, default `github`); an unknown provider
+MUST fail closed before any request (`G2-CONN-PROVIDER`). `github` MUST reproduce the
+G2.005.1 behavior exactly.
+
+### FR-027 — Jira read adapter
+
+`UrllibJiraReadClient` MUST shape a provider-correct read-only GET (configurable base;
+`Bearer` auth header derived from the resolved credential; resource path) and normalize
+the response into the existing redaction-safe receipt shape; it MUST fail closed
+offline (`G2-CONN-NETWORK`).
+
+### FR-028 — GitLab read adapter
+
+`UrllibGitLabReadClient` MUST shape a provider-correct read-only GET (GitLab `/api/v4`
+base; native `PRIVATE-TOKEN` auth header derived from the resolved credential; resource
+path) and normalize the response; it MUST fail closed offline.
+
+### FR-029 — Read-only floor across providers
+
+A `write` capability scope or non-read verb MUST be refused before any request for
+every provider; tracker adapters expose READ (GET) only; tracker writes are deferred.
+
+### FR-030 — Credential by reference; offline discipline; no descriptor coupling
+
+Credentials MUST be resolved by reference and never stored/printed/logged/committed;
+every adapter MUST reach the network only through the injectable opener seam (tests
+network-free); receipts carry no secret; and no descriptor `provider` field is added
+(selection is the runtime flag; the descriptor stays vendor-neutral).
+
+## Success criteria (G2.005.3)
+
+- `ce connector fetch --provider jira|gitlab` round-trips via an injected opener and
+  returns a redaction-safe receipt; `--provider github` is unchanged; an unknown
+  provider and a `write` scope are each refused before any request with `G2-CONN-*`
+  codes; offline fails closed.
+- No credential/secret value appears in any record, output, log, or commit; no
+  descriptor `provider` field is added and no schema is changed.
+- The full validator suite introduces no new failures; the G2.005.1 read path, the
+  G2.005.2 write path, the G2.005.0 `connector`/`mission_brief` checks, schemas, and
+  `_crosswalk.yml` are unchanged.
+- The `--provider` flag is documented (README) and the offline wheel is reconciled.
+- PR review, approval, merge, and cleanup remain separate Operator-ratified gates.

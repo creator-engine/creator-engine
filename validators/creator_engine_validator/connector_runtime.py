@@ -1,11 +1,13 @@
-"""GitHub connector runtime (``ce connector``): read-only (G2.005.1) + write (G2.005.2).
+"""Connector runtime (``ce connector``): read-only (G2.005.1/.3) + write (G2.005.2).
 
 Turns the merged G2.005.0 connector substrate (``checks/connector_substrate.py`` +
 ``schemas/connector.schema.yaml`` + ``schemas/mission-brief.schema.yaml``) into a
 local, daemonless ``ce connector`` surface. G2.005.1 added **read-only** source-host
 access (``verify``/``plan``/``fetch``); G2.005.2 adds the **write** path
 (``write-plan``/``submit``) bounded to the non-privileged ``tracker_mirror`` verb set
-and executed only under CE ``operating_mode: strict``.
+and executed only under CE ``operating_mode: strict``; G2.005.3 adds **read-only
+tracker** adapters (Jira + GitLab, REST) selected by a runtime ``provider`` (default
+``github``) — Linear/GraphQL and tracker writes are deferred.
 
 Read floors (enforced before any request):
 
@@ -62,6 +64,10 @@ from .checks import connector_substrate as conn_check
 from .loader import LoaderError, load_yaml
 
 DEFAULT_GITHUB_API_BASE = "https://api.github.com"
+# G2.005.3 tracker read providers (REST). Jira Cloud is per-tenant, so its default is a
+# placeholder; real use passes `--base-url`. GitLab SaaS has a fixed API root.
+DEFAULT_GITLAB_API_BASE = "https://gitlab.com/api/v4"
+DEFAULT_JIRA_API_BASE = "https://example.atlassian.net/rest/api/3"
 PROSE_CONTRACT = "docs/operations/CONNECTOR_PROTOCOL.md"
 RECEIPT_KIND = "connector-read-receipt"
 SCHEMA_VERSION = "1"
@@ -112,6 +118,12 @@ class ReadOnlyRefused(ConnectorRuntimeError):
     code = "G2-CONN-READONLY-REFUSED"
 
 
+class ProviderError(ConnectorRuntimeError):
+    """An unknown connector provider was requested (G2.005.3 supports github/jira/gitlab)."""
+
+    code = "G2-CONN-PROVIDER"
+
+
 # ---------------------------------------------------------------------------
 # Credential handle — resolved BY REFERENCE; value never serialized/printed
 # ---------------------------------------------------------------------------
@@ -133,6 +145,19 @@ class CredentialHandle:
         """Authorization header for request construction only. Never logged/returned to the user."""
         if self.present and self._value:
             return {"Authorization": f"Bearer {self._value}"}
+        return {}
+
+    def auth_header_for(self, *, header: str = "Authorization", scheme: str = "Bearer") -> dict[str, str]:
+        """Provider-specific auth header for request construction only (G2.005.3).
+
+        ``scheme`` empty or ``"raw"`` sets the bare value (e.g. GitLab ``PRIVATE-TOKEN``);
+        otherwise ``{header: "{scheme} {value}"}``. Like :meth:`auth_header`, the value
+        is used only to build the request and is never logged or returned.
+        """
+        if self.present and self._value:
+            if not scheme or scheme == "raw":
+                return {header: self._value}
+            return {header: f"{scheme} {self._value}"}
         return {}
 
 
@@ -266,6 +291,91 @@ class UrllibGitHubReadClient:
 
 
 # ---------------------------------------------------------------------------
+# G2.005.3 tracker read adapters (REST: Jira + GitLab) — same injectable seam
+# ---------------------------------------------------------------------------
+
+
+def _rest_get(opener: Opener, url: str, headers: dict[str, str]) -> ReadResponse:
+    """Shared GET over the injectable opener; fails closed on transport / bad JSON."""
+    request = urllib.request.Request(url, method="GET", headers=headers)
+    try:
+        response = opener(request)
+        raw = response.read()
+        status = getattr(response, "status", None) or response.getcode()
+    except (urllib.error.URLError, OSError) as exc:
+        raise ConnectorNetworkError(f"read request failed (fail-closed): {exc}") from exc
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else None
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ConnectorNetworkError(f"read response was not valid JSON: {exc}") from exc
+    return ReadResponse(status=int(status), body=body)
+
+
+class UrllibJiraReadClient:
+    """Read-only Jira (Cloud) REST adapter. GET only; no write method exists.
+
+    Auth is a Bearer header derived from the resolved credential (Jira OAuth 2.0 /
+    bearer token); the per-tenant base is supplied via ``base_url``. Reaches the
+    network only via the injected ``opener``; fails closed offline (``G2-CONN-NETWORK``).
+    """
+
+    name = "urllib-jira"
+
+    def __init__(self, *, base_url: str = DEFAULT_JIRA_API_BASE, opener: Opener | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        self._opener = opener or _default_opener()
+
+    def get(self, resource: str, *, credential: CredentialHandle) -> ReadResponse:
+        url = f"{self.base_url}/{str(resource).lstrip('/')}"
+        headers = {"Accept": "application/json", "User-Agent": "creator-engine-ce-connector"}
+        headers.update(credential.auth_header())  # Bearer; constructed here, never logged
+        return _rest_get(self._opener, url, headers)
+
+
+class UrllibGitLabReadClient:
+    """Read-only GitLab REST (``/api/v4``) adapter. GET only; no write method exists.
+
+    Auth is GitLab's native ``PRIVATE-TOKEN`` header derived from the resolved
+    credential. Reaches the network only via the injected ``opener``; fails closed
+    offline (``G2-CONN-NETWORK``).
+    """
+
+    name = "urllib-gitlab"
+
+    def __init__(self, *, base_url: str = DEFAULT_GITLAB_API_BASE, opener: Opener | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        self._opener = opener or _default_opener()
+
+    def get(self, resource: str, *, credential: CredentialHandle) -> ReadResponse:
+        url = f"{self.base_url}/{str(resource).lstrip('/')}"
+        headers = {"Accept": "application/json", "User-Agent": "creator-engine-ce-connector"}
+        headers.update(credential.auth_header_for(header="PRIVATE-TOKEN", scheme="raw"))  # never logged
+        return _rest_get(self._opener, url, headers)
+
+
+# Provider registry for the default read adapter. `github` reproduces the G2.005.1
+# behavior exactly; `jira`/`gitlab` are the G2.005.3 read-only tracker adapters.
+PROVIDER_READ_CLIENTS: dict[str, type] = {
+    "github": UrllibGitHubReadClient,
+    "jira": UrllibJiraReadClient,
+    "gitlab": UrllibGitLabReadClient,
+}
+DEFAULT_PROVIDER = "github"
+
+
+def _read_client_for(provider: str, *, base_url: str | None, opener: Opener | None) -> ReadClient:
+    """Select the default read adapter for ``provider``; unknown provider fails closed."""
+    key = str(provider or DEFAULT_PROVIDER).strip().lower()
+    adapter_cls = PROVIDER_READ_CLIENTS.get(key)
+    if adapter_cls is None:
+        raise ProviderError(f"unknown provider {provider!r}; supported: {sorted(PROVIDER_READ_CLIENTS)}")
+    kwargs: dict[str, Any] = {"opener": opener}
+    if base_url is not None:
+        kwargs["base_url"] = base_url
+    return adapter_cls(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # Normalization + receipt (redaction-safe; never carries a credential)
 # ---------------------------------------------------------------------------
 
@@ -358,14 +468,18 @@ def fetch(
     resource: str,
     client: ReadClient | None = None,
     opener: Opener | None = None,
-    base_url: str = DEFAULT_GITHUB_API_BASE,
+    base_url: str | None = None,
+    provider: str = DEFAULT_PROVIDER,
 ) -> ReadReceipt:
     """Execute one read-only GET via the read client and return a redaction-safe receipt.
 
     Refuses before any request on a write scope / non-read verb / missing read
     plan. The credential is resolved by reference and used only to build the
-    request. If no client is given, the default urllib adapter is used (with the
-    injected ``opener`` when provided); offline/transport failures fail closed.
+    request. If no client is given, the default adapter for ``provider``
+    (``github``/``jira``/``gitlab``, default ``github``) is selected from
+    :data:`PROVIDER_READ_CLIENTS` (with the injected ``opener`` when provided, and
+    ``base_url`` overriding the provider default); an unknown provider fails closed
+    (``G2-CONN-PROVIDER``) and offline/transport failures fail closed.
     """
     connector = load_connector(connector_path)
     mission_brief = load_mission_brief(mission_brief_path)
@@ -373,7 +487,7 @@ def fetch(
     if not isinstance(resource, str) or not resource.strip():
         raise ConnectorScopeError("fetch requires a non-empty read resource path")
     credential = resolve_credential(connector)
-    active_client = client or UrllibGitHubReadClient(base_url=base_url, opener=opener)
+    active_client = client or _read_client_for(provider, base_url=base_url, opener=opener)
     response = active_client.get(resource, credential=credential)
     results = normalize_results(response.body)
     return ReadReceipt(

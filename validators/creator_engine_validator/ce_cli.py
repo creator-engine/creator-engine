@@ -29,7 +29,7 @@ ce pcl index         # deterministic content-hashed index of a PCL ledger (writt
 ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
-ce connector fetch      # execute one read-only GET via an injectable client; credential by reference; offline fails closed
+ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
 ```
@@ -508,7 +508,8 @@ def _build_parser() -> argparse.ArgumentParser:
     cf.add_argument("--connector", required=True)
     cf.add_argument("--mission-brief", required=True)
     cf.add_argument("--resource", required=True, help="read resource path (e.g. repos/OWNER/REPO/issues)")
-    cf.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="read API base URL")
+    cf.add_argument("--provider", default=connector_runtime.DEFAULT_PROVIDER, choices=sorted(connector_runtime.PROVIDER_READ_CLIENTS), help="read provider adapter (github default; jira/gitlab read-only, G2.005.3)")
+    cf.add_argument("--base-url", default=None, help="read API base URL (overrides the provider default)")
     cf.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     cwp = connector_sub.add_parser("write-plan", help="build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)")
@@ -1317,6 +1318,7 @@ def _connector_fetch(args) -> int:
             connector_path=args.connector,
             mission_brief_path=args.mission_brief,
             resource=args.resource,
+            provider=args.provider,
             base_url=args.base_url,
         )
     except connector_runtime.ConnectorRuntimeError as exc:

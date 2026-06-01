@@ -160,6 +160,46 @@ non-privileged `tracker_mirror` write set executable — and only under CE
 
 ### Deferred (after G2.005.2)
 
-Tracker connectors (`G2.005.3`), `auto`/`transcendence` write activation,
-credential brokering/injection, batching/multi-write transactions, CI/deploy,
-merge/queue authority.
+Tracker connectors (`G2.005.3`, now landed read-only — see §10), `auto`/
+`transcendence` write activation, credential brokering/injection, batching/
+multi-write transactions, CI/deploy, merge/queue authority.
+
+## 10. Read-only tracker connectors (G2.005.3)
+
+`G2.005.3` generalizes the read runtime from GitHub-only to **multi-provider** by
+adding read-only **Jira** and **GitLab** (REST) adapters over the same read plan +
+client seam + receipt machinery. The concrete vendor is selected at invocation by a
+runtime `--provider` flag (default `github`); the connector descriptor stays
+vendor-neutral (the substrate declares `provider_class` an opaque, non-vendor label
+and the connector object is closed), so no descriptor field and no schema change is
+introduced. It reuses the `connector`/`mission_brief` validator, changes no GitHub
+read/write behavior, and imports no CE-event/PCL/distributed-identity code.
+
+### Commands
+
+- `ce connector fetch --connector <f> --mission-brief <f> --resource <path> --provider {github,jira,gitlab} [--base-url U]`
+  — execute one read-only GET via the selected provider adapter and emit a
+  redaction-safe read-receipt. `verify`/`plan` are provider-agnostic (offline) and
+  unchanged.
+
+### Floors
+
+- **Read-only only.** A `write` scope / non-read verb is refused before any request
+  (`G2-CONN-WRITE-REFUSED` / `G2-CONN-SCOPE`) for every provider; tracker adapters
+  expose GET only. Tracker **writes** are deferred.
+- **Provider by flag.** `--provider` selects the default adapter
+  (`github`/`jira`/`gitlab`); an unknown provider fails closed (`G2-CONN-PROVIDER`).
+  `github` reproduces the G2.005.1 behavior exactly. Provider-correct auth: GitHub/
+  Jira use a `Bearer` header; GitLab uses its native `PRIVATE-TOKEN` header — each
+  derived from the credential resolved BY REFERENCE and never logged.
+- **Network only through an injectable seam.** Every adapter reaches the network only
+  via an injectable opener; tests inject a fake so the suite is network-free, and each
+  default adapter fails closed offline.
+- **Redaction-safe receipts.** Read-receipts carry only bounded fields, never a
+  credential or secret.
+
+### Deferred (after G2.005.3)
+
+Linear (GraphQL) adapter + seam generalization; the tracker **write** runtime
+(`tracker_mirror` writes for Jira/GitLab); descriptor-bound provider selection (a
+substrate schema change); credential brokering; CI/deploy.
