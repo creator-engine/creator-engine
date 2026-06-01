@@ -1,0 +1,14 @@
+connector:
+  connector_id: conn-ratifier-role-001
+  connector_kind: tracker
+  provider_class: issue-tracker
+  capability:
+    scope: read_only
+    verbs:
+      - issue-read
+  credential_ref:
+    ref_kind: none
+    ref_name: unused
+  emitting_role: agent_ratifier
+  operating_mode: strict
+  recorded_at: '2026-06-01T03:21:29Z'

@@ -1,0 +1,15 @@
+mission_brief:
+  brief_id: mb-g20050-9002
+  assignment_ref: lane:g20050-connector-substrate
+  declared_mutation_classes:
+    - tracker_mirror
+  capability_scope: read_only
+  refs:
+    ce_event_content_hash: not-a-valid-hash
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-06-01T03:21:29Z'
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

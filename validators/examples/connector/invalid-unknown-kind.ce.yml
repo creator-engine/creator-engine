@@ -1,0 +1,14 @@
+connector:
+  connector_id: conn-unknown-kind-001
+  connector_kind: ci
+  provider_class: pipeline
+  capability:
+    scope: read_only
+    verbs:
+      - status-read
+  credential_ref:
+    ref_kind: none
+    ref_name: unused
+  emitting_role: controller
+  operating_mode: strict
+  recorded_at: '2026-06-01T03:21:29Z'

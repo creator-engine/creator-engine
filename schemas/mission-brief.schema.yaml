@@ -1,0 +1,79 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/mission-brief.schema.yaml"
+title: "Creator Engine Mission-Brief record substrate"
+description: >-
+  G2.005.0 shape-only schema for a Mission-Brief record — the bounded task brief a
+  connector carries. A Mission-Brief references an assignment/lane by opaque id,
+  declares the mutation classes it is permitted (which MAY include the bounded
+  non-privileged `tracker_mirror` class but MUST NOT include any privileged class),
+  declares a capability scope, and references CE-event blocks / PCL records only by
+  opaque 64-hex content hashes. The `signature` is shape-only (`reserved-inactive`);
+  real signing and key custody are deferred. Mission-Briefs never ratify.
+type: object
+oneOf:
+  - required: [mission_brief]
+properties:
+  mission_brief:
+    $ref: "#/$defs/brief"
+additionalProperties: false
+$defs:
+  hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  brief:
+    type: object
+    required: [brief_id, assignment_ref, declared_mutation_classes, capability_scope, emitting_role, operating_mode, recorded_at, signature]
+    properties:
+      brief_id:
+        type: string
+        pattern: "^mb-[a-z0-9][a-z0-9-]{3,96}$"
+      assignment_ref:
+        type: string
+        minLength: 1
+      declared_mutation_classes:
+        type: array
+        minItems: 1
+        items:
+          type: string
+      capability_scope:
+        type: string
+        enum: [read_only, write]
+      refs:
+        type: object
+        properties:
+          ce_event_content_hash:
+            $ref: "#/$defs/hash"
+          pcl_content_hash:
+            $ref: "#/$defs/hash"
+          binding_ref:
+            $ref: "#/$defs/hash"
+        additionalProperties: false
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      signature:
+        type: object
+        required: [scheme, key_id, value]
+        properties:
+          scheme:
+            type: string
+            enum: [reserved-shape-only]
+          key_id:
+            type: string
+            minLength: 1
+          value:
+            type: string
+            enum: [reserved-inactive]
+        additionalProperties: false
+      metadata:
+        type: object
+        additionalProperties: true
+    additionalProperties: false

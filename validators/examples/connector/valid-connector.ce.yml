@@ -1,0 +1,18 @@
+connector:
+  connector_id: conn-issue-tracker-001
+  connector_kind: tracker
+  provider_class: issue-tracker
+  capability:
+    scope: write
+    verbs:
+      - issue-create
+      - issue-update
+      - pr-comment
+  credential_ref:
+    ref_kind: secret_manager_ref
+    ref_name: ci-tracker-credential
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-01T03:21:29Z'
+  metadata:
+    summary: Bounded tracker_mirror connector; references its credential by name only.
