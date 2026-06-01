@@ -13,28 +13,39 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.005.0
+  id: G2.005.1
   feature_binding: specs/v2/005
-  slice: "0"
-  title: connector substrate + Mission-Brief + tracker_mirror class
+  slice: "1"
+  title: GitHub connector read-only runtime
   layer: 3
+  predecessor_gate:
+    id: G2.005.0
+    slice: "0"
+    title: connector substrate + Mission-Brief + tracker_mirror class
+    status: merged
   note: >-
-    First Phase D gate. Depends only on the merged G2.002.0 operating-mode
-    substrate; lands after Phase C is complete. Substrate only: connector
-    descriptor + Mission-Brief shape-only record families + the bounded
-    non-privileged tracker_mirror class. No connector runtime, no ce connector
-    CLI, no network/API, no credential injection. The connector runtime gates
-    G2.005.1 (GitHub read-only), G2.005.2 (write), and G2.005.3 (tracker) are
+    G2.005.0 landed the connector substrate (PR #100, merged). G2.005.1 is the
+    active slice: the GitHub connector READ-ONLY runtime (`ce connector`
+    verify/plan/fetch) over that substrate. Read-only only (writes are G2.005.2);
+    credentials resolved BY REFERENCE and never stored/printed/committed; the
+    network is reached only through an injectable client seam so tests are
+    network-free and the default adapter fails closed offline. It reuses the
+    G2.005.0 validator and imports no CE-event/PCL/distributed-identity code. The
+    connector write runtime (G2.005.2) and tracker connectors (G2.005.3) remain
     separate, deferred, Operator-ratified gates.
 
 authority_basis:
   ratified_prompt:
     path: .hermes/research/g20050-connector-substrate-planning-20260601T032129Z/recommended-next/NEXT_OPERATOR_G20050_CONNECTOR_SUBSTRATE_AUTOMODE_EXECUTION_PROMPT_20260601T032129Z.md
     sha256: 8b909b01a4a15bb81a4f28f5ccb382a7ec001ace3beb65358360f9933cc887dc
+  ratified_prompt_g2_005_1:
+    path: .hermes/research/g20051-connector-read-runtime-planning-20260601T035951Z/recommended-next/NEXT_OPERATOR_G20051_CONNECTOR_READ_RUNTIME_AUTOMODE_EXECUTION_PROMPT_20260601T035951Z.md
+    sha256: c087d5d3009be0ba3e251d1eb990c6cf7a8b7b123f9257a4385c460e68bdaf16
   note: >-
-    This sidecar records G2.005.0 substrate authority only. It ratifies nothing,
-    activates no connector runtime, carries no secret/credential values, and binds
-    no concrete vendor/account identity as normative.
+    This sidecar records G2.005.0 substrate authority and the G2.005.1 read-only
+    runtime authority. It ratifies nothing, performs no write, carries no
+    secret/credential values, and binds no concrete vendor/account identity as
+    normative.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -122,6 +133,41 @@ requirements:
     statement: Stop before connector runtime, ce connector CLI, network/API, credential injection, CI/deploy, or autonomy activation.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-005-SCOPE]
+  - id: RV2-005-012
+    spec_md_ref: FR-012
+    statement: ce connector verify/plan validates a connector + Mission-Brief and builds a read-only read plan, offline.
+    decisions: [OD-10]
+    risk_refs: [RISK-RV2-005-RT-WRITE]
+  - id: RV2-005-013
+    spec_md_ref: FR-013
+    statement: Resolve the credential BY REFERENCE at call time; never store, print, log, or commit the value.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-RT-CRED]
+  - id: RV2-005-014
+    spec_md_ref: FR-014
+    statement: Enforce read-only; refuse any write scope or non-read verb (writes are G2.005.2).
+    decisions: [OD-19]
+    risk_refs: [RISK-RV2-005-RT-WRITE]
+  - id: RV2-005-015
+    spec_md_ref: FR-015
+    statement: Reach the network only through an injectable read-client seam; the default urllib adapter fails closed offline.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-RT-NETWORK]
+  - id: RV2-005-016
+    spec_md_ref: FR-016
+    statement: Normalize read results into a redaction-safe receipt carrying no credential or secret value.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-RT-RECEIPT]
+  - id: RV2-005-017
+    spec_md_ref: FR-017
+    statement: Keep tests and check network-free by injecting fakes; make no real request in CI.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-RT-NETWORK]
+  - id: RV2-005-018
+    spec_md_ref: FR-018
+    statement: Stop before the connector write runtime, credential injection/brokering, CI/deploy, or autonomy activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-005-RT-SCOPE]
 
 risk_inventory:
   - id: RISK-RV2-005-CONN-SHAPE
@@ -196,6 +242,36 @@ risk_inventory:
     description: Connector runtime, CLI, network/API, or credential injection is implemented before separate ratification.
     severity: critical
     required_validation_refs: [VAL-CONN-WRITE-FREEZE, VAL-MB-WRITE-FREEZE]
+  - id: RISK-RV2-005-RT-CRED
+    title: Credential value leaks at runtime.
+    relevance: [security]
+    description: The connector runtime stores, prints, logs, or commits a credential/secret value instead of referencing it by name.
+    severity: critical
+    required_validation_refs: [VAL-CONN-RT-CREDENTIAL]
+  - id: RISK-RV2-005-RT-WRITE
+    title: Read-only runtime performs or permits a write.
+    relevance: [security, governance]
+    description: The read-only runtime accepts a write scope/verb instead of refusing and routing to G2.005.2.
+    severity: critical
+    required_validation_refs: [VAL-CONN-RT-READONLY]
+  - id: RISK-RV2-005-RT-NETWORK
+    title: Network call in tests / not fail-closed offline.
+    relevance: [quality, runtime]
+    description: The runtime makes a real request in tests/CI, or does not fail closed when offline / without a client.
+    severity: high
+    required_validation_refs: [VAL-CONN-RT-NETWORK]
+  - id: RISK-RV2-005-RT-RECEIPT
+    title: Read-receipt leaks a secret or unbounded field.
+    relevance: [security, attestation]
+    description: A read-receipt carries a credential value or an unbounded response field.
+    severity: high
+    required_validation_refs: [VAL-CONN-RT-RECEIPT]
+  - id: RISK-RV2-005-RT-SCOPE
+    title: Write runtime bundled into the read-only gate.
+    relevance: [governance, runtime]
+    description: The connector write runtime or credential injection is implemented before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-CONN-RT-STOPLINE]
 
 required_validation:
   - id: VAL-CONN-SCHEMA
@@ -293,7 +369,33 @@ required_validation:
     planned_slice: G2.005.0
     planned_validator: mission_brief
     status: implemented
+  - id: VAL-CONN-RT-CREDENTIAL
+    description: Resolve the credential by reference; the value never appears in a record, repr, output, or commit.
+    planned_slice: G2.005.1
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-RT-READONLY
+    description: Refuse a write scope/verb before any request; read-only runtime only.
+    planned_slice: G2.005.1
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-RT-NETWORK
+    description: Reach the network only via an injectable seam; tests are network-free; offline fails closed.
+    planned_slice: G2.005.1
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-RT-RECEIPT
+    description: Read-receipts carry only bounded fields and no credential/secret value.
+    planned_slice: G2.005.1
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-RT-STOPLINE
+    description: No connector write runtime, credential injection/brokering, CI/deploy, or autonomy activation.
+    planned_slice: G2.005.1
+    planned_validator: connector_runtime
+    status: implemented
 
 crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/005
 adr_refs:
   - specs/v2/adrs/ADR-V2-006-connector-substrate.md
+  - specs/v2/adrs/ADR-V2-006-1-connector-runtime.md

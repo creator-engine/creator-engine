@@ -99,3 +99,73 @@ injection/brokering, live issue/PR mutation, CI/deploy, or autonomy activation.
 - Prior checks/examples/tests remain unchanged; the full validator suite introduces
   no new failures.
 - PR review, approval, merge, and cleanup remain separate Operator-ratified gates.
+
+# G2.005.1 — GitHub connector read-only runtime
+
+## Goal
+
+G2.005.1 turns the merged G2.005.0 connector substrate into a local, daemonless
+`ce connector` runtime for **read-only** source-host access. It depends on
+G2.005.0 and reuses its validator for every shape decision.
+
+## Scope
+
+Adds `validators/creator_engine_validator/connector_runtime.py`, a `ce connector`
+CLI group (`verify`/`plan`/`fetch`), the `.ce/connector/cache/` ignore posture, the
+runtime ADR, and this spec/sidecar runtime slice. Read-only only; credentials by
+reference; network only through an injectable seam (tests network-free); imports no
+CE-event/PCL/distributed-identity code; does not modify the connector/Mission-Brief
+schemas or the `connector_substrate` check.
+
+## Functional requirements
+
+### FR-012 — `ce connector verify` / `plan`
+
+`verify`/`plan` MUST validate a connector descriptor + Mission-Brief via the
+G2.005.0 validator and build a read-only read plan, fully offline; a write scope is
+refused.
+
+### FR-013 — Credential by reference
+
+The credential MUST be resolved from `credential_ref` at call time, used only to
+construct the request, and MUST NEVER be stored in a record, printed, logged, or
+committed. `none`/absent references resolve as anonymous/absent and a write or
+required credential failure fails closed before any request.
+
+### FR-014 — Read-only enforcement
+
+The runtime MUST refuse any `write` capability scope or non-read verb before any
+request and route writes to G2.005.2. The default adapter exposes GET only.
+
+### FR-015 — Injectable read-client seam
+
+The network MUST be reached only through an injectable `ReadClient` seam; the
+default stdlib-`urllib` GitHub adapter MUST fail closed (`G2-CONN-NETWORK`) on any
+transport error or when no client is configured.
+
+### FR-016 — Redaction-safe read-receipt
+
+Read results MUST be normalized into a receipt carrying only bounded fields and no
+credential or secret value.
+
+### FR-017 — Offline / network discipline
+
+Tests and `check` MUST be network-free: tests inject a fake client/opener and make
+no real request.
+
+### FR-018 — Substrate→runtime stop line
+
+No connector write runtime, credential injection/brokering, tracker connectors,
+CI/deploy, or auto/transcendence activation.
+
+## Success criteria (G2.005.1)
+
+- `ce connector verify`/`plan` validate offline; `fetch` round-trips via an injected
+  client and returns a redaction-safe receipt; write scope is refused before any
+  request; offline/no-client fails closed with `G2-CONN-*` codes.
+- No credential/secret value appears in any record, output, log, or commit.
+- The full validator suite introduces no new failures; the G2.005.0
+  `connector`/`mission_brief` checks, schemas, and `_crosswalk.yml` are unchanged.
+- The `ce connector` group is documented (README) and the `ce`-inventory guard +
+  offline wheel are reconciled.
+- PR review, approval, merge, and cleanup remain separate Operator-ratified gates.

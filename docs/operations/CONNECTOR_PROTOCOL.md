@@ -68,8 +68,45 @@ capability, and it does **not** modify the v0.1 baseline mutation-class taxonomy
 The canonical future home for connector/Mission-Brief runtime state is under
 `.ce/`. `G2.005.0` writes no active state and refuses legacy `.hermes/` targets.
 
-## 7. Out of scope (deferred)
+## 7. Out of scope of the substrate (G2.005.0)
 
-Connector runtime, `ce connector` CLI, network / GitHub / tracker API calls,
-credential injection/brokering, live issue/PR mutation, CI/deploy, and
-auto/transcendence activation — all deferred to later, separately ratified gates.
+Connector runtime, `ce connector` CLI, network calls, credential injection/
+brokering, live issue/PR mutation, CI/deploy, and auto/transcendence activation —
+the read-only runtime is `G2.005.1` (below); write is `G2.005.2`.
+
+## 8. Read-only runtime (G2.005.1)
+
+`G2.005.1` adds the local, daemonless `ce connector` read-only runtime over the
+substrate. It reuses the `connector`/`mission_brief` validator and imports no
+CE-event/PCL/distributed-identity code.
+
+### Commands
+
+- `ce connector verify --connector <f> --mission-brief <f>` — validate the pair and
+  confirm a read plan builds (offline).
+- `ce connector plan --connector <f> --mission-brief <f>` — emit the read-only read
+  plan (offline; no secrets).
+- `ce connector fetch --connector <f> --mission-brief <f> --resource <path> [--base-url U]`
+  — execute one read-only GET via the read client and emit a redaction-safe
+  read-receipt. Offline / no-credential / transport failure fails closed
+  (`G2-CONN-NETWORK`).
+
+### Floors
+
+- **Read-only only.** A `write` scope or non-read verb is refused before any
+  request (`G2-CONN-WRITE-REFUSED` / `G2-CONN-SCOPE`); the adapter exposes GET only.
+  Write is `G2.005.2`.
+- **Credential by reference.** Resolved from `credential_ref` at call time, used
+  only to build the request Authorization header, and never stored, printed,
+  logged, or committed. `secret_manager_ref` resolution is deferred (fails closed).
+- **Network only through an injectable seam.** The default `urllib` adapter reaches
+  the network only via an injectable opener; tests inject a fake so the suite is
+  network-free, and the default fails closed offline / without a client.
+- **Redaction-safe receipts.** Read-receipts carry only bounded fields, never a
+  credential or secret. Optional cache writes go to the git-ignored
+  `.ce/connector/cache/`.
+
+### Deferred
+
+Connector write runtime (`G2.005.2`), tracker connectors (`G2.005.3`), credential
+brokering, CI/deploy, and autonomy activation.

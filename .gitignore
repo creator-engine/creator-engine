@@ -30,3 +30,8 @@ __pycache__/
 # `.ce/pcl/cache/` holds only rebuildable index/merge projections and is
 # instance-local, never tracked. Additive instance-zone line only.
 .ce/pcl/cache/
+
+# G2.005.1 connector read-only runtime cache. `.ce/connector/cache/` holds only
+# rebuildable read-receipts the `ce connector` runtime writes; it is instance-local,
+# never tracked, and never carries a credential value. Additive instance-zone line.
+.ce/connector/cache/

@@ -27,6 +27,9 @@ ce pcl verify        # validate an on-disk PCL ledger + head manifest, read-only
 ce pcl replay        # deterministic ordered read-only projection of a PCL ledger
 ce pcl index         # deterministic content-hashed index of a PCL ledger (written to the ignored cache)
 ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
+ce connector verify  # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
+ce connector plan    # build + validate a read-only read plan (offline)
+ce connector fetch   # execute one read-only GET via an injectable client; credential by reference; offline fails closed
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -53,6 +56,7 @@ from typing import Sequence
 
 from . import (
     ce_event_runtime,
+    connector_runtime,
     doctor_runtime,
     fanin_runtime,
     init_runtime,
@@ -477,6 +481,32 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--repo-root", default=None, help="repo root for the cache git-ignore guard")
     pm.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
     pm.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce connector — G2.005.1 GitHub connector read-only runtime. Validates a
+    # connector descriptor + Mission-Brief (G2.005.0 substrate), builds a read
+    # plan, and executes read-only GETs via an injectable client. Credential by
+    # reference (never stored/printed); read-only only; offline fails closed.
+    connector = groups.add_parser(
+        "connector", help="GitHub connector read-only runtime: verify/plan/fetch (G2.005.1)"
+    )
+    connector_sub = connector.add_subparsers(dest="connector_cmd")
+
+    cv = connector_sub.add_parser("verify", help="validate a connector + Mission-Brief pair (offline)")
+    cv.add_argument("--connector", required=True, help="path to a connector descriptor *.ce.yml")
+    cv.add_argument("--mission-brief", required=True, help="path to a Mission-Brief *.ce.yml")
+    cv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    cp = connector_sub.add_parser("plan", help="build + validate a read-only read plan (offline)")
+    cp.add_argument("--connector", required=True)
+    cp.add_argument("--mission-brief", required=True)
+    cp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    cf = connector_sub.add_parser("fetch", help="execute one read-only GET; credential by reference; offline fails closed")
+    cf.add_argument("--connector", required=True)
+    cf.add_argument("--mission-brief", required=True)
+    cf.add_argument("--resource", required=True, help="read resource path (e.g. repos/OWNER/REPO/issues)")
+    cf.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="read API base URL")
+    cf.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce check — umbrella wrapper over the retained creator-engine-validator
     # conformance checks (DP-1 = A: ce wraps the validator subcommands).
@@ -1235,6 +1265,53 @@ def _pcl_merge(args) -> int:
     return 0
 
 
+def _connector_plan_payload(plan) -> dict:
+    return {
+        "connector_id": plan.connector_id,
+        "connector_kind": plan.connector_kind,
+        "provider_class": plan.provider_class,
+        "capability_scope": plan.capability_scope,
+        "read_verbs": list(plan.read_verbs),
+        "assignment_ref": plan.assignment_ref,
+        "credential_ref_name": plan.credential_ref_name,
+    }
+
+
+def _connector_verify(args, *, verb: str = "verify") -> int:
+    try:
+        plan = connector_runtime.verify(connector_path=args.connector, mission_brief_path=args.mission_brief)
+    except connector_runtime.ConnectorRuntimeError as exc:
+        print(f"ERROR: ce connector {verb} [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(_connector_plan_payload(plan), indent=2, sort_keys=True))
+    else:
+        print(f"ce connector {verb}: OK (connector={plan.connector_id} scope={plan.capability_scope} kind={plan.connector_kind})")
+    return 0
+
+
+def _connector_plan(args) -> int:
+    return _connector_verify(args, verb="plan")
+
+
+def _connector_fetch(args) -> int:
+    try:
+        receipt = connector_runtime.fetch(
+            connector_path=args.connector,
+            mission_brief_path=args.mission_brief,
+            resource=args.resource,
+            base_url=args.base_url,
+        )
+    except connector_runtime.ConnectorRuntimeError as exc:
+        print(f"ERROR: ce connector fetch [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce connector fetch: status={receipt.status} results={receipt.result_count} (connector={receipt.connector_id})")
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -1367,6 +1444,12 @@ _PCL_DISPATCH = {
     "merge": _pcl_merge,
 }
 
+_CONNECTOR_DISPATCH = {
+    "verify": _connector_verify,
+    "plan": _connector_plan,
+    "fetch": _connector_fetch,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -1419,6 +1502,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _PCL_DISPATCH.get(pcl_cmd)
         if handler is None:
             parser.parse_args(["pcl", "--help"])  # prints pcl help, exits
+            return 2
+        return handler(args)
+    if args.group == "connector":
+        connector_cmd = getattr(args, "connector_cmd", None)
+        handler = _CONNECTOR_DISPATCH.get(connector_cmd)
+        if handler is None:
+            parser.parse_args(["connector", "--help"])  # prints connector help, exits
             return 2
         return handler(args)
     if args.group == "check":
