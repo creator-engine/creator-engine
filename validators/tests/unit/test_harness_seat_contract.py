@@ -114,12 +114,29 @@ def test_codex_seat_binds_yolo(tmp_path):
     assert "VAL-SEAT-PERMISSION-FLAG" not in _codes(tmp_path, to_codex)
 
 
-def test_hermes_unbound_flag_accepted(tmp_path):
-    # hermes is not yet promoted (G2.007.1): any flag is accepted (no VAL-SEAT-PERMISSION-FLAG).
-    def to_hermes(r):
+def test_hermes_binds_profile_flag(tmp_path):
+    # G2.007.1: a hermes seat in full_permission_mode binds --profile creator-engine (Hermes
+    # realizes full-permission via its pinned governed profile; the --yolo approval-bypass is
+    # REFUSED, HM-D-2). The wrong flag is rejected; the bound flag passes.
+    def to_hermes_wrong(r):
         r.update(seat_id="seat-hermes-controller", harness="hermes")
-        r["launch_posture"].update(permission_mode_flag="--whatever")
-    assert "VAL-SEAT-PERMISSION-FLAG" not in _codes(tmp_path, to_hermes)
+        r["launch_posture"].update(permission_mode_flag="--yolo")
+    assert "VAL-SEAT-PERMISSION-FLAG" in _codes(tmp_path, to_hermes_wrong)
+
+    def to_hermes_ok(r):
+        r.update(seat_id="seat-hermes-controller", harness="hermes")
+        r["launch_posture"].update(permission_mode_flag="--profile creator-engine")
+    assert "VAL-SEAT-PERMISSION-FLAG" not in _codes(tmp_path, to_hermes_ok)
+
+
+def test_openclaw_seam_no_flag_passes(tmp_path):
+    # G2.007.1: openclaw is a SEAM (never in-seat) — full_permission_mode: false, no flag bound.
+    # Such a seat is fully valid (no VAL-SEAT-PERMISSION-FLAG, no VAL-SEAT-FULL-PERMISSION).
+    def to_openclaw(r):
+        r.update(seat_id="seat-openclaw-seam", harness="openclaw")
+        r["launch_posture"].update(full_permission_mode=False, ring0_hook_pack_confirmed=False)
+        r["launch_posture"].pop("permission_mode_flag", None)
+    assert _codes(tmp_path, to_openclaw) == set()
 
 
 # --- required hook-pack (G2.006.0 reuse) ---

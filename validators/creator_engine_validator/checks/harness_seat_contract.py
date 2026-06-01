@@ -15,8 +15,11 @@ the validator enforces ``full_permission_mode: true`` => ``ring0_hook_pack_confi
 true`` (the Ring 0 hook-pack confirmation is the safety substitute for per-action
 approval; hooks still fire under full permissions). Implementation varies by harness, so
 ``permission_mode_flag`` records the concrete flag and the validator binds it for known
-harnesses (``claude_code`` => ``--dangerously-skip-permissions``; ``codex`` =>
-``--yolo``); ``hermes``/``openclaw`` are bound by G2.007.1.
+in-seat harnesses (``claude_code`` => ``--dangerously-skip-permissions``; ``codex`` =>
+``--yolo``; ``hermes`` => ``--profile creator-engine`` — Hermes runs its governed
+full-permission posture via the pinned ``creator-engine`` profile and REFUSES the ``--yolo``
+approval-bypass, HM-D-2; promoted in G2.007.1). ``openclaw`` is a SEAM harness (never
+in-seat), so it runs no in-seat ``full_permission_mode`` and binds no flag (G2.007.1).
 
 Substrate only: this formalizes — and does NOT replace — the CC-G-* runtime
 (``.claude/**``, ``hook_check.py``, ``ce launch``). No runtime, no ``.claude/**``
@@ -66,8 +69,16 @@ HARNESSES = frozenset({"claude_code", "codex", "hermes", "openclaw"})
 # The genuinely posture-DEFEATING modes a governed seat MUST refuse (CLAUDE_CODE_
 # CONTROLLER_SEAT_CONTRACT.md §5). full_permission_mode is NOT here — it is sanctioned.
 REQUIRED_REFUSED_MODES = frozenset({"bare", "print_headless", "background_agents", "remote_control", "settings_local_weakening"})
-# Harness-specific full-permission flags CE knows today (extended per harness by G2.007.1).
-HARNESS_FULL_PERMISSION_FLAGS = {"claude_code": "--dangerously-skip-permissions", "codex": "--yolo"}
+# Harness-specific full-permission flags for known IN-SEAT harnesses. G2.007.1 promotion:
+# Hermes binds the pinned governed profile (its full-permission posture is the trusted
+# `creator-engine` profile, NOT an approval-skip flag — `--yolo` is REFUSED, HM-D-2).
+# `openclaw` is a SEAM (never in-seat): it runs no in-seat full_permission_mode and is
+# intentionally absent here (nothing to bind).
+HARNESS_FULL_PERMISSION_FLAGS = {
+    "claude_code": "--dangerously-skip-permissions",
+    "codex": "--yolo",
+    "hermes": "--profile creator-engine",
+}
 
 _YAML_SUFFIXES = {".yml", ".yaml"}
 _MD_SUFFIXES = {".md", ".markdown"}

@@ -1,0 +1,55 @@
+# G2.007.1 promotion: an OpenClaw seat-contract on the harness-agnostic shape.
+# OpenClaw is a SEAM harness (never in-seat) — it attaches THROUGH the Controller-seat
+# seam, it does not occupy the seat as the full-permission Controller. So it runs no in-seat
+# full_permission_mode (full_permission_mode: false) and binds NO permission_mode_flag,
+# while still satisfying the rest of the governed posture (ring_0, model_pin,
+# strict_mcp_config, operator_visible, the full refused-modes floor, a ring_1 defeasible
+# required hook-pack). No secrets.
+seat_contract:
+  seat_id: seat-ce-openclaw-seam
+  harness: openclaw
+  launch_posture:
+    model_pin: true
+    effort: high
+    setting_sources:
+      - project
+    terminal_visibility: operator_visible
+    strict_mcp_config: true
+    full_permission_mode: false
+    ring0_hook_pack_confirmed: false
+  refused_modes:
+    - bare
+    - print_headless
+    - background_agents
+    - remote_control
+    - settings_local_weakening
+  enforcement_ring: ring_0
+  required_hook_pack:
+    extension_id: ext-ce-openclaw-hook-pack
+    extension_kind: hook_pack
+    ring: ring_1
+    enforcement_strength: defeasible
+    emitting_role: controller
+    operating_mode: strict
+    hooks:
+      - event: PreToolUse
+        matcher: "Edit|Write|MultiEdit|Read|Bash"
+        decision_protocol: allow_deny
+        failure_posture: fail_open
+        validator_binding: hook-check
+        defeasible: true
+      - event: Stop
+        decision_protocol: advisory
+        failure_posture: fail_open
+        validator_binding: hook-check
+        defeasible: true
+    recorded_at: '2026-06-01T12:07:05Z'
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-01T12:07:05Z'
+  metadata:
+    summary: >-
+      G2.007.1 OpenClaw seam seat-contract. OpenClaw is a SEAM (never in-seat), so it runs
+      no in-seat full_permission_mode and binds no permission_mode_flag; the rest of the
+      governed posture still applies.
+    seam_disposition: openclaw-is-a-seam-never-in-seat

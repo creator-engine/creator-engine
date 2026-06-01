@@ -13,30 +13,30 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.007.2
+  id: G2.007.1
   feature_binding: specs/v2/007
-  slice: "2"
-  title: reviewer-venue side-effect-authority seam
+  slice: "1"
+  title: Codex / Hermes / OpenClaw harness seat-contract promotions
   layer: 3
   predecessor_gate:
-    id: G2.007.0
-    slice: "0"
-    title: Harness seat-contract + hook-pack template + validator
+    id: G2.007.2
+    slice: "2"
+    title: reviewer-venue side-effect-authority seam
     status: merged
   note: >-
-    G2.007.0 (harness seat-contract) is merged (#106, via a one-time Operator override).
-    G2.007.2 is the active slice: the reviewer-venue side-effect-authority seam. It adds the
-    reviewer_authority_envelope schema + validator and modifies the Ring-2 enforcement engine
-    hook_check.py so a restricted mechanic is allowed ONLY when a validated bounded envelope's
-    mechanic equals the classified action AND (for pr_review) the command's target PR equals
-    pr_number — the old raw loose side_effect_authority token is no longer honored. head_sha/
-    actor/ratified_prompt_sha bind the grant for audit. Backward-compatible (no envelope =>
-    deny as before). It does NOT modify .claude/** (Ring-1 wrapper/settings) or ce launch/the
-    launcher (minting + hook-side head/actor verification are deferred). It resolves the
-    governance debt from PR #106 and is sequenced before G2.007.1. Class O (governance +
-    identity + security). G2.007.0 (merged) formalized the seat-contract incl. the
-    full_permission_mode posture; G2.007.2 makes a reviewer seat's bounded side_effect_authority
-    real in the Ring-2 hook.
+    G2.007.0 (harness seat-contract substrate, #106) and G2.007.2 (reviewer-venue
+    side-effect-authority seam, #107) are merged on main @ 61ce676. G2.007.1 is the active
+    slice: it promotes the remaining harnesses (codex/hermes/openclaw) onto the harness-agnostic
+    seat-contract shape. The schema is unchanged (its harness enum already admits all four
+    harnesses); the only validator edit is extending HARNESS_FULL_PERMISSION_FLAGS — Hermes
+    binds the pinned governed profile (--profile creator-engine; the --yolo approval-bypass is
+    REFUSED, HM-D-2), Codex is already bound (--yolo), and OpenClaw is a SEAM (never in-seat) so
+    runs no in-seat full_permission_mode and binds no flag. It adds three valid example
+    seat-contracts + one invalid fixture, this spec section, and ADR-V2-010. No new VAL-SEAT-*
+    code, no new check, no checks/__init__.py change, no schema change, and no runtime/ce/
+    launcher/.claude/hook_check.py change. Class O (governance + identity; per-harness landing;
+    OD-15). It is the first 007 PR reviewable through the now-live reviewer_authority_envelope
+    seam (not an Operator override).
 
 authority_basis:
   ratified_prompt:
@@ -45,11 +45,14 @@ authority_basis:
   ratified_prompt_g2_007_2:
     path: .hermes/research/g20072-reviewer-venue-authority-planning-20260601T104313Z/recommended-next/NEXT_OPERATOR_G20072_REVIEWER_VENUE_AUTHORITY_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T104313Z.md
     sha256: b01b000c84e7e68b5f13ba0128013ad6d001476e1269032e624cbbf65d5d3789
+  ratified_prompt_g2_007_1:
+    path: .hermes/research/g20071-harness-seat-promotions-planning-20260601T120126Z/recommended-next/NEXT_OPERATOR_G20071_HARNESS_SEAT_PROMOTIONS_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T120126Z.md
+    sha256: 979179d792c718a27e207a800ef84ebb5ef928cc469592ec2a11cf9aa01705a5
   note: >-
-    This sidecar records the G2.007.0 harness seat-contract authority and the G2.007.2
-    reviewer-venue side-effect-authority seam authority. It ratifies nothing, performs no write,
-    carries no secret/credential values, and binds no concrete vendor/harness account identity
-    as normative.
+    This sidecar records the G2.007.0 harness seat-contract authority, the G2.007.2
+    reviewer-venue side-effect-authority seam authority, and the G2.007.1 Codex/Hermes/OpenClaw
+    harness-promotion authority. It ratifies nothing, performs no write, carries no
+    secret/credential values, and binds no concrete vendor/harness account identity as normative.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -127,6 +130,11 @@ requirements:
     statement: Preserve hook backward compatibility (no envelope => deny as before) and modify no .claude/launcher/other-check/ce_cli surface; carry no secret.
     decisions: [OD-15, OD-23]
     risk_refs: [RISK-RV2-007-RVA-SCOPE]
+  - id: RV2-007-010
+    spec_md_ref: FR-010
+    statement: Promote codex/hermes/openclaw onto the seat-contract shape — bind hermes to --profile creator-engine (codex already --yolo) and model openclaw as a SEAM (full_permission_mode false, no flag), via valid example instances + the HARNESS_FULL_PERMISSION_FLAGS binding, with no schema change, no new check, and no new VAL-SEAT-* code.
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-PROMOTION]
 
 risk_inventory:
   - id: RISK-RV2-007-SHAPE
@@ -189,6 +197,12 @@ risk_inventory:
     description: The hook_check change regresses prior behavior (no-envelope must still deny), or the gate modifies .claude/**, the launcher, another existing check/schema, or ce_cli.py.
     severity: critical
     required_validation_refs: [VAL-RVA-BACKCOMPAT]
+  - id: RISK-RV2-007-PROMOTION
+    title: Incorrect per-harness promotion or unknown harness instance.
+    relevance: [governance, identity, security]
+    description: A promoted harness seat-contract binds the wrong permission_mode_flag (e.g. a Hermes seat declaring the refused --yolo approval-bypass instead of --profile creator-engine, or an OpenClaw seam claiming an in-seat full-permission flag), or names a harness CE does not support.
+    severity: high
+    required_validation_refs: [VAL-SEAT-HARNESS, VAL-SEAT-PERMISSION-FLAG]
 
 required_validation:
   - id: VAL-SEAT-SCHEMA
@@ -297,3 +311,4 @@ crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/007
 adr_refs:
   - specs/v2/adrs/ADR-V2-008-harness-seat-contract.md
   - specs/v2/adrs/ADR-V2-009-reviewer-venue-authority.md
+  - specs/v2/adrs/ADR-V2-010-harness-seat-promotions.md
