@@ -13,30 +13,31 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.005.2
+  id: G2.005.3
   feature_binding: specs/v2/005
-  slice: "2"
-  title: GitHub connector write runtime (strict mode)
+  slice: "3"
+  title: tracker connector (read-only, Jira + GitLab)
   layer: 3
   predecessor_gate:
-    id: G2.005.1
-    slice: "1"
-    title: GitHub connector read-only runtime
+    id: G2.005.2
+    slice: "2"
+    title: GitHub connector write runtime (strict mode)
     status: merged
   note: >-
-    G2.005.0 (substrate, PR #100) and G2.005.1 (read-only runtime, PR #101) are
-    merged. G2.005.2 is the active slice: the GitHub connector WRITE runtime
-    (`ce connector` write-plan/submit) over that substrate + read runtime. It makes
-    the bounded, non-privileged tracker_mirror write set (issue-create/issue-update/
-    pr-comment) executable, and ONLY under CE operating_mode: strict (auto/
-    transcendence are refused; this is the G2.002.1 dependency made enforceable —
-    distinct from the batch strict-mode governance cadence). A write REQUIRES a
-    credential resolved BY REFERENCE and never stored/printed/committed; the network
-    is reached only through an injectable client seam so tests are network-free and
-    the default adapter fails closed offline. It reuses the G2.005.0 validator,
-    imports no CE-event/PCL/distributed-identity code, and changes no G2.005.1
-    read-path behavior. Tracker connectors (G2.005.3), auto/transcendence write
-    activation, credential brokering, and CI/deploy remain separate, deferred,
+    G2.005.0 (substrate, PR #100), G2.005.1 (read-only runtime, PR #101), and
+    G2.005.2 (strict-mode write runtime, PR #102) are merged. G2.005.3 is the active
+    slice: read-only tracker adapters for Jira and GitLab (REST) over the same read
+    plan + client seam + receipt machinery. The concrete vendor is selected at
+    invocation by a runtime `--provider` flag (default github); the descriptor stays
+    vendor-neutral (provider_class is an opaque, non-vendor label and the connector
+    object is closed), so NO descriptor provider field and NO schema change is
+    introduced. Read-only only (tracker writes deferred); credentials resolved BY
+    REFERENCE and never stored/printed/committed; the network is reached only through
+    the injectable opener seam so tests are network-free and each default adapter
+    fails closed offline. It reuses the G2.005.0 validator, imports no
+    CE-event/PCL/distributed-identity code, and changes no G2.005.1 read or G2.005.2
+    write behavior. Linear (GraphQL) + seam generalization, the tracker WRITE runtime,
+    and descriptor-bound provider selection remain separate, deferred,
     Operator-ratified gates.
 
 authority_basis:
@@ -49,11 +50,15 @@ authority_basis:
   ratified_prompt_g2_005_2:
     path: .hermes/research/g20052-connector-write-runtime-planning-20260601T045927Z/recommended-next/NEXT_OPERATOR_G20052_CONNECTOR_WRITE_RUNTIME_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T051658Z.md
     sha256: a0526700bf5351b36927750185da7aeebdd06065ae9679aa9a94366f401ed470
+  ratified_prompt_g2_005_3:
+    path: .hermes/research/g20053-tracker-connector-planning-20260601T062839Z/recommended-next/NEXT_OPERATOR_G20053_TRACKER_CONNECTOR_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T062839Z.md
+    sha256: fe892146137701f98738fd7a57c88e9ba1950d87eb1e3447ecaca5a4d844edd7
   note: >-
     This sidecar records G2.005.0 substrate authority, the G2.005.1 read-only
-    runtime authority, and the G2.005.2 strict-mode write runtime authority. It
-    ratifies nothing, performs no write, carries no secret/credential values, and
-    binds no concrete vendor/account identity as normative.
+    runtime authority, the G2.005.2 strict-mode write runtime authority, and the
+    G2.005.3 read-only tracker (Jira+GitLab) authority. It ratifies nothing, performs
+    no write, carries no secret/credential values, and binds no concrete vendor/
+    account identity as normative.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -211,6 +216,31 @@ requirements:
     statement: Stop before tracker connectors, auto/transcendence write activation, credential brokering, batching, or CI/deploy; leave the G2.005.1 read path unchanged.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-005-W-STOPLINE]
+  - id: RV2-005-026
+    spec_md_ref: FR-026
+    statement: Select the default read adapter from a provider registry (github/jira/gitlab, default github); an unknown provider fails closed; github reproduces the G2.005.1 behavior.
+    decisions: [OD-10]
+    risk_refs: [RISK-RV2-005-T-PROVIDER]
+  - id: RV2-005-027
+    spec_md_ref: FR-027
+    statement: The Jira read adapter shapes a provider-correct read-only GET and normalizes the response into the redaction-safe receipt; it fails closed offline.
+    decisions: [OD-10]
+    risk_refs: [RISK-RV2-005-T-JIRA]
+  - id: RV2-005-028
+    spec_md_ref: FR-028
+    statement: The GitLab read adapter shapes a provider-correct read-only GET (PRIVATE-TOKEN auth) and normalizes the response; it fails closed offline.
+    decisions: [OD-10]
+    risk_refs: [RISK-RV2-005-T-GITLAB]
+  - id: RV2-005-029
+    spec_md_ref: FR-029
+    statement: Refuse a write scope or non-read verb before any request for every provider; tracker adapters expose read (GET) only.
+    decisions: [OD-19]
+    risk_refs: [RISK-RV2-005-T-READONLY]
+  - id: RV2-005-030
+    spec_md_ref: FR-030
+    statement: Resolve credentials BY REFERENCE (never stored/printed/committed), keep tests network-free, and add no descriptor provider field or schema change.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-T-CRED]
 
 risk_inventory:
   - id: RISK-RV2-005-CONN-SHAPE
@@ -357,6 +387,36 @@ risk_inventory:
     description: Tracker connectors, auto/transcendence write activation, credential brokering, batching, or CI/deploy is implemented before separate ratification, or the read path is mutated.
     severity: critical
     required_validation_refs: [VAL-CONN-W-STOPLINE]
+  - id: RISK-RV2-005-T-PROVIDER
+    title: Wrong or unknown provider adapter selected.
+    relevance: [governance, runtime]
+    description: An unknown provider is silently accepted, or the wrong adapter is selected, or github no longer reproduces the G2.005.1 behavior.
+    severity: high
+    required_validation_refs: [VAL-CONN-T-PROVIDER]
+  - id: RISK-RV2-005-T-JIRA
+    title: Jira read adapter mis-shapes the request or does not fail closed.
+    relevance: [quality, runtime]
+    description: The Jira adapter constructs an incorrect request (URL/method/auth), mis-normalizes the response, or makes a real network call / does not fail closed offline.
+    severity: high
+    required_validation_refs: [VAL-CONN-T-JIRA]
+  - id: RISK-RV2-005-T-GITLAB
+    title: GitLab read adapter mis-shapes the request or does not fail closed.
+    relevance: [quality, runtime]
+    description: The GitLab adapter constructs an incorrect request (URL/method/PRIVATE-TOKEN auth), mis-normalizes the response, or makes a real network call / does not fail closed offline.
+    severity: high
+    required_validation_refs: [VAL-CONN-T-GITLAB]
+  - id: RISK-RV2-005-T-READONLY
+    title: Tracker adapter performs or permits a write.
+    relevance: [security, governance]
+    description: A provider read adapter accepts a write scope/verb instead of refusing it before any request.
+    severity: critical
+    required_validation_refs: [VAL-CONN-T-READONLY]
+  - id: RISK-RV2-005-T-CRED
+    title: Credential leak, real network in tests, or descriptor coupling.
+    relevance: [security]
+    description: A provider adapter stores/prints/logs/commits a credential value, makes a real request in tests/CI, or a descriptor provider field / schema change is introduced.
+    severity: critical
+    required_validation_refs: [VAL-CONN-T-CRED]
 
 required_validation:
   - id: VAL-CONN-SCHEMA
@@ -514,9 +574,35 @@ required_validation:
     planned_slice: G2.005.2
     planned_validator: connector_runtime
     status: implemented
+  - id: VAL-CONN-T-PROVIDER
+    description: Select the read adapter from the provider registry (github/jira/gitlab); an unknown provider fails closed; github reproduces G2.005.1.
+    planned_slice: G2.005.3
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-T-JIRA
+    description: Jira read adapter shapes a correct GET (base/Bearer/resource) and normalizes the response via an injected opener; fails closed offline.
+    planned_slice: G2.005.3
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-T-GITLAB
+    description: GitLab read adapter shapes a correct GET (/api/v4 base, PRIVATE-TOKEN auth, resource) and normalizes the response via an injected opener; fails closed offline.
+    planned_slice: G2.005.3
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-T-READONLY
+    description: Refuse a write scope/non-read verb before any request for every provider; tracker adapters expose read only.
+    planned_slice: G2.005.3
+    planned_validator: connector_runtime
+    status: implemented
+  - id: VAL-CONN-T-CRED
+    description: Credentials by reference (never stored/printed/committed); tests network-free; no descriptor provider field or schema change.
+    planned_slice: G2.005.3
+    planned_validator: connector_runtime
+    status: implemented
 
 crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/005
 adr_refs:
   - specs/v2/adrs/ADR-V2-006-connector-substrate.md
   - specs/v2/adrs/ADR-V2-006-1-connector-runtime.md
   - specs/v2/adrs/ADR-V2-006-2-connector-write-runtime.md
+  - specs/v2/adrs/ADR-V2-006-3-tracker-connector.md
