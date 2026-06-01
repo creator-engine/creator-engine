@@ -93,3 +93,41 @@ The `pcl_record` validator enforces schema shape, content-address determinism,
 chain linkage, record-kind enum, role floor, operating-mode enum, event-block
 pointer shape, signature shape, no-inline metadata, and the `.hermes/pcl/`
 write-freeze.
+
+## Runtime (G2.004.1)
+
+`G2.004.1` adds the local, daemonless, network-free `ce pcl` runtime over the
+per-repo authoritative `.ce/pcl/` state. It reuses the `pcl_record` validator for
+every shape decision and imports no CE-event or distributed-identity code.
+
+### Commands
+
+- `ce pcl append --ledger <id> --pcl-root .ce/pcl --record-id <id> --record-kind <kind> --emitting-role <role> --operating-mode <mode> --recorded-at <ts> --body-json <json>`
+  — validates and content-addresses a record on the chain head, then atomically
+  writes it (and the head manifest) under `.ce/pcl/records/<ledger>/`. Every
+  refusal raises before any write.
+- `ce pcl verify --ledger <id> --pcl-root .ce/pcl` — reconstructs and validates
+  the chain fail-closed (shape, content addressing, linkage, floor, head).
+- `ce pcl replay --ledger <id> --pcl-root .ce/pcl` — deterministic ordered
+  read-only projection.
+- `ce pcl index --ledger <id> --pcl-root .ce/pcl` — deterministic content-hashed
+  index written to the **git-ignored** `.ce/pcl/cache/<ledger>/`.
+- `ce pcl merge --source <a> --source <b> --target <t> --pcl-root .ce/pcl` —
+  deterministic conflict-detecting union of ≥2 verified ledgers (fails closed on
+  a fork; never mutates authoritative records; writes a projection to the cache).
+
+### State boundary
+
+`.ce/pcl/records/` is the per-repo authoritative, **tracked-or-synced**
+coordination ledger (records are committed/synced, not ignored). The rebuildable
+`.ce/pcl/cache/` (index/merge projections) is **git-ignored** and never
+authoritative. Active writes under legacy `.hermes/` paths are refused.
+
+### Floors
+
+No cryptography or key custody — `signature` stays shape-only `reserved-inactive`.
+The canonical non-ratifying `emitting_role` floor is enforced at `append`;
+`agent_ratifier`/`source` may not emit; PCL never ratifies; the runtime records
+operating-mode context only and activates no autonomy. Real signing, key custody,
+the federated-identity / distributed-claim runtime, and connector/queue runtime
+remain deferred to later, separately ratified gates.

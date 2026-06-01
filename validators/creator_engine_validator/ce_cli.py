@@ -22,6 +22,11 @@ ce event verify      # validate an on-disk CE-event chain + head manifest, read-
 ce event sign        # refresh a draft block's shape-only signature + content hash (no crypto)
 ce event replay      # deterministic ordered read-only projection of a CE-event chain
 ce event index       # deterministic content-hashed read-only index of a CE-event chain
+ce pcl append        # append a shape-only-signed PCL record to a tracked local ledger (G2.004.1)
+ce pcl verify        # validate an on-disk PCL ledger + head manifest, read-only
+ce pcl replay        # deterministic ordered read-only projection of a PCL ledger
+ce pcl index         # deterministic content-hashed index of a PCL ledger (written to the ignored cache)
+ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -54,6 +59,7 @@ from . import (
     integration_queue_dry_run,
     lane_runtime,
     launch_runtime,
+    pcl_runtime,
     side_effect_ledger_runtime,
     transcript_archive,
     worker_runtime,
@@ -413,6 +419,64 @@ def _build_parser() -> argparse.ArgumentParser:
     ei.add_argument("--stream", required=True)
     ei.add_argument("--event-root", required=True)
     ei.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce pcl — G2.004.1 PCL runtime. Local, daemonless, network-free append-only
+    # content-addressed record chains. Records are the per-repo authoritative,
+    # tracked-or-synced coordination ledger under .ce/pcl/records/<ledger>/; the
+    # rebuildable index/merge cache lives under the ignored .ce/pcl/cache/. No
+    # cryptography/key custody; signature stays reserved-inactive; PCL never ratifies.
+    pcl = groups.add_parser(
+        "pcl", help="append/verify/replay/index/merge local PCL coordination ledgers (G2.004.1)"
+    )
+    pcl_sub = pcl.add_subparsers(dest="pcl_cmd")
+
+    pa = pcl_sub.add_parser("append", help="append a shape-only-signed PCL record to a tracked local ledger")
+    pa.add_argument("--ledger", required=True, help="ledger name (path-safe slug)")
+    pa.add_argument("--pcl-root", required=True, help="PCL home (e.g. .ce/pcl)")
+    pa.add_argument("--record-id", required=True, help="record id (pattern pcl-<slug>)")
+    pa.add_argument("--record-kind", required=True, help="canonical PCL record_kind")
+    pa.add_argument("--emitting-role", required=True, help="canonical non-ratifying emitting role")
+    pa.add_argument(
+        "--operating-mode",
+        required=True,
+        help="operating-mode context strict|auto|transcendence (recorded only; an unknown "
+        "mode is refused with G2-PCL-MODE-INVALID)",
+    )
+    pa.add_argument("--recorded-at", required=True, help="UTC timestamp YYYY-MM-DDThh:mm:ssZ")
+    pa.add_argument("--body-json", required=True, help="record body mapping as JSON")
+    pa.add_argument("--repo-root", default=None, help="repo root (records must not target .hermes/)")
+    pa.add_argument("--key-id", default=pcl_runtime.DEFAULT_KEY_ID, help="shape-only signature key_id")
+    pa.add_argument(
+        "--signature-value",
+        default=pcl_runtime.SIGNATURE_VALUE,
+        help="refuse-guarded: must stay reserved-inactive (no cryptography)",
+    )
+    pa.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    pv = pcl_sub.add_parser("verify", help="validate an on-disk PCL ledger + head manifest")
+    pv.add_argument("--ledger", required=True)
+    pv.add_argument("--pcl-root", required=True)
+    pv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    pr = pcl_sub.add_parser("replay", help="deterministic ordered read-only projection of a ledger")
+    pr.add_argument("--ledger", required=True)
+    pr.add_argument("--pcl-root", required=True)
+    pr.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    pi = pcl_sub.add_parser("index", help="deterministic content-hashed index (written to the ignored cache)")
+    pi.add_argument("--ledger", required=True)
+    pi.add_argument("--pcl-root", required=True)
+    pi.add_argument("--repo-root", default=None, help="repo root for the cache git-ignore guard")
+    pi.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
+    pi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    pm = pcl_sub.add_parser("merge", help="deterministic conflict-detecting merge projection of >=2 ledgers")
+    pm.add_argument("--source", action="append", dest="sources", required=True, help="repeatable source ledger (>=2)")
+    pm.add_argument("--target", required=True, help="target ledger name for the merge projection")
+    pm.add_argument("--pcl-root", required=True)
+    pm.add_argument("--repo-root", default=None, help="repo root for the cache git-ignore guard")
+    pm.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
+    pm.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce check — umbrella wrapper over the retained creator-engine-validator
     # conformance checks (DP-1 = A: ce wraps the validator subcommands).
@@ -1047,6 +1111,130 @@ def _event_index(args) -> int:
     return 0
 
 
+def _pcl_append(args) -> int:
+    try:
+        body = json.loads(args.body_json)
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: ce pcl append: --body-json is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    try:
+        result = pcl_runtime.append(
+            ledger=args.ledger,
+            pcl_root=args.pcl_root,
+            record_id=args.record_id,
+            record_kind=args.record_kind,
+            emitting_role=args.emitting_role,
+            operating_mode=args.operating_mode,
+            body=body,
+            recorded_at=args.recorded_at,
+            repo_root=args.repo_root,
+            key_id=args.key_id,
+            signature_value=args.signature_value,
+        )
+    except pcl_runtime.PclRuntimeError as exc:
+        print(f"ERROR: ce pcl append refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "record_path": str(result.record_path),
+                "head_path": str(result.head_path),
+                "ledger": result.ledger,
+                "sequence": result.sequence,
+                "content_hash": result.content_hash,
+                "parent_hash": result.parent_hash,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce pcl append: wrote {result.record_path} (ledger={result.ledger} sequence={result.sequence})")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
+def _pcl_verify(args) -> int:
+    try:
+        result = pcl_runtime.verify(ledger=args.ledger, pcl_root=args.pcl_root)
+    except pcl_runtime.PclRuntimeError as exc:
+        print(f"ERROR: ce pcl verify [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.summary, indent=2, sort_keys=True))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce pcl verify: {status} (ledger={result.ledger}, {result.summary['record_count']} record(s))")
+        for error in result.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _pcl_replay(args) -> int:
+    try:
+        result = pcl_runtime.replay(ledger=args.ledger, pcl_root=args.pcl_root)
+    except pcl_runtime.PclRuntimeError as exc:
+        print(f"ERROR: ce pcl replay [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "ledger": result.ledger,
+                "content_hash": result.content_hash,
+                "record_count": result.projection["record_count"],
+                "records": list(result.records),
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce pcl replay: ledger={result.ledger} ({result.projection['record_count']} record(s))")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
+def _pcl_index(args) -> int:
+    try:
+        result = pcl_runtime.index(
+            ledger=args.ledger,
+            pcl_root=args.pcl_root,
+            write_cache=not getattr(args, "no_cache", False),
+            repo_root=args.repo_root,
+        )
+    except pcl_runtime.PclRuntimeError as exc:
+        print(f"ERROR: ce pcl index [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.index, indent=2, sort_keys=True))
+    else:
+        print(f"ce pcl index: ledger={result.ledger} ({result.index['record_count']} record(s))")
+        print(f"content_hash: {result.content_hash}")
+        if result.cache_path is not None:
+            print(f"cache: {result.cache_path}")
+    return 0
+
+
+def _pcl_merge(args) -> int:
+    try:
+        result = pcl_runtime.merge(
+            sources=args.sources,
+            target=args.target,
+            pcl_root=args.pcl_root,
+            write_cache=not getattr(args, "no_cache", False),
+            repo_root=args.repo_root,
+        )
+    except pcl_runtime.PclRuntimeError as exc:
+        print(f"ERROR: ce pcl merge [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.merged, indent=2, sort_keys=True))
+    else:
+        print(f"ce pcl merge: target={result.target} ({result.merged['record_count']} record(s))")
+        print(f"content_hash: {result.content_hash}")
+        if result.cache_path is not None:
+            print(f"cache: {result.cache_path}")
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -1171,6 +1359,14 @@ _EVENT_DISPATCH = {
     "index": _event_index,
 }
 
+_PCL_DISPATCH = {
+    "append": _pcl_append,
+    "verify": _pcl_verify,
+    "replay": _pcl_replay,
+    "index": _pcl_index,
+    "merge": _pcl_merge,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -1216,6 +1412,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _EVENT_DISPATCH.get(event_cmd)
         if handler is None:
             parser.parse_args(["event", "--help"])  # prints event help, exits
+            return 2
+        return handler(args)
+    if args.group == "pcl":
+        pcl_cmd = getattr(args, "pcl_cmd", None)
+        handler = _PCL_DISPATCH.get(pcl_cmd)
+        if handler is None:
+            parser.parse_args(["pcl", "--help"])  # prints pcl help, exits
             return 2
         return handler(args)
     if args.group == "check":

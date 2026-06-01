@@ -62,6 +62,7 @@ The as-built v1.0 `ce` command surface is exactly these groups:
 | `ce fanin` | build/inspect a local read-only evidence fan-in packet (no authority) |
 | `ce queue` | Integration Queue **dry-run** landing preview (`dry-run`/`inspect`); no authority |
 | `ce event` | CE-event runtime: local append-only signed-block chains (`append`/`verify`/`sign`/`replay`/`index`); no authority |
+| `ce pcl` | PCL runtime: tracked per-repo coordination ledgers (`append`/`verify`/`replay`/`index`/`merge`); records tracked, cache ignored; no authority |
 
 `ce launch` opens or attaches a visible Controller seat through the chosen
 Controller harness; the active agent occupying that seat is the Controller

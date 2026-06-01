@@ -24,3 +24,9 @@ __pycache__/
 # tracked. This is a minimal, additive instance-zone line: do NOT wholesale-
 # ignore `.ce/` — governance subtrees under `.ce/` must remain trackable.
 .ce/ce-events/spool/
+
+# G2.004.1 PCL runtime cache. `.ce/pcl/records/` is the per-repo authoritative,
+# tracked-or-synced coordination ledger (NOT ignored) the `ce pcl` runtime writes;
+# `.ce/pcl/cache/` holds only rebuildable index/merge projections and is
+# instance-local, never tracked. Additive instance-zone line only.
+.ce/pcl/cache/
