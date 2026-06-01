@@ -169,3 +169,90 @@ CI/deploy, or auto/transcendence activation.
 - The `ce connector` group is documented (README) and the `ce`-inventory guard +
   offline wheel are reconciled.
 - PR review, approval, merge, and cleanup remain separate Operator-ratified gates.
+
+# G2.005.2 — GitHub connector write runtime (strict mode)
+
+## Goal
+
+G2.005.2 makes the bounded, non-privileged `tracker_mirror` write set executable as
+the `ce connector` **write** runtime, over the merged G2.005.1 read runtime and
+G2.005.0 substrate. It is the first side-effecting connector surface: it can mutate a
+source host, so it executes only under CE `operating_mode: strict`, only the bounded
+`tracker_mirror` verbs, and only with a credential resolved by reference. It depends
+on G2.005.1 and G2.002.1 and reuses the G2.005.0 validator for every shape decision.
+
+> **Two distinct "strict" axes.** CE `operating_mode: strict` is the runtime autonomy
+> mode this gate enforces on records (vs `auto`/`transcendence`, which are
+> schema-present but unactivated). That is separate from the *batch strict-mode*
+> governance cadence used to author and ratify the gate. This section is about the
+> former.
+
+## Scope
+
+Extends `validators/creator_engine_validator/connector_runtime.py` with the write path
+(`build_write_plan`, an injectable `WriteClient` seam with a stdlib-`urllib` GitHub
+write adapter, and redaction-safe `WriteReceipt` normalization) and adds the
+`ce connector write-plan`/`submit` subcommands. Strict mode only; credentials by
+reference and REQUIRED for writes; network only through an injectable seam (tests
+network-free); imports no CE-event/PCL/distributed-identity code; does not modify the
+connector/Mission-Brief schemas, the `connector_substrate` check, or the G2.005.1
+read-path behavior.
+
+## Functional requirements
+
+### FR-019 — `ce connector write-plan`
+
+`write-plan` MUST validate a `write`-scope connector + `tracker_mirror` Mission-Brief
+via the G2.005.0 validator and build a bounded write plan, fully offline; a
+`read_only` connector/brief is refused (`G2-CONN-READONLY-REFUSED`).
+
+### FR-020 — Strict operating_mode floor
+
+The write runtime MUST execute only when BOTH the connector and the Mission-Brief
+carry `operating_mode: strict`; `auto`/`transcendence` MUST be refused before any
+request (`G2-CONN-MODE-REFUSED`). This makes the G2.002.1 dependency enforceable.
+
+### FR-021 — `tracker_mirror`-bounded capability
+
+Permitted write verbs MUST be bounded to `issue-create`/`issue-update`/`pr-comment`;
+any other verb is refused (`G2-CONN-SCOPE`), no privileged verb/class is accepted,
+and the Mission-Brief MUST declare the `tracker_mirror` mutation class.
+
+### FR-022 — Credential REQUIRED by reference
+
+A write MUST resolve a present credential from `credential_ref` at call time and use
+it only to construct the request; an absent/`none` credential MUST fail closed before
+any request (`G2-CONN-CREDENTIAL-MISSING`). The value MUST NEVER be stored in a
+record, printed, logged, committed, or carried in a write-receipt.
+
+### FR-023 — Injectable write-client seam
+
+The network MUST be reached only through an injectable `WriteClient` seam; the default
+stdlib-`urllib` GitHub adapter (`POST` for `issue-create`/`pr-comment`, `PATCH` for
+`issue-update`) MUST fail closed (`G2-CONN-NETWORK`) on any transport error or when no
+client is configured. One bounded mutation per `submit` (no batch, no auto-retry).
+
+### FR-024 — Redaction-safe write-receipt
+
+Write results MUST be normalized into a receipt carrying only bounded fields and no
+credential or secret value.
+
+### FR-025 — Substrate/read→write stop line
+
+No tracker connectors, `auto`/`transcendence` write activation, credential
+brokering/injection, batching/multi-write transactions, CI/deploy, or merge/queue
+authority. The G2.005.1 read path and its tests are unchanged.
+
+## Success criteria (G2.005.2)
+
+- `ce connector write-plan` validates offline; `submit` round-trips via an injected
+  client and returns a redaction-safe write-receipt; a `read_only` scope, a
+  non-strict mode, a verb outside the `tracker_mirror` set, and an absent credential
+  are each refused before any request with `G2-CONN-*` codes.
+- No credential/secret value appears in any record, output, log, or commit.
+- The full validator suite introduces no new failures; the G2.005.1 read path, the
+  G2.005.0 `connector`/`mission_brief` checks, schemas, and `_crosswalk.yml` are
+  unchanged.
+- The new `write-plan`/`submit` subcommands are documented (README) and the offline
+  wheel is reconciled.
+- PR review, approval, merge, and cleanup remain separate Operator-ratified gates.

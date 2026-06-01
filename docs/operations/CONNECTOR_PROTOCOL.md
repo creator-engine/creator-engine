@@ -108,5 +108,58 @@ CE-event/PCL/distributed-identity code.
 
 ### Deferred
 
-Connector write runtime (`G2.005.2`), tracker connectors (`G2.005.3`), credential
-brokering, CI/deploy, and autonomy activation.
+Connector write runtime (`G2.005.2`, now landed — see §9), tracker connectors
+(`G2.005.3`), credential brokering, CI/deploy, and autonomy activation.
+
+## 9. Write runtime (G2.005.2)
+
+`G2.005.2` adds the strict-mode `ce connector` **write** path over the same
+substrate + read runtime. It reuses the `connector`/`mission_brief` validator and
+the read runtime's credential/client seams, imports no CE-event/PCL/distributed-
+identity code, and changes no read-path behavior. It makes the bounded,
+non-privileged `tracker_mirror` write set executable — and only under CE
+`operating_mode: strict`.
+
+> **Two distinct "strict" axes.** CE `operating_mode: strict` is the *runtime
+> autonomy mode* this gate enforces on records (vs `auto`/`transcendence`). It is
+> separate from the *batch strict-mode* governance cadence used to author and
+> ratify the gate. This section is about the former.
+
+### Commands
+
+- `ce connector write-plan --connector <f> --mission-brief <f>` — validate a
+  `write`-scope connector + `tracker_mirror` Mission-Brief and emit the bounded
+  write plan (offline; no secrets).
+- `ce connector submit --connector <f> --mission-brief <f> --verb <v> --resource <path> [--payload <json>] [--base-url U]`
+  — execute one bounded `tracker_mirror` write (`--verb` ∈
+  `issue-create`/`issue-update`/`pr-comment`) via the write client and emit a
+  redaction-safe write-receipt. Offline / no-client / absent-credential /
+  non-strict / transport failure fails closed.
+
+### Floors
+
+- **CE `operating_mode: strict` only.** A write executes only when BOTH the
+  connector and the Mission-Brief carry `operating_mode: strict`; `auto`/
+  `transcendence` are refused before any request (`G2-CONN-MODE-REFUSED`).
+- **`tracker_mirror`-bounded; non-privileged.** Only `issue-create`/`issue-update`/
+  `pr-comment` are permitted; a `read_only` connector/brief routed to the write path
+  is refused (`G2-CONN-READONLY-REFUSED`), a verb outside the set is refused
+  (`G2-CONN-SCOPE`), and the Mission-Brief must declare the `tracker_mirror`
+  mutation class. One bounded mutation per `submit` (no batch, no auto-retry).
+- **Credential REQUIRED by reference.** Unlike reads, a write REQUIRES a present
+  credential resolved from `credential_ref` at call time; an absent/`none`
+  credential fails closed before any request (`G2-CONN-CREDENTIAL-MISSING`). The
+  value is never stored, printed, logged, committed, or carried in a write-receipt.
+- **Network only through an injectable seam.** The default `urllib` write adapter
+  (`POST` for `issue-create`/`pr-comment`, `PATCH` for `issue-update`) reaches the
+  network only via an injectable opener; tests inject a fake so the suite is
+  network-free, and both it and the null client fail closed offline.
+- **Redaction-safe receipts.** Write-receipts carry only bounded result fields,
+  never a credential or secret. Optional cache writes go to the git-ignored
+  `.ce/connector/cache/`.
+
+### Deferred (after G2.005.2)
+
+Tracker connectors (`G2.005.3`), `auto`/`transcendence` write activation,
+credential brokering/injection, batching/multi-write transactions, CI/deploy,
+merge/queue authority.
