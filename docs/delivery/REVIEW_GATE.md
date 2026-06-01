@@ -179,6 +179,16 @@ When a reviewer records `blocking_findings_present` (or when any
 4. CI green, an external tracker green check, an agent commentary
    verdict, or a passing validator run MUST NOT substitute for
    addressing the blocking findings.
+5. A **structural regression** identified under a maintainability
+   deep review (§o) is a `blocking_findings` class: a change that is
+   behavior-correct — its tests pass and CI is green — but worsens
+   maintainability still produces a blocking finding and forces
+   `verdict: blocking_findings_present`. A green test, CI, or
+   validator run does not clear it. The finding maps into the
+   existing `blocking_findings` structure; no verdict enum and no
+   schema field is added. See
+   [`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)
+   §e.
 
 ## j. What happens if the reviewer identity is missing or not ratified
 
@@ -284,3 +294,44 @@ review-gate requirements:
 - States the standing invariants (§m), including the non-ratification
   invariant, the privileged-class invariant, and the
   author/approver-separation invariant.
+
+## o. Maintainability deep review depth (additive review-depth layer)
+
+This section adds a **review depth** to the gate without changing any
+verdict enum, any schema field, or any §c–§n semantics above. It is
+the gate-side anchor for the CE-native rubric in
+[`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)
+and the worksheet in
+[`./CODE_QUALITY_REVIEW_CHECKLIST.md`](./CODE_QUALITY_REVIEW_CHECKLIST.md).
+
+1. **The depth name.** When the ratified envelope requests a
+   `maintainability_deep_review`, the reviewer applies the rubric and
+   checklist in addition to the §c–§m governance/scope checks. The
+   depth name is **prose/template vocabulary only** in this gate; it
+   is not added to the review-evidence schema's `review_mode` enum
+   (which records who/how, not how deeply). A reviewer records the
+   depth applied in the evidence `findings` prose.
+2. **Structural regression is a blocking-finding class.** Per §i.5, a
+   change that is behavior-correct but worsens maintainability is a
+   `blocking_findings` entry and forces
+   `verdict: blocking_findings_present` — even when every test passes.
+   This adds a *finding class*, not a verdict value; the four-value
+   enum in §h is unchanged.
+3. **Findings map into existing fields.** Maintainability observations
+   are recorded in the existing `findings`, `blocking_findings`,
+   `non_blocking_findings`, and `recommended_follow_up` fields per
+   [`./CODE_QUALITY_REVIEW_CHECKLIST.md`](./CODE_QUALITY_REVIEW_CHECKLIST.md)
+   §k. No schema field is added in this gate.
+4. **Waiver posture.** Advisory maintainability signals are waiver-able
+   only when the ratified envelope records the waiver; a structural
+   regression defaults to blocking unless the envelope explicitly
+   directs otherwise for the named batch, mirroring the
+   independent-review waiver in §c.4. The reviewer does not waive
+   their own finding.
+5. **Reviewer boundary unchanged.** The reviewer recommends or blocks;
+   the reviewer never self-authors the fix
+   ([`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)
+   §c). Every remediation is recorded for a separate, separately
+   ratified implementer envelope, and every §m invariant — above all
+   §m.1 (review evidence is not Source ratification) — continues to
+   apply unchanged.

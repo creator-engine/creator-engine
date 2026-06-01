@@ -128,6 +128,20 @@ requirement in the named batch's envelope. A
 ratification, per
 [`./REVIEW_GATE.md`](./REVIEW_GATE.md) §m.1.
 
+Where the batch's ratified envelope requested a **maintainability deep
+review** depth, the review evidence also reflects the code-quality
+checklist outcome
+([`./CODE_QUALITY_REVIEW_CHECKLIST.md`](./CODE_QUALITY_REVIEW_CHECKLIST.md);
+[`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)).
+A blocking **structural regression** is a blocking finding and blocks
+this gate exactly as any other `blocking_findings` entry does — even
+when the batch's tests and CI are green
+([`./REVIEW_GATE.md`](./REVIEW_GATE.md) §i.5, §o). This wires the
+maintainability evidence into the pre-merge gate **without changing
+merge authority**: Source remains the sole merge ratifier under §d, the
+reviewer never approves the merge, and a green check or source-host
+approval never clears a blocking maintainability finding.
+
 ### c.6 Scope audit confirms no boundary or mechanics violation
 
 The verifier-side audit in

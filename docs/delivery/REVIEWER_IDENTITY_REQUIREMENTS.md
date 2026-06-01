@@ -92,6 +92,18 @@ record produced under this pattern, regardless of deployment overlay:
    branch protection, mutate repository settings, run or modify
    deploy automation, delete or rename branches, or alter
    source-host metadata.
+9. A reviewer identity's remit MAY include **maintainability deep
+   review** per
+   [`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)
+   when the ratified envelope requests that depth. The remit is
+   review-evidence-authoring and recommendation only: the reviewer
+   records maintainability findings (including a blocking structural
+   regression) and recommended remediations, and **never** authors the
+   fix to the mutation under review. The deep-review remit does not
+   widen reviewer authority and does not alter the deferral in §c.1 —
+   instantiation of a real reviewer identity (including any
+   maintainability remit it carries) remains downstream Feature 004
+   work under its own Source-ratified privileged envelope.
 
 ## d. Required record fields (generic pattern)
 

@@ -77,16 +77,33 @@ per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.5.
 
 ### b.4 Independent review or equivalent evidence recorded (when applicable)
 
-Where the work item is reviewable by an independent reviewer
-identity, the review evidence is recorded. Codex (or an equivalent
-reviewer identity once Feature 004 instantiates one) records review
-findings under the schema named in the envelope. Until Feature 004
-ratifies a review-evidence schema, the review evidence MAY be an
-explicit "no independent reviewer applies for this batch" note inside
-the post-merge report, captured by Hermes / Source — but only when
-the batch's mutation class and scope make independent review
-inapplicable; the note is not a substitute for review where review
-is required.
+Where the work item is reviewable by an independent reviewer, the
+review evidence is recorded against the **landed** review-evidence
+schema (`schemas/review-evidence.schema.yaml`) and the review gate
+([`./REVIEW_GATE.md`](./REVIEW_GATE.md)), with a verdict drawn from the
+gate's four-value enum. Both the schema and the gate are ratified and
+on the canonical branch, so review evidence is authored **against**
+them; they are no longer deferred work.
+
+What remains deferred to Feature 004 is the **instantiation of a
+governed reviewer identity record** (alongside the QA and security
+evidence schemas). Until that lands, review evidence is authored under
+the envelope's named, independent reviewer venue per
+[`./REVIEWER_IDENTITY_REQUIREMENTS.md`](./REVIEWER_IDENTITY_REQUIREMENTS.md).
+For a batch whose mutation class and scope make independent review
+inapplicable, the review evidence MAY instead be an explicit "no
+independent reviewer applies for this batch" note inside the post-merge
+report, captured by the controller / Source — but only when review is
+genuinely inapplicable; the note is not a substitute for review where
+review is required.
+
+When the ratified envelope requests a **maintainability deep review**
+depth
+([`../quality/MAINTAINABILITY_DEEP_REVIEW.md`](../quality/MAINTAINABILITY_DEEP_REVIEW.md)),
+the review evidence reflects that depth, and a blocking structural
+regression blocks `Done` exactly as any blocking finding does — even
+when the batch's tests pass
+([`./REVIEW_GATE.md`](./REVIEW_GATE.md) §i.5, §o).
 
 **Review is not ratification.** Per Feature 002 FR-013, FR-017 and
 Feature 001 FR-017, agent-authored review text MUST NOT count as

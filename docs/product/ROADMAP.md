@@ -148,25 +148,58 @@ canonical docs landing first.
 
 ## d. Feature 004 — independent review / QA agent evidence (scope summary)
 
-**Status**: Deferred. Not yet specced.
+**Status**: Partially landed. The review-evidence schema
+(`schemas/review-evidence.schema.yaml`) and the review gate
+(`docs/delivery/REVIEW_GATE.md`) have already landed on the canonical
+branch (via the Slice D reviewer-evidence-gate work); the governed
+reviewer / QA / security identity *instantiation* and the QA / security
+evidence schemas remain deferred.
 
-Feature 004 will instantiate the governed identities Feature 002 names
-but does not implement:
+Already landed (no longer Feature 004 deferrals):
 
-- Codex reviewer identity record per Feature 001 identity contract.
+- **Review evidence schema** — `schemas/review-evidence.schema.yaml`,
+  with its `review_evidence_schema` validator.
+- **Review gate definition** — `docs/delivery/REVIEW_GATE.md`, plus
+  the reviewer identity *pattern* in
+  `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md` and the evidence
+  template in `docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md`. The rule
+  that review evidence is not ratification for privileged classes is a
+  standing invariant (Feature 002 FR-013, FR-017).
+
+Still deferred to Feature 004 (governed identity instantiation is a
+privileged mutation class):
+
+- Governed reviewer identity record per Feature 001 identity contract
+  (the *pattern* has landed; an *instantiated* identity has not).
 - QA agent identity record per Feature 001 identity contract.
-- security agent identity record per Feature 001 identity contract.
-- Review evidence schema; QA evidence schema; security finding record
-  schema.
-- Review gate definition; the rule that review evidence is not
-  ratification for privileged classes (already invariant per Feature
-  002 FR-013, FR-017).
+- Security agent identity record per Feature 001 identity contract.
+- QA evidence schema; security finding record schema.
+- Any later **code-quality / maintainability** evidence-schema and
+  objective-signal expansion. The CE-native maintainability deep
+  review *rubric, checklist, and reviewer-pane handoff template*
+  (`docs/quality/MAINTAINABILITY_DEEP_REVIEW.md`,
+  `docs/delivery/CODE_QUALITY_REVIEW_CHECKLIST.md`,
+  `templates/hermes/handoffs/REVIEWER_PANE_HANDOFF.template.md`) are
+  authored at the **docs/governance layer only**; any schema enum,
+  validator signal, or reviewer runtime that implements them is a
+  separately ratified future gate (see §e on the active v2 line).
 
 **Deferral rationale**: Feature 002 names these roles in the
 actor/tool ownership matrix with presence category "named in the
 operating model; governed identity record deferred." Instantiating
-their identity records and evidence schemas requires a separate spec
-and ratification, since identity is itself a privileged mutation class.
+their identity records and the remaining evidence schemas requires a
+separate spec and ratification, since identity is itself a privileged
+mutation class. The review-evidence schema and review gate, by
+contrast, are not identity instantiation and have already landed.
+
+**Active v2 line acknowledgment**: the current substrate work runs on
+the active v2 `G2.*` gate line (per
+[`../../specs/v2/_crosswalk.yml`](../../specs/v2/_crosswalk.yml)),
+which carries the connector, extension/hook, and related gates. The
+docs-layer maintainability deep review named above rides a
+docs/governance envelope on that line and does **not**, by itself,
+implement any v2.x schema, validator, or runtime work; those remain
+separately ratified future gates.
 
 ## e. Feature 005 — Parallel Controller Orchestration (PCO) (scope summary)
 
@@ -440,7 +473,7 @@ Concretely, v1.0 requires:
 | Feature | Owns | Deferred from Feature 002 because |
 |---|---|---|
 | 003 | `.github/` workflows, PR templates, branch protection, CI checks | Feature 002 is specification-only at the operating-model layer; wiring CI is a privileged `governance`/`security`/`deploy` mutation that requires its own spec/plan/tasks triple. |
-| 004 | Codex / QA / security identity records and evidence schemas | Identity is a privileged mutation class (Feature 001 FR-008); each governed identity requires its own ratified spec. Feature 002 names the roles and reserves their surfaces. |
+| 004 | Governed reviewer / QA / security identity instantiation and the QA / security evidence schemas (the review-evidence schema and review gate have already landed; see §d) | Identity is a privileged mutation class (Feature 001 FR-008); each governed identity requires its own ratified spec. Feature 002 names the roles and reserves their surfaces. |
 | 005 | Parallel Controller Orchestration (PCO): active-work ledger, conflict validator, worktree allocator, pane registry, side-effect ledger, `pco-fanin`, integration queue, and the dispatcher / sandbox runtime previously planned under Feature 005. | Feature 002 specifies the manual protocol the orchestration substrate must obey; building automation before the manual coordination substrate is rehearsed risks freezing a wrong protocol into code. |
 | 006 | Release records, deploy attestations, rollback evidence, GitHub environments, Source-approved deploy gates | The `deploy` mutation class is Source-only per Feature 001 FR-008; deploy targets do not yet exist. |
 

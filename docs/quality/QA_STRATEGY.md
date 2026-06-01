@@ -191,6 +191,43 @@ Post-Feature-006, the release-readiness checklist will include:
 The release-readiness checklist itself is a `governance`-class
 artifact and its content is Source-ratified.
 
+## g. Behavioral QA vs. maintainability review
+
+Behavioral QA (this document) and **maintainability review**
+([`./MAINTAINABILITY_DEEP_REVIEW.md`](./MAINTAINABILITY_DEEP_REVIEW.md),
+[`../delivery/CODE_QUALITY_REVIEW_CHECKLIST.md`](../delivery/CODE_QUALITY_REVIEW_CHECKLIST.md))
+are complementary and orthogonal dimensions:
+
+- **Behavioral QA asks: does it work?** The seven testing levels (§a)
+  and the level-to-mutation-class mapping (§b) verify that a change
+  behaves correctly — unit, integration, e2e, security, accessibility,
+  performance, regression.
+- **Maintainability review asks: is it well-structured?** It judges
+  decomposition, branching, schema/type boundaries, layer placement,
+  helper reuse, and atomicity, and it can raise a blocking
+  **structural regression**.
+
+The two are evaluated independently, and neither erases the other:
+
+1. **QA / test success does not erase a structural review blocker.** A
+   green test run, a green CI run, or a passing validator run is
+   behavioral verification; it does **not** clear a blocking
+   maintainability finding. A change that passes every test but worsens
+   the structure is a structural regression and blocks the review gate
+   ([`../delivery/REVIEW_GATE.md`](../delivery/REVIEW_GATE.md) §i.5,
+   §o).
+2. A maintainability block does not, by itself, imply a behavioral
+   defect, and a behavioral defect is not, by itself, a maintainability
+   finding; each is recorded under its own gate.
+3. Neither QA evidence nor review evidence is Source ratification. Both
+   are advisory/governance evidence with no merge, deploy,
+   branch-protection, or repository-settings authority.
+
+This section names the QA-vs-maintainability boundary; it adds no
+testing level, no mutation-class mapping, and no schema. The QA agent
+identity and QA evidence schema remain deferred to Feature 004 per §c
+and §d.
+
 ## Acceptance posture for this document
 
 This QA_STRATEGY.md satisfies Feature 002 Canonical Document
@@ -198,4 +235,6 @@ Specification #13: the testing-level-to-mutation-class table covers
 all nine baseline classes; the QA agent role appears in the
 Actor/Tool Ownership Matrix and is summarized here; Feature 004 and
 Feature 006 deferrals are flagged per FR-021 without inventing
-competing contracts.
+competing contracts. It additionally distinguishes behavioral QA from
+maintainability review and states that QA/test success does not erase a
+structural review blocker (§g).
