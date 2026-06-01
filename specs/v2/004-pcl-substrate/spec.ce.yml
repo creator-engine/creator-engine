@@ -13,10 +13,10 @@ spec:
   release_line: v2.0-foundation
 
 gate:
-  id: G2.004.2
+  id: G2.004.1
   feature_binding: specs/v2/004
-  slice: "2"
-  title: federated identity binding + distributed claim substrate
+  slice: "1"
+  title: PCL runtime
   layer: 2
   predecessor_gate:
     id: G2.004.0
@@ -24,13 +24,15 @@ gate:
     title: PCL record substrate
     status: merged
   note: >-
-    G2.004.0 landed the PCL record substrate (PR #94, merged). G2.004.2 is the
-    active slice: it adds the federated identity binding and distributed claim
-    shape-only record families. It depends only on G2.004.0, is authored in
-    parallel with the CE-event runtime gate G2.003.1, ratifies nothing, activates
-    no runtime, and binds no active authority. The PCL runtime gate G2.004.1
-    (depends on G2.004.0 and G2.003.1) and the federated-identity / distributed-
-    claim runtime remain separate, deferred, Operator-ratified gates.
+    Slice-order note: G2.004.0 (record substrate, PR #94) and G2.004.2 (federated
+    identity + distributed claim substrate, PR #96) landed before this runtime
+    slice because G2.004.1 was dependency-gated on G2.003.1 (CE-event runtime, PR
+    #97, now merged). G2.004.1 is the active slice: it adds the
+    `ce pcl {append,verify,replay,index,merge}` runtime over the tracked
+    .ce/pcl/records/ home (the rebuildable index/merge cache lives under the
+    ignored .ce/pcl/cache/). It reuses the G2.004.0 validator for every shape
+    decision, imports no CE-event or distributed-identity code, ratifies nothing,
+    performs no signing or key custody, and activates no operating mode.
 
 authority_basis:
   ratified_prompt:
@@ -42,10 +44,15 @@ authority_basis:
   ratified_prompt_g2_004_2:
     path: .hermes/research/g20042-distributed-identity-substrate-planning-20260531T105922Z/recommended-next/NEXT_OPERATOR_G20042_DISTRIBUTED_IDENTITY_SUBSTRATE_AUTOMODE_EXECUTION_PROMPT_20260531T105922Z.md
     sha256: 707c6e6023768e5d68da033123feeae5a342181e8bb59ed3435e19cde5757ba0
+  ratified_prompt_g2_004_1:
+    path: .hermes/research/g20041-pcl-runtime-planning-20260531T164841Z/recommended-next/NEXT_OPERATOR_G20041_PCL_RUNTIME_AUTOMODE_EXECUTION_PROMPT_20260531T164841Z.md
+    sha256: e8c0590f01949836c6fa7a449f73adbe30e773e9e00efcf52740e60df6e00279
   note: >-
-    This sidecar records G2.004.0 and G2.004.2 substrate authority only. It
-    ratifies nothing and does not activate the ce pcl runtime, .ce/pcl/ live
-    writes, the federated-identity runtime, or the distributed-claim runtime.
+    This sidecar records G2.004.0 + G2.004.2 substrate authority and the G2.004.1
+    runtime authority. It ratifies nothing, performs no signing or key custody,
+    and does not activate any operating mode; PCL records are tracked-or-synced
+    under .ce/pcl/records/ and the index/merge cache is git-ignored under
+    .ce/pcl/cache/.
 
 operating_mode_relevance:
   modes: [strict, auto, transcendence]
@@ -188,6 +195,46 @@ requirements:
     statement: Stop before distributed-identity/claim runtime, .ce/ live writes, signing, key custody, connector, queue, CI, deploy, or runtime autonomy activation.
     decisions: [OD-23]
     risk_refs: [RISK-RV2-004-DI-SCOPE]
+  - id: RV2-004-023
+    spec_md_ref: FR-023
+    statement: ce pcl append validates a record against the G2.004.0 schema and the chain head before writing it content-addressed to the tracked .ce/pcl/records/ home; all refusals raise before any write.
+    decisions: [OD-08, OD-09]
+    risk_refs: [RISK-RV2-004-RT-WRITE]
+  - id: RV2-004-024
+    spec_md_ref: FR-024
+    statement: ce pcl verify reconstructs and validates the on-disk chain fail-closed (content addressing, linkage, role floor, mode, signature, pointer shape, head agreement).
+    decisions: [OD-09]
+    risk_refs: [RISK-RV2-004-RT-CHAIN]
+  - id: RV2-004-025
+    spec_md_ref: FR-025
+    statement: ce pcl replay emits a deterministic ordered read-only projection of the verified chain.
+    decisions: [OD-09]
+    risk_refs: [RISK-RV2-004-RT-NONDET]
+  - id: RV2-004-026
+    spec_md_ref: FR-026
+    statement: ce pcl index builds a deterministic content-hashed index written only to the git-ignored .ce/pcl/cache/.
+    decisions: [OD-09]
+    risk_refs: [RISK-RV2-004-RT-NONDET]
+  - id: RV2-004-027
+    spec_md_ref: FR-027
+    statement: ce pcl merge deterministically unions verified ledgers and fails closed on any fork; merge never mutates authoritative records and never ratifies.
+    decisions: [OD-09]
+    risk_refs: [RISK-RV2-004-RT-FORK]
+  - id: RV2-004-028
+    spec_md_ref: FR-028
+    statement: Records are tracked-or-synced under .ce/pcl/records/; the rebuildable cache under .ce/pcl/cache/ must be git-ignored; legacy .hermes/ active writes are refused.
+    decisions: [OD-06A, OD-09]
+    risk_refs: [RISK-RV2-004-RT-STATE]
+  - id: RV2-004-029
+    spec_md_ref: FR-029
+    statement: The runtime preserves the privileged floor (non-ratifying emitting_role, reserved-inactive signature, no signing/key custody), reuses the G2.004.0 validator, and imports no CE-event or distributed-identity code.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-004-RT-FLOOR, RISK-RV2-004-RT-COUPLE]
+  - id: RV2-004-030
+    spec_md_ref: FR-030
+    statement: Stop before real signing/key custody, federated-identity/distributed-claim runtime, connector/queue runtime, CI/deploy hooks, and auto/transcendence activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-004-RT-FLOOR]
 
 risk_inventory:
   - id: RISK-RV2-004-SHAPE
@@ -346,6 +393,48 @@ risk_inventory:
     description: A binding or claim context names an unratified or ambiguous autonomy mode.
     severity: high
     required_validation_refs: [VAL-FIB-MODE-ENUM, VAL-DC-MODE-ENUM]
+  - id: RISK-RV2-004-RT-WRITE
+    title: Runtime writes an invalid or forged record.
+    relevance: [attestation, runtime]
+    description: ce pcl append writes a record that fails the landed shape/role/mode/signature floor or is not content-addressed.
+    severity: critical
+    required_validation_refs: [VAL-PCL-RT-APPEND, VAL-PCL-RT-FLOOR]
+  - id: RISK-RV2-004-RT-CHAIN
+    title: Verify misses a broken or forged chain.
+    relevance: [audit, runtime]
+    description: ce pcl verify accepts a forged content_hash or a broken parent-hash linkage.
+    severity: critical
+    required_validation_refs: [VAL-PCL-RT-VERIFY]
+  - id: RISK-RV2-004-RT-NONDET
+    title: Non-deterministic replay or index.
+    relevance: [quality, runtime]
+    description: replay/index output varies across runs, breaking reproducibility.
+    severity: high
+    required_validation_refs: [VAL-PCL-RT-REPLAY, VAL-PCL-RT-INDEX]
+  - id: RISK-RV2-004-RT-FORK
+    title: Merge silently resolves a fork.
+    relevance: [governance, runtime]
+    description: ce pcl merge combines divergent ledgers without failing closed on a fork, or mutates authoritative records.
+    severity: critical
+    required_validation_refs: [VAL-PCL-RT-MERGE]
+  - id: RISK-RV2-004-RT-STATE
+    title: State-boundary violation.
+    relevance: [state-boundary, runtime]
+    description: Records are written to an ignored path or under legacy .hermes/, or the rebuildable cache is tracked.
+    severity: high
+    required_validation_refs: [VAL-PCL-RT-STATE-BOUNDARY]
+  - id: RISK-RV2-004-RT-FLOOR
+    title: Runtime bypasses the privileged floor or activates a mode.
+    relevance: [governance, identity, runtime]
+    description: The runtime emits with a ratifying role, activates a signature/mode, or performs signing/key custody before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-PCL-RT-FLOOR]
+  - id: RISK-RV2-004-RT-COUPLE
+    title: Runtime couples to CE-event or distributed-identity code.
+    relevance: [state-boundary, runtime]
+    description: pcl_runtime imports CE-event or distributed-identity code instead of opaque-hash references, breaking decoupling.
+    severity: high
+    required_validation_refs: [VAL-PCL-RT-DECOUPLE]
 
 required_validation:
   - id: VAL-PCL-SCHEMA
@@ -498,8 +587,49 @@ required_validation:
     planned_slice: G2.004.2
     planned_validator: distributed_claim
     status: implemented
+  - id: VAL-PCL-RT-APPEND
+    description: ce pcl append validates + content-addresses before write and refuses role/mode/kind/signature/write-freeze violations before any write.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-VERIFY
+    description: ce pcl verify fails closed on forged content hashes and broken chain linkage.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-REPLAY
+    description: ce pcl replay is deterministic across runs.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-INDEX
+    description: ce pcl index is deterministic and writes only to the git-ignored cache.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-MERGE
+    description: ce pcl merge fails closed on a fork and never mutates authoritative records.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-STATE-BOUNDARY
+    description: Records stay tracked-or-synced; the cache must be git-ignored; legacy .hermes/ writes refused.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-FLOOR
+    description: The runtime preserves the non-ratifying role floor, reserved-inactive signature, and no signing/key custody.
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
+  - id: VAL-PCL-RT-DECOUPLE
+    description: pcl_runtime imports no CE-event or distributed-identity code (AST-asserted).
+    planned_slice: G2.004.1
+    planned_validator: pcl_runtime
+    status: implemented
 
 crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/004
 adr_refs:
   - specs/v2/adrs/ADR-V2-004-pcl-substrate.md
   - specs/v2/adrs/ADR-V2-005-distributed-identity-substrate.md
+  - specs/v2/adrs/ADR-V2-004-1-pcl-runtime.md

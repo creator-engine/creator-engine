@@ -208,3 +208,92 @@ scope.
   code.
 - PR review, approval, merge, and cleanup remain separate Operator-ratified
   gates; canonical-branch integration is serialized with G2.003.1.
+
+# G2.004.1 — PCL runtime
+
+## Goal
+
+G2.004.1 turns the merged G2.004.0 PCL record substrate into an executable,
+local, daemonless, network-free `ce pcl {append,verify,replay,index,merge}`
+runtime over the per-repo authoritative `.ce/pcl/` state. It depends on
+G2.004.0 (record substrate) and G2.003.1 (CE-event runtime, now merged) and
+lands after the G2.004.2 substrate slice because it was dependency-gated on
+G2.003.1.
+
+## Scope
+
+Adds `validators/creator_engine_validator/pcl_runtime.py`, a `pcl` subcommand
+group on the `ce` CLI, the `.ce/pcl/cache/` ignore posture, the runtime ADR, and
+this spec/sidecar runtime slice. It reuses the G2.004.0 validator for every shape
+decision (a runtime record is byte-identical to what `pcl_record` already
+accepts) and imports no CE-event or distributed-identity code. It performs no
+cryptography, no key custody, and activates no operating mode.
+
+## Functional requirements
+
+### FR-023 — `ce pcl append`
+
+`append` MUST compute `parent_hash` from the current head, assign the monotonic
+`sequence` (`0` for genesis), compute `content_hash` with the G2.004.0 canonical
+rule, self-validate against the landed record schema (and the opaque-pointer
+shape for `event_block_pointer`), then atomically write the record + head
+manifest under the tracked `.ce/pcl/records/<ledger>/`. Role-floor, unknown-mode,
+unknown-record-kind, non-reserved-signature, and `.hermes/` write-freeze refusals
+MUST raise before any write, leaving the records dir byte-identical.
+
+### FR-024 — `ce pcl verify`
+
+`verify` MUST reconstruct the on-disk chain and fail closed on schema violations,
+forged content hashes, broken/forked parent-hash linkage, role-floor/mode/
+signature violations, malformed event-block pointers, and head-manifest
+disagreement, delegating shape to the landed `pcl_record` validator.
+
+### FR-025 — `ce pcl replay`
+
+`replay` MUST emit a deterministic, ordered, read-only projection of the verified
+chain (byte-identical across runs).
+
+### FR-026 — `ce pcl index`
+
+`index` MUST build a deterministic content-hashed index written only to the
+git-ignored `.ce/pcl/cache/<ledger>/`; it is never authoritative and is fully
+rebuildable from the records.
+
+### FR-027 — `ce pcl merge`
+
+`merge` MUST deterministically union two-or-more verified ledgers, fail closed on
+any fork (a `parent_hash` with multiple distinct children, or a `sequence`
+claimed by distinct records), never mutate authoritative records, and never
+ratify. The merge projection is written only to the ignored cache.
+
+### FR-028 — State boundary
+
+`.ce/pcl/records/` is the per-repo authoritative tracked-or-synced home (NOT
+git-ignored); `.ce/pcl/cache/` is git-ignored. Active writes under legacy
+`.hermes/` paths are refused.
+
+### FR-029 — Privileged floor + decoupling
+
+The runtime preserves the canonical non-ratifying `emitting_role` floor, keeps
+`signature` shape-only `reserved-inactive` (no signing/key custody), reuses the
+G2.004.0 validator, and imports no CE-event or distributed-identity code.
+
+### FR-030 — Substrate→runtime stop line
+
+No real signing/key custody, federated-identity/distributed-claim runtime,
+connector/queue runtime, CI/deploy hooks, or auto/transcendence activation.
+
+## Success criteria (G2.004.1)
+
+- `ce pcl append`→`verify`→`replay`→`index`→`merge` round-trip green; refusals
+  return non-zero with stable `G2-PCL-*` codes and leave the records dir
+  byte-identical.
+- Records under `.ce/pcl/records/` are git-trackable; the `.ce/pcl/cache/` index/
+  merge projections are git-ignored.
+- A runtime-produced record passes the unchanged `pcl_record` validator; the
+  runtime imports no CE-event or distributed-identity code.
+- The extended sidecar passes the v2 sidecar/role/terminology/crosswalk checks
+  without mutating `specs/v2/_crosswalk.yml`; the full validator suite introduces
+  no new failures.
+- PR review, approval, merge, and cleanup remain separate Operator-ratified
+  gates.
