@@ -66,6 +66,17 @@ ce_hook_invoke() {
     return 0
 }
 
+# G2.007.3 reviewer-venue authority injection. A distinct CE reviewer venue
+# (`ce lane launch --role reviewer --lane-kind review --reviewer-authority-ref ...`)
+# exports the launch-pinned envelope ref as CE_REVIEWER_AUTHORITY_REF into the pane
+# environment. Echo it (single value, safe to quote) so the entry hook can forward it
+# to the validator as `--reviewer-authority-ref`, which injects it as
+# `ce.reviewer_authority_ref` before `hook_check.build_context()`. Empty/unset prints
+# nothing — fail-closed: no authority, restricted mechanics stay denied.
+ce_hook_reviewer_authority_ref() {
+    printf '%s\n' "${CE_REVIEWER_AUTHORITY_REF:-}"
+}
+
 # Best-effort observability: append one advisory, non-blocking NDJSON record
 # under the ignored `.hermes/` evidence root. Never blocks, never fails the hook.
 # Usage: ce_hook_log_observation <posture_root> <hook_event_name>

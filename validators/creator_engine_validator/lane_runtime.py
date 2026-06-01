@@ -51,6 +51,14 @@ ELEVATED_MODES = frozenset({"auto", "transcendence"})
 DEFAULT_OPERATING_MODE = "strict"
 LANE_KINDS = frozenset({"read-only", "implementation", "review", "approval", "merge", "audit"})
 
+# G2.007.3 reviewer venue. A distinct reviewer venue is exactly role=reviewer +
+# lane_kind=review; only such a venue may carry an injected reviewer-authority ref.
+# The ref is exported to the pane environment under this launch-pinned env var; the
+# in-band CC-G-C hook reads it and forwards it as ce.reviewer_authority_ref.
+REVIEWER_VENUE_ROLE = "reviewer"
+REVIEWER_VENUE_LANE_KIND = "review"
+CE_REVIEWER_AUTHORITY_ENV = "CE_REVIEWER_AUTHORITY_REF"
+
 DEFAULT_HOST_ID = "operator-host"
 DEFAULT_SESSION = "ce-lane"
 TMUX_TERMINAL_KIND = "tmux"
@@ -134,6 +142,21 @@ class ClaudeLaunchRefused(LaneLaunchError):
     code = "G3-CLAUDE-REFUSED"
 
 
+class ReviewerAuthorityInvalid(LaneLaunchError):
+    """G2.007.3: a ``reviewer_authority_ref`` is missing or not a schema-valid
+    reviewer-authority envelope. Fail-closed: refused before any side effect."""
+
+    code = "G3-REVIEWER-AUTHORITY-INVALID"
+
+
+class ReviewerVenueIdentityInvalid(LaneLaunchError):
+    """G2.007.3: a ``reviewer_authority_ref`` was supplied for a lane that is not a
+    distinct reviewer venue (role=reviewer + lane_kind=review). Refused before any
+    side effect so reviewer authority can only ride a genuine reviewer venue."""
+
+    code = "G3-REVIEWER-VENUE-IDENTITY"
+
+
 # G2.002.1 operating-mode runtime-carrier refusals. Each is raised before any
 # side effect (no tmux spawn, no Pane Registry write, no ledger write), mirroring
 # the G3-* ordering. They preserve — never relax — the Operator-only floor.
@@ -202,6 +225,10 @@ class LaunchResult:
     operating_mode: str = DEFAULT_OPERATING_MODE
     autonomy_class: str | None = None
     lane_kind: str | None = None
+    # G2.007.3: the validated reviewer-authority envelope ref injected into this
+    # reviewer venue (exported to the pane env + recorded in the ignored sidecar).
+    # ``None`` for non-reviewer lanes or a reviewer lane launched without a ref.
+    reviewer_authority_ref: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +286,49 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
     from . import hook_pack_confirm
 
     return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
+
+
+def is_distinct_reviewer_venue(*, role: str | None, lane_kind: str | None) -> bool:
+    """True iff ``role``/``lane_kind`` form a distinct CE reviewer venue.
+
+    The canonical-root authoring Controller seat is NOT a reviewer venue. A live
+    reviewer pane proves a distinct review role/lane only when it is launched as
+    ``role=reviewer`` AND ``lane_kind=review`` (G2.007.3). The check is the single
+    place that definition lives, so launch-time binding and post-hoc evidence
+    validation never diverge.
+    """
+    norm_role = str(role).strip().lower() if role is not None else None
+    norm_kind = str(lane_kind).strip().lower() if lane_kind is not None else None
+    return norm_role == REVIEWER_VENUE_ROLE and norm_kind == REVIEWER_VENUE_LANE_KIND
+
+
+def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Path | str) -> str:
+    """Resolve + validate a reviewer-authority envelope ref. Fail-closed.
+
+    Returns the (unchanged, repo-relative) ref on success so the caller can both
+    export it to the pane env and record it. Raises :class:`ReviewerAuthorityInvalid`
+    when the file is missing or is not a schema-valid ``reviewer_authority_envelope``.
+    """
+    from .checks.reviewer_authority_envelope import (
+        validate_reviewer_authority_envelope_file,
+    )
+
+    repo_root = Path(repo_root)
+    candidates = [repo_root / reviewer_authority_ref, Path(reviewer_authority_ref)]
+    resolved = next((c for c in candidates if c.is_file()), None)
+    if resolved is None:
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {reviewer_authority_ref!r} not found under "
+            f"{repo_root} (or as an absolute path); refusing before any side effect"
+        )
+    errors = validate_reviewer_authority_envelope_file(resolved)
+    if errors:
+        detail = "; ".join(e.format() for e in errors[:3])
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {reviewer_authority_ref!r} is not a schema-valid "
+            f"reviewer-authority envelope: {detail}"
+        )
+    return reviewer_authority_ref
 
 
 @dataclass(frozen=True)
@@ -395,6 +465,7 @@ def launch(
     lane_kind: str | None = None,
     tenant_policy: Path | str | None = None,
     ratification_evidence_ref: str | None = None,
+    reviewer_authority_ref: str | None = None,
 ) -> LaunchResult:
     """Launch a governed visible lane and write its Pane Registry record.
 
@@ -415,6 +486,21 @@ def launch(
         tenant_policy=tenant_policy,
         ratification_evidence_ref=ratification_evidence_ref,
     )
+
+    # 0b. G2.007.3 reviewer-venue authority injection. A reviewer_authority_ref may
+    #     ride ONLY a distinct reviewer venue (role=reviewer + lane_kind=review), and
+    #     it must resolve to a schema-valid reviewer-authority envelope. Both checks
+    #     are pure and raise before any side effect (no tmux spawn, no pane write).
+    if reviewer_authority_ref is not None:
+        if not is_distinct_reviewer_venue(role=role, lane_kind=mode_resolution.lane_kind):
+            raise ReviewerVenueIdentityInvalid(
+                f"reviewer_authority_ref requires a distinct reviewer venue "
+                f"(role={REVIEWER_VENUE_ROLE!r} + lane_kind={REVIEWER_VENUE_LANE_KIND!r}); "
+                f"got role={role!r} lane_kind={mode_resolution.lane_kind!r}"
+            )
+        reviewer_authority_ref = _validate_reviewer_authority_ref(
+            reviewer_authority_ref, repo_root
+        )
 
     # 1. Prompt pointer must exist and match its SHA (RV1-031) — before side effects.
     if not prompt.is_file():
@@ -544,15 +630,23 @@ def launch(
 
     # --- Side effects begin here ---
 
-    # 7. Spawn/attach the tmux pane running the (possibly governed) command.
+    # 7. Spawn/attach the tmux pane running the (possibly governed) command. A
+    #    validated reviewer venue carries its authority ref as a launch-pinned env
+    #    var so the in-band hook can forward it as ce.reviewer_authority_ref.
     session_name = session or DEFAULT_SESSION
     window_name = window or lane_id
+    pane_env = (
+        {CE_REVIEWER_AUTHORITY_ENV: reviewer_authority_ref}
+        if reviewer_authority_ref
+        else None
+    )
     try:
         pane = adapter.ensure_pane(
             session=session_name,
             window=window_name,
             command=launch_command,
             cwd=worktree_path or None,
+            env=pane_env,
         )
     except TmuxUnavailable as exc:
         raise TmuxUnavailableError(str(exc)) from exc
@@ -607,11 +701,27 @@ def launch(
         )
     _atomic_write(pane_path, yaml.safe_dump(record, sort_keys=True))
 
-    # 9. CC-G-D: persist the governed-Claude audit + deterministic closeout
-    #    pointers to an ignored sidecar (never the tracked-shape pane record).
-    if claude_governance is not None:
+    # 9. Persist ignored governance sidecar (never the schema-locked pane record):
+    #    the CC-G-D governed-Claude audit + closeout pointers, and — G2.007.3 — the
+    #    distinct reviewer venue identity (role/lane_kind) plus the injected
+    #    reviewer_authority_ref, so the venue's authority is auditable from CE evidence.
+    sidecar_payload: dict[str, Any] = dict(claude_governance) if claude_governance else {}
+    if reviewer_authority_ref or is_distinct_reviewer_venue(
+        role=role, lane_kind=mode_resolution.lane_kind
+    ):
+        sidecar_payload.update(
+            {
+                "reviewer_venue": is_distinct_reviewer_venue(
+                    role=role, lane_kind=mode_resolution.lane_kind
+                ),
+                "role": role,
+                "lane_kind": mode_resolution.lane_kind,
+                "reviewer_authority_ref": reviewer_authority_ref,
+            }
+        )
+    if sidecar_payload:
         sidecar = _governance_sidecar_path(ledger_root, controller_id, lane_id)
-        _atomic_write(sidecar, json.dumps(claude_governance, indent=2, sort_keys=True))
+        _atomic_write(sidecar, json.dumps(sidecar_payload, indent=2, sort_keys=True))
 
     return LaunchResult(
         pane_path=pane_path,
@@ -622,6 +732,7 @@ def launch(
         operating_mode=mode_resolution.operating_mode,
         autonomy_class=mode_resolution.autonomy_class,
         lane_kind=mode_resolution.lane_kind,
+        reviewer_authority_ref=reviewer_authority_ref,
     )
 
 

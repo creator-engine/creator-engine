@@ -18,7 +18,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass, replace
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 TMUX_BIN = "tmux"
 
@@ -105,6 +105,7 @@ class TmuxAdapter:
         window: str,
         command: Sequence[str],
         cwd: str | os.PathLike[str] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> TmuxPane:
         """Spawn or attach a tmux pane/window running ``command``; return its identity.
 
@@ -116,6 +117,11 @@ class TmuxAdapter:
         ``-c <cwd>`` and then *verified* against the pane's reported
         ``pane_current_path``; a mismatch raises :class:`TmuxCwdMismatch` so a
         lane can never silently run outside its allocated worktree.
+
+        When ``env`` is given, each ``KEY: VALUE`` pair is pinned into the new
+        session/window environment via tmux ``-e KEY=VALUE`` (emitted before the
+        pane command). This is the launch-pinned carrier the in-band hook reads;
+        the values are passed to tmux only and are never printed.
         """
         if not self.is_available():
             raise TmuxUnavailable(
@@ -124,11 +130,16 @@ class TmuxAdapter:
 
         command = list(command)
         cwd_args = ["-c", str(cwd)] if cwd is not None else []
+        env_args: list[str] = []
+        if env:
+            for key, value in env.items():
+                env_args += ["-e", f"{key}={value}"]
         if self._session_exists(session):
             argv = [
                 self._tmux_bin, "new-window", "-d",
                 "-t", session, "-n", window,
                 *cwd_args,
+                *env_args,
                 "-P", "-F", _IDENTITY_FORMAT,
                 *command,
             ]
@@ -137,6 +148,7 @@ class TmuxAdapter:
                 self._tmux_bin, "new-session", "-d",
                 "-s", session, "-n", window,
                 *cwd_args,
+                *env_args,
                 "-P", "-F", _IDENTITY_FORMAT,
                 *command,
             ]
