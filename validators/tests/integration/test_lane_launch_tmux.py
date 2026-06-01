@@ -32,7 +32,7 @@ class DoubleAdapter:
     def is_available(self) -> bool:
         return True
 
-    def ensure_pane(self, *, session, window, command, cwd=None):
+    def ensure_pane(self, *, session, window, command, cwd=None, env=None):
         return TmuxPane(
             session_id="$1", window_id="@2", pane_id="%3",
             pane_tty="/dev/pts/0", pane_pid=1234, pane_cwd=(str(cwd) if cwd else None),

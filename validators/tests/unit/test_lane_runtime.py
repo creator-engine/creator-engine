@@ -32,13 +32,15 @@ class FakeAdapter:
     def __init__(self, *, available: bool = True):
         self._available = available
         self.spawned: list[tuple[str, str, list[str]]] = []
+        self.last_env = None
 
     def is_available(self) -> bool:
         return self._available
 
-    def ensure_pane(self, *, session, window, command, cwd=None):
+    def ensure_pane(self, *, session, window, command, cwd=None, env=None):
         self.spawned.append((session, window, list(command)))
         self.last_cwd = cwd
+        self.last_env = dict(env) if env else None
         return TmuxPane(
             session_id="$1",
             window_id="@2",

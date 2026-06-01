@@ -175,6 +175,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="inherited ratification-evidence pointer carried for elevated modes / privileged lane kinds",
     )
+    launch.add_argument(
+        "--reviewer-authority-ref",
+        dest="reviewer_authority_ref",
+        default=None,
+        help="G2.007.3: reviewer-authority envelope ref for a distinct reviewer venue "
+        "(role=reviewer + --lane-kind review); validated then exported to the pane env "
+        "as CE_REVIEWER_AUTHORITY_REF for the in-band hook",
+    )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
     launch.add_argument("--session", default=None, help="tmux session name")
@@ -651,6 +659,7 @@ def _lane_launch(args) -> int:
             lane_kind=getattr(args, "lane_kind", None),
             tenant_policy=getattr(args, "tenant_policy", None),
             ratification_evidence_ref=getattr(args, "ratification_evidence_ref", None),
+            reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:

@@ -62,7 +62,10 @@ Required arguments: `--controller-id`, `--lane-id`, `--role`, `--prompt`,
 `--window`, `--worktree-path`, `--branch`, `--envelope-ref`, `--no-tmux`.
 G2.002.1 operating-mode carriers (optional): `--operating-mode` (default
 `strict`), `--autonomy-class`, `--lane-kind`, `--tenant-policy`,
-`--ratification-evidence`.
+`--ratification-evidence`. G2.007.3 reviewer-venue carrier (optional):
+`--reviewer-authority-ref` (a reviewer-authority envelope ref for a distinct
+reviewer venue; see step 0b and
+[`./REVIEWER_VENUE_AUTHORITY.md`](./REVIEWER_VENUE_AUTHORITY.md) §4).
 
 The launch sequence, **with every refusal raised before any side effect**:
 
@@ -78,6 +81,20 @@ The launch sequence, **with every refusal raised before any side effect**:
    as a privileged ratifier (`G2-PRIVILEGED-RATIFIER-INVALID`) is refused in
    every mode. These carriers record posture only and mint no authority; the
    Operator-only privileged floor is preserved unchanged.
+0b. **Reviewer-venue authority injection (G2.007.3).** When
+   `--reviewer-authority-ref` is supplied, the lane must be a distinct reviewer
+   venue — `--role reviewer` **and** `--lane-kind review`
+   (`is_distinct_reviewer_venue`); otherwise refuse `G3-REVIEWER-VENUE-IDENTITY`.
+   The ref must resolve (under `--repo-root` or as an absolute path) to a
+   schema-valid reviewer-authority envelope; otherwise refuse
+   `G3-REVIEWER-AUTHORITY-INVALID`. Both refusals raise before any side effect.
+   On success the validated ref is exported into the pane environment as
+   `CE_REVIEWER_AUTHORITY_REF` (via tmux `-e`, never printed) and the venue
+   identity is recorded in the ignored governance sidecar; the in-band
+   `.claude/hooks/ce-pretooluse.sh` forwards it to the validator as
+   `--reviewer-authority-ref`, which injects `ce.reviewer_authority_ref` before
+   `hook_check.build_context()`. Fail-closed: with no ref, no authority is
+   carried and restricted mechanics stay denied.
 1. **Prompt pointer + SHA (RV1-031).** The `--prompt` path must exist; its
    byte-level SHA256 must equal `--prompt-sha`. Refuse on missing path or
    mismatch.

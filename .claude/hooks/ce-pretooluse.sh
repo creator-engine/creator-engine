@@ -18,8 +18,19 @@ CE_HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CE_REPO_ROOT=$(ce_hook_repo_root "$CE_HOOK_DIR")
 CE_POSTURE_ROOT=$(ce_hook_posture_root "$CE_REPO_ROOT")
 
-ce_hook_invoke "$CE_REPO_ROOT" \
-    hook-check --stdin --format claude \
-    --posture-root "$CE_POSTURE_ROOT" --evidence-root .hermes
+# G2.007.3: forward the launch-pinned reviewer-venue authority ref (if any) so the
+# validator injects it as ce.reviewer_authority_ref before build_context(). Unset =>
+# omit the flag entirely (fail-closed: no authority, restricted mechanics denied).
+CE_RVA_REF=$(ce_hook_reviewer_authority_ref)
+if [ -n "$CE_RVA_REF" ]; then
+    ce_hook_invoke "$CE_REPO_ROOT" \
+        hook-check --stdin --format claude \
+        --posture-root "$CE_POSTURE_ROOT" --evidence-root .hermes \
+        --reviewer-authority-ref "$CE_RVA_REF"
+else
+    ce_hook_invoke "$CE_REPO_ROOT" \
+        hook-check --stdin --format claude \
+        --posture-root "$CE_POSTURE_ROOT" --evidence-root .hermes
+fi
 
 exit 0

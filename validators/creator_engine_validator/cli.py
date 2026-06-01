@@ -156,6 +156,13 @@ def _build_parser() -> argparse.ArgumentParser:
     hook_check_p.add_argument("--evidence-root", default=None, help="ignored evidence-root prefix the gate may write under")
     hook_check_p.add_argument("--closeout-file", default=None, help="path to the Stop closeout text to verify")
     hook_check_p.add_argument("--completion-report", default=None, help="completion-report artifact to validate on Stop")
+    hook_check_p.add_argument(
+        "--reviewer-authority-ref",
+        dest="reviewer_authority_ref",
+        default=None,
+        help="launch-pinned reviewer-authority envelope ref injected as ce.reviewer_authority_ref "
+        "before context resolution (G2.007.3); resolved under --posture-root",
+    )
 
     pco_release = sub.add_parser(
         "pco-release",
@@ -437,6 +444,19 @@ def _hook_check(args) -> int:
     if not isinstance(event, dict):
         print("ERROR: hook-check: event JSON must be an object", file=sys.stderr)
         return 2
+
+    # G2.007.3: a live reviewer venue exports its authority ref via the launch-pinned
+    # environment; the hook forwards it here. Inject it as ce.reviewer_authority_ref so
+    # build_context() resolves it exactly as the synthetic probes proved — but never
+    # override an event that already carries its own ce authority (the event wins).
+    ref = getattr(args, "reviewer_authority_ref", None)
+    if ref:
+        ce = event.get("ce")
+        if not isinstance(ce, dict):
+            ce = {}
+            event["ce"] = ce
+        if "reviewer_authority_ref" not in ce and "reviewer_authority" not in ce:
+            ce["reviewer_authority_ref"] = ref
 
     context = hc.build_context(
         event,
