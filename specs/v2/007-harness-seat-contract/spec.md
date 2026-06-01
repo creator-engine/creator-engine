@@ -76,3 +76,64 @@ G2.006.0 `extension_hook_contract`.
   v0.1 baseline taxonomy unchanged.
 - PR review, approval, merge, and cleanup remain separate ratified batches (review in a
   distinct CE-governed reviewer venue, not author self-review).
+
+# G2.007.2 — reviewer-venue side-effect-authority seam
+
+## Goal
+
+G2.007.2 builds the runtime seam that lets a distinct CE-governed reviewer venue legitimately
+perform the `pr_review` restricted mechanic: a bounded, auditable `reviewer_authority_envelope`
+that the Ring-2 hook (`hook_check`) honors for exactly one mechanic on exactly one PR. It resolves
+the governance debt from PR #106 (whose distinct-venue review was correctly hard-denied submission
+and landed once via an Operator override). It depends on the merged `G2.006.0` + `G2.007.0`, is
+class O (`governance`+`identity`+`security`), and is the runtime continuation of the 007 seat line
+(sequenced before `G2.007.1`).
+
+## Scope
+
+Adds `schemas/reviewer-authority-envelope.schema.yaml`, the `reviewer_authority_envelope` validator
+(registered via `checks/__init__.py`), the prose contract `docs/operations/REVIEWER_VENUE_AUTHORITY.md`,
+examples, and this spec slice + ADR. **Modifies the Ring-2 enforcement engine `hook_check.py`**
+(authority resolution + the restricted-mechanic decision) — the first gate to do so — but **not**
+`.claude/**` (Ring-1 wrapper/settings), `ce launch`/the launcher, or any other existing check.
+Backward-compatible: with no valid envelope, behavior is unchanged. The launcher minting path and
+hook-side head/actor verification are deferred.
+
+## Functional requirements
+
+### FR-007 — Reviewer-authority envelope shape
+
+The substrate MUST define a `reviewer_authority_envelope` record: `envelope_id`, `mechanic`
+(`pr_review`), `pr_number`, `head_sha`, `actor`, `ratified_prompt_sha`, `emitting_role`,
+`operating_mode`, `recorded_at`, optional `metadata`. The validator MUST reject unknown mechanics
+(`VAL-RVA-MECHANIC`), missing bindings (`VAL-RVA-BINDING`), non-canonical roles/unknown modes
+(`VAL-RVA-ROLE`/`VAL-RVA-MODE`), inline secrets (`VAL-RVA-SECRET`), and inline Markdown metadata
+(`VAL-RVA-NO-INLINE`).
+
+### FR-008 — Bounded authority resolution + decision
+
+`hook_check.build_context` MUST resolve `side_effect_authority` from a validated bounded envelope
+(not a raw loose token), and `_mechanics_would_deny` MUST allow a restricted mechanic ONLY when the
+envelope's `mechanic` equals the classified action AND (for `pr_review`) the command's target PR
+number equals `pr_number`. Wrong PR / wrong mechanic / no envelope MUST deny; merge/push/comment/
+`ce launch` MUST stay denied.
+
+### FR-009 — Backward compatibility + decoupling
+
+With no/invalid envelope, governed restricted mechanics MUST be denied exactly as before; all other
+hook behavior MUST be unchanged (only the one loose-token test is updated). The gate MUST modify no
+`.claude/**`, launcher, other existing check/schema, or `ce_cli.py`, and carry no secret value.
+
+## Success criteria (G2.007.2)
+
+- `ce check validators/examples/reviewer-authority-envelope` + the tests: the valid example passes;
+  each invalid fixture is refused with its specific `VAL-RVA-*` code.
+- Hook-decision tests: `gh pr review` is denied without authority, allowed only with a valid matching
+  envelope, denied on a wrong PR / wrong mechanic; `gh pr merge`/`git push`/`gh pr comment`/`ce launch`
+  remain denied under a `pr_review` envelope.
+- `--list-checks` includes `reviewer_authority_envelope`; the full suite introduces no new failures;
+  the existing `hook_check` tests stay green except the one updated loose-token test.
+- No `.claude/**`/launcher/other-check/`ce_cli.py` change; `_crosswalk.yml` + the v0.1 baseline
+  taxonomy unchanged; no secret committed.
+- PR review/approval/merge remain separate ratified batches; this gate's own PR lands via a one-time
+  logged Operator override (bootstrap), after which the seam is used legitimately.

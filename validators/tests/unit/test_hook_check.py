@@ -157,13 +157,23 @@ def test_mechanics_classification_reuses_reserved_restricted():
     assert hook_check.classify_mechanics("git status") is None
 
 
-def test_governed_bash_with_side_effect_authority_allows():
-    # Explicit future side-effect authority token opens the seam; default-deny otherwise.
-    ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, side_effect_authority="ratified-token-xyz"
-    )
-    decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
-    assert decision.decision == "allow"
+def test_governed_bash_with_reviewer_authority_envelope_allows_matching_pr_review():
+    # G2.007.2: a bounded, validated reviewer-authority envelope opens exactly its mechanic on
+    # exactly its PR — a raw loose token no longer authorizes anything, and the envelope does not
+    # open an unrelated mechanic.
+    envelope = {
+        "mechanic": "pr_review",
+        "pr_number": 106,
+        "head_sha": "aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+        "actor": "ubuntuaws745-cmyk",
+        "ratified_prompt_sha": "ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27",
+        "emitting_role": "operator",
+        "operating_mode": "strict",
+    }
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST, side_effect_authority=envelope)
+    assert hook_check.evaluate(_bash_event("gh pr review 106 --approve"), ctx).decision == "allow"
+    # the same pr_review envelope does NOT open an unrelated restricted mechanic
+    assert hook_check.evaluate(_bash_event("git push origin main"), ctx).decision == "deny"
 
 
 def test_ungoverned_bash_restricted_is_advisory_allow():

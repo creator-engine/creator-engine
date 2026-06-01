@@ -58,8 +58,11 @@ class HookContext:
     repo-relative tracked paths the active ratified manifest authorizes.
     ``evidence_root`` is the ignored evidence-root prefix the gate may write
     under. ``closeout_text`` / ``completion_report_path`` feed the Stop gate.
-    ``side_effect_authority`` is the (future) explicit token that opens the
-    restricted-mechanics seam.
+    ``side_effect_authority`` is the validated, bounded reviewer-venue authority
+    envelope (a ``reviewer_authority_envelope`` mapping) that opens exactly one
+    restricted mechanic (``pr_review``) on exactly one PR — G2.007.2. ``None`` means
+    no authority (restricted mechanics stay denied under governed posture). A raw
+    string/loose token is NOT honored; only a schema-valid envelope is.
     """
 
     posture: str
@@ -67,7 +70,7 @@ class HookContext:
     evidence_root: str | None = None
     closeout_text: str | None = None
     completion_report_path: str | None = None
-    side_effect_authority: str | None = None
+    side_effect_authority: dict | None = None
     repo_root: str | None = None
 
 
@@ -259,15 +262,46 @@ def _scope_would_deny(file_path: Any, context: HookContext) -> str | None:
     return OUT_OF_MANIFEST_REASON
 
 
+# A reviewer-venue authority envelope authorizes exactly one mechanic + one PR. The
+# hook can verify the mechanic and the target PR number from the command; head/actor/
+# ratified_prompt_sha are auditable bindings the venue honors (the hook cannot re-derive
+# head/actor from the command alone).
+_PR_REVIEW_NUMBER_RE = re.compile(r"\bgh\s+pr\s+review\b[^|;&]*?\b([0-9]+)\b")
+
+
+def _extract_pr_number(command: Any) -> int | None:
+    if not isinstance(command, str):
+        return None
+    match = _PR_REVIEW_NUMBER_RE.search(command)
+    return int(match.group(1)) if match else None
+
+
+def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
+    """True only when a validated reviewer-authority envelope authorizes this exact
+    mechanic AND (for pr_review) the command's target PR number. Any other mechanic,
+    a wrong PR, or no/invalid envelope ⇒ not covered (deny)."""
+    if not isinstance(envelope, dict):
+        return False
+    rec = envelope.get("reviewer_authority_envelope", envelope)
+    if not isinstance(rec, dict):
+        return False
+    if str(rec.get("mechanic", "")).strip().lower() != action:
+        return False
+    if action == "pr_review":
+        pr = _extract_pr_number(command)
+        return pr is not None and pr == rec.get("pr_number")
+    return False
+
+
 def _mechanics_would_deny(command: Any, context: HookContext) -> str | None:
     action = classify_mechanics(command)
     if action is None:
         return None
-    if context.side_effect_authority:
+    if _authority_covers(context.side_effect_authority, action, command):
         return None
     return (
-        f"restricted mechanic ({action}) is denied without explicit ratified "
-        "side-effect authority"
+        f"restricted mechanic ({action}) is denied without a matching ratified "
+        "reviewer-venue side-effect-authority envelope (G2.007.2)"
     )
 
 
@@ -491,6 +525,43 @@ def _resolve_manifest(manifest_doc, ce, posture_root, bound_claim) -> list[str]:
     return []
 
 
+def _resolve_side_effect_authority(ce: dict, posture_root: str | None) -> dict | None:
+    """Resolve a validated, bounded reviewer-venue authority envelope record, or None.
+
+    Accepts an inline ``ce.reviewer_authority`` mapping or a ``ce.reviewer_authority_ref``
+    path (resolved under ``posture_root``). A raw loose token is NOT honored — only a
+    schema-valid ``reviewer_authority_envelope`` is. Fail-closed: any load/validation
+    problem yields ``None`` (no authority).
+    """
+    from .checks.reviewer_authority_envelope import (
+        KEY as _RVA_KEY,
+        validate_reviewer_authority_envelope_record,
+    )
+    from .loader import LoaderError, load_yaml
+
+    candidate: Any = None
+    inline = ce.get("reviewer_authority")
+    if isinstance(inline, dict):
+        candidate = inline if _RVA_KEY in inline else {_RVA_KEY: inline}
+    else:
+        ref = ce.get("reviewer_authority_ref")
+        if isinstance(ref, str) and ref:
+            search = [Path(posture_root) / ref, Path(ref)] if posture_root else [Path(ref)]
+            for path in search:
+                if path.is_file():
+                    try:
+                        candidate = load_yaml(path)
+                    except LoaderError:
+                        candidate = None
+                    break
+    if not isinstance(candidate, dict):
+        return None
+    if validate_reviewer_authority_envelope_record(candidate, Path(posture_root or ".")):
+        return None
+    rec = candidate.get(_RVA_KEY)
+    return rec if isinstance(rec, dict) else None
+
+
 def build_context(
     event: dict,
     *,
@@ -512,7 +583,7 @@ def build_context(
     manifest_paths = _resolve_manifest(manifest_doc, ce, posture_root, bound_claim)
     evidence_root = evidence_root or ce.get("evidence_root")
     completion_report = completion_report or ce.get("completion_report")
-    side_effect_authority = event.get("side_effect_authority") or ce.get("side_effect_authority")
+    side_effect_authority = _resolve_side_effect_authority(ce, posture_root)
 
     closeout_text = ce.get("closeout_text")
     if closeout_file:
