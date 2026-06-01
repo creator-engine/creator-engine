@@ -46,14 +46,39 @@ With **no valid envelope**, governed restricted mechanics are denied exactly as 
 gate; all non-mechanic hook behavior (scope/secret/Stop/ungoverned-advisory, the fail-open
 Ring-1 contract) is unchanged.
 
-## 4. Minting (out of scope here)
+## 4. Carrying the envelope into the live hook (G2.007.3)
 
-The envelope is written under the governed posture inputs as part of the **ratified
-reviewer-launch procedure** (tied to the ratified reviewer prompt, recorded in
-`ratified_prompt_sha`). This gate does **not** modify `ce launch`/the launcher; minting the
-envelope inside the launcher and hook-side `head`/`actor` verification are deferred.
+G2.007.2 proved the hook honors `ce.reviewer_authority_ref` **synthetically**; it left the
+launch→live-hook carrier and the distinct-reviewer-venue identity deferred. G2.007.3 closes
+that gap without weakening any gate:
 
-## 5. Out of scope of this gate (G2.007.2)
+- **Distinct reviewer venue identity.** `ce lane launch --role reviewer --lane-kind review`
+  is the only venue allowed to carry an injected authority ref. `lane_runtime.launch`
+  validates the binding with `is_distinct_reviewer_venue` (role `reviewer` + lane kind
+  `review`) and records the venue identity (`role`, `lane_kind`, `reviewer_venue: true`,
+  `reviewer_authority_ref`) in the ignored governance sidecar next to the Pane Registry
+  record. The canonical-root authoring Controller seat is **not** a reviewer venue.
+- **Authority injection carrier.** `lane_runtime.launch` validates the ref as a schema-valid
+  envelope **before any side effect** (fail-closed `G3-REVIEWER-AUTHORITY-INVALID`; a ref on a
+  non-reviewer venue is `G3-REVIEWER-VENUE-IDENTITY`), then exports it to the pane environment
+  as `CE_REVIEWER_AUTHORITY_REF` via tmux `-e` (never printed). The committed
+  `.claude/hooks/ce-pretooluse.sh` reads it and forwards `--reviewer-authority-ref <ref>` to
+  the validator, which injects it as `ce.reviewer_authority_ref` **before**
+  `hook_check.build_context()` — so the same bounded mechanic+PR semantics from §2 now hold on
+  the live path. An event that already carries its own `ce` authority wins (the flag is a
+  fallback carrier, never an override).
+- **Fail-closed end to end.** No env var ⇒ no flag ⇒ no authority ⇒ restricted mechanics stay
+  denied. An invalid/missing envelope resolves to no authority. Posture handling is unchanged:
+  a governed venue hard-denies an unauthorized mechanic and hard-allows only the matching
+  `pr_review`.
 
-The launcher/`ce launch` minting path; hook-side head/actor verification via `gh`;
-`G2.007.1` per-harness promotions; any widening beyond the `pr_review` reviewer mechanic.
+The envelope is still **minted out-of-band** under the ratified reviewer-launch procedure
+(tied to the ratified reviewer prompt, recorded in `ratified_prompt_sha`); G2.007.3 carries an
+already-minted envelope, it does not change how one is authored.
+
+## 5. Out of scope of this gate (G2.007.3)
+
+In-launcher **minting** of the envelope; hook-side `head_sha`/`actor` verification via `gh`;
+the Controller-seat `ce launch` path (a reviewer venue is a `ce lane launch` lane, not the
+Controller seat); `G2.007.1` per-harness promotions; any widening beyond the `pr_review`
+reviewer mechanic.
