@@ -1,0 +1,19 @@
+# Schema-valid but rejected by the three-ring coherence invariant
+# (VAL-EXT-RING-COHERENCE): a ring_1 extension is RUNTIME/DEFEASIBLE and must not
+# claim `hard` enforcement; `hard` is valid only at ring_0. The hook also misdeclares
+# itself non-defeasible / fail_closed, which Ring 1 forbids.
+extension_contract:
+  extension_id: ext-ring1-hard
+  extension_kind: hook_pack
+  ring: ring_1
+  enforcement_strength: hard
+  emitting_role: controller
+  operating_mode: strict
+  hooks:
+    - event: PreToolUse
+      matcher: "Edit|Write|Bash"
+      decision_protocol: allow_deny
+      failure_posture: fail_closed
+      validator_binding: hook-check
+      defeasible: false
+  recorded_at: '2026-06-01T07:44:19Z'

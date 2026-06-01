@@ -1,0 +1,16 @@
+# Rejected: `ring_3` is not a known ring (VAL-EXT-RING / VAL-EXT-SCHEMA).
+extension_contract:
+  extension_id: ext-bad-ring
+  extension_kind: hook_pack
+  ring: ring_3
+  enforcement_strength: defeasible
+  emitting_role: controller
+  operating_mode: strict
+  hooks:
+    - event: PreToolUse
+      matcher: "Bash"
+      decision_protocol: allow_deny
+      failure_posture: fail_open
+      validator_binding: hook-check
+      defeasible: true
+  recorded_at: '2026-06-01T07:44:19Z'

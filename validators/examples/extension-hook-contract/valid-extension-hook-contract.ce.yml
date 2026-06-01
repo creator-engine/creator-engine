@@ -1,0 +1,27 @@
+# Models the committed CE Claude Code hook-pack (CC-G-C, Ring 1): the PreToolUse
+# wrapper and the Stop hook, both defeasible and fail-open, bridging the Ring 2
+# `hook-check` validator. Demonstrates the schema can describe the real hook-pack.
+extension_contract:
+  extension_id: ext-ce-claude-hook-pack
+  extension_kind: hook_pack
+  ring: ring_1
+  enforcement_strength: defeasible
+  emitting_role: controller
+  operating_mode: strict
+  hooks:
+    - event: PreToolUse
+      matcher: "Edit|Write|MultiEdit|Read|Bash"
+      decision_protocol: allow_deny
+      failure_posture: fail_open
+      validator_binding: hook-check
+      defeasible: true
+    - event: Stop
+      decision_protocol: advisory
+      failure_posture: fail_open
+      validator_binding: hook-check
+      defeasible: true
+  recorded_at: '2026-06-01T07:44:19Z'
+  metadata:
+    summary: >-
+      Declarative contract for the Ring 1 CC-G-C hook-pack; references the Ring 2
+      validator by name only. Formalizes, does not replace, the runtime.

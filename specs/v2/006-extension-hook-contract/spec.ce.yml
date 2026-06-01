@@ -1,0 +1,197 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/006-extension-hook-contract
+  spec_number: "006"
+  title: Creator Engine v2.0 extension + hook contract substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.006.0
+  feature_binding: specs/v2/006
+  slice: "0"
+  title: Extension + hook contract schema + validator
+  layer: 0
+  note: >-
+    G2.006.0 is the shape-only extension + hook contract substrate: a schema + the
+    extension_hook_contract validator + examples that formalize the three-ring model
+    (Ring 0 HARD kernel, Ring 1 RUNTIME/DEFEASIBLE hook-pack, Ring 2 VALIDATOR bridge).
+    The headline rule is the enforcement_strength x ring coherence invariant (hard =>
+    ring_0; ring_1 => defeasible/fail_open), enforced by the validator. It formalizes —
+    and does not replace — the CC-G-C/D hook-pack runtime (.claude/**, hook_check.py),
+    which it leaves untouched; a valid example describes the committed hook-pack. Class
+    C (non-privileged governance; OD-16 Controller-decidable). It is the dependency
+    floor for G2.007.0 (harness seat-contract + hook-pack template), which remains a
+    separate, deferred, Operator-ratified gate.
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/g20060-extension-hook-contract-planning-20260601T074419Z/recommended-next/NEXT_OPERATOR_G20060_EXTENSION_HOOK_CONTRACT_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T074419Z.md
+    sha256: dfdfd4cf906c2e4302bd7f5acd2cdfa4b0b8a29da718fbf27b3642aaa424beba
+  note: >-
+    This sidecar records the G2.006.0 extension + hook contract substrate authority. It
+    ratifies nothing, performs no write, carries no secret/credential values, and binds
+    no concrete vendor/harness identity as normative.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    Extension contracts record operating-mode context only; this substrate activates or
+    propagates no runtime operating mode.
+
+authority:
+  mutation_classes: [governance]
+  privileged: false
+  required_ratifier_role: controller
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, examples, tests, and spec substrate only. No extension
+    runtime, no ce command, no modification of the live hook-pack (.claude/**) or the
+    Ring 2 hook_check.py runtime, no network/credential surface, and no privileged-class
+    escalation. The contract shape is Controller-decidable (OD-16); execution still
+    proceeds under an Operator-ratified prompt, and review/merge remain separate.
+
+state_boundary:
+  canonical_future_home: .ce/
+  substrate_writes_state: false
+  legacy_home_write_freeze: .hermes/
+  notes: >-
+    This gate defines shape and validation only; it writes no active state and does not
+    mutate the committed hook-pack or settings.
+
+requirements:
+  - id: RV2-006-001
+    spec_md_ref: FR-001
+    statement: Define the extension_contract record shape with bounded extension_kind/ring/enforcement_strength and a non-empty hooks array.
+    decisions: [OD-16]
+    risk_refs: [RISK-RV2-006-SHAPE]
+  - id: RV2-006-002
+    spec_md_ref: FR-002
+    statement: Define the hook contract shape with bounded event/decision_protocol/failure_posture and a defeasible flag.
+    decisions: [OD-16]
+    risk_refs: [RISK-RV2-006-SHAPE]
+  - id: RV2-006-003
+    spec_md_ref: FR-003
+    statement: Enforce the three-ring coherence invariant — hard enforcement only at ring_0; ring_1 must be defeasible and fail_open.
+    decisions: [OD-16]
+    risk_refs: [RISK-RV2-006-RING-COHERENCE]
+  - id: RV2-006-004
+    spec_md_ref: FR-004
+    statement: Reject non-canonical emitting roles (agent_ratifier/source reserved-inactive) and unknown operating modes.
+    decisions: [OD-16, OD-22]
+    risk_refs: [RISK-RV2-006-ROLE, RISK-RV2-006-MODE]
+  - id: RV2-006-005
+    spec_md_ref: FR-005
+    statement: Reject any inline secret/credential value and inline contract metadata in Markdown.
+    decisions: [OD-24]
+    risk_refs: [RISK-RV2-006-SECRET, RISK-RV2-006-INLINE]
+  - id: RV2-006-006
+    spec_md_ref: FR-006
+    statement: Keep the contract able to describe the committed hook-pack and modify no existing schema/check/.claude runtime; implement no runtime.
+    decisions: [OD-16, OD-23]
+    risk_refs: [RISK-RV2-006-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-006-SHAPE
+    title: Ambiguous extension/hook contract shape.
+    relevance: [governance, runtime]
+    description: An extension or hook contract cannot be validated deterministically or declares an unknown ring/kind/event/protocol/posture.
+    severity: high
+    required_validation_refs: [VAL-EXT-SCHEMA, VAL-EXT-KIND, VAL-EXT-RING, VAL-EXT-HOOK]
+  - id: RISK-RV2-006-RING-COHERENCE
+    title: Three-ring model misrepresented.
+    relevance: [governance, security]
+    description: A hook claims hard/non-defeasible/fail-closed enforcement at Ring 1, or hard enforcement outside ring_0 — misrepresenting the defeasible-Ring-1 / HARD-Ring-0 model.
+    severity: critical
+    required_validation_refs: [VAL-EXT-RING-COHERENCE]
+  - id: RISK-RV2-006-ROLE
+    title: Reserved ratifier or non-canonical role emits a contract.
+    relevance: [governance, identity]
+    description: A reserved ratification role is treated as active authority, or a non-canonical role emits an extension contract.
+    severity: high
+    required_validation_refs: [VAL-EXT-ROLE]
+  - id: RISK-RV2-006-MODE
+    title: Unknown operating-mode context.
+    relevance: [governance, autonomy]
+    description: An extension contract names an unratified or ambiguous autonomy mode.
+    severity: medium
+    required_validation_refs: [VAL-EXT-MODE]
+  - id: RISK-RV2-006-SECRET
+    title: Secret/credential value carried in a contract.
+    relevance: [security]
+    description: An extension contract carries a token/secret/credential value instead of a name reference.
+    severity: critical
+    required_validation_refs: [VAL-EXT-SECRET]
+  - id: RISK-RV2-006-INLINE
+    title: Inline contract metadata in Markdown.
+    relevance: [metadata]
+    description: Extension-hook-contract metadata leaks into Markdown prose instead of sidecars/examples.
+    severity: medium
+    required_validation_refs: [VAL-EXT-NO-INLINE]
+  - id: RISK-RV2-006-SCOPE
+    title: Runtime bundled into the substrate, or contract cannot describe reality.
+    relevance: [governance, runtime]
+    description: The gate modifies the live hook-pack/hook_check.py/an existing schema or adds a runtime before separate ratification, or the contract cannot describe the committed hook-pack.
+    severity: high
+    required_validation_refs: [VAL-EXT-SCHEMA]
+
+required_validation:
+  - id: VAL-EXT-SCHEMA
+    description: Reject malformed extension_contract records; the valid example (the committed hook-pack) passes.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-KIND
+    description: Reject extension_kind values outside hook_pack/connector/directive_pack.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-RING
+    description: Reject ring / enforcement_strength values outside the bounded enums.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-HOOK
+    description: Reject hook event / decision_protocol / failure_posture values outside the bounded enums.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-RING-COHERENCE
+    description: Enforce hard => ring_0, and ring_1 => defeasible + fail_open across the extension and its hooks.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-ROLE
+    description: Reject non-canonical emitting roles and reserved active ratifier roles.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-MODE
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-SECRET
+    description: Reject extension contracts carrying secret/credential values.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+  - id: VAL-EXT-NO-INLINE
+    description: Reject inline extension-hook-contract metadata in Markdown.
+    planned_slice: G2.006.0
+    planned_validator: extension_hook_contract
+    status: implemented
+
+crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/006
+adr_refs:
+  - specs/v2/adrs/ADR-V2-007-extension-hook-contract.md
