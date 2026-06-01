@@ -27,9 +27,11 @@ ce pcl verify        # validate an on-disk PCL ledger + head manifest, read-only
 ce pcl replay        # deterministic ordered read-only projection of a PCL ledger
 ce pcl index         # deterministic content-hashed index of a PCL ledger (written to the ignored cache)
 ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
-ce connector verify  # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
-ce connector plan    # build + validate a read-only read plan (offline)
-ce connector fetch   # execute one read-only GET via an injectable client; credential by reference; offline fails closed
+ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
+ce connector plan       # build + validate a read-only read plan (offline)
+ce connector fetch      # execute one read-only GET via an injectable client; credential by reference; offline fails closed
+ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
+ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -482,12 +484,13 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
     pm.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    # ce connector — G2.005.1 GitHub connector read-only runtime. Validates a
-    # connector descriptor + Mission-Brief (G2.005.0 substrate), builds a read
-    # plan, and executes read-only GETs via an injectable client. Credential by
-    # reference (never stored/printed); read-only only; offline fails closed.
+    # ce connector — GitHub connector runtime. Validates a connector descriptor +
+    # Mission-Brief (G2.005.0 substrate). G2.005.1 added read-only verify/plan/fetch;
+    # G2.005.2 adds the strict-mode write path write-plan/submit, bounded to the
+    # tracker_mirror verbs. Credential by reference (never stored/printed); offline
+    # fails closed.
     connector = groups.add_parser(
-        "connector", help="GitHub connector read-only runtime: verify/plan/fetch (G2.005.1)"
+        "connector", help="GitHub connector runtime: read-only verify/plan/fetch (G2.005.1) + strict-mode write-plan/submit (G2.005.2)"
     )
     connector_sub = connector.add_subparsers(dest="connector_cmd")
 
@@ -507,6 +510,20 @@ def _build_parser() -> argparse.ArgumentParser:
     cf.add_argument("--resource", required=True, help="read resource path (e.g. repos/OWNER/REPO/issues)")
     cf.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="read API base URL")
     cf.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    cwp = connector_sub.add_parser("write-plan", help="build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)")
+    cwp.add_argument("--connector", required=True)
+    cwp.add_argument("--mission-brief", required=True)
+    cwp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    cs = connector_sub.add_parser("submit", help="execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed (G2.005.2)")
+    cs.add_argument("--connector", required=True)
+    cs.add_argument("--mission-brief", required=True)
+    cs.add_argument("--verb", required=True, choices=sorted(connector_runtime.WRITE_METHODS), help="tracker_mirror write verb")
+    cs.add_argument("--resource", required=True, help="write resource path (e.g. repos/OWNER/REPO/issues)")
+    cs.add_argument("--payload", default=None, help="path to a JSON request-body file (optional)")
+    cs.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="write API base URL")
+    cs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce check — umbrella wrapper over the retained creator-engine-validator
     # conformance checks (DP-1 = A: ce wraps the validator subcommands).
@@ -1312,6 +1329,63 @@ def _connector_fetch(args) -> int:
     return 0
 
 
+def _connector_write_plan_payload(plan) -> dict:
+    return {
+        "connector_id": plan.connector_id,
+        "connector_kind": plan.connector_kind,
+        "provider_class": plan.provider_class,
+        "capability_scope": plan.capability_scope,
+        "write_verbs": list(plan.write_verbs),
+        "operating_mode": plan.operating_mode,
+        "assignment_ref": plan.assignment_ref,
+        "credential_ref_name": plan.credential_ref_name,
+    }
+
+
+def _connector_write_plan(args) -> int:
+    try:
+        plan = connector_runtime.write_plan(connector_path=args.connector, mission_brief_path=args.mission_brief)
+    except connector_runtime.ConnectorRuntimeError as exc:
+        print(f"ERROR: ce connector write-plan [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(_connector_write_plan_payload(plan), indent=2, sort_keys=True))
+    else:
+        print(
+            f"ce connector write-plan: OK (connector={plan.connector_id} scope={plan.capability_scope} "
+            f"mode={plan.operating_mode} verbs={','.join(plan.write_verbs)})"
+        )
+    return 0
+
+
+def _connector_submit(args) -> int:
+    payload = None
+    if getattr(args, "payload", None):
+        try:
+            with open(args.payload, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: ce connector submit [G2-CONN-VALIDATION]: cannot read --payload: {exc}", file=sys.stderr)
+            return 1
+    try:
+        receipt = connector_runtime.submit(
+            connector_path=args.connector,
+            mission_brief_path=args.mission_brief,
+            verb=args.verb,
+            resource=args.resource,
+            payload=payload,
+            base_url=args.base_url,
+        )
+    except connector_runtime.ConnectorRuntimeError as exc:
+        print(f"ERROR: ce connector submit [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce connector submit: status={receipt.status} verb={receipt.verb} (connector={receipt.connector_id})")
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -1448,6 +1522,8 @@ _CONNECTOR_DISPATCH = {
     "verify": _connector_verify,
     "plan": _connector_plan,
     "fetch": _connector_fetch,
+    "write-plan": _connector_write_plan,
+    "submit": _connector_submit,
 }
 
 
