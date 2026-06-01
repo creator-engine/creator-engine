@@ -1,0 +1,299 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/007-harness-seat-contract
+  spec_number: "007"
+  title: Creator Engine v2.0 harness seat-contract + hook-pack template substrate
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.007.2
+  feature_binding: specs/v2/007
+  slice: "2"
+  title: reviewer-venue side-effect-authority seam
+  layer: 3
+  predecessor_gate:
+    id: G2.007.0
+    slice: "0"
+    title: Harness seat-contract + hook-pack template + validator
+    status: merged
+  note: >-
+    G2.007.0 (harness seat-contract) is merged (#106, via a one-time Operator override).
+    G2.007.2 is the active slice: the reviewer-venue side-effect-authority seam. It adds the
+    reviewer_authority_envelope schema + validator and modifies the Ring-2 enforcement engine
+    hook_check.py so a restricted mechanic is allowed ONLY when a validated bounded envelope's
+    mechanic equals the classified action AND (for pr_review) the command's target PR equals
+    pr_number — the old raw loose side_effect_authority token is no longer honored. head_sha/
+    actor/ratified_prompt_sha bind the grant for audit. Backward-compatible (no envelope =>
+    deny as before). It does NOT modify .claude/** (Ring-1 wrapper/settings) or ce launch/the
+    launcher (minting + hook-side head/actor verification are deferred). It resolves the
+    governance debt from PR #106 and is sequenced before G2.007.1. Class O (governance +
+    identity + security). G2.007.0 (merged) formalized the seat-contract incl. the
+    full_permission_mode posture; G2.007.2 makes a reviewer seat's bounded side_effect_authority
+    real in the Ring-2 hook.
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/g20070-harness-seat-contract-planning-20260601T084855Z/recommended-next/NEXT_OPERATOR_G20070_HARNESS_SEAT_CONTRACT_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T084855Z.md
+    sha256: ff9b4b939111c252b308c0fc0eff19aa085f6f8f586a73a3d8f97f346bee8495
+  ratified_prompt_g2_007_2:
+    path: .hermes/research/g20072-reviewer-venue-authority-planning-20260601T104313Z/recommended-next/NEXT_OPERATOR_G20072_REVIEWER_VENUE_AUTHORITY_BATCH_STRICTMODE_EXECUTION_PROMPT_20260601T104313Z.md
+    sha256: b01b000c84e7e68b5f13ba0128013ad6d001476e1269032e624cbbf65d5d3789
+  note: >-
+    This sidecar records the G2.007.0 harness seat-contract authority and the G2.007.2
+    reviewer-venue side-effect-authority seam authority. It ratifies nothing, performs no write,
+    carries no secret/credential values, and binds no concrete vendor/harness account identity
+    as normative.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    Seat-contracts record operating-mode context only; this substrate activates or propagates
+    no runtime operating mode.
+
+authority:
+  mutation_classes: [governance, identity, security]
+  privileged: true
+  required_ratifier_role: operator
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, template, examples, tests, and spec substrate only. No seat
+    runtime, no ce command, no ce launch/launcher change, no modification of the live
+    hook-pack (.claude/**), settings, hook_check.py, the existing Claude-Code seat-contract
+    doc, or the G2.006.0 extension_hook_contract check (reuse by import). No network/credential
+    surface and no privileged-class escalation beyond recording the seat posture.
+
+state_boundary:
+  canonical_future_home: .ce/
+  substrate_writes_state: false
+  legacy_home_write_freeze: .hermes/
+  notes: >-
+    This gate defines shape and validation only; it writes no active state and does not mutate
+    the committed hook-pack, settings, or launcher.
+
+requirements:
+  - id: RV2-007-001
+    spec_md_ref: FR-001
+    statement: Define the seat_contract record shape (harness, launch_posture, refused_modes, enforcement_ring, embedded required_hook_pack).
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-SHAPE]
+  - id: RV2-007-002
+    spec_md_ref: FR-002
+    statement: Enforce the required launch posture (setting_sources project-not-local, strict_mcp_config, operator_visible, model_pin, ring_0) and a known harness.
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-POSTURE]
+  - id: RV2-007-003
+    spec_md_ref: FR-003
+    statement: Require refused_modes to refuse every posture-defeating mode (bare/print_headless/background_agents/remote_control/settings_local_weakening).
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-PROHIBITED]
+  - id: RV2-007-004
+    spec_md_ref: FR-004
+    statement: Treat full_permission_mode as the sanctioned Controller mode requiring ring0_hook_pack_confirmed, and bind the harness-specific permission_mode_flag for known harnesses.
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-FULL-PERMISSION]
+  - id: RV2-007-005
+    spec_md_ref: FR-005
+    statement: Require the embedded required_hook_pack to be a ring_1 defeasible hook_pack (reuse G2.006.0 extension_hook_contract).
+    decisions: [OD-15, OD-16]
+    risk_refs: [RISK-RV2-007-HOOKPACK]
+  - id: RV2-007-006
+    spec_md_ref: FR-006
+    statement: Enforce role/mode/secret/inline floors and modify no existing schema/check/.claude runtime; the hook-pack template validates against G2.006.0.
+    decisions: [OD-15, OD-23, OD-24]
+    risk_refs: [RISK-RV2-007-FLOOR, RISK-RV2-007-SCOPE]
+  - id: RV2-007-007
+    spec_md_ref: FR-007
+    statement: Define the reviewer_authority_envelope shape (mechanic pr_review, pr_number, head_sha, actor, ratified_prompt_sha) and validate it (VAL-RVA-*).
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-RVA-SHAPE]
+  - id: RV2-007-008
+    spec_md_ref: FR-008
+    statement: Resolve side_effect_authority from a validated bounded envelope and allow a restricted mechanic only on an exact mechanic + PR-number match; else deny.
+    decisions: [OD-15]
+    risk_refs: [RISK-RV2-007-RVA-DECISION]
+  - id: RV2-007-009
+    spec_md_ref: FR-009
+    statement: Preserve hook backward compatibility (no envelope => deny as before) and modify no .claude/launcher/other-check/ce_cli surface; carry no secret.
+    decisions: [OD-15, OD-23]
+    risk_refs: [RISK-RV2-007-RVA-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-007-SHAPE
+    title: Ambiguous seat-contract shape or unknown harness.
+    relevance: [governance, identity]
+    description: A seat_contract cannot be validated deterministically or names a harness CE does not support.
+    severity: high
+    required_validation_refs: [VAL-SEAT-SCHEMA, VAL-SEAT-HARNESS]
+  - id: RISK-RV2-007-POSTURE
+    title: Weakened launch posture.
+    relevance: [governance, security]
+    description: A seat-contract permits a weakenable posture (settings_sources includes local, non-strict mcp, hidden terminal, no model pin, or enforcement below ring_0).
+    severity: critical
+    required_validation_refs: [VAL-SEAT-POSTURE]
+  - id: RISK-RV2-007-PROHIBITED
+    title: Posture-defeating mode not refused.
+    relevance: [security, governance]
+    description: A seat-contract fails to refuse a posture-defeating mode (bare/headless/background-agents/remote-control/settings.local weakening), defeating the enforcement layer.
+    severity: critical
+    required_validation_refs: [VAL-SEAT-PROHIBITED]
+  - id: RISK-RV2-007-FULL-PERMISSION
+    title: Full-permission mode without Ring 0 confirmation, or wrong harness flag.
+    relevance: [security, governance]
+    description: full_permission_mode is enabled without ring0_hook_pack_confirmed (no safety substitute for per-action approval), or the harness-specific permission_mode_flag does not bind to the harness.
+    severity: critical
+    required_validation_refs: [VAL-SEAT-FULL-PERMISSION, VAL-SEAT-PERMISSION-FLAG]
+  - id: RISK-RV2-007-HOOKPACK
+    title: Missing or non-defeasible required hook-pack.
+    relevance: [governance, security]
+    description: A seat-contract requires no hook-pack, or a hook-pack that is not a ring_1 defeasible hook_pack — the in-band enforcement floor is absent or misrepresented.
+    severity: critical
+    required_validation_refs: [VAL-SEAT-HOOKPACK]
+  - id: RISK-RV2-007-FLOOR
+    title: Role/mode/secret/inline floor breach.
+    relevance: [governance, identity, security, metadata]
+    description: A reserved/non-canonical role emits a seat-contract, an unknown operating mode is named, a secret value is carried inline, or contract metadata leaks into Markdown.
+    severity: high
+    required_validation_refs: [VAL-SEAT-ROLE, VAL-SEAT-MODE, VAL-SEAT-SECRET, VAL-SEAT-NO-INLINE]
+  - id: RISK-RV2-007-SCOPE
+    title: Runtime bundled into the substrate, or template cannot describe reality.
+    relevance: [governance, runtime]
+    description: The gate modifies the live hook-pack/hook_check.py/launcher/an existing schema or adds a runtime before separate ratification, or the seat-contract/template cannot describe the committed Claude Code seat.
+    severity: high
+    required_validation_refs: [VAL-SEAT-SCHEMA]
+  - id: RISK-RV2-007-RVA-SHAPE
+    title: Ambiguous or secret-bearing reviewer-authority envelope.
+    relevance: [security, governance]
+    description: A reviewer_authority_envelope cannot be validated deterministically, names an unknown mechanic, omits a required binding, uses a reserved role/unknown mode, or carries a secret value.
+    severity: high
+    required_validation_refs: [VAL-RVA-SCHEMA, VAL-RVA-MECHANIC, VAL-RVA-BINDING, VAL-RVA-ROLE, VAL-RVA-MODE, VAL-RVA-SECRET, VAL-RVA-NO-INLINE]
+  - id: RISK-RV2-007-RVA-DECISION
+    title: Unbounded or mismatched authority grant.
+    relevance: [security, governance]
+    description: The hook honors a raw loose token, or allows a restricted mechanic without an exact mechanic + PR-number match (wrong PR / wrong mechanic / no envelope), or lets merge/push/comment/ce launch through under a pr_review grant.
+    severity: critical
+    required_validation_refs: [VAL-RVA-HOOK-MATCH]
+  - id: RISK-RV2-007-RVA-SCOPE
+    title: Enforcement-engine regression or out-of-scope surface change.
+    relevance: [governance, runtime, security]
+    description: The hook_check change regresses prior behavior (no-envelope must still deny), or the gate modifies .claude/**, the launcher, another existing check/schema, or ce_cli.py.
+    severity: critical
+    required_validation_refs: [VAL-RVA-BACKCOMPAT]
+
+required_validation:
+  - id: VAL-SEAT-SCHEMA
+    description: Reject malformed seat_contract records; the valid example (the Claude Code seat) and the hook-pack template pass.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-HARNESS
+    description: Reject harness values outside claude_code/codex/hermes/openclaw.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-POSTURE
+    description: Enforce setting_sources project-not-local, strict_mcp_config, operator_visible, model_pin, and enforcement_ring ring_0.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-PROHIBITED
+    description: Require refused_modes to refuse every posture-defeating mode.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-FULL-PERMISSION
+    description: Require ring0_hook_pack_confirmed when full_permission_mode is true.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-PERMISSION-FLAG
+    description: Bind the harness-specific permission_mode_flag for known harnesses (claude_code/codex).
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-HOOKPACK
+    description: Require the embedded required_hook_pack to be a ring_1 defeasible hook_pack (G2.006.0 vocabulary).
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-ROLE
+    description: Reject non-canonical emitting roles and reserved active ratifier roles.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-MODE
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-SECRET
+    description: Reject seat-contracts carrying secret/credential values.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+  - id: VAL-SEAT-NO-INLINE
+    description: Reject inline harness-seat-contract metadata in Markdown.
+    planned_slice: G2.007.0
+    planned_validator: harness_seat_contract
+    status: implemented
+
+  - id: VAL-RVA-SCHEMA
+    description: Reject malformed reviewer_authority_envelope records; the valid example passes.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-MECHANIC
+    description: Reject mechanic values other than pr_review.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-BINDING
+    description: Require the pr_number/head_sha/actor/ratified_prompt_sha authority bindings.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-ROLE
+    description: Reject non-canonical emitting roles and reserved active ratifier roles.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-MODE
+    description: Reject unknown operating_mode values.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-SECRET
+    description: Reject reviewer_authority_envelope records carrying secret/credential values.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-NO-INLINE
+    description: Reject inline reviewer-authority-envelope metadata in Markdown.
+    planned_slice: G2.007.2
+    planned_validator: reviewer_authority_envelope
+    status: implemented
+  - id: VAL-RVA-HOOK-MATCH
+    description: hook_check allows a restricted mechanic only on an exact validated mechanic + PR-number match; wrong PR / wrong mechanic / no envelope / other mechanics deny.
+    planned_slice: G2.007.2
+    planned_validator: hook_check
+    status: implemented
+  - id: VAL-RVA-BACKCOMPAT
+    description: With no/invalid envelope, governed restricted mechanics deny exactly as before; no .claude/launcher/other-check/ce_cli change.
+    planned_slice: G2.007.2
+    planned_validator: hook_check
+    status: implemented
+
+crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/007
+adr_refs:
+  - specs/v2/adrs/ADR-V2-008-harness-seat-contract.md
+  - specs/v2/adrs/ADR-V2-009-reviewer-venue-authority.md

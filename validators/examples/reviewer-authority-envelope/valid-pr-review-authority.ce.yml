@@ -1,0 +1,16 @@
+# Models the PR #106 reviewer-venue grant (the case G2.007.2 was built for). Authorizes
+# exactly `pr_review` on exactly PR 106; head/actor/ratified_prompt_sha bind it for audit.
+reviewer_authority_envelope:
+  envelope_id: rva-pr106-reviewer
+  mechanic: pr_review
+  pr_number: 106
+  head_sha: aa02b0ceb192b38f52da0d99f798e1e2710a8a22
+  actor: ubuntuaws745-cmyk
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-01T10:43:13Z'
+  metadata:
+    summary: >-
+      Reviewer-venue pr_review authority for PR 106; actor is a login name (never a
+      token). The hook allows the pr_review mechanic only on PR 106.
