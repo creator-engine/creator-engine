@@ -1,0 +1,18 @@
+# Mission-Brief template (G2.005.0). Generic; declare only docs/code/tracker_mirror
+# classes (never a privileged class). Reference CE-event/PCL artifacts by opaque
+# 64-hex content hash only. signature is shape-only (reserved-inactive).
+mission_brief:
+  brief_id: mb-example-0001
+  assignment_ref: lane:example
+  declared_mutation_classes:
+    - docs
+    - tracker_mirror
+  capability_scope: read_only        # read_only | write
+  refs: {}                           # optional: ce_event_content_hash / pcl_content_hash / binding_ref (64-hex)
+  emitting_role: controller          # canonical non-ratifying role
+  operating_mode: strict             # strict | auto | transcendence (context only)
+  recorded_at: '2026-01-01T00:00:00Z'
+  signature:
+    scheme: reserved-shape-only
+    key_id: operator-reserved
+    value: reserved-inactive

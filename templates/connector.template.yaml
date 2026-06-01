@@ -1,0 +1,17 @@
+# Connector descriptor template (G2.005.0). Generic; carry no secret values —
+# reference credentials BY NAME only. provider_class is an opaque label, not a
+# vendor/account binding. write-scope verbs are bounded to the tracker_mirror set.
+connector:
+  connector_id: conn-example-0001
+  connector_kind: tracker            # source_host | tracker
+  provider_class: issue-tracker      # opaque class label
+  capability:
+    scope: read_only                 # read_only | write
+    verbs:
+      - issue-read                   # write scope: issue-create | issue-update | pr-comment
+  credential_ref:
+    ref_kind: secret_manager_ref     # none | env_var_name | secret_manager_ref
+    ref_name: example-credential-name
+  emitting_role: operator            # canonical non-ratifying role
+  operating_mode: strict             # strict | auto | transcendence (context only)
+  recorded_at: '2026-01-01T00:00:00Z'

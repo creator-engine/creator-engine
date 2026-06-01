@@ -1,0 +1,299 @@
+schema: creator-engine/spec.ce.yml
+schema_version: "2.0.0-draft"
+schema_status: formalized
+ce_metadata_kind: spec-ce-sidecar
+
+spec:
+  id: specs/v2/005-connector-substrate
+  spec_number: "005"
+  title: Creator Engine v2.0 connector substrate (connector descriptor + Mission-Brief)
+  namespace: specs/v2
+  spec_md: spec.md
+  status: draft
+  release_line: v2.0-foundation
+
+gate:
+  id: G2.005.0
+  feature_binding: specs/v2/005
+  slice: "0"
+  title: connector substrate + Mission-Brief + tracker_mirror class
+  layer: 3
+  note: >-
+    First Phase D gate. Depends only on the merged G2.002.0 operating-mode
+    substrate; lands after Phase C is complete. Substrate only: connector
+    descriptor + Mission-Brief shape-only record families + the bounded
+    non-privileged tracker_mirror class. No connector runtime, no ce connector
+    CLI, no network/API, no credential injection. The connector runtime gates
+    G2.005.1 (GitHub read-only), G2.005.2 (write), and G2.005.3 (tracker) are
+    separate, deferred, Operator-ratified gates.
+
+authority_basis:
+  ratified_prompt:
+    path: .hermes/research/g20050-connector-substrate-planning-20260601T032129Z/recommended-next/NEXT_OPERATOR_G20050_CONNECTOR_SUBSTRATE_AUTOMODE_EXECUTION_PROMPT_20260601T032129Z.md
+    sha256: 8b909b01a4a15bb81a4f28f5ccb382a7ec001ace3beb65358360f9933cc887dc
+  note: >-
+    This sidecar records G2.005.0 substrate authority only. It ratifies nothing,
+    activates no connector runtime, carries no secret/credential values, and binds
+    no concrete vendor/account identity as normative.
+
+operating_mode_relevance:
+  modes: [strict, auto, transcendence]
+  authoring_mode: strict
+  default_mode_for_migrated_v1_tenants: strict
+  notes: >-
+    Connector descriptors and Mission-Briefs record operating-mode context only;
+    G2.005.0 activates or propagates no runtime operating mode.
+
+authority:
+  mutation_classes: [governance, identity, security]
+  privileged: true
+  required_ratifier_role: operator
+  agent_reviewer: advisory_only
+  agent_ratifier: reserved_inactive
+  emergency_override: operator_only
+  authoring_authority_boundary: >-
+    Docs, schema, validator, examples, tests, templates, and spec substrate only.
+    No connector runtime, no ce connector CLI, no network/GitHub/tracker API, no
+    credential injection, no live issue/PR mutation, no CI/deploy, and no privileged
+    class escalation. The bounded tracker_mirror class is non-privileged.
+
+state_boundary:
+  canonical_future_connector_home: .ce/
+  substrate_writes_connector_state: false
+  legacy_home_write_freeze: .hermes/
+  notes: >-
+    This gate defines shape and validation only. The canonical future home for
+    connector/Mission-Brief runtime state is under .ce/; active state MUST NOT be
+    written under legacy .hermes/ paths.
+
+requirements:
+  - id: RV2-005-001
+    spec_md_ref: FR-001
+    statement: Define the connector descriptor shape with a connector_kind discriminator.
+    decisions: [OD-03, OD-10]
+    risk_refs: [RISK-RV2-005-CONN-SHAPE]
+  - id: RV2-005-002
+    spec_md_ref: FR-002
+    statement: Bound capability verbs to read or the tracker_mirror write set; no privileged verbs.
+    decisions: [OD-19]
+    risk_refs: [RISK-RV2-005-CAPABILITY]
+  - id: RV2-005-003
+    spec_md_ref: FR-003
+    statement: Reference credentials by name only; carry no secret values anywhere.
+    decisions: [OD-03]
+    risk_refs: [RISK-RV2-005-SECRET]
+  - id: RV2-005-004
+    spec_md_ref: FR-004
+    statement: Define the Mission-Brief record shape.
+    decisions: [OD-10]
+    risk_refs: [RISK-RV2-005-MB-SHAPE]
+  - id: RV2-005-005
+    spec_md_ref: FR-005
+    statement: Keep tracker_mirror bounded and non-privileged; refuse privilege escalation; do not modify the baseline taxonomy.
+    decisions: [OD-19, OD-22]
+    risk_refs: [RISK-RV2-005-ESCALATION]
+  - id: RV2-005-006
+    spec_md_ref: FR-006
+    statement: Reference CE-event/PCL artifacts only by opaque 64-hex hashes; import no runtime code.
+    decisions: [OD-05, OD-09]
+    risk_refs: [RISK-RV2-005-POINTER]
+  - id: RV2-005-007
+    spec_md_ref: FR-007
+    statement: Preserve the Operator-only privileged floor; agent_ratifier stays reserved-inactive; connectors never ratify.
+    decisions: [OD-22]
+    risk_refs: [RISK-RV2-005-ROLE]
+  - id: RV2-005-008
+    spec_md_ref: FR-008
+    statement: Record operating-mode context, validate signature shape, and forbid inline metadata.
+    decisions: [OD-01, OD-24]
+    risk_refs: [RISK-RV2-005-MODE, RISK-RV2-005-SIGNATURE, RISK-RV2-005-INLINE]
+  - id: RV2-005-009
+    spec_md_ref: FR-009
+    statement: Preserve .ce/ as the future home and freeze legacy .hermes/ active writes; make no network/API calls.
+    decisions: [OD-06A]
+    risk_refs: [RISK-RV2-005-WRITE]
+  - id: RV2-005-010
+    spec_md_ref: FR-010
+    statement: Provide fail-closed validator coverage with targeted VAL-CONN-*/VAL-MB-* codes.
+    decisions: [OD-03, OD-10, OD-19]
+    risk_refs: [RISK-RV2-005-CONN-SHAPE, RISK-RV2-005-MB-SHAPE]
+  - id: RV2-005-011
+    spec_md_ref: FR-011
+    statement: Stop before connector runtime, ce connector CLI, network/API, credential injection, CI/deploy, or autonomy activation.
+    decisions: [OD-23]
+    risk_refs: [RISK-RV2-005-SCOPE]
+
+risk_inventory:
+  - id: RISK-RV2-005-CONN-SHAPE
+    title: Ambiguous connector descriptor shape.
+    relevance: [governance, identity]
+    description: A connector cannot be validated deterministically or declares an unknown kind.
+    severity: high
+    required_validation_refs: [VAL-CONN-SCHEMA, VAL-CONN-KIND]
+  - id: RISK-RV2-005-CAPABILITY
+    title: Unbounded capability / privileged verb.
+    relevance: [security, governance]
+    description: A connector claims a write verb outside the bounded tracker_mirror set or a privileged verb.
+    severity: critical
+    required_validation_refs: [VAL-CONN-CAPABILITY]
+  - id: RISK-RV2-005-SECRET
+    title: Secret/credential value carried in a record.
+    relevance: [security]
+    description: A connector or Mission-Brief carries a token/secret/credential value instead of a name reference.
+    severity: critical
+    required_validation_refs: [VAL-CONN-SECRET, VAL-MB-SECRET, VAL-CONN-CREDENTIAL-REF]
+  - id: RISK-RV2-005-MB-SHAPE
+    title: Ambiguous Mission-Brief shape.
+    relevance: [governance]
+    description: A Mission-Brief cannot be validated deterministically.
+    severity: high
+    required_validation_refs: [VAL-MB-SCHEMA]
+  - id: RISK-RV2-005-ESCALATION
+    title: Privilege escalation via a Mission-Brief.
+    relevance: [governance, security]
+    description: A Mission-Brief declares a privileged mutation class or an unpermitted class.
+    severity: critical
+    required_validation_refs: [VAL-MB-PRIVILEGE-ESCALATION, VAL-MB-CLASS]
+  - id: RISK-RV2-005-POINTER
+    title: Malformed or coupling artifact pointer.
+    relevance: [attestation, state-boundary]
+    description: A Mission-Brief references a CE-event/PCL artifact with a non-64-hex pointer or couples to internals.
+    severity: high
+    required_validation_refs: [VAL-MB-POINTER-SHAPE]
+  - id: RISK-RV2-005-ROLE
+    title: Reserved ratifier or non-canonical role emits a record.
+    relevance: [governance, identity]
+    description: A reserved ratification role is treated as active authority, or a connector/brief is used to ratify.
+    severity: critical
+    required_validation_refs: [VAL-CONN-ROLE-FLOOR, VAL-MB-ROLE-FLOOR]
+  - id: RISK-RV2-005-MODE
+    title: Unknown operating-mode context.
+    relevance: [governance, autonomy]
+    description: A record context names an unratified or ambiguous autonomy mode.
+    severity: high
+    required_validation_refs: [VAL-CONN-MODE-ENUM, VAL-MB-MODE-ENUM]
+  - id: RISK-RV2-005-SIGNATURE
+    title: Signature semantics activated early.
+    relevance: [identity, attestation]
+    description: A shape-only signature field is mistaken for live key custody.
+    severity: high
+    required_validation_refs: [VAL-MB-SIGNATURE-SHAPE]
+  - id: RISK-RV2-005-INLINE
+    title: Inline connector-substrate metadata in Markdown.
+    relevance: [metadata]
+    description: Record metadata leaks into Spec Kit prose instead of sidecars/examples.
+    severity: medium
+    required_validation_refs: [VAL-CONN-NO-INLINE, VAL-MB-NO-INLINE]
+  - id: RISK-RV2-005-WRITE
+    title: Legacy active-state write.
+    relevance: [state-boundary]
+    description: A v2 connector/Mission-Brief targets a legacy .hermes/ path as active state.
+    severity: high
+    required_validation_refs: [VAL-CONN-WRITE-FREEZE, VAL-MB-WRITE-FREEZE]
+  - id: RISK-RV2-005-SCOPE
+    title: Runtime bundled into the substrate gate.
+    relevance: [governance, runtime]
+    description: Connector runtime, CLI, network/API, or credential injection is implemented before separate ratification.
+    severity: critical
+    required_validation_refs: [VAL-CONN-WRITE-FREEZE, VAL-MB-WRITE-FREEZE]
+
+required_validation:
+  - id: VAL-CONN-SCHEMA
+    description: Reject malformed connector descriptors.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-KIND
+    description: Reject connector_kind values outside source_host/tracker.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles on connectors.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-MODE-ENUM
+    description: Reject unknown operating_mode values on connectors.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-CREDENTIAL-REF
+    description: Reject connectors whose credential_ref is not a {ref_kind, ref_name} reference.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-SECRET
+    description: Reject connectors carrying secret/credential values.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-CAPABILITY
+    description: Reject capability verbs outside the read set or the bounded tracker_mirror write set.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-NO-INLINE
+    description: Reject inline connector metadata in Markdown.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-CONN-WRITE-FREEZE
+    description: Reject connectors targeting legacy .hermes/ active state.
+    planned_slice: G2.005.0
+    planned_validator: connector
+    status: implemented
+  - id: VAL-MB-SCHEMA
+    description: Reject malformed Mission-Brief records.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-ROLE-FLOOR
+    description: Reject non-canonical emitting roles and reserved active ratifier roles on Mission-Briefs.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-MODE-ENUM
+    description: Reject unknown operating_mode values on Mission-Briefs.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-CLASS
+    description: Reject declared mutation classes outside docs/code/tracker_mirror.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-PRIVILEGE-ESCALATION
+    description: Reject Mission-Briefs declaring any privileged mutation class.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-POINTER-SHAPE
+    description: Reject non-64-hex CE-event/PCL references in a Mission-Brief.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-SIGNATURE-SHAPE
+    description: Validate shape-only Mission-Brief signature fields and the reserved-inactive value.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-SECRET
+    description: Reject Mission-Briefs carrying secret/credential values.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-NO-INLINE
+    description: Reject inline Mission-Brief metadata in Markdown.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+  - id: VAL-MB-WRITE-FREEZE
+    description: Reject Mission-Briefs targeting legacy .hermes/ active state.
+    planned_slice: G2.005.0
+    planned_validator: mission_brief
+    status: implemented
+
+crosswalk_ref: specs/v2/_crosswalk.yml#specs/v2/005
+adr_refs:
+  - specs/v2/adrs/ADR-V2-006-connector-substrate.md

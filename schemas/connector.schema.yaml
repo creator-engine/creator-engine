@@ -1,0 +1,74 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/connector.schema.yaml"
+title: "Creator Engine connector descriptor substrate"
+description: >-
+  G2.005.0 shape-only schema for a connector descriptor. A connector descriptor
+  declares the shape of a source-host or tracker connector: its kind, an opaque
+  provider-class label (never a concrete vendor/account binding as normative), a
+  capability scope (read-only or a bounded write set), and a credential reference
+  carried BY NAME ONLY (never a secret value). The connector substrate is
+  shape-and-validation only: no connector runtime, no network/API calls, no
+  credential injection. Privileged mutation classes remain Operator-only; the only
+  bounded write class this substrate permits is `tracker_mirror`.
+type: object
+oneOf:
+  - required: [connector]
+properties:
+  connector:
+    $ref: "#/$defs/connector"
+additionalProperties: false
+$defs:
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  connector:
+    type: object
+    required: [connector_id, connector_kind, provider_class, capability, credential_ref, emitting_role, operating_mode, recorded_at]
+    properties:
+      connector_id:
+        type: string
+        pattern: "^conn-[a-z0-9][a-z0-9-]{3,96}$"
+      connector_kind:
+        type: string
+        enum: [source_host, tracker]
+      provider_class:
+        type: string
+        description: "Opaque provider-class label (e.g. git-host, issue-tracker); not a vendor/account binding."
+        pattern: "^[a-z][a-z0-9-]{1,63}$"
+      capability:
+        type: object
+        required: [scope, verbs]
+        properties:
+          scope:
+            type: string
+            enum: [read_only, write]
+          verbs:
+            type: array
+            items:
+              type: string
+              pattern: "^[a-z][a-z0-9-]{1,63}$"
+        additionalProperties: false
+      credential_ref:
+        type: object
+        description: "A reference to a credential BY NAME — never a secret value."
+        required: [ref_kind, ref_name]
+        properties:
+          ref_kind:
+            type: string
+            enum: [none, env_var_name, secret_manager_ref]
+          ref_name:
+            type: string
+            minLength: 1
+        additionalProperties: false
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      metadata:
+        type: object
+        additionalProperties: true
+    additionalProperties: false
