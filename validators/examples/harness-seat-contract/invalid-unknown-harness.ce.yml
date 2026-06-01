@@ -1,0 +1,27 @@
+# Rejected: `jenkins` is not a CE-supported Controller-seat harness (VAL-SEAT-HARNESS / VAL-SEAT-SCHEMA).
+seat_contract:
+  seat_id: seat-bad-harness
+  harness: jenkins
+  launch_posture:
+    model_pin: true
+    setting_sources: [project]
+    terminal_visibility: operator_visible
+    strict_mcp_config: true
+    full_permission_mode: true
+    permission_mode_flag: "--dangerously-skip-permissions"
+    ring0_hook_pack_confirmed: true
+  refused_modes: [bare, print_headless, background_agents, remote_control, settings_local_weakening]
+  enforcement_ring: ring_0
+  required_hook_pack:
+    extension_id: ext-x
+    extension_kind: hook_pack
+    ring: ring_1
+    enforcement_strength: defeasible
+    emitting_role: controller
+    operating_mode: strict
+    hooks:
+      - {event: PreToolUse, matcher: "Bash", decision_protocol: allow_deny, failure_posture: fail_open, validator_binding: hook-check, defeasible: true}
+    recorded_at: '2026-06-01T09:03:02Z'
+  emitting_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-01T09:03:02Z'

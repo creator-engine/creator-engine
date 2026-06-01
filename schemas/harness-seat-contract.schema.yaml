@@ -1,0 +1,95 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/harness-seat-contract.schema.yaml"
+title: "Creator Engine harness seat-contract substrate"
+description: >-
+  G2.007.0 shape-only schema for a harness-agnostic Controller-seat contract. A
+  seat_contract declares the harness occupying the Controller seat, the required launch
+  posture, the genuinely posture-defeating modes the seat must refuse, the
+  full-permission mode (the efficient Controller operating mode) and its harness-specific
+  flag, the enforcement ring, and the required hook-pack (a G2.006.0 extension_contract).
+  CE does not privilege any harness: claude_code is the reference instance and
+  codex/hermes/openclaw instantiate the same contract (promoted in G2.007.1). The seat
+  posture invariants (required posture; refused-modes floor; full_permission_mode =>
+  ring0_hook_pack_confirmed; harness permission_mode_flag binding; a ring_1 defeasible
+  required hook-pack) are enforced by the `harness_seat_contract` validator. Shape-only:
+  no runtime, no .claude/** mutation, and no secret/credential values anywhere.
+type: object
+oneOf:
+  - required: [seat_contract]
+properties:
+  seat_contract:
+    $ref: "#/$defs/seat_contract"
+additionalProperties: false
+$defs:
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  seat_contract:
+    type: object
+    required: [seat_id, harness, launch_posture, refused_modes, enforcement_ring, required_hook_pack, emitting_role, operating_mode, recorded_at]
+    additionalProperties: false
+    properties:
+      seat_id:
+        type: string
+        pattern: "^seat-[a-z0-9][a-z0-9-]{3,96}$"
+      harness:
+        type: string
+        enum: [claude_code, codex, hermes, openclaw]
+      launch_posture:
+        $ref: "#/$defs/launch_posture"
+      refused_modes:
+        type: array
+        minItems: 1
+        items: {type: string}
+      enforcement_ring:
+        type: string
+        enum: [ring_0, ring_1, ring_2]
+      required_hook_pack:
+        $ref: "#/$defs/required_hook_pack"
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      metadata:
+        type: object
+        additionalProperties: true
+  launch_posture:
+    type: object
+    required: [model_pin, setting_sources, terminal_visibility, strict_mcp_config, full_permission_mode, ring0_hook_pack_confirmed]
+    additionalProperties: false
+    properties:
+      model_pin:
+        type: boolean
+      effort:
+        type: string
+      setting_sources:
+        type: array
+        minItems: 1
+        items: {type: string}
+      terminal_visibility:
+        type: string
+      strict_mcp_config:
+        type: boolean
+      full_permission_mode:
+        type: boolean
+        description: "The efficient Controller operating mode (no per-action approval). Harness-agnostic; sanctioned, NOT a refused mode. Requires ring0_hook_pack_confirmed when true."
+      permission_mode_flag:
+        type: string
+        description: "The harness-specific flag implementing full_permission_mode (e.g. --dangerously-skip-permissions for claude_code, --yolo for codex). Never a secret."
+      ring0_hook_pack_confirmed:
+        type: boolean
+  required_hook_pack:
+    type: object
+    description: "An embedded G2.006.0 extension_contract (kind hook_pack, ring_1, defeasible/fail-open hooks); validated by reusing the extension_hook_contract vocabulary."
+    required: [extension_id, extension_kind, ring, enforcement_strength, emitting_role, operating_mode, hooks, recorded_at]
+    additionalProperties: true
+    properties:
+      extension_kind: {type: string}
+      ring: {type: string}
+      hooks:
+        type: array
+        minItems: 1

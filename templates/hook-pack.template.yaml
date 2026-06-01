@@ -1,0 +1,32 @@
+# Harness-agnostic hook-pack template (G2.007.0).
+#
+# A generic Ring 1 (RUNTIME / DEFEASIBLE) hook-pack contract that any Controller-seat
+# harness instantiates and that a seat_contract embeds as its required_hook_pack. It is a
+# G2.006.0 `extension_contract` (kind hook_pack) and validates against the
+# `extension_hook_contract` check. Replace <…> placeholders per harness; bind the Ring 2
+# validator/command by name only (never a secret). The PreToolUse hook fails open and is
+# defeasible by contract (the HARD floor is Ring 0).
+extension_contract:
+  extension_id: ext-harness-hook-pack-template
+  extension_kind: hook_pack
+  ring: ring_1
+  enforcement_strength: defeasible
+  emitting_role: controller
+  operating_mode: strict
+  hooks:
+    - event: PreToolUse
+      matcher: "Edit|Write|MultiEdit|Read|Bash"
+      decision_protocol: allow_deny
+      failure_posture: fail_open
+      validator_binding: hook-check
+      defeasible: true
+    - event: Stop
+      decision_protocol: advisory
+      failure_posture: fail_open
+      validator_binding: hook-check
+      defeasible: true
+  recorded_at: '2026-06-01T09:03:02Z'
+  metadata:
+    summary: >-
+      Generic Ring 1 hook-pack template; a harness adapter instantiates it and a
+      seat_contract requires it. Formalizes, does not replace, the runtime hook-pack.
