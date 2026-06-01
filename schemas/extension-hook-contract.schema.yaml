@@ -1,0 +1,80 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/extension-hook-contract.schema.yaml"
+title: "Creator Engine extension + hook contract substrate"
+description: >-
+  G2.006.0 shape-only schema for a CE extension contract and its hook bindings. An
+  extension (e.g. a Claude Code hook-pack) declares the ring it occupies, its
+  enforcement strength, and the hooks it binds (event, matcher, decision protocol,
+  failure posture, defeasibility, validator binding). This is the declarative
+  formalization of the three-ring model (Ring 0 HARD kernel, Ring 1 RUNTIME/
+  DEFEASIBLE hook-pack, Ring 2 VALIDATOR bridge); it does NOT replace the CC-G-C/D
+  runtime. Shape-and-validation only: no runtime, no `.claude/**` mutation, and no
+  secret/credential values anywhere. The enforcement_strength x ring coherence
+  invariant (hard => ring_0; ring_1 => defeasible/fail_open) is enforced by the
+  `extension_hook_contract` validator, not by this schema alone.
+type: object
+oneOf:
+  - required: [extension_contract]
+properties:
+  extension_contract:
+    $ref: "#/$defs/extension_contract"
+additionalProperties: false
+$defs:
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  extension_contract:
+    type: object
+    required: [extension_id, extension_kind, ring, enforcement_strength, emitting_role, operating_mode, hooks, recorded_at]
+    additionalProperties: false
+    properties:
+      extension_id:
+        type: string
+        pattern: "^ext-[a-z0-9][a-z0-9-]{3,96}$"
+      extension_kind:
+        type: string
+        enum: [hook_pack, connector, directive_pack]
+      ring:
+        type: string
+        enum: [ring_0, ring_1, ring_2]
+      enforcement_strength:
+        type: string
+        enum: [hard, runtime, defeasible]
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      hooks:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/hook_contract"
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      metadata:
+        type: object
+        additionalProperties: true
+  hook_contract:
+    type: object
+    required: [event, decision_protocol, failure_posture, defeasible]
+    additionalProperties: false
+    properties:
+      event:
+        type: string
+        enum: [PreToolUse, PostToolUse, Stop, UserPromptSubmit, SessionStart]
+      matcher:
+        type: string
+        description: "Claude Code tool-name matcher (e.g. Edit|Write|MultiEdit|Read|Bash); optional for non-tool events."
+      decision_protocol:
+        type: string
+        enum: [allow_deny, allow_deny_block, advisory]
+      failure_posture:
+        type: string
+        enum: [fail_open, fail_closed]
+      validator_binding:
+        type: string
+        description: "Opaque name of the Ring 2 validator/command this hook bridges to (e.g. hook-check). Never a secret."
+      defeasible:
+        type: boolean
