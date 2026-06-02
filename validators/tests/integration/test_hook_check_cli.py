@@ -29,7 +29,10 @@ def _run(argv, capsys, stdin_text=None, monkeypatch=None):
     return code, out
 
 
-def test_hook_check_stdin_governed_deny(capsys, monkeypatch):
+def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch):
+    # G-i: author-time path-manifest enforcement is ADVISORY under governed
+    # posture (scope is enforced post-hoc by the CI path_manifest_fidelity
+    # PR-diff gate). Secret/mechanic denies stay hard (see the canaries below).
     event = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Edit",
@@ -37,10 +40,11 @@ def test_hook_check_stdin_governed_deny(capsys, monkeypatch):
         "ce": {"posture": "governed", "manifest_paths": ["schemas/x.yaml"]},
     }
     code, out = _run(["hook-check", "--stdin"], capsys, json.dumps(event), monkeypatch)
-    assert code == 0  # deny is a decision, not a CLI crash
+    assert code == 0  # advisory-allow is a decision, not a CLI crash
     payload = json.loads(out)
-    assert payload["decision"] == "deny"
-    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is True
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert payload["posture"] == "governed"
 
 
@@ -104,7 +108,8 @@ def test_hook_check_posture_auto_governed_from_examples(capsys, monkeypatch):
     assert code == 0
     payload = json.loads(out)
     assert payload["posture"] == "governed"
-    assert payload["decision"] == "deny"
+    assert payload["decision"] == "allow"  # governed out-of-manifest is advisory (G-i)
+    assert payload["advisory"] is True
 
 
 def test_hook_check_posture_auto_ungoverned_empty(capsys, tmp_path, monkeypatch):
@@ -154,7 +159,9 @@ def test_hook_check_manifest_doc_parsing(capsys, monkeypatch):
         monkeypatch,
     )
     assert code == 0
-    assert json.loads(out)["decision"] == "deny"
+    out_payload = json.loads(out)
+    assert out_payload["decision"] == "allow"  # out-of-manifest is advisory (G-i)
+    assert out_payload["advisory"] is True
 
 
 def test_hook_check_end_to_end_governed_lane(capsys, tmp_path, monkeypatch):
@@ -223,15 +230,17 @@ def test_hook_check_end_to_end_governed_lane(capsys, tmp_path, monkeypatch):
     assert payload["posture"] == "governed"
     assert payload["decision"] == "allow"
 
-    deny_event = dict(base, tool_input={"file_path": "docs/other.md"})
+    off_manifest_event = dict(base, tool_input={"file_path": "docs/other.md"})
     code, out = _run(
         ["hook-check", "--stdin", "--posture-root", str(root)],
         capsys,
-        json.dumps(deny_event),
+        json.dumps(off_manifest_event),
         monkeypatch,
     )
     assert code == 0
-    assert json.loads(out)["decision"] == "deny"
+    off_payload = json.loads(out)
+    assert off_payload["decision"] == "allow"  # governed out-of-manifest is advisory (G-i)
+    assert off_payload["advisory"] is True
 
 
 def _sha_for(paths):

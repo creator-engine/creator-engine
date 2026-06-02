@@ -377,7 +377,14 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
                 "permissionDecisionReason": reason,
             },
         )
-    if context.posture == "governed":
+    # G-i (v3 kickoff): under governed posture a *path-manifest mismatch* is now
+    # ADVISORY (allow-with-warning), not a hard deny — author-time scope
+    # containment moves to the PR-diff gate (path_manifest_fidelity --base). The
+    # secret-path and restricted-mechanic denies are UNCHANGED: they remain hard
+    # denies under governed posture. Branch on the reason so only the manifest
+    # outcome is relaxed.
+    manifest_mismatch = would_deny_reason == OUT_OF_MANIFEST_REASON
+    if context.posture == "governed" and not manifest_mismatch:
         return HookDecision(
             ok=True,
             hook_event_name="PreToolUse",
@@ -391,8 +398,12 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
                 "permissionDecisionReason": would_deny_reason,
             },
         )
-    # Ungoverned: advisory-allow, but still report what would have been denied.
-    reason = f"advisory (ungoverned): would deny — {would_deny_reason}"
+    # Advisory-allow: an ungoverned would-deny of any class, OR a governed
+    # path-manifest mismatch (G-i). Still report what would have been denied.
+    if manifest_mismatch and context.posture == "governed":
+        reason = f"advisory (governed; manifest enforcement is advisory): would deny — {would_deny_reason}"
+    else:
+        reason = f"advisory (ungoverned): would deny — {would_deny_reason}"
     return HookDecision(
         ok=True,
         hook_event_name="PreToolUse",

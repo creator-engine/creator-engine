@@ -60,13 +60,19 @@ MANIFEST = ("validators/creator_engine_validator/hook_check.py", "schemas/comple
 # --- Scope (PreToolUse Edit/Write/MultiEdit) -------------------------------
 
 
-def test_governed_out_of_manifest_edit_denies():
+def test_governed_out_of_manifest_edit_is_advisory_allow():
+    # G-i (v3 kickoff): a governed path-manifest mismatch is now ADVISORY
+    # (allow-with-warning), not a hard deny — scope containment moved to the
+    # PR-diff gate. Secret/mechanic denies stay hard (see below).
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
     decision = hook_check.evaluate(_edit_event("README.md"), ctx)
     assert decision.posture == "governed"
-    assert decision.decision == "deny"
-    assert decision.hook_specific_output["permissionDecision"] == "deny"
-    assert decision.ok is True  # a deny is a decision, not a CLI failure
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert decision.would_have_denied is True
+    assert decision.hook_specific_output["permissionDecision"] == "allow"
+    assert "manifest" in decision.reason.lower()
+    assert decision.ok is True
 
 
 def test_governed_in_manifest_edit_allows():
@@ -86,10 +92,13 @@ def test_governed_write_in_manifest_allows():
     assert decision.decision == "allow"
 
 
-def test_governed_multiedit_out_of_manifest_denies():
+def test_governed_multiedit_out_of_manifest_is_advisory_allow():
+    # G-i: governed manifest mismatch is advisory for MultiEdit too.
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
     decision = hook_check.evaluate(_edit_event("src/app.py", tool="MultiEdit"), ctx)
-    assert decision.decision == "deny"
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert decision.would_have_denied is True
 
 
 def test_ungoverned_out_of_manifest_edit_is_advisory_allow():
@@ -298,8 +307,11 @@ def test_stop_allows_well_formed_completion_report():
 
 
 def test_pretooluse_decision_to_dict_shape():
+    # Pin the deny-shaped to_dict() via a still-hard deny (restricted mechanic);
+    # the manifest mismatch is advisory post-G-i, so a deny case must come from a
+    # secret/mechanic reason.
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
-    decision = hook_check.evaluate(_edit_event("README.md"), ctx)
+    decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
     payload = decision.to_dict()
     assert payload["ok"] is True
     assert payload["hookEventName"] == "PreToolUse"
