@@ -1,4 +1,5 @@
 import hashlib
+import subprocess
 from pathlib import Path
 
 from creator_engine_validator.checks import registered_checks
@@ -6,6 +7,7 @@ from creator_engine_validator.checks.path_manifest_fidelity import (
     CHECK_NAME,
     PEDAGOGICAL_SENTINEL,
     run,
+    run_with_base,
     scan_document,
 )
 from creator_engine_validator.cli import main
@@ -210,3 +212,119 @@ def test_cli_scan_path_manifest_flags_init_py_corruption(capsys, tmp_path: Path)
     out = capsys.readouterr().out
     assert "FAIL path_manifest_fidelity" in out
     assert "path_manifest_init_py_corruption" in out
+
+
+# --- PR-diff gate (run_with_base / verify-path-manifest) — G-ii -----------
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def _init_repo(tmp_path: Path) -> tuple[Path, str]:
+    """Create a real git repo with one base commit; return (repo, base_sha)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "seed.txt").write_text("seed\n")
+    _git(repo, "add", "seed.txt")
+    _git(repo, "commit", "-q", "-m", "base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return repo, base
+
+
+def _write_manifest(repo: Path, paths: list[str]) -> Path:
+    """Write a fenced path-manifest doc OUTSIDE the diff (committed in base)."""
+    doc = repo / "pr-manifest.md"
+    doc.write_text(_build_doc(paths, prefix="AUTHORIZED"))
+    return doc
+
+
+def test_run_with_base_no_manifest_is_neutral(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    # Make a change so HEAD != base, but supply no manifest.
+    (repo / "changed.py").write_text("x = 1\n")
+    _git(repo, "add", "changed.py")
+    _git(repo, "commit", "-q", "-m", "change")
+    result = run_with_base([repo], base, manifest=None)
+    assert result.ok, [e.format() for e in result.errors]
+    assert result.errors == ()
+
+
+def test_run_with_base_diff_within_manifest_passes(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    manifest = _write_manifest(repo, ["src/app.py", "src/util.py"])
+    # The diff exactly equals the manifest path-set.
+    for rel in ("src/app.py", "src/util.py"):
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# code\n")
+    _git(repo, "add", "src/app.py", "src/util.py")
+    _git(repo, "commit", "-q", "-m", "in-manifest change")
+    result = run_with_base([repo], base, manifest=manifest)
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_with_base_diff_outside_manifest_fails_listing_path(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    manifest = _write_manifest(repo, ["src/app.py"])
+    # Change an in-manifest path AND an out-of-manifest path.
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / "src/app.py").write_text("# ok\n")
+    (repo / "rogue.py").write_text("# not authorized\n")
+    _git(repo, "add", "src/app.py", "rogue.py")
+    _git(repo, "commit", "-q", "-m", "out-of-manifest change")
+    result = run_with_base([repo], base, manifest=manifest)
+    assert not result.ok
+    codes = {e.code for e in result.errors}
+    assert "path_manifest_diff_outside_manifest" in codes, [e.format() for e in result.errors]
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "rogue.py" in rendered
+
+
+def test_run_with_base_manifest_path_not_changed_fails(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    # Manifest names a path the diff never touches → under-delivery flagged.
+    manifest = _write_manifest(repo, ["src/app.py", "src/missing.py"])
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / "src/app.py").write_text("# only this one\n")
+    _git(repo, "add", "src/app.py")
+    _git(repo, "commit", "-q", "-m", "partial change")
+    result = run_with_base([repo], base, manifest=manifest)
+    assert not result.ok
+    codes = {e.code for e in result.errors}
+    assert "path_manifest_unfulfilled_manifest_path" in codes, [e.format() for e in result.errors]
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "src/missing.py" in rendered
+
+
+def test_cli_verify_path_manifest_neutral_without_manifest(capsys, tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    (repo / "changed.py").write_text("x = 1\n")
+    _git(repo, "add", "changed.py")
+    _git(repo, "commit", "-q", "-m", "change")
+    exit_code = main(["verify-path-manifest", "--base", base, str(repo)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "PASS path_manifest_fidelity" in out
+
+
+def test_cli_verify_path_manifest_fails_on_out_of_manifest(capsys, tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    manifest = _write_manifest(repo, ["src/app.py"])
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / "src/app.py").write_text("# ok\n")
+    (repo / "rogue.py").write_text("# not authorized\n")
+    _git(repo, "add", "src/app.py", "rogue.py")
+    _git(repo, "commit", "-q", "-m", "out-of-manifest change")
+    exit_code = main(
+        ["verify-path-manifest", "--base", base, "--manifest", str(manifest), str(repo)]
+    )
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "FAIL path_manifest_fidelity" in out
+    assert "path_manifest_diff_outside_manifest" in out

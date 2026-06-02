@@ -169,7 +169,59 @@ This last step is what makes the manifest a **closed** scope rather
 than a polite suggestion: the report-back's hash equals the envelope's
 hash if and only if the implementer authored exactly the manifest.
 
-## h. Acceptance posture
+## h. PR-diff gate mode (`verify-path-manifest --base`) — v3
+
+As of the v3 kickoff the **real** scope-containment mechanism is a
+**PR-diff gate**, not author-time enforcement. The author-time
+PreToolUse manifest enforcement (the in-band hook bridge in
+`validators/creator_engine_validator/hook_check.py`) is now **advisory**:
+a governed path-manifest mismatch yields an *allow-with-warning*, not a
+hard deny, so the substrate no longer deadlocks a governed author who
+must touch a path the manifest did not anticipate. **The secret-path and
+dangerous-mechanic denies remain HARD** — only the *manifest* outcome was
+relaxed.
+
+Scope containment instead moves to where it can be enforced without
+blocking authoring: the **PR diff**. The check
+`path_manifest_fidelity.run_with_base(paths, base, manifest)` (reachable
+via the CLI subcommand `verify-path-manifest`) compares the set of paths
+changed between `<base>..HEAD` (`git diff --name-only`) to the ratified
+manifest path-set loaded from a **PR-carried manifest document**:
+
+```bash
+PYTHONPATH=validators python -m creator_engine_validator \
+  verify-path-manifest --base <PR base sha> [--manifest <path-manifest doc>]
+```
+
+- **`--manifest` supplied** → the gate is active. It flags:
+  - `path_manifest_diff_outside_manifest` for each `diff ∖ manifest`
+    path (a changed file the closed manifest does not authorize — the
+    scope overrun this gate exists to catch); and
+  - `path_manifest_unfulfilled_manifest_path` for each `manifest ∖ diff`
+    path (a manifest path the PR never changed — an under-delivered
+    closed manifest).
+  - `path_manifest_diff_no_manifest_paths` when the supplied document
+    declares no fenced manifest at all.
+- **`--manifest` omitted** → the gate is **NEUTRAL** (a passing
+  `CheckResult` with no errors). This is the transition-safe default:
+  non-manifest PRs are not failed. Making the gate a *required* status
+  check is a deliberate follow-on (the G-iii branch-protection step), not
+  part of this protocol.
+
+### PR-carried-manifest convention
+
+A PR that wishes to assert a closed manifest carries it as a fenced
+path-manifest document (the §c shape — `AUTHORIZED_PATHS_COUNT=` /
+`AUTHORIZED_PATHS_SHA256=` + a ```` ```text ```` block) committed in the
+PR itself. The CI workflow (`.github/workflows/validate.yml`) runs the
+gate on `pull_request` events against `github.event.pull_request.base.sha`,
+passing `--manifest .ce/pr-path-manifest.md` when that file is present and
+running neutral otherwise. This supersedes the `.hermes/handoffs/`-based
+author-time enforcement: the ratified manifest now travels *with the PR*,
+and the gate that enforces it runs *on the diff*, where it cannot deadlock
+the author.
+
+## i. Acceptance posture
 
 This document satisfies the workflow-hardening requirement to enforce
 fenced or machine-readable path manifests with normalized counts and
@@ -181,3 +233,6 @@ SHA256 hashes:
   `path_manifest_init_py_corruption` — in §e.
 - Names the canonical recomputation command shape in §f.
 - Names the final controller-side boundary verification in §g.
+- Names the v3 PR-diff gate mode + PR-carried-manifest convention, and
+  records that author-time PreToolUse manifest enforcement is now
+  advisory (secret/mechanic denies remain hard), in §h.

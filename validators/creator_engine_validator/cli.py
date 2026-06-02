@@ -117,6 +117,18 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_attribution.add_argument("--base", required=True, help="base commit (e.g., origin/main)")
     verify_attribution.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_path_manifest = sub.add_parser(
+        "verify-path-manifest",
+        help="path_manifest_fidelity PR-diff gate (compares <base>..HEAD against a PR-carried fenced path manifest; neutral when --manifest is omitted)",
+    )
+    verify_path_manifest.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_path_manifest.add_argument(
+        "--manifest",
+        default=None,
+        help="PR-committed handoff/envelope doc carrying the fenced ratified path manifest; omit for a neutral pass",
+    )
+    verify_path_manifest.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     pco_allocate = sub.add_parser(
         "pco-allocate",
         help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
@@ -406,6 +418,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-path-manifest":
+        from .checks.path_manifest_fidelity import run_with_base as _run_path_manifest
+        result = _run_path_manifest([Path(p) for p in args.paths], args.base, args.manifest)
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
         return _hook_check(args)

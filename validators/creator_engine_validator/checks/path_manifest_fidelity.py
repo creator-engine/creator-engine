@@ -44,9 +44,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
@@ -355,6 +356,133 @@ def extract_manifest_paths_from_file(path: Path) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return []
     return extract_manifest_paths(text)
+
+
+# --------------------------------------------------------------------------
+# PR-diff gate (verify-path-manifest --base) — G-ii
+# --------------------------------------------------------------------------
+#
+# The author-time PreToolUse manifest enforcement is advisory post-G-i; the
+# real scope-containment mechanism is this PR-diff gate. It compares the set of
+# paths changed between ``<base>..HEAD`` to the ratified manifest path-set
+# carried in a PR-committed manifest document, flagging any path in the diff
+# but not the manifest (diff∖manifest) and any manifest path not in the diff
+# (manifest∖diff). When no manifest is supplied the gate is NEUTRAL (a pass with
+# a note) — this is transition-safe and NOT yet a hard-required check.
+#
+# The git helper mirrors ``role_boundary_attribution`` so the two diff gates
+# share one shape and never disagree about how ``<base>..HEAD`` is computed.
+
+DIFF_GATE_CONTRACT = CONTRACT
+
+
+def _run_git(args: Sequence[str], cwd: Path) -> tuple[int, str, str]:
+    """Run a git command, returning (returncode, stdout, stderr). Never raises."""
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=30, check=False
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        return 1, "", str(exc)
+    return result.returncode, result.stdout, result.stderr
+
+
+def _repo_root_for(path: Path) -> Path:
+    start = path if path.is_dir() else path.parent
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists() or (candidate / "validators").is_dir():
+            return candidate
+    return Path.cwd()
+
+
+def run_with_base(
+    paths: Iterable[Path], base: str, manifest: str | Path | None = None
+) -> CheckResult:
+    """``verify-path-manifest --base <commit> [--manifest <doc>]`` mode.
+
+    Compute the changed-path set ``git diff --name-only <base>..HEAD`` and
+    compare it to the ratified manifest path-set loaded from ``manifest`` (a
+    PR-committed handoff/envelope doc carrying a fenced ``*_PATHS`` manifest,
+    parsed by ``extract_manifest_paths_from_file``).
+
+    * ``diff∖manifest`` → ``path_manifest_diff_outside_manifest`` (a changed
+      path the ratified manifest does not authorize) — the scope-containment
+      failure G-ii exists to catch.
+    * ``manifest∖diff`` → ``path_manifest_unfulfilled_manifest_path`` (a
+      manifest path the diff never touched) — flagged so an under-delivered
+      closed manifest is visible.
+
+    NEUTRAL (a passing ``CheckResult`` with no errors) when ``manifest`` is
+    ``None`` — the transition-safe default; this is not yet a hard-required
+    check.
+    """
+    raw_paths = [Path(p) for p in paths] or [Path(".")]
+    repo_root = _repo_root_for(raw_paths[0])
+    errors: list[ValidationError] = []
+
+    if manifest is None:
+        # Transition-safe neutral: no PR-carried manifest → nothing to enforce.
+        return CheckResult(name=CHECK_NAME, warnings=())
+
+    manifest_paths = set(extract_manifest_paths_from_file(Path(manifest)))
+    if not manifest_paths:
+        errors.append(
+            make_error(
+                "path_manifest_diff_no_manifest_paths",
+                str(manifest),
+                "",
+                (
+                    "verify-path-manifest --manifest was supplied but the document declares "
+                    "no fenced path manifest (no *_PATHS_COUNT/*_PATHS_SHA256 + ```text block)"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    returncode, stdout, stderr = _run_git(["diff", "--name-only", f"{base}..HEAD"], repo_root)
+    if returncode != 0:
+        errors.append(
+            make_error(
+                "path_manifest_diff_git_failed",
+                str(repo_root),
+                "",
+                f"git diff --name-only {base}..HEAD failed: {stderr.strip() or 'unknown error'}",
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    changed = {line.strip() for line in stdout.splitlines() if line.strip()}
+
+    for path in sorted(changed - manifest_paths):
+        errors.append(
+            make_error(
+                "path_manifest_diff_outside_manifest",
+                path,
+                "",
+                (
+                    f"changed file '{path}' is not present in the ratified PR path manifest "
+                    f"'{manifest}'; the PR diff exceeds its closed manifest"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+    for path in sorted(manifest_paths - changed):
+        errors.append(
+            make_error(
+                "path_manifest_unfulfilled_manifest_path",
+                path,
+                "",
+                (
+                    f"manifest path '{path}' in '{manifest}' was not changed in {base}..HEAD; "
+                    "the PR under-delivers its closed manifest"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+
+    return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
 
 @register(CHECK_NAME, ["R-012", "WH-001"])

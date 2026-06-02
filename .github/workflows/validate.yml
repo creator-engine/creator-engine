@@ -97,6 +97,25 @@ jobs:
         run: |
           PYTHONPATH=validators python -m creator_engine_validator --list-checks
 
+      - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          # Fetch the PR base so `<base>..HEAD` resolves; actions/checkout is a
+          # shallow single-commit checkout by default.
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${PR_BASE_SHA}" || true
+          # Convention: a PR carries its ratified closed manifest as a fenced
+          # path-manifest document at `.ce/pr-path-manifest.md`. When that file
+          # is present, enforce the diff against it; otherwise the gate is
+          # NEUTRAL (transition-safe — non-manifest PRs are not failed).
+          MANIFEST_ARG=""
+          if [ -f .ce/pr-path-manifest.md ]; then
+            MANIFEST_ARG="--manifest .ce/pr-path-manifest.md"
+          fi
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-path-manifest --base "${PR_BASE_SHA}" ${MANIFEST_ARG}
+
       - name: Workflow permissions audit (no write permissions present)
         run: |
           python - <<'PYEOF'

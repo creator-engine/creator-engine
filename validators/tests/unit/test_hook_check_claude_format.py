@@ -131,22 +131,24 @@ _GOVERNED_OUT_OF_MANIFEST = {
 }
 
 
-def test_cli_format_claude_pretooluse_deny(capsys, monkeypatch):
+def test_cli_format_claude_pretooluse_advisory_allow(capsys, monkeypatch):
+    # G-i (v3 kickoff): a governed path-manifest mismatch routed through the
+    # live decision path is now an ADVISORY allow, not a hard deny. The minimal
+    # Claude shape therefore maps to permissionDecision "allow" (an advisory
+    # outcome never hard-denies), with the advisory context in the reason.
     code, out = _run(
         ["hook-check", "--stdin", "--format", "claude"],
         capsys,
         json.dumps(_GOVERNED_OUT_OF_MANIFEST),
         monkeypatch,
     )
-    assert code == 0  # a deny is a decision, not a CLI crash
+    assert code == 0  # an advisory allow is a decision, not a CLI crash
     payload = json.loads(out)
-    assert payload == {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": "tracked path is outside the ratified path manifest",
-        }
-    }
+    hso = payload["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["permissionDecision"] == "allow"
+    assert "advisory" in hso["permissionDecisionReason"]
+    assert "manifest" in hso["permissionDecisionReason"].lower()
     # Minimal Claude shape: none of the raw decision-dict keys leak through.
     assert "ok" not in payload
     assert "decision" not in payload
@@ -162,11 +164,15 @@ def test_cli_format_raw_is_default_and_backward_compatible(capsys, monkeypatch):
     )
     assert code == 0
     default_payload = json.loads(default_out)
-    # Raw shape retains the full CC-G-B decision dict.
+    # Raw shape retains the full CC-G-B decision dict. Post-G-i a governed
+    # path-manifest mismatch is an advisory allow (allow-with-warning); the
+    # raw dict surfaces the advisory flag + would_have_denied.
     assert default_payload["ok"] is True
-    assert default_payload["decision"] == "deny"
+    assert default_payload["decision"] == "allow"
+    assert default_payload["advisory"] is True
+    assert default_payload["wouldHaveDenied"] is True
     assert default_payload["posture"] == "governed"
-    assert default_payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert default_payload["hookSpecificOutput"]["permissionDecision"] == "allow"
 
     code, explicit_out = _run(
         ["hook-check", "--stdin", "--format", "raw"],

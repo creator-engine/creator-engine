@@ -144,11 +144,18 @@ def _governed_event(tool_name, tool_input):
     return {"hook_event_name": "PreToolUse", "tool_name": tool_name, "tool_input": tool_input}
 
 
-def test_governed_out_of_manifest_edit_denies(tmp_path):
+def test_governed_out_of_manifest_edit_advisory_allows(tmp_path):
+    # G-i (v3 kickoff): a governed path-manifest mismatch is now ADVISORY end to
+    # end — the hook emits permissionDecision "allow" with the advisory context
+    # in the reason, NOT a hard deny. Scope containment moves to the PR-diff gate
+    # (path_manifest_fidelity --base). Secret/mechanic denies stay hard (below).
     root = _build_governed_root(tmp_path, ["docs/keep.md"])
     proc = _run_hook(_governed_event("Edit", {"file_path": "docs/other.md"}), root)
     assert proc.returncode == 0
-    assert _permission(proc) == "deny"
+    out = json.loads(proc.stdout)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "allow"
+    assert "advisory" in hso["permissionDecisionReason"]
 
 
 def test_governed_in_manifest_edit_allows(tmp_path):
