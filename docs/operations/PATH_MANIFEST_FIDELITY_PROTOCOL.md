@@ -204,22 +204,28 @@ PYTHONPATH=validators python -m creator_engine_validator \
     declares no fenced manifest at all.
 - **`--manifest` omitted** → the gate is **NEUTRAL** (a passing
   `CheckResult` with no errors). This is the transition-safe default:
-  non-manifest PRs are not failed. Making the gate a *required* status
-  check is a deliberate follow-on (the G-iii branch-protection step), not
-  part of this protocol.
+  non-manifest PRs (e.g. docs-only changes) are not failed. The gate runs
+  as a step of the **required** `Validate governance artifacts` status check
+  (which runs both the pytest suite and this diff-gate), so a *gate* PR that
+  carries its manifest cannot merge with a diff that drifts from it. Wiring
+  that required check + the reviewer policy that pins the non-author approver
+  is the work of **G-iii** — see `GITHUB_NATIVE_COORDINATION_PROTOCOL.md`.
 
-### PR-carried-manifest convention
+### PR-carried-manifest convention (the standard for gate PRs)
 
-A PR that wishes to assert a closed manifest carries it as a fenced
-path-manifest document (the §c shape — `AUTHORIZED_PATHS_COUNT=` /
-`AUTHORIZED_PATHS_SHA256=` + a ```` ```text ```` block) committed in the
-PR itself. The CI workflow (`.github/workflows/validate.yml`) runs the
-gate on `pull_request` events against `github.event.pull_request.base.sha`,
+**Every gate PR carries its ratified closed manifest** as a fenced
+path-manifest document committed at **`.ce/pr-path-manifest.md`** (the §c
+shape — `AUTHORIZED_PATHS_COUNT=` / `AUTHORIZED_PATHS_SHA256=` + a
+```` ```text ```` block listing the authorized paths; the carrier lists
+itself). The CI workflow (`.github/workflows/validate.yml`) runs the gate
+on `pull_request` events against `github.event.pull_request.base.sha`,
 passing `--manifest .ce/pr-path-manifest.md` when that file is present and
-running neutral otherwise. This supersedes the `.hermes/handoffs/`-based
-author-time enforcement: the ratified manifest now travels *with the PR*,
-and the gate that enforces it runs *on the diff*, where it cannot deadlock
-the author.
+running neutral otherwise (so docs-only / non-gate PRs are not failed). This
+supersedes the `.hermes/handoffs/`-based author-time enforcement: the
+ratified manifest now travels *with the PR*, and the gate that enforces it
+runs *on the diff*, where it cannot deadlock the author. Carrying the
+manifest in the PR is what turns the diff-gate from *post-hoc-by-the-
+Controller* verification into a *machine-enforced* merge gate (G-iii).
 
 ## i. Acceptance posture
 

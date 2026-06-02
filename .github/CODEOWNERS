@@ -1,0 +1,13 @@
+# CE-managed reviewer identity (v3 G-iii).
+#
+# The non-author approver of every pull request is the CE-managed reviewer
+# identity — an independent, adversarially-prompted CE reviewer agent operating
+# in a distinct venue (architect Q3; see
+# docs/operations/GITHUB_NATIVE_COORDINATION_PROTOCOL.md and the independent
+# reviewer-venue rule). Author-cannot-approve-own-PR is GitHub-intrinsic;
+# enabling `require_code_owner_reviews` (done by `configure_repo()` in the merge
+# batch) pins that required approval to the identity named here.
+#
+# `ubuntuaws745-cmyk` is a write-access collaborator (Code-Owner-eligible) and is
+# distinct from the author identity `chmod735`.
+*       @ubuntuaws745-cmyk
