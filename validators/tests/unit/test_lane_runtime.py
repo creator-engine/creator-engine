@@ -705,3 +705,89 @@ def test_launch_refuses_advisory_role_as_ratifier_tenant_policy_before_side_effe
             tmux_adapter=adapter,
         )
     assert adapter.spawned == []
+
+
+# ---------------------------------------------------------------------------
+# G2.007.4: launch auto-provisions the strict lane MCP config in the worktree
+# ---------------------------------------------------------------------------
+
+
+def test_lane_launch_autoprovisions_mcp_config_when_missing(tmp_path, monkeypatch):
+    """A governed Claude lane gets its strict MCP config written into the worktree."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["claude", "--model", "claude-opus-4-7"],
+        worktree_path=str(wt),
+        tmux_adapter=FakeAdapter(),
+    )
+    target = wt / ".hermes" / "gate3-lane" / "mcp" / "ce-mcp.json"
+    assert target.is_file(), "launch must auto-provision the strict lane MCP config"
+    assert json.loads(target.read_text(encoding="utf-8")) == {"mcpServers": {}}
+    # byte-exact: indent=2, sort_keys, trailing newline (matches init_runtime writer)
+    assert (
+        target.read_text(encoding="utf-8")
+        == json.dumps({"mcpServers": {}}, indent=2, sort_keys=True) + "\n"
+    )
+
+
+def test_lane_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypatch):
+    """An Operator/launcher-supplied MCP config is never clobbered."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    wt = tmp_path / "wt"
+    target = wt / ".hermes" / "gate3-lane" / "mcp" / "ce-mcp.json"
+    target.parent.mkdir(parents=True)
+    preexisting = '{"mcpServers": {"keep": {"command": "x"}}}\n'
+    target.write_text(preexisting, encoding="utf-8")
+    _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["claude", "--model", "claude-opus-4-7"],
+        worktree_path=str(wt),
+        tmux_adapter=FakeAdapter(),
+    )
+    assert target.read_text(encoding="utf-8") == preexisting
+
+
+def test_lane_launch_refuses_nonfile_mcp_target_before_side_effects(tmp_path, monkeypatch):
+    """A non-regular-file at the MCP target is a fail-closed refusal (no spawn/pane)."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    wt = tmp_path / "wt"
+    target = wt / ".hermes" / "gate3-lane" / "mcp" / "ce-mcp.json"
+    target.mkdir(parents=True)  # a DIRECTORY where the config file must go
+    adapter = FakeAdapter()
+    with pytest.raises(lane_runtime.ClaudeLaunchRefused):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            command=["claude", "--model", "claude-opus-4-7"],
+            worktree_path=str(wt),
+            tmux_adapter=adapter,
+        )
+    assert adapter.spawned == []
+    assert not (ledger / "panes" / "hermes-primary" / "gate3-lane.yaml").exists()
+
+
+def test_lane_launch_non_claude_command_does_not_provision_mcp(tmp_path):
+    """Non-Claude lanes never get an MCP config written (the branch is Claude-only)."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    _launch(
+        tmp_path,
+        ledger_root=ledger,
+        command=["sh", "-c", "echo hi"],
+        worktree_path=str(wt),
+        tmux_adapter=FakeAdapter(),
+    )
+    assert not (wt / ".hermes" / "gate3-lane" / "mcp" / "ce-mcp.json").exists()
