@@ -128,6 +128,21 @@ Only after all refusals pass does the command produce side effects:
    available plus the bound claim's `claim_record_sha256`. The generated record
    is validated against the Pane Registry schema before it is written.
 
+### Governed Claude lanes: strict MCP config auto-provisioning
+
+When `--command` is a `claude` invocation, the launcher pins the governed
+command to `--strict-mcp-config` pointing at a CE-owned config
+(`--mcp-config`, else `.hermes/<lane-id>/mcp/ce-mcp.json`). Because the lane runs
+with `cwd` set to its worktree, that path must exist **inside the worktree** or
+the governed seat cannot bind its MCP servers. The launcher therefore
+**auto-provisions** the config before spawn (resolving the path against
+`--worktree-path`, else the repo root): if nothing is present it writes the
+default `{"mcpServers": {}}` payload (byte-identical to `ce init`); an existing
+regular file is left untouched (an Operator- or launcher-supplied config wins);
+and a non-regular file at the path is a fail-closed refusal (`CC-D-7`) before any
+side effect — it is never clobbered. This removes the prior requirement to
+pre-provision the worktree's MCP config by hand before launching a governed lane.
+
 ## e. `ce lane status`
 
 Reads the Pane Registry record for `--controller-id`/`--lane-id` under

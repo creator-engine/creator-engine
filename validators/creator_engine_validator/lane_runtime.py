@@ -36,6 +36,7 @@ from . import claude_launch_spec
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
+from .init_runtime import DEFAULT_MCP_CONFIG_PAYLOAD
 from .loader import LoaderError, load_yaml
 from .pco_allocator import guard
 from .tmux_adapter import TmuxAdapter, TmuxPane, TmuxUnavailable
@@ -286,6 +287,31 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
     from . import hook_pack_confirm
 
     return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
+
+
+def _ensure_lane_mcp_config(target: Path) -> None:
+    """Idempotently provision the strict lane MCP config at ``target``.
+
+    A governed Claude lane is pinned to ``--strict-mcp-config`` pointing at
+    ``target``; the seat cannot bind without that file existing in its worktree.
+    Writes the default ``{"mcpServers": {}}`` payload (byte-identical to
+    :data:`init_runtime.DEFAULT_MCP_CONFIG_PAYLOAD`) only when nothing is there.
+    An existing regular file is left untouched (an Operator/launcher-supplied
+    config wins); a non-regular file is a fail-closed refusal before any side
+    effect (never clobbered).
+    """
+    if target.exists():
+        if not target.is_file():
+            raise ClaudeLaunchRefused(
+                f"refusing governed Claude lane launch: {claude_launch_spec.CLAUSE_MCP} — "
+                f"lane MCP config path exists but is not a regular file: {target}"
+            )
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(DEFAULT_MCP_CONFIG_PAYLOAD, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def is_distinct_reviewer_venue(*, role: str | None, lane_kind: str | None) -> bool:
@@ -595,6 +621,15 @@ def launch(
                 "Ring 0 refuses before any side effect"
             )
         resolved_mcp = mcp_config_path or f".hermes/{lane_id}/mcp/ce-mcp.json"
+        # Auto-provision the strict lane MCP config into the directory the seat
+        # will run in (cwd = worktree_path, else repo_root), so a governed Claude
+        # lane can bind --strict-mcp-config. Idempotent; refuses a non-file
+        # before any side effect.
+        mcp_target = Path(resolved_mcp)
+        if not mcp_target.is_absolute():
+            mcp_base = Path(worktree_path) if worktree_path else Path(repo_root)
+            mcp_target = mcp_base / mcp_target
+        _ensure_lane_mcp_config(mcp_target)
         try:
             launch_command = claude_launch_spec.build_governed_claude_command(
                 base_argv=requested,
