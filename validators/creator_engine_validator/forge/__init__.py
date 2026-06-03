@@ -27,6 +27,7 @@ installable validator package so the existing CI pytest job covers it.
 """
 from __future__ import annotations
 
+from .change import ChangeRef, OpenChangeRefused, open_change
 from .github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
     BranchProtectionPolicy,
@@ -50,16 +51,19 @@ __all__ = [
     "DEFAULT_MAIN_PROTECTION",
     "ApprovalQuery",
     "BranchProtectionPolicy",
+    "ChangeRef",
     "ConfigResult",
     "ForgeConfigError",
     "ForgeConfigRefused",
     "GhRunner",
+    "OpenChangeRefused",
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
     "configure_repo",
     "install_required_checks",
     "mint_scoped_token",
+    "open_change",
     "plan_approved",
     "revoke_scoped_token",
 ]
