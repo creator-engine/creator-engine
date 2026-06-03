@@ -1,0 +1,36 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: "1"
+records:
+  # Genesis record: prev_hash is the all-zero sentinel, sequence 0.
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+    run_id: run-implementer-0001
+    lifecycle_phase: provision
+    classification: allowed
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 0
+    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+    content_hash: "4846f11589cab1125e8e6e3a501dedac79f119742ecf247f15d79cf099474cdb"
+  # Second record: prev_hash links to the genesis content_hash, sequence 1.
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+    run_id: run-implementer-0001
+    lifecycle_phase: teardown
+    classification: allowed
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 1
+    prev_hash: "4846f11589cab1125e8e6e3a501dedac79f119742ecf247f15d79cf099474cdb"
+    content_hash: "7f68be529bd31d9d9008926014e4689f624116ba0fbe1d899ebe3510560439a5"
+note: >
+  Runtime-evidence chain for one implementer seat provisioning: a genesis
+  provision record and a teardown record, both classified allowed and bound to
+  the same runtime-policy (policy_sha matches the well-formed runtime-policy
+  example). Content-addressed and hash-chained; verifies clean. Record-shape
+  only — G-1.3a stands up no live runtime and runs no classifier.

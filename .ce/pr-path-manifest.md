@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-1.2 (gVisor + capability-separation egress proxy backend)
+# PR path manifest — v3 G-1.3a (hash-chained evidence-spine substrate)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,29 +9,39 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This PR adds the v3 **G-1.2** first live plane-C backend — a `gvisor-proxy`
-backend behind the G-1.1 `RunnerBackend` adapter that translates a runtime-policy
-into a hardened gVisor (runsc, Systrap — no KVM) container plan + a
-capability-separation egress-proxy deny-by-default config, and fixes the in-repo
-egress stub. The translation is pure/unit-tested; live calls go through an
-injectable runner seam behind an availability gate (ZERO live subprocess in CI).
-NOT a validator check — `--list-checks` is unchanged at 42.
+This PR adds the v3 **G-1.3a** evidence-spine substrate: a tamper-evident,
+append-only, content-addressed **hash-chained runtime-evidence** record chain
+(`schemas/runtime-evidence.schema.yaml` + the PURE
+`runtime_evidence_spine.append`/`verify_chain` substrate), validated by a new
+`@register`-ed `ce_runtime_evidence` dogfood check. Each record is content-
+addressed and chain-linked, anchored to the runtime-policy it attests via
+`policy_sha`. Reuses the proven `ce-event-block` / side-effect-ledger hash-chain
+discipline; pure (no container/subprocess/socket/disk). The classifier + audit
+overlay over the RunnerBackend lifecycle is the deferred G-1.3b slice.
 
-This manifest is REVISION-2 (4 → 5): registering `gvisor-proxy` flipped the
-G-1.1 `test_runner_backend.py` assertion that `gvisor-proxy` raises
-`UnknownBackend`, so that test is a MODIFY (halt-and-amend).
+This registers a new validator check, so `--list-checks` changes **42 → 43**
+(`test_cli.py` updated accordingly). No `ce_cli.py` / wheel change (stdlib only).
 
-- **base:** `d4df4bd7326522b5c1b1bb975da151707e8f8a2e`.
+- **base:** `ae2315baae4cc672fa921c7ee17e349e7b5a20e3`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=14
 
-AUTHORIZED_PATHS_SHA256=bea2344d57725cba72fac3b9cb5e1336b10c550ca42b37af9323689385b5971c
+AUTHORIZED_PATHS_SHA256=3b1a50a4fbe8717e346abb3c79cf3135be335470abf405f2cd4c077853cfbfc9
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/runner/__init__.py
-validators/creator_engine_validator/runner/gvisor_proxy_backend.py
-validators/tests/unit/test_gvisor_proxy_backend.py
-validators/tests/unit/test_runner_backend.py
+docs/contracts/runtime-evidence.md
+examples/malformed/runtime-evidence/broken-chain-link.yml
+examples/malformed/runtime-evidence/mutated-content-hash.yml
+examples/malformed/runtime-evidence/unbound-policy-sha.yml
+examples/well-formed/runtime-evidence/example-runtime-evidence-chain.yml
+schemas/runtime-evidence.schema.yaml
+validators/creator_engine_validator/checks/__init__.py
+validators/creator_engine_validator/checks/ce_runtime_evidence.py
+validators/creator_engine_validator/cli.py
+validators/creator_engine_validator/runtime_evidence_spine.py
+validators/tests/integration/test_ce_runtime_evidence_examples.py
+validators/tests/unit/test_ce_runtime_evidence.py
+validators/tests/unit/test_cli.py
 ```

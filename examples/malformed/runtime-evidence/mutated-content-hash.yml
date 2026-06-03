@@ -1,0 +1,20 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: "1"
+records:
+  # runtime_evidence_content_address: the stored content_hash does NOT equal the
+  # SHA256 recomputed over the record's canonical material — a field was mutated
+  # after the record was hashed. The content_hash is a well-formed 64-hex digest
+  # (so the schema passes), so ONLY the content-address predicate fires.
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+    run_id: run-implementer-0001
+    lifecycle_phase: run
+    classification: denied
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 0
+    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+    content_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

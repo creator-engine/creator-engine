@@ -305,6 +305,9 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/runtime-policy/unpinned-image.yml"), False, "runtime_policy_image_not_digest_pinned"),
         ("malformed", Path("examples/malformed/runtime-policy/forbidden-mount.yml"), False, "runtime_policy_forbidden_mount"),
         ("malformed", Path("examples/malformed/runtime-policy/controller-key-secret.yml"), False, "runtime_policy_secret_names_only_violation"),
+        ("malformed", Path("examples/malformed/runtime-evidence/broken-chain-link.yml"), False, "runtime_evidence_chain_link"),
+        ("malformed", Path("examples/malformed/runtime-evidence/mutated-content-hash.yml"), False, "runtime_evidence_content_address"),
+        ("malformed", Path("examples/malformed/runtime-evidence/unbound-policy-sha.yml"), False, "runtime_evidence_policy_unbound"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
