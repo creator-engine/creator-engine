@@ -37,9 +37,11 @@ from .github_repo_config import (
     configure_repo,
     install_required_checks,
 )
+from .plan_approval import ApprovalQuery, plan_approved
 
 __all__ = [
     "DEFAULT_MAIN_PROTECTION",
+    "ApprovalQuery",
     "BranchProtectionPolicy",
     "ConfigResult",
     "ForgeConfigError",
@@ -47,4 +49,5 @@ __all__ = [
     "GhRunner",
     "configure_repo",
     "install_required_checks",
+    "plan_approved",
 ]

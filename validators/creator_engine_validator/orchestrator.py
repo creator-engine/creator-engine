@@ -39,8 +39,12 @@ Design invariants (deliberate, load-bearing):
 
 This module is the seed for the architect's pre-committed ``ce_orchestrator``
 extraction; until then it lives in the installable validator package so the
-existing CI pytest job covers it. The forge-native approval source
-(``plan_approved()``) and the per-task ``mint_scoped_token`` are deferred G-2
+existing CI pytest job covers it. **G-2.1 hardening** wires the gate to a
+forge-native approval source-of-truth via an injected ``approval_resolver`` seam
+(the production resolver is a thin closure over ``forge.plan_approved``; the
+orchestrator itself stays forge-free) and adds the no-self-approval guardrail
+(``approved_by`` != the running ``seat_identity``). The per-task
+``mint_scoped_token`` (JIT least-privilege credential) remains deferred G-2.2
 hardening. See ``docs/contracts/orchestrator.md``.
 
 Defensive only — authorization + accountability for our own agent runtime;
@@ -49,7 +53,7 @@ never offensive.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -82,10 +86,10 @@ class ApprovedPlan:
     ``policy_sha`` anchors the approval to the runtime-policy version in force and
     ``run_id`` to the specific run. ``approved_by`` is the ratifier identity (NOT
     the agent seat being run — the agent never self-approves) and ``approval_ref``
-    points at the ratifying artifact (e.g. the forge issue / plan-PR). In G-2.0
-    these are caller-supplied; wiring them to the forge-native ``plan_approved()``
-    query (and enforcing ``approved_by`` != the seat identity) is deferred G-2
-    hardening.
+    points at the ratifying artifact (e.g. the forge issue / plan-PR). These may
+    be caller-supplied, or (G-2.1) resolved from the forge by an injected
+    ``approval_resolver`` (``forge.plan_approved``); ``run_plan`` enforces
+    ``approved_by`` != the running ``seat_identity`` either way.
     """
 
     run_id: str
@@ -94,16 +98,27 @@ class ApprovedPlan:
     approval_ref: str
 
 
+# A resolver maps (runtime_policy, run_id) -> the ApprovedPlan to gate-check, or
+# None when the forge holds no valid ratification. The production resolver is a
+# thin closure over ``forge.plan_approved``; injecting it (rather than importing
+# the forge here) keeps the orchestrator pure and forge-free.
+ApprovalResolver = Callable[[dict[str, Any], str], "ApprovedPlan | None"]
+
+
 def _ratify_or_refuse(
     runtime_policy: dict[str, Any],
     run_id: str,
     approved_plan: ApprovedPlan | None,
+    seat_identity: str | None = None,
 ) -> None:
     """Raise :class:`PlanNotRatified` unless ``approved_plan`` authorizes the run.
 
     Enforced BEFORE any provision. The approval must be present, bound to the
     exact ``run_id``, anchored to the runtime-policy's ``policy_sha`` (a 64-hex
-    digest), and carry a non-empty ratifier identity + approval reference.
+    digest), carry a non-empty ratifier identity + approval reference, and — when
+    a ``seat_identity`` is supplied — NOT be approved by the running seat itself
+    (the agent never self-approves; the guardrail holds for both caller-supplied
+    and forge-resolved plans).
     """
     if approved_plan is None:
         raise PlanNotRatified(
@@ -129,6 +144,11 @@ def _ratify_or_refuse(
             "approved plan is missing approved_by / approval_ref "
             "(an unattributed approval is not a ratification)"
         )
+    if seat_identity is not None and approved_plan.approved_by == seat_identity:
+        raise PlanNotRatified(
+            f"approved plan approved_by {approved_plan.approved_by!r} is the running seat "
+            "(a seat may not approve its own run)"
+        )
 
 
 def run_plan(
@@ -139,13 +159,19 @@ def run_plan(
     *,
     backend: RunnerBackend | None = None,
     clock: Clock | None = None,
+    approval_resolver: ApprovalResolver | None = None,
+    seat_identity: str | None = None,
 ) -> CollectedEvidence:
     """Drive one ratified, audited agent-seat run and return its collected evidence.
 
     Thin glue, in order:
 
+    0. **resolve approval** — if no ``approved_plan`` is supplied and an
+       ``approval_resolver`` is injected (production wires it to
+       ``forge.plan_approved``), resolve the plan from the forge source-of-truth;
     1. **gate-check** — :func:`_ratify_or_refuse` raises :class:`PlanNotRatified`
-       BEFORE any side effect if the run is not ratified + bound to this policy;
+       BEFORE any side effect if the run is not ratified + bound to this policy,
+       or if ``seat_identity`` approved its own run;
     2. **resolve** the inner isolation backend — the injected ``backend`` else
        ``get_backend(runtime_policy["isolation_backend"])``;
     3. **wrap** it in :class:`AuditOverlayBackend` so every lifecycle step is
@@ -159,8 +185,12 @@ def run_plan(
     the backend's own refusals unchanged: ``PolicyRejected`` on an unclean
     runtime-policy, ``BackendUnavailable`` / ``UnknownBackend`` on resolution.
     """
+    # 0) Resolve the approval from the forge if not supplied (injected resolver).
+    if approved_plan is None and approval_resolver is not None:
+        approved_plan = approval_resolver(runtime_policy, run_id)
+
     # 1) Ratification gate — refuse BEFORE any side effect (the locked guardrail).
-    _ratify_or_refuse(runtime_policy, run_id, approved_plan)
+    _ratify_or_refuse(runtime_policy, run_id, approved_plan, seat_identity)
 
     # 2) Resolve the inner backend (injected for tests, else by the policy selector).
     inner = backend if backend is not None else get_backend(runtime_policy["isolation_backend"])

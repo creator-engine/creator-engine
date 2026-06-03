@@ -2,10 +2,14 @@
 
 Gate: v3 **G-2.0** — the thin orchestrator + the approved-plan ratification
 gate (the first slice of G-2; opens the second MVP milestone after G-1 /
-plane C is complete).
+plane C is complete). **G-2.1** hardens it: the gate is wired to a forge-native
+approval source-of-truth (`forge.plan_approved`) through an injected resolver
+seam, and a no-self-approval guardrail (`approved_by` != the running
+`seat_identity`) is enforced.
 Validator check: **none** — the orchestrator is pure in-process glue behind the
-G-1.1 runner adapter. It registers no `@register` check (`--list-checks` stays
-**43**) and no `isolation_backend` (`available_backends()` stays
+G-1.1 runner adapter, and the G-2.1 resolver is pure behind the G-iii forge
+`GhRunner` seam. Neither registers a `@register` check (`--list-checks` stays
+**43**) nor an `isolation_backend` (`available_backends()` stays
 `('gvisor-proxy', 'local-noop')`).
 Module: `validators/creator_engine_validator/orchestrator.py`
 Reuses: the G-1.1 adapter (`runner.get_backend` / `RunnerBackend` /
@@ -70,9 +74,38 @@ not duplicate.
 | run bound | `PlanNotRatified` when `approved_plan.run_id != run_id` |
 | policy bound | `PlanNotRatified` when `approved_plan.policy_sha` is not a 64-hex digest, or `!= runtime_policy["policy_sha"]` |
 | attested | `PlanNotRatified` when `approved_by` or `approval_ref` is empty |
+| not self-approved | `PlanNotRatified` when a `seat_identity` is supplied and `approved_by == seat_identity` |
 | backend resolvable | propagates `UnknownBackend` (e.g. `openshell`, not yet registered) |
 | backend available | propagates `BackendUnavailable` (e.g. `gvisor-proxy` with no runsc) |
 | policy clean | propagates the inner backend's `PolicyRejected` |
+
+## Forge-native approval resolution (G-2.1)
+
+In G-2.0 the `ApprovedPlan` was a caller-supplied literal. G-2.1 makes the
+**forge the source-of-truth** for it without coupling the orchestrator to the
+forge: `run_plan` takes two keyword-only seams — `approval_resolver` and
+`seat_identity`. When no `approved_plan` is supplied and a resolver is injected,
+`run_plan` calls `approval_resolver(runtime_policy, run_id)` and gate-checks the
+result. The production resolver is a thin closure over
+`forge.plan_approved(query, *, seat_identity, gh_runner)`; injecting it (rather
+than importing the forge here) keeps the orchestrator pure and forge-free.
+
+`forge.plan_approved` resolves an `ApprovedPlan` from a plan-PR and returns it
+only when **all** of the following hold (else it returns `None`; a transport
+failure raises `ForgeConfigError`):
+
+| axis | rule |
+| --- | --- |
+| run + policy bound | the PR body carries `ce-run-id:` / `ce-policy-sha:` markers equal to the requested `run_id` / `policy_sha` |
+| commit-pinned | the `APPROVED` review's `commit_id` equals the PR head SHA (re-asserts GitHub's stale-on-commit-change behaviour) |
+| independent | the approver is neither the PR author nor the running `seat_identity` (no self-approval) |
+| state | only an `APPROVED` review counts (`COMMENTED` / `CHANGES_REQUESTED` do not) |
+
+The resolved `approval_ref` is `{repo}#{pr}@{head_sha}`. Defence-in-depth: even a
+caller-supplied or resolved plan is re-checked by the gate's `approved_by` !=
+`seat_identity` guardrail, so the seat can never approve its own run on any path.
+Like the rest of `forge/`, the resolver performs **zero** live network in
+tests (the `GhRunner` is injected) and registers no check.
 
 ## Purity and the injectable backend seam
 
@@ -90,13 +123,11 @@ The returned evidence is the audit overlay's collect-time spine snapshot
 the run's `policy_sha`; a clean run satisfies `verify_chain(records) == []`.
 `teardown` is still executed to release the runtime.
 
-## Deferred (later G-2 hardening — NOT in G-2.0)
+## Deferred (later G-2 hardening — NOT in this slice)
 
-- **Forge-native approval source.** Populating `approved_by` / `approval_ref`
-  from the architect's `forge.plan_approved(plan_ref)` query over an approved
-  forge issue / plan-PR, and enforcing `approved_by` != the seat identity.
-- **`mint_scoped_token`.** The least-privilege, short-TTL token minted per task
-  between the approval gate and provision.
+- **`mint_scoped_token` (G-2.2).** The least-privilege, short-TTL token minted
+  per task between the approval gate and provision, behind an injectable minter
+  seam, attested to the evidence spine.
 - **OpenShell** as a registered backend behind the same `RunnerBackend` adapter.
 - **Real-clock + evidence persistence** behind the existing injectable seams.
 
