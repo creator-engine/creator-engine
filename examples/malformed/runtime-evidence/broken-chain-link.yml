@@ -1,0 +1,32 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: "1"
+records:
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+    run_id: run-implementer-0001
+    lifecycle_phase: provision
+    classification: allowed
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 0
+    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+    content_hash: "4846f11589cab1125e8e6e3a501dedac79f119742ecf247f15d79cf099474cdb"
+  # runtime_evidence_chain_link: prev_hash does NOT equal the genesis record's
+  # content_hash, so the hash chain is broken (a record was substituted /
+  # reparented). The record is otherwise internally hash-consistent, so ONLY the
+  # chain-link predicate fires.
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+    run_id: run-implementer-0001
+    lifecycle_phase: teardown
+    classification: allowed
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 1
+    prev_hash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    content_hash: "75ff837658cdb9ec0352af053071d44cfbb531410f2ede36b807e1ad72503346"

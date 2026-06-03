@@ -1,0 +1,170 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/runtime-evidence.schema.yaml"
+title: "Creator Engine Runtime Evidence Chain"
+description: |
+  Machine-readable schema for a hash-chained Runtime Evidence chain — the
+  tamper-evident, append-only, content-addressed audit spine for one Creator
+  Engine agent seat's runtime lifecycle (plane C / runtime safety, v3 G-1.3a).
+
+  Prose contract: `docs/contracts/runtime-evidence.md`.
+
+  Each record is content-addressed (`content_hash` = SHA256 of the canonical
+  record material excluding `content_hash` itself) and chain-linked
+  (`prev_hash`); the genesis record's `prev_hash` is the all-zero SHA256
+  sentinel and `sequence` is contiguous from 0. Every record binds to the exact
+  runtime-policy it attests via `policy_sha`. This discipline mirrors the landed
+  `ce-event-block` and side-effect-ledger hash chains; the PURE append/verify
+  substrate is
+  `validators/creator_engine_validator/runtime_evidence_spine.py`.
+
+  G-1.3a boundary statement: this schema and its `ce_runtime_evidence` dogfood
+  check validate the *record shape and chain integrity* of static evidence
+  files only. They do NOT allocate a container, invoke a runner backend, build
+  or push an image, open a network socket, or tap a live runtime. The
+  classifier + audit overlay that *produces* these records over the
+  RunnerBackend provision/run/collect/teardown lifecycle is the deferred G-1.3b
+  slice; an OpenShell backend is a later fast-follow behind the same adapter.
+
+  Defensive posture: this contract makes the Creator Engine's own runtime audit
+  trail tamper-evident; it is never an offensive capability. The `policy_sha`
+  binding and the content-address + chain-link + sequence invariants are
+  enforced mechanically by the `ce_runtime_evidence` check.
+
+  Concrete host, port, credential, account, or registry identifiers MUST NOT
+  appear in a record as normative bindings; evidence records carry hashes,
+  phase/classification enums, and shape-only references.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - records
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: runtime-evidence-chain
+    description: |
+      Discriminator constant. Files that do not carry this exact value are not
+      governed Runtime Evidence chains and MUST NOT be validated by the
+      `ce_runtime_evidence` check.
+  record_type:
+    type: string
+    const: runtime_evidence_chain
+    description: |
+      Sub-discriminator for the chain wrapper. G-1.3a defines exactly one
+      chain shape; later slices MAY add additive record types under a new
+      `schema_version`.
+  schema_version:
+    type: string
+    enum: ["1"]
+    description: |
+      Runtime Evidence schema version. G-1.3a ships v1; later slices MAY extend
+      additively without breaking v1 readers.
+  records:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/runtime_evidence_record"
+    description: |
+      The ordered, append-only record chain. Element 0 is the genesis record
+      (`prev_hash` = the all-zero sentinel, `sequence` = 0); each subsequent
+      record links to its predecessor by `prev_hash` and increments `sequence`.
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional free-text note. Advisory only; MUST NOT contain secrets,
+      tokens, credentials, or actor ids.
+$defs:
+  runtime_evidence_record:
+    type: object
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - lifecycle_phase
+      - classification
+      - recorded_at
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-evidence-record
+      record_type:
+        type: string
+        const: runtime_evidence
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` (SHA256 hex digest) of the runtime-policy record
+          this evidence attests. The schema REQUIRES presence; the
+          `ce_runtime_evidence` check enforces the exact `^[0-9a-f]{64}$`
+          shape and emits `runtime_evidence_policy_unbound` when it is absent
+          or malformed — a record MUST be anchored to its policy. (Kept loose
+          at the schema layer, like `runtime-policy`'s `image_ref.sha`, so the
+          check can emit a precise contract error.)
+      run_id:
+        type: string
+        minLength: 1
+        description: |
+          The provisioning run this record belongs to (the runner adapter's
+          `run_id` / `ProvisionedHandle.run_id`). Binds the chain to one seat
+          provisioning. Shape only.
+      sequence:
+        type: integer
+        minimum: 0
+        description: |
+          Monotonic position in the chain, contiguous from 0 at genesis. The
+          check refuses a non-contiguous sequence (reorder / truncation).
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The predecessor record's `content_hash`. The genesis record uses the
+          all-zero SHA256 sentinel. The check refuses a `prev_hash` that does
+          not match the prior record's content address (broken hash chain).
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          SHA256 of the canonical record material excluding `content_hash`
+          itself. The check recomputes and refuses any mismatch (mutation).
+      lifecycle_phase:
+        type: string
+        enum: [provision, run, collect, teardown]
+        description: |
+          The RunnerBackend lifecycle phase this record attests.
+      classification:
+        type: string
+        enum: [allowed, denied, escalate]
+        description: |
+          The classifier verdict category for the attested event. The
+          classifier that ASSIGNS this is the deferred G-1.3b audit overlay;
+          G-1.3a fixes only the record shape.
+      recorded_at:
+        type: string
+        minLength: 1
+        description: |
+          Timestamp the record was produced (an input; never read from the
+          wall clock inside the pure substrate). Shape only.
+      backend_key:
+        type: string
+        minLength: 1
+        description: |
+          Optional: the runner backend that produced the evidence (e.g.
+          `gvisor-proxy`). Shape only.
+      summary:
+        type: string
+        maxLength: 1024
+        description: |
+          Optional advisory summary. MUST NOT contain secrets or credentials.

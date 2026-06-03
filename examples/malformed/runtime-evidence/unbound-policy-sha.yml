@@ -1,0 +1,20 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: "1"
+records:
+  # runtime_evidence_policy_unbound: policy_sha is present and a non-empty string
+  # (so the schema passes), but it is not a 64-hex SHA256 digest, so the record
+  # is not anchored to the runtime-policy it claims to attest. The record is
+  # otherwise hash-consistent, so ONLY the policy-binding predicate fires.
+  - kind: runtime-evidence-record
+    record_type: runtime_evidence
+    schema_version: "1"
+    policy_sha: "0000"
+    run_id: run-implementer-0001
+    lifecycle_phase: provision
+    classification: allowed
+    recorded_at: "2026-06-03T07:13:04Z"
+    backend_key: gvisor-proxy
+    sequence: 0
+    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+    content_hash: "8141a46539116fa2022b6924f7ba690a52414bb8f96771982d00731f1b81f295"
