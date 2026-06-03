@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-1.0 (plane-C runtime-policy substrate)
+# PR path manifest — v3 G-1.1 (runner-backend adapter interface)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,31 +9,25 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This PR stands up the v3 **G-1.0** runtime-policy substrate — the declarative
-`schemas/runtime-policy.schema.yaml` contract plus the `ce_runtime_policy`
-dogfood check. Substrate / record-shape only: no container, no gVisor /
-OpenShell, no egress proxy, no network, no live runtime (those land in
-G-1.1 / G-1.2 / G-1.3).
+This PR stands up the v3 **G-1.1** runner-backend adapter interface — the
+`RunnerBackend` lifecycle ABC + the provision/run/collect/teardown data model +
+a backend registry + an inert `local-noop` test backend. Pure interface: no
+container, no gVisor/OpenShell, no egress proxy, no network, no subprocess, no
+live backend (the live gVisor+proxy backend is G-1.2; the classifier/audit
+overlay + evidence spine is G-1.3). NEW `runner/` sub-package — NOT a validator
+check, so `--list-checks` is unchanged.
 
-- **base:** `6ecf9a5997a1d1b3f6be8fdda5651dd324180375`.
+- **base:** `813c2dddb3a2619928edd72a5421b03a56cd2710`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=13
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=13ddc11fa6ade66b56d7fc0680c8221d9efe450e1c141021317ae69991951bb0
+AUTHORIZED_PATHS_SHA256=edfe0278b6b028836b300634b146046bca11d011f39d153f33e29dc881d68cd2
 
 ```text
 .ce/pr-path-manifest.md
-docs/contracts/runtime-policy.md
-examples/malformed/runtime-policy/controller-key-secret.yml
-examples/malformed/runtime-policy/forbidden-mount.yml
-examples/malformed/runtime-policy/unpinned-image.yml
-examples/well-formed/runtime-policy/example-runtime-policy.yml
-schemas/runtime-policy.schema.yaml
-validators/creator_engine_validator/checks/__init__.py
-validators/creator_engine_validator/checks/ce_runtime_policy.py
-validators/creator_engine_validator/cli.py
-validators/tests/integration/test_ce_runtime_policy_examples.py
-validators/tests/unit/test_ce_runtime_policy.py
-validators/tests/unit/test_cli.py
+validators/creator_engine_validator/runner/__init__.py
+validators/creator_engine_validator/runner/backend.py
+validators/creator_engine_validator/runner/noop_backend.py
+validators/tests/unit/test_runner_backend.py
 ```
