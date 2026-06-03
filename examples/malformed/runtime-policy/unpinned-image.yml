@@ -1,0 +1,19 @@
+kind: runtime-policy-record
+record_type: runtime_policy
+schema_version: "1"
+policy_id: bad-unpinned-image-v1
+policy_sha: "2222222222222222222222222222222222222222222222222222222222222222"
+role: implementer
+isolation_backend: gvisor-proxy
+image_ref:
+  # runtime_policy_image_not_digest_pinned: no `sha` digest pin.
+  # A mutable tag alone is refused — the runtime MUST run an exact,
+  # content-addressed image.
+  name: registry.example/creator-engine/implementer:latest
+mount_manifest:
+  - path: governance
+    mode: ro
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: controller
