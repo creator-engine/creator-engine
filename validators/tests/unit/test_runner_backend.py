@@ -135,9 +135,8 @@ def test_provision_rejects_non_mapping():
 # Registry
 # ---------------------------------------------------------------------------
 def test_unregistered_backends_raise_until_later_slices():
-    # gvisor-proxy (G-1.2) and openshell (fast-follow) are not registered yet.
-    with pytest.raises(UnknownBackend):
-        get_backend("gvisor-proxy")
+    # gvisor-proxy is registered as of G-1.2; openshell remains a fast-follow
+    # backend (not registered yet) and must still raise.
     with pytest.raises(UnknownBackend):
         get_backend("openshell")
 
