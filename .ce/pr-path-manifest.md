@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-2.1 (forge-native plan_approved + no-self-approval guardrail)
+# PR path manifest — docs/v3-roadmap.md (durable in-repo v3 roadmap)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,46 +9,23 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This PR is the first **G-2 hardening** slice. It wires the G-2.0 ratification
-gate to a **forge-native approval source-of-truth** and adds the
-**no-self-approval guardrail**:
+This is a **docs-only** PR: it adds `docs/v3-roadmap.md`, a durable, shareable,
+in-repo consolidation of the v3 roadmap (orientation + design-source pointers +
+the G-i/ii/iii -> G-1 -> G-2 -> G-3 gate map + a per-gate status table with PR /
+commit + what's next + a code-location table + a maintenance note). No code, no
+`@register` check, no schema, no backend -> `--list-checks` is **unchanged at 43**
+and `available_backends()` is unchanged; no `ce_cli.py`/wheel change. Re-baselined
+onto `main` after the G-2.1 merge (PR #120) advanced it; the path-set is unchanged
+(same COUNT + SHA), only the base and the roadmap's G-2.1 status row moved.
 
-- NEW `forge/plan_approval.py` — `ApprovalQuery(repo, pr_number, run_id, policy_sha)`
-  and `plan_approved(query, *, seat_identity, gh_runner=None) -> ApprovedPlan | None`,
-  which resolves the approval from a plan-PR's reviews: bound to the run + policy
-  (`ce-run-id`/`ce-policy-sha` body markers), commit-pinned (`review.commit_id` ==
-  PR head), by an independent non-author non-seat reviewer, `APPROVED` state only.
-  Pure behind the G-iii `GhRunner` seam (reuses `GhRunner`/`ForgeConfigError`
-  imported from `github_repo_config`, which stays byte-unchanged); a transport
-  failure raises `ForgeConfigError`, a clean "not ratified" returns `None`.
-- MODIFY `orchestrator.py` — `run_plan` gains keyword-only `approval_resolver`
-  (injected; production wires it to `forge.plan_approved`, so the orchestrator
-  stays forge-free) and `seat_identity`; `_ratify_or_refuse` gains the
-  `approved_by != seat_identity` guardrail. Backward-compatible: the existing
-  explicit-`approved_plan` calls behave identically.
-
-The resolver and the orchestrator are pure in-process Python: they register NO
-validator check and NO `isolation_backend`, so `--list-checks` is **unchanged at
-43** (source-tree count) and `available_backends()` stays
-`('gvisor-proxy','local-noop')`. CI exercises the resolver with an injected fake
-`GhRunner` (zero live network) and the lifecycle against the inert
-`LocalNoopBackend` (zero live subprocess). No `ce_cli.py`/wheel change (stdlib +
-the existing `gh` seam only). `mint_scoped_token` (G-2.2) and OpenShell (G-2.3)
-remain deferred G-2 hardening.
-
-- **base:** `77656e57a01f1d4c3f1febdd66eddea45ca4fe28`.
+- **base:** `269c8f25c561a287ff7d8f92f810621c8cc3364f`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=6fce3bb480648289d34ed662128d8e197e38f7bd123462b0658373241a65d8b5
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-docs/contracts/orchestrator.md
-validators/creator_engine_validator/forge/__init__.py
-validators/creator_engine_validator/forge/plan_approval.py
-validators/creator_engine_validator/orchestrator.py
-validators/tests/unit/test_orchestrator.py
-validators/tests/unit/test_plan_approval.py
+docs/v3-roadmap.md
 ```
