@@ -214,3 +214,52 @@ def test_run_plan_no_live_subprocess_or_socket(monkeypatch):
 
     evidence = run_plan(valid_policy(), "run-1", ("echo", "hi"), approved(), backend=LocalNoopBackend())
     assert isinstance(evidence, CollectedEvidence)
+
+
+# ---------------------------------------------------------------------------
+# G-2.1 — forge-native approval resolver seam + no-self-approval guardrail
+# ---------------------------------------------------------------------------
+def test_run_plan_resolves_approval_via_injected_resolver():
+    # With no explicit approved_plan, run_plan consults the injected resolver
+    # (the production path wires this to forge.plan_approved) and drives the run.
+    spy = _SpyBackend()
+    calls: list[tuple] = []
+
+    def resolver(runtime_policy, run_id):
+        calls.append((runtime_policy["policy_sha"], run_id))
+        return approved(run_id=run_id)
+
+    run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), None,
+        backend=spy, clock=CounterClock(), approval_resolver=resolver,
+    )
+    assert spy.calls == ["provision", "run", "collect", "teardown"]
+    assert calls == [(_POLICY_SHA, "run-1")]  # resolver consulted with the policy + run in force
+
+
+def test_run_plan_refuses_when_resolver_returns_no_approval():
+    spy = _SpyBackend()
+    with pytest.raises(PlanNotRatified):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), None,
+            backend=spy, approval_resolver=lambda rp, rid: None,
+        )
+    assert spy.calls == []  # refused before any provision
+
+
+def test_gate_refuses_self_approval_by_seat():
+    # The seat may not approve its own run, even with an otherwise-valid plan.
+    spy = _SpyBackend()
+    self_plan = ApprovedPlan(
+        run_id="run-1", policy_sha=_POLICY_SHA, approved_by="seat-agent", approval_ref="ref",
+    )
+    with pytest.raises(PlanNotRatified):
+        run_plan(valid_policy(), "run-1", ("echo", "hi"), self_plan, backend=spy, seat_identity="seat-agent")
+    assert spy.calls == []  # refused before any provision
+
+
+def test_seat_identity_allows_independent_approver():
+    # An independent approver (approved_by="operator" != seat) passes the guardrail.
+    spy = _SpyBackend()
+    run_plan(valid_policy(), "run-1", ("echo", "hi"), approved(), backend=spy, seat_identity="seat-agent")
+    assert spy.calls == ["provision", "run", "collect", "teardown"]
