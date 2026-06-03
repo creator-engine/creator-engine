@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-1.3b (classifier + backend-agnostic audit overlay)
+# PR path manifest — v3 G-2.0 (thin orchestrator + approved-plan ratification gate)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,31 +9,34 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This PR adds the v3 **G-1.3b** classifier + audit overlay: a PURE
-`classify(event, runtime_policy) -> {allowed|denied|escalate}` policy decision
-point evaluated against the G-1.0 `ce_runtime_policy` record, and an
-`AuditOverlayBackend(RunnerBackend)` **decorator** that wraps any backend and
-attests every provision/run/collect/teardown step (and every observed runtime
-event) to a tamper-evident, hash-chained evidence record via the merged G-1.3a
-`runtime_evidence_spine`, bound to the `policy_sha` it attests. Together with
-G-1.3a this completes G-1.3 / G-1 (plane C).
+This PR opens the v3 **G-2** milestone with **G-2.0**: the **thin orchestrator**
+`run_plan(...)` — pure glue that gate-checks an `ApprovedPlan`, resolves an
+isolation backend (injected, else `get_backend(runtime_policy["isolation_backend"])`),
+wraps it in the G-1.3b `AuditOverlayBackend`, and drives
+`provision -> run -> collect -> teardown`, returning the collected hash-chained
+evidence — and the **approved-plan ratification gate** (`PlanNotRatified`), which
+refuses to provision BEFORE any side effect unless a human-ratified plan, bound
+to the exact `policy_sha` and `run_id`, is present.
 
-The overlay is pure-in-process Python behind the adapter: it registers NO
-validator check and NO `isolation_backend`, so `--list-checks` is **unchanged at
-43** and `available_backends()` stays `('gvisor-proxy','local-noop')`. The
-concrete backends and the G-1.0 deny surface are byte-untouched. No `ce_cli.py`/
-wheel change (stdlib only).
+The orchestrator is pure-in-process Python behind the G-1.1 adapter: it registers
+NO validator check and NO `isolation_backend`, so `--list-checks` is **unchanged
+at 43** (source-tree count) and `available_backends()` stays
+`('gvisor-proxy','local-noop')`. CI exercises the full lifecycle against the
+inert `LocalNoopBackend` with zero live subprocess. The concrete backends, the
+G-1.0 deny surface, and the evidence spine are byte-untouched. No `ce_cli.py`/
+wheel change (stdlib only). Forge-native `plan_approved()`/`mint_scoped_token`
+and OpenShell remain deferred G-2 hardening.
 
-- **base:** `6fe06cdfa0f9e816878ab0b322110c011b5ba3eb`.
+- **base:** `fe0b54c82b91faad6eab375619708a81470fcb22`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=43a88d3710358989a7bf99b0566defb1f3230a27f9778fbef170772be0a5eef6
+AUTHORIZED_PATHS_SHA256=4ab2992e9d9bab7d18b11311ec7aba8dc007feda3807d51677fad95f20371ed3
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/runner/__init__.py
-validators/creator_engine_validator/runner/audit_overlay.py
-validators/tests/unit/test_audit_overlay.py
+docs/contracts/orchestrator.md
+validators/creator_engine_validator/orchestrator.py
+validators/tests/unit/test_orchestrator.py
 ```
