@@ -1,0 +1,21 @@
+kind: runtime-policy-record
+record_type: runtime_policy
+schema_version: "1"
+policy_id: bad-forbidden-mount-v1
+policy_sha: "3333333333333333333333333333333333333333333333333333333333333333"
+role: implementer
+isolation_backend: gvisor-proxy
+image_ref:
+  name: registry.example/creator-engine/implementer
+  sha: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+mount_manifest:
+  - path: governance
+    mode: ro
+  - path: "~/.ssh"
+    mode: ro
+    # runtime_policy_forbidden_mount: a host home-directory / SSH key
+    # directory. The runtime MUST NOT have access to host SSH keys.
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: controller

@@ -1,0 +1,41 @@
+kind: runtime-policy-record
+record_type: runtime_policy
+schema_version: "1"
+policy_id: gvisor-implementer-v1
+policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+role: implementer
+isolation_backend: gvisor-proxy
+image_ref:
+  name: registry.example/creator-engine/implementer
+  sha: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+mount_manifest:
+  - path: /runtime/worktree
+    mode: rw
+    write_justification: "allocated worktree for this seat"
+  - path: governance
+    mode: ro
+  - path: schemas
+    mode: ro
+egress_allowlist:
+  # Deny-by-default floor: only these endpoints are reachable.
+  # One L4 (connection-level) rule and one L7 (TLS-terminated) rule.
+  - host: model-provider.example
+    port: 443
+    protocol: https
+    assurance: [l4]
+  - host: package-registry.example
+    protocol: https
+    assurance: [l7]
+    tls_terminated: true
+    binary_identity: package-installer
+secret_allowlist:
+  - model-provider-key
+  - per-task-scoped-token
+grant_extensible: false
+grant_authority: controller
+note: >
+  Implementer seat policy. Digest-pinned image; read-write only on the
+  allocated worktree; read-only governance/schemas; deny-by-default
+  egress to a model provider (L4) and a package registry (L7,
+  TLS-terminated); names-only secrets (never the controller-key). No
+  forbidden mounts. Record-shape only — G-1.0 stands up no live runtime.

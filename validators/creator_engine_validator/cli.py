@@ -110,6 +110,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_terminology_v2.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_runtime_policy = sub.add_parser(
+        "scan-runtime-policy",
+        help="run only the ce_runtime_policy check (v3 G-1.0 plane-C) against a path",
+    )
+    scan_runtime_policy.add_argument("path", nargs="?", default=".", help="path to scan")
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -296,6 +302,9 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/crosswalk-register/missing-authoritative.yml"), False, "VAL-CROSSWALK-AUTHORITATIVE"),
         ("malformed", Path("examples/malformed/crosswalk-register/missing-canonical-mappings.yml"), False, "VAL-CROSSWALK-CANONICAL-MAPPING"),
         ("malformed", Path("examples/malformed/crosswalk-register/derived-supersedes-authoritative.yml"), False, "VAL-CROSSWALK-DERIVED-SUPERSEDES"),
+        ("malformed", Path("examples/malformed/runtime-policy/unpinned-image.yml"), False, "runtime_policy_image_not_digest_pinned"),
+        ("malformed", Path("examples/malformed/runtime-policy/forbidden-mount.yml"), False, "runtime_policy_forbidden_mount"),
+        ("malformed", Path("examples/malformed/runtime-policy/controller-key-secret.yml"), False, "runtime_policy_secret_names_only_violation"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []
@@ -414,6 +423,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-terminology-v2":
         from .checks.ce_terminology_v2 import run as _run_terminology_v2
         result = _run_terminology_v2([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-runtime-policy":
+        from .checks.ce_runtime_policy import run as _run_runtime_policy
+        result = _run_runtime_policy([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
