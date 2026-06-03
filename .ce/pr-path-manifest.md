@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.0 `forge.open_change()` / `ChangeRef` (the change-lifecycle "PR opened" primitive)
+# PR path manifest — v3 G-3.0 roadmap status-flip (`docs/v3-roadmap.md`)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,29 +9,25 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **code** PR. It adds a NEW pure, idempotent, desired-state forge module
-`validators/creator_engine_validator/forge/change.py` exposing `open_change()` (the
-§5.1 step-5 / §8.1 step-4 "PR opened" primitive) and a frozen, secret-free `ChangeRef`,
-behind the already-merged injectable `GhRunner` seam (ZERO live network in CI; the
-default `gh`-shelling runner is `# pragma: no cover`). It MODIFIES only
-`validators/creator_engine_validator/forge/__init__.py` to export the three new symbols
-(`open_change`, `ChangeRef`, `OpenChangeRefused`). It registers **no** `@register` check,
-adds **no** schema, and calls **no** `register_backend` -> `--list-checks` is **unchanged
-at 43** and `available_backends()` is unchanged at `('gvisor-proxy', 'local-noop')`; no
-`ce_cli.py`/wheel change. The byte-unchanged sibling forge modules
-(`github_repo_config.py`, `scoped_token.py`, `plan_approval.py`) are reused by import only
-and are out of this diff.
+This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
+**G-3.0** (forge-native `open_change()` / `ChangeRef`, PR #124, merge commit
+`65ec35d`) is MERGED, seeds the planned **G-3.1 … G-3.7** sub-gate rows, expands
+the MVP gate map's G-3 block, brings the status summary + "What's next" current
+(G-1 and G-2 COMPLETE; G-2.3 OpenShell deferred; G-3 underway), and adds the
+`forge/scoped_token.py` (G-2.2) and `forge/change.py` (G-3.0) rows to the
+"Where the v3 code lives" table. It touches **no** Python, schema, or check
+surface → `--list-checks` is **unchanged at 43** and `available_backends()` is
+unchanged at `('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The
+draft passes `ce_terminology_v2` and `no_limitless_strings`.
 
-- **base:** `2e440f53d62239de54c4aff5b204836df95921b2`.
+- **base:** `65ec35dc0c34fa1bcce683e3dfe51544bf4a3746`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=b50e5114ec10f418315e90ae328d4ff67fbdd26fff2400a9d8f2aa1b4b0ea568
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/forge/__init__.py
-validators/creator_engine_validator/forge/change.py
-validators/tests/unit/test_open_change.py
+docs/v3-roadmap.md
 ```
