@@ -43,9 +43,13 @@ existing CI pytest job covers it. **G-2.1 hardening** wires the gate to a
 forge-native approval source-of-truth via an injected ``approval_resolver`` seam
 (the production resolver is a thin closure over ``forge.plan_approved``; the
 orchestrator itself stays forge-free) and adds the no-self-approval guardrail
-(``approved_by`` != the running ``seat_identity``). The per-task
-``mint_scoped_token`` (JIT least-privilege credential) remains deferred G-2.2
-hardening. See ``docs/contracts/orchestrator.md``.
+(``approved_by`` != the running ``seat_identity``). **G-2.2 hardening** wires a
+per-run credential: an injected ``token_minter`` seam mints a JIT, least-privilege,
+time-boxed credential for the provisioned sandbox (the production minter is a thin
+closure over ``forge.mint_scoped_token`` mapping to a value-free ``MintedCredential``
+port type — the live secret never crosses into the orchestrator), gates its issuance
+on the runtime-policy ``secret_allowlist`` via the G-1.3b classifier, and attests the
+issuance + revocation to the evidence spine. See ``docs/contracts/orchestrator.md``.
 
 Defensive only — authorization + accountability for our own agent runtime;
 never offensive.
@@ -58,6 +62,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .runner import (
+    ALLOWED,
     AuditOverlayBackend,
     Clock,
     CollectedEvidence,
@@ -65,6 +70,7 @@ from .runner import (
     RunnerBackend,
     RunnerError,
     RunRequest,
+    SecretEvent,
     get_backend,
 )
 from .runtime_evidence_spine import is_policy_sha
@@ -103,6 +109,48 @@ class ApprovedPlan:
 # thin closure over ``forge.plan_approved``; injecting it (rather than importing
 # the forge here) keeps the orchestrator pure and forge-free.
 ApprovalResolver = Callable[[dict[str, Any], str], "ApprovedPlan | None"]
+
+
+class CredentialNotPermitted(RunnerError):
+    """The runtime-policy does not permit the per-run credential the run requested.
+
+    Raised AFTER provision (the issuance is attested to the spine first) when the
+    classifier denies the credential's ``secret_name`` against the runtime-policy
+    ``secret_allowlist`` — the local least-privilege "permission ceiling" check. The
+    provisioned runtime is still torn down (the mint is gated, not leaked).
+    """
+
+
+@dataclass(frozen=True)
+class MintedCredential:
+    """A JIT per-run credential's *attestable metadata* — deliberately value-free.
+
+    The orchestrator gates and attests a minted credential through this port type and
+    NEVER holds the live secret value (a type-level guarantee: there is no ``value``
+    field). The secret lives only in the forge ``ScopedToken`` (redacted from its repr);
+    the production ``token_minter`` closure mints via ``forge.mint_scoped_token``, maps the
+    result to this value-free record, and arranges ``forge.revoke_scoped_token`` at
+    completion. ``secret_name`` is the logical secret the credential satisfies (gated
+    against the policy ``secret_allowlist``); ``permissions`` the least-privilege subset
+    granted; ``expires_at`` the forge-granted expiry; ``credential_ref`` a non-secret
+    correlation pointer.
+    """
+
+    run_id: str
+    policy_sha: str
+    secret_name: str
+    permissions: tuple[tuple[str, str], ...]
+    expires_at: str
+    credential_ref: str
+
+
+# A minter maps (runtime_policy, run_id) -> the MintedCredential for the run, or None
+# when no per-run credential is needed. The production minter is a thin closure over
+# ``forge.mint_scoped_token`` that maps the (value-bearing) ScopedToken to the value-free
+# MintedCredential port type and arranges ``forge.revoke_scoped_token`` at completion;
+# injecting it (rather than importing the forge here) keeps the orchestrator pure and
+# forge-free, and keeps the live secret value out of the orchestrator entirely.
+TokenMinter = Callable[[dict[str, Any], str], "MintedCredential | None"]
 
 
 def _ratify_or_refuse(
@@ -161,6 +209,7 @@ def run_plan(
     clock: Clock | None = None,
     approval_resolver: ApprovalResolver | None = None,
     seat_identity: str | None = None,
+    token_minter: TokenMinter | None = None,
 ) -> CollectedEvidence:
     """Drive one ratified, audited agent-seat run and return its collected evidence.
 
@@ -176,9 +225,13 @@ def run_plan(
        ``get_backend(runtime_policy["isolation_backend"])``;
     3. **wrap** it in :class:`AuditOverlayBackend` so every lifecycle step is
        attested to the hash-chained evidence spine, bound to the policy;
-    4. **drive** ``provision -> run -> collect -> teardown`` and return the
-       collected evidence (the audit overlay's collect-time spine snapshot;
-       teardown is still executed to release the runtime).
+    4. **drive** ``provision -> [mint] -> run -> [revoke] -> collect -> teardown``
+       and return the collected evidence (the audit overlay's collect-time spine
+       snapshot; teardown is still executed to release the runtime). When a
+       ``token_minter`` is injected, a JIT per-run credential is minted for the
+       provisioned sandbox, its issuance gated on the policy ``secret_allowlist``
+       and attested, and its revocation attested before collect
+       (:class:`CredentialNotPermitted` if the policy forbids it).
 
     Allocates no container and runs no subprocess itself; in CI it is exercised
     against the inert ``LocalNoopBackend`` with zero live subprocess. Propagates
@@ -201,7 +254,28 @@ def run_plan(
     # 4) Drive the lifecycle. The inner backend's provision() re-applies the G-1.0
     #    deny surface (PolicyRejected on an unclean record) — not duplicated here.
     handle = overlay.provision(ProvisionRequest(runtime_policy=runtime_policy, run_id=run_id))
-    overlay.run(handle, RunRequest(command=tuple(command)))
-    evidence = overlay.collect(handle)
-    overlay.teardown(handle)
+    try:
+        # 4.5) G-2.2: mint a JIT, least-privilege, time-boxed per-run credential for the
+        #      provisioned sandbox (sandbox up FIRST, no creds; the credential is injected
+        #      at runtime — a deferred backend seam). The live secret stays in the forge
+        #      minter; only the value-free MintedCredential crosses into the orchestrator.
+        credential = token_minter(runtime_policy, run_id) if token_minter is not None else None
+        if credential is not None:
+            # Gate the issuance on the runtime-policy secret_allowlist via the G-1.3b
+            # classifier (the local permission-ceiling check) AND attest it to the spine.
+            issuance = overlay.observe(handle, SecretEvent(name=credential.secret_name))
+            if issuance.get("classification") != ALLOWED:
+                raise CredentialNotPermitted(
+                    f"runtime-policy does not permit credential {credential.secret_name!r} "
+                    f"for run {run_id!r}; refusing (secret not in the policy secret_allowlist)"
+                )
+        overlay.run(handle, RunRequest(command=tuple(command)))
+        if credential is not None:
+            # The run no longer needs the credential → attest its revocation BEFORE collect
+            # (so it lands in the collect snapshot). The live forge DELETE is the injected
+            # minter seam's job; here we record the release, bound to the policy.
+            overlay.observe(handle, SecretEvent(name=credential.secret_name, phase="teardown"))
+        evidence = overlay.collect(handle)
+    finally:
+        overlay.teardown(handle)
     return evidence
