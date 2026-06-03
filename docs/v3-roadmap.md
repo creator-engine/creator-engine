@@ -25,15 +25,18 @@ evidence); the **enforcement** lives in the policy + container + forge config.
 
 ## Design source-of-truth
 
-The authoritative design lives in the architect reports under `.hermes/research/`
-(read the spec report first):
+Curated, **fresh-clone-resolvable** copies of the load-bearing design live in
+`docs/architecture/` (start with `docs/architecture/README.md`, then the spec).
+These are curated/redacted for sharing; the **full-fidelity** originals live under
+the gitignored `.hermes/research/v3-*-architect-*/` tree (instance-local — these
+links resolve only in the authoring instance, not a fresh clone).
 
-| Report (directory) | What it decides |
-| --- | --- |
-| `v3-evolve-vs-greenfield-architect-20260602T070354Z/` | Evolve this repo (don't greenfield) — the EVOLVE-dominant hybrid decision |
-| `v3-spec-architect-20260602T091332Z/` | **The spec** — thin-orchestrator / thick-enforcer, the D0–D6 deletion plan, and the G-i/ii/iii → G-1 → G-2 → G-3 MVP gate map |
-| `v3-secure-runtime-architect-20260602T114327Z/` | Plane C — gVisor + proxy, OpenShell, the tamper-evident evidence spine |
-| `v3-product-architecture-brief-20260602T091332Z/` | The product brief that framed the above |
+| Committed copy (fresh-clone) | Full-fidelity original (gitignored) | What it decides |
+| --- | --- | --- |
+| `docs/architecture/v3-spec.md` | `.hermes/research/v3-spec-architect-20260602T091332Z/` | **The spec** — thin-orchestrator / thick-enforcer, the D0–D6 deletion plan, and the G-i/ii/iii → G-1 → G-2 → G-3 MVP gate map |
+| `docs/architecture/v3-secure-runtime.md` | `.hermes/research/v3-secure-runtime-architect-20260602T114327Z/` | Plane C — gVisor + proxy, OpenShell, the tamper-evident evidence spine |
+| `docs/architecture/v3-product-brief.md` | `.hermes/research/v3-product-architecture-brief-20260602T091332Z/` | The product brief that framed the above |
+| _(not committed)_ | `.hermes/research/v3-evolve-vs-greenfield-architect-20260602T070354Z/` | Evolve this repo (don't greenfield) — the EVOLVE-dominant hybrid decision (its conclusion is captured in the brief §4 + the spec) |
 
 Note: `specs/001-v0-1-governance-substrate/` is the **superseded v2 governance
 substrate** — historical context, not the v3 roadmap.
@@ -68,21 +71,18 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-1.3b | classifier + backend-agnostic audit overlay (`classify` + `AuditOverlayBackend`) | #118 | `fe0b54c` | MERGED |
 | G-2.0 | thin orchestrator `run_plan` + approved-plan ratification gate | #119 | `77656e5` | MERGED |
 | G-2.1 | forge-native `plan_approved()` + no-self-approval guardrail | #120 | `269c8f2` | MERGED |
-| G-2.2 | `mint_scoped_token` — JIT least-privilege, time-boxed per-run credential | — | — | planned |
+| G-2.2 | `mint_scoped_token` — JIT least-privilege, time-boxed per-run credential | #122 | `b3caa5e` | MERGED |
 | G-2.3 | OpenShell backend behind the runner adapter | — | — | planned (research-gated) |
 | G-3 | next milestone | — | — | planned |
 
 **G-1 (plane C / runtime safety) is COMPLETE.** **G-2 (thin orchestrator +
-ratification gate) is in progress** (G-2.0 and G-2.1 merged; G-2.2 next).
+ratification gate) is in progress** (G-2.0, G-2.1, and G-2.2 merged; G-2.3 next).
 
 ## What's next
 
-1. **G-2.2** — `mint_scoped_token`: a JIT, least-privilege, time-boxed, audited
-   per-run credential behind an injectable minter seam (zero live mint in CI),
-   with mint/teardown attested to the evidence spine.
-2. **G-2.3** — the OpenShell backend (research-gated: OpenShell adoption is an
+1. **G-2.3** — the OpenShell backend (research-gated: OpenShell adoption is an
    open platform-wide question, evaluated before implementation).
-3. **G-3** — the next milestone, scoped from the spec report.
+2. **G-3** — the next milestone, scoped from the spec report.
 
 The authoritative live "next action" is always the current batch-strict prompt
 chain (below), not this summary.

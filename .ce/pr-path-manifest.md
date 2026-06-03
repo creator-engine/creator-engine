@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-2.2 (`mint_scoped_token`: JIT least-privilege per-run credential)
+# PR path manifest — committed `docs/architecture/` (curated v3 design source-of-truth) + G-2.2 roadmap status-flip
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,33 +9,29 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **code** PR (the second G-2 hardening slice). It adds a forge-native
-scoped-token minter (`forge/scoped_token.py`: `mint_scoped_token` /
-`revoke_scoped_token` / `TokenRequest` / `ScopedToken` [value-redacted] /
-`TokenMintRefused`), wires it into the thin orchestrator via an injected
-`token_minter` seam + a value-free `MintedCredential` port type + a
-`CredentialNotPermitted` refusal (issuance gated on the policy `secret_allowlist`
-via the G-1.3b classifier, issuance/revocation attested to the evidence spine),
-and documents the seam. Pure behind the existing injectable `GhRunner`; **no
-`@register` check, no schema, no `register_backend`** -> `--list-checks` is
-**unchanged at 43** and `available_backends()` is unchanged; no `ce_cli.py`/wheel
-change. The G-iii `forge/github_repo_config.py`, the G-2.1 `forge/plan_approval.py`,
-the `runner/*` backends, and `runtime_evidence_spine.py` are byte-unchanged (reuse
-only).
+This is a **docs-only** PR. It adds curated/redacted copies of the load-bearing v3
+architect reports under `docs/architecture/` (`v3-spec.md`, `v3-secure-runtime.md`,
+`v3-product-brief.md`, and a `README.md` index) so the roadmap's design-source
+pointers resolve in a fresh clone, and MODIFIES `docs/v3-roadmap.md` to (a) repoint
+the "Design source-of-truth" section at the committed copies (keeping the
+`.hermes/research/` full-fidelity note) and (b) flip the **G-2.2 status row →
+MERGED `b3caa5e`** (PR #122). No code, no `@register` check, no schema, no backend
+-> `--list-checks` is **unchanged at 43** and `available_backends()` is unchanged;
+no `ce_cli.py`/wheel change. The pre-existing `docs/architecture/*.md` (the v2-era
+docs) are left byte-unchanged and are out of this diff.
 
-- **base:** `160f08d41b6ab219ff7193d8edc4c8e41fc25245`.
+- **base:** `b3caa5ee7aa05e0ca7bbd4bcc84cd78f0e5682be`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=4df02395f6a8a851c6901a8809980f1dd20d21022e8669c48b221d56bac68b33
+AUTHORIZED_PATHS_SHA256=9f6e9e7c5eed043ee6df8187a35a71879a4a7d219d4c88fba99974325580a54b
 
 ```text
 .ce/pr-path-manifest.md
-docs/contracts/orchestrator.md
-validators/creator_engine_validator/forge/__init__.py
-validators/creator_engine_validator/forge/scoped_token.py
-validators/creator_engine_validator/orchestrator.py
-validators/tests/unit/test_orchestrator.py
-validators/tests/unit/test_scoped_token.py
+docs/architecture/README.md
+docs/architecture/v3-product-brief.md
+docs/architecture/v3-secure-runtime.md
+docs/architecture/v3-spec.md
+docs/v3-roadmap.md
 ```
