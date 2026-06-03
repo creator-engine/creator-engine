@@ -38,6 +38,13 @@ from .github_repo_config import (
     install_required_checks,
 )
 from .plan_approval import ApprovalQuery, plan_approved
+from .scoped_token import (
+    ScopedToken,
+    TokenMintRefused,
+    TokenRequest,
+    mint_scoped_token,
+    revoke_scoped_token,
+)
 
 __all__ = [
     "DEFAULT_MAIN_PROTECTION",
@@ -47,7 +54,12 @@ __all__ = [
     "ForgeConfigError",
     "ForgeConfigRefused",
     "GhRunner",
+    "ScopedToken",
+    "TokenMintRefused",
+    "TokenRequest",
     "configure_repo",
     "install_required_checks",
+    "mint_scoped_token",
     "plan_approved",
+    "revoke_scoped_token",
 ]

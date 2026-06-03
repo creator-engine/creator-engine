@@ -18,6 +18,8 @@ import pytest
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.orchestrator import (
     ApprovedPlan,
+    CredentialNotPermitted,
+    MintedCredential,
     PlanNotRatified,
     run_plan,
 )
@@ -263,3 +265,78 @@ def test_seat_identity_allows_independent_approver():
     spy = _SpyBackend()
     run_plan(valid_policy(), "run-1", ("echo", "hi"), approved(), backend=spy, seat_identity="seat-agent")
     assert spy.calls == ["provision", "run", "collect", "teardown"]
+
+
+# ---------------------------------------------------------------------------
+# G-2.2 — JIT scoped-credential minter seam (provision -> mint -> gate+attest
+# -> run -> attest revocation -> collect -> teardown)
+# ---------------------------------------------------------------------------
+def _credential(secret_name: str = "model-provider-key") -> MintedCredential:
+    return MintedCredential(
+        run_id="run-1",
+        policy_sha=_POLICY_SHA,
+        secret_name=secret_name,
+        permissions=(("contents", "read"),),
+        expires_at="2026-06-03T15:00:00Z",
+        credential_ref="creator-engine/creator-engine@2026-06-03T15:00:00Z",
+    )
+
+
+def test_token_minter_issues_and_revokes_attesting_to_the_spine():
+    # The minted credential's secret_name IS in the policy secret_allowlist → allowed;
+    # issuance + revocation are attested to the spine around the run, bound to the policy.
+    minter_calls: list[tuple] = []
+
+    def minter(runtime_policy, run_id):
+        minter_calls.append((runtime_policy["policy_sha"], run_id))
+        return _credential()
+
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=LocalNoopBackend(), clock=CounterClock(), token_minter=minter,
+    )
+    assert minter_calls == [(_POLICY_SHA, "run-1")]  # consulted with the policy + run in force
+    phases = [r["lifecycle_phase"] for r in evidence.records]
+    assert phases == ["provision", "run", "run", "teardown", "collect"]  # issuance(run)+revocation(teardown)
+    assert verify_chain(list(evidence.records)) == []
+    assert all(r["policy_sha"] == _POLICY_SHA for r in evidence.records)
+    assert all("value" not in r for r in evidence.records)  # no secret value on the spine
+
+
+def test_token_minter_credential_not_in_allowlist_is_refused_after_provision():
+    # The classifier (policy secret_allowlist) is the local permission-ceiling check.
+    spy = _SpyBackend()
+    with pytest.raises(CredentialNotPermitted):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), approved(),
+            backend=spy, clock=CounterClock(),
+            token_minter=lambda rp, rid: _credential(secret_name="unlisted-secret"),
+        )
+    assert spy.calls == ["provision", "teardown"]  # gated after provision; run/collect skipped; still torn down
+
+
+def test_token_minter_returning_none_drives_normal_lifecycle():
+    spy = _SpyBackend()
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=spy, clock=CounterClock(), token_minter=lambda rp, rid: None,
+    )
+    assert spy.calls == ["provision", "run", "collect", "teardown"]
+    assert [r["lifecycle_phase"] for r in evidence.records] == ["provision", "run", "collect"]
+
+
+def test_no_token_minter_is_backward_compatible():
+    # Identical to the G-2.0/2.1 behaviour: provision, run, collect (+ teardown after).
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=LocalNoopBackend(), clock=CounterClock(),
+    )
+    assert [r["lifecycle_phase"] for r in evidence.records] == ["provision", "run", "collect"]
+
+
+def test_minted_credential_carries_no_secret_value():
+    from dataclasses import fields
+
+    cred = _credential()
+    assert not hasattr(cred, "value")
+    assert "value" not in {f.name for f in fields(cred)}

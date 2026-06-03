@@ -1,4 +1,4 @@
-# PR path manifest — docs/v3-roadmap.md (durable in-repo v3 roadmap)
+# PR path manifest — v3 G-2.2 (`mint_scoped_token`: JIT least-privilege per-run credential)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,23 +9,33 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **docs-only** PR: it adds `docs/v3-roadmap.md`, a durable, shareable,
-in-repo consolidation of the v3 roadmap (orientation + design-source pointers +
-the G-i/ii/iii -> G-1 -> G-2 -> G-3 gate map + a per-gate status table with PR /
-commit + what's next + a code-location table + a maintenance note). No code, no
-`@register` check, no schema, no backend -> `--list-checks` is **unchanged at 43**
-and `available_backends()` is unchanged; no `ce_cli.py`/wheel change. Re-baselined
-onto `main` after the G-2.1 merge (PR #120) advanced it; the path-set is unchanged
-(same COUNT + SHA), only the base and the roadmap's G-2.1 status row moved.
+This is a **code** PR (the second G-2 hardening slice). It adds a forge-native
+scoped-token minter (`forge/scoped_token.py`: `mint_scoped_token` /
+`revoke_scoped_token` / `TokenRequest` / `ScopedToken` [value-redacted] /
+`TokenMintRefused`), wires it into the thin orchestrator via an injected
+`token_minter` seam + a value-free `MintedCredential` port type + a
+`CredentialNotPermitted` refusal (issuance gated on the policy `secret_allowlist`
+via the G-1.3b classifier, issuance/revocation attested to the evidence spine),
+and documents the seam. Pure behind the existing injectable `GhRunner`; **no
+`@register` check, no schema, no `register_backend`** -> `--list-checks` is
+**unchanged at 43** and `available_backends()` is unchanged; no `ce_cli.py`/wheel
+change. The G-iii `forge/github_repo_config.py`, the G-2.1 `forge/plan_approval.py`,
+the `runner/*` backends, and `runtime_evidence_spine.py` are byte-unchanged (reuse
+only).
 
-- **base:** `269c8f25c561a287ff7d8f92f810621c8cc3364f`.
+- **base:** `160f08d41b6ab219ff7193d8edc4c8e41fc25245`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=2
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
+AUTHORIZED_PATHS_SHA256=4df02395f6a8a851c6901a8809980f1dd20d21022e8669c48b221d56bac68b33
 
 ```text
 .ce/pr-path-manifest.md
-docs/v3-roadmap.md
+docs/contracts/orchestrator.md
+validators/creator_engine_validator/forge/__init__.py
+validators/creator_engine_validator/forge/scoped_token.py
+validators/creator_engine_validator/orchestrator.py
+validators/tests/unit/test_orchestrator.py
+validators/tests/unit/test_scoped_token.py
 ```

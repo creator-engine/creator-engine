@@ -5,12 +5,15 @@ gate (the first slice of G-2; opens the second MVP milestone after G-1 /
 plane C is complete). **G-2.1** hardens it: the gate is wired to a forge-native
 approval source-of-truth (`forge.plan_approved`) through an injected resolver
 seam, and a no-self-approval guardrail (`approved_by` != the running
-`seat_identity`) is enforced.
+`seat_identity`) is enforced. **G-2.2** adds a JIT, least-privilege, time-boxed
+per-run credential: an injected `token_minter` seam (`forge.mint_scoped_token` /
+`revoke_scoped_token`) minted for the provisioned sandbox, gated on the policy
+`secret_allowlist`, and attested to the evidence spine.
 Validator check: **none** — the orchestrator is pure in-process glue behind the
-G-1.1 runner adapter, and the G-2.1 resolver is pure behind the G-iii forge
-`GhRunner` seam. Neither registers a `@register` check (`--list-checks` stays
-**43**) nor an `isolation_backend` (`available_backends()` stays
-`('gvisor-proxy', 'local-noop')`).
+G-1.1 runner adapter, and the G-2.1 resolver + the G-2.2 minter are pure behind
+the G-iii forge `GhRunner` seam. Neither registers a `@register` check
+(`--list-checks` stays **43**) nor an `isolation_backend` (`available_backends()`
+stays `('gvisor-proxy', 'local-noop')`).
 Module: `validators/creator_engine_validator/orchestrator.py`
 Reuses: the G-1.1 adapter (`runner.get_backend` / `RunnerBackend` /
 `ProvisionRequest` / `RunRequest`), the G-1.3b `AuditOverlayBackend`, and the
@@ -119,15 +122,64 @@ or `openshell` (a fast-follow, not yet registered) in production; tests inject
 the inert backend directly. Importing the module performs zero I/O.
 
 The returned evidence is the audit overlay's collect-time spine snapshot
-(`provision`, `run`, `collect`), content-addressed and hash-chained and bound to
-the run's `policy_sha`; a clean run satisfies `verify_chain(records) == []`.
-`teardown` is still executed to release the runtime.
+(`provision`, `run`, `collect`, plus the credential issuance/revocation records
+when a `token_minter` is injected — see G-2.2), content-addressed and
+hash-chained and bound to the run's `policy_sha`; a clean run satisfies
+`verify_chain(records) == []`. `teardown` is still executed to release the
+runtime.
+
+## Per-run scoped credential (G-2.2)
+
+Once a run is ratified, G-2.2 gives it a **just-in-time, least-privilege,
+time-boxed, audited per-run credential** rather than a long-lived ambient token.
+`run_plan` takes a third keyword-only seam — `token_minter` — and runs the
+credential lifecycle *inside* the provisioned sandbox's lifecycle:
+
+```
+provision  ->  [mint + gate + attest]  ->  run  ->  [attest revocation]  ->  collect  ->  teardown
+```
+
+- **Ordering — provision first, then mint.** The sandbox is provisioned **without
+  credentials**; the credential is minted JIT for that handle and (in production)
+  injected at runtime via the backend/proxy. This matches the secure-runtime model
+  ("the agent holds no network/secrets; the proxy holds both") and gives clean
+  failure semantics — a provision failure mints nothing, and a refused/failed mint
+  still tears the sandbox down (the mint runs under a `try` whose `finally` tears
+  down). It refines the earlier "between the gate and provision" sketch.
+- **Policy-gated issuance (the local permission ceiling).** When `token_minter`
+  returns a `MintedCredential`, `run_plan` classifies a `SecretEvent(name=…)` for
+  the credential's `secret_name` against the runtime-policy `secret_allowlist` via
+  the G-1.3b classifier. `allowed` → the issuance is attested and the run proceeds;
+  anything else → `CredentialNotPermitted` (after provision, before run/collect;
+  the runtime is still torn down). A run can only mint a credential the policy
+  already permits.
+- **Attested to the spine.** Both the issuance (at the run phase) and the
+  revocation (at the teardown phase, recorded *before* collect so it lands in the
+  snapshot) are hash-chained evidence records bound to `policy_sha` — **without**
+  the secret name's value, the token value, or the token ref. Revocation is
+  defense-in-depth: release the credential the instant the run no longer needs it,
+  not after its ≤1h ttl elapses (a 2-minute run must not hold a 60-minute token).
+- **Secret hygiene — the orchestrator never holds the value.** The `MintedCredential`
+  port type is deliberately **value-free** (it has no `value` field); the live secret
+  lives only in the forge `ScopedToken` (redacted from its repr) and never enters the
+  orchestrator or the evidence spine.
+
+`forge.mint_scoped_token(request, *, gh_runner)` / `forge.revoke_scoped_token(token,
+*, gh_runner)` do the actual minting/revocation behind the injectable `GhRunner`
+(`POST app/installations/{id}/access_tokens` scoped to one repo + an explicit
+least-privilege `permissions` subset; `DELETE installation/token`). They **refuse
+before any forge call** (`TokenMintRefused`) an empty / `admin` / forbidden permission
+set, a ttl outside `0 < t <= 3600`, a non-64-hex `policy_sha`, a malformed repo, or a
+non-positive installation id. The production `token_minter` is a thin caller-side
+closure that mints via `forge.mint_scoped_token`, maps the result to the value-free
+`MintedCredential`, and arranges `forge.revoke_scoped_token` at completion — so the
+orchestrator stays pure and forge-free, registering no check (`--list-checks` stays
+**43**) and no backend, with **zero** live mint in tests (the `GhRunner` is injected).
 
 ## Deferred (later G-2 hardening — NOT in this slice)
 
-- **`mint_scoped_token` (G-2.2).** The least-privilege, short-TTL token minted
-  per task between the approval gate and provision, behind an injectable minter
-  seam, attested to the evidence spine.
+- **Live credential injection** of the minted token value into the running backend
+  (env/proxy), behind the runner adapter — the value-delivery seam G-2.2 leaves open.
 - **OpenShell** as a registered backend behind the same `RunnerBackend` adapter.
 - **Real-clock + evidence persistence** behind the existing injectable seams.
 
