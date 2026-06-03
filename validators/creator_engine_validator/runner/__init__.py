@@ -46,13 +46,33 @@ from .backend import (
 )
 from .noop_backend import BACKEND_KEY as LOCAL_NOOP_BACKEND_KEY
 from .noop_backend import LocalNoopBackend
+from .gvisor_proxy_backend import BACKEND_KEY as GVISOR_PROXY_BACKEND_KEY
+from .gvisor_proxy_backend import (
+    ContainerRunner,
+    EgressNotEnforceable,
+    EgressProxyConfig,
+    EgressRule,
+    GvisorProxyBackend,
+    MountSpec,
+    RunscPlan,
+    SubprocessContainerRunner,
+    translate_to_egress_proxy_config,
+    translate_to_runsc_plan,
+)
 
 __all__ = [
     "BackendAlreadyRegistered",
     "BackendUnavailable",
     "CollectedEvidence",
+    "ContainerRunner",
+    "EgressNotEnforceable",
+    "EgressProxyConfig",
+    "EgressRule",
+    "GVISOR_PROXY_BACKEND_KEY",
+    "GvisorProxyBackend",
     "LOCAL_NOOP_BACKEND_KEY",
     "LocalNoopBackend",
+    "MountSpec",
     "PolicyRejected",
     "ProvisionRequest",
     "ProvisionedHandle",
@@ -60,9 +80,13 @@ __all__ = [
     "RunResult",
     "RunnerBackend",
     "RunnerError",
+    "RunscPlan",
+    "SubprocessContainerRunner",
     "TeardownResult",
     "UnknownBackend",
     "available_backends",
     "get_backend",
     "register_backend",
+    "translate_to_egress_proxy_config",
+    "translate_to_runsc_plan",
 ]
