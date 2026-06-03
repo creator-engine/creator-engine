@@ -59,8 +59,32 @@ from .gvisor_proxy_backend import (
     translate_to_egress_proxy_config,
     translate_to_runsc_plan,
 )
+from .audit_overlay import (
+    ALLOWED,
+    DENIED,
+    ESCALATE,
+    AuditOverlayBackend,
+    Clock,
+    CounterClock,
+    EgressEvent,
+    LifecycleEvent,
+    MountEvent,
+    SecretEvent,
+    classify,
+)
 
 __all__ = [
+    "ALLOWED",
+    "AuditOverlayBackend",
+    "Clock",
+    "CounterClock",
+    "DENIED",
+    "ESCALATE",
+    "EgressEvent",
+    "LifecycleEvent",
+    "MountEvent",
+    "SecretEvent",
+    "classify",
     "BackendAlreadyRegistered",
     "BackendUnavailable",
     "CollectedEvidence",
