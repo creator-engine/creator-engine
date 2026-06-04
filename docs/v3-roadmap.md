@@ -78,7 +78,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-2.2 | `mint_scoped_token` — JIT least-privilege, time-boxed per-run credential | #122 | `b3caa5e` | MERGED |
 | G-2.3 | OpenShell backend behind the runner adapter | — | — | deferred (research-gated) |
 | G-3.0 | forge-native `open_change()` + `ChangeRef` (change-lifecycle "PR opened" primitive) | #124 | `65ec35d` | MERGED |
-| G-3.1 | orchestrator wiring (`run_plan` → `open_change`; thread the run change-set + JIT-token `gh_runner`) | — | — | planned |
+| G-3.1 | orchestrator wiring (`run_plan` → `open_change`; thread the run change-set + JIT-token `gh_runner`) | #126 | `9067034` | MERGED |
 | G-3.2 | read-only forge change-status (`review_state` / `checks_state` / `change_conflicts`) | — | — | planned |
 | G-3.3 | `forge.merge()` — squash, gated on review + checks + up-to-date | — | — | planned |
 | G-3.4 | credential value-injection seam (minter-closure → runner only) | — | — | planned |
@@ -88,15 +88,17 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 
 **G-1 (plane C / runtime safety) and G-2 (thin orchestrator + ratification
 gate) are COMPLETE** (G-2.0 / G-2.1 / G-2.2 merged; G-2.3 OpenShell deferred —
-research-gated). **G-3 (first working v3) is underway** — G-3.0, the
-change-lifecycle `open_change()` primitive, merged (#124); G-3.1 next.
+research-gated). **G-3 (first working v3) is underway** — G-3.0
+(change-lifecycle `open_change()` primitive) and G-3.1 (orchestrator wiring —
+`run_plan` `change_opener` seam → `open_change()`) merged (#124, #126); G-3.2
+next.
 
 ## What's next
 
-1. **G-3.1** — orchestrator wiring: thread the audited run's change-set and the
-   JIT-minted token's `gh_runner` into `open_change()` (the first
-   lifecycle-assembly step), then G-3.2–G-3.6, then the **G-3.7** live spike
-   ("first working v3", Operator-ratified outside the CI-purity envelope).
+1. **G-3.2** — read-only forge change-status (`review_state` / `checks_state` /
+   `change_conflicts`) over the opened `ChangeRef` (the next lifecycle slice),
+   then G-3.3–G-3.6, then the **G-3.7** live spike ("first working v3",
+   Operator-ratified outside the CI-purity envelope).
 2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
    recorded trigger conditions).
 
@@ -109,8 +111,8 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 
 | Path | Gate | Role |
 | --- | --- | --- |
-| `orchestrator.py` | G-2.0 / G-2.1 | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate |
-| `runner/backend.py` | G-1.1 | `RunnerBackend` ABC + registry (`get_backend` / `available_backends`) |
+| `orchestrator.py` | G-2.0 / G-2.1 / G-3.1 | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate + the injected `change_opener` seam → `open_change()` |
+| `runner/backend.py` | G-1.1 / G-3.1 | `RunnerBackend` ABC + registry (`get_backend` / `available_backends`) + the value-free `RunChangeSet` pointer type |
 | `runner/noop_backend.py` | G-1.1 | inert `local-noop` backend (used in CI) |
 | `runner/gvisor_proxy_backend.py` | G-1.2 | hardened gVisor + egress-proxy backend |
 | `runner/audit_overlay.py` | G-1.3b | `classify()` + `AuditOverlayBackend` decorator |
