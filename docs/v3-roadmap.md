@@ -80,7 +80,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.0 | forge-native `open_change()` + `ChangeRef` (change-lifecycle "PR opened" primitive) | #124 | `65ec35d` | MERGED |
 | G-3.1 | orchestrator wiring (`run_plan` → `open_change`; thread the run change-set + JIT-token `gh_runner`) | #126 | `9067034` | MERGED |
 | G-3.2 | read-only forge change-status (`review_state` / `checks_state` / `change_conflicts`) | #128 | `3bee641` | MERGED |
-| G-3.3 | `forge.merge()` — squash, gated on review + checks + up-to-date | — | — | planned |
+| G-3.3 | `forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"` | #130 | `25db4e5` | MERGED |
 | G-3.4 | credential value-injection seam (minter-closure → runner only) | — | — | planned |
 | G-3.5 | evidence persistence sink (AuditOverlay hash-chain + `CollectedEvidence`) | — | — | planned |
 | G-3.6 | preflight + offline end-to-end dry-run (the integration harness) | — | — | planned |
@@ -90,16 +90,17 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 gate) are COMPLETE** (G-2.0 / G-2.1 / G-2.2 merged; G-2.3 OpenShell deferred —
 research-gated). **G-3 (first working v3) is underway** — G-3.0
 (change-lifecycle `open_change()` primitive), G-3.1 (orchestrator wiring —
-`run_plan` `change_opener` seam → `open_change()`), and G-3.2 (read-only forge
-change-status — `review_state` / `checks_state` / `change_conflicts`) merged
-(#124, #126, #128); G-3.3 next.
+`run_plan` `change_opener` seam → `open_change()`), G-3.2 (read-only forge
+change-status — `review_state` / `checks_state` / `change_conflicts`), and G-3.3
+(`forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"`)
+merged (#124, #126, #128, #130); G-3.4 next.
 
 ## What's next
 
-1. **G-3.3** — `forge.merge()` (squash, gated on review + checks + up-to-date)
-   consuming the G-3.2 read ops (the next lifecycle slice), then G-3.4–G-3.6,
-   then the **G-3.7** live spike ("first working v3", Operator-ratified outside
-   the CI-purity envelope).
+1. **G-3.4** — the credential value-injection seam (the minter-closure
+   `ScopedToken.value` → runner env only; wire the `gh_runner` factory) — the
+   next lifecycle slice, then G-3.5–G-3.6, then the **G-3.7** live spike ("first
+   working v3", Operator-ratified outside the CI-purity envelope).
 2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
    recorded trigger conditions).
 
@@ -123,6 +124,7 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 | `forge/scoped_token.py` | G-2.2 | `mint_scoped_token` / `revoke_scoped_token` (JIT per-run credential) |
 | `forge/change.py` | G-3.0 | forge-native `open_change()` + `ChangeRef` (change-lifecycle "PR opened" primitive) |
 | `forge/change_status.py` | G-3.2 | read-only `review_state` / `checks_state` / `change_conflicts` over a `ChangeRef` (GraphQL via `GhRunner`) |
+| `forge/merge.py` | G-3.3 | gated squash-merge `merge()` → `MergeResult` (review + checks + `mergeable=="MERGEABLE"`; plan-by-default; head-pinned squash `PUT` via `GhRunner`) |
 | `schemas/*.yaml` + `docs/contracts/*.md` | various | declarative + prose contracts |
 
 The package also retains earlier v2 machinery (lane/PCO/tmux runtime, etc.)
