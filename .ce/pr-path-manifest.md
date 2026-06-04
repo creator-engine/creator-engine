@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.2 roadmap status-flip (`docs/v3-roadmap.md`)
+# PR path manifest — v3 G-3.3 forge-native gated merge op (`forge/merge.py`)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,25 +9,46 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
-**G-3.2** (read-only forge change-status — `review_state` / `checks_state` /
-`change_conflicts`, PR #128, merge commit `3bee641`) is MERGED: it flips the
-G-3.2 gate-status row to `#128` / `3bee641` / MERGED, advances the
-status-summary prose and "What's next" pointer (G-3.0/G-3.1/G-3.2 merged; G-3.3
-next), and adds a `forge/change_status.py` (G-3.2) row to the "Where the v3 code
-lives" table. It touches **no** Python, schema, or check surface → `--list-checks`
-is **unchanged at 43** and `available_backends()` is unchanged at
-`('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The draft passes
-`ce_terminology_v2` and `no_limitless_strings`.
+This is a **code** PR (G-3.3). It adds a pure, forge-native gated squash-merge op so the
+orchestrator can MERGE its own PR only when GitHub reports it merge-eligible:
 
-- **base:** `3bee64179b3ec979b9ba2795ec890fad5d1efc0b`.
+- `forge/merge.py` (NEW) adds `merge(change, *, apply=False, gh_runner=None) -> MergeResult`.
+  It is **plan-by-default** and **refuses before any side effect**: `apply=False` composes the
+  three G-3.2 reads (`review_state` + `checks_state` + `change_conflicts`) through the injected
+  `GhRunner` and returns a value-free `MergeResult` reporting whether the PR `would_merge`
+  (eligible ⇔ `review.approved and checks.all_green and conflict.mergeable == "MERGEABLE"`),
+  mutating nothing; `apply=True` re-reads the gate, raises `MergeRefused`
+  (code `V3-FORGE-MERGE-REFUSED`) BEFORE the merge on a gate-ineligible PR / a malformed `repo`
+  / a `ChangeRef` with no open PR / an `apply` without a `head_sha`, and otherwise issues exactly
+  one head-pinned squash merge (`PUT /repos/{owner}/{repo}/pulls/{n}/merge` with
+  `{"merge_method":"squash","sha":<head>}`) through the same runner. A transport failure (e.g.
+  GitHub `405` not-mergeable / `409` head-moved) raises `ForgeConfigError`. It reuses
+  `GhRunner`/`ForgeConfigError`/`ForgeConfigRefused` (and `ChangeRef` + the three G-3.2 read ops)
+  by import, re-defines `_REPO_RE` and a local `_gh_api_method` literally, and does NOT reuse the
+  unrelated PCL-ledger `pcl_runtime.MergeResult` (a NEW forge-native `MergeResult`).
+- `forge/__init__.py` re-exports `merge` + `MergeResult` + `MergeRefused`.
+- `tests/unit/test_merge.py` (NEW) drives every path through a fake `GhRunner` returning canned
+  GraphQL (gate reads) + REST (merge PUT) JSON (`subprocess.run`/`Popen`/`socket.socket`
+  monkeypatched to explode — zero live network/subprocess in CI), asserting `runner.calls == []`
+  on refusals and that an ineligible/plan-mode call issues NO merge PUT.
+
+It registers **no** `@register` check, adds **no** backend (`register_backend`) and **no**
+schema → `--list-checks` is **unchanged at 43** and `available_backends()` is unchanged at
+`('gvisor-proxy', 'local-noop')`. The frozen forge siblings `change.py`, `change_status.py`,
+`github_repo_config.py`, `scoped_token.py`, `plan_approval.py` are **byte-unchanged**
+(reuse by import); the only existing-file edit is `forge/__init__.py`. No `cli.py`/
+`ce_cli.py`/`pyproject.toml`/`requirements*` change; no new `schemas/*.yaml`.
+
+- **base:** `fedc24b1c35671f8c91250b432c0f14069bc199c`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=2
+AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
+AUTHORIZED_PATHS_SHA256=63aad97aebe89ebdfc053bcd2d445163596147ae1d0d04177630d94d209770cd
 
 ```text
 .ce/pr-path-manifest.md
-docs/v3-roadmap.md
+validators/creator_engine_validator/forge/__init__.py
+validators/creator_engine_validator/forge/merge.py
+validators/tests/unit/test_merge.py
 ```

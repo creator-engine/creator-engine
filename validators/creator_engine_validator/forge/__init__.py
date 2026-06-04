@@ -47,6 +47,7 @@ from .github_repo_config import (
     configure_repo,
     install_required_checks,
 )
+from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
 from .scoped_token import (
     ScopedToken,
@@ -68,6 +69,8 @@ __all__ = [
     "ForgeConfigError",
     "ForgeConfigRefused",
     "GhRunner",
+    "MergeRefused",
+    "MergeResult",
     "OpenChangeRefused",
     "ReviewState",
     "ScopedToken",
@@ -77,6 +80,7 @@ __all__ = [
     "checks_state",
     "configure_repo",
     "install_required_checks",
+    "merge",
     "mint_scoped_token",
     "open_change",
     "plan_approved",
