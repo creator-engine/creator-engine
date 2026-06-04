@@ -23,12 +23,14 @@ from creator_engine_validator.orchestrator import (
     PlanNotRatified,
     run_plan,
 )
+from creator_engine_validator.forge import open_change
 from creator_engine_validator.runner import (
     BackendUnavailable,
     CollectedEvidence,
     PolicyRejected,
     ProvisionedHandle,
     ProvisionRequest,
+    RunChangeSet,
     RunnerBackend,
     RunRequest,
     RunResult,
@@ -340,3 +342,164 @@ def test_minted_credential_carries_no_secret_value():
     cred = _credential()
     assert not hasattr(cred, "value")
     assert "value" not in {f.name for f in fields(cred)}
+
+
+# ---------------------------------------------------------------------------
+# G-3.1 — change-opener seam: the lifecycle ends at "PR opened" (a ChangeRef).
+# The audited run's in-manifest work crosses the runner seam as DATA
+# (RunChangeSet pointers); after collect the orchestrator opens the change
+# plan-by-default through a FAKE GhRunner and attests the value-free ChangeRef
+# as the terminal "change-opened" step. Zero-live: the fake runner is the sole
+# transport (subprocess/socket monkeypatched to explode).
+# ---------------------------------------------------------------------------
+_RUN_CHANGE_SET = RunChangeSet(
+    branch="ce/run-1",
+    base="main",
+    manifest_paths=(
+        "validators/creator_engine_validator/orchestrator.py",
+        "validators/tests/unit/test_orchestrator.py",
+    ),
+    head_sha="d" * 40,
+)
+
+
+class _ChangeSetBackend(RunnerBackend):
+    """Fake backend whose run() reports a deterministic change-set (the agent's work as DATA)."""
+
+    backend_key = "changeset"
+
+    def __init__(self) -> None:
+        self._inner = LocalNoopBackend()
+        self.calls: list[str] = []
+
+    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        self.calls.append("provision")
+        return self._inner.provision(request)
+
+    def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
+        self.calls.append("run")
+        return RunResult(
+            exit_code=0,
+            stdout="noop",
+            stderr="",
+            started_ref=handle.ref,
+            change_set=_RUN_CHANGE_SET,
+        )
+
+    def collect(self, handle: ProvisionedHandle) -> CollectedEvidence:
+        self.calls.append("collect")
+        return self._inner.collect(handle)
+
+    def teardown(self, handle: ProvisionedHandle) -> TeardownResult:
+        self.calls.append("teardown")
+        return self._inner.teardown(handle)
+
+
+def _fake_gh_runner(argv, input_text=None):
+    # A canned empty open-PR list -> no existing PR -> plan-by-default ChangeRef(changed=True).
+    return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="[]", stderr="")
+
+
+def test_run_plan_opens_change_on_completion(monkeypatch):
+    # The lifecycle ends at "PR opened": after collect, run_plan consults the injected
+    # change_opener with the run's change-set + the 64-hex plan_ref (the policy_sha), opens
+    # the change plan-by-default through the FAKE GhRunner, and attests the value-free
+    # ChangeRef as the terminal "change-opened" step. The fake runner is the SOLE transport.
+    def explode(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("open_change must use the injected fake gh_runner, not a live runtime")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(subprocess, "Popen", explode)
+    monkeypatch.setattr(socket, "socket", explode)
+
+    opener_calls: list[tuple] = []
+    refs: list = []
+
+    # The production change_opener captures the repo + a gh_runner FACTORY (credential
+    # value-injection is G-3.4) and calls forge.open_change(..., apply=False); run_plan
+    # only ever sees the ChangeOpener callable.
+    def gh_runner_factory():
+        return _fake_gh_runner
+
+    def change_opener(change_set, plan_ref):
+        opener_calls.append((change_set, plan_ref))
+        ref = open_change(
+            "creator-engine/creator-engine",
+            change_set.branch,
+            change_set.base,
+            change_set.manifest_paths,
+            plan_ref,
+            apply=False,
+            gh_runner=gh_runner_factory(),
+        )
+        refs.append(ref)
+        return ref
+
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=_ChangeSetBackend(), clock=CounterClock(), change_opener=change_opener,
+    )
+
+    # The opener was consulted once, with the run's change-set + the policy_sha as plan_ref.
+    assert len(opener_calls) == 1
+    consulted_change_set, consulted_plan_ref = opener_calls[0]
+    assert consulted_change_set.branch == "ce/run-1"
+    assert consulted_change_set.manifest_paths == _RUN_CHANGE_SET.manifest_paths
+    assert consulted_plan_ref == _POLICY_SHA
+
+    # The returned ChangeRef is value-free (no token) and plan-by-default (no existing PR).
+    from dataclasses import fields
+
+    assert len(refs) == 1
+    ref = refs[0]
+    assert not hasattr(ref, "value")
+    assert "value" not in {f.name for f in fields(ref)}
+    assert ref.changed is True and ref.applied is False
+
+    # "change-opened" is the TERMINAL attested step, AFTER collect; chain clean + policy-bound.
+    phases = [r["lifecycle_phase"] for r in evidence.records]
+    assert phases == ["provision", "run", "collect", "change-opened"]
+    assert verify_chain(list(evidence.records)) == []
+    assert all(r["policy_sha"] == _POLICY_SHA for r in evidence.records)
+    assert all("value" not in r for r in evidence.records)  # no secret value on the spine
+
+    # The run's change-set is surfaced on the returned evidence (value-free pointers).
+    assert evidence.change_set is not None
+    assert evidence.change_set.branch == "ce/run-1"
+
+
+def test_no_change_opener_is_backward_compatible():
+    # A run that produces a change-set but with NO change_opener still ends at collect
+    # (the seam defaults to None -> the existing G-2.x lifecycle, byte-for-byte unchanged).
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+    )
+    assert [r["lifecycle_phase"] for r in evidence.records] == ["provision", "run", "collect"]
+    assert evidence.change_set is None
+
+
+def test_change_opener_without_change_set_is_noop():
+    # The inert LocalNoopBackend produces no change-set; even with a change_opener injected,
+    # run_plan opens nothing (the run authored no in-manifest work) and ends at collect.
+    opener_calls: list[tuple] = []
+
+    def change_opener(change_set, plan_ref):
+        opener_calls.append((change_set, plan_ref))  # pragma: no cover - must never run
+        raise AssertionError("change_opener must not be called when the run produced no change-set")
+
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=LocalNoopBackend(), clock=CounterClock(), change_opener=change_opener,
+    )
+    assert opener_calls == []
+    assert [r["lifecycle_phase"] for r in evidence.records] == ["provision", "run", "collect"]
+    assert evidence.change_set is None
+
+
+def test_change_set_carries_no_secret():
+    from dataclasses import fields
+
+    cs = RunChangeSet(branch="b", base="main", manifest_paths=("a.py",), head_sha="abc")
+    assert not hasattr(cs, "value")
+    assert {f.name for f in fields(cs)} == {"branch", "base", "manifest_paths", "head_sha"}
