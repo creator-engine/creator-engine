@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.4 credential value-injection seam (`forge/credential_runner.py`)
+# PR path manifest — v3 G-3.4 roadmap status-flip (`docs/v3-roadmap.md`)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,35 +9,26 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **code** PR (it touches Python under `validators/`). It adds the
-G-3.4 credential value-injection seam: a new `forge/credential_runner.py`
-exporting `authenticated_gh_runner(token, *, spawn=None) -> GhRunner`, which
-takes a JIT-minted `ScopedToken` and returns a `GhRunner` whose child `gh`
-subprocess env carries the live token value (`GH_TOKEN`) so the forge ops
-authenticate as the scoped per-run credential. The token value reaches the
-child env only — never the argv, never the input body, never a log, never disk,
-never the parent `os.environ`, never the agent task container; competing ambient
-auth (`GITHUB_TOKEN` and the GHES variants) is dropped from the child env. The
-only existing-file edit is `forge/__init__.py` (it adds `authenticated_gh_runner`
-to the imports and `__all__`). The frozen forge siblings (`change.py`,
-`change_status.py`, `github_repo_config.py`, `scoped_token.py`,
-`plan_approval.py`, `merge.py`) and `orchestrator.py` stay byte-unchanged. It
-adds no `@register` check, no backend, and no schema → `--list-checks` is
+This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
+**G-3.4** (the credential value-injection seam — `authenticated_gh_runner` turns
+a JIT `ScopedToken` into an authenticated `GhRunner`, PR #132, merge commit
+`4d4a65b`) is MERGED: it flips the G-3.4 gate-status row to `#132` / `4d4a65b` /
+MERGED, advances the status-summary prose and "What's next" pointer
+(G-3.0/G-3.1/G-3.2/G-3.3/G-3.4 merged; G-3.5 next), and adds a
+`forge/credential_runner.py` (G-3.4) row to the "Where the v3 code lives" table.
+It touches **no** Python, schema, or check surface → `--list-checks` is
 **unchanged at 43** and `available_backends()` is unchanged at
-`('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/`cli.py`/wheel/`requirements`/
-`pyproject.toml` change. The new `tests/unit/test_credential_runner.py` drives
-every path with a fake `spawn` (zero live `gh` / network / subprocess).
+`('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The draft passes
+`ce_terminology_v2` and `no_limitless_strings`.
 
-- **base:** `99b56d5ff9c33b63451edb5f34a6cae5c2a16197`.
+- **base:** `4d4a65bc05b39ab73a57261a08a3abce0fcda24f`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=fa466d7eea57e1ebbb414aa1ec195e121a943dab76fe500c102e0792835aaa46
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/forge/__init__.py
-validators/creator_engine_validator/forge/credential_runner.py
-validators/tests/unit/test_credential_runner.py
+docs/v3-roadmap.md
 ```
