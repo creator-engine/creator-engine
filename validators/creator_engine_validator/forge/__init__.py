@@ -37,6 +37,7 @@ from .change_status import (
     checks_state,
     review_state,
 )
+from .credential_runner import authenticated_gh_runner
 from .github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
     BranchProtectionPolicy,
@@ -76,6 +77,7 @@ __all__ = [
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
+    "authenticated_gh_runner",
     "change_conflicts",
     "checks_state",
     "configure_repo",
