@@ -49,7 +49,14 @@ time-boxed credential for the provisioned sandbox (the production minter is a th
 closure over ``forge.mint_scoped_token`` mapping to a value-free ``MintedCredential``
 port type — the live secret never crosses into the orchestrator), gates its issuance
 on the runtime-policy ``secret_allowlist`` via the G-1.3b classifier, and attests the
-issuance + revocation to the evidence spine. See ``docs/contracts/orchestrator.md``.
+issuance + revocation to the evidence spine. **G-3.1 wiring** threads the audited run's
+in-manifest work (the value-free ``RunChangeSet`` pointers on the ``RunResult``) into the
+merged ``forge.open_change`` via an injected ``change_opener`` seam: after ``collect`` the
+lifecycle's terminal step opens/claims the PR plan-by-default (the production closure
+captures the repo + a ``gh_runner`` factory — the orchestrator passes a factory, never a
+raw token) and attests the resulting value-free ``ChangeRef`` as a terminal
+``change-opened`` record, so the lifecycle ends at "PR opened". See
+``docs/contracts/orchestrator.md``.
 
 Defensive only — authorization + accountability for our own agent runtime;
 never offensive.
@@ -58,15 +65,17 @@ never offensive.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 from .runner import (
     ALLOWED,
     AuditOverlayBackend,
     Clock,
     CollectedEvidence,
+    LifecycleEvent,
     ProvisionRequest,
+    RunChangeSet,
     RunnerBackend,
     RunnerError,
     RunRequest,
@@ -74,6 +83,9 @@ from .runner import (
     get_backend,
 )
 from .runtime_evidence_spine import is_policy_sha
+
+if TYPE_CHECKING:  # type-only: the orchestrator imports ZERO from ``forge`` at runtime
+    from .forge.change import ChangeRef
 
 
 class PlanNotRatified(RunnerError):
@@ -153,6 +165,22 @@ class MintedCredential:
 TokenMinter = Callable[[dict[str, Any], str], "MintedCredential | None"]
 
 
+# A change-opener maps (the run's RunChangeSet, the 64-hex plan_ref) -> the value-free
+# ChangeRef for the opened/claimed PR, or None when no change is to be opened. The
+# production change_opener is a thin closure capturing the repo + a ``gh_runner`` FACTORY
+# (a ``Callable[[], GhRunner]``) that calls ``forge.open_change(..., apply=False)`` and
+# never a raw token; auth stays in the runner's env, never in argv, never here. Injecting
+# it (rather than importing the forge) keeps the orchestrator pure and forge-free, and the
+# credential value-injection into the runner env is a later, deferred seam (G-3.4). For
+#   def make_change_opener(repo, gh_runner_factory):
+#       def change_opener(change_set, plan_ref):
+#           return open_change(repo, change_set.branch, change_set.base,
+#                              change_set.manifest_paths, plan_ref,
+#                              apply=False, gh_runner=gh_runner_factory())
+#       return change_opener
+ChangeOpener = Callable[["RunChangeSet", str], "ChangeRef | None"]
+
+
 def _ratify_or_refuse(
     runtime_policy: dict[str, Any],
     run_id: str,
@@ -210,6 +238,7 @@ def run_plan(
     approval_resolver: ApprovalResolver | None = None,
     seat_identity: str | None = None,
     token_minter: TokenMinter | None = None,
+    change_opener: ChangeOpener | None = None,
 ) -> CollectedEvidence:
     """Drive one ratified, audited agent-seat run and return its collected evidence.
 
@@ -225,13 +254,26 @@ def run_plan(
        ``get_backend(runtime_policy["isolation_backend"])``;
     3. **wrap** it in :class:`AuditOverlayBackend` so every lifecycle step is
        attested to the hash-chained evidence spine, bound to the policy;
-    4. **drive** ``provision -> [mint] -> run -> [revoke] -> collect -> teardown``
-       and return the collected evidence (the audit overlay's collect-time spine
-       snapshot; teardown is still executed to release the runtime). When a
-       ``token_minter`` is injected, a JIT per-run credential is minted for the
-       provisioned sandbox, its issuance gated on the policy ``secret_allowlist``
-       and attested, and its revocation attested before collect
-       (:class:`CredentialNotPermitted` if the policy forbids it).
+    4. **drive** ``provision -> [mint] -> run -> [revoke] -> collect -> [open
+       change] -> teardown`` and return the collected evidence (the audit
+       overlay's collect-time spine snapshot; teardown is still executed to
+       release the runtime). When a ``token_minter`` is injected, a JIT per-run
+       credential is minted for the provisioned sandbox, its issuance gated on
+       the policy ``secret_allowlist`` and attested, and its revocation attested
+       before collect (:class:`CredentialNotPermitted` if the policy forbids it).
+
+    **G-3.1 wiring.** The run's in-manifest work crosses the runner seam as DATA
+    (the value-free :class:`~.runner.RunChangeSet` pointers on the ``RunResult``).
+    When a ``change_opener`` is injected and the run produced a change-set, the
+    lifecycle's terminal step (after ``collect``) opens/claims the PR for that
+    change plan-by-default (the production closure captures the repo + a
+    ``gh_runner`` factory and calls ``forge.open_change(..., apply=False)`` — the
+    orchestrator passes a factory, never a raw token), attests the resulting
+    value-free :class:`~.forge.change.ChangeRef` as a terminal ``change-opened``
+    record on the hash chain, and surfaces the change-set on the returned
+    evidence — so the lifecycle ends at "PR opened," not "evidence collected."
+    A ``None`` ``change_opener`` (or a run with no change-set) is the existing
+    G-2.x behavior, byte-for-byte unchanged.
 
     Allocates no container and runs no subprocess itself; in CI it is exercised
     against the inert ``LocalNoopBackend`` with zero live subprocess. Propagates
@@ -269,13 +311,30 @@ def run_plan(
                     f"runtime-policy does not permit credential {credential.secret_name!r} "
                     f"for run {run_id!r}; refusing (secret not in the policy secret_allowlist)"
                 )
-        overlay.run(handle, RunRequest(command=tuple(command)))
+        run_result = overlay.run(handle, RunRequest(command=tuple(command)))
         if credential is not None:
             # The run no longer needs the credential → attest its revocation BEFORE collect
             # (so it lands in the collect snapshot). The live forge DELETE is the injected
             # minter seam's job; here we record the release, bound to the policy.
             overlay.observe(handle, SecretEvent(name=credential.secret_name, phase="teardown"))
         evidence = overlay.collect(handle)
+        # 4.6) G-3.1: the lifecycle's terminal step is "PR opened". The run's in-manifest
+        #      work crosses the seam as DATA (run_result.change_set). When a change_opener
+        #      is injected and the run produced a change-set, open/claim the PR for it
+        #      (plan-by-default; the closure calls forge.open_change(apply=False) through a
+        #      gh_runner factory — value-free, no raw token here), attest the value-free
+        #      ChangeRef as a terminal "change-opened" record AFTER collect, and fold that
+        #      record + the change-set pointer into the returned evidence so it reflects a
+        #      lifecycle that ends at "PR opened".
+        if change_opener is not None and run_result.change_set is not None:
+            change_opener(run_result.change_set, approved_plan.policy_sha)
+            opened = overlay.observe(handle, LifecycleEvent(phase="change-opened"))
+            evidence = replace(
+                evidence,
+                records=tuple(evidence.records) + (opened,),
+                change_set=run_result.change_set,
+                note=f"{evidence.note}; change-opened",
+            )
     finally:
         overlay.teardown(handle)
     return evidence

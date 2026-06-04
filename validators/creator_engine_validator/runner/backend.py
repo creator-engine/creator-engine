@@ -96,6 +96,25 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
+class RunChangeSet:
+    """The agent's in-manifest work as DATA crossing the runner seam — value-free.
+
+    Desired-state POINTERS only: the head ``branch`` the run authored, the ``base``
+    it targets, the authorized ``manifest_paths`` the change carries, and the produced
+    ``head_sha``. It holds NO diff blob and NO secret — the live diff capture is the
+    gVisor backend's job (later). The inert ``LocalNoopBackend`` produces none (an inert
+    run authors nothing, so :class:`RunResult`/:class:`CollectedEvidence` default
+    ``change_set`` to ``None``); a test/fake backend or the real gVisor backend populates
+    it so the work crosses the seam as a value, not a side effect.
+    """
+
+    branch: str
+    base: str
+    manifest_paths: tuple[str, ...]
+    head_sha: str
+
+
+@dataclass(frozen=True)
 class RunResult:
     """The outcome of a single run inside a provisioned runtime."""
 
@@ -103,6 +122,8 @@ class RunResult:
     stdout: str
     stderr: str
     started_ref: str
+    #: The run's value-free change-set pointers (``None`` for an inert/no-author run).
+    change_set: RunChangeSet | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +133,8 @@ class CollectedEvidence:
     handle_ref: str
     records: tuple[dict[str, Any], ...]
     note: str
+    #: Surfaced when the orchestrated lifecycle ends at "PR opened" (G-3.1); else ``None``.
+    change_set: RunChangeSet | None = None
 
 
 @dataclass(frozen=True)
