@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.6a roadmap status-flip (`docs/v3-roadmap.md`)
+# PR path manifest — v3 G-3.6b offline composition-root assembly
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,32 +9,43 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
-**G-3.6a** (the run-outcome / terminal-disposition model — a run's terminal
-outcome is a typed `runtime_run_outcome` record appended to the same
-tamper-evident hash chain, orthogonal to the `provision`/`run`/`collect`/
-`teardown` `lifecycle_phase` axis; PR #136, merge commit `bc22681`) is MERGED.
-It splits the single planned `G-3.6` gate-status row into **G-3.6a** (`#136` /
-`bc22681` / MERGED) + **G-3.6b** (offline composition-root assembly + end-to-end
-dry-run, planned), mirrors that split in the MVP gate-map sketch, advances the
-status-summary prose and "What's next" pointer
-(G-3.0…G-3.5 + G-3.6a merged; G-3.6b next), and adds G-3.6a code-location +
-contract notes to the "Where the v3 code lives" table (the `orchestrator.py`
-terminal-outcome append, the `runtime_evidence_spine.py` `RUN_OUTCOME_*`
-constants, and the `runtime_run_outcome_record` `$def` in
-`runtime-evidence.schema.yaml`). It touches **no** Python, schema, or check
-surface → `--list-checks` is **unchanged at 43** and `available_backends()` is
-unchanged at `('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The
-draft passes `ce_terminology_v2` and `no_limitless_strings`.
+This PR builds the **G-3.6b offline composition root** — the first production
+`run` driver. A new `run_assembly.py` `make_run_driver(...)` wires the already
+fake-tested seams into ONE offline `run_plan(...)` drive that persists the run's
+evidence: the production `token_minter` (over `forge.mint_scoped_token`/
+`revoke_scoped_token` → the value-free `MintedCredential`), the **minter→runner
+bridge** (a closure cell sharing the one live `ScopedToken` from the minter to
+the `change_opener`'s authenticated `gh` runner via `authenticated_gh_runner`, so
+the change-opener authenticates with the SAME minted token while the orchestrator
+stays value-free), the production `change_opener` (over `forge.open_change(...,
+apply=False)`), and the G-3.5 `file_evidence_sink`. The deferred-from-G-3.5
+`run_plan(evidence_sink=…)` injectable + a post-`teardown` success-path persist
+call-site land in `orchestrator.py` (the sink is injected; default `None` = no
+I/O; `EvidencePersistRefused` propagates). The drive proves
+**mint → authenticated runner → run → collect → typed `pr_opened` outcome →
+persisted evidence**, entirely offline (a `RunChangeSet`-yielding fake backend +
+a fake `GhRunner`/`spawn`/`write`, `subprocess`/`socket`/`Path.write_text`
+monkeypatched to explode), with ZERO live side effects. `ScopedToken.value` lives
+only in the composition root's closure cell and, at call time, only in the child
+`gh` env — never the orchestrator, evidence, argv, input, log, disk, or the
+parent env. `merge()` and the live drive (`apply=True`, App key) are DEFERRED to
+G-3.7. No schema/spine/model change (the run-outcome model is settled in G-3.6a).
+`--list-checks` is **unchanged at 43**; `available_backends()` is unchanged at
+`('gvisor-proxy', 'local-noop')`; `check-examples` stays 77/0; no `ce_cli.py`/
+wheel/requirements/pyproject change.
 
-- **base:** `bc2268130bad7e4cf836e520eed0a6169dee05e7`.
+- **base:** `d7c6aa5fc67d5d6ce549c588ec2156d763404655`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=2
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
+AUTHORIZED_PATHS_SHA256=19e4520f9dcf8301cb45ca652275de0db317cf44f40cfc86f88b6859683301a4
 
 ```text
 .ce/pr-path-manifest.md
-docs/v3-roadmap.md
+docs/contracts/orchestrator.md
+validators/creator_engine_validator/orchestrator.py
+validators/creator_engine_validator/run_assembly.py
+validators/tests/unit/test_orchestrator.py
+validators/tests/unit/test_run_assembly.py
 ```

@@ -176,12 +176,52 @@ closure that mints via `forge.mint_scoped_token`, maps the result to the value-f
 orchestrator stays pure and forge-free, registering no check (`--list-checks` stays
 **43**) and no backend, with **zero** live mint in tests (the `GhRunner` is injected).
 
-## Deferred (later G-2 hardening — NOT in this slice)
+## Evidence persistence + the composition root (G-3.6b)
 
-- **Live credential injection** of the minted token value into the running backend
-  (env/proxy), behind the runner adapter — the value-delivery seam G-2.2 leaves open.
-- **OpenShell** as a registered backend behind the same `RunnerBackend` adapter.
-- **Real-clock + evidence persistence** behind the existing injectable seams.
+The lifecycle's terminal disposition (G-3.1 / G-3.6a) opens/claims the PR for the
+run's `RunChangeSet` through an injected `change_opener` and attests a typed
+`runtime_run_outcome` record (`outcome: pr_opened` + a value-free `change_set`
+pointer; on the disposition axis, never a `lifecycle_phase`). G-3.6b makes that
+run's evidence **durable** and wires the production composition root:
+
+- **The `evidence_sink` seam.** `run_plan` takes a keyword-only `evidence_sink`
+  (the production wiring is the G-3.5 `evidence_sink.file_evidence_sink`). When
+  injected, the run's **final** evidence — the full hash chain *including* the
+  terminal run-outcome record — is persisted **after `teardown`, on the success
+  path**. The sink is an injectable seam: the default `None` persists nothing and
+  performs zero I/O (the orchestrator stays pure — it writes no file itself), and
+  a non-conforming chain's `EvidencePersistRefused` **propagates** (it is a defect
+  to surface, not swallow). The sink never re-hashes a record, so the persisted
+  chain re-reads to `verify_chain() == []` and validates against
+  `schemas/runtime-evidence.schema.yaml`.
+- **The composition root — `run_assembly.make_run_driver(repo, root, …)`.** The
+  first production `run` driver. It is the one place that imports `forge` and
+  holds the live `ScopedToken.value` (the opposite of the pure orchestrator),
+  assembling the seams into one `run_plan(...)` drive: the production
+  `token_minter` (over `forge.mint_scoped_token` / `revoke_scoped_token` → the
+  value-free `MintedCredential`), the **minter→runner bridge** (a closure cell
+  sharing the one live `ScopedToken` from the minter to the `change_opener`'s
+  authenticated `gh` runner via `forge.authenticated_gh_runner`, so the
+  change-opener authenticates AS the same minted token while the orchestrator
+  never sees the value), the production `change_opener` (over
+  `forge.open_change(..., apply=False)`), and the `file_evidence_sink`. It revokes
+  the credential at completion (success **or** failure). The live `value` lives
+  only in the closure cell and, at call time, only in the child `gh` env — never
+  the orchestrator, the evidence, argv, input, a log, disk, or the parent
+  environment. The driver runs entirely offline against an injected backend +
+  fake `gh_runner` / `spawn` / `write` (CI monkeypatches `subprocess` / `socket` /
+  `Path.write_text` to explode); it is the exact entry G-3.7 promotes to live
+  (`apply=True` + a real installation, outside the CI-purity envelope).
+
+## Deferred (NOT in this slice)
+
+- **The live spike (G-3.7)** — promoting the composition root to a real drive
+  (`apply=True`, a real GitHub App installation, a real container) OUTSIDE the
+  CI-purity envelope; the human-created App key never enters the task container.
+- **`merge()` in the drive** — the gated squash-merge (`forge.merge`) is deferred
+  to G-3.7; G-3.6b opens + persists only.
+- **OpenShell** as a registered backend behind the same `RunnerBackend` adapter
+  (the research-gated G-2.3).
 
 This module is the seed for the architect's pre-committed `ce_orchestrator`
 extraction; until then it lives in the installable validator package so the
