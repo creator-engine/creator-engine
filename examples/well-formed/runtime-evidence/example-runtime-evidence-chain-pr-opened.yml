@@ -1,0 +1,61 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: '1'
+records:
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  lifecycle_phase: provision
+  classification: allowed
+  recorded_at: '2026-06-05T07:00:00Z'
+  backend_key: gvisor-proxy
+  sequence: 0
+  prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  content_hash: 0c81071cea40857756a754c68207465146c50fb761944284da11ee41201b1e45
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  lifecycle_phase: run
+  classification: allowed
+  recorded_at: '2026-06-05T07:00:01Z'
+  backend_key: gvisor-proxy
+  sequence: 1
+  prev_hash: 0c81071cea40857756a754c68207465146c50fb761944284da11ee41201b1e45
+  content_hash: 692da1c4ede7d138e994f768dec78aed9e69414c880d5a224d9e3b950ae4416f
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  lifecycle_phase: collect
+  classification: allowed
+  recorded_at: '2026-06-05T07:00:02Z'
+  backend_key: gvisor-proxy
+  sequence: 2
+  prev_hash: 692da1c4ede7d138e994f768dec78aed9e69414c880d5a224d9e3b950ae4416f
+  content_hash: 8f0af1f8c252a77ce6b8c6f3023f328b58978c9cee7d520591aa108be05a22d2
+- kind: runtime-run-outcome
+  record_type: runtime_run_outcome
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  recorded_at: '2026-06-05T07:00:03Z'
+  outcome: pr_opened
+  change_set:
+    branch: ce/run-implementer-0002
+    base: main
+    manifest_paths:
+    - validators/creator_engine_validator/example_change.py
+    head_sha: dddddddddddddddddddddddddddddddddddddddd
+    pr_number: 42
+  sequence: 3
+  prev_hash: 8f0af1f8c252a77ce6b8c6f3023f328b58978c9cee7d520591aa108be05a22d2
+  content_hash: a88b76c9047241866a894e09f1b41acfcb27a5063b873113112cc3275255f79e
+note: 'Runtime-evidence chain for one implementer seat that ended at "PR opened": a provision/run/collect
+  lifecycle plus a typed terminal runtime_run_outcome record (outcome pr_opened) on the orthogonal disposition
+  axis, carrying a value-free change_set pointer. Content-addressed + hash-chained; verifies clean. The
+  run-outcome is its own record type, never a lifecycle_phase.'

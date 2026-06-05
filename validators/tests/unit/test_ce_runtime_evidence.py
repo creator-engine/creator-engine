@@ -26,6 +26,8 @@ from creator_engine_validator.checks.ce_runtime_evidence import (
 from creator_engine_validator.runtime_evidence_spine import (
     CHAIN_KIND,
     GENESIS_PREV_HASH,
+    RUN_OUTCOME_RECORD_KIND,
+    RUN_OUTCOME_RECORD_TYPE,
     append,
     canonical_content_hash,
     is_policy_sha,
@@ -74,6 +76,55 @@ def _chain_file(records: list[dict]) -> dict:
         "schema_version": "1",
         "records": records,
     }
+
+
+def _outcome_body(outcome: str = "pr_opened", policy: str = _POLICY) -> dict:
+    # A G-3.6a typed terminal run-OUTCOME record: no lifecycle_phase; carries the
+    # plural ``outcome`` + a value-free ``change_set`` pointer.
+    return {
+        "kind": RUN_OUTCOME_RECORD_KIND,
+        "record_type": RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": policy,
+        "run_id": "run-implementer-0001",
+        "recorded_at": "t9",
+        "outcome": outcome,
+        "change_set": {
+            "branch": "ce/run-implementer-0001",
+            "base": "main",
+            "manifest_paths": ["a.py"],
+            "head_sha": "d" * 40,
+        },
+    }
+
+
+def _chain_with_outcome(outcome: str = "pr_opened") -> dict:
+    chain: list[dict] = []
+    for phase in ("provision", "run", "collect"):
+        chain.append(append(chain, _body(phase=phase)))
+    chain.append(append(chain, _outcome_body(outcome=outcome)))
+    return _chain_file(chain)
+
+
+# ---------------------------------------------------------------------------
+# G-3.6a — typed run-outcome record (orthogonal to lifecycle_phase)
+# ---------------------------------------------------------------------------
+def test_chain_with_typed_run_outcome_record_validates_clean():
+    """A terminal ``runtime_run_outcome`` record is schema-valid + chain-clean."""
+    doc = _chain_with_outcome("pr_opened")
+    errors = validate_runtime_evidence_chain(doc, Path("outcome-chain.yml"))
+    assert errors == []
+    assert verify_chain(doc["records"]) == []
+    tail = doc["records"][-1]
+    assert tail["record_type"] == RUN_OUTCOME_RECORD_TYPE
+    assert "lifecycle_phase" not in tail
+
+
+def test_run_outcome_with_bad_outcome_value_is_schema_violation():
+    """A run-outcome record whose ``outcome`` is not in the enum fails the schema."""
+    doc = _chain_with_outcome("not-a-real-outcome")
+    errors = validate_runtime_evidence_chain(doc, Path("bad-outcome.yml"))
+    assert CODE_SCHEMA in _codes(errors)
 
 
 # ---------------------------------------------------------------------------

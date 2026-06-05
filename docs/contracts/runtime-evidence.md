@@ -24,10 +24,14 @@ A reader with only a fresh clone must be able to read a chain and answer:
 
 - which runtime-policy each record attests (`policy_sha`) and which provisioning
   run it belongs to (`run_id`);
-- which lifecycle phase each record covers (`lifecycle_phase`:
+- which lifecycle phase each lifecycle record covers (`lifecycle_phase`:
   `provision` / `run` / `collect` / `teardown`);
 - the classifier verdict category for the attested event (`classification`:
-  `allowed` / `denied` / `escalate`); and
+  `allowed` / `denied` / `escalate`);
+- the run's terminal **outcome**, when the run produced one (a typed
+  `runtime_run_outcome` record: `outcome` ∈ `pr_opened` / `review_submitted` /
+  `research_delivered` / `no_change`, plus a value-free `change_set` pointer — the
+  disposition axis, orthogonal to `lifecycle_phase`); and
 - whether the chain is intact — no record mutated, reordered, truncated, or
   unlinked (`content_hash`, `prev_hash`, `sequence`).
 
@@ -72,6 +76,38 @@ implement this discipline over in-memory records with no I/O.
 A file is treated as a candidate Runtime Evidence chain when it is a `.yml` /
 `.yaml` file (not under `schemas/` or `templates/`, basename without `.tmp.`)
 whose loaded YAML is a mapping with `kind: runtime-evidence-chain`.
+
+## Run-outcome records (v3 G-3.6a — the terminal-disposition axis)
+
+A chain may end with a **typed run-outcome record** that attests WHERE the run
+ended. This is a distinct record type (`kind: runtime-run-outcome`,
+`record_type: runtime_run_outcome`) on an axis **orthogonal** to the container
+`lifecycle_phase`: the lifecycle axis is universal (`provision` → `teardown`),
+whereas the *outcome* is plural and work-type-dependent (a run may open a PR,
+submit a review, deliver research, or change nothing). Modelling the outcome as a
+`lifecycle_phase` value would conflate the two axes, so the outcome is its own
+typed record and is **never** a `lifecycle_phase`.
+
+- **Same chain, same integrity.** The outcome record is appended to the SAME
+  hash chain via the pure `append` (content-addressed, `prev_hash`-linked,
+  contiguous `sequence`, `policy_sha`-bound), so the terminal disposition is
+  itself tamper-evident. `verify_chain` treats it like any record.
+- **Required fields:** `kind` / `record_type` / `schema_version` / `policy_sha` /
+  `run_id` / `sequence` / `prev_hash` / `content_hash` / `recorded_at` / `outcome`
+  / `change_set`. It carries **no** `lifecycle_phase` and **no** `classification`.
+- **`outcome`** is a string enum: `pr_opened` / `review_submitted` /
+  `research_delivered` / `no_change`. The v3 MVP produces only `pr_opened`; the
+  rest are reserved vocabulary for later slices.
+- **`change_set`** is a value-free pointer — `branch` / `base` / `manifest_paths`
+  / `head_sha` (+ optional `pr_number`). It carries NO diff, NO secret, and NO
+  host / credential / account / registry identifier as a normative binding (the
+  same prohibition that applies to every record).
+
+A schema-conformant chain holds **either** record type per element; the two are
+mutually exclusive (`kind` / `record_type` consts + `lifecycle_phase` vs
+`outcome` select exactly one). A record with an out-of-enum `outcome` (or a
+missing `change_set`) fails `runtime_evidence_schema_violation`. Worked example:
+`examples/well-formed/runtime-evidence/example-runtime-evidence-chain-pr-opened.yml`.
 
 ## Scope boundary (what G-1.3a does NOT do)
 
