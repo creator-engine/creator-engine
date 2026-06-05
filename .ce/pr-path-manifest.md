@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.5 evidence persistence sink (`evidence_sink.py`)
+# PR path manifest — v3 G-3.5 roadmap status-flip (`docs/v3-roadmap.md`)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,36 +9,27 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **code** PR (it adds Python under `validators/`). It adds the G-3.5
-evidence persistence sink: a new top-level `evidence_sink.py` exporting
-`file_evidence_sink(root, *, write=None) -> EvidenceSink`, which serializes a
-run's `CollectedEvidence` (the `AuditOverlayBackend` hash-chain) into a durable
-file matching `schemas/runtime-evidence.schema.yaml` — persisting iff
-`verify_chain()==[]` AND the chain validates against the schema, else raising a
-value-free `EvidencePersistRefused` and writing nothing. The write goes through
-an injectable `write` seam (the lone live line); the new
-`tests/unit/test_evidence_sink.py` drives every path with a fake `write` (zero
-live filesystem write / network / subprocess). It reuses `CollectedEvidence`,
-`verify_chain` / `CHAIN_KIND` / `CONTENT_HASH_FIELD`, and `validate_with_schema`
-by import; it adds **no** `@register` check, **no** backend, and **no** schema
-(the runtime-evidence schema + `ce_runtime_evidence` check pre-exist) →
-`--list-checks` is **unchanged at 43** and `available_backends()` is unchanged
-at `('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel/`requirements`/
-`pyproject.toml` change. The frozen runtime-evidence substrate
-(`runtime_evidence_spine.py`, `schemas/runtime-evidence.schema.yaml`,
-`checks/ce_runtime_evidence.py`), `orchestrator.py`, and every backend stay
-byte-unchanged. The `run_plan` `evidence_sink` seam + the run-outcome model are
-G-3.6 (this slice REFUSES a `change-opened` chain rather than persist it).
+This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
+**G-3.5** (the evidence persistence sink — `file_evidence_sink` turns a run's
+`CollectedEvidence` (AuditOverlay hash-chain) into a durable
+`runtime-evidence-chain` file, PR #134, merge commit `e63ae0b`) is MERGED: it
+flips the G-3.5 gate-status row to `#134` / `e63ae0b` / MERGED, advances the
+status-summary prose and "What's next" pointer
+(G-3.0/G-3.1/G-3.2/G-3.3/G-3.4/G-3.5 merged; G-3.6 next), and adds an
+`evidence_sink.py` (G-3.5) row to the "Where the v3 code lives" table. It
+touches **no** Python, schema, or check surface → `--list-checks` is
+**unchanged at 43** and `available_backends()` is unchanged at
+`('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The draft passes
+`ce_terminology_v2` and `no_limitless_strings`.
 
-- **base:** `59ecf8b32449da1decca6461b2ae9e85a1f47e9b`.
+- **base:** `e63ae0b1fa83c572408c0ee1e3cc119c733f4625`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=863a219c6f3ae42161fd098142b4bc65a245334c99308cd261d38a9ca359b1a4
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/evidence_sink.py
-validators/tests/unit/test_evidence_sink.py
+docs/v3-roadmap.md
 ```
