@@ -82,7 +82,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.2 | read-only forge change-status (`review_state` / `checks_state` / `change_conflicts`) | #128 | `3bee641` | MERGED |
 | G-3.3 | `forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"` | #130 | `25db4e5` | MERGED |
 | G-3.4 | credential value-injection seam (`authenticated_gh_runner` — `ScopedToken.value` → child `gh` env only) | #132 | `4d4a65b` | MERGED |
-| G-3.5 | evidence persistence sink (AuditOverlay hash-chain + `CollectedEvidence`) | — | — | planned |
+| G-3.5 | evidence persistence sink (`file_evidence_sink` — `CollectedEvidence` → durable `runtime-evidence-chain` file; persist iff `verify_chain`+schema-valid, else refuse) | #134 | `e63ae0b` | MERGED |
 | G-3.6 | preflight + offline end-to-end dry-run (the integration harness) | — | — | planned |
 | G-3.7 | live spike — first working v3 (Operator-ratified outside the CI-purity envelope) | — | — | planned |
 
@@ -93,17 +93,19 @@ research-gated). **G-3 (first working v3) is underway** — G-3.0
 `run_plan` `change_opener` seam → `open_change()`), G-3.2 (read-only forge
 change-status — `review_state` / `checks_state` / `change_conflicts`), G-3.3
 (`forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"`),
-and G-3.4 (credential value-injection seam — `authenticated_gh_runner`:
-`ScopedToken.value` → the child `gh` env only) merged (#124, #126, #128, #130,
-#132); G-3.5 next.
+G-3.4 (credential value-injection seam — `authenticated_gh_runner`:
+`ScopedToken.value` → the child `gh` env only), and G-3.5 (evidence persistence
+sink — `file_evidence_sink`: `CollectedEvidence` → a durable
+`runtime-evidence-chain` file) merged (#124, #126, #128, #130, #132, #134);
+G-3.6 next.
 
 ## What's next
 
-1. **G-3.5** — the evidence persistence sink (the `AuditOverlay` hash-chain +
-   `CollectedEvidence` → a durable file matching `runtime-evidence.schema.yaml`)
-   — the next lifecycle slice, then G-3.6 (preflight + offline end-to-end
-   dry-run), then the **G-3.7** live spike ("first working v3", Operator-ratified
-   outside the CI-purity envelope).
+1. **G-3.6** — preflight + offline end-to-end dry-run (the integration harness:
+   assembles the minter-token → `gh_runner`-factory bridge + `change_opener` +
+   `merge()` + the G-3.5 `evidence_sink` into `run_plan` against local-noop + a
+   fake `GhRunner`), then the **G-3.7** live spike ("first working v3",
+   Operator-ratified outside the CI-purity envelope).
 2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
    recorded trigger conditions).
 
@@ -129,6 +131,7 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 | `forge/change_status.py` | G-3.2 | read-only `review_state` / `checks_state` / `change_conflicts` over a `ChangeRef` (GraphQL via `GhRunner`) |
 | `forge/merge.py` | G-3.3 | gated squash-merge `merge()` → `MergeResult` (review + checks + `mergeable=="MERGEABLE"`; plan-by-default; head-pinned squash `PUT` via `GhRunner`) |
 | `forge/credential_runner.py` | G-3.4 | `authenticated_gh_runner()` — a `ScopedToken` → an authenticated `GhRunner` (the live token value into the child `gh` env only; never argv / log / disk / the task container) |
+| `evidence_sink.py` | G-3.5 | `file_evidence_sink()` — a `CollectedEvidence` (AuditOverlay hash-chain) → a durable `runtime-evidence-chain` file matching `runtime-evidence.schema.yaml` (persist iff `verify_chain`+schema-valid, else `EvidencePersistRefused`) |
 | `schemas/*.yaml` + `docs/contracts/*.md` | various | declarative + prose contracts |
 
 The package also retains earlier v2 machinery (lane/PCO/tmux runtime, etc.)
