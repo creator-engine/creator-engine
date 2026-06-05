@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.6a run-outcome / terminal-disposition model
+# PR path manifest — v3 G-3.6a roadmap status-flip (`docs/v3-roadmap.md`)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,49 +9,32 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This PR resolves the **G-3.6a run-outcome / terminal-disposition model**
-(Operator-decided Option A): a run's terminal outcome is modelled as a typed
-`runtime_run_outcome` record appended to the SAME tamper-evident hash chain —
-orthogonal to the container `lifecycle_phase` axis, never a `lifecycle_phase`
-value. This makes a real PR-opening run's evidence schema-valid + persistable
-(replacing the G-3.5 sink's `change-opened` refuse-stub). The change is:
+This is a **docs-only** PR. It updates `docs/v3-roadmap.md` to reflect that
+**G-3.6a** (the run-outcome / terminal-disposition model — a run's terminal
+outcome is a typed `runtime_run_outcome` record appended to the same
+tamper-evident hash chain, orthogonal to the `provision`/`run`/`collect`/
+`teardown` `lifecycle_phase` axis; PR #136, merge commit `bc22681`) is MERGED.
+It splits the single planned `G-3.6` gate-status row into **G-3.6a** (`#136` /
+`bc22681` / MERGED) + **G-3.6b** (offline composition-root assembly + end-to-end
+dry-run, planned), mirrors that split in the MVP gate-map sketch, advances the
+status-summary prose and "What's next" pointer
+(G-3.0…G-3.5 + G-3.6a merged; G-3.6b next), and adds G-3.6a code-location +
+contract notes to the "Where the v3 code lives" table (the `orchestrator.py`
+terminal-outcome append, the `runtime_evidence_spine.py` `RUN_OUTCOME_*`
+constants, and the `runtime_run_outcome_record` `$def` in
+`runtime-evidence.schema.yaml`). It touches **no** Python, schema, or check
+surface → `--list-checks` is **unchanged at 43** and `available_backends()` is
+unchanged at `('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel change. The
+draft passes `ce_terminology_v2` and `no_limitless_strings`.
 
-- `schemas/runtime-evidence.schema.yaml` — a new `runtime_run_outcome_record`
-  `$def` admitted via a `records.items` `oneOf` (`outcome` enum + a value-free
-  `change_set` pointer; no `lifecycle_phase`).
-- `validators/creator_engine_validator/runtime_evidence_spine.py` — additive
-  `RUN_OUTCOME_RECORD_KIND` / `RUN_OUTCOME_RECORD_TYPE` / `RUN_OUTCOMES`
-  constants (no behavior change).
-- `validators/creator_engine_validator/orchestrator.py` — the terminal step now
-  appends a typed `runtime_run_outcome` record via the spine `append` (instead
-  of a `lifecycle_phase="change-opened"` record), reusing one clock instance and
-  capturing the `ChangeRef`'s `pr_number` when present.
-- a new well-formed example fixture + the `docs/contracts/runtime-evidence.md`
-  contract section + the flipped/added unit tests.
-
-The sink (`evidence_sink.py`), the audit overlay (`runner/audit_overlay.py`), the
-`ce_runtime_evidence` check, and every backend are **byte-unchanged** — the check
-delegates record shape to the schema and the sink persists any schema-valid
-chain, so admitting the new record type flips the refuse-stub for free.
-`--list-checks` is **unchanged at 43**; `available_backends()` is unchanged at
-`('gvisor-proxy', 'local-noop')`; no `ce_cli.py`/wheel/requirements/pyproject
-change. The contract doc passes `ce_terminology_v2` and `no_limitless_strings`.
-
-- **base:** `258a8fb6943487fc194788d09e1f9967da0cb5d1`.
+- **base:** `bc2268130bad7e4cf836e520eed0a6169dee05e7`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=c8e729720c7dc6fbd1c26f12ea9c8206fbd89987161734d5b532106748d99f9a
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-docs/contracts/runtime-evidence.md
-examples/well-formed/runtime-evidence/example-runtime-evidence-chain-pr-opened.yml
-schemas/runtime-evidence.schema.yaml
-validators/creator_engine_validator/orchestrator.py
-validators/creator_engine_validator/runtime_evidence_spine.py
-validators/tests/unit/test_ce_runtime_evidence.py
-validators/tests/unit/test_evidence_sink.py
-validators/tests/unit/test_orchestrator.py
+docs/v3-roadmap.md
 ```
