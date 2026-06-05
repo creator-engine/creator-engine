@@ -36,6 +36,9 @@ from creator_engine_validator.runner.noop_backend import LocalNoopBackend
 from creator_engine_validator.runtime_evidence_spine import (
     CHAIN_KIND,
     CONTENT_HASH_FIELD,
+    RUN_OUTCOME_RECORD_KIND,
+    RUN_OUTCOME_RECORD_TYPE,
+    append,
     verify_chain,
 )
 from creator_engine_validator.schema import validate_with_schema
@@ -149,6 +152,62 @@ def test_serialization_is_deterministic():
     s1(evidence)
     s2(evidence)
     assert c1[0][1] == c2[0][1]
+
+
+# ---------------------------------------------------------------------------
+# G-3.6a — a typed run-outcome record PERSISTS (replaces the change-opened stub)
+# ---------------------------------------------------------------------------
+def _run_outcome_chain(run_id: str = "run-1") -> CollectedEvidence:
+    """A real provision/run/collect chain + a typed terminal ``runtime_run_outcome``.
+
+    Mirrors the orchestrator's G-3.6a terminal step: the outcome record is appended
+    to the SAME hash chain via the spine ``append`` (no ``lifecycle_phase``; carries
+    the plural ``outcome`` + a value-free ``change_set`` pointer), so the chain is
+    schema-valid + ``verify_chain``-clean and the sink writes it.
+    """
+    overlay = AuditOverlayBackend(LocalNoopBackend(), clock=CounterClock())
+    handle = overlay.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id=run_id))
+    overlay.run(handle, RunRequest(command=("echo", "hi")))
+    evidence = overlay.collect(handle)
+    outcome_body = {
+        "kind": RUN_OUTCOME_RECORD_KIND,
+        "record_type": RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": _POLICY_SHA,
+        "run_id": run_id,
+        "recorded_at": "t9",
+        "outcome": "pr_opened",
+        "change_set": {
+            "branch": f"ce/{run_id}",
+            "base": "main",
+            "manifest_paths": ["a.py", "b.py"],
+            "head_sha": "d" * 40,
+        },
+    }
+    opened = append(list(evidence.records), outcome_body)
+    return CollectedEvidence(
+        handle_ref=evidence.handle_ref,
+        records=tuple(evidence.records) + (opened,),
+        note=evidence.note,
+    )
+
+
+def test_persists_chain_with_typed_run_outcome_record():
+    sink, captured = _capturing_sink()
+    receipt = sink(_run_outcome_chain("run-1"))
+
+    assert len(captured) == 1
+    _, text = captured[0]
+    doc = yaml.safe_load(text)
+    tail = doc["records"][-1]
+    assert tail["record_type"] == RUN_OUTCOME_RECORD_TYPE
+    assert tail["outcome"] == "pr_opened"
+    assert "lifecycle_phase" not in tail
+    assert tail["change_set"]["branch"] == "ce/run-1"
+    # round-trips clean through the same contract ce_runtime_evidence enforces
+    assert verify_chain(doc["records"]) == []
+    assert validate_with_schema(doc, _SCHEMA, "round-trip", code="x", contract=_CONTRACT) == []
+    assert receipt.record_count == 4
 
 
 # ---------------------------------------------------------------------------

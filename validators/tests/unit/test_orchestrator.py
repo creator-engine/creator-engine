@@ -456,9 +456,19 @@ def test_run_plan_opens_change_on_completion(monkeypatch):
     assert "value" not in {f.name for f in fields(ref)}
     assert ref.changed is True and ref.applied is False
 
-    # "change-opened" is the TERMINAL attested step, AFTER collect; chain clean + policy-bound.
-    phases = [r["lifecycle_phase"] for r in evidence.records]
-    assert phases == ["provision", "run", "collect", "change-opened"]
+    # The TERMINAL attested step (AFTER collect) is a TYPED run-outcome record on the
+    # SAME hash chain — orthogonal to the container lifecycle axis: it carries no
+    # lifecycle_phase, but the plural ``outcome`` + a value-free ``change_set`` pointer.
+    lifecycle = list(evidence.records[:-1])
+    outcome = evidence.records[-1]
+    assert [r["lifecycle_phase"] for r in lifecycle] == ["provision", "run", "collect"]
+    assert outcome["kind"] == "runtime-run-outcome"
+    assert outcome["record_type"] == "runtime_run_outcome"
+    assert outcome["outcome"] == "pr_opened"
+    assert "lifecycle_phase" not in outcome  # an outcome is NOT a container phase
+    assert outcome["change_set"]["branch"] == "ce/run-1"
+    assert outcome["change_set"]["manifest_paths"] == list(_RUN_CHANGE_SET.manifest_paths)
+    # The outcome record is chain-linked + policy-bound like every record; chain clean.
     assert verify_chain(list(evidence.records)) == []
     assert all(r["policy_sha"] == _POLICY_SHA for r in evidence.records)
     assert all("value" not in r for r in evidence.records)  # no secret value on the spine

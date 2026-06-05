@@ -61,6 +61,17 @@ LIFECYCLE_PHASES = ("provision", "run", "collect", "teardown")
 #: The classifier verdict categories (assigned by the deferred G-1.3b overlay).
 CLASSIFICATIONS = ("allowed", "denied", "escalate")
 
+#: v3 G-3.6a run-OUTCOME / terminal-disposition vocabulary. A typed terminal
+#: record (``RUN_OUTCOME_RECORD_KIND`` / ``RUN_OUTCOME_RECORD_TYPE``) the
+#: orchestrator appends to the chain after ``collect`` to attest WHERE a run
+#: ended. This is ORTHOGONAL to the container ``LIFECYCLE_PHASES`` axis —
+#: outcomes are plural + work-type-dependent — and is NEVER a ``lifecycle_phase``
+#: value. The v3 MVP produces only ``pr_opened``; the rest are reserved
+#: vocabulary for later slices (review / research / no-change runs).
+RUN_OUTCOME_RECORD_KIND = "runtime-run-outcome"
+RUN_OUTCOME_RECORD_TYPE = "runtime_run_outcome"
+RUN_OUTCOMES = ("pr_opened", "review_submitted", "research_delivered", "no_change")
+
 #: Semantic finding kinds returned by :func:`verify_chain`. The check maps these
 #: to its own stable error codes — the spine owns the *semantics*, not the codes.
 FINDING_KINDS = ("content_address", "chain_link", "sequence", "policy_unbound")

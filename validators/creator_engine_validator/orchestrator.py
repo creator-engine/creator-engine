@@ -54,8 +54,9 @@ in-manifest work (the value-free ``RunChangeSet`` pointers on the ``RunResult``)
 merged ``forge.open_change`` via an injected ``change_opener`` seam: after ``collect`` the
 lifecycle's terminal step opens/claims the PR plan-by-default (the production closure
 captures the repo + a ``gh_runner`` factory — the orchestrator passes a factory, never a
-raw token) and attests the resulting value-free ``ChangeRef`` as a terminal
-``change-opened`` record, so the lifecycle ends at "PR opened". See
+raw token) and attests a typed terminal **run-outcome** record (G-3.6a: ``outcome:
+pr_opened`` + a value-free ``change_set`` pointer, on the disposition axis ORTHOGONAL
+to ``lifecycle_phase``) on the hash chain, so the lifecycle ends at "PR opened". See
 ``docs/contracts/orchestrator.md``.
 
 Defensive only — authorization + accountability for our own agent runtime;
@@ -73,7 +74,7 @@ from .runner import (
     AuditOverlayBackend,
     Clock,
     CollectedEvidence,
-    LifecycleEvent,
+    CounterClock,
     ProvisionRequest,
     RunChangeSet,
     RunnerBackend,
@@ -82,7 +83,12 @@ from .runner import (
     SecretEvent,
     get_backend,
 )
-from .runtime_evidence_spine import is_policy_sha
+from .runtime_evidence_spine import (
+    RUN_OUTCOME_RECORD_KIND,
+    RUN_OUTCOME_RECORD_TYPE,
+    append,
+    is_policy_sha,
+)
 
 if TYPE_CHECKING:  # type-only: the orchestrator imports ZERO from ``forge`` at runtime
     from .forge.change import ChangeRef
@@ -268,10 +274,11 @@ def run_plan(
     lifecycle's terminal step (after ``collect``) opens/claims the PR for that
     change plan-by-default (the production closure captures the repo + a
     ``gh_runner`` factory and calls ``forge.open_change(..., apply=False)`` — the
-    orchestrator passes a factory, never a raw token), attests the resulting
-    value-free :class:`~.forge.change.ChangeRef` as a terminal ``change-opened``
-    record on the hash chain, and surfaces the change-set on the returned
-    evidence — so the lifecycle ends at "PR opened," not "evidence collected."
+    orchestrator passes a factory, never a raw token), attests a typed terminal
+    run-outcome record (G-3.6a — ``outcome: pr_opened`` + a value-free ``change_set``
+    pointer; a distinct ``runtime_run_outcome`` record type on the disposition axis,
+    NEVER a ``lifecycle_phase``) on the hash chain, and surfaces the change-set on the
+    returned evidence — so the lifecycle ends at "PR opened," not "evidence collected."
     A ``None`` ``change_opener`` (or a run with no change-set) is the existing
     G-2.x behavior, byte-for-byte unchanged.
 
@@ -290,7 +297,10 @@ def run_plan(
     # 2) Resolve the inner backend (injected for tests, else by the policy selector).
     inner = backend if backend is not None else get_backend(runtime_policy["isolation_backend"])
 
-    # 3) Wrap in the audit overlay so every lifecycle step is attested.
+    # 3) Wrap in the audit overlay so every lifecycle step is attested. Resolve the
+    #    clock HERE (not only inside the overlay) so the terminal run-outcome record
+    #    (G-3.6a) shares the SAME monotonic clock instance as the lifecycle records.
+    clock = clock if clock is not None else CounterClock()
     overlay = AuditOverlayBackend(inner, clock=clock)
 
     # 4) Drive the lifecycle. The inner backend's provision() re-applies the G-1.0
@@ -318,22 +328,46 @@ def run_plan(
             # minter seam's job; here we record the release, bound to the policy.
             overlay.observe(handle, SecretEvent(name=credential.secret_name, phase="teardown"))
         evidence = overlay.collect(handle)
-        # 4.6) G-3.1: the lifecycle's terminal step is "PR opened". The run's in-manifest
-        #      work crosses the seam as DATA (run_result.change_set). When a change_opener
-        #      is injected and the run produced a change-set, open/claim the PR for it
-        #      (plan-by-default; the closure calls forge.open_change(apply=False) through a
-        #      gh_runner factory — value-free, no raw token here), attest the value-free
-        #      ChangeRef as a terminal "change-opened" record AFTER collect, and fold that
-        #      record + the change-set pointer into the returned evidence so it reflects a
-        #      lifecycle that ends at "PR opened".
+        # 4.6) G-3.1 + G-3.6a: the lifecycle's terminal disposition. The run's in-manifest
+        #      work crosses the seam as DATA (run_result.change_set). When a change_opener is
+        #      injected and the run produced a change-set, open/claim the PR plan-by-default
+        #      (the closure calls forge.open_change(apply=False) through a gh_runner factory —
+        #      value-free, no raw token here), then attest a TYPED run-outcome record AFTER
+        #      collect. The outcome is its OWN record type on the disposition axis (NOT a
+        #      lifecycle_phase; outcomes are plural — pr_opened here), appended to the SAME
+        #      hash chain via the spine `append` so it is itself tamper-evident, carrying a
+        #      value-free change_set pointer (+ pr_number when the ChangeRef has one). A None
+        #      change_opener (or a run with no change-set) ends at the clean lifecycle.
         if change_opener is not None and run_result.change_set is not None:
-            change_opener(run_result.change_set, approved_plan.policy_sha)
-            opened = overlay.observe(handle, LifecycleEvent(phase="change-opened"))
+            ref = change_opener(run_result.change_set, approved_plan.policy_sha)
+            cs = run_result.change_set
+            change_set_ptr: dict[str, Any] = {
+                "branch": cs.branch,
+                "base": cs.base,
+                "manifest_paths": list(cs.manifest_paths),
+                "head_sha": cs.head_sha,
+            }
+            pr_number = getattr(ref, "pr_number", None)
+            if pr_number is not None:
+                change_set_ptr["pr_number"] = pr_number
+            opened = append(
+                list(evidence.records),
+                {
+                    "kind": RUN_OUTCOME_RECORD_KIND,
+                    "record_type": RUN_OUTCOME_RECORD_TYPE,
+                    "schema_version": "1",
+                    "policy_sha": approved_plan.policy_sha,
+                    "run_id": handle.run_id,
+                    "recorded_at": clock(),
+                    "outcome": "pr_opened",
+                    "change_set": change_set_ptr,
+                },
+            )
             evidence = replace(
                 evidence,
                 records=tuple(evidence.records) + (opened,),
                 change_set=run_result.change_set,
-                note=f"{evidence.note}; change-opened",
+                note=f"{evidence.note}; run-outcome: pr_opened",
             )
     finally:
         overlay.teardown(handle)
