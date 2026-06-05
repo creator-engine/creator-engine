@@ -57,7 +57,8 @@ G-3       first working v3 — one real Dev-mode gate end-to-end
             G-3.0 forge-native open_change() + ChangeRef       G-3.1 orchestrator wiring (run_plan -> open_change)
             G-3.2 read-only change-status (review/checks/conflicts)   G-3.3 forge.merge() (review + checks + up-to-date)
             G-3.4 credential value-injection seam             G-3.5 evidence persistence sink
-            G-3.6 preflight + offline end-to-end dry-run      G-3.7 live spike (first working v3)
+            G-3.6a run-outcome / disposition model            G-3.6b offline end-to-end dry-run
+            G-3.7 live spike (first working v3)
 ```
 
 ## Gate status
@@ -83,7 +84,8 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.3 | `forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"` | #130 | `25db4e5` | MERGED |
 | G-3.4 | credential value-injection seam (`authenticated_gh_runner` — `ScopedToken.value` → child `gh` env only) | #132 | `4d4a65b` | MERGED |
 | G-3.5 | evidence persistence sink (`file_evidence_sink` — `CollectedEvidence` → durable `runtime-evidence-chain` file; persist iff `verify_chain`+schema-valid, else refuse) | #134 | `e63ae0b` | MERGED |
-| G-3.6 | preflight + offline end-to-end dry-run (the integration harness) | — | — | planned |
+| G-3.6a | run-outcome / terminal-disposition model (typed `runtime_run_outcome` record — the run-disposition axis, orthogonal to the `provision`/`run`/`collect`/`teardown` `lifecycle_phase`, appended to the same hash chain) | #136 | `bc22681` | MERGED |
+| G-3.6b | offline composition-root assembly + end-to-end dry-run (the integration harness) | — | — | planned |
 | G-3.7 | live spike — first working v3 (Operator-ratified outside the CI-purity envelope) | — | — | planned |
 
 **G-1 (plane C / runtime safety) and G-2 (thin orchestrator + ratification
@@ -94,18 +96,21 @@ research-gated). **G-3 (first working v3) is underway** — G-3.0
 change-status — `review_state` / `checks_state` / `change_conflicts`), G-3.3
 (`forge.merge()` — squash, gated on review + checks + `mergeable=="MERGEABLE"`),
 G-3.4 (credential value-injection seam — `authenticated_gh_runner`:
-`ScopedToken.value` → the child `gh` env only), and G-3.5 (evidence persistence
+`ScopedToken.value` → the child `gh` env only), G-3.5 (evidence persistence
 sink — `file_evidence_sink`: `CollectedEvidence` → a durable
-`runtime-evidence-chain` file) merged (#124, #126, #128, #130, #132, #134);
-G-3.6 next.
+`runtime-evidence-chain` file), and G-3.6a (run-outcome / terminal-disposition
+model — the typed `runtime_run_outcome` record, orthogonal to the container
+lifecycle) merged (#124, #126, #128, #130, #132, #134, #136);
+G-3.6b next.
 
 ## What's next
 
-1. **G-3.6** — preflight + offline end-to-end dry-run (the integration harness:
-   assembles the minter-token → `gh_runner`-factory bridge + `change_opener` +
-   `merge()` + the G-3.5 `evidence_sink` into `run_plan` against local-noop + a
-   fake `GhRunner`), then the **G-3.7** live spike ("first working v3",
-   Operator-ratified outside the CI-purity envelope).
+1. **G-3.6b** — offline composition-root assembly + end-to-end dry-run (now that
+   G-3.6a landed the run-outcome model, assemble the minter-token →
+   `gh_runner`-factory `ScopedToken` bridge + `change_opener` + `merge()` + the
+   G-3.5 `evidence_sink` into `run_plan` against local-noop + a fake `GhRunner`,
+   persisting the run's typed-outcome chain end-to-end), then the **G-3.7** live
+   spike ("first working v3", Operator-ratified outside the CI-purity envelope).
 2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
    recorded trigger conditions).
 
@@ -118,12 +123,12 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 
 | Path | Gate | Role |
 | --- | --- | --- |
-| `orchestrator.py` | G-2.0 / G-2.1 / G-3.1 | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate + the injected `change_opener` seam → `open_change()` |
+| `orchestrator.py` | G-2.0 / G-2.1 / G-3.1 / G-3.6a | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate + the injected `change_opener` seam → `open_change()`; the terminal step appends a typed `runtime_run_outcome` record (G-3.6a) to the run's evidence chain |
 | `runner/backend.py` | G-1.1 / G-3.1 | `RunnerBackend` ABC + registry (`get_backend` / `available_backends`) + the value-free `RunChangeSet` pointer type |
 | `runner/noop_backend.py` | G-1.1 | inert `local-noop` backend (used in CI) |
 | `runner/gvisor_proxy_backend.py` | G-1.2 | hardened gVisor + egress-proxy backend |
 | `runner/audit_overlay.py` | G-1.3b | `classify()` + `AuditOverlayBackend` decorator |
-| `runtime_evidence_spine.py` | G-1.3a | hash-chained evidence spine (`append` / `verify_chain`) |
+| `runtime_evidence_spine.py` | G-1.3a / G-3.6a | hash-chained evidence spine (`append` / `verify_chain`); the `RUN_OUTCOME_RECORD_KIND` / `RUN_OUTCOME_RECORD_TYPE` / `RUN_OUTCOMES` constants for the G-3.6a run-disposition record |
 | `forge/github_repo_config.py` | G-iii | `configure_repo` / `install_required_checks` |
 | `forge/plan_approval.py` | G-2.1 | forge-native `plan_approved()` (merged in #120) |
 | `forge/scoped_token.py` | G-2.2 | `mint_scoped_token` / `revoke_scoped_token` (JIT per-run credential) |
@@ -132,7 +137,7 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 | `forge/merge.py` | G-3.3 | gated squash-merge `merge()` → `MergeResult` (review + checks + `mergeable=="MERGEABLE"`; plan-by-default; head-pinned squash `PUT` via `GhRunner`) |
 | `forge/credential_runner.py` | G-3.4 | `authenticated_gh_runner()` — a `ScopedToken` → an authenticated `GhRunner` (the live token value into the child `gh` env only; never argv / log / disk / the task container) |
 | `evidence_sink.py` | G-3.5 | `file_evidence_sink()` — a `CollectedEvidence` (AuditOverlay hash-chain) → a durable `runtime-evidence-chain` file matching `runtime-evidence.schema.yaml` (persist iff `verify_chain`+schema-valid, else `EvidencePersistRefused`) |
-| `schemas/*.yaml` + `docs/contracts/*.md` | various | declarative + prose contracts |
+| `schemas/*.yaml` + `docs/contracts/*.md` | various / G-3.6a | declarative + prose contracts (incl. the G-3.6a `runtime_run_outcome_record` `$def` admitted via a `records.items` `oneOf` in `runtime-evidence.schema.yaml` + its `runtime-evidence.md` run-outcome section) |
 
 The package also retains earlier v2 machinery (lane/PCO/tmux runtime, etc.)
 earmarked for the spec report's D0–D6 deletion plan; the table above is the v3
