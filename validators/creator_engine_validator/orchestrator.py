@@ -91,6 +91,7 @@ from .runtime_evidence_spine import (
 )
 
 if TYPE_CHECKING:  # type-only: the orchestrator imports ZERO from ``forge`` at runtime
+    from .evidence_sink import EvidenceSink
     from .forge.change import ChangeRef
 
 
@@ -245,6 +246,7 @@ def run_plan(
     seat_identity: str | None = None,
     token_minter: TokenMinter | None = None,
     change_opener: ChangeOpener | None = None,
+    evidence_sink: "EvidenceSink | None" = None,
 ) -> CollectedEvidence:
     """Drive one ratified, audited agent-seat run and return its collected evidence.
 
@@ -281,6 +283,16 @@ def run_plan(
     returned evidence — so the lifecycle ends at "PR opened," not "evidence collected."
     A ``None`` ``change_opener`` (or a run with no change-set) is the existing
     G-2.x behavior, byte-for-byte unchanged.
+
+    **G-3.6b wiring.** When an ``evidence_sink`` is injected (production wires the
+    G-3.5 :func:`~.evidence_sink.file_evidence_sink`), the run's FINAL evidence —
+    the full hash chain INCLUDING the terminal run-outcome record — is persisted
+    AFTER ``teardown``, on the success path. The sink is an injectable seam
+    (default ``None`` = no persistence, zero I/O — the orchestrator stays pure and
+    performs no I/O itself); a non-conforming chain's
+    :class:`~.evidence_sink.EvidencePersistRefused` PROPAGATES (it is a defect to
+    surface, not swallow). The value-bearing per-run credential is the
+    composition root's concern (see ``run_assembly``); it never reaches here.
 
     Allocates no container and runs no subprocess itself; in CI it is exercised
     against the inert ``LocalNoopBackend`` with zero live subprocess. Propagates
@@ -371,4 +383,10 @@ def run_plan(
             )
     finally:
         overlay.teardown(handle)
+    # G-3.6b: persist the run's FINAL evidence (with the terminal run-outcome record) via the
+    # injected G-3.5 sink, AFTER teardown, on the success path. The sink is an injectable seam
+    # (default None = today's behavior, zero I/O — the orchestrator stays pure); a malformed
+    # chain's EvidencePersistRefused PROPAGATES (non-conforming evidence is a defect to surface).
+    if evidence_sink is not None:
+        evidence_sink(evidence)
     return evidence

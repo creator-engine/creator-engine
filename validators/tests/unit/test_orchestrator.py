@@ -12,10 +12,12 @@ and no backend (``--list-checks`` and ``available_backends()`` unchanged).
 
 import socket
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from creator_engine_validator.checks import registered_checks
+from creator_engine_validator.evidence_sink import EvidencePersistRefused
 from creator_engine_validator.orchestrator import (
     ApprovedPlan,
     CredentialNotPermitted,
@@ -513,3 +515,80 @@ def test_change_set_carries_no_secret():
     cs = RunChangeSet(branch="b", base="main", manifest_paths=("a.py",), head_sha="abc")
     assert not hasattr(cs, "value")
     assert {f.name for f in fields(cs)} == {"branch", "base", "manifest_paths", "head_sha"}
+
+
+# ---------------------------------------------------------------------------
+# G-3.6b — the run_plan(evidence_sink=...) seam: an injected sink persists the
+# run's FINAL evidence (with the terminal run-outcome record) AFTER teardown, on
+# the success path; the default None persists nothing; a sink's refusal
+# propagates (non-conforming evidence is surfaced, not swallowed). The sink is
+# the lone persistence seam — run_plan stays pure (default None = no I/O).
+# ---------------------------------------------------------------------------
+def test_run_plan_persists_final_evidence_via_injected_sink(monkeypatch):
+    def explode(*a, **k):  # pragma: no cover - must never run
+        raise AssertionError("zero live transport")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(socket, "socket", explode)
+
+    def change_opener(change_set, plan_ref):
+        return open_change(
+            "creator-engine/creator-engine", change_set.branch, change_set.base,
+            change_set.manifest_paths, plan_ref, apply=False, gh_runner=_fake_gh_runner,
+        )
+
+    backend = _ChangeSetBackend()
+    persisted: list = []
+    calls_at_sink: list = []
+
+    def sink(evidence):
+        calls_at_sink.append(list(backend.calls))
+        persisted.append(evidence)
+
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=backend, clock=CounterClock(), change_opener=change_opener, evidence_sink=sink,
+    )
+    # The sink received EXACTLY the returned evidence — the FINAL chain with the outcome record.
+    assert len(persisted) == 1
+    assert persisted[0] is evidence
+    assert persisted[0].records[-1]["record_type"] == "runtime_run_outcome"
+    # ...and it ran AFTER teardown (the runtime is released before the run's evidence persists).
+    assert "teardown" in calls_at_sink[0]
+
+
+def test_run_plan_without_sink_does_no_io(monkeypatch):
+    # The default evidence_sink=None persists nothing — no filesystem write is even attempted.
+    def explode(*a, **k):  # pragma: no cover - must never run
+        raise AssertionError("no sink -> no write / no live transport")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(socket, "socket", explode)
+    monkeypatch.setattr(Path, "write_text", explode)
+
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+    )
+    assert [r["lifecycle_phase"] for r in evidence.records] == ["provision", "run", "collect"]
+
+
+def test_run_plan_evidence_sink_refusal_propagates(monkeypatch):
+    def explode(*a, **k):  # pragma: no cover - must never run
+        raise AssertionError("zero live transport")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(socket, "socket", explode)
+
+    backend = _ChangeSetBackend()
+
+    def refusing_sink(evidence):
+        raise EvidencePersistRefused("non-conforming evidence")
+
+    with pytest.raises(EvidencePersistRefused):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), approved(),
+            backend=backend, clock=CounterClock(), evidence_sink=refusing_sink,
+        )
+    # teardown still ran — the runtime is released even when persistence refuses.
+    assert "teardown" in backend.calls
