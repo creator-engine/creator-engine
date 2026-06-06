@@ -706,3 +706,67 @@ def test_compute_binding_ref_deterministic_and_order_independent():
     assert len(a) == 64 and all(c in "0123456789abcdef" for c in a)
     assert a != compute_binding_ref(_REPO, _INSTALL, _PERMS, "e" * 40)  # head differs
     assert a != compute_binding_ref(_REPO, 99, _PERMS, _RATIFIED_HEAD)  # installation differs
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.3a — the observed-base-head assertion. When run_assembly supplies a LIVE
+# observed head (live mode), the gate binds the INDEPENDENTLY-OBSERVED repo head
+# too — refusing BEFORE the change-open if it drifted from the ratified head, even
+# when the agent-claimed change head matches (closing the agent-trust/TOCTOU gap).
+# Absent observed_head_sha => byte-for-byte the 3.7.2b behavior.
+# ---------------------------------------------------------------------------
+def _binding_inputs_observed(observed: str) -> dict:
+    bi = _binding_inputs()
+    bi["observed_head_sha"] = observed
+    return bi
+
+
+def test_observed_head_drift_refuses_before_change_open(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    # The agent-claimed change head MATCHES the ratified head ("d"*40), but the
+    # independently-observed live head ("e"*40) does NOT -> refuse before any apply.
+    plan = approved_bound(head=_RATIFIED_HEAD)
+    with pytest.raises(RatificationBindingRefused):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), plan,
+            backend=_ChangeSetBackend(), clock=CounterClock(),
+            change_opener=_recording_opener(opener_calls),
+            binding_inputs=_binding_inputs_observed("e" * 40),
+        )
+    assert opener_calls == []  # refused BEFORE the change-open side effect
+
+
+def test_observed_head_match_proceeds_and_appends_ratification(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    plan = approved_bound(head=_RATIFIED_HEAD)
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), plan,
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+        change_opener=_recording_opener(opener_calls),
+        binding_inputs=_binding_inputs_observed(_RATIFIED_HEAD),  # observed == ratified
+    )
+    assert len(opener_calls) == 1  # observed head matches -> the change WAS opened
+    rats = [r for r in evidence.records if r["record_type"] == "runtime_ratification"]
+    assert len(rats) == 1 and rats[0]["ratified_head_sha"] == _RATIFIED_HEAD
+    assert verify_chain(list(evidence.records)) == []
+
+
+def test_observed_head_absent_is_unchanged_3_7_2b_behavior(monkeypatch):
+    # No observed_head_sha key => ONLY the agent-claimed head + binding_ref checks run (the
+    # 3.7.2b path), byte-for-byte. The change opens; the ratification record still appends.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    plan = approved_bound(head=_RATIFIED_HEAD)
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), plan,
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+        change_opener=_recording_opener(opener_calls),
+        binding_inputs=_binding_inputs(),  # NO observed_head_sha
+    )
+    assert len(opener_calls) == 1
+    assert any(r["record_type"] == "runtime_ratification" for r in evidence.records)
