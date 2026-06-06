@@ -68,16 +68,18 @@ properties:
       oneOf:
         - $ref: "#/$defs/runtime_evidence_record"
         - $ref: "#/$defs/runtime_run_outcome_record"
+        - $ref: "#/$defs/runtime_ratification_record"
     description: |
       The ordered, append-only record chain. Element 0 is the genesis record
       (`prev_hash` = the all-zero sentinel, `sequence` = 0); each subsequent
       record links to its predecessor by `prev_hash` and increments `sequence`.
-      Each element is EITHER a lifecycle `runtime_evidence_record` (the
-      `provision`/`run`/`collect`/`teardown` container-phase attestations) OR a
+      Each element is a lifecycle `runtime_evidence_record` (the
+      `provision`/`run`/`collect`/`teardown` container-phase attestations), a
       terminal `runtime_run_outcome_record` (the typed run-OUTCOME on the
-      orthogonal disposition axis); the two are mutually exclusive (a record's
-      `kind`/`record_type` consts + `lifecycle_phase` vs `outcome` select exactly
-      one branch).
+      orthogonal disposition axis), OR a `runtime_ratification_record` (the typed
+      run-RATIFICATION attestation); the branches are mutually exclusive (a
+      record's `kind`/`record_type` consts + its `lifecycle_phase`/`outcome`/
+      `approver_ref` discriminating fields select exactly one branch).
   note:
     type: string
     maxLength: 1024
@@ -271,3 +273,95 @@ $defs:
           pr_number:
             type: integer
             minimum: 1
+  runtime_ratification_record:
+    type: object
+    description: |
+      A typed run-RATIFICATION record (v3 G-3.7.2a). It attests that a run was
+      RATIFIED — the CE-owned, SHA-pinned, single-use ratification that authorizes
+      the run to act — appended to the SAME tamper-evident hash chain
+      (content-addressed + chain-linked + policy-bound) so the authorization itself
+      is auditable. It is its OWN record type on a dimension ORTHOGONAL to the
+      container `lifecycle_phase` and the run `outcome`, and is NEVER a
+      `lifecycle_phase` value. It is VALUE-FREE: it carries only opaque digests
+      (`approver_ref`, `ratified_prompt_sha`, `binding_ref`) plus the pinned git
+      `ratified_head_sha` (a content-address) and the policy/run ids — NEVER a raw
+      account/login, host, credential/token, or installation identifier in clear
+      (repo/installation/permissions identity is folded into the opaque
+      `binding_ref`). The runtime head-SHA assertion (G-3.7.2b) consumes
+      `ratified_head_sha` (+ a recomputed `binding_ref`) to REFUSE drift before any
+      `apply=True` side effect.
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - ratified_prompt_sha
+      - approver_ref
+      - ratified_head_sha
+      - binding_ref
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-ratification
+      record_type:
+        type: string
+        const: runtime_ratification
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests, identical to the
+          lifecycle/outcome records' binding (the check enforces `^[0-9a-f]{64}$`
+          and emits `runtime_evidence_policy_unbound` when absent or malformed).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      ratified_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 digest of the ratified Source prompt — the SHA-pinned
+          ratification this run is bound to. An opaque digest, never the prompt body.
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest standing in for the approving actor (e.g. a salted hash
+          of the account). NEVER a raw account/login — preserving the
+          no-identifier-in-evidence invariant.
+      ratified_head_sha:
+        type: string
+        minLength: 1
+        description: |
+          The git head SHA the ratification pins (a content-address, the shape the
+          `runtime_run_outcome_record.change_set.head_sha` uses). The G-3.7.2b
+          assertion refuses to act when the runtime head differs from this.
+      binding_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest of the normative {repo, installation_id, permissions,
+          ratified_head_sha} tuple, so the repo/installation/permission identity is
+          bound WITHOUT any account/installation identifier appearing in clear; the
+          assertion recomputes and compares it.

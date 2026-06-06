@@ -72,6 +72,17 @@ RUN_OUTCOME_RECORD_KIND = "runtime-run-outcome"
 RUN_OUTCOME_RECORD_TYPE = "runtime_run_outcome"
 RUN_OUTCOMES = ("pr_opened", "review_submitted", "research_delivered", "no_change")
 
+#: v3 G-3.7.2a ratification record. A typed record (``RATIFICATION_RECORD_KIND`` /
+#: ``RATIFICATION_RECORD_TYPE``) the orchestrator appends to attest that a run was
+#: RATIFIED — the CE-owned SHA-pinned single-use ratification. Value-free: it carries
+#: only opaque digests (``approver_ref`` / ``ratified_prompt_sha`` / ``binding_ref``)
+#: + the pinned ``ratified_head_sha`` (a git content-address) + the policy/run ids;
+#: NEVER a raw account / host / credential / installation identifier, and NEVER a
+#: ``lifecycle_phase`` value. The runtime head-SHA assertion (3.7.2b) consumes the
+#: ``ratified_head_sha`` / ``binding_ref`` to refuse drift before any ``apply=True``.
+RATIFICATION_RECORD_KIND = "runtime-ratification"
+RATIFICATION_RECORD_TYPE = "runtime_ratification"
+
 #: Semantic finding kinds returned by :func:`verify_chain`. The check maps these
 #: to its own stable error codes — the spine owns the *semantics*, not the codes.
 FINDING_KINDS = ("content_address", "chain_link", "sequence", "policy_unbound")

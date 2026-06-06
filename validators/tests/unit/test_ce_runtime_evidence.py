@@ -26,6 +26,8 @@ from creator_engine_validator.checks.ce_runtime_evidence import (
 from creator_engine_validator.runtime_evidence_spine import (
     CHAIN_KIND,
     GENESIS_PREV_HASH,
+    RATIFICATION_RECORD_KIND,
+    RATIFICATION_RECORD_TYPE,
     RUN_OUTCOME_RECORD_KIND,
     RUN_OUTCOME_RECORD_TYPE,
     append,
@@ -125,6 +127,85 @@ def test_run_outcome_with_bad_outcome_value_is_schema_violation():
     doc = _chain_with_outcome("not-a-real-outcome")
     errors = validate_runtime_evidence_chain(doc, Path("bad-outcome.yml"))
     assert CODE_SCHEMA in _codes(errors)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.2a — typed ratification record (value-free; NEVER a lifecycle_phase)
+# ---------------------------------------------------------------------------
+def _ratification_body(
+    policy: str = _POLICY,
+    approver_ref: str = "2" * 64,
+    prompt_sha: str = "3" * 64,
+    binding_ref: str = "4" * 64,
+    head_sha: str = "d" * 40,
+) -> dict:
+    # A value-free ratification attestation: only opaque hashes + a git head SHA +
+    # run/policy ids. NO raw account / host / credential / installation identifier.
+    return {
+        "kind": RATIFICATION_RECORD_KIND,
+        "record_type": RATIFICATION_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": policy,
+        "run_id": "run-implementer-0001",
+        "recorded_at": "t1",
+        "ratified_prompt_sha": prompt_sha,
+        "approver_ref": approver_ref,
+        "ratified_head_sha": head_sha,
+        "binding_ref": binding_ref,
+    }
+
+
+def _chain_with_ratification(**over) -> dict:
+    # Ratification is genesis (it authorizes the run), then a lifecycle record follows.
+    chain: list[dict] = [append([], _ratification_body(**over))]
+    chain.append(append(chain, _body(phase="provision")))
+    return _chain_file(chain)
+
+
+def test_chain_with_ratification_record_validates_clean():
+    """A typed ``runtime_ratification`` record is schema-valid + chain-clean."""
+    doc = _chain_with_ratification()
+    errors = validate_runtime_evidence_chain(doc, Path("ratification-chain.yml"))
+    assert errors == []
+    assert verify_chain(doc["records"]) == []
+    genesis = doc["records"][0]
+    assert genesis["record_type"] == RATIFICATION_RECORD_TYPE
+    assert "lifecycle_phase" not in genesis  # ratification is NOT a lifecycle phase
+
+
+def test_ratification_example_file_validates_clean():
+    """The shipped well-formed ratification example passes the check (check-examples)."""
+    example = (
+        Path(__file__).resolve().parents[3]
+        / "examples"
+        / "well-formed"
+        / "runtime-evidence"
+        / "example-runtime-evidence-chain-ratified.yml"
+    )
+    data = yaml.safe_load(example.read_text(encoding="utf-8"))
+    assert validate_runtime_evidence_chain(data, example) == []
+
+
+def test_ratification_missing_approver_ref_is_schema_violation():
+    body = _ratification_body()
+    del body["approver_ref"]
+    doc = _chain_file([append([], body)])
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(doc, Path("bad.yml")))
+
+
+def test_ratification_non_hex_approver_ref_is_schema_violation():
+    doc = _chain_with_ratification(approver_ref="chmod735")  # a raw account, not an opaque digest
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(doc, Path("bad.yml")))
+
+
+def test_ratification_non_hex_prompt_sha_is_schema_violation():
+    doc = _chain_with_ratification(prompt_sha="not-a-64-hex-digest")
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(doc, Path("bad.yml")))
+
+
+def test_ratification_spine_constants():
+    assert RATIFICATION_RECORD_KIND == "runtime-ratification"
+    assert RATIFICATION_RECORD_TYPE == "runtime_ratification"
 
 
 # ---------------------------------------------------------------------------

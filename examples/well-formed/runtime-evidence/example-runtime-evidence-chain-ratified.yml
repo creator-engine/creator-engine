@@ -1,0 +1,29 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: '1'
+records:
+- kind: runtime-ratification
+  record_type: runtime_ratification
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  recorded_at: '2026-06-06T07:00:00Z'
+  ratified_prompt_sha: '2222222222222222222222222222222222222222222222222222222222222222'
+  approver_ref: '3333333333333333333333333333333333333333333333333333333333333333'
+  ratified_head_sha: a1b2c3d4e5f60718293a4b5c6d7e8f9001122334
+  binding_ref: '4444444444444444444444444444444444444444444444444444444444444444'
+  sequence: 0
+  prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  content_hash: 564a3243811d8040072a1fbbb444f7dd93ca9bc249e502f7e14c3ee341a0debe
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0002
+  lifecycle_phase: provision
+  classification: allowed
+  recorded_at: '2026-06-06T07:00:01Z'
+  backend_key: gvisor-proxy
+  sequence: 1
+  prev_hash: 564a3243811d8040072a1fbbb444f7dd93ca9bc249e502f7e14c3ee341a0debe
+  content_hash: a00f63c8394ea80e91b880bda5cedead361c3a210629aca718f84d6e4c0c9fd3
