@@ -44,6 +44,19 @@ what is committed here, that gitignored tree is the system of record.
 Note: `specs/001-v0-1-governance-substrate/` is the **superseded v2 governance
 substrate** — historical context, not the v3 roadmap.
 
+## Pilot design (v3.0 → v3.1)
+
+The pilot arc — building the full stack (agent-interaction contract · tokenomics
+gate · coordination layer) + the product surface to a **pilot-ready** build. These
+are **DESIGNED / pilot-target** (re-ground at the implementing gate, G-4…G-7);
+execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).
+
+| Document | What it decides |
+| --- | --- |
+| [`pilot-roadmap.md`](./pilot-roadmap.md) | **The full-stack-first roadmap to pilot.** Milestones v3.0 (MVP-complete) / v3.1 (pilot-ready); the gate clusters G-3.7b/G-3.8 → G-3.9 (D1–D6, launcher-guarded) → G-4 (contract) → G-5 (tokenomics) → G-6 (coordination) → G-7 (product surface, incl. the two-mode installer); acceptance per cluster + the build-order rationale + the deferred backlog. |
+| [`pilot-deployment-transport.md`](./pilot-deployment-transport.md) | **Pilot deployment + transport selection.** The per-scenario transport matrix (subscription vs API-key × vendor ToS), the auto-select logic, the deployment invariants (gVisor box · two-credential custody · dev-as-reviewer for N=1 · two-mode installer), and the cost regime. |
+| [`pilot-uiux-model.md`](./pilot-uiux-model.md) | **The pilot UI/UX.** The surface (the Operator's own agent + `ce` CLI + GitHub; cockpit deferred), the branded experience layer (`ce session` frame · staged workflow · the ◆ CE Completion Report · artifact awareness), and the cockpit graduation path. |
+
 ## Maintenance
 
 These are point-in-time architecture records, not a living spec. Refresh a curated
