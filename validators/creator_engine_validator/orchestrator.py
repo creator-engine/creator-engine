@@ -84,9 +84,12 @@ from .runner import (
     get_backend,
 )
 from .runtime_evidence_spine import (
+    RATIFICATION_RECORD_KIND,
+    RATIFICATION_RECORD_TYPE,
     RUN_OUTCOME_RECORD_KIND,
     RUN_OUTCOME_RECORD_TYPE,
     append,
+    compute_binding_ref,
     is_policy_sha,
 )
 
@@ -103,6 +106,18 @@ class PlanNotRatified(RunnerError):
     """
 
 
+class RatificationBindingRefused(RunnerError):
+    """The runtime head-SHA assertion refused: the runtime drifted from what was ratified.
+
+    Raised BEFORE the change-open (the point a live drive promotes to ``apply=True``)
+    when the SHA-pinned ratification is ENGAGED (``ApprovedPlan.ratified_head_sha`` set)
+    but the change's ``head_sha`` differs from the ratified head, or the recomputed
+    ``binding_ref`` over the in-force ``{repo, installation_id, permissions,
+    ratified_head_sha}`` tuple differs from the ratified one. Value-free: the message
+    names the run + that the binding drifted, never an account / secret / host.
+    """
+
+
 @dataclass(frozen=True)
 class ApprovedPlan:
     """A human-ratified plan attestation that authorizes one orchestrated run.
@@ -115,12 +130,27 @@ class ApprovedPlan:
     be caller-supplied, or (G-2.1) resolved from the forge by an injected
     ``approval_resolver`` (``forge.plan_approved``); ``run_plan`` enforces
     ``approved_by`` != the running ``seat_identity`` either way.
+
+    **G-3.7.2b SHA-pinned binding (optional, value-free).** When ``ratified_head_sha``
+    is set the run is bound to a SHA-pinned ratification: ``run_plan`` asserts the
+    change being opened is at exactly that head (+ the recomputed ``binding_ref``
+    matches the in-force ``{repo, installation_id, permissions, ratified_head_sha}``
+    tuple) BEFORE the change-open, REFUSING drift, and appends a value-free
+    ``runtime_ratification_record`` (the opaque ``approver_ref`` / ``ratified_prompt_sha``
+    / ``binding_ref`` + the pinned ``ratified_head_sha``) to the evidence chain. These
+    fields are opaque digests the CALLER supplies (the orchestrator never derives an
+    identity); they default empty, so an unbound plan leaves the gate inert and the
+    run byte-for-byte unchanged.
     """
 
     run_id: str
     policy_sha: str
     approved_by: str
     approval_ref: str
+    ratified_head_sha: str = ""
+    binding_ref: str = ""
+    approver_ref: str = ""
+    ratified_prompt_sha: str = ""
 
 
 # A resolver maps (runtime_policy, run_id) -> the ApprovedPlan to gate-check, or
@@ -247,6 +277,7 @@ def run_plan(
     token_minter: TokenMinter | None = None,
     change_opener: ChangeOpener | None = None,
     evidence_sink: "EvidenceSink | None" = None,
+    binding_inputs: dict[str, Any] | None = None,
 ) -> CollectedEvidence:
     """Drive one ratified, audited agent-seat run and return its collected evidence.
 
@@ -351,6 +382,31 @@ def run_plan(
         #      value-free change_set pointer (+ pr_number when the ChangeRef has one). A None
         #      change_opener (or a run with no change-set) ends at the clean lifecycle.
         if change_opener is not None and run_result.change_set is not None:
+            # 4.6a) G-3.7.2b: the runtime head-SHA assertion. When the ratification is
+            #       SHA-pinned (ratified_head_sha set), REFUSE — BEFORE the change-open (the
+            #       point a live drive promotes to apply=True) — unless the change is at the
+            #       ratified head AND the recomputed binding_ref matches the in-force
+            #       {repo, installation_id, permissions, ratified_head_sha} tuple. The agent
+            #       seat cannot bypass this; an unbound plan (ratified_head_sha == "") is inert.
+            if approved_plan.ratified_head_sha:
+                if run_result.change_set.head_sha != approved_plan.ratified_head_sha:
+                    raise RatificationBindingRefused(
+                        f"run {run_id!r} change head_sha drifted from the ratified head "
+                        "(refusing to open a change not bound to the ratified head)"
+                    )
+                if binding_inputs is not None:
+                    recomputed = compute_binding_ref(
+                        binding_inputs["repo"],
+                        binding_inputs["installation_id"],
+                        binding_inputs["permissions"],
+                        approved_plan.ratified_head_sha,
+                    )
+                    if recomputed != approved_plan.binding_ref:
+                        raise RatificationBindingRefused(
+                            f"run {run_id!r} ratification binding_ref mismatch "
+                            "(the in-force repo/installation/permissions tuple drifted from "
+                            "the ratified binding)"
+                        )
             ref = change_opener(run_result.change_set, approved_plan.policy_sha)
             cs = run_result.change_set
             change_set_ptr: dict[str, Any] = {
@@ -381,6 +437,34 @@ def run_plan(
                 change_set=run_result.change_set,
                 note=f"{evidence.note}; run-outcome: pr_opened",
             )
+            # 4.6b) G-3.7.2b: when the run was SHA-pinned-ratified (and the assertion above
+            #       passed), attest the ratification itself as a typed, value-free record on the
+            #       SAME hash chain — the opaque approver/prompt/binding digests + the pinned
+            #       head SHA — so the authorization that admitted the change is auditable. The
+            #       orchestrator copies the caller-supplied opaque digests verbatim (it never
+            #       derives an identity). An unbound plan appends nothing (byte-for-byte the
+            #       pre-3.7.2b chain).
+            if approved_plan.ratified_head_sha:
+                ratified = append(
+                    list(evidence.records),
+                    {
+                        "kind": RATIFICATION_RECORD_KIND,
+                        "record_type": RATIFICATION_RECORD_TYPE,
+                        "schema_version": "1",
+                        "policy_sha": approved_plan.policy_sha,
+                        "run_id": handle.run_id,
+                        "recorded_at": clock(),
+                        "ratified_prompt_sha": approved_plan.ratified_prompt_sha,
+                        "approver_ref": approved_plan.approver_ref,
+                        "ratified_head_sha": approved_plan.ratified_head_sha,
+                        "binding_ref": approved_plan.binding_ref,
+                    },
+                )
+                evidence = replace(
+                    evidence,
+                    records=tuple(evidence.records) + (ratified,),
+                    note=f"{evidence.note}; ratified",
+                )
     finally:
         overlay.teardown(handle)
     # G-3.6b: persist the run's FINAL evidence (with the terminal run-outcome record) via the

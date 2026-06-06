@@ -23,6 +23,7 @@ from creator_engine_validator.orchestrator import (
     CredentialNotPermitted,
     MintedCredential,
     PlanNotRatified,
+    RatificationBindingRefused,
     run_plan,
 )
 from creator_engine_validator.forge import open_change
@@ -42,7 +43,7 @@ from creator_engine_validator.runner import (
 )
 from creator_engine_validator.runner.audit_overlay import CounterClock
 from creator_engine_validator.runner.noop_backend import LocalNoopBackend
-from creator_engine_validator.runtime_evidence_spine import verify_chain
+from creator_engine_validator.runtime_evidence_spine import compute_binding_ref, verify_chain
 
 _POLICY_SHA = "a" * 64
 _OTHER_SHA = "c" * 64
@@ -592,3 +593,116 @@ def test_run_plan_evidence_sink_refusal_propagates(monkeypatch):
         )
     # teardown still ran — the runtime is released even when persistence refuses.
     assert "teardown" in backend.calls
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.2b — the runtime head-SHA assertion gate (refuse BEFORE the change-open;
+# append the ratification record; INERT for the existing unbound ApprovedPlan).
+# ---------------------------------------------------------------------------
+_REPO = "creator-engine/creator-engine"
+_INSTALL = 42
+_PERMS = {"contents": "read", "pull_requests": "write"}
+_RATIFIED_HEAD = "d" * 40  # == _RUN_CHANGE_SET.head_sha (the produced change head)
+
+
+def _binding_inputs() -> dict:
+    return {"repo": _REPO, "installation_id": _INSTALL, "permissions": dict(_PERMS)}
+
+
+def approved_bound(
+    *, head: str = _RATIFIED_HEAD, binding_ref: str | None = None,
+    approver_ref: str = "2" * 64, prompt_sha: str = "3" * 64,
+) -> ApprovedPlan:
+    bref = binding_ref if binding_ref is not None else compute_binding_ref(_REPO, _INSTALL, _PERMS, head)
+    return ApprovedPlan(
+        run_id="run-1", policy_sha=_POLICY_SHA, approved_by="operator", approval_ref="forge-issue#42",
+        ratified_head_sha=head, binding_ref=bref, approver_ref=approver_ref, ratified_prompt_sha=prompt_sha,
+    )
+
+
+def _recording_opener(calls: list):
+    def change_opener(change_set, plan_ref):
+        calls.append((change_set, plan_ref))
+        return open_change(
+            _REPO, change_set.branch, change_set.base, change_set.manifest_paths,
+            plan_ref, apply=False, gh_runner=_fake_gh_runner,
+        )
+    return change_opener
+
+
+def test_head_sha_drift_refuses_before_change_open(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    # ratified head "e"*40 != the produced change head "d"*40; binding_ref matches the ratified head.
+    plan = approved_bound(head="e" * 40)
+    with pytest.raises(RatificationBindingRefused):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), plan,
+            backend=_ChangeSetBackend(), clock=CounterClock(),
+            change_opener=_recording_opener(opener_calls), binding_inputs=_binding_inputs(),
+        )
+    assert opener_calls == []  # refused BEFORE the change-open side effect
+
+
+def test_binding_ref_mismatch_refuses(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    # head matches the produced change, but the binding_ref is wrong (tuple drift).
+    plan = approved_bound(head=_RATIFIED_HEAD, binding_ref="f" * 64)
+    with pytest.raises(RatificationBindingRefused):
+        run_plan(
+            valid_policy(), "run-1", ("echo", "hi"), plan,
+            backend=_ChangeSetBackend(), clock=CounterClock(),
+            change_opener=_recording_opener(opener_calls), binding_inputs=_binding_inputs(),
+        )
+    assert opener_calls == []
+
+
+def test_engaged_matching_appends_ratification_record(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    plan = approved_bound()  # head + binding_ref both match
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), plan,
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+        change_opener=_recording_opener(opener_calls), binding_inputs=_binding_inputs(),
+    )
+    assert len(opener_calls) == 1  # gate passed -> the change WAS opened
+    rats = [r for r in evidence.records if r["record_type"] == "runtime_ratification"]
+    assert len(rats) == 1
+    rec = rats[0]
+    assert rec["ratified_head_sha"] == _RATIFIED_HEAD
+    assert rec["approver_ref"] == "2" * 64 and rec["ratified_prompt_sha"] == "3" * 64
+    assert rec["binding_ref"] == compute_binding_ref(_REPO, _INSTALL, _PERMS, _RATIFIED_HEAD)
+    assert rec["policy_sha"] == _POLICY_SHA and "lifecycle_phase" not in rec
+    assert "operator" not in repr(rec)  # value-free: the raw ratifier never lands in the record
+    # chain still clean + still carries the run-outcome record.
+    assert verify_chain(list(evidence.records)) == []
+    assert any(r["record_type"] == "runtime_run_outcome" for r in evidence.records)
+
+
+def test_inert_when_unbound_appends_no_ratification_record(monkeypatch):
+    # The existing unbound ApprovedPlan (no ratified_head_sha) => gate inert: no assertion,
+    # no ratification record, the chain is the pre-3.7.2b run-outcome shape.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no live")))
+    opener_calls: list = []
+    evidence = run_plan(
+        valid_policy(), "run-1", ("echo", "hi"), approved(),  # unbound
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+        change_opener=_recording_opener(opener_calls), binding_inputs=_binding_inputs(),
+    )
+    assert len(opener_calls) == 1
+    assert not any(r["record_type"] == "runtime_ratification" for r in evidence.records)
+    assert evidence.records[-1]["record_type"] == "runtime_run_outcome"
+
+
+def test_compute_binding_ref_deterministic_and_order_independent():
+    a = compute_binding_ref(_REPO, _INSTALL, {"contents": "read", "pull_requests": "write"}, _RATIFIED_HEAD)
+    b = compute_binding_ref(_REPO, _INSTALL, {"pull_requests": "write", "contents": "read"}, _RATIFIED_HEAD)
+    assert a == b  # permission order-independent
+    assert len(a) == 64 and all(c in "0123456789abcdef" for c in a)
+    assert a != compute_binding_ref(_REPO, _INSTALL, _PERMS, "e" * 40)  # head differs
+    assert a != compute_binding_ref(_REPO, 99, _PERMS, _RATIFIED_HEAD)  # installation differs
