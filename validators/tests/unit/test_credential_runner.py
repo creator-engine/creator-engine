@@ -90,6 +90,38 @@ def test_scoped_token_wins_and_competing_auth_neutralized(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Child-env scrubber (G-3.7.0a) — debug/redirect/app-key host vars never reach the child
+# ---------------------------------------------------------------------------
+def test_scrubs_debug_redirect_and_appkey_vars_from_child_env(monkeypatch):
+    # Host vars inherited from os.environ that could echo the token (GH_DEBUG), redirect the
+    # Authorization header to a non-github host (GH_HOST / GITHUB_API_URL / GH_CONFIG_DIR), or
+    # leak the App private key (any *_PEM / PRIVATE_KEY / APP_KEY var) must NEVER reach the child
+    # gh env — even though they live in the parent environment.
+    monkeypatch.setenv("GH_DEBUG", "api")
+    monkeypatch.setenv("GH_HOST", "evil.example")
+    monkeypatch.setenv("GITHUB_API_URL", "https://evil.example")
+    monkeypatch.setenv("GH_CONFIG_DIR", "/tmp/evil")
+    monkeypatch.setenv("CE_APP_PEM", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----")
+    monkeypatch.setenv("CE_GITHUB_APP_PRIVATE_KEY", "secret-key-material")
+    monkeypatch.setenv("CE_KEEP_ME", "ok")  # an unrelated var must pass through unharmed
+    spawn = _fake_spawn()
+    runner = authenticated_gh_runner(_token(), spawn=spawn)
+    runner(["gh", "api", "x"])
+    env = spawn.calls[0]["env"]
+    assert env["GH_TOKEN"] == _SECRET
+    for scrubbed in (
+        "GH_DEBUG",
+        "GH_HOST",
+        "GITHUB_API_URL",
+        "GH_CONFIG_DIR",
+        "CE_APP_PEM",
+        "CE_GITHUB_APP_PRIVATE_KEY",
+    ):
+        assert scrubbed not in env, f"{scrubbed} must be scrubbed from the child gh env"
+    assert env.get("CE_KEEP_ME") == "ok"  # unrelated vars preserved
+
+
+# ---------------------------------------------------------------------------
 # Child-only scope — the parent os.environ is never mutated
 # ---------------------------------------------------------------------------
 def test_parent_environ_not_mutated(monkeypatch):

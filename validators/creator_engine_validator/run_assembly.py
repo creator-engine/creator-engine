@@ -40,6 +40,7 @@ never offensive.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ from typing import Any
 from .evidence_sink import file_evidence_sink
 from .forge.change import open_change
 from .forge.credential_runner import authenticated_gh_runner
+from .forge.github_repo_config import ForgeConfigError
 from .forge.scoped_token import TokenRequest, mint_scoped_token, revoke_scoped_token
 from .orchestrator import ApprovedPlan, MintedCredential, run_plan
 from .runner import CollectedEvidence, RunnerBackend
@@ -80,7 +82,8 @@ def make_run_driver(
     ``ScopedToken`` to the change-opener's authenticated ``gh`` runner through a
     closure cell (the orchestrator never sees the value), opens/claims the PR
     plan-by-default, persists the run's evidence chain via the G-3.5 sink, and
-    revokes the credential at completion (success OR failure).
+    revokes the credential — authenticated AS the token, best-effort — at
+    completion (success OR failure).
     """
     root = Path(root)
 
@@ -137,8 +140,23 @@ def make_run_driver(
         finally:
             # Defense-in-depth: release the credential the instant the run ends — success OR
             # failure — rather than waiting out its (<=1h) ttl. No mint -> nothing to revoke.
+            # DELETE /installation/token must authenticate AS the token being revoked, so route
+            # the revoke through an authenticated runner bound to the minted token (NOT the
+            # App-level mint runner). Best-effort: a revoke-transport failure must neither mask
+            # the run exception nor manufacture a success-path error — it is swallowed and made
+            # alertable (value-free), and the token then expires on its own (<=1h) ttl.
             token = cell["token"]
             if token is not None:
-                revoke_scoped_token(token, gh_runner=gh_runner)
+                try:
+                    revoke_scoped_token(
+                        token, gh_runner=authenticated_gh_runner(token, spawn=spawn)
+                    )
+                except ForgeConfigError:
+                    logging.getLogger(__name__).warning(
+                        "scoped-token revoke failed for run %s (token_ref %s); "
+                        "the token will expire on its ttl",
+                        run_id,
+                        token.token_ref,
+                    )
 
     return drive
