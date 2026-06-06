@@ -27,6 +27,7 @@ installable validator package so the existing CI pytest job covers it.
 """
 from __future__ import annotations
 
+from .app_jwt_runner import app_jwt_gh_runner
 from .change import ChangeRef, OpenChangeRefused, open_change
 from .change_status import (
     ChangeStatusRefused,
@@ -77,6 +78,7 @@ __all__ = [
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
+    "app_jwt_gh_runner",
     "authenticated_gh_runner",
     "change_conflicts",
     "checks_state",
