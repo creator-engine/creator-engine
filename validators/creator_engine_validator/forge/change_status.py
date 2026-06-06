@@ -55,6 +55,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .change import ChangeRef
+from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
 # Re-defined LOCALLY (literal copied from ``scoped_token.py`` / ``change.py``) per the
@@ -197,7 +198,7 @@ def _read_pr_node(runner: GhRunner, change: ChangeRef, query: str) -> dict:
     if code != 0 or not isinstance(parsed, dict):
         raise ForgeConfigError(
             f"could not read change status for {change.repo}#{change.pr_number}: "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     pr = ((parsed.get("data") or {}).get("repository") or {}).get("pullRequest")
     if not isinstance(pr, dict):

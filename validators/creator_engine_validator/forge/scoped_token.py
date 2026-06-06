@@ -44,6 +44,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
 #: GitHub installation access tokens live at most one hour; we never request more.
@@ -203,7 +204,7 @@ def mint_scoped_token(request: TokenRequest, *, gh_runner: GhRunner | None = Non
     if code != 0 or not isinstance(parsed, dict) or not parsed.get("token"):
         raise ForgeConfigError(
             f"could not mint scoped token for {request.repo} "
-            f"(installation {request.installation_id}): {stderr.strip() or 'unknown error'}"
+            f"(installation {request.installation_id}): {redact_gh_stderr(stderr) or 'unknown error'}"
         )
     expires_at = str(parsed.get("expires_at") or "")
     permissions = tuple(sorted((str(k), str(v)) for k, v in request.permissions.items()))
@@ -233,6 +234,6 @@ def revoke_scoped_token(token: ScopedToken, *, gh_runner: GhRunner | None = None
     if code != 0:
         raise ForgeConfigError(
             f"could not revoke scoped token for {token.repo} (run {token.run_id}): "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     return True

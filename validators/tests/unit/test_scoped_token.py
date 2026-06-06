@@ -41,8 +41,12 @@ def _request(**overrides) -> TokenRequest:
     return TokenRequest(**base)
 
 
-def _fake_runner(*, token="ghs_minted_secret", expires_at="2026-06-03T15:00:00Z", mint_rc=0, revoke_rc=0):
-    """A GhRunner that answers the mint POST and the revoke DELETE from canned data."""
+def _fake_runner(*, token="ghs_minted_secret", expires_at="2026-06-03T15:00:00Z", mint_rc=0, revoke_rc=0, err="boom"):
+    """A GhRunner that answers the mint POST and the revoke DELETE from canned data.
+
+    ``err`` is the stderr returned on a non-zero exit (override it to a token-bearing
+    stderr to exercise the G-3.7.0b redaction of an exception message).
+    """
     calls: list[list[str]] = []
     inputs: list[str | None] = []
 
@@ -50,12 +54,12 @@ def _fake_runner(*, token="ghs_minted_secret", expires_at="2026-06-03T15:00:00Z"
         calls.append(list(argv))
         inputs.append(input_text)
         if "DELETE" in argv:
-            return subprocess.CompletedProcess(argv, revoke_rc, stdout="", stderr="" if revoke_rc == 0 else "boom")
+            return subprocess.CompletedProcess(argv, revoke_rc, stdout="", stderr="" if revoke_rc == 0 else err)
         payload = {"token": token, "expires_at": expires_at}
         return subprocess.CompletedProcess(
             argv, mint_rc,
             stdout=json.dumps(payload) if mint_rc == 0 else "",
-            stderr="" if mint_rc == 0 else "boom",
+            stderr="" if mint_rc == 0 else err,
         )
 
     run.calls = calls  # type: ignore[attr-defined]
@@ -172,6 +176,46 @@ def test_token_value_is_redacted_from_repr_and_str():
     assert token.value == "ghs_super_secret"  # available to the revoker, never displayed
     assert "ghs_super_secret" not in repr(token)
     assert "ghs_super_secret" not in str(token)
+    assert "<redacted>" in repr(token)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.0b — a leaked credential in gh stderr is masked in the raised exception
+# ---------------------------------------------------------------------------
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+def test_mint_error_message_redacts_leaked_token():
+    runner = _fake_runner(mint_rc=1, err=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        mint_scoped_token(_request(), gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+    assert _REPO in msg  # the non-secret identifier remains for diagnosis
+
+
+def test_revoke_error_message_redacts_leaked_token():
+    runner = _fake_runner(revoke_rc=1, err=_LEAK_STDERR)
+    token = mint_scoped_token(_request(), gh_runner=runner)
+    with pytest.raises(ForgeConfigError) as ei:
+        revoke_scoped_token(token, gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.0b — opaque token: a ~520-char ghs_APPID_JWT round-trips mint VERBATIM
+# (no length/format assumption), and is still redacted from repr/str.
+# ---------------------------------------------------------------------------
+def test_mint_treats_token_as_opaque_no_length_or_format_assumption():
+    long_tok = "ghs_654321_eyJ" + "Q" * 240 + "." + "Z" * 240 + ".abcDEF12"
+    assert len(long_tok) > 500  # the stateless installation-token brownout shape
+    token = mint_scoped_token(_request(), gh_runner=_fake_runner(token=long_tok))
+    assert token.value == long_tok  # verbatim — no truncation / format mangling
+    assert long_tok not in repr(token) and long_tok not in str(token)
     assert "<redacted>" in repr(token)
 
 

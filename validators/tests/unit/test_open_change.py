@@ -42,12 +42,14 @@ def _args(**overrides) -> dict:
     return base
 
 
-def _fake_runner(*, pulls=None, created=None, get_rc=0, post_rc=0):
+def _fake_runner(*, pulls=None, created=None, get_rc=0, post_rc=0, err="boom"):
     """A GhRunner answering the GET-open-pulls list and the POST-create-PR from canned data.
 
     Stateful so an ``apply=True`` create (GET empty -> POST -> GET re-read) re-reads the
     newly-created PR. Records every ``(argv, input_text)`` so refuse paths can assert
-    ``runner.calls == []`` and the apply path can assert the exact POST body.
+    ``runner.calls == []`` and the apply path can assert the exact POST body. ``err`` is
+    the stderr returned on a non-zero exit (override it to a token-bearing stderr to
+    exercise the G-3.7.0b redaction of an exception message).
     """
     state = {"pulls": list(pulls or [])}
     calls: list[list[str]] = []
@@ -64,13 +66,13 @@ def _fake_runner(*, pulls=None, created=None, get_rc=0, post_rc=0):
             return subprocess.CompletedProcess(
                 argv, post_rc,
                 stdout=json.dumps(new) if post_rc == 0 else "",
-                stderr="" if post_rc == 0 else "boom",
+                stderr="" if post_rc == 0 else err,
             )
         # GET (initial read or re-read)
         return subprocess.CompletedProcess(
             argv, get_rc,
             stdout=json.dumps(state["pulls"]) if get_rc == 0 else "",
-            stderr="" if get_rc == 0 else "boom",
+            stderr="" if get_rc == 0 else err,
         )
 
     run.calls = calls  # type: ignore[attr-defined]
@@ -180,6 +182,32 @@ def test_apply_post_failure_raises_forge_config_error():
     runner = _fake_runner(pulls=[], post_rc=1)
     with pytest.raises(ForgeConfigError):
         open_change(**_args(), apply=True, gh_runner=runner)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.0b — a leaked credential in gh stderr is masked in the raised exception
+# ---------------------------------------------------------------------------
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+def test_read_error_message_redacts_leaked_token():
+    runner = _fake_runner(get_rc=1, err=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        open_change(**_args(), gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+    assert _REPO in msg  # the non-secret identifier remains for diagnosis
+
+
+def test_open_post_error_message_redacts_leaked_token():
+    runner = _fake_runner(pulls=[], post_rc=1, err=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        open_change(**_args(), apply=True, gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
 
 
 # ---------------------------------------------------------------------------

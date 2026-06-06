@@ -55,6 +55,7 @@ from dataclasses import dataclass
 
 from .change import ChangeRef
 from .change_status import change_conflicts, checks_state, review_state
+from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
 # Re-defined LOCALLY (literal copied from ``scoped_token.py`` / ``change.py``) per the
@@ -216,7 +217,7 @@ def merge(
     if code != 0 or not isinstance(parsed, dict):
         raise ForgeConfigError(
             f"could not squash-merge {change.repo}#{change.pr_number}: "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     return MergeResult(
         pr_number=change.pr_number,  # type: ignore[arg-type]

@@ -47,8 +47,12 @@ def _review(login: str, state: str = "APPROVED", commit_id: str = _HEAD) -> dict
     return {"state": state, "commit_id": commit_id, "user": {"login": login}}
 
 
-def _fake_runner(pr_obj: dict, reviews: list, *, pr_rc: int = 0, reviews_rc: int = 0):
-    """A GhRunner that answers the PR GET and the reviews GET from canned JSON."""
+def _fake_runner(pr_obj: dict, reviews: list, *, pr_rc: int = 0, reviews_rc: int = 0, err: str = "boom"):
+    """A GhRunner that answers the PR GET and the reviews GET from canned JSON.
+
+    ``err`` is the stderr returned on a non-zero exit (override it to a token-bearing
+    stderr to exercise the G-3.7.0b redaction of an exception message).
+    """
     calls: list[list[str]] = []
 
     def run(argv, input_text=None):
@@ -56,10 +60,10 @@ def _fake_runner(pr_obj: dict, reviews: list, *, pr_rc: int = 0, reviews_rc: int
         path = argv[-1]
         if path.endswith("/reviews"):
             return subprocess.CompletedProcess(
-                argv, reviews_rc, stdout=json.dumps(reviews), stderr="" if reviews_rc == 0 else "boom"
+                argv, reviews_rc, stdout=json.dumps(reviews), stderr="" if reviews_rc == 0 else err
             )
         return subprocess.CompletedProcess(
-            argv, pr_rc, stdout=json.dumps(pr_obj), stderr="" if pr_rc == 0 else "boom"
+            argv, pr_rc, stdout=json.dumps(pr_obj), stderr="" if pr_rc == 0 else err
         )
 
     run.calls = calls  # type: ignore[attr-defined]
@@ -136,6 +140,32 @@ def test_transport_failure_raises_forge_config_error():
     runner = _fake_runner(_pr(), [], pr_rc=1)
     with pytest.raises(ForgeConfigError):
         plan_approved(_query(), seat_identity=_SEAT, gh_runner=runner)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.0b — a leaked credential in gh stderr is masked in the raised exception
+# ---------------------------------------------------------------------------
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+def test_pr_read_error_message_redacts_leaked_token():
+    runner = _fake_runner(_pr(), [], pr_rc=1, err=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        plan_approved(_query(), seat_identity=_SEAT, gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+    assert _REPO in msg  # the non-secret identifier remains for diagnosis
+
+
+def test_reviews_read_error_message_redacts_leaked_token():
+    runner = _fake_runner(_pr(), [], reviews_rc=1, err=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        plan_approved(_query(), seat_identity=_SEAT, gh_runner=runner)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
 
 
 # ---------------------------------------------------------------------------

@@ -156,6 +156,23 @@ def test_transport_failure_raises_forge_config_error(op):
         op(_change(), gh_runner=r)
 
 
+# ---------------------------------------------------------------------- G-3.7.0b redaction
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+@pytest.mark.parametrize("op", [review_state, checks_state, change_conflicts])
+def test_status_read_error_message_redacts_leaked_token(op):
+    # a credential leaked into the GraphQL-read stderr is masked in the raised exception
+    r = _runner(None, rc=1, stderr=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        op(_change(), gh_runner=r)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+    assert _REPO in msg  # the non-secret identifier remains for diagnosis
+
+
 # --------------------------------------------------------------------------- value-free
 def test_results_carry_no_secret():
     from dataclasses import fields
