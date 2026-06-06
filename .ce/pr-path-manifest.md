@@ -1,4 +1,4 @@
-# PR path manifest — v3 pilot design → `docs/architecture/` (curated, fresh-clone-durable)
+# PR path manifest — v3 G-3.7 roadmap-flip + pilot-map extension (docs-only)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,31 +9,28 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is a **docs-only** gate: it commits the 2026-06-06 pilot design — the
-full-stack-first roadmap-to-pilot, the deployment/transport-selection matrix, and
-the pilot UI/UX model — into `docs/architecture/` as **curated, redacted,
-fresh-clone-resolvable** design references (the established `docs/architecture/`
-curated-copy pattern), and indexes them in `docs/architecture/README.md`. Purpose:
-make the **G-4…G-7 design durable in-repo** so those gates' planning prompts cite
-in-repo docs rather than an instance-local design corpus. It touches no
-code/schema/spine/check/example/contract/forge/backend/CLI/wheel surface and adds
-no dependency → `--list-checks` is **unchanged at 43**, `available_backends()` is
-unchanged at `('gvisor-proxy', 'local-noop')`, and `check-examples` stays 77/0.
-The committed docs are redacted per the README provenance discipline (no transient
-SHAs / account-host identifiers / gitignored absolute-path pointers / internal IDs;
-design substance + dated external citations preserved).
+This is the **final G-3.7 slice** — the ONE roadmap flip closing the whole G-3.7
+program (no per-sub-slice flips), folded with the approved roadmap-to-pilot
+extension (`.hermes/research/V3_ROADMAP_TO_PILOT_EXTENSION_PROPOSAL_20260606.md` +
+`~/Documents/ce-v3-roadmap-to-pilot-design-20260606.md`). It edits ONLY
+`docs/v3-roadmap.md`: flip **G-3.7 → MERGED** (the live OPEN drive proven
+end-to-end; gated merge deferred → G-3.7b/G-3.8), append the Pilot block to the
+gate-map + 7 `designed` rows (G-3.7b/G-3.8 · G-3.9 · G-4 · G-5 · G-6 · G-7), a
+coherence prose fix, and the milestone-aware "What's next" (the **v3.0
+MVP-complete** + **v3.1 pilot-ready** milestones + the deferred post-pilot
+backlog; cites the in-repo `docs/architecture/pilot-*.md`). **Docs-only, CI-pure:**
+zero code/schema/forge/test/architecture-doc change → the suite (1860/1/1),
+`--list-checks` (43), `available_backends()`, and `check-examples` (77/0) are all
+byte-unchanged. When this merges, **G-3.7 is CLOSED**.
 
-- **base:** `a1325343b7f74b31dcd51e2f954b36f3aac8bb66`.
+- **base:** `7095cfbfbdb040b1511b899ebe70fab2bd9fec6d`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=2
 
-AUTHORIZED_PATHS_SHA256=694614ff0af44b6eda69746b750cbbf3412efc91aa4299b0ef5dc6a304f3e573
+AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
 
 ```text
 .ce/pr-path-manifest.md
-docs/architecture/README.md
-docs/architecture/pilot-deployment-transport.md
-docs/architecture/pilot-roadmap.md
-docs/architecture/pilot-uiux-model.md
+docs/v3-roadmap.md
 ```

@@ -59,6 +59,14 @@ G-3       first working v3 — one real Dev-mode gate end-to-end
             G-3.4 credential value-injection seam             G-3.5 evidence persistence sink
             G-3.6a run-outcome / disposition model            G-3.6b offline end-to-end dry-run
             G-3.7 live spike (first working v3)
+Pilot     post-MVP stack → v3.1 pilot-ready (full-stack-first)
+            G-3.7b CI-pure: merge-seam + live-merge-identity seam + pr_merged model
+            G-3.8  out-of-envelope LIVE merge spike   ► v3.0 MVP-complete
+            G-3.9  D1–D6 cleanup (safe early deletions; D0 done; lane/launch D2 deferred → post-G-7.0)
+            G-4    agent-interaction contract (AgentActionEvent → decide() → runtime_agent_action)
+            G-5    tokenomics gate (spend envelope: admission + circuit-breaker)
+            G-6    coordination layer (Scope + backlog + DoR-wiring + crosswalk)
+            G-7    product surface (v3 CLI + seat-launch replacement + 2-mode install [one-liner + signed agent-native]; retires deferred D2)  ► v3.1 pilot-ready
 ```
 
 ## Gate status
@@ -86,11 +94,18 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.5 | evidence persistence sink (`file_evidence_sink` — `CollectedEvidence` → durable `runtime-evidence-chain` file; persist iff `verify_chain`+schema-valid, else refuse) | #134 | `e63ae0b` | MERGED |
 | G-3.6a | run-outcome / terminal-disposition model (typed `runtime_run_outcome` record — the run-disposition axis, orthogonal to the `provision`/`run`/`collect`/`teardown` `lifecycle_phase`, appended to the same hash chain) | #136 | `bc22681` | MERGED |
 | G-3.6b | offline composition-root assembly + end-to-end dry-run (`run_assembly.py` `make_run_driver` — the minter→runner `ScopedToken` bridge + the injectable `run_plan(evidence_sink=…)` seam; mint → authenticated runner → run → collect → typed `pr_opened` outcome → persisted evidence, fully offline) | #138 | `2245426` | MERGED |
-| G-3.7 | live spike — first working v3 (Operator-ratified outside the CI-purity envelope) | — | — | planned |
+| G-3.7 | live spike — first working v3: the live OPEN drive (App-JWT mint → one real PR → persisted evidence + CE-owned ratification record → correct revoke), Operator-ratified outside the CI-purity envelope; custody / ratification / leak-hardening landed; **gated merge deferred → G-3.7b/G-3.8** | #140–#145 (+ out-of-envelope live drive 3.7.3b) | `a132534` | MERGED |
+| G-3.7b | CI-pure merge-driving seam + distinct live-merge-identity seam + `pr_merged` run-outcome/schema/spine | — | — | designed |
+| G-3.8 | out-of-envelope live merge spike (real open→review→merge) → **v3.0 MVP-complete** | — | — | designed |
+| G-3.9 | D1–D6 cleanup per `v3-spec.md §4` (D0 done; lane/launch D2 deferred to post-G-7.0; worker re-homed) | — | — | designed |
+| G-4 | agent-interaction contract (`AgentActionEvent`/`decide()`/`runtime_agent_action`; Tier-B CC-hooks) | — | — | designed |
+| G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
+| G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
+| G-7 | product surface — v3 work-driving CLI + seat-launch replacement + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; retires deferred D2 → **v3.1 pilot-ready** | — | — | designed |
 
 **G-1 (plane C / runtime safety) and G-2 (thin orchestrator + ratification
 gate) are COMPLETE** (G-2.0 / G-2.1 / G-2.2 merged; G-2.3 OpenShell deferred —
-research-gated). **G-3 (first working v3) is underway** — G-3.0
+research-gated). **G-3 (first working v3) is COMPLETE** — G-3.0
 (change-lifecycle `open_change()` primitive), G-3.1 (orchestrator wiring —
 `run_plan` `change_opener` seam → `open_change()`), G-3.2 (read-only forge
 change-status — `review_state` / `checks_state` / `change_conflicts`), G-3.3
@@ -103,17 +118,55 @@ model — the typed `runtime_run_outcome` record, orthogonal to the container
 lifecycle), and G-3.6b (offline composition-root assembly — `run_assembly.py`
 `make_run_driver`, the minter→runner `ScopedToken` bridge + the
 `run_plan(evidence_sink=…)` seam, drivable offline end-to-end) merged (#124,
-#126, #128, #130, #132, #134, #136, #138); G-3.7 next.
+#126, #128, #130, #132, #134, #136, #138). **G-3.7 (the live spike) is COMPLETE** —
+its CI-pure slices 3.7.0a/0b/1/2a/2b merged (#140–#145) and the out-of-envelope
+live drive 3.7.3b opened one real governed PR with a persisted, value-free
+evidence chain + a CE-owned ratification record and a correct revoke; the gated
+live `merge()` is deferred to **G-3.7b/G-3.8**. The post-MVP, full-stack-first arc
+to a developer pilot (G-3.7b → G-7, with the **v3.0 MVP-complete** and **v3.1
+pilot-ready** milestones) is below — **G-3.7b is next**.
 
 ## What's next
 
-1. **G-3.7** — the live spike ("first working v3"): promote the G-3.6b offline
-   composition root (`run_assembly.py` `make_run_driver`) to a live drive
-   (`apply=True`, a real `open_change()` then a gated `merge()`), Operator-ratified
-   OUTSIDE the CI-purity envelope — the human-created App key is never present in
-   the task container.
-2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
-   recorded trigger conditions).
+**G-3.7 (the live spike — "first working v3") is COMPLETE** (live OPEN proven
+end-to-end; gated merge deferred). The roadmap now extends past the MVP on a
+**full-stack-first** arc to a developer pilot, gated by two milestones:
+
+- **v3.0 "MVP-complete"** — the governed-run engine proven live end-to-end
+  **including merge** (open → review → merge). Reached at the end of **G-3.8**.
+- **v3.1 "pilot-ready"** — a developer can install, provision, file work, and get
+  governed, cost-safe PRs + merges. Reached at the end of **G-7**.
+
+1. **G-3.7b** *(next)* — CI-pure: the merge-driving seam + a distinct
+   live-merge-identity seam (never the per-run token) + the `pr_merged` run-outcome
+   (outcomes enum + `runtime-evidence.schema.yaml` + the spine constants).
+2. **G-3.8** — the out-of-envelope live merge spike (real open → review → merge),
+   proven once. **► v3.0 MVP-complete.**
+3. **G-3.9** — D1–D6 cleanup (safe early deletions; D0 done; the lane/launch/tmux
+   deletion D2 is deferred to post-G-7.0 so the build never cuts the launcher it
+   runs on; worker isolation primitives re-homed, not lost).
+4. **G-4** — the agent-interaction contract (`AgentActionEvent` → `decide()` →
+   `runtime_agent_action`; Tier-B CC-hooks/stream-json transport).
+5. **G-5** — the tokenomics gate (spend envelope: `spend_cap` /
+   `max_concurrent_runs` + a deny-by-default admission gate + a post-action
+   circuit-breaker) — closes the #1 pilot blocker.
+6. **G-6** — the coordination layer (the Scope object + `forge/backlog` +
+   DoR-wiring + crosswalk; Scope-only for the pilot).
+7. **G-7** — the product surface: the v3 work-driving CLI + the seat-launch
+   replacement + a two-mode operator-typeless install (a human one-liner + a
+   signed, verified-before-execute agent-native `llms-install.md`); retires the
+   deferred D2. **► v3.1 pilot-ready.**
+8. **G-2.3** — the OpenShell backend, still deferred (research-gated; re-opens on
+   the recorded trigger conditions).
+
+The detailed designs the G-4…G-7 planning prompts build to live in
+`docs/architecture/pilot-roadmap.md`, `docs/architecture/pilot-deployment-transport.md`,
+and `docs/architecture/pilot-uiux-model.md`.
+
+**Deferred to post-first-pilot** (named, not forgotten): the cockpit UI · the
+ACP/acpx Tier-A transport (pilot on CC-hooks/subprocess) · the durable **Skill**
+axis (pilot Scope-only) · the MCP-server `install` tool · the OpenShell backend
+(G-2.3) · CEO-mode / BMAD (v3.5 / v4).
 
 The authoritative live "next action" is always the current batch-strict prompt
 chain (below), not this summary.
