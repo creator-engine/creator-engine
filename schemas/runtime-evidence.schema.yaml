@@ -237,10 +237,11 @@ $defs:
         minLength: 1
       outcome:
         type: string
-        enum: [pr_opened, review_submitted, research_delivered, no_change]
+        enum: [pr_opened, pr_merged, review_submitted, research_delivered, no_change]
         description: |
           The run's terminal disposition (the run-OUTCOME axis). Plural +
-          extensible; the v3 MVP produces only `pr_opened`. NEVER a
+          extensible; the producers are `pr_opened` (G-3.7) and `pr_merged`
+          (G-3.7b — the gated-merge disposition; live merge in G-3.8). NEVER a
           `lifecycle_phase` value.
       change_set:
         type: object
