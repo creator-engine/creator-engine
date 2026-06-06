@@ -103,11 +103,45 @@ typed record and is **never** a `lifecycle_phase`.
   host / credential / account / registry identifier as a normative binding (the
   same prohibition that applies to every record).
 
-A schema-conformant chain holds **either** record type per element; the two are
-mutually exclusive (`kind` / `record_type` consts + `lifecycle_phase` vs
-`outcome` select exactly one). A record with an out-of-enum `outcome` (or a
-missing `change_set`) fails `runtime_evidence_schema_violation`. Worked example:
+A schema-conformant chain holds one record type per element; the branches are
+mutually exclusive (`kind` / `record_type` consts + the `lifecycle_phase` /
+`outcome` / `approver_ref` discriminators select exactly one). A record with an
+out-of-enum `outcome` (or a missing `change_set`) fails
+`runtime_evidence_schema_violation`. Worked example:
 `examples/well-formed/runtime-evidence/example-runtime-evidence-chain-pr-opened.yml`.
+
+## Run-ratification record (v3 G-3.7.2a)
+
+A third element type, the **`runtime_ratification_record`**, attests that a run
+was **ratified** — the CE-owned, SHA-pinned, single-use ratification that
+authorizes the run to act. Like the run-outcome record it is its OWN record type
+on a dimension ORTHOGONAL to the container `lifecycle_phase` (and to the run
+`outcome`), is **never** a `lifecycle_phase`, and is appended to the SAME hash
+chain via the pure `append`, so the authorization itself is content-addressed,
+`prev_hash`-linked, `sequence`-contiguous, and `policy_sha`-bound — i.e.
+tamper-evident. `verify_chain` treats it like any record.
+
+- **Required fields:** `kind` / `record_type` / `schema_version` / `policy_sha` /
+  `run_id` / `sequence` / `prev_hash` / `content_hash` / `recorded_at` /
+  `ratified_prompt_sha` / `approver_ref` / `ratified_head_sha` / `binding_ref`. It
+  carries **no** `lifecycle_phase`, `classification`, or `outcome`.
+- **Value-free, by construction.** `ratified_prompt_sha` (the SHA256 of the
+  ratified Source prompt), `approver_ref` (an **opaque** digest standing in for
+  the approving actor — never a raw account/login), and `binding_ref` (an
+  **opaque** digest of the normative `{repo, installation_id, permissions,
+  ratified_head_sha}` tuple) are all 64-hex digests. `ratified_head_sha` is the
+  pinned git head SHA (a content-address, the shape `change_set.head_sha` uses).
+  No account, host, credential/token, or installation identifier appears in clear
+  — the same prohibition that applies to every record.
+- **Consumed by the runtime head-SHA assertion (G-3.7.2b).** Before any
+  `apply=True` side effect, the orchestrator refuses to act when the runtime head
+  differs from `ratified_head_sha` (and the recomputed `binding_ref` differs from
+  the in-force tuple) — refusing drift between ratification and execution.
+
+A record with `kind: runtime-ratification` selects this branch; a missing or
+non-`^[0-9a-f]{64}$` `approver_ref` / `ratified_prompt_sha` / `binding_ref` fails
+`runtime_evidence_schema_violation`. Worked example:
+`examples/well-formed/runtime-evidence/example-runtime-evidence-chain-ratified.yml`.
 
 ## Scope boundary (what G-1.3a does NOT do)
 
