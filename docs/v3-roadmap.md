@@ -85,7 +85,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.4 | credential value-injection seam (`authenticated_gh_runner` — `ScopedToken.value` → child `gh` env only) | #132 | `4d4a65b` | MERGED |
 | G-3.5 | evidence persistence sink (`file_evidence_sink` — `CollectedEvidence` → durable `runtime-evidence-chain` file; persist iff `verify_chain`+schema-valid, else refuse) | #134 | `e63ae0b` | MERGED |
 | G-3.6a | run-outcome / terminal-disposition model (typed `runtime_run_outcome` record — the run-disposition axis, orthogonal to the `provision`/`run`/`collect`/`teardown` `lifecycle_phase`, appended to the same hash chain) | #136 | `bc22681` | MERGED |
-| G-3.6b | offline composition-root assembly + end-to-end dry-run (the integration harness) | — | — | planned |
+| G-3.6b | offline composition-root assembly + end-to-end dry-run (`run_assembly.py` `make_run_driver` — the minter→runner `ScopedToken` bridge + the injectable `run_plan(evidence_sink=…)` seam; mint → authenticated runner → run → collect → typed `pr_opened` outcome → persisted evidence, fully offline) | #138 | `2245426` | MERGED |
 | G-3.7 | live spike — first working v3 (Operator-ratified outside the CI-purity envelope) | — | — | planned |
 
 **G-1 (plane C / runtime safety) and G-2 (thin orchestrator + ratification
@@ -98,19 +98,20 @@ change-status — `review_state` / `checks_state` / `change_conflicts`), G-3.3
 G-3.4 (credential value-injection seam — `authenticated_gh_runner`:
 `ScopedToken.value` → the child `gh` env only), G-3.5 (evidence persistence
 sink — `file_evidence_sink`: `CollectedEvidence` → a durable
-`runtime-evidence-chain` file), and G-3.6a (run-outcome / terminal-disposition
+`runtime-evidence-chain` file), G-3.6a (run-outcome / terminal-disposition
 model — the typed `runtime_run_outcome` record, orthogonal to the container
-lifecycle) merged (#124, #126, #128, #130, #132, #134, #136);
-G-3.6b next.
+lifecycle), and G-3.6b (offline composition-root assembly — `run_assembly.py`
+`make_run_driver`, the minter→runner `ScopedToken` bridge + the
+`run_plan(evidence_sink=…)` seam, drivable offline end-to-end) merged (#124,
+#126, #128, #130, #132, #134, #136, #138); G-3.7 next.
 
 ## What's next
 
-1. **G-3.6b** — offline composition-root assembly + end-to-end dry-run (now that
-   G-3.6a landed the run-outcome model, assemble the minter-token →
-   `gh_runner`-factory `ScopedToken` bridge + `change_opener` + `merge()` + the
-   G-3.5 `evidence_sink` into `run_plan` against local-noop + a fake `GhRunner`,
-   persisting the run's typed-outcome chain end-to-end), then the **G-3.7** live
-   spike ("first working v3", Operator-ratified outside the CI-purity envelope).
+1. **G-3.7** — the live spike ("first working v3"): promote the G-3.6b offline
+   composition root (`run_assembly.py` `make_run_driver`) to a live drive
+   (`apply=True`, a real `open_change()` then a gated `merge()`), Operator-ratified
+   OUTSIDE the CI-purity envelope — the human-created App key is never present in
+   the task container.
 2. **G-2.3** — the OpenShell backend, deferred (research-gated; re-opens on the
    recorded trigger conditions).
 
@@ -123,7 +124,8 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 
 | Path | Gate | Role |
 | --- | --- | --- |
-| `orchestrator.py` | G-2.0 / G-2.1 / G-3.1 / G-3.6a | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate + the injected `change_opener` seam → `open_change()`; the terminal step appends a typed `runtime_run_outcome` record (G-3.6a) to the run's evidence chain |
+| `orchestrator.py` | G-2.0 / G-2.1 / G-3.1 / G-3.6a / G-3.6b | thin `run_plan()` + the `ApprovedPlan` / `PlanNotRatified` ratification gate + the injected `change_opener` seam → `open_change()`; the terminal step appends a typed `runtime_run_outcome` record (G-3.6a) to the run's evidence chain; the injectable `run_plan(evidence_sink=…)` (G-3.6b) persists the final chain on a post-`teardown` success path (default `None` = no I/O; `EvidencePersistRefused` propagates) |
+| `run_assembly.py` | G-3.6b | the production composition root `make_run_driver()` — wires the minter→runner `ScopedToken` bridge (a closure cell sharing the one live token from `mint_scoped_token` into `authenticated_gh_runner`), the production `token_minter` / `change_opener` (over `open_change(…, apply=False)`), and the G-3.5 `file_evidence_sink` into one offline `run_plan()` drive, with `revoke_scoped_token` in a `finally`; the one place `forge` is imported (the orchestrator stays forge-free) |
 | `runner/backend.py` | G-1.1 / G-3.1 | `RunnerBackend` ABC + registry (`get_backend` / `available_backends`) + the value-free `RunChangeSet` pointer type |
 | `runner/noop_backend.py` | G-1.1 | inert `local-noop` backend (used in CI) |
 | `runner/gvisor_proxy_backend.py` | G-1.2 | hardened gVisor + egress-proxy backend |
