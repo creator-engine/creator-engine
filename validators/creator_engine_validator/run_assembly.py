@@ -50,7 +50,12 @@ from .forge.change import open_change
 from .forge.credential_runner import authenticated_gh_runner
 from .forge.github_repo_config import ForgeConfigError
 from .forge.scoped_token import TokenRequest, mint_scoped_token, revoke_scoped_token
-from .orchestrator import ApprovedPlan, MintedCredential, run_plan
+from .orchestrator import (
+    ApprovedPlan,
+    MintedCredential,
+    RatificationBindingRefused,
+    run_plan,
+)
 from .runner import CollectedEvidence, RunnerBackend
 
 #: The composed driver: drive(runtime_policy, run_id, command, approved_plan, token_request).
@@ -67,6 +72,8 @@ def make_run_driver(
     write: Any = None,
     backend: RunnerBackend | None = None,
     gh_runner: Any = None,
+    live: bool = False,
+    head_observer: Callable[[], str] | None = None,
 ) -> RunDriver:
     """Return a :data:`RunDriver` composing one offline run end to end + persistence.
 
@@ -76,6 +83,18 @@ def make_run_driver(
     ``gh_runner`` (the App-level mint/revoke transport), ``spawn`` (the child ``gh``
     transport for the authenticated change-opener runner), and ``write`` (the
     evidence-file writer). CI injects fakes for all four.
+
+    **G-3.7.3a — the live-mode seam (default OFF).** ``live`` promotes the
+    change-open from ``apply=False`` (the offline default — byte-for-byte the prior
+    behavior) to ``apply=True``; the actual live drive (G-3.7.3b) sets it. When
+    ``live`` and the plan is SHA-pinned (``approved_plan.ratified_head_sha`` set),
+    an injected ``head_observer`` — a host-side read of the LIVE repo head supplied
+    by the live-drive runbook — is REQUIRED: ``drive`` reads the observed head and
+    passes it to the orchestrator gate (as value-free DATA) so the ratification
+    binds the INDEPENDENTLY-observed head, not just the agent-claimed change head;
+    a live SHA-pinned drive without an observer is refused before minting. The
+    observer is an injectable seam (CI injects a fake → zero live I/O); the real
+    authenticated read lives in the 3.7.3b runbook, never here.
 
     The returned ``drive(runtime_policy, run_id, command, approved_plan,
     token_request)`` mints a JIT per-run credential, shares the live
@@ -121,7 +140,7 @@ def make_run_driver(
                 change_set.base,
                 change_set.manifest_paths,
                 plan_ref,
-                apply=False,
+                apply=live,  # G-3.7.3a: live mode promotes the change-open to a real apply=True
                 gh_runner=authed,
             )
 
@@ -131,11 +150,23 @@ def make_run_driver(
         # ratified_head_sha} tuple and REFUSES if it (or the change head) drifted from the
         # SHA-pinned ratification on the ApprovedPlan. Only the opaque digest lands in evidence,
         # never these raw identifiers; for an unbound ApprovedPlan the gate is inert.
-        binding_inputs = {
+        binding_inputs: dict[str, Any] = {
             "repo": repo,
             "installation_id": token_request.installation_id,
             "permissions": dict(token_request.permissions),
         }
+        # G-3.7.3a: in live mode a SHA-pinned ratification MUST be checked against an
+        # INDEPENDENTLY-observed live repo head — refuse a live apply=True without one rather
+        # than trusting only the agent-claimed change head. Read the observed head (the injected
+        # seam; the real authenticated read is the 3.7.3b runbook's) and pass it to the gate as
+        # value-free DATA; the orchestrator asserts observed == ratified before the change-open.
+        if live and approved_plan.ratified_head_sha and head_observer is None:
+            raise RatificationBindingRefused(
+                f"run {run_id!r} live drive of a SHA-pinned ratification requires a head_observer "
+                "(refusing apply=True without an independent observed-base-head check)"
+            )
+        if live and head_observer is not None:
+            binding_inputs["observed_head_sha"] = head_observer()
         try:
             return run_plan(
                 runtime_policy,

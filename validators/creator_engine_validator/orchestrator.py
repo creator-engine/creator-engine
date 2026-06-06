@@ -395,6 +395,22 @@ def run_plan(
                         "(refusing to open a change not bound to the ratified head)"
                     )
                 if binding_inputs is not None:
+                    # 4.6b) G-3.7.3a: when run_assembly supplies a LIVE observed-base-head
+                    #       (live mode reads the real repo head and passes it as DATA), the
+                    #       ratification ALSO binds the INDEPENDENTLY-OBSERVED head — not just the
+                    #       agent-claimed change head — so a compromised/buggy seat that merely
+                    #       CLAIMS the ratified head cannot drive a live apply against a different
+                    #       real head. Absent observed_head_sha (the CI-pure / pre-3.7.3a path)
+                    #       this is a no-op (byte-for-byte the 3.7.2b assertions).
+                    observed_head_sha = binding_inputs.get("observed_head_sha")
+                    if (
+                        observed_head_sha is not None
+                        and observed_head_sha != approved_plan.ratified_head_sha
+                    ):
+                        raise RatificationBindingRefused(
+                            f"run {run_id!r} observed head_sha drifted from the ratified head "
+                            "(the live-observed repo head is not the ratified head)"
+                        )
                     recomputed = compute_binding_ref(
                         binding_inputs["repo"],
                         binding_inputs["installation_id"],

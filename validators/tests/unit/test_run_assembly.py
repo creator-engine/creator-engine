@@ -25,6 +25,7 @@ import os
 import socket
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -353,3 +354,102 @@ def test_bound_drive_head_drift_refuses_but_still_revokes(monkeypatch):
     delete_spawns = [c for c in spawn_calls if any("DELETE" in a for a in c["argv"])]
     assert delete_spawns, "revoke must still fire when the head-SHA gate refuses"
     assert all(c["env"]["GH_TOKEN"] == _MINTED_SECRET for c in delete_spawns)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.3a — live mode: make_run_driver(live=True) opens the change apply=True AND
+# binds the independently-observed base head (via the head_observer seam) into the
+# gate. Zero live I/O: open_change is a recording fake; the observer is injected.
+# Default (live=False) is byte-for-byte the apply=False path.
+# ---------------------------------------------------------------------------
+def _recording_open_change(calls: list):
+    def fake_open_change(repo, branch, base, manifest_paths, plan_ref, *, apply, gh_runner):
+        calls.append({"apply": apply, "repo": repo, "branch": branch})
+        return SimpleNamespace(pr_number=7)
+
+    return fake_open_change
+
+
+def test_live_mode_opens_apply_true_and_binds_observed_head(monkeypatch):
+    _explode(monkeypatch)
+    oc_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.open_change", _recording_open_change(oc_calls))
+    spawn_calls: list = []
+    written: list = []
+    head = "d" * 40  # == _RUN_CHANGE_SET.head_sha (the produced change head) == the ratified head
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn(spawn_calls), write=lambda p, t: written.append((p, t)),
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+        live=True, head_observer=lambda: head,
+    )
+    evidence = driver(valid_policy(), "run-1", ("echo", "hi"), _approved_bound(head=head), _token_request("run-1"))
+    # The change was opened apply=True (live mode promoted the conditional).
+    assert len(oc_calls) == 1 and oc_calls[0]["apply"] is True
+    # The chain carries the ratification record and verifies clean.
+    rats = [r for r in evidence.records if r["record_type"] == "runtime_ratification"]
+    assert len(rats) == 1 and rats[0]["ratified_head_sha"] == head
+    assert verify_chain(list(evidence.records)) == []
+    # The minted token was still revoked (token-authed spawn), per the live-drive discipline.
+    assert any("DELETE" in a for c in spawn_calls for a in c["argv"])
+
+
+def test_live_mode_observed_head_drift_refuses_before_open_and_revokes(monkeypatch):
+    from creator_engine_validator.orchestrator import RatificationBindingRefused
+
+    _explode(monkeypatch)
+    oc_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.open_change", _recording_open_change(oc_calls))
+    spawn_calls: list = []
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn(spawn_calls), write=lambda p, t: None,
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+        live=True, head_observer=lambda: "e" * 40,  # observed live head != ratified "d"*40
+    )
+    with pytest.raises(RatificationBindingRefused):
+        driver(valid_policy(), "run-1", ("echo", "hi"), _approved_bound(head="d" * 40), _token_request("run-1"))
+    assert oc_calls == []  # refused BEFORE any apply=True open
+    # The minted token is STILL revoked even when the observed-head gate refuses.
+    delete_spawns = [c for c in spawn_calls if any("DELETE" in a for a in c["argv"])]
+    assert delete_spawns and all(c["env"]["GH_TOKEN"] == _MINTED_SECRET for c in delete_spawns)
+
+
+def test_live_mode_requires_head_observer_for_bound_plan(monkeypatch):
+    from creator_engine_validator.orchestrator import RatificationBindingRefused
+
+    _explode(monkeypatch)
+    oc_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.open_change", _recording_open_change(oc_calls))
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn([]), write=lambda p, t: None,
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+        live=True,  # NO head_observer
+    )
+    # A live apply=True of a SHA-pinned ratification with no independent observed-head check is
+    # refused BEFORE minting/driving (no token minted, no change opened).
+    with pytest.raises(RatificationBindingRefused):
+        driver(valid_policy(), "run-1", ("echo", "hi"), _approved_bound(head="d" * 40), _token_request("run-1"))
+    assert oc_calls == []
+
+
+def test_default_live_false_opens_apply_false_and_skips_observer(monkeypatch):
+    _explode(monkeypatch)
+    oc_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.open_change", _recording_open_change(oc_calls))
+    observer_calls: list = []
+
+    def observer():  # pragma: no cover - must never run when live=False
+        observer_calls.append(1)
+        return "d" * 40
+
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn([]), write=lambda p, t: None,
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+        head_observer=observer,  # provided, but live defaults False
+    )
+    driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
+    assert len(oc_calls) == 1 and oc_calls[0]["apply"] is False  # default path: apply=False
+    assert observer_calls == []  # head_observer NOT called when live=False
