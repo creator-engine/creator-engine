@@ -37,7 +37,7 @@ from creator_engine_validator.runner import (
     RunResult,
 )
 from creator_engine_validator.runner.noop_backend import LocalNoopBackend
-from creator_engine_validator.runtime_evidence_spine import verify_chain
+from creator_engine_validator.runtime_evidence_spine import compute_binding_ref, verify_chain
 from creator_engine_validator.schema import validate_with_schema
 
 _POLICY_SHA = "a" * 64
@@ -295,3 +295,61 @@ def test_revoke_failure_does_not_mask_the_run_exception(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="boom"):
         driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
+
+
+# ---------------------------------------------------------------------------
+# G-3.7.2b — the composition root supplies the binding inputs; the head-SHA gate
+# admits a matching SHA-pinned ratification and refuses drift (still revoking).
+# ---------------------------------------------------------------------------
+def _approved_bound(*, head: str = "d" * 40, run_id: str = "run-1"):
+    from creator_engine_validator.orchestrator import ApprovedPlan
+
+    # binding_ref over the SAME tuple run_assembly forwards (repo + the token_request's
+    # installation_id + permissions + the pinned head) so a matching plan passes the gate.
+    bref = compute_binding_ref(_REPO, 42, {"contents": "read", "pull_requests": "write"}, head)
+    return ApprovedPlan(
+        run_id=run_id, policy_sha=_POLICY_SHA, approved_by="operator", approval_ref="forge-issue#42",
+        ratified_head_sha=head, binding_ref=bref, approver_ref="2" * 64, ratified_prompt_sha="3" * 64,
+    )
+
+
+def test_bound_drive_persists_ratification_record(monkeypatch):
+    _explode(monkeypatch)
+    spawn_calls: list = []
+    written: list = []
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn(spawn_calls), write=lambda p, t: written.append((p, t)),
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+    )
+    # head "d"*40 matches _RUN_CHANGE_SET.head_sha; binding_ref matches the forwarded tuple.
+    evidence = driver(valid_policy(), "run-1", ("echo", "hi"), _approved_bound(), _token_request("run-1"))
+    records = list(evidence.records)
+    assert verify_chain(records) == []
+    assert any(r["record_type"] == "runtime_run_outcome" for r in records)
+    rats = [r for r in records if r["record_type"] == "runtime_ratification"]
+    assert len(rats) == 1 and rats[0]["ratified_head_sha"] == "d" * 40
+    # the persisted chain carries it too, and remains schema-valid + chain-clean.
+    doc = yaml.safe_load(written[0][1])
+    assert any(r["record_type"] == "runtime_ratification" for r in doc["records"])
+    assert verify_chain(doc["records"]) == []
+    assert validate_with_schema(doc, _SCHEMA, str(written[0][0]), code="x", contract=_CONTRACT) == []
+
+
+def test_bound_drive_head_drift_refuses_but_still_revokes(monkeypatch):
+    from creator_engine_validator.orchestrator import RatificationBindingRefused
+
+    _explode(monkeypatch)
+    spawn_calls: list = []
+    driver = make_run_driver(
+        _REPO, Path("/evidence"),
+        spawn=_spawn(spawn_calls), write=lambda p, t: None,
+        backend=_ChangeSetBackend(), gh_runner=_mint_gh_runner([]),
+    )
+    # ratified head "e"*40 != the produced change head "d"*40 -> the gate refuses.
+    with pytest.raises(RatificationBindingRefused):
+        driver(valid_policy(), "run-1", ("echo", "hi"), _approved_bound(head="e" * 40), _token_request("run-1"))
+    # The minted credential is STILL revoked in the finally (token-authed), even on a gate refusal.
+    delete_spawns = [c for c in spawn_calls if any("DELETE" in a for a in c["argv"])]
+    assert delete_spawns, "revoke must still fire when the head-SHA gate refuses"
+    assert all(c["env"]["GH_TOKEN"] == _MINTED_SECRET for c in delete_spawns)

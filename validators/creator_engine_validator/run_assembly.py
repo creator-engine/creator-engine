@@ -126,6 +126,16 @@ def make_run_driver(
             )
 
         sink = file_evidence_sink(root, write=write)
+        # G-3.7.2b: the value-free binding inputs for the runtime head-SHA assertion. The
+        # orchestrator recomputes binding_ref over this {repo, installation_id, permissions,
+        # ratified_head_sha} tuple and REFUSES if it (or the change head) drifted from the
+        # SHA-pinned ratification on the ApprovedPlan. Only the opaque digest lands in evidence,
+        # never these raw identifiers; for an unbound ApprovedPlan the gate is inert.
+        binding_inputs = {
+            "repo": repo,
+            "installation_id": token_request.installation_id,
+            "permissions": dict(token_request.permissions),
+        }
         try:
             return run_plan(
                 runtime_policy,
@@ -136,6 +146,7 @@ def make_run_driver(
                 token_minter=token_minter,
                 change_opener=change_opener,
                 evidence_sink=sink,
+                binding_inputs=binding_inputs,
             )
         finally:
             # Defense-in-depth: release the credential the instant the run ends — success OR

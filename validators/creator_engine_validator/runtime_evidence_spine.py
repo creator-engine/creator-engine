@@ -111,6 +111,29 @@ def canonical_content_hash(record: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def compute_binding_ref(
+    repo: str, installation_id: int, permissions: Any, ratified_head_sha: str
+) -> str:
+    """Return the opaque 64-hex digest binding a ratification to its normative tuple (v3 G-3.7.2b).
+
+    A value-free digest over the ``{repo, installation_id, permissions, ratified_head_sha}`` the
+    ratification is pinned to — so the runtime head-SHA assertion can recompute + compare WITHOUT
+    any account / installation identifier appearing in the evidence record (only this digest does).
+    ``permissions`` is normalized to a sorted ``[scope, level]`` list so the digest is
+    order-independent. Reuses the :func:`canonical_content_hash` canonicalization rule
+    (``sort_keys=True``, tight separators); deterministic and stdlib-only; performs no I/O.
+    """
+    perms = sorted([str(k), str(v)] for k, v in dict(permissions).items())
+    material = {
+        "repo": str(repo),
+        "installation_id": int(installation_id),
+        "permissions": perms,
+        "ratified_head_sha": str(ratified_head_sha),
+    }
+    raw = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def append(chain: Sequence[dict[str, Any]], record_body: dict[str, Any]) -> dict[str, Any]:
     """Return a new chain-linked, content-addressed record to follow ``chain``.
 
