@@ -42,6 +42,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..orchestrator import ApprovedPlan
+from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, GhRunner
 
 _MARKER_RE = re.compile(r"\s*(ce-run-id|ce-policy-sha)\s*:\s*(\S+)\s*$", re.IGNORECASE)
@@ -118,7 +119,7 @@ def plan_approved(
     code, pr_obj, stderr = _gh_api(runner, f"repos/{repo}/pulls/{pr}")
     if code != 0 or not isinstance(pr_obj, dict):
         raise ForgeConfigError(
-            f"could not read PR {repo}#{pr}: {stderr.strip() or 'unknown error'}"
+            f"could not read PR {repo}#{pr}: {redact_gh_stderr(stderr) or 'unknown error'}"
         )
     author = ((pr_obj.get("user") or {}).get("login")) or ""
     head_sha = ((pr_obj.get("head") or {}).get("sha")) or ""
@@ -134,7 +135,7 @@ def plan_approved(
     rcode, reviews, rstderr = _gh_api(runner, f"repos/{repo}/pulls/{pr}/reviews")
     if rcode != 0:
         raise ForgeConfigError(
-            f"could not read reviews for {repo}#{pr}: {rstderr.strip() or 'unknown error'}"
+            f"could not read reviews for {repo}#{pr}: {redact_gh_stderr(rstderr) or 'unknown error'}"
         )
     if not isinstance(reviews, list):
         return None

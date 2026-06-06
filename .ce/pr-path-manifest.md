@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.7.0a revoke-routing fix + child-env scrubber
+# PR path manifest — v3 G-3.7.0b gh-stderr redaction sweep + opaque-token regression
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,36 +9,50 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is the first (CI-pure) hardening slice of the **G-3.7 live spike**. It
-(a) FIXES the load-bearing revoke-routing bug — `run_assembly.make_run_driver`
-revoked the JIT scoped token through the **App-level** `gh_runner`, but
-`DELETE /installation/token` must authenticate **AS the token being revoked**;
-the fix routes the revoke through `authenticated_gh_runner(token, spawn=spawn)`,
-best-effort in the `finally` (a revoke-transport failure is swallowed and made
-alertable value-free — it never masks the run exception nor manufactures a
-success-path error) — and (b) adds a **child-env scrubber** to
-`authenticated_gh_runner` so an inherited host var can neither echo the token
-(`GH_DEBUG`) nor redirect the `Authorization` header to a non-github host
-(`GH_HOST`/`GITHUB_API_URL`/`GH_CONFIG_DIR`) nor leak the GitHub App private key
-(any `*_PEM`/`*PRIVATE_KEY*`/`*APP_KEY*` var) into the child `gh` env. RED→GREEN,
-**CI-pure** (every path driven by fakes; `subprocess`/`socket`/`Path.write_text`
-monkeypatched to explode; ZERO real `gh`/network/disk/PR). It touches **no**
-schema/spine/check/backend/CLI/wheel surface -> `--list-checks` is **unchanged at
-43** and `available_backends()` is unchanged at `('gvisor-proxy', 'local-noop')`;
-`check-examples` stays 77/0. Corrections-of-record + the verified ground truth are
-in `.hermes/research/v3-g3-7-live-spike-planning-20260606T053007Z/REGROUNDING_LEDGER_G3_7_20260606T063941Z.md`.
+This is the second (CI-pure) hardening slice of the **G-3.7 live spike**. It
+adds a shared `forge/_redact.py` helper (`redact_gh_stderr`, stdlib `re` only)
+that masks token / JWT / `Authorization`-header material in a `gh` subprocess's
+stderr **before** that stderr is interpolated into a `ForgeConfigError` message
+(a message that may be logged or surfaced into the runtime-evidence chain), and
+applies it at **all 11 leak sites across the 6 forge ops** that today interpolate
+raw `stderr.strip()` into an exception (`scoped_token` ×2, `change` ×2, `merge`
+×1, `change_status` ×1, `github_repo_config` ×3, `plan_approval` ×2). It also
+adds an **opaque-token regression**: a ~520-char `ghs_<appid>_<jwt>` installation
+token flows verbatim through mint (no length/format assumption) and is fully
+masked by the redactor regardless of length. This is **belt-and-suspenders** —
+the primary custody invariant (the token lives only in the child `gh` env, never
+in argv/stderr) is unchanged from G-3.4/G-3.7.0a; this slice adds a secondary net.
+RED→GREEN, **CI-pure** (every path driven by fakes; `subprocess`/`socket`/
+`Path.write_text` monkeypatched to explode; ZERO real `gh`/network/disk/PR). It
+touches **no** schema/spine/check/backend/CLI/wheel surface -> `--list-checks` is
+**unchanged at 43** and `available_backends()` is unchanged at
+`('gvisor-proxy', 'local-noop')`; `check-examples` stays 77/0. The two `checks/*`
+`stderr.strip()` sites (`role_boundary_attribution.py`, `path_manifest_fidelity.py`)
+interpolate `git diff` plumbing stderr (no credential material) and are OUT of
+scope. Corrections-of-record + the verified ground truth are in
+`.hermes/research/v3-g3-7-live-spike-planning-20260606T053007Z/REGROUNDING_LEDGER_G3_7_20260606T063941Z.md`.
 
-- **base:** `8466cdaa75bc47c7e9651b45c95d53b35ee125f6`.
+- **base:** `856a8d0a5f83dbb8c6e1bde5dbb5e4ab49f6ee09`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=50ed59d138511b118f8bc0eb5b0b388ad31d009fbb1c8eb3f8aa75f516dd8662
+AUTHORIZED_PATHS_SHA256=d792b21a314d9f220e2c7b9bbbc4fc14bc1fe368abd8059911f352d19c8fb440
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/forge/credential_runner.py
-validators/creator_engine_validator/run_assembly.py
-validators/tests/unit/test_credential_runner.py
-validators/tests/unit/test_run_assembly.py
+validators/creator_engine_validator/forge/_redact.py
+validators/creator_engine_validator/forge/change.py
+validators/creator_engine_validator/forge/change_status.py
+validators/creator_engine_validator/forge/github_repo_config.py
+validators/creator_engine_validator/forge/merge.py
+validators/creator_engine_validator/forge/plan_approval.py
+validators/creator_engine_validator/forge/scoped_token.py
+validators/tests/unit/test_change_status.py
+validators/tests/unit/test_github_repo_config.py
+validators/tests/unit/test_merge.py
+validators/tests/unit/test_open_change.py
+validators/tests/unit/test_plan_approval.py
+validators/tests/unit/test_redact.py
+validators/tests/unit/test_scoped_token.py
 ```

@@ -38,6 +38,8 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 
+from ._redact import redact_gh_stderr
+
 # A GhRunner runs a ``gh`` invocation (argv including the leading "gh") with an
 # optional stdin body and returns the completed process. Mirrors the repo's
 # ``GitRunner`` idiom (ce_event_runtime/fanin_runtime/integration_queue_dry_run),
@@ -280,7 +282,7 @@ def install_required_checks(
     if code != 0 or not isinstance(parsed, dict):
         raise ForgeConfigError(
             f"could not read required status checks for {repo}@{branch}: "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     current = sorted(parsed.get("contexts", []) or [])
     strict = bool(parsed.get("strict", True))
@@ -314,7 +316,7 @@ def install_required_checks(
     if pcode != 0:
         raise ForgeConfigError(
             f"PATCH required status checks for {repo}@{branch} failed: "
-            f"{pstderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(pstderr) or 'unknown error'}"
         )
     actions.append(f"APPLIED: required contexts {current} -> {desired}")
     vcode, vparsed, _ = _gh_api(
@@ -382,7 +384,7 @@ def configure_repo(
     )
     if pcode != 0:
         raise ForgeConfigError(
-            f"PUT protection for {repo}@{branch} failed: {pstderr.strip() or 'unknown error'}"
+            f"PUT protection for {repo}@{branch} failed: {redact_gh_stderr(pstderr) or 'unknown error'}"
         )
     actions.append("APPLIED: protection PUT to desired policy")
     actions += _describe_diff(observed, desired)

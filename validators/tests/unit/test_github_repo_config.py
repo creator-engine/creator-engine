@@ -278,6 +278,52 @@ def test_configure_repo_reports_verify_mismatch():
 
 
 # --------------------------------------------------------------------------
+# G-3.7.0b — a leaked credential in gh stderr is masked in the raised exception
+# --------------------------------------------------------------------------
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+class _TokenLeakingGh(FakeGh):
+    """A FakeGh that fails the chosen HTTP method with a token-bearing stderr."""
+
+    def __init__(self, protection, *, fail_method):
+        super().__init__(protection)
+        self._fail_method = fail_method
+
+    def __call__(self, argv, input_text=None):
+        method, _path = self._parse(argv)
+        if method == self._fail_method:
+            self.calls.append((list(argv), input_text))
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr=_LEAK_STDERR)
+        return super().__call__(argv, input_text)
+
+
+def test_read_required_checks_error_redacts_leaked_token():
+    fake = _TokenLeakingGh(_get_shape(contexts=("Validate governance artifacts",)), fail_method="GET")
+    with pytest.raises(ForgeConfigError) as ei:
+        install_required_checks(REPO, ["pytest"], apply=True, gh_runner=fake)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg and "<redacted>" in msg
+
+
+def test_patch_required_checks_error_redacts_leaked_token():
+    fake = _TokenLeakingGh(_get_shape(contexts=("Validate governance artifacts",)), fail_method="PATCH")
+    with pytest.raises(ForgeConfigError) as ei:
+        install_required_checks(REPO, ["pytest"], apply=True, gh_runner=fake)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg and "<redacted>" in msg
+
+
+def test_put_protection_error_redacts_leaked_token():
+    fake = _TokenLeakingGh(_get_shape(code_owner=False), fail_method="PUT")
+    with pytest.raises(ForgeConfigError) as ei:
+        configure_repo(REPO, apply=True, gh_runner=fake)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg and "<redacted>" in msg
+
+
+# --------------------------------------------------------------------------
 # No live network
 # --------------------------------------------------------------------------
 def test_no_live_network_default_runner_never_invoked(monkeypatch):

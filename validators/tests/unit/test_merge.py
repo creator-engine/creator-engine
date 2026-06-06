@@ -209,6 +209,21 @@ def test_merge_put_transport_failure_raises_forge_config_error():
         merge(_change(), apply=True, gh_runner=r)
 
 
+# ---------------------------------------------------------------------- G-3.7.0b redaction
+_LEAK_TOKEN = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
+_LEAK_STDERR = f"HTTP 401: Bad credentials (token {_LEAK_TOKEN})"
+
+
+def test_merge_put_error_message_redacts_leaked_token():
+    # a credential leaked into the merge-PUT stderr is masked in the raised exception
+    r = _runner(put_rc=1, stderr=_LEAK_STDERR)
+    with pytest.raises(ForgeConfigError) as ei:
+        merge(_change(), apply=True, gh_runner=r)
+    msg = str(ei.value)
+    assert _LEAK_TOKEN not in msg
+    assert "<redacted>" in msg
+
+
 # --------------------------------------------------------------------------- value-free
 def test_result_carries_no_secret():
     from dataclasses import fields

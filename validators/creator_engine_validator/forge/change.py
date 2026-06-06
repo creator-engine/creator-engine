@@ -50,6 +50,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
 # Re-defined LOCALLY (literals copied from ``scoped_token.py`` lines 56-57) per the
@@ -203,7 +204,7 @@ def _read_open_pr(
     if code != 0:
         raise ForgeConfigError(
             f"could not read open pulls for {repo} head {owner}:{branch}: "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
         return parsed[0]
@@ -265,7 +266,7 @@ def open_change(
     if code != 0 or not isinstance(parsed, dict) or not parsed.get("number"):
         raise ForgeConfigError(
             f"could not open PR for {repo} {branch} -> {base}: "
-            f"{stderr.strip() or 'unknown error'}"
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
         )
     reread = _read_open_pr(runner, repo, branch, base, owner)
     return ChangeRef(
