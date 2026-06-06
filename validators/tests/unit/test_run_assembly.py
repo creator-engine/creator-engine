@@ -20,6 +20,7 @@ hygiene, and revocation.
 """
 
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -208,27 +209,89 @@ def test_offline_drive_persists_pr_opened_chain(monkeypatch):
         assert c["input_text"] is None or _MINTED_SECRET not in c["input_text"]
     assert os.environ.get("GH_TOKEN") != _MINTED_SECRET
 
-    # Revocation: a DELETE installation/token was issued at completion.
-    assert any("DELETE" in a for a in mint_calls)
+    # Revocation (G-3.7.0a): the DELETE installation/token authenticates AS the token — it routes
+    # through the token-authed runner (spawn), NOT the App-level mint runner (mint_calls).
+    delete_spawns = [c for c in spawn_calls if any("DELETE" in a for a in c["argv"])]
+    assert delete_spawns, "revoke must route through the token-authed runner (spawn), not mint_calls"
+    assert all(c["env"]["GH_TOKEN"] == _MINTED_SECRET for c in delete_spawns)
+    assert not any("DELETE" in a for a in mint_calls), "DELETE must NOT go through the App-level runner"
+
+
+class _BoomBackend(_ChangeSetBackend):
+    def run(self, handle, request):
+        raise RuntimeError("boom mid-run")
+
+
+def _revoke_failing_spawn(captured: list):
+    """A fake spawn that FAILS the revoke DELETE (rc=1) but serves the open-change read (rc=0)."""
+
+    def spawn(argv, input_text, env):
+        captured.append({"argv": list(argv), "input_text": input_text, "env": dict(env)})
+        rc = 1 if any("DELETE" in a for a in argv) else 0
+        return subprocess.CompletedProcess(list(argv), rc, stdout="[]", stderr="boom-revoke")
+
+    return spawn
 
 
 def test_revokes_even_when_the_run_raises(monkeypatch):
     _explode(monkeypatch)
     mint_calls: list = []
-
-    class _BoomBackend(_ChangeSetBackend):
-        def run(self, handle, request):
-            raise RuntimeError("boom mid-run")
+    spawn_calls: list = []
 
     driver = make_run_driver(
         _REPO,
         Path("/evidence"),
-        spawn=_spawn([]),
+        spawn=_spawn(spawn_calls),
         write=lambda p, t: None,
         backend=_BoomBackend(),
         gh_runner=_mint_gh_runner(mint_calls),
     )
     with pytest.raises(RuntimeError, match="boom"):
         driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
-    # The credential is revoked even on a failed run (the finally fires).
-    assert any("DELETE" in a for a in mint_calls)
+    # The credential is revoked even on a failed run (the finally fires) — token-authed (spawn),
+    # not the App-level mint runner.
+    delete_spawns = [c for c in spawn_calls if any("DELETE" in a for a in c["argv"])]
+    assert delete_spawns, "revoke (token-authed) must fire even when the run raises"
+    assert all(c["env"]["GH_TOKEN"] == _MINTED_SECRET for c in delete_spawns)
+    assert not any("DELETE" in a for a in mint_calls)
+
+
+def test_revoke_transport_failure_is_best_effort_and_alertable(monkeypatch, caplog):
+    _explode(monkeypatch)
+    mint_calls: list = []
+    spawn_calls: list = []
+
+    driver = make_run_driver(
+        _REPO,
+        Path("/evidence"),
+        spawn=_revoke_failing_spawn(spawn_calls),
+        write=lambda p, t: None,
+        backend=_ChangeSetBackend(),
+        gh_runner=_mint_gh_runner(mint_calls),
+    )
+    with caplog.at_level(logging.WARNING):
+        evidence = driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
+    # Success path preserved: a failed revoke transport is swallowed (not raised), the drive
+    # still returns its evidence and the run succeeds.
+    assert evidence.records[-1]["outcome"] == "pr_opened"
+    assert any("DELETE" in a for c in spawn_calls for a in c["argv"]), "revoke was attempted"
+    # Alertable + value-free: a WARNING names the run/token_ref but NEVER the secret value.
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("revoke" in r.getMessage().lower() for r in warnings)
+    assert all(_MINTED_SECRET not in r.getMessage() for r in caplog.records)
+
+
+def test_revoke_failure_does_not_mask_the_run_exception(monkeypatch):
+    _explode(monkeypatch)
+    # Both the run AND the revoke transport fail; the ORIGINAL run exception must propagate,
+    # never the revoke ForgeConfigError.
+    driver = make_run_driver(
+        _REPO,
+        Path("/evidence"),
+        spawn=_revoke_failing_spawn([]),
+        write=lambda p, t: None,
+        backend=_BoomBackend(),
+        gh_runner=_mint_gh_runner([]),
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
