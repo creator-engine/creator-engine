@@ -70,6 +70,8 @@ properties:
         - $ref: "#/$defs/runtime_run_outcome_record"
         - $ref: "#/$defs/runtime_ratification_record"
         - $ref: "#/$defs/runtime_agent_action_record"
+        - $ref: "#/$defs/runtime_spend_ledger_record"
+        - $ref: "#/$defs/runtime_spend_breach_record"
     description: |
       The ordered, append-only record chain. Element 0 is the genesis record
       (`prev_hash` = the all-zero sentinel, `sequence` = 0); each subsequent
@@ -78,11 +80,13 @@ properties:
       `provision`/`run`/`collect`/`teardown` container-phase attestations), a
       terminal `runtime_run_outcome_record` (the typed run-OUTCOME on the
       orthogonal disposition axis), a `runtime_ratification_record` (the typed
-      run-RATIFICATION attestation), OR a `runtime_agent_action_record` (the v3
-      G-4 per-action attestation on its own orthogonal axis); the branches are
-      mutually exclusive (a record's `kind`/`record_type` consts + its
-      `lifecycle_phase`/`outcome`/`approver_ref`/`op` discriminating fields select
-      exactly one branch).
+      run-RATIFICATION attestation), a `runtime_agent_action_record` (the v3
+      G-4 per-action attestation on its own orthogonal axis), a
+      `runtime_spend_ledger_record` (the v3 G-5 metered-spend leaf), OR a
+      `runtime_spend_breach_record` (the v3 G-5 circuit-breaker trip); the branches
+      are mutually exclusive (a record's `kind`/`record_type` consts + its
+      `lifecycle_phase`/`outcome`/`approver_ref`/`op`/`tier` discriminating fields
+      select exactly one branch).
   note:
     type: string
     maxLength: 1024
@@ -496,3 +500,191 @@ $defs:
           Optional: an OPAQUE, deterministic digest present only when
           `classification == escalate`, correlating the escalation. NEVER a raw
           identifier.
+  runtime_spend_ledger_record:
+    type: object
+    description: |
+      A typed spend-METER / ledger record (v3 G-5). It attests one metered cost
+      leaf — `$` (API-USD, the fleet regime) or `%` (the single subscription seat
+      meter) — appended to the SAME tamper-evident hash chain (content-addressed +
+      chain-linked + policy-bound) so the spend ledger is itself spoof-resistant
+      grader input. It is its OWN record type on a dimension ORTHOGONAL to the
+      container `lifecycle_phase`, the run `outcome`, the `ratification`, and the
+      agent `action`, and is NEVER a `lifecycle_phase` value. The cumulative tally
+      is a PURE PROJECTION (`runner.spend_gate.project_spend`) over these leaves per
+      scope + window — there is no separate mutable ledger file. The signal is
+      FAITHFUL-BY-CONSTRUCTION (transport / API-reported, never agent-asserted).
+      VALUE-FREE: `model` / `fleet_id` are shape-only provenance, NEVER a
+      credential, account, or host identifier.
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - unit
+      - amount
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-spend-ledger
+      record_type:
+        type: string
+        const: runtime_spend_ledger
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests, identical to the
+          other records' binding (the check enforces `^[0-9a-f]{64}$` and emits
+          `runtime_evidence_policy_unbound` when absent or malformed).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      unit:
+        type: string
+        enum: ["$", "%"]
+        description: |
+          `$` = API-USD (the fleet regime) or `%` = single-seat utilization meter
+          (the subscription regime).
+      amount:
+        type: number
+        minimum: 0
+        description: |
+          The metered cost of this leaf, in `unit`. The pure `project_spend` folds
+          these per scope + window into the cumulative tally.
+      fleet_id:
+        type: string
+        minLength: 1
+        description: |
+          Optional: the fleet this cost rolls up to (for `fleet`-scope projection).
+          Shape only.
+      model:
+        type: string
+        minLength: 1
+        description: |
+          Optional: the model the cost was metered for (provenance). Shape only.
+      window:
+        type: string
+        enum: [per_run, rolling_5h, rolling_weekly, total]
+        description: |
+          Optional: the accounting window this leaf contributes to.
+  runtime_spend_breach_record:
+    type: object
+    description: |
+      A typed spend-BREACH record (v3 G-5). It attests a circuit-breaker trip —
+      `soft` (~80% alert, continue) or `hard` (100% pause + escalate) — on the
+      nested deny-by-default envelope hierarchy, appended to the SAME tamper-evident
+      hash chain so the breach is itself auditable. It is its OWN record type on a
+      dimension ORTHOGONAL to the other axes and is NEVER a `lifecycle_phase` value.
+      It carries the two-signal refusal (`budget_exhausted` = do-NOT-retry vs
+      `throttle` = retry-with-backoff). VALUE-FREE: `escalation_id` is an opaque
+      digest; `limit` / `observed` are the envelope magnitudes (never a credential
+      or account).
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - breach_scope
+      - breach_unit
+      - tier
+      - signal
+      - limit
+      - observed
+      - decision_reason
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-spend-breach
+      record_type:
+        type: string
+        const: runtime_spend_breach
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests (the check enforces
+          `^[0-9a-f]{64}$` and emits `runtime_evidence_policy_unbound` when absent
+          or malformed).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      breach_scope:
+        type: string
+        enum: [global, fleet, run]
+        description: |
+          The envelope scope that tripped (most-restrictive-wins).
+      breach_unit:
+        type: string
+        enum: ["$", "%"]
+      tier:
+        type: string
+        enum: [soft, hard]
+        description: |
+          `soft` (~80% — alert + continue) or `hard` (100% — pause + escalate).
+      signal:
+        type: string
+        enum: [budget_exhausted, throttle]
+        description: |
+          The two-signal refusal protocol: `budget_exhausted` (do NOT retry) vs
+          `throttle` (retry with backoff). Conflating them risks retry storms.
+      limit:
+        type: number
+        description: |
+          The tripped envelope's cap magnitude (in `breach_unit`). Shape only.
+      observed:
+        type: number
+        description: |
+          The observed cumulative spend at the trip (in `breach_unit`). Shape only.
+      decision_reason:
+        type: string
+        minLength: 1
+        description: |
+          A deterministic explanation string. Advisory; MUST NOT contain secrets.
+      escalation_id:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          Optional: an OPAQUE, deterministic digest correlating a `hard`
+          pause + escalate. NEVER a raw identifier.

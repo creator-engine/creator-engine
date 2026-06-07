@@ -145,6 +145,30 @@ non-`^[0-9a-f]{64}$` `approver_ref` / `ratified_prompt_sha` / `binding_ref` fail
 `runtime_evidence_schema_violation`. Worked example:
 `examples/well-formed/runtime-evidence/example-runtime-evidence-chain-ratified.yml`.
 
+## Spend records (v3 G-5 — the tokenomics axis)
+
+Two further element types carry the tokenomics spend axis, each its OWN record
+type on a dimension ORTHOGONAL to every other axis (never a `lifecycle_phase`),
+appended to the SAME hash chain so the spend ledger and its breaches are
+themselves tamper-evident. `verify_chain` treats them like any record. The pure
+spend decision substrate is `runner.spend_gate`; see
+[`docs/contracts/spend-envelope.md`](spend-envelope.md).
+
+- **`runtime_spend_ledger_record`** — one metered cost leaf (`unit` ∈ `$` for the
+  fleet API-USD regime / `%` for the single subscription seat; `amount`; optional
+  `fleet_id` / `model` / `window`). The cumulative tally is a PURE PROJECTION
+  (`project_spend`) over these leaves per scope + window — there is no separate
+  mutable ledger file. The signal is faithful-by-construction (transport-reported,
+  never agent-asserted).
+- **`runtime_spend_breach_record`** — a circuit-breaker trip: `tier` (`soft`
+  ~80% alert / `hard` 100% pause + escalate), `breach_scope`, `breach_unit`,
+  `signal` (`budget_exhausted` = no-retry / `throttle` = retry-with-backoff),
+  `limit` / `observed`, and an opaque `escalation_id` for a `hard` trip.
+
+Both are value-free (`model` / `fleet_id` are shape-only provenance; `escalation_id`
+is an opaque digest). A `kind: runtime-spend-ledger` / `runtime-spend-breach`
+selects the respective branch.
+
 ## Scope boundary (what G-1.3a does NOT do)
 
 G-1.3a is the **substrate**: the schema, the pure append/verify functions, and

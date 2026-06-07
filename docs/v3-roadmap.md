@@ -100,8 +100,8 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.8 | out-of-envelope live merge spike — one real PR opened → independently reviewed → squash-merged by a **distinct merge identity** (merge identity ≠ run token); value-free `pr_merged` evidence persisted on the same chain (`verify_chain()==[]`, schema-valid); **zero repo code change** (ran the merged G-3.7b seams) → **v3.0 MVP-complete** | — (out-of-envelope live spike) | — | PROVEN (live) |
 | G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | #152 | `a02aca8` | DONE |
 | G-4 | agent-interaction contract — typed `AgentActionEvent` (op × mutation_class × fidelity) → PURE `classify()` branch → deterministic `decide()` control-point (built-in deny + Zed precedence + gate-mode ladder; `auto` advisory-only) → hash-chained `runtime_agent_action` record; additive runtime-policy `action_class_allowlist`/`gate_mode_ladder`; **boundary-clean Tier-B CC-hook derivation seam** (`runner.cc_hook_adapter` via the **shared** `checks.mutation_class`, never v1 `hook_check`); CI-pure (live tap deferred) | #154 | `ec4eb3a` | DONE |
-| G-4.1 | v3 naming-hygiene guard + neutral local-state convention — a self/structural `v3_naming_hygiene` check (sibling to `version_boundary`) FAILing on CE bootstrapping-harness residue (`.hermes`/`Hermes`/`Nefarious`) in the v3 CODE/SCHEMA surface (green-on-day-one + ratchet; legit adapter names Claude/gVisor/Codex/ACP carved out; v3 docs + legacy corpus excluded); neutral `.ce/state` local-state convention (`_versions.V3_LOCAL_STATE_ROOT`, never `.hermes/`/`.claude/`); standing requirement that G-5…G-7 prompts cite both | #156 | `pending` | DONE |
-| G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
+| G-4.1 | v3 naming-hygiene guard + neutral local-state convention — a self/structural `v3_naming_hygiene` check (sibling to `version_boundary`) FAILing on CE bootstrapping-harness residue (`.hermes`/`Hermes`/`Nefarious`) in the v3 CODE/SCHEMA surface (green-on-day-one + ratchet; legit adapter names Claude/gVisor/Codex/ACP carved out; v3 docs + legacy corpus excluded); neutral `.ce/state` local-state convention (`_versions.V3_LOCAL_STATE_ROOT`, never `.hermes/`/`.claude/`); standing requirement that G-5…G-7 prompts cite both | #156 | `e916df2` | DONE |
+| G-5 | tokenomics gate (spend envelope) — additive runtime-policy spend fields (`spend_envelopes` nested `global→fleet→run`, most-restrictive-wins + mandatory global `$` ceiling; `max_concurrent_runs`; `model_rates` read-live-never-hardcode; `spend_cap_enforcement`/`spend_cap_optout`) → PURE `runner.spend_gate` (two-regime cost [`$` fleet / `%` seat] · ledger-as-projection over the spine · admission + synchronous soft/hard circuit-breaker · two-signal `budget_exhausted`-vs-`throttle`) → spend-ledger + breach record axis on the evidence spine; cap/detection split + ratified-HUMAN-only opt-out; new `ce_spend_envelope` check; CI-pure (live `usage`/`/usage` taps, cockpit channel, cross-process semaphore deferred) | #158 | `pending` | DONE |
 | G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
 | G-7 | product surface — v3 work-driving CLI + v3 seat-launch entry (distinct, alongside `ce`) + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; **v1 launcher retained** (no D2 teardown) → **v3.1 pilot-ready** | — | — | designed |
 
@@ -133,7 +133,7 @@ one tamper-evident, value-free evidence chain (open → `pr_opened` → ratifica
 `pr_merged`; `verify_chain()==[]`, schema-valid), with **zero repo code change**.
 **► v3.0 "MVP-complete" is REACHED.** The remaining full-stack-first arc to a
 developer pilot (G-3.9 → G-7, to the **v3.1 pilot-ready** milestone) is below.
-**G-4 (agent-interaction contract) is DONE; G-4.1 (v3 naming-hygiene guard + neutral `.ce/state` convention) lands here; G-5 is next.** Standing requirement (G-4.1): every v3.1 planning prompt (G-5…G-7) cites the `v3_naming_hygiene` guard + the neutral local-state convention (see [`docs/contracts/v3-naming-hygiene.md`](contracts/v3-naming-hygiene.md)). Standing invariants: **v1 retained + v1⊥v3 held + v3 surface naming-clean.**
+**G-4 (agent-interaction contract), G-4.1 (v3 naming-hygiene guard + neutral `.ce/state` convention), and G-5 (tokenomics gate — the #1 pilot blocker closed) are DONE; G-6 is next.** Standing requirement (G-4.1): every v3.1 planning prompt (G-5…G-7) cites the `v3_naming_hygiene` guard + the neutral local-state convention (see [`docs/contracts/v3-naming-hygiene.md`](contracts/v3-naming-hygiene.md)) — see also [`docs/contracts/spend-envelope.md`](contracts/spend-envelope.md). Standing invariants: **v1 retained + v1⊥v3 held + v3 surface naming-clean.**
 
 ## What's next
 
@@ -169,9 +169,15 @@ developer pilot, gated by the next milestone:
    `checks.mutation_class`, never v1 `hook_check`). CI-pure — the live transport tap
    and the credential hardening are deferred follow-ons. **The substrate G-5 + G-6
    plug into.**
-3. **G-5** — the tokenomics gate (spend envelope: `spend_cap` /
-   `max_concurrent_runs` + a deny-by-default admission gate + a post-action
-   circuit-breaker) — closes the #1 pilot blocker.
+3. **G-5** *(lands here)* — the tokenomics gate (spend envelope): additive
+   runtime-policy spend fields → a PURE `runner.spend_gate` (two-regime cost
+   [`$` fleet / `%` seat] · ledger-as-projection over the evidence spine · a
+   deny-by-default admission gate + a synchronous soft/hard circuit-breaker ·
+   two-signal `budget_exhausted`-vs-`throttle`) → a spend-ledger + breach record
+   axis on the spine; the cap/detection split + a ratified-HUMAN-only opt-out; a new
+   `ce_spend_envelope` check. CI-pure — the live `usage`/`/usage` taps, the cockpit
+   channel, and the cross-process semaphore are deferred follow-ons. **Closes the #1
+   pilot blocker.**
 4. **G-6** — the coordination layer (the Scope object + `forge/backlog` +
    DoR-wiring + crosswalk; Scope-only for the pilot).
 5. **G-7** — the product surface: the v3 work-driving CLI + the v3 seat-launch

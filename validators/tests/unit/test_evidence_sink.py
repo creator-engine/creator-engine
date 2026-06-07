@@ -298,5 +298,5 @@ def test_zero_live_filesystem_write(monkeypatch):
 
 
 def test_purity_unchanged():
-    assert len(registered_checks()) == 45  # G-4.1 added v3_naming_hygiene
+    assert len(registered_checks()) == 46  # G-5 added ce_spend_envelope
     assert available_backends() == ("gvisor-proxy", "local-noop")

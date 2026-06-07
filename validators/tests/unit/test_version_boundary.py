@@ -28,8 +28,8 @@ def _mods():
 def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
-    # 45 with the G-4.1 v3_naming_hygiene check registered alongside version_boundary.
-    assert len(reg) == 45
+    # 46 with the G-5 ce_spend_envelope check registered alongside version_boundary.
+    assert len(reg) == 46
 
 
 def test_green_on_real_package():
@@ -64,8 +64,8 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained runner.cc_hook_adapter (the G-4 Tier-B derivation seam): 18 -> 19.
-    assert len(ver.V3_RUNTIME) == 19
+    # v3 gained runner.spend_gate (the G-5 tokenomics spend gate): 19 -> 20.
+    assert len(ver.V3_RUNTIME) == 20
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

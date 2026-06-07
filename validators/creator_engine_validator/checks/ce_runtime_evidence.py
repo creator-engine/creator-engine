@@ -19,6 +19,12 @@ through the SAME path — the schema gained a fourth ``oneOf`` branch and
 ``verify_chain`` is record-type-agnostic (content-address + chain-link +
 sequence + policy-binding apply uniformly), so no check logic changes.
 
+v3 G-5 (additive): a chain MAY now also carry ``runtime_spend_ledger`` and
+``runtime_spend_breach`` records (the tokenomics spend axis — metered cost leaves
++ circuit-breaker trips). They validate through the SAME path (two further
+``oneOf`` branches; ``verify_chain`` stays record-type-agnostic), so again no
+check logic changes. The pure spend-decision substrate is ``runner.spend_gate``.
+
 A file is treated as a candidate Runtime Evidence chain when it satisfies all
 of:
 
