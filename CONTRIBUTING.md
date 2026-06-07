@@ -133,6 +133,20 @@ PYTHONPATH=validators python3 -m creator_engine_validator check
 
 A PR whose changes do not pass these checks locally will not pass CI.
 
+## Version boundary (v1 ↔ v3)
+
+Creator Engine v1.0 and v3.x coexist in this repository on a shared base, and
+the two execution runtimes are kept import-disjoint. The `version_boundary`
+check (run by `check` above) enforces this: a `v1` module must not import a `v3`
+module or vice-versa, and a `shared` (validator-engine / durable-infra) module
+must not import a version-specific module except via the small baselined
+allowlist. When you add code, classify any new runtime module in
+`creator_engine_validator/_versions.py`, do not cross the v1⊥v3 boundary, and do
+not introduce a new `shared`→version import. See
+[`docs/architecture/VERSION_BOUNDARY.md`](./docs/architecture/VERSION_BOUNDARY.md).
+Removing v1.0 code is governed, not routine — propose it as an orphaned-only
+change proven unused by both versions.
+
 ## Code of conduct, security, license
 
 - All participation is subject to the

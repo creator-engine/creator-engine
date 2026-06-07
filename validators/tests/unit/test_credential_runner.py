@@ -192,5 +192,5 @@ def test_purity_unchanged():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner.backend import available_backends
 
-    assert len(registered_checks()) == 43
+    assert len(registered_checks()) == 44
     assert available_backends() == ("gvisor-proxy", "local-noop")

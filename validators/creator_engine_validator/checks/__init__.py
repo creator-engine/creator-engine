@@ -79,3 +79,4 @@ from . import harness_seat_contract as harness_seat_contract  # noqa: E402,F401
 from . import reviewer_authority_envelope as reviewer_authority_envelope  # noqa: E402,F401
 from . import ce_runtime_policy as ce_runtime_policy  # noqa: E402,F401
 from . import ce_runtime_evidence as ce_runtime_evidence  # noqa: E402,F401
+from . import version_boundary as version_boundary  # noqa: E402,F401

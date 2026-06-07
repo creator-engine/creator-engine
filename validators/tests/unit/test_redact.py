@@ -119,5 +119,5 @@ def test_redactor_registers_no_check_and_no_backend():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner import available_backends
 
-    assert len(registered_checks()) == 43
+    assert len(registered_checks()) == 44
     assert available_backends() == ("gvisor-proxy", "local-noop")

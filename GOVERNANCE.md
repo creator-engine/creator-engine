@@ -27,6 +27,20 @@ under "Doctrine: deterministic syscall layer over probabilistic
 agents" and §h. This GOVERNANCE.md remains the public on-ramp; the
 operating-model document remains authoritative for SDLC mechanics.
 
+## Version coexistence (v1 ↔ v3)
+
+Creator Engine v1.0 and v3.x **coexist** on a shared governance base rather
+than one replacing the other: v1.0 is retained as a working system and as the
+substrate used to build v3.x. The two execution runtimes — the v1.0
+coordination/launch runtime and the v3.x agent-native execution runtime — are
+held import-disjoint so each stays independently-operable; the shared validator
+engine grades both. This boundary is a governed invariant: it is declared in
+`creator_engine_validator/_versions.py`, enforced by the `version_boundary`
+check, and documented in
+[`docs/architecture/VERSION_BOUNDARY.md`](./docs/architecture/VERSION_BOUNDARY.md).
+Removing v1.0 machinery is **not** a routine change — cleanup is restricted to
+code proven unused by both versions.
+
 ## Authority hierarchy
 
 The source-of-truth hierarchy (Feature 002 FR-019) is:
