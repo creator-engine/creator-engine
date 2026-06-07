@@ -15,53 +15,60 @@
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Creator Engine — Governed SDLC for autonomous agents" />
 <meta name="twitter:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2307090d'/%3E%3Cpath%20d='M32%206%2054%2019v26L32%2058%2010%2045V19L32%206Z'%20fill='none'%20stroke='%2329e0d2'%20stroke-width='4'/%3E%3Cpath%20d='M22%2032h20M32%2022v20'%20stroke='%23f4b740'%20stroke-width='4'%20stroke-linecap='round'/%3E%3C/svg%3E" />
 <!--
-  Creator Engine — initial one-page brand site (design prototype)
+  Creator Engine — one-page brand site.
   Self-contained: no external fonts, scripts, images, or network calls.
   All styling is inline; all glyphs are inline SVG or system characters.
+  Design system: "Control-Room Violet" — off-black base + neon purple as the
+  single signature accent; crimson reserved strictly as the privileged-gate /
+  alarm semantic; verify-green only for genuine "verified" states. All motion
+  is gated behind prefers-reduced-motion.
+  Naming: the local state root is .ce/ (the single per-repo state root every
+  seat writes to from v3 onward).
   Status discipline: public copy must reflect the current v3 roadmap: v3.0
   MVP-complete is proven; v3.1 pilot-ready is in progress; the packaged
   runtime remains a 0.1.0 repository-checkout pre-release.
 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2308090f'/%3E%3Cpath%20d='M32%206%2054%2019v26L32%2058%2010%2045V19L32%206Z'%20fill='none'%20stroke='%23a06bff'%20stroke-width='4'/%3E%3Ccircle%20cx='32'%20cy='32'%20r='4'%20fill='%23ff4d6d'/%3E%3C/svg%3E" />
 <style>
   :root {
-    /* Core palette — deep ink + off-white surfaces */
-    --ink-900: #07090d;
-    --ink-850: #0a0d13;
-    --ink-800: #0e121a;
-    --ink-700: #141925;
-    --ink-600: #1c2233;
-    --line: #232a3d;
-    --line-soft: #1a2030;
-    --paper: #f6f7f9;
-    --paper-700: #e7eaf0;
+    /* ---- Control-Room Violet : off-black ink ramp ---- */
+    --ink-900: #08090F;   /* page background (off-black, not pure #000) */
+    --ink-850: #0B0D15;   /* raised cards / control-surface tier */
+    --ink-800: #0F1220;   /* inset / terminal body */
+    --ink-700: #161A2B;   /* hover surface */
+    --line: #23263A;
+    --line-soft: #181B2B;
+    --line-glow: rgba(160,107,255,0.18);
 
     /* Text */
-    --fg: #e8ecf4;
-    --fg-dim: #b4bfd4;
-    --fg-faint: #8794ad;
+    --fg: #E9EAF5;        /* ~15:1 on ink-900 — AAA */
+    --fg-dim: #B7BCD6;    /* ~9:1 — AA */
+    --fg-faint: #878DAD;  /* ~5:1 — AA secondary */
 
-    /* One signature accent: electric cyan */
-    --accent: #29e0d2;
-    --accent-deep: #11b3a8;
-    --accent-glow: rgba(41, 224, 210, 0.16);
+    /* Signature accent — neon purple */
+    --accent: #A06BFF;          /* 6.4:1 — AA normal + UI */
+    --accent-bright: #B98CFF;   /* glow cores / focus */
+    --accent-deep: #6E3CD6;     /* borders / pressed */
+    --accent-glow: rgba(160,107,255,0.16);
 
-    /* Secondary governance amber — gates, ratification */
-    --amber: #f4b740;
-    --amber-soft: rgba(244, 183, 64, 0.14);
+    /* Verify / success green — true "✓ verified" only */
+    --green: #4FD9A4;
+    --green-soft: rgba(79,217,164,0.12);
 
-    /* Evidence / check green — reserved for code + verified states */
-    --green: #57d98a;
-    --green-soft: rgba(87, 217, 138, 0.12);
+    /* Privileged-gate / alarm crimson — RESERVED, never decorative */
+    --gate: #FF4D6D;
+    --gate-soft: rgba(255,77,109,0.13);
+    --gate-glow: rgba(255,77,109,0.20);
 
-    /* Caution magenta — for the "ungoverned" comparison side only */
-    --warn: #ff6b8b;
+    /* Caution amber — kept only for the 3-state roadmap lamp */
+    --amber: #F4B740;
+    --amber-soft: rgba(244,183,64,0.13);
 
     --radius: 14px;
     --radius-sm: 10px;
     --maxw: 1120px;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
@@ -99,6 +106,7 @@
     content: "";
     width: 18px; height: 1px;
     background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
     display: inline-block;
   }
   .muted { color: var(--fg-dim); }
@@ -110,33 +118,48 @@
     font-weight: 600; font-size: 15px;
     padding: 12px 20px; border-radius: 999px;
     border: 1px solid transparent; cursor: pointer;
-    transition: transform .12s ease, background .15s ease, border-color .15s ease;
+    transition: transform .12s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
   .btn:hover { transform: translateY(-1px); }
-  .btn-primary { background: var(--accent); color: #04201d; box-shadow: 0 0 0 1px var(--accent-deep), 0 14px 40px -16px var(--accent-glow); }
-  .btn-primary:hover { background: #3cf0e1; }
-  .btn-ghost { background: rgba(255,255,255,0.02); color: var(--fg); border-color: var(--line); }
-  .btn-ghost:hover { border-color: var(--accent-deep); }
+  .btn-primary {
+    background: var(--accent); color: #150633;
+    box-shadow: 0 0 0 1px var(--accent-deep), 0 14px 44px -14px var(--accent-glow), 0 0 22px -4px var(--accent-glow);
+  }
+  .btn-primary:hover { background: var(--accent-bright); box-shadow: 0 0 0 1px var(--accent), 0 16px 50px -12px var(--accent-glow), 0 0 30px -2px var(--accent-glow); }
+  .btn-ghost { background: rgba(160,107,255,0.04); color: var(--fg); border-color: var(--line); }
+  .btn-ghost:hover { border-color: var(--accent-deep); box-shadow: 0 0 22px -10px var(--accent-glow); }
   .btn svg { width: 16px; height: 16px; }
 
   /* ---------- Nav ---------- */
   header.nav {
     position: sticky; top: 0; z-index: 50;
     backdrop-filter: blur(12px);
-    background: color-mix(in srgb, var(--ink-900) 82%, transparent);
+    background: color-mix(in srgb, var(--ink-900) 84%, transparent);
     border-bottom: 1px solid var(--line-soft);
   }
+  /* ledger-integrity hairline under the sticky bar */
+  header.nav::after {
+    content: ""; position: absolute; left: 0; bottom: -1px; height: 1px; width: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent-glow) 20%, var(--accent) 50%, var(--accent-glow) 80%, transparent);
+    opacity: .5;
+  }
+  header.nav::before {
+    content: ""; position: absolute; bottom: -1px; height: 1px; width: 90px;
+    background: linear-gradient(90deg, transparent, var(--accent-bright), transparent);
+    animation: railscan 6.5s linear infinite;
+  }
+  @keyframes railscan { 0% { left: -90px; } 100% { left: 100%; } }
   .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
   .brand { display: flex; align-items: center; gap: 11px; font-weight: 680; letter-spacing: -0.01em; font-size: 16px; }
-  .brand .mark { width: 26px; height: 26px; }
+  .brand .mark { width: 26px; height: 26px; filter: drop-shadow(0 0 6px var(--accent-glow)); }
   .nav-links { display: flex; align-items: center; gap: 26px; }
   .nav-links a { font-size: 14.5px; color: var(--fg-dim); transition: color .15s; }
   .nav-links a:hover { color: var(--fg); }
   .nav-cta { display: flex; align-items: center; gap: 12px; }
   .tag-pre {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
-    color: var(--amber); border: 1px solid var(--amber-soft);
-    background: var(--amber-soft); padding: 3px 9px; border-radius: 999px;
+    color: var(--accent); border: 1px solid var(--accent-deep);
+    background: var(--accent-glow); padding: 3px 9px; border-radius: 999px;
   }
   @media (max-width: 860px) { .nav-links { display: none; } }
   @media (max-width: 540px) {
@@ -154,23 +177,24 @@
   .hero::before {
     content: ""; position: absolute; inset: 0; z-index: 0;
     background:
-      radial-gradient(900px 480px at 78% -8%, rgba(41,224,210,0.10), transparent 60%),
-      radial-gradient(700px 420px at 8% 0%, rgba(244,183,64,0.05), transparent 55%);
+      radial-gradient(900px 480px at 80% -8%, rgba(160,107,255,0.13), transparent 60%),
+      radial-gradient(680px 420px at 6% 4%, rgba(255,77,109,0.05), transparent 55%);
     pointer-events: none;
   }
+  /* faint blueprint/authority grid, masked */
   .hero::after {
-    content: ""; position: absolute; inset: 0; z-index: 0; opacity: .35;
+    content: ""; position: absolute; inset: 0; z-index: 0; opacity: .4;
     background-image:
       linear-gradient(var(--line-soft) 1px, transparent 1px),
       linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(720px 460px at 70% 6%, #000 0%, transparent 72%);
-    -webkit-mask-image: radial-gradient(720px 460px at 70% 6%, #000 0%, transparent 72%);
+    background-size: 54px 54px;
+    mask-image: radial-gradient(720px 460px at 72% 8%, #000 0%, transparent 72%);
+    -webkit-mask-image: radial-gradient(720px 460px at 72% 8%, #000 0%, transparent 72%);
   }
   .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 54px; align-items: center; }
   .hero-grid > * { min-width: 0; }
   .hero h1 { font-size: clamp(34px, 5vw, 56px); margin-bottom: 20px; }
-  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .accent { color: var(--accent); text-shadow: 0 0 24px var(--accent-glow); }
   .hero-sub { font-size: 18px; color: var(--fg-dim); max-width: 36ch; margin-bottom: 28px; }
   .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
   .badge-row { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
@@ -179,54 +203,106 @@
     border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
     display: inline-flex; align-items: center; gap: 7px;
   }
-  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-  .pill .dot.amber { background: var(--amber); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill .dot.gate { background: var(--gate); box-shadow: 0 0 8px var(--gate); }
   @media (max-width: 920px) { .hero-grid { grid-template-columns: 1fr; gap: 40px; } .hero-sub { max-width: none; } }
 
-  /* ---------- Terminal card ---------- */
+  /* ---------- Terminal card (the hero centerpiece) ---------- */
   .terminal {
+    position: relative;
     background: linear-gradient(180deg, var(--ink-800), var(--ink-850));
     border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: 0 40px 90px -50px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.02);
+    box-shadow:
+      0 40px 90px -50px rgba(0,0,0,0.9),
+      inset 0 1px 0 rgba(255,255,255,0.02),
+      0 0 0 1px rgba(160,107,255,0.06),
+      0 18px 60px -30px var(--accent-glow);
     overflow: hidden;
   }
-  .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,0.015); }
-  .term-bar .lamp { width: 11px; height: 11px; border-radius: 50%; background: #2a3346; }
+  /* restrained CRT scanlines */
+  .terminal::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: .5;
+    background: repeating-linear-gradient(180deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--line-soft); background: rgba(160,107,255,0.025); }
+  .term-bar .lamp { width: 11px; height: 11px; border-radius: 50%; background: #2a2740; }
+  .term-bar .lamp:nth-child(1){ background:#3a2a44; }
+  .term-bar .lamp:nth-child(3){ box-shadow: 0 0 7px var(--accent-glow); background:#3a2f55; }
   .term-bar .title { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-faint); }
-  .term-body { padding: 18px 18px 20px; font-family: var(--mono); font-size: 14px; line-height: 1.82; overflow-x: auto; }
+  .term-body { position: relative; z-index: 2; padding: 18px 18px 20px; font-family: var(--mono); font-size: 14px; line-height: 1.82; overflow-x: auto; }
   .term-body .cmd::before { content: "$ "; color: var(--accent); }
   .term-body .cmd { color: var(--fg); }
   .term-body .cont { color: var(--fg); padding-left: 1.35em; }
-  .term-body .c { color: var(--fg-faint); }   /* comment */
-  .term-body .ok { color: var(--green); }      /* verified / pass */
-  .term-body .gate { color: var(--amber); }    /* gate / ratify */
-  .term-body .k { color: var(--accent); }       /* keyword/value */
+  .term-body .c { color: var(--fg-faint); }
+  .term-body .ok { color: var(--green); }
+  .term-body .gate { color: var(--gate); text-shadow: 0 0 14px var(--gate-glow); }
+  .term-body .k { color: var(--accent); }
   .term-body .out { color: var(--fg-dim); }
+  .term-body .gate-line {
+    margin-top: 4px; padding: 6px 9px; border-radius: 8px;
+    background: var(--gate-soft); border: 1px solid rgba(255,77,109,0.28);
+    box-shadow: 0 0 26px -8px var(--gate-glow);
+    animation: gatepulse 3.2s ease-in-out infinite;
+  }
+  @keyframes gatepulse {
+    0%,100% { box-shadow: 0 0 22px -10px var(--gate-glow); }
+    50% { box-shadow: 0 0 30px -4px var(--gate-glow); }
+  }
 
   /* ---------- Section scaffolding ---------- */
   section { position: relative; }
   .band { padding: 80px 0; border-top: 1px solid var(--line-soft); }
-  .band.paper { background: var(--paper); color: #11151f; border-top: none; }
-  .band.paper .muted { color: #51607a; }
-  .band.paper h2 { color: #0c1019; }
-  .band.paper .card h3, .band.paper .prim h3, .band.paper .stage h3 { color: var(--fg); }
-  .band.paper .eyebrow { color: var(--accent-deep); }
-  .band.paper .eyebrow::before { background: var(--accent-deep); }
+  /* control-surface tier (replaces the old white "paper" bands) */
+  .band.surface {
+    background:
+      linear-gradient(180deg, var(--ink-850), var(--ink-800));
+    border-top: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 var(--line-glow);
+  }
+  .band.surface::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-glow) 30%, var(--accent-glow) 50%, var(--line-glow) 70%, transparent);
+  }
   .section-head { max-width: 56ch; margin-bottom: 44px; }
   .section-head h2 { font-size: clamp(26px, 3.4vw, 36px); margin-bottom: 14px; }
   .section-head p { font-size: 17px; }
 
-  /* ---------- Metrics row ---------- */
+  /* ---------- Metrics row (instrument cluster) ---------- */
   .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
-  .metric { background: var(--ink-850); padding: 26px 22px; }
-  .metric .n { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; color: var(--fg); }
-  .metric .n .u { color: var(--accent); }
+  .metric { position: relative; background: var(--ink-850); padding: 26px 22px; }
+  .metric::before { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); opacity: .55; }
+  .metric .n { font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: -0.03em; color: var(--fg); }
+  .metric .n .u { color: var(--accent); text-shadow: 0 0 14px var(--accent-glow); }
   .metric .l { font-size: 14px; color: var(--fg-dim); margin-top: 4px; }
   @media (max-width: 760px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
 
+  /* ---------- "The Gate" artwork band ---------- */
+  .gate-art-band { padding: 70px 0; border-top: 1px solid var(--line-soft); overflow: hidden; position: relative; }
+  .gate-art-band::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(700px 300px at 86% 50%, var(--gate-soft), transparent 62%),
+                radial-gradient(700px 320px at 18% 50%, var(--accent-glow), transparent 60%);
+    pointer-events: none;
+  }
+  .gate-art-wrap { position: relative; z-index: 1; }
+  .gate-art-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; flex-wrap: wrap; }
+  .gate-art-head h2 { font-size: clamp(22px, 3vw, 30px); }
+  .gate-art-head p { font-size: 15px; color: var(--fg-dim); max-width: 40ch; }
+  .gate-svg { width: 100%; height: auto; display: block; }
+  .gate-svg .agent { animation: agentflick 4s ease-in-out infinite; }
+  .gate-svg .agent:nth-child(2n){ animation-delay: -1.3s; }
+  .gate-svg .agent:nth-child(3n){ animation-delay: -2.6s; }
+  @keyframes agentflick { 0%,100%{ opacity:.85; } 50%{ opacity:1; } }
+  .gate-svg .flow { stroke-dasharray: 6 10; animation: flow 3.4s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -64; } }
+  .gate-svg .seam { animation: seampulse 3.2s ease-in-out infinite; }
+  @keyframes seampulse { 0%,100%{ opacity:.75; } 50%{ opacity:1; } }
+
   /* ---------- Steps ---------- */
   .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
-  .step { background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 22px; position: relative; }
+  .step { background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 22px; position: relative; transition: border-color .18s, box-shadow .18s; }
+  .step:hover { border-color: var(--accent-deep); box-shadow: 0 0 30px -14px var(--accent-glow); }
   .step .num { font-family: var(--mono); font-size: 12px; color: var(--accent); border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; display: inline-block; margin-bottom: 14px; }
   .step h3 { font-size: 17px; margin-bottom: 8px; }
   .step p { font-size: 14px; color: var(--fg-dim); }
@@ -235,9 +311,10 @@
 
   /* ---------- Capability cards ---------- */
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .card { background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 24px; transition: border-color .18s, transform .18s; }
-  .card:hover { border-color: var(--accent-deep); transform: translateY(-2px); }
-  .card .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-glow); border: 1px solid var(--line); margin-bottom: 16px; }
+  .card { background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 24px; transition: border-color .18s, box-shadow .18s, transform .18s; }
+  .card:hover { border-color: var(--accent-deep); transform: translateY(-2px); box-shadow: 0 0 34px -14px var(--accent-glow); }
+  .card .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-glow); border: 1px solid var(--line); margin-bottom: 16px; transition: box-shadow .18s; }
+  .card:hover .icon { box-shadow: 0 0 18px -4px var(--accent-glow); }
   .card .icon svg { width: 19px; height: 19px; stroke: var(--accent); }
   .card h3 { font-size: 16.5px; margin-bottom: 8px; }
   .card p { font-size: 14px; color: var(--fg-dim); }
@@ -261,39 +338,47 @@
   .prim p { font-size: 13.5px; color: var(--fg-dim); }
   @media (max-width: 760px) { .prims { grid-template-columns: 1fr; } }
 
-  /* ---------- Comparison ---------- */
+  /* ---------- Comparison (duotone: purple governed / crimson alarm) ---------- */
   .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   .col { border-radius: var(--radius); padding: 26px; border: 1px solid var(--line-soft); }
-  .col.bad { background: linear-gradient(180deg, rgba(255,107,139,0.05), transparent); }
-  .col.good { background: linear-gradient(180deg, var(--accent-glow), transparent); border-color: var(--accent-deep); }
+  .col.bad { background: linear-gradient(180deg, var(--gate-soft), transparent); border-color: rgba(255,77,109,0.25); }
+  .col.good { background: linear-gradient(180deg, var(--accent-glow), transparent); border-color: var(--accent-deep); box-shadow: 0 0 40px -22px var(--accent-glow); }
   .col h3 { font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
   .col ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
   .col li { display: flex; gap: 11px; font-size: 14.5px; color: var(--fg-dim); }
   .col li .g { color: var(--accent); flex: 0 0 auto; }
-  .col li .b { color: var(--warn); flex: 0 0 auto; }
+  .col li .b { color: var(--gate); flex: 0 0 auto; }
+  .col h3 .b { color: var(--gate); text-shadow: 0 0 12px var(--gate-glow); }
+  .col h3 .g { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
   @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
 
-  /* ---------- Roadmap ---------- */
+  /* ---------- Roadmap (status lamps) ---------- */
   .road { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
   .stage { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 22px; background: var(--ink-850); }
-  .stage .s-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; display: inline-block; margin-bottom: 14px; }
+  .stage .s-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 7px; margin-bottom: 14px; }
+  .stage .s-tag .lamp { width: 7px; height: 7px; border-radius: 50%; }
   .stage.now .s-tag { color: var(--accent); background: var(--accent-glow); }
+  .stage.now .s-tag .lamp { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: livepulse 2.4s ease-in-out infinite; }
+  @keyframes livepulse { 0%,100%{ box-shadow: 0 0 5px var(--accent); } 50%{ box-shadow: 0 0 12px var(--accent); } }
   .stage.pre .s-tag { color: var(--amber); background: var(--amber-soft); }
+  .stage.pre .s-tag .lamp { background: var(--amber); box-shadow: 0 0 7px var(--amber-soft); }
   .stage.draft .s-tag { color: var(--fg-faint); background: rgba(255,255,255,0.03); }
+  .stage.draft .s-tag .lamp { background: var(--fg-faint); }
   .stage h3 { font-size: 16px; margin-bottom: 8px; }
   .stage p { font-size: 13.5px; color: var(--fg-dim); }
   @media (max-width: 820px) { .road { grid-template-columns: 1fr; } }
 
-  /* ---------- Final CTA ---------- */
+  /* ---------- Final CTA (the purple->crimson climax) ---------- */
   .cta-band { position: relative; overflow: hidden; padding: 86px 0; text-align: center; border-top: 1px solid var(--line-soft); }
-  .cta-band::before { content: ""; position: absolute; inset: 0; background: radial-gradient(600px 300px at 50% 0%, var(--accent-glow), transparent 70%); }
+  .cta-band::before { content: ""; position: absolute; inset: 0; background: radial-gradient(620px 320px at 38% 0%, var(--accent-glow), transparent 70%), radial-gradient(560px 300px at 70% 12%, var(--gate-soft), transparent 70%); }
   .cta-band .inner { position: relative; z-index: 1; max-width: 60ch; margin: 0 auto; }
   .cta-band h2 { font-size: clamp(28px, 4vw, 42px); margin-bottom: 16px; }
+  .cta-band h2 code { font-family: var(--mono); color: var(--accent); font-size: .82em; }
   .cta-band p { font-size: 17px; color: var(--fg-dim); margin-bottom: 30px; }
   .cta-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
 
-  /* ---------- Footer ---------- */
-  footer { border-top: 1px solid var(--line-soft); padding: 46px 0 60px; }
+  /* ---------- Footer (powered-down calm) ---------- */
+  footer { border-top: 1px solid var(--line-soft); padding: 46px 0 60px; background: linear-gradient(180deg, transparent, rgba(0,0,0,0.25)); }
   .foot-grid { display: flex; justify-content: space-between; gap: 30px; flex-wrap: wrap; }
   .foot-brand { max-width: 34ch; }
   .foot-brand p { font-size: 13.5px; color: var(--fg-faint); margin-top: 12px; }
@@ -303,7 +388,12 @@
   .foot-col a:hover { color: var(--fg); }
   .foot-base { margin-top: 38px; padding-top: 22px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--fg-faint); }
 
-  .note { font-family: var(--mono); font-size: 13px; color: var(--fg-faint); border-left: 2px solid var(--amber); padding-left: 14px; }
+  .note { font-family: var(--mono); font-size: 13px; color: var(--fg-faint); border-left: 2px solid var(--gate); padding-left: 14px; }
+
+  /* ---------- Motion restraint ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
 </style>
 </head>
 <body>
@@ -313,10 +403,10 @@
   <div class="wrap nav-inner">
     <a class="brand" href="#top" aria-label="Creator Engine home">
       <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#29e0d2" stroke-width="1.6"/>
-        <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#29e0d2" stroke-width="1.4" fill="rgba(41,224,210,0.08)"/>
-        <circle cx="16" cy="16" r="3.2" fill="#29e0d2"/>
-        <path d="M16 11 V7 M16 25 V21 M11.5 13.5 L8 11.5 M20.5 13.5 L24 11.5" stroke="#f4b740" stroke-width="1.3"/>
+        <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
+        <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
+        <circle cx="16" cy="16" r="3.2" fill="#FF4D6D"/>
+        <path d="M16 11 V7 M16 25 V21 M11.5 13.5 L8 11.5 M20.5 13.5 L24 11.5" stroke="#A06BFF" stroke-width="1.3"/>
       </svg>
       Creator&nbsp;Engine
     </a>
@@ -348,7 +438,7 @@
       <p class="hero-sub">Creator Engine binds every agent-authored mutation to identity, mutation class, evidence, and a named ratifier — so agent work is reviewable, ratifiable, and shippable, straight from <code>git clone</code>.</p>
       <div class="badge-row">
         <span class="pill"><span class="dot"></span> Daemonless local <code>ce</code> runtime</span>
-        <span class="pill"><span class="dot amber"></span> Operator-ratified gates</span>
+        <span class="pill"><span class="dot gate"></span> Operator-ratified gates</span>
         <span class="pill"><span class="dot"></span> Evidence in your repo</span>
       </div>
       <div class="hero-actions">
@@ -373,11 +463,11 @@
         <div class="out"><span class="ok">✓</span> conformance: identity, mutation-class, authority — <span class="ok">sample pass set</span></div>
         <div class="cmd">ce launch <span class="k">--dry-run</span></div>
         <div class="out"><span class="c"># visible Controller-seat launch plan built</span></div>
-        <div class="cmd">ce ledger verify <span class="k">--side-effect-ledger-root</span> .hermes/side-effect-ledger</div>
+        <div class="cmd">ce ledger verify <span class="k">--side-effect-ledger-root</span> .ce/side-effect-ledger</div>
         <div class="out"><span class="ok">✓</span> side-effect ledger: hash chain intact (<span class="k">sample ledger</span>)</div>
-        <div class="cmd">ce fanin build <span class="k">--request</span> fanin-request.yml <span class="k">--packet-root</span> .hermes/fan-in</div>
+        <div class="cmd">ce fanin build <span class="k">--request</span> fanin-request.yml <span class="k">--packet-root</span> .ce/fan-in</div>
         <div class="out">evidence packet built · spec ✓ tests ✓ review ✓</div>
-        <div class="out"><span class="gate">⟂ privileged gate: deploy → awaiting Operator ratification</span></div>
+        <div class="out gate-line"><span class="gate">⟂ privileged gate: deploy → awaiting Operator ratification</span></div>
       </div>
     </div>
   </div>
@@ -390,14 +480,100 @@
       <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Baseline mutation classes, privileged floor</div></div>
       <div class="metric"><div class="n">25<span class="u">→</span></div><div class="l">State SDLC machine, 24 governed transitions</div></div>
       <div class="metric"><div class="n">13</div><div class="l"><code>ce</code> command groups in the current runtime surface</div></div>
-      <div class="metric"><div class="n">0<span class="u">∞</span></div><div class="l">Daemons & web servers — runs on demand, then exits</div></div>
+      <div class="metric"><div class="n">0<span class="u">∞</span></div><div class="l">Daemons &amp; web servers — runs on demand, then exits</div></div>
     </div>
     <p class="note" style="margin-top:22px;">v3.0 MVP-complete is proven by the live open→review→merge spike; v3.1 pilot-ready is the active arc. The packaged runtime is still a repository-checkout 0.1.0 pre-release. Apache-2.0.</p>
   </div>
 </section>
 
-<!-- ===================== PRODUCT PROMISE (paper) ===================== -->
-<section class="band paper">
+<!-- ===================== "THE GATE" ARTWORK ===================== -->
+<section class="gate-art-band">
+  <div class="wrap gate-art-wrap">
+    <div class="gate-art-head">
+      <div>
+        <span class="eyebrow">The privileged floor stays human</span>
+        <h2>Agents propose. One gate ratifies.</h2>
+      </div>
+      <p>A lights-out line of agent workers conveys evidence toward a single privileged gate — calm violet flow, one crimson seam only a human opens.</p>
+    </div>
+
+    <!-- "The Gate" — inline SVG: agent-cells on a grid feeding a crimson gate -->
+    <svg class="gate-svg" viewBox="0 0 1120 240" fill="none" aria-label="Isometric lights-out factory line of violet agent cells conveying work toward a single crimson privileged gate">
+      <defs>
+        <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#A06BFF" stop-opacity="0.10"/>
+          <stop offset="1" stop-color="#A06BFF" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="conveyor" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#6E3CD6" stop-opacity="0"/>
+          <stop offset="0.5" stop-color="#A06BFF" stop-opacity="0.9"/>
+          <stop offset="1" stop-color="#FF4D6D" stop-opacity="0.9"/>
+        </linearGradient>
+        <radialGradient id="gateglow" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#FF4D6D" stop-opacity="0.55"/>
+          <stop offset="1" stop-color="#FF4D6D" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="3.2"/>
+        </filter>
+      </defs>
+
+      <!-- faint floor grid -->
+      <g stroke="#23263A" stroke-width="1" opacity="0.55">
+        <path d="M40 170 H1080"/><path d="M40 200 H1080"/>
+        <path d="M120 150 L80 210"/><path d="M260 150 L220 210"/><path d="M400 150 L360 210"/>
+        <path d="M540 150 L500 210"/><path d="M680 150 L640 210"/><path d="M820 150 L780 210"/>
+      </g>
+      <rect x="40" y="150" width="1040" height="62" fill="url(#floor)"/>
+
+      <!-- conveyor trace -->
+      <path class="flow" d="M90 120 H880" stroke="url(#conveyor)" stroke-width="2.4" stroke-linecap="round"/>
+
+      <!-- agent cells -->
+      <g>
+        <g class="agent" transform="translate(96,86)">
+          <rect width="58" height="58" rx="11" fill="#0B0D15" stroke="#6E3CD6" stroke-width="1.4"/>
+          <rect x="9" y="9" width="40" height="40" rx="7" fill="rgba(160,107,255,0.08)"/>
+          <circle cx="29" cy="29" r="5.4" fill="#A06BFF"/>
+        </g>
+        <g class="agent" transform="translate(236,86)">
+          <rect width="58" height="58" rx="11" fill="#0B0D15" stroke="#6E3CD6" stroke-width="1.4"/>
+          <rect x="9" y="9" width="40" height="40" rx="7" fill="rgba(160,107,255,0.08)"/>
+          <circle cx="29" cy="29" r="5.4" fill="#A06BFF"/>
+        </g>
+        <g class="agent" transform="translate(376,86)">
+          <rect width="58" height="58" rx="11" fill="#0B0D15" stroke="#6E3CD6" stroke-width="1.4"/>
+          <rect x="9" y="9" width="40" height="40" rx="7" fill="rgba(160,107,255,0.08)"/>
+          <circle cx="29" cy="29" r="5.4" fill="#A06BFF"/>
+        </g>
+        <g class="agent" transform="translate(516,86)">
+          <rect width="58" height="58" rx="11" fill="#0B0D15" stroke="#6E3CD6" stroke-width="1.4"/>
+          <rect x="9" y="9" width="40" height="40" rx="7" fill="rgba(160,107,255,0.08)"/>
+          <circle cx="29" cy="29" r="5.4" fill="#A06BFF"/>
+        </g>
+        <g class="agent" transform="translate(656,86)">
+          <rect width="58" height="58" rx="11" fill="#0B0D15" stroke="#6E3CD6" stroke-width="1.4"/>
+          <rect x="9" y="9" width="40" height="40" rx="7" fill="rgba(160,107,255,0.08)"/>
+          <circle cx="29" cy="29" r="5.4" fill="#A06BFF"/>
+        </g>
+      </g>
+
+      <!-- the privileged gate -->
+      <ellipse cx="960" cy="120" rx="120" ry="120" fill="url(#gateglow)"/>
+      <g transform="translate(906,40)">
+        <rect width="108" height="160" rx="14" fill="#0B0D15" stroke="#FF4D6D" stroke-width="1.8"/>
+        <rect class="seam" x="50" y="14" width="8" height="132" rx="4" fill="#FF4D6D" filter="url(#soft)"/>
+        <rect class="seam" x="51.5" y="16" width="5" height="128" rx="2.5" fill="#FFB3C1"/>
+        <path d="M30 100 h48 M30 116 h48" stroke="#FF4D6D" stroke-width="1.4" opacity="0.7"/>
+      </g>
+      <text x="124" y="228" fill="#878DAD" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">AGENT WORKERS · PROPOSE</text>
+      <text x="864" y="228" fill="#FF4D6D" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">PRIVILEGED GATE</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ===================== PRODUCT PROMISE (surface) ===================== -->
+<section class="band surface">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">The problem</span>
@@ -446,7 +622,7 @@
 </section>
 
 <!-- ===================== CAPABILITIES ===================== -->
-<section class="band paper" id="capabilities">
+<section class="band surface" id="capabilities">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Capabilities</span>
@@ -494,7 +670,7 @@
     <div class="section-head">
       <span class="eyebrow">The <code>ce</code> runtime</span>
       <h2>Daemonless. Repo-native. Runs on demand, then exits.</h2>
-      <p class="muted">A local command-line runtime over your repository's <code>.hermes/</code> state and tracked substrate. No daemon, no web server. Offline, uv-first install against a checked-in wheelhouse.</p>
+      <p class="muted">A local command-line runtime over your repository's <code>.ce/</code> state and tracked substrate. No daemon, no web server. Offline, uv-first install against a checked-in wheelhouse.</p>
     </div>
 
     <div class="hero-grid" style="align-items:start;">
@@ -513,7 +689,7 @@
           <div class="cont"><span class="k">--find-links</span> validators/wheelhouse creator-engine-validator</div>
           <div class="c"># 3 — initialize local kernel state</div>
           <div class="cmd">.venv/bin/ce init</div>
-          <div class="out"><span class="ok">✓</span> .hermes/ kernel initialized</div>
+          <div class="out"><span class="ok">✓</span> .ce/ kernel initialized</div>
           <div class="c"># 4 — preflight + conformance</div>
           <div class="cmd">.venv/bin/ce doctor && .venv/bin/ce check</div>
           <div class="out"><span class="ok">✓</span> environment governed · <span class="ok">conformance passed</span></div>
@@ -527,7 +703,7 @@
         <div class="cmd-grid">
           <div class="cmd-row"><code>ce check</code><span>Run conformance checks</span></div>
           <div class="cmd-row"><code>ce doctor</code><span>Governed-environment preflight</span></div>
-          <div class="cmd-row"><code>ce init</code><span>Initialize <code>.hermes/</code> state</span></div>
+          <div class="cmd-row"><code>ce init</code><span>Initialize <code>.ce/</code> state</span></div>
           <div class="cmd-row"><code>ce launch</code><span>Visible Controller seat</span></div>
           <div class="cmd-row"><code>ce lane</code><span>Governed visible lanes</span></div>
           <div class="cmd-row"><code>ce worker</code><span>Rootless Podman isolation</span></div>
@@ -546,7 +722,7 @@
 </section>
 
 <!-- ===================== GOVERNANCE PRIMITIVES ===================== -->
-<section class="band paper" id="governance">
+<section class="band surface" id="governance">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Governance primitives</span>
@@ -618,7 +794,7 @@
 </section>
 
 <!-- ===================== ROADMAP / SEAMS ===================== -->
-<section class="band paper" id="roadmap">
+<section class="band surface" id="roadmap">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Roadmap & seams</span>
@@ -627,17 +803,17 @@
     </div>
     <div class="road">
       <div class="stage now">
-        <span class="s-tag">Proven · v3.0</span>
+        <span class="s-tag"><span class="lamp"></span> Proven · v3.0</span>
         <h3>MVP-complete inner loop</h3>
         <p>The live spike proved the governed loop end-to-end: one real PR opened, independently reviewed, and squash-merged by a distinct merge identity, with schema-valid evidence on the hash chain.</p>
       </div>
       <div class="stage pre">
-        <span class="s-tag">In progress · v3.1</span>
+        <span class="s-tag"><span class="lamp"></span> In progress · v3.1</span>
         <h3>Pilot-ready stack</h3>
         <p>G-3.9 cleanup is next, followed by the agent-interaction contract, tokenomics gate, coordination layer, and G-7 product surface with the two-mode installer.</p>
       </div>
       <div class="stage draft">
-        <span class="s-tag">Pre-release · 0.1.0</span>
+        <span class="s-tag"><span class="lamp"></span> Pre-release · 0.1.0</span>
         <h3>Repository-checkout runtime</h3>
         <p>The public package is still installed from the repository's checked-in wheelhouse. No hosted service, no daemon, and no <code>uvx</code> one-liner yet; the Operator-only privileged floor is preserved.</p>
       </div>
@@ -668,9 +844,9 @@
       <div class="foot-brand">
         <a class="brand" href="#top">
           <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#29e0d2" stroke-width="1.6"/>
-            <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#29e0d2" stroke-width="1.4" fill="rgba(41,224,210,0.08)"/>
-            <circle cx="16" cy="16" r="3.2" fill="#29e0d2"/>
+            <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
+            <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
+            <circle cx="16" cy="16" r="3.2" fill="#FF4D6D"/>
           </svg>
           Creator&nbsp;Engine
         </a>
