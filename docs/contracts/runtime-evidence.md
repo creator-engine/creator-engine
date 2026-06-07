@@ -29,9 +29,9 @@ A reader with only a fresh clone must be able to read a chain and answer:
 - the classifier verdict category for the attested event (`classification`:
   `allowed` / `denied` / `escalate`);
 - the run's terminal **outcome**, when the run produced one (a typed
-  `runtime_run_outcome` record: `outcome` ∈ `pr_opened` / `review_submitted` /
-  `research_delivered` / `no_change`, plus a value-free `change_set` pointer — the
-  disposition axis, orthogonal to `lifecycle_phase`); and
+  `runtime_run_outcome` record: `outcome` ∈ `pr_opened` / `pr_merged` /
+  `review_submitted` / `research_delivered` / `no_change`, plus a value-free
+  `change_set` pointer — the disposition axis, orthogonal to `lifecycle_phase`); and
 - whether the chain is intact — no record mutated, reordered, truncated, or
   unlinked (`content_hash`, `prev_hash`, `sequence`).
 
@@ -84,7 +84,7 @@ ended. This is a distinct record type (`kind: runtime-run-outcome`,
 `record_type: runtime_run_outcome`) on an axis **orthogonal** to the container
 `lifecycle_phase`: the lifecycle axis is universal (`provision` → `teardown`),
 whereas the *outcome* is plural and work-type-dependent (a run may open a PR,
-submit a review, deliver research, or change nothing). Modelling the outcome as a
+merge one, submit a review, deliver research, or change nothing). Modelling the outcome as a
 `lifecycle_phase` value would conflate the two axes, so the outcome is its own
 typed record and is **never** a `lifecycle_phase`.
 
@@ -95,9 +95,11 @@ typed record and is **never** a `lifecycle_phase`.
 - **Required fields:** `kind` / `record_type` / `schema_version` / `policy_sha` /
   `run_id` / `sequence` / `prev_hash` / `content_hash` / `recorded_at` / `outcome`
   / `change_set`. It carries **no** `lifecycle_phase` and **no** `classification`.
-- **`outcome`** is a string enum: `pr_opened` / `review_submitted` /
-  `research_delivered` / `no_change`. The v3 MVP produces only `pr_opened`; the
-  rest are reserved vocabulary for later slices.
+- **`outcome`** is a string enum: `pr_opened` / `pr_merged` / `review_submitted` /
+  `research_delivered` / `no_change`. The producers are `pr_opened` (G-3.7) and
+  `pr_merged` (G-3.7b — the gated-merge disposition; its producer is the G-3.7b.1
+  merge-driving seam, the live merge is G-3.8); the rest are reserved vocabulary
+  for later slices.
 - **`change_set`** is a value-free pointer — `branch` / `base` / `manifest_paths`
   / `head_sha` (+ optional `pr_number`). It carries NO diff, NO secret, and NO
   host / credential / account / registry identifier as a normative binding (the

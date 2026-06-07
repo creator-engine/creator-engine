@@ -66,11 +66,13 @@ CLASSIFICATIONS = ("allowed", "denied", "escalate")
 #: orchestrator appends to the chain after ``collect`` to attest WHERE a run
 #: ended. This is ORTHOGONAL to the container ``LIFECYCLE_PHASES`` axis —
 #: outcomes are plural + work-type-dependent — and is NEVER a ``lifecycle_phase``
-#: value. The v3 MVP produces only ``pr_opened``; the rest are reserved
-#: vocabulary for later slices (review / research / no-change runs).
+#: value. The v3 MVP produces ``pr_opened`` (G-3.7) and ``pr_merged`` (G-3.7b —
+#: the gated-merge disposition; its producer is the G-3.7b.1 merge-driving seam,
+#: the live merge is G-3.8). The remaining members are reserved vocabulary for
+#: later slices (review / research / no-change runs).
 RUN_OUTCOME_RECORD_KIND = "runtime-run-outcome"
 RUN_OUTCOME_RECORD_TYPE = "runtime_run_outcome"
-RUN_OUTCOMES = ("pr_opened", "review_submitted", "research_delivered", "no_change")
+RUN_OUTCOMES = ("pr_opened", "pr_merged", "review_submitted", "research_delivered", "no_change")
 
 #: v3 G-3.7.2a ratification record. A typed record (``RATIFICATION_RECORD_KIND`` /
 #: ``RATIFICATION_RECORD_TYPE``) the orchestrator appends to attest that a run was

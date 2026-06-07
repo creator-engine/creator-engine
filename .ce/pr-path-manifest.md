@@ -1,4 +1,4 @@
-# PR path manifest — v3 G-3.7 roadmap-flip + pilot-map extension (docs-only)
+# PR path manifest — v3 G-3.7b.0 `pr_merged` run-outcome model (CI-pure, additive)
 
 This file is the **carrier** for this PR's ratified closed manifest (the
 convention defined in `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
@@ -9,28 +9,36 @@ path-set below (the diff-gate runs *active*, not neutral). The fidelity scan
 (`scan-path-manifest`) additionally requires the declared count and SHA256 to
 match the fenced block.
 
-This is the **final G-3.7 slice** — the ONE roadmap flip closing the whole G-3.7
-program (no per-sub-slice flips), folded with the approved roadmap-to-pilot
-extension (`.hermes/research/V3_ROADMAP_TO_PILOT_EXTENSION_PROPOSAL_20260606.md` +
-`~/Documents/ce-v3-roadmap-to-pilot-design-20260606.md`). It edits ONLY
-`docs/v3-roadmap.md`: flip **G-3.7 → MERGED** (the live OPEN drive proven
-end-to-end; gated merge deferred → G-3.7b/G-3.8), append the Pilot block to the
-gate-map + 7 `designed` rows (G-3.7b/G-3.8 · G-3.9 · G-4 · G-5 · G-6 · G-7), a
-coherence prose fix, and the milestone-aware "What's next" (the **v3.0
-MVP-complete** + **v3.1 pilot-ready** milestones + the deferred post-pilot
-backlog; cites the in-repo `docs/architecture/pilot-*.md`). **Docs-only, CI-pure:**
-zero code/schema/forge/test/architecture-doc change → the suite (1860/1/1),
-`--list-checks` (43), `available_backends()`, and `check-examples` (77/0) are all
-byte-unchanged. When this merges, **G-3.7 is CLOSED**.
+This is the data MODEL half of the gated-merge substrate (G-3.7b.0) — it adds the
+**`pr_merged`** terminal run-outcome to the run-disposition vocabulary: a new
+member of the spine `RUN_OUTCOMES` tuple + the `runtime-evidence.schema.yaml`
+`runtime_run_outcome_record.outcome` enum + the prose contract, plus a new
+well-formed `example-runtime-evidence-chain-pr-merged.yml` and accept tests. The
+change is **ADDITIVE** — the existing four outcome members + the record shape +
+the other `$defs` + `append`/`verify_chain`/`canonical_content_hash` are
+byte-unchanged, and there is **NO `schema_version` bump** (the G-3.7.2a
+precedent; existing chains still validate). `pr_merged` is **producer-less** in
+this slice — its producer (the merge-driving seam + the distinct merge-identity
+seam) is the next slice **G-3.7b.1**, and the live merge is the out-of-envelope
+**G-3.8**. It touches no orchestrator/run_assembly/forge/check/backend/CLI/wheel
+surface and adds no dependency → `--list-checks` STAYS **43**,
+`available_backends()` is unchanged, and `check-examples` STAYS **77/0** (the new
+well-formed example is absorbed by the whole-`examples/well-formed` expectation
+entry — NOT 78). RED→GREEN, CI-pure (no live `gh`/network/`apply=True`). Design
+source: the in-repo `docs/architecture/pilot-roadmap.md` §"G-3.7b / G-3.8".
 
-- **base:** `7095cfbfbdb040b1511b899ebe70fab2bd9fec6d`.
+- **base:** `ab83629f1105550985a9577b721a3991cf6c397c`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=2
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=66e7ad7ab04be13723de672338c4ee9eacc4ab3f2c3977350b8a3d52a9c47cb6
+AUTHORIZED_PATHS_SHA256=a385d83a9af5d20316ec0bb0302816343e9ae3a0483dfd2a8c61b9f19e12ce5f
 
 ```text
 .ce/pr-path-manifest.md
-docs/v3-roadmap.md
+docs/contracts/runtime-evidence.md
+examples/well-formed/runtime-evidence/example-runtime-evidence-chain-pr-merged.yml
+schemas/runtime-evidence.schema.yaml
+validators/creator_engine_validator/runtime_evidence_spine.py
+validators/tests/unit/test_ce_runtime_evidence.py
 ```

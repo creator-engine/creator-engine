@@ -30,6 +30,7 @@ from creator_engine_validator.runtime_evidence_spine import (
     RATIFICATION_RECORD_TYPE,
     RUN_OUTCOME_RECORD_KIND,
     RUN_OUTCOME_RECORD_TYPE,
+    RUN_OUTCOMES,
     append,
     canonical_content_hash,
     is_policy_sha,
@@ -127,6 +128,27 @@ def test_run_outcome_with_bad_outcome_value_is_schema_violation():
     doc = _chain_with_outcome("not-a-real-outcome")
     errors = validate_runtime_evidence_chain(doc, Path("bad-outcome.yml"))
     assert CODE_SCHEMA in _codes(errors)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7b.0 — the pr_merged run-outcome MODEL (additive vocabulary; producer-less
+# until G-3.7b.1; the live merge is G-3.8).
+# ---------------------------------------------------------------------------
+def test_pr_merged_is_in_run_outcomes_vocabulary():
+    """``pr_merged`` is a first-class run-outcome member (the gated-merge disposition)."""
+    assert "pr_merged" in RUN_OUTCOMES
+
+
+def test_chain_with_pr_merged_outcome_validates_clean():
+    """A terminal ``runtime_run_outcome`` record with ``outcome: pr_merged`` is schema-valid + chain-clean."""
+    doc = _chain_with_outcome("pr_merged")
+    errors = validate_runtime_evidence_chain(doc, Path("pr-merged-chain.yml"))
+    assert errors == []
+    assert verify_chain(doc["records"]) == []
+    tail = doc["records"][-1]
+    assert tail["record_type"] == RUN_OUTCOME_RECORD_TYPE
+    assert tail["outcome"] == "pr_merged"
+    assert "lifecycle_phase" not in tail  # an outcome is NEVER a container phase
 
 
 # ---------------------------------------------------------------------------
