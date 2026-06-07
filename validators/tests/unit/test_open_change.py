@@ -247,5 +247,5 @@ def test_slice_registers_no_check_and_adds_no_backend():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner import available_backends
 
-    assert len(registered_checks()) == 44
+    assert len(registered_checks()) == 45  # G-4.1 added v3_naming_hygiene
     assert available_backends() == ("gvisor-proxy", "local-noop")

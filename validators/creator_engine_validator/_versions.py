@@ -107,6 +107,35 @@ BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+# --- v3 plane-C SCHEMAS (G-4.1). The v3-classified schema surface the
+#     ``v3_naming_hygiene`` check scans for bootstrapping-harness residue, paired
+#     with the v3 CODE surface (``classify(...) == V3``). Paths are repo-root
+#     relative. Declared (not derived) so a rename is caught (COMPLETENESS) and
+#     the set is an explicit ratchet floor. v1/shared schemas are NOT listed. ---
+V3_SCHEMAS: frozenset[str] = frozenset(
+    {
+        "schemas/runtime-policy.schema.yaml",
+        "schemas/runtime-evidence.schema.yaml",
+    }
+)
+
+# --- Neutral v3/v3.1 LOCAL-STATE root (G-4.1). The CE-namespaced, gitignored
+#     instance-local state root for the v3 execution runtime — NEVER ``.hermes/``
+#     (the v1 bootstrapping-harness residue, retained frozen for v1 only) and
+#     NEVER ``.claude/`` (Claude Code's own tool dir; using it would re-bind CE
+#     state to one harness — the same mistake). The v3 sink/driver are already
+#     path-neutral (``evidence_sink(root)`` / ``make_run_driver(root)`` take the
+#     write-root as a parameter), so this is the convention/default the v3 work-
+#     driving CLI (G-7) wires production state under. See
+#     ``docs/contracts/v3-naming-hygiene.md``. ---
+V3_LOCAL_STATE_ROOT = ".ce/state"
+
+# --- Baselined v3 naming-hygiene exceptions (G-4.1 ratchet floor). Each entry is
+#     (repo-relative-file, residue-token) — a justified, pre-existing residue in
+#     the v3 surface. EXPECTED EMPTY: the v3 surface is clean on day one. The set
+#     only shrinks; a new residue in the v3 surface fails ``v3_naming_hygiene``. ---
+BASELINE_V3_NAMING_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
+
 
 def classify(rel_module: str) -> str:
     """Return the version line (``v1`` / ``v3`` / ``shared``) for a module.
