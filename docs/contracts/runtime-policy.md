@@ -182,3 +182,29 @@ agent-action cells and falls back to the safe `ask` gate mode). The
   Rules carry the Lobster separation-of-duties fields
   (`require_different_approver` / `initiated_by` / `approved_by`) as shape
   only.
+
+## v3 G-5 — tokenomics spend fields (additive, optional)
+
+G-5 adds OPTIONAL plane-C spend-governance fields. All are additive: a record
+that omits them is a valid G-1.0/G-4 policy (no spend governance). The
+`ce_runtime_policy` check validates their **shape**; the cross-envelope
+*semantics* are enforced by `ce_spend_envelope` and the gate runtime lives in
+`runner.spend_gate` — see [`docs/contracts/spend-envelope.md`](spend-envelope.md).
+
+- **`spend_envelopes`** — the nested deny-by-default envelopes (`global` ->
+  `fleet` -> `run`, most-restrictive-wins). Each is `{scope, amount, unit, window}`
+  (+ optional `reset_anchor` / `fleet_id`). A `global` `$` ceiling is mandatory
+  whenever any `$` envelope is declared (the anti-catastrophe backstop). Two
+  regimes: `$` = API-USD (fleet); `%` = single-seat subscription meter (`run`-scoped
+  only, never a fleet). Shape only — never a host / credential / account identifier.
+- **`max_concurrent_runs`** — the concurrency envelope dimension (a semaphore
+  ceiling). Over-limit admission yields `throttle` (retry), distinct from
+  `budget_exhausted` (no retry).
+- **`model_rates`** — the per-model API-USD rate table the `$` regime meters
+  against. **Read live, never hardcoded** — prices live in policy (re-read each run)
+  because vendor rates/caps drift.
+- **`spend_cap_enforcement`** (`enforce` | `off`, default `enforce`) +
+  **`spend_cap_optout`** — the cost-enforcement opt-out: a ratified-HUMAN-only
+  choice (an agent can never set it). `off` disables the sub-allocated CAPS but never
+  the runaway-DETECTION net (the mandatory global ceiling + anomaly → escalate), and
+  REQUIRES a `spend_cap_optout` `{ratified_prompt_sha, approver_ref}` binding.

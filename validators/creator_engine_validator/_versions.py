@@ -89,6 +89,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.cc_hook_adapter",
         "runner.gvisor_proxy_backend",
         "runner.noop_backend",
+        # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
+        "runner.spend_gate",
     }
 )
 

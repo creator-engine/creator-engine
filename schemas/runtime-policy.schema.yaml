@@ -219,6 +219,58 @@ properties:
       `decide()` control-point resolves (OpenClaw exec-approvals modes + Zed
       precedence). Optional; when absent the safe `ask` default applies to every
       gateable cell.
+  spend_envelopes:
+    type: array
+    items:
+      $ref: "#/$defs/spend_envelope"
+    description: |
+      v3 G-5 (additive, optional): the nested deny-by-default spend envelopes
+      (`global` -> `fleet` -> `run`, most-restrictive-wins). Shape only here — the
+      admission-gate + circuit-breaker semantics live in `runner.spend_gate`; the
+      `ce_spend_envelope` check enforces the cross-envelope predicates (a mandatory
+      `global` `$` ceiling whenever any `$` envelope is declared; inner <= outer
+      consistency; two-regime unit correctness). A record WITHOUT this field is a
+      valid G-1.0/G-4 policy (no spend governance). Never a host / credential /
+      account identifier.
+  max_concurrent_runs:
+    type: integer
+    minimum: 1
+    description: |
+      v3 G-5 (additive, optional): the concurrency envelope dimension — the maximum
+      number of runs admitted at once (a semaphore ceiling). Over-limit admission
+      yields the `throttle` signal (retry with backoff), distinct from
+      `budget_exhausted` (no retry). The live cross-process semaphore is deferred;
+      this is the policy ceiling the pure `admit_concurrency` reads.
+  model_rates:
+    type: array
+    items:
+      $ref: "#/$defs/model_rate"
+    description: |
+      v3 G-5 (additive, optional): the per-model API-USD rate table the fleet (`$`)
+      regime meters against. READ LIVE, NEVER HARDCODED — vendor rates / caps drift
+      (e.g. the +50% weekly bump expiring 2026-07-13), so prices live in policy and
+      are re-read each run, never baked into code. Prices are per-MTok ($ / 1e6
+      tokens). Required only for the fleet (`$`) regime; the subscription `%`-seat
+      regime needs none.
+  spend_cap_enforcement:
+    type: string
+    enum: [enforce, off]
+    default: enforce
+    description: |
+      v3 G-5 (additive, optional): the cost-enforcement opt-out lever — an
+      OPERATOR-FACING, RATIFIED-HUMAN-ONLY choice (an agent can never set it; the
+      gate is external to the agent). `enforce` (default): the spend CAPS are
+      active. `off`: the opt-out — it disables the sub-allocated fleet / run budget
+      CAPS (the friction) but NEVER the always-on runaway-DETECTION net (the
+      mandatory `global` `$` ceiling + anomaly -> escalate stay on). `off` REQUIRES
+      a `spend_cap_optout` ratification binding (the `ce_spend_envelope` check
+      refuses an unratified opt-out — `VAL-SPEND-OPTOUT-UNRATIFIED`).
+  spend_cap_optout:
+    $ref: "#/$defs/spend_cap_optout"
+    description: |
+      v3 G-5 (additive, optional): the ratification binding REQUIRED when
+      `spend_cap_enforcement` is `off`. Value-free opaque digests proving the
+      opt-out was an explicit ratified human choice.
 $defs:
   agent_op:
     type: string
@@ -401,3 +453,93 @@ $defs:
           Whether the egress proxy terminates TLS for this rule.
           REQUIRED to be `true` for any rule whose `assurance`
           includes `l7`.
+  spend_envelope:
+    type: object
+    required: [scope, amount, unit, window]
+    unevaluatedProperties: false
+    properties:
+      scope:
+        type: string
+        enum: [global, fleet, run]
+        description: |
+          The envelope level. Nested deny-by-default `global` >= `fleet` >= `run`
+          (most-restrictive-wins). A `global` `$` ceiling is mandatory whenever any
+          `$` envelope is declared (the anti-catastrophe backstop).
+      amount:
+        type: number
+        exclusiveMinimum: 0
+        description: |
+          The cap magnitude in `unit` (`$` for the fleet regime, `%` for the single
+          subscription seat). Shape only; not a vendor price.
+      unit:
+        type: string
+        enum: ["$", "%"]
+        description: |
+          `$` = API-USD (the fleet regime). `%` = single-seat utilization meter
+          (the subscription regime — `run`-scoped only, never a `fleet` / `global`
+          scope; a subscription seat is never a poolable fleet).
+      window:
+        type: string
+        enum: [per_run, rolling_5h, rolling_weekly, total]
+        description: |
+          The accounting window the cap applies over (`per_run` / `total` for the
+          `$` regime; `rolling_5h` / `rolling_weekly` for the `%`-seat meter).
+      reset_anchor:
+        type: string
+        minLength: 1
+        description: |
+          Optional: the window reset anchor (shape only; the live wall-clock window
+          bucketing is deferred).
+      fleet_id:
+        type: string
+        minLength: 1
+        description: |
+          Optional: the fleet this envelope scopes (for `scope: fleet`). Shape only
+          — never an account / host identifier.
+  model_rate:
+    type: object
+    required: [model, input_per_mtok, output_per_mtok]
+    unevaluatedProperties: false
+    properties:
+      model:
+        type: string
+        minLength: 1
+      input_per_mtok:
+        type: number
+        minimum: 0
+      output_per_mtok:
+        type: number
+        minimum: 0
+      cache_read_per_mtok:
+        type: number
+        minimum: 0
+        description: |
+          Optional: the cache-read price per MTok. When absent the documented
+          cache-read RATIO (0.1x input — a ratio, not an expiring absolute price)
+          applies.
+      cache_write_per_mtok:
+        type: number
+        minimum: 0
+        description: |
+          Optional: the cache-creation price per MTok. When absent the input rate
+          applies (conservative).
+    description: |
+      One model's API-USD rate row. Prices are deployment / vendor data read live
+      from policy — never baked into code.
+  spend_cap_optout:
+    type: object
+    required: [ratified_prompt_sha, approver_ref]
+    unevaluatedProperties: false
+    properties:
+      ratified_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 digest of the ratified Operator prompt authorizing the
+          opt-out — an opaque digest, never the prompt body.
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest standing in for the approving human actor. NEVER a raw
+          account / login.

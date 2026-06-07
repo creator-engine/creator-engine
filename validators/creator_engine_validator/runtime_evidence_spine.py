@@ -116,6 +116,41 @@ AGENT_ACTION_TIMINGS = ("pre", "post")
 DECISION_MODES = ("deny", "allowlist", "ask", "auto", "full")
 REMEMBER_VALUES = ("none", "allow_always", "reject_always")
 
+#: v3 G-5 tokenomics spend records. Two typed records on a NEW axis ORTHOGONAL to
+#: the container ``lifecycle_phase``, the run ``outcome``, the ``ratification``, and
+#: the agent ``action`` — and NEVER a ``lifecycle_phase`` value. Both are appended
+#: to the SAME hash chain (content-addressed + chain-linked + policy-bound) so the
+#: spend ledger and its breaches are themselves tamper-evident grader input. The
+#: spend signal is FAITHFUL-BY-CONSTRUCTION (transport / API-reported, never
+#: agent-asserted) — it inherits the Fork-1 fidelity (an agent cannot spoof its own
+#: spend). This shared substrate carries only the value-free constants; the PURE
+#: decision functions that PRODUCE the records live in the v3 ``runner.spend_gate``
+#: (no runner / forge import here, exactly like the outcome / ratification / action
+#: axes). The two record types are:
+#:   * a METER / ledger record (``RUNTIME_SPEND_LEDGER_*``) — one metered cost leaf
+#:     (``$`` for a fleet seat, ``%`` for the single subscription seat) that the
+#:     pure ``project_spend`` folds (per scope + window) into the cumulative tally
+#:     (state-as-projection — there is no separate mutable ledger file);
+#:   * a BREACH record (``RUNTIME_SPEND_BREACH_*``) — a ``soft`` (~80% alert,
+#:     continue) or ``hard`` (100% pause + escalate) circuit-breaker trip, carrying
+#:     the two-signal refusal (``budget_exhausted`` = do-NOT-retry vs ``throttle``
+#:     = retry-with-backoff) — never conflated (the retry-storm hazard).
+RUNTIME_SPEND_LEDGER_RECORD_KIND = "runtime-spend-ledger"
+RUNTIME_SPEND_LEDGER_RECORD_TYPE = "runtime_spend_ledger"
+RUNTIME_SPEND_BREACH_RECORD_KIND = "runtime-spend-breach"
+RUNTIME_SPEND_BREACH_RECORD_TYPE = "runtime_spend_breach"
+#: The two disjoint billing-tier metric units (Fork C): ``$`` = API-USD (the fleet
+#: regime); ``%`` = single-seat utilization meter (the subscription regime).
+SPEND_UNITS = ("$", "%")
+#: The nested deny-by-default envelope scopes (Fork B), most-restrictive-wins.
+SPEND_SCOPES = ("global", "fleet", "run")
+#: The accounting windows a cap may apply over.
+SPEND_WINDOWS = ("per_run", "rolling_5h", "rolling_weekly", "total")
+#: Circuit-breaker tiers (the two-tier breach model).
+SPEND_BREACH_TIERS = ("soft", "hard")
+#: The two-signal refusal protocol — distinct codes (cf. Portkey 412-vs-429).
+SPEND_SIGNALS = ("budget_exhausted", "throttle")
+
 #: Semantic finding kinds returned by :func:`verify_chain`. The check maps these
 #: to its own stable error codes — the spine owns the *semantics*, not the codes.
 FINDING_KINDS = ("content_address", "chain_link", "sequence", "policy_unbound")
