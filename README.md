@@ -38,6 +38,20 @@ harness output inform the Operator but never ratify on the Operator's
 behalf. v1.0 is the integration target: an end-to-end governed agentic
 SDLC loop with every privileged gate human-ratified.
 
+## Versions: v1.0 and v3.x coexist
+
+Creator Engine v1.0 and v3.x **coexist** in this repository on a shared
+governance base — v1.0 is a shipped, working system and the substrate we
+operate on to build v3.x; it is retained, not replaced. The two **execution
+runtimes** are kept independently-operable: the v1.0 coordination/launch
+runtime (the `ce` launcher, lane/PCO/tmux/hook pack) and the v3.x agent-native
+execution runtime (orchestrator, forge adapters, runner backends) do not import
+each other. Both entry points are retained — `ce` is the v1 launcher; the v3
+CLI arrives as a *distinct* entry point at G-7, never by mutating `ce`. The
+boundary is declared in `creator_engine_validator/_versions.py` and enforced by
+the `version_boundary` check; see
+[`docs/architecture/VERSION_BOUNDARY.md`](./docs/architecture/VERSION_BOUNDARY.md).
+
 ## v1.0 command-line runtime (`ce`)
 
 v1.0 adds a daemonless, repo-native, local command-line runtime, `ce`. It runs

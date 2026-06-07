@@ -62,11 +62,11 @@ G-3       first working v3 — one real Dev-mode gate end-to-end
 Pilot     post-MVP stack → v3.1 pilot-ready (full-stack-first)
             G-3.7b CI-pure: merge-seam + live-merge-identity seam + pr_merged model
             G-3.8  out-of-envelope LIVE merge spike   ► v3.0 MVP-complete ✓ REACHED
-            G-3.9  D1–D6 cleanup (safe early deletions; D0 done; lane/launch D2 deferred → post-G-7.0)
+            G-3.9  version coexistence / separation (declare + guard the v1⊥v3 boundary; v1 RETAINED; no deletion)
             G-4    agent-interaction contract (AgentActionEvent → decide() → runtime_agent_action)
             G-5    tokenomics gate (spend envelope: admission + circuit-breaker)
             G-6    coordination layer (Scope + backlog + DoR-wiring + crosswalk)
-            G-7    product surface (v3 CLI + seat-launch replacement + 2-mode install [one-liner + signed agent-native]; retires deferred D2)  ► v3.1 pilot-ready
+            G-7    product surface (v3 CLI as a DISTINCT entry point alongside `ce` + 2-mode install [one-liner + signed agent-native]; v1 launcher retained)  ► v3.1 pilot-ready
 ```
 
 ## Gate status
@@ -97,7 +97,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.7 | live spike — first working v3: the live OPEN drive (App-JWT mint → one real PR → persisted evidence + CE-owned ratification record → correct revoke), Operator-ratified outside the CI-purity envelope; custody / ratification / leak-hardening landed; **gated merge deferred → G-3.7b/G-3.8** | #140–#145 (+ out-of-envelope live drive 3.7.3b) | `a132534` | MERGED |
 | G-3.7b | CI-pure merge-driving seam + distinct live-merge-identity seam + `pr_merged` run-outcome/schema/spine (`.0` run-outcome model + `.1` merge-driving producer) | #148 (`.0`) + #149 (`.1`) | `af60f06` | MERGED |
 | G-3.8 | out-of-envelope live merge spike — one real PR opened → independently reviewed → squash-merged by a **distinct merge identity** (merge identity ≠ run token); value-free `pr_merged` evidence persisted on the same chain (`verify_chain()==[]`, schema-valid); **zero repo code change** (ran the merged G-3.7b seams) → **v3.0 MVP-complete** | — (out-of-envelope live spike) | — | PROVEN (live) |
-| G-3.9 | D1–D6 cleanup per `v3-spec.md §4` (D0 done; lane/launch D2 deferred to post-G-7.0; worker re-homed) | — | — | designed |
+| G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | _this PR_ | _pending_ | DONE |
 | G-4 | agent-interaction contract (`AgentActionEvent`/`decide()`/`runtime_agent_action`; Tier-B CC-hooks) | — | — | designed |
 | G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
 | G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
@@ -130,8 +130,8 @@ governed inner loop live end-to-end:** one real PR opened → independently revi
 one tamper-evident, value-free evidence chain (open → `pr_opened` → ratification →
 `pr_merged`; `verify_chain()==[]`, schema-valid), with **zero repo code change**.
 **► v3.0 "MVP-complete" is REACHED.** The remaining full-stack-first arc to a
-developer pilot (G-3.9 → G-7, to the **v3.1 pilot-ready** milestone) is below —
-**G-3.9 is next**.
+developer pilot (G-3.9 → G-7, to the **v3.1 pilot-ready** milestone) is below.
+**G-3.9 (version coexistence) lands here; G-4 is next.**
 
 ## What's next
 
@@ -151,9 +151,13 @@ developer pilot, gated by the next milestone:
   file work, and get governed, cost-safe PRs + merges. Reached at the end of
   **G-7**.
 
-1. **G-3.9** *(next)* — D1–D6 cleanup (safe early deletions; D0 done; the
-   lane/launch/tmux deletion D2 is deferred to post-G-7.0 so the build never cuts
-   the launcher it runs on; worker isolation primitives re-homed, not lost).
+1. **G-3.9** *(lands here)* — version coexistence / separation: declare the
+   v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the
+   `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version`
+   allowlist ratchet). **v1.0 is retained whole — no deletion** (this replaces the
+   spec §6 "deletion plan"); any future removal is orphaned-only, proven dead to
+   both versions. The v3.1 arc proceeds additively with **"v1 retained + v1⊥v3
+   held"** as a standing invariant.
 2. **G-4** — the agent-interaction contract (`AgentActionEvent` → `decide()` →
    `runtime_agent_action`; Tier-B CC-hooks/stream-json transport).
 3. **G-5** — the tokenomics gate (spend envelope: `spend_cap` /
