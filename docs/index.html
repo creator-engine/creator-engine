@@ -6,12 +6,12 @@
 <meta name="color-scheme" content="dark" />
 <title>Creator Engine — Governed SDLC for autonomous agents</title>
 <meta name="description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
-<link rel="canonical" href="https://creator-engine.github.io/creator-engine/" />
+<link rel="canonical" href="https://creator-engine.dev/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Creator Engine" />
 <meta property="og:title" content="Creator Engine — Governed SDLC for autonomous agents" />
 <meta property="og:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
-<meta property="og:url" content="https://creator-engine.github.io/creator-engine/" />
+<meta property="og:url" content="https://creator-engine.dev/" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Creator Engine — Governed SDLC for autonomous agents" />
 <meta name="twitter:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
@@ -20,8 +20,9 @@
   Creator Engine — initial one-page brand site (design prototype)
   Self-contained: no external fonts, scripts, images, or network calls.
   All styling is inline; all glyphs are inline SVG or system characters.
-  Status discipline: v1.0 runtime is pre-release (runtime-complete, not yet
-  tagged); v2.0 is draft/spec-only. Copy must not present either as shipped.
+  Status discipline: public copy must reflect the current v3 roadmap: v3.0
+  MVP-complete is proven; v3.1 pilot-ready is in progress; the packaged
+  runtime remains a 0.1.0 repository-checkout pre-release.
 -->
 <style>
   :root {
@@ -38,8 +39,8 @@
 
     /* Text */
     --fg: #e8ecf4;
-    --fg-dim: #9aa6bd;
-    --fg-faint: #6c7790;
+    --fg-dim: #b4bfd4;
+    --fg-faint: #8794ad;
 
     /* One signature accent: electric cyan */
     --accent: #29e0d2;
@@ -129,7 +130,7 @@
   .brand { display: flex; align-items: center; gap: 11px; font-weight: 680; letter-spacing: -0.01em; font-size: 16px; }
   .brand .mark { width: 26px; height: 26px; }
   .nav-links { display: flex; align-items: center; gap: 26px; }
-  .nav-links a { font-size: 14px; color: var(--fg-dim); transition: color .15s; }
+  .nav-links a { font-size: 14.5px; color: var(--fg-dim); transition: color .15s; }
   .nav-links a:hover { color: var(--fg); }
   .nav-cta { display: flex; align-items: center; gap: 12px; }
   .tag-pre {
@@ -192,9 +193,10 @@
   .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,0.015); }
   .term-bar .lamp { width: 11px; height: 11px; border-radius: 50%; background: #2a3346; }
   .term-bar .title { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-faint); }
-  .term-body { padding: 18px 18px 20px; font-family: var(--mono); font-size: 13.5px; line-height: 1.85; overflow-x: auto; }
+  .term-body { padding: 18px 18px 20px; font-family: var(--mono); font-size: 14px; line-height: 1.82; overflow-x: auto; }
   .term-body .cmd::before { content: "$ "; color: var(--accent); }
   .term-body .cmd { color: var(--fg); }
+  .term-body .cont { color: var(--fg); padding-left: 1.35em; }
   .term-body .c { color: var(--fg-faint); }   /* comment */
   .term-body .ok { color: var(--green); }      /* verified / pass */
   .term-body .gate { color: var(--amber); }    /* gate / ratify */
@@ -219,7 +221,7 @@
   .metric { background: var(--ink-850); padding: 26px 22px; }
   .metric .n { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; color: var(--fg); }
   .metric .n .u { color: var(--accent); }
-  .metric .l { font-size: 13px; color: var(--fg-dim); margin-top: 4px; }
+  .metric .l { font-size: 14px; color: var(--fg-dim); margin-top: 4px; }
   @media (max-width: 760px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
 
   /* ---------- Steps ---------- */
@@ -301,7 +303,7 @@
   .foot-col a:hover { color: var(--fg); }
   .foot-base { margin-top: 38px; padding-top: 22px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--fg-faint); }
 
-  .note { font-family: var(--mono); font-size: 12.5px; color: var(--fg-faint); border-left: 2px solid var(--amber); padding-left: 14px; }
+  .note { font-family: var(--mono); font-size: 13px; color: var(--fg-faint); border-left: 2px solid var(--amber); padding-left: 14px; }
 </style>
 </head>
 <body>
@@ -326,7 +328,7 @@
       <a href="#roadmap">Roadmap</a>
     </nav>
     <div class="nav-cta">
-      <span class="tag-pre">v1.0 · pre-release</span>
+      <span class="tag-pre">v3.0 · MVP-complete</span>
       <a class="btn btn-ghost" href="https://github.com/creator-engine/creator-engine" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
         GitHub
@@ -358,7 +360,7 @@
       </div>
     </div>
 
-    <!-- Hero terminal: a real ce session shape -->
+    <!-- Hero terminal: representative ce session shape; sample inputs abbreviated. -->
     <div class="terminal" role="img" aria-label="Example ce CLI session showing checks passing and a privileged gate routed to the Operator">
       <div class="term-bar">
         <span class="lamp"></span><span class="lamp"></span><span class="lamp"></span>
@@ -369,11 +371,11 @@
         <div class="out"><span class="ok">✓</span> governed environment verified · rootless podman ready</div>
         <div class="cmd">ce check</div>
         <div class="out"><span class="ok">✓</span> conformance: identity, mutation-class, authority — <span class="ok">sample pass set</span></div>
-        <div class="cmd">ce lane launch <span class="k">--spec</span> 007-payments-api</div>
-        <div class="out"><span class="c"># visible lane opened · worker isolated</span></div>
-        <div class="cmd">ce ledger verify</div>
+        <div class="cmd">ce launch <span class="k">--dry-run</span></div>
+        <div class="out"><span class="c"># visible Controller-seat launch plan built</span></div>
+        <div class="cmd">ce ledger verify <span class="k">--side-effect-ledger-root</span> .hermes/side-effect-ledger</div>
         <div class="out"><span class="ok">✓</span> side-effect ledger: hash chain intact (<span class="k">sample ledger</span>)</div>
-        <div class="cmd">ce fanin</div>
+        <div class="cmd">ce fanin build <span class="k">--request</span> fanin-request.yml <span class="k">--packet-root</span> .hermes/fan-in</div>
         <div class="out">evidence packet built · spec ✓ tests ✓ review ✓</div>
         <div class="out"><span class="gate">⟂ privileged gate: deploy → awaiting Operator ratification</span></div>
       </div>
@@ -387,10 +389,10 @@
     <div class="metrics">
       <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Baseline mutation classes, privileged floor</div></div>
       <div class="metric"><div class="n">25<span class="u">→</span></div><div class="l">State SDLC machine, 24 governed transitions</div></div>
-      <div class="metric"><div class="n">10</div><div class="l"><code>ce</code> command groups in the v1.0 surface</div></div>
+      <div class="metric"><div class="n">13</div><div class="l"><code>ce</code> command groups in the current runtime surface</div></div>
       <div class="metric"><div class="n">0<span class="u">∞</span></div><div class="l">Daemons & web servers — runs on demand, then exits</div></div>
     </div>
-    <p class="note" style="margin-top:22px;">v1.0 runtime is runtime-complete and pre-release — landed on <code>main</code>, pinned at 0.1.0, ready for Operator ratification but not yet cut or tagged. Apache-2.0.</p>
+    <p class="note" style="margin-top:22px;">v3.0 MVP-complete is proven by the live open→review→merge spike; v3.1 pilot-ready is the active arc. The packaged runtime is still a repository-checkout 0.1.0 pre-release. Apache-2.0.</p>
   </div>
 </section>
 
@@ -502,23 +504,26 @@
           <span class="title">install + first run</span>
         </div>
         <div class="term-body">
-          <div class="c"># 1 — clone the governed repository</div>
-          <div class="cmd">git clone &lt;your-tenant-repo&gt; && cd repo</div>
-          <div class="c"># 2 — offline, uv-first install (cp314 wheelhouse)</div>
-          <div class="cmd">uv sync <span class="k">--offline</span></div>
+          <div class="c"># 1 — clone the public repository</div>
+          <div class="cmd">git clone https://github.com/creator-engine/creator-engine.git</div>
+          <div class="cmd">cd creator-engine</div>
+          <div class="c"># 2 — install from the checked-in cp314 wheelhouse</div>
+          <div class="cmd">uv venv <span class="k">--python</span> 3.14</div>
+          <div class="cmd">UV_PYTHON_DOWNLOADS=never uv pip install <span class="k">--no-index</span> \</div>
+          <div class="cont"><span class="k">--find-links</span> validators/wheelhouse creator-engine-validator</div>
           <div class="c"># 3 — initialize local kernel state</div>
-          <div class="cmd">ce init</div>
+          <div class="cmd">.venv/bin/ce init</div>
           <div class="out"><span class="ok">✓</span> .hermes/ kernel initialized</div>
           <div class="c"># 4 — preflight + conformance</div>
-          <div class="cmd">ce doctor && ce check</div>
+          <div class="cmd">.venv/bin/ce doctor && .venv/bin/ce check</div>
           <div class="out"><span class="ok">✓</span> environment governed · <span class="ok">conformance passed</span></div>
           <div class="c"># 5 — open the visible Controller seat</div>
-          <div class="cmd">ce launch</div>
+          <div class="cmd">.venv/bin/ce launch</div>
         </div>
       </div>
 
       <div>
-        <p class="muted" style="margin-bottom:18px;font-size:15px;">The complete v1.0 command surface — ten groups, no hidden authority:</p>
+        <p class="muted" style="margin-bottom:18px;font-size:15px;">The current command surface — thirteen groups, no hidden authority:</p>
         <div class="cmd-grid">
           <div class="cmd-row"><code>ce check</code><span>Run conformance checks</span></div>
           <div class="cmd-row"><code>ce doctor</code><span>Governed-environment preflight</span></div>
@@ -529,9 +534,12 @@
           <div class="cmd-row"><code>ce ledger</code><span>Append-only hash chain</span></div>
           <div class="cmd-row"><code>ce fanin</code><span>Read-only evidence packet</span></div>
           <div class="cmd-row"><code>ce queue</code><span>Integration dry-run preview</span></div>
+          <div class="cmd-row"><code>ce event</code><span>Local CE-event chains</span></div>
+          <div class="cmd-row"><code>ce pcl</code><span>Coordination ledgers</span></div>
+          <div class="cmd-row"><code>ce connector</code><span>Connector plans and bounded submits</span></div>
           <div class="cmd-row"><code>ce hud</code><span>Seam alias for <code>ce launch</code></span></div>
         </div>
-        <p class="note" style="margin-top:18px;"><code>ce fanin</code> and <code>ce queue</code> carry no authority. The Integration Queue is a dry-run landing preview in v1.0; live landing is post-v1.</p>
+        <p class="note" style="margin-top:18px;"><code>ce fanin</code>, <code>ce queue</code>, and connector output inform decisions; they do not ratify privileged action. The one-line <code>uvx</code> installer is post-v1 — today's public install is a repository checkout.</p>
       </div>
     </div>
   </div>
@@ -614,24 +622,24 @@
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Roadmap & seams</span>
-      <h2>Honest about what ships today.</h2>
-      <p class="muted">We name release stages plainly. v0.1 substrate composes beneath a pre-release v1.0 runtime; v2.0 is a drafted direction, not shipped runtime.</p>
+      <h2>Honest about where the build is.</h2>
+      <p class="muted">We name release stages plainly. v3.0 is MVP-complete; v3.1 pilot-ready is in progress; the public runtime package remains a 0.1.0 repository-checkout pre-release.</p>
     </div>
     <div class="road">
       <div class="stage now">
-        <span class="s-tag">Shipped · v0.1</span>
-        <h3>Governance substrate</h3>
-        <p>Identity schema, mutation-class taxonomy, authority matrix, attestation/ratification/redaction formats, Spec Kit sidecars, and an offline validator — all runnable from a fresh clone.</p>
+        <span class="s-tag">Proven · v3.0</span>
+        <h3>MVP-complete inner loop</h3>
+        <p>The live spike proved the governed loop end-to-end: one real PR opened, independently reviewed, and squash-merged by a distinct merge identity, with schema-valid evidence on the hash chain.</p>
       </div>
       <div class="stage pre">
-        <span class="s-tag">Pre-release · v1.0</span>
-        <h3>Daemonless <code>ce</code> runtime</h3>
-        <p>Runtime-complete and landed on <code>main</code> at 0.1.0; G0–G9 delivery gates ready for Operator ratification. Not yet cut or tagged — the end-to-end governed loop is the integration target.</p>
+        <span class="s-tag">In progress · v3.1</span>
+        <h3>Pilot-ready stack</h3>
+        <p>G-3.9 cleanup is next, followed by the agent-interaction contract, tokenomics gate, coordination layer, and G-7 product surface with the two-mode installer.</p>
       </div>
       <div class="stage draft">
-        <span class="s-tag">Draft · v2.0</span>
-        <h3>Foundation substrate</h3>
-        <p>Spec-authoring-only: a canonical <code>.ce/</code> namespace, a read-only v1→v2 importer, operating modes, and advisory agent roles. No v2 runtime is shipped; the Operator-only privileged floor is preserved in every mode.</p>
+        <span class="s-tag">Pre-release · 0.1.0</span>
+        <h3>Repository-checkout runtime</h3>
+        <p>The public package is still installed from the repository's checked-in wheelhouse. No hosted service, no daemon, and no <code>uvx</code> one-liner yet; the Operator-only privileged floor is preserved.</p>
       </div>
     </div>
   </div>
@@ -689,13 +697,13 @@
           <a href="https://github.com/creator-engine/creator-engine/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
           <a href="https://github.com/creator-engine/creator-engine/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a>
           <a href="https://github.com/creator-engine/creator-engine/blob/main/LICENSE" rel="noopener">License</a>
-          <a href="mailto:ubuntuaws745@gmail.com">Contact</a>
+          <a href="https://github.com/creator-engine/creator-engine/issues" rel="noopener">Issues</a>
         </div>
       </div>
     </div>
     <div class="foot-base">
       <span>© 2026 Creator Engine. Licensed under Apache-2.0.</span>
-      <span>v1.0 pre-release (0.1.0) · v2.0 draft · governance-first by design.</span>
+      <span>v3.0 MVP-complete · v3.1 pilot arc · 0.1.0 pre-release package.</span>
     </div>
   </div>
 </footer>
