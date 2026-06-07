@@ -13,6 +13,7 @@ and no backend (``--list-checks`` and ``available_backends()`` unchanged).
 import socket
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +25,7 @@ from creator_engine_validator.orchestrator import (
     MintedCredential,
     PlanNotRatified,
     RatificationBindingRefused,
+    merge_change,
     run_plan,
 )
 from creator_engine_validator.forge import open_change
@@ -770,3 +772,126 @@ def test_observed_head_absent_is_unchanged_3_7_2b_behavior(monkeypatch):
     )
     assert len(opener_calls) == 1
     assert any(r["record_type"] == "runtime_ratification" for r in evidence.records)
+
+
+# ---------------------------------------------------------------------------
+# G-3.7b.1 — the merge-driving producer: merge_change drives a gated merge of an
+# ALREADY-OPEN, reviewed PR (a disposition distinct from an agent run) through an
+# injected forge-free change_merger (the production closure wraps forge.merge), and
+# on an ACTUAL merge attests a typed pr_merged run-outcome on the SAME hash chain.
+# Forge-free: the change_merger is injected; the orchestrator imports zero forge at
+# runtime. An ineligible / non-mutating (plan-mode would_merge) merge attests NOTHING.
+# ---------------------------------------------------------------------------
+def _pr_opened_prior(run_id: str = "run-1"):
+    """A realistic prior chain from the open drive (ends at a pr_opened outcome + change_set)."""
+    return run_plan(
+        valid_policy(), run_id, ("echo", "hi"), approved(run_id),
+        backend=_ChangeSetBackend(), clock=CounterClock(),
+        change_opener=lambda change_set, plan_ref: SimpleNamespace(pr_number=43),
+    )
+
+
+def test_merge_change_attests_pr_merged_on_actual_merge():
+    prior = _pr_opened_prior()
+    assert prior.records[-1]["outcome"] == "pr_opened"  # the open-drive terminal
+    merger_calls: list = []
+    # An ACTUAL merge (apply path): merged=True + the value-free gate snapshot.
+    result = SimpleNamespace(
+        merged=True, would_merge=True, eligible=True,
+        pr_number=43, head_sha="d" * 40, merge_commit_sha="f" * 40,
+    )
+
+    def change_merger():
+        merger_calls.append(1)
+        return result
+
+    evidence = merge_change(
+        prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=change_merger,
+        clock=CounterClock(),
+    )
+    assert len(merger_calls) == 1
+    # The TERMINAL record is a TYPED pr_merged run-outcome on the disposition axis (no phase).
+    outcome = evidence.records[-1]
+    assert outcome["kind"] == "runtime-run-outcome"
+    assert outcome["record_type"] == "runtime_run_outcome"
+    assert outcome["outcome"] == "pr_merged"
+    assert "lifecycle_phase" not in outcome  # an outcome is NOT a container phase
+    # The pr_merged record carries the SAME value-free change_set pointer shape as pr_opened
+    # (branch / base / manifest_paths / head_sha / pr_number) — NO merge_commit_sha slot
+    # (no schema bump in this slice; the commit sha lives only on the returned MergeResult).
+    assert outcome["change_set"]["branch"] == "ce/run-1"
+    assert outcome["change_set"]["pr_number"] == 43
+    assert "merge_commit_sha" not in outcome
+    assert "merge_commit_sha" not in outcome["change_set"]
+    # Appended onto the SAME chain (open -> merged): exactly one pr_merged, prior tail preserved.
+    outcomes = [r.get("outcome") for r in evidence.records]
+    assert outcomes.count("pr_merged") == 1
+    assert evidence.records[-2]["outcome"] == "pr_opened"
+    # Chain-linked + policy-bound + value-free; verifies clean.
+    assert verify_chain(list(evidence.records)) == []
+    assert all(r["policy_sha"] == _POLICY_SHA for r in evidence.records)
+    assert all("value" not in r for r in evidence.records)
+
+
+def test_merge_change_ineligible_attests_no_pr_merged():
+    # A gate-ineligible merge (the change_merger reports not merged / not would-merge) attests
+    # NOTHING — the gate is load-bearing: no pr_merged record, the chain is unchanged.
+    prior = _pr_opened_prior()
+    result = SimpleNamespace(
+        merged=False, would_merge=False, eligible=False, pr_number=43, head_sha="d" * 40,
+    )
+    evidence = merge_change(
+        prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=lambda: result,
+    )
+    assert all(r.get("outcome") != "pr_merged" for r in evidence.records)
+    assert evidence.records[-1]["outcome"] == "pr_opened"
+    assert verify_chain(list(evidence.records)) == []
+
+
+def test_merge_change_plan_mode_would_merge_attests_no_pr_merged():
+    # A NON-mutating plan-mode preview (would_merge True but merged False) attests NOTHING —
+    # pr_merged means the PR was ACTUALLY merged, never a dry-run preview.
+    prior = _pr_opened_prior()
+    result = SimpleNamespace(
+        merged=False, would_merge=True, eligible=True, pr_number=43, head_sha="d" * 40,
+    )
+    evidence = merge_change(
+        prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=lambda: result,
+    )
+    assert all(r.get("outcome") != "pr_merged" for r in evidence.records)
+    assert evidence.records[-1]["outcome"] == "pr_opened"
+
+
+def test_merge_change_persists_only_on_actual_merge():
+    # The injected sink fires (once) on an actual merge, and NOT at all when nothing merged.
+    prior = _pr_opened_prior()
+    written: list = []
+    merged_result = SimpleNamespace(merged=True, would_merge=True, pr_number=43, head_sha="d" * 40)
+    merge_change(
+        prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=lambda: merged_result,
+        evidence_sink=lambda ev: written.append(ev), clock=CounterClock(),
+    )
+    assert len(written) == 1 and written[0].records[-1]["outcome"] == "pr_merged"
+
+    written.clear()
+    not_merged = SimpleNamespace(merged=False, would_merge=False, pr_number=43, head_sha="d" * 40)
+    merge_change(
+        prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=lambda: not_merged,
+        evidence_sink=lambda ev: written.append(ev),
+    )
+    assert written == []  # nothing merged -> nothing persisted
+
+
+def test_merge_change_propagates_merger_refusal_without_attesting():
+    # If the change_merger raises (e.g. forge.merge(apply=True) raised MergeRefused on an
+    # ineligible PR), merge_change does not swallow it and attests NO partial pr_merged record.
+    prior = _pr_opened_prior()
+
+    class _Refused(RuntimeError):
+        pass
+
+    def change_merger():
+        raise _Refused("merge gate not satisfied")
+
+    with pytest.raises(_Refused):
+        merge_change(prior, run_id="run-1", policy_sha=_POLICY_SHA, change_merger=change_merger)

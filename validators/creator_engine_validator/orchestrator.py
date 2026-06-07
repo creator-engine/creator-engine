@@ -96,6 +96,7 @@ from .runtime_evidence_spine import (
 if TYPE_CHECKING:  # type-only: the orchestrator imports ZERO from ``forge`` at runtime
     from .evidence_sink import EvidenceSink
     from .forge.change import ChangeRef
+    from .forge.merge import MergeResult
 
 
 class PlanNotRatified(RunnerError):
@@ -216,6 +217,16 @@ TokenMinter = Callable[[dict[str, Any], str], "MintedCredential | None"]
 #                              apply=False, gh_runner=gh_runner_factory())
 #       return change_opener
 ChangeOpener = Callable[["RunChangeSet", str], "ChangeRef | None"]
+
+
+# A change-merger drives the gated merge of an ALREADY-OPEN, reviewed PR and returns the
+# value-free MergeResult (whether it ``merged`` / ``would_merge`` + the gate snapshot; it holds
+# NO token). The production closure (see ``run_assembly.make_merge_driver``) wraps
+# ``forge.merge(change, apply=live, gh_runner=<the DISTINCT merge identity — NEVER the per-run
+# token>)``; injecting it (rather than importing the forge here) keeps the orchestrator pure and
+# forge-free, and keeps the merge credential out of the orchestrator entirely. Zero-arg: the
+# closure captures the already-open change to merge.
+ChangeMerger = Callable[[], "MergeResult"]
 
 
 def _ratify_or_refuse(
@@ -487,6 +498,83 @@ def run_plan(
     # injected G-3.5 sink, AFTER teardown, on the success path. The sink is an injectable seam
     # (default None = today's behavior, zero I/O — the orchestrator stays pure); a malformed
     # chain's EvidencePersistRefused PROPAGATES (non-conforming evidence is a defect to surface).
+    if evidence_sink is not None:
+        evidence_sink(evidence)
+    return evidence
+
+
+def merge_change(
+    prior_evidence: CollectedEvidence,
+    *,
+    run_id: str,
+    policy_sha: str,
+    change_merger: ChangeMerger,
+    evidence_sink: "EvidenceSink | None" = None,
+    clock: Clock | None = None,
+) -> CollectedEvidence:
+    """Drive a gated merge of an already-open, reviewed PR; attest a typed ``pr_merged`` outcome.
+
+    The disposition AFTER review (G-3.7b.1) — a merge acts on an ALREADY-OPEN, gate-eligible PR,
+    so it is its OWN entry, distinct from the agent-run :func:`run_plan`. Thin, forge-free glue:
+
+    1. **drive the merge** via the injected ``change_merger`` (the production closure wraps
+       ``forge.merge`` through a DISTINCT merge identity — NEVER the per-run token; see
+       ``run_assembly.make_merge_driver``). It returns the value-free :class:`~.forge.merge.MergeResult`
+       (duck-typed here — the orchestrator imports ZERO from ``forge`` at runtime);
+    2. **attest only an ACTUAL merge** — when ``result.merged`` is True (the ``apply``/live path),
+       append a TYPED ``runtime_run_outcome`` record (``outcome: pr_merged`` + the value-free
+       ``change_set`` pointer carried from the open drive — branch / base / manifest_paths / head_sha
+       + the PR number; NO secret, and NO ``merge_commit_sha`` slot under the v1 schema) onto the
+       SAME hash chain via the spine :func:`~.runtime_evidence_spine.append`, so the merge
+       disposition is itself tamper-evident; then persist via the injected sink. A NON-mutating
+       plan-mode preview (``would_merge`` but not ``merged``) or a gate-ineligible result attests
+       NOTHING (``pr_merged`` means the PR was ACTUALLY merged, never a dry run); a
+       ``change_merger`` that RAISES (e.g. ``forge.merge(apply=True)`` refused an ineligible PR)
+       PROPAGATES, leaving no partial record.
+
+    Holds no credential, allocates nothing, runs no subprocess; in CI it is exercised against a
+    fake ``change_merger`` with zero live I/O. The merge identity is the composition root's
+    concern (``run_assembly``); it never reaches here.
+    """
+    clock = clock if clock is not None else CounterClock()
+    result = change_merger()
+    if not bool(getattr(result, "merged", False)):
+        # Not actually merged (a plan-mode would-merge preview, or a gate-ineligible result):
+        # attest nothing and persist nothing; the caller surfaces the MergeResult disposition.
+        return prior_evidence
+    change_set = prior_evidence.change_set
+    if change_set is None:
+        raise ValueError(
+            f"merge_change for run {run_id!r} requires the open drive's change_set "
+            "(the value-free pointer to the merged change) to attest the pr_merged outcome"
+        )
+    change_set_ptr: dict[str, Any] = {
+        "branch": change_set.branch,
+        "base": change_set.base,
+        "manifest_paths": list(change_set.manifest_paths),
+        "head_sha": change_set.head_sha,
+    }
+    pr_number = getattr(result, "pr_number", None)
+    if pr_number is not None:
+        change_set_ptr["pr_number"] = pr_number
+    merged_record = append(
+        list(prior_evidence.records),
+        {
+            "kind": RUN_OUTCOME_RECORD_KIND,
+            "record_type": RUN_OUTCOME_RECORD_TYPE,
+            "schema_version": "1",
+            "policy_sha": policy_sha,
+            "run_id": run_id,
+            "recorded_at": clock(),
+            "outcome": "pr_merged",
+            "change_set": change_set_ptr,
+        },
+    )
+    evidence = replace(
+        prior_evidence,
+        records=tuple(prior_evidence.records) + (merged_record,),
+        note=f"{prior_evidence.note}; run-outcome: pr_merged",
+    )
     if evidence_sink is not None:
         evidence_sink(evidence)
     return evidence

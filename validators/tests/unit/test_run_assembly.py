@@ -31,7 +31,8 @@ import pytest
 import yaml
 
 from creator_engine_validator.forge.scoped_token import TokenRequest
-from creator_engine_validator.run_assembly import make_run_driver
+from creator_engine_validator.orchestrator import run_plan
+from creator_engine_validator.run_assembly import make_merge_driver, make_run_driver
 from creator_engine_validator.runner import (
     RunChangeSet,
     RunnerBackend,
@@ -453,3 +454,135 @@ def test_default_live_false_opens_apply_false_and_skips_observer(monkeypatch):
     driver(valid_policy(), "run-1", ("echo", "hi"), approved(), _token_request("run-1"))
     assert len(oc_calls) == 1 and oc_calls[0]["apply"] is False  # default path: apply=False
     assert observer_calls == []  # head_observer NOT called when live=False
+
+
+# ---------------------------------------------------------------------------
+# G-3.7b.1 — the merge composition root: make_merge_driver drives a gated merge of an
+# ALREADY-OPEN, reviewed PR through a DISTINCT merge identity (the injected
+# merge_gh_runner — NEVER the per-run token: no mint, no authenticated_gh_runner on
+# the merge path), composes forge.merge(apply=live), and on an ACTUAL merge appends +
+# persists a typed pr_merged outcome onto the open drive's chain. Zero live I/O: merge
+# is a recording fake; subprocess/socket/Path.write_text explode.
+# ---------------------------------------------------------------------------
+def _pr_opened_prior(run_id: str = "run-1"):
+    """A realistic prior chain from the open drive (pr_opened terminal + change_set)."""
+    return run_plan(
+        valid_policy(), run_id, ("echo", "hi"), approved(run_id),
+        backend=_ChangeSetBackend(),
+        change_opener=lambda change_set, plan_ref: SimpleNamespace(pr_number=43),
+    )
+
+
+def _recording_merge(calls: list):
+    """A fake forge.merge: records the call + returns a value-free MergeResult-like.
+
+    ``merged`` is True ONLY on an actual apply (apply=True); plan mode (apply=False) is a
+    non-mutating would-merge preview (merged=False)."""
+
+    def fake_merge(change, *, apply, gh_runner):
+        calls.append(
+            {"apply": apply, "gh_runner": gh_runner, "repo": change.repo,
+             "pr_number": change.pr_number, "head_sha": change.head_sha}
+        )
+        return SimpleNamespace(
+            merged=bool(apply), would_merge=True, eligible=True,
+            pr_number=change.pr_number, head_sha=change.head_sha, merge_commit_sha="f" * 40,
+        )
+
+    return fake_merge
+
+
+def _boom(msg: str):
+    def boom(*a, **k):  # pragma: no cover - must never run on the merge path
+        raise AssertionError(msg)
+
+    return boom
+
+
+def test_merge_driver_actual_merge_attests_and_persists_via_distinct_identity(monkeypatch):
+    _explode(monkeypatch)
+    merge_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.merge", _recording_merge(merge_calls))
+    # LOAD-BEARING: the merge identity is DISTINCT — the merge path must mint NO per-run token
+    # and never reach for the per-run-token runner.
+    monkeypatch.setattr(
+        "creator_engine_validator.run_assembly.mint_scoped_token",
+        _boom("the merge path must NOT mint a per-run token"),
+    )
+    monkeypatch.setattr(
+        "creator_engine_validator.run_assembly.authenticated_gh_runner",
+        _boom("the merge must NOT authenticate as the per-run token"),
+    )
+    written: list = []
+    merge_runner = object()  # the DISTINCT merge identity (a sentinel fake GhRunner)
+    driver = make_merge_driver(
+        _REPO, Path("/evidence"), merge_gh_runner=merge_runner,
+        write=lambda p, t: written.append((p, t)), live=True,
+    )
+    prior = _pr_opened_prior()
+    evidence = driver(prior, pr_number=43, run_id="run-1", policy_sha=_POLICY_SHA)
+
+    # forge.merge driven once, apply=True (live), through the DISTINCT runner (never a token runner),
+    # on the SAME already-open PR (pr_number/head_sha carried from the open drive's change_set).
+    assert len(merge_calls) == 1
+    assert merge_calls[0]["apply"] is True
+    assert merge_calls[0]["gh_runner"] is merge_runner
+    assert merge_calls[0]["pr_number"] == 43 and merge_calls[0]["head_sha"] == "d" * 40
+
+    # pr_merged attested onto the open drive's chain (open -> merged) + persisted; clean + schema-valid.
+    outcome = evidence.records[-1]
+    assert outcome["record_type"] == "runtime_run_outcome"
+    assert outcome["outcome"] == "pr_merged" and "lifecycle_phase" not in outcome
+    assert outcome["change_set"]["pr_number"] == 43
+    assert "merge_commit_sha" not in outcome and "merge_commit_sha" not in outcome["change_set"]
+    assert evidence.records[-2]["outcome"] == "pr_opened"
+    assert verify_chain(list(evidence.records)) == []
+    assert len(written) == 1
+    path, text = written[0]
+    assert path == Path("/evidence/run-1.runtime-evidence.yaml")
+    doc = yaml.safe_load(text)
+    assert doc["kind"] == "runtime-evidence-chain"
+    assert doc["records"][-1]["outcome"] == "pr_merged"
+    assert verify_chain(doc["records"]) == []
+    assert validate_with_schema(doc, _SCHEMA, str(path), code="x", contract=_CONTRACT) == []
+
+
+def test_merge_driver_plan_mode_attests_nothing_and_does_not_persist(monkeypatch):
+    # Default live=False -> forge.merge(apply=False): a non-mutating gate preview. Nothing was
+    # actually merged, so NO pr_merged is attested and NOTHING is persisted.
+    _explode(monkeypatch)
+    merge_calls: list = []
+    monkeypatch.setattr("creator_engine_validator.run_assembly.merge", _recording_merge(merge_calls))
+    written: list = []
+    driver = make_merge_driver(
+        _REPO, Path("/evidence"), merge_gh_runner=object(),
+        write=lambda p, t: written.append((p, t)),  # live defaults False
+    )
+    prior = _pr_opened_prior()
+    evidence = driver(prior, pr_number=43, run_id="run-1", policy_sha=_POLICY_SHA)
+    assert len(merge_calls) == 1 and merge_calls[0]["apply"] is False  # plan-by-default
+    assert all(r.get("outcome") != "pr_merged" for r in evidence.records)
+    assert evidence.records[-1]["outcome"] == "pr_opened"
+    assert written == []  # nothing merged -> nothing persisted
+
+
+def test_merge_driver_merge_refusal_propagates_and_attests_nothing(monkeypatch):
+    # forge.merge(apply=True) raising MergeRefused (an ineligible PR) propagates; NO partial
+    # pr_merged record, NO persistence — the gate is load-bearing end to end.
+    from creator_engine_validator.forge.merge import MergeRefused
+
+    _explode(monkeypatch)
+    written: list = []
+
+    def refusing_merge(change, *, apply, gh_runner):
+        raise MergeRefused("merge gate not satisfied")
+
+    monkeypatch.setattr("creator_engine_validator.run_assembly.merge", refusing_merge)
+    driver = make_merge_driver(
+        _REPO, Path("/evidence"), merge_gh_runner=object(),
+        write=lambda p, t: written.append((p, t)), live=True,
+    )
+    prior = _pr_opened_prior()
+    with pytest.raises(MergeRefused):
+        driver(prior, pr_number=43, run_id="run-1", policy_sha=_POLICY_SHA)
+    assert written == []

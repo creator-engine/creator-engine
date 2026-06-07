@@ -46,14 +46,16 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_sink import file_evidence_sink
-from .forge.change import open_change
+from .forge.change import ChangeRef, open_change
 from .forge.credential_runner import authenticated_gh_runner
-from .forge.github_repo_config import ForgeConfigError
+from .forge.github_repo_config import ForgeConfigError, GhRunner
+from .forge.merge import MergeResult, merge
 from .forge.scoped_token import TokenRequest, mint_scoped_token, revoke_scoped_token
 from .orchestrator import (
     ApprovedPlan,
     MintedCredential,
     RatificationBindingRefused,
+    merge_change,
     run_plan,
 )
 from .runner import CollectedEvidence, RunnerBackend
@@ -200,5 +202,88 @@ def make_run_driver(
                         run_id,
                         token.token_ref,
                     )
+
+    return drive
+
+
+#: The composed merge driver: drive(prior_evidence, *, pr_number, run_id, policy_sha).
+MergeDriver = Callable[..., CollectedEvidence]
+
+
+def make_merge_driver(
+    repo: str,
+    root: Path,
+    *,
+    merge_gh_runner: GhRunner,
+    write: Any = None,
+    live: bool = False,
+) -> MergeDriver:
+    """Return a driver that drives a gated merge of an already-open, reviewed PR + persists.
+
+    v3 G-3.7b.1 — the merge composition root, the disposition AFTER review. The merge acts on an
+    ALREADY-OPEN, gate-eligible PR, so this is a SEPARATE composition from the open/run drive
+    (:func:`make_run_driver`).
+
+    **Distinct merge identity (load-bearing).** The merge credential is the injected
+    ``merge_gh_runner`` and is **NEVER the per-run scoped token**: the per-run token AUTHORED the
+    PR, so it must not merge it (self-merge collision; the merge gate + branch protection assume an
+    independent merger — see ``docs/architecture/pilot-deployment-transport.md``). This root
+    therefore mints NO per-run token and never reaches for ``authenticated_gh_runner``; the merge
+    authenticates ONLY as ``merge_gh_runner`` (CI injects a fake; the real distinct credential is
+    provisioned at the out-of-envelope G-3.8 live drive).
+
+    **Plan-by-default.** ``live`` (default OFF) promotes ``forge.merge`` from ``apply=False`` (a
+    non-mutating gate-read preview — byte-for-byte the offline default) to ``apply=True``; only the
+    G-3.8 live drive sets it. ``pr_merged`` is attested only on an ACTUAL merge.
+
+    The returned ``drive(prior_evidence, *, pr_number, run_id, policy_sha)`` reconstructs the
+    value-free merge target from the open drive's ``change_set`` (the PR it merges), composes the
+    forge-free ``change_merger`` over ``forge.merge(change, apply=live, gh_runner=merge_gh_runner)``,
+    and appends + persists the typed ``pr_merged`` outcome via :func:`~.orchestrator.merge_change`
+    (the G-3.5 sink). The prior evidence (the open drive's chain) is supplied at drive time — its
+    live read is the G-3.8 runbook's concern, never here. Zero live I/O — every seam is injected.
+    """
+    root = Path(root)
+
+    def drive(
+        prior_evidence: CollectedEvidence,
+        *,
+        pr_number: int,
+        run_id: str,
+        policy_sha: str,
+    ) -> CollectedEvidence:
+        change_set = prior_evidence.change_set
+        if change_set is None:
+            raise ValueError(
+                f"make_merge_driver drive for run {run_id!r} requires the open drive's change_set "
+                "(the value-free pointer to the already-open PR being merged)"
+            )
+        # The value-free merge target: the SAME already-open PR (its number + head to head-pin) the
+        # open drive produced. Only repo + pr_number + head_sha are load-bearing for the gated merge.
+        change = ChangeRef(
+            repo=repo,
+            branch=change_set.branch,
+            base=change_set.base,
+            pr_number=pr_number,
+            head_sha=change_set.head_sha,
+            manifest_paths=tuple(change_set.manifest_paths),
+            plan_ref=policy_sha,
+            changed=True,
+            applied=True,
+            verified=True,
+        )
+
+        def change_merger() -> MergeResult:
+            # Authenticate the merge AS the DISTINCT merge identity — NEVER the per-run token.
+            return merge(change, apply=live, gh_runner=merge_gh_runner)
+
+        sink = file_evidence_sink(root, write=write)
+        return merge_change(
+            prior_evidence,
+            run_id=run_id,
+            policy_sha=policy_sha,
+            change_merger=change_merger,
+            evidence_sink=sink,
+        )
 
     return drive
