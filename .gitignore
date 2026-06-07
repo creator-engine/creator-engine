@@ -35,3 +35,12 @@ __pycache__/
 # rebuildable read-receipts the `ce connector` runtime writes; it is instance-local,
 # never tracked, and never carries a credential value. Additive instance-zone line.
 .ce/connector/cache/
+
+# Instance-local governed-execution working zones. CE gate execution provisions
+# per-gate git worktrees and per-PR reviewer-seat clones INSIDE the repo dir
+# (`ce-worktrees/<gate>/`, `ce-review-venues/pr<N>-<ts>/`). These are separate
+# working trees / clones — never content of the canonical tree — so they MUST NOT
+# be tracked or appear as untracked pollution on other branches. Additive
+# instance-zone lines only.
+/ce-worktrees/
+/ce-review-venues/

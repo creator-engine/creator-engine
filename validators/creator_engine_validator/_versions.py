@@ -86,6 +86,7 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner",
         "runner.audit_overlay",
         "runner.backend",
+        "runner.cc_hook_adapter",
         "runner.gvisor_proxy_backend",
         "runner.noop_backend",
     }

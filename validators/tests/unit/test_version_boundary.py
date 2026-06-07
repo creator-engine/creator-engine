@@ -63,7 +63,8 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    assert len(ver.V3_RUNTIME) == 18
+    # v3 gained runner.cc_hook_adapter (the G-4 Tier-B derivation seam): 18 -> 19.
+    assert len(ver.V3_RUNTIME) == 19
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

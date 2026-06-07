@@ -13,6 +13,12 @@ runtime. The classifier + audit overlay that *produces* spine records over the
 ``RunnerBackend`` provision/run/collect/teardown lifecycle is the deferred
 G-1.3b slice.
 
+v3 G-4 (additive): a chain MAY now also carry ``runtime_agent_action`` records
+(the per-action attestations on their own orthogonal axis). They validate
+through the SAME path — the schema gained a fourth ``oneOf`` branch and
+``verify_chain`` is record-type-agnostic (content-address + chain-link +
+sequence + policy-binding apply uniformly), so no check logic changes.
+
 A file is treated as a candidate Runtime Evidence chain when it satisfies all
 of:
 

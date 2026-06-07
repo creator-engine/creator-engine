@@ -39,8 +39,8 @@ The developer test group will pilot CE on a real greenfield OSS project and will
 ### G-4 — Agent-interaction contract (per-run substrate)
 - A typed `AgentActionEvent` (op × mutation_class × fidelity) + a `runtime_agent_action` hash-chained record (builds on the existing `mutation_class` taxonomy + the evidence spine).
 - A `decide()` control-point (deterministic, in-process, zero-token; **observe-all, gate-mutations-selectively**) + runtime-policy action-class allowlists + a gate-mode ladder (builds on the existing `classify()`).
-- The first transport emitter = Claude-Code hooks / stream-json (the OAuth/subscription-first-class tier; reuses the hook check). *(ACP/Tier-A deferred — see backlog.)*
-- Borrowed hardening: late-credential-minting + snapshot-hash recheck-before-mutate on secret/vcs ops.
+- The first transport emitter = Claude-Code hooks / stream-json (the OAuth/subscription-first-class tier). *(ACP/Tier-A deferred — see backlog.)* **As-built note (post-G-3.9):** the `hook_check` runtime is **v1** and `runner.*` is **v3**, so the Tier-B adapter (`runner.cc_hook_adapter`) reuses the **shared** `checks.mutation_class` taxonomy, NOT the v1 `hook_check` runtime — a direct import would break `version_boundary`. Heuristic parity with `hook_check` is a ratified follow-on (shared extraction or scoped re-derivation). The live hook/stream-json tap is a deferred event source; G-4 lands the pure derivation seam.
+- Borrowed hardening: late-credential-minting + snapshot-hash recheck-before-mutate on secret/vcs ops. *(Deferred to a named G-4 follow-on — not in the CI-pure substrate.)*
 - **Acceptance:** every action recorded fidelity-tagged; mutating/high-blast actions gated preventively before they run; reads default allow+observe. This is the substrate G-5 + G-6 plug into.
 
 ### G-5 — Tokenomics gate (spend envelope)

@@ -69,6 +69,7 @@ properties:
         - $ref: "#/$defs/runtime_evidence_record"
         - $ref: "#/$defs/runtime_run_outcome_record"
         - $ref: "#/$defs/runtime_ratification_record"
+        - $ref: "#/$defs/runtime_agent_action_record"
     description: |
       The ordered, append-only record chain. Element 0 is the genesis record
       (`prev_hash` = the all-zero sentinel, `sequence` = 0); each subsequent
@@ -76,10 +77,12 @@ properties:
       Each element is a lifecycle `runtime_evidence_record` (the
       `provision`/`run`/`collect`/`teardown` container-phase attestations), a
       terminal `runtime_run_outcome_record` (the typed run-OUTCOME on the
-      orthogonal disposition axis), OR a `runtime_ratification_record` (the typed
-      run-RATIFICATION attestation); the branches are mutually exclusive (a
-      record's `kind`/`record_type` consts + its `lifecycle_phase`/`outcome`/
-      `approver_ref` discriminating fields select exactly one branch).
+      orthogonal disposition axis), a `runtime_ratification_record` (the typed
+      run-RATIFICATION attestation), OR a `runtime_agent_action_record` (the v3
+      G-4 per-action attestation on its own orthogonal axis); the branches are
+      mutually exclusive (a record's `kind`/`record_type` consts + its
+      `lifecycle_phase`/`outcome`/`approver_ref`/`op` discriminating fields select
+      exactly one branch).
   note:
     type: string
     maxLength: 1024
@@ -366,3 +369,130 @@ $defs:
           ratified_head_sha} tuple, so the repo/installation/permission identity is
           bound WITHOUT any account/installation identifier appearing in clear; the
           assertion recomputes and compares it.
+  runtime_agent_action_record:
+    type: object
+    description: |
+      A typed per-action record (v3 G-4). It attests one observed agent action —
+      WHAT was done (`op` × `mutation_class`), at WHAT observation `fidelity`,
+      gated HOW (`classification` + `decision_mode`) — appended to the SAME
+      tamper-evident hash chain (content-addressed + chain-linked + policy-bound)
+      so each action is itself spoof-resistant grader input. It is its OWN record
+      type on a dimension ORTHOGONAL to the container `lifecycle_phase`, the run
+      `outcome`, and the `ratification`, and is NEVER a `lifecycle_phase` value.
+      It is VALUE-FREE: `target`/`tool` are salient-parameter provenance (a path
+      pattern / host:port / git-ref+cmd / tool name), NEVER a credential, secret
+      value, account, or installation identifier; `escalation_id` is an opaque
+      digest. The classifier + `decide()` control-point that PRODUCE these records
+      live in `runner.audit_overlay`; this schema fixes only the record shape.
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - op
+      - mutation_class
+      - target
+      - tool
+      - fidelity
+      - timing
+      - classification
+      - decision_mode
+      - decision_reason
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-agent-action
+      record_type:
+        type: string
+        const: runtime_agent_action
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests, identical to the
+          lifecycle/outcome/ratification records' binding (the check enforces
+          `^[0-9a-f]{64}$` and emits `runtime_evidence_policy_unbound` when absent
+          or malformed).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      op:
+        type: string
+        enum: [read, write, exec, egress, secret, vcs]
+        description: |
+          The operation/capability axis — the "do we gate?" axis. `read` is
+          observe-only; the rest are gateable.
+      mutation_class:
+        type: string
+        enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+        description: |
+          The blast-radius/severity axis — the shared planning-layer taxonomy
+          plus `none`. An INPUT (the adapter derives it), not derived here.
+      target:
+        type: string
+        description: |
+          The salient action parameter (path / host:port / secret-name /
+          git-ref+cmd) as a value-free reference. MAY be empty. NEVER a
+          credential, secret value, account, or installation identifier.
+      tool:
+        type: string
+        description: |
+          The raw tool / command as seen on the wire (provenance, e.g. `Edit`,
+          `Bash:git push`, an ACP tool id). MAY be empty.
+      fidelity:
+        type: string
+        enum: [faithful, best_effort, inferred]
+        description: |
+          The observation-fidelity marker (Fork 1) — stamped by the adapter,
+          never the agent; itself a policy input (stricter policy at lower
+          fidelity).
+      timing:
+        type: string
+        enum: [pre, post]
+        description: |
+          `pre` (gateable before execution → preventive) or `post` (observed
+          after → detective).
+      classification:
+        type: string
+        enum: [allowed, denied, escalate]
+        description: |
+          The enforced verdict for the action (the `decide()` outcome).
+      decision_mode:
+        type: string
+        enum: [deny, allowlist, ask, auto, full]
+        description: |
+          The gate-mode the verdict was produced under (provenance).
+      decision_reason:
+        type: string
+        minLength: 1
+        description: |
+          A deterministic explanation string for the verdict. Advisory; MUST NOT
+          contain secrets or credentials.
+      escalation_id:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          Optional: an OPAQUE, deterministic digest present only when
+          `classification == escalate`, correlating the escalation. NEVER a raw
+          identifier.

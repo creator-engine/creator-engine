@@ -1,0 +1,55 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: '1'
+records:
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0042
+  lifecycle_phase: provision
+  classification: allowed
+  recorded_at: '2026-06-07T10:30:00Z'
+  backend_key: gvisor-proxy
+  sequence: 0
+  prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  content_hash: 3bb67b8e065b4c501b5319e153a26f7f301aa215882e792a85614d0ae7b864b7
+- kind: runtime-agent-action
+  record_type: runtime_agent_action
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0042
+  recorded_at: '2026-06-07T10:30:01Z'
+  op: write
+  mutation_class: docs
+  target: docs/architecture/agent-interaction-model.md
+  tool: Edit
+  fidelity: faithful
+  timing: pre
+  classification: allowed
+  decision_mode: allowlist
+  decision_reason: mode=allowlist:allowed
+  sequence: 1
+  prev_hash: 3bb67b8e065b4c501b5319e153a26f7f301aa215882e792a85614d0ae7b864b7
+  content_hash: 962779cf7c1a12d2736666b04a31c0cfe97918c6fc2af7ee6600c8de3d120aa2
+- kind: runtime-agent-action
+  record_type: runtime_agent_action
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0042
+  recorded_at: '2026-06-07T10:30:02Z'
+  op: write
+  mutation_class: code
+  target: validators/creator_engine_validator/new_mod.py
+  tool: Edit
+  fidelity: best_effort
+  timing: pre
+  classification: escalate
+  decision_mode: allowlist
+  decision_reason: mode=allowlist:escalate
+  escalation_id: df0fb3cd275d84209f9478b9aba3877e06c94a42f6ac30358a7d03f8cbd6a75e
+  sequence: 2
+  prev_hash: 962779cf7c1a12d2736666b04a31c0cfe97918c6fc2af7ee6600c8de3d120aa2
+  content_hash: 4b8e9cd5e0d18c186d051b5b434a1a47b26a6e2665dccbbd2e25ec0a3ddcab1f
+note: 'v3 G-4 example: a chain carrying runtime_agent_action records (allowed write/docs
+  at faithful; escalate write/code at best_effort).'

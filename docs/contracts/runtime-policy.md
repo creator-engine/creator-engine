@@ -154,3 +154,31 @@ and applies the safety predicates above. Records carrying any other
 `kind` are ignored (no-op). The check is reachable discretely via the
 `scan-runtime-policy` CLI subcommand and runs as part of the full
 `check` sweep.
+
+## v3 G-4 — agent-action gate fields (additive, optional)
+
+G-4 adds two OPTIONAL plane-C fields the audit-overlay
+classifier/control-point consume at runtime. Both are additive: a record
+that omits them is a valid G-1.0 policy (the runtime simply grants no
+agent-action cells and falls back to the safe `ask` gate mode). The
+`ce_runtime_policy` check validates their **shape** only; the gate
+*semantics* live in `runner.audit_overlay` (`classify` / `decide`) — see
+[`docs/architecture/agent-interaction-model.md`](../architecture/agent-interaction-model.md).
+
+- **`action_class_allowlist`** — a list of `{op, mutation_class}` grants.
+  Each grant authorizes one `(op, mutation_class)` cell: the cells a
+  *faithfully-observed* mutating agent action may perform without
+  escalation. Deny-by-default — a mutating op whose cell is absent is
+  denied; reads are never gated. `op` is the capability axis
+  (`read`/`write`/`exec`/`egress`/`secret`/`vcs`); `mutation_class` is the
+  shared planning-layer taxonomy plus `none`. Shape only — never a host,
+  path, credential, or account identifier.
+- **`gate_mode_ladder`** — the gate-mode ladder `decide()` resolves:
+  `default_mode` (`deny`/`allowlist`/`ask`/`auto`/`full`), optional
+  per-cell `cells` overrides, and `always_*` precedence `rules`
+  (`always_deny` > `always_confirm` > `always_allow`, all beaten by the
+  hard-coded built-in deny tier). `auto` is advisory-only — it may
+  downgrade an escalate→allow but never authorizes a deny-class action.
+  Rules carry the Lobster separation-of-duties fields
+  (`require_different_approver` / `initiated_by` / `approved_by`) as shape
+  only.
