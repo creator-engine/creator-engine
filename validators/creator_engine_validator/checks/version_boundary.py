@@ -64,11 +64,19 @@ def discover_modules(pkg_dir: Path) -> dict[str, Path]:
     return mods
 
 
-def _resolve_from(dotted_self: str, level: int, module: str | None) -> str:
-    """Resolve a relative ``from`` import to its absolute target prefix."""
+def _resolve_from(dotted_self: str, is_package: bool, level: int, module: str | None) -> str:
+    """Resolve a relative ``from`` import to its absolute target prefix.
+
+    ``dotted_self`` is the importing module's dotted name; ``is_package`` is True
+    when it is a package ``__init__`` — whose discovered dotted name IS the package,
+    so its relative-import anchor is the package itself, not its parent. (A regular
+    module ``pkg.sub.mod`` anchors relative imports at ``pkg.sub``; a package
+    ``pkg.sub``'s own ``__init__`` anchors at ``pkg.sub``.)
+    """
     if level == 0:
         return module or ""
-    pkg_parts = dotted_self.split(".")[:-1]  # containing package of the module
+    parts = dotted_self.split(".")
+    pkg_parts = parts if is_package else parts[:-1]  # anchor package for relatives
     up = level - 1
     if up:
         pkg_parts = pkg_parts[:-up] if up <= len(pkg_parts) else []
@@ -97,7 +105,7 @@ def build_edges(mods: dict[str, Path]) -> set[tuple[str, str]]:
             if isinstance(node, ast.Import):
                 targets = [a.name for a in node.names if a.name.startswith(PKG)]
             elif isinstance(node, ast.ImportFrom):
-                base = _resolve_from(dotted, node.level, node.module)
+                base = _resolve_from(dotted, path.name == "__init__.py", node.level, node.module)
                 if base.startswith(PKG) or node.level > 0:
                     targets = [base] + [
                         (base + "." + a.name) if base else a.name for a in node.names

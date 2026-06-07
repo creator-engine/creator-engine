@@ -30,7 +30,8 @@ guards** it so it cannot silently regress as v3 grows.
 Every shipped module is classified into exactly one **version line**: `v1`, `v3`, or
 `shared`. The two runtime surfaces are enumerated explicitly (`V1_RUNTIME`,
 `V3_RUNTIME`); everything else — the validator engine and durable infra — is `shared`.
-Counts on `main`: **v1 = 21, v3 = 18, shared = 51** (90 shipped modules).
+Counts (with this gate's two new shared modules, `_versions` and
+`checks.version_boundary`): **v1 = 21, v3 = 18, shared = 53** (92 shipped modules).
 
 ### Deliberate boundary calls
 A few modules straddle and were classified deliberately:

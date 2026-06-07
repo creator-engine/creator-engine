@@ -11,6 +11,8 @@ from creator_engine_validator.checks.version_boundary import (
     CODE_OVERLAP,
     CODE_UNALLOWED,
     _package_dir,
+    _resolve_from,
+    build_edges,
     discover_modules,
     evaluate,
     run,
@@ -102,3 +104,47 @@ def test_classify_lines():
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call
     assert ver.classify("environment_guard") == ver.SHARED      # deliberate call
+
+
+# --- regression: relative imports inside __init__.py (reviewer finding) ------
+
+PKG = "creator_engine_validator"
+
+
+def test_resolve_from_anchors_package_init_at_itself():
+    # A package's own __init__ (discovered dotted name == the package) anchors
+    # relative imports at the package itself, NOT its parent.
+    assert _resolve_from(f"{PKG}.forge", True, 1, "change") == f"{PKG}.forge.change"
+    assert _resolve_from(f"{PKG}.forge", True, 2, "lane_runtime") == f"{PKG}.lane_runtime"
+    assert _resolve_from(PKG, True, 1, "orchestrator") == f"{PKG}.orchestrator"
+    # A regular module anchors relatives at its parent package.
+    assert (
+        _resolve_from(f"{PKG}.checks.ce_runtime_evidence", False, 2, "runtime_evidence_spine")
+        == f"{PKG}.runtime_evidence_spine"
+    )
+
+
+def _write_pkg(root, rel_path, body):
+    p = root / rel_path
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def test_relative_cross_version_import_in_init_is_detected(tmp_path):
+    # Synthetic creator_engine_validator package: a v3 subpackage __init__ uses a
+    # RELATIVE import of a v1 module. The guard must capture the edge (the bug was
+    # that __init__ relative imports were silently dropped -> boundary bypassable).
+    root = tmp_path / PKG
+    _write_pkg(root, "__init__.py", "from .orchestrator import Orchestrator\n")  # shared->v3 relative
+    _write_pkg(root, "orchestrator.py", "class Orchestrator: ...\n")
+    _write_pkg(root, "lane_runtime.py", "class LaneError(Exception): ...\n")
+    _write_pkg(root, "forge/__init__.py", "from ..lane_runtime import LaneError\n")  # v3->v1 relative
+    _write_pkg(root, "forge/change.py", "VALUE = 1\n")
+
+    edges = build_edges(discover_modules(root))
+    # both relative-__init__ edges are now resolved (previously: missing)
+    assert ("forge", "lane_runtime") in edges        # v3 -> v1 (a HARD cross)
+    assert ("", "orchestrator") in edges             # root __init__ (shared) -> v3
+    # and they classify as boundary-relevant under the real taxonomy
+    assert {ver.classify("forge"), ver.classify("lane_runtime")} == {ver.V3, ver.V1}
+    assert ver.classify("orchestrator") == ver.V3
