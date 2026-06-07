@@ -16,11 +16,11 @@ The developer test group will pilot CE on a real greenfield OSS project and will
 [pilot arc — full-stack-first]
  G-3.7b  CI-pure: merge-driving seam + live-merge-identity seam + pr_merged run-outcome model
  G-3.8   out-of-envelope LIVE merge spike + the final G-3.7 roadmap flip      ► v3.0 MVP-complete
- G-3.9   D1–D6 cleanup (D0 already done) — SAFE early deletions; lane/launch (D2) deferred → post-G-7.0
+ G-3.9   version coexistence / separation — v1/v3/shared taxonomy + version_boundary guard; v1 RETAINED (no deletion)
  G-4     Agent-interaction contract (per-run substrate)
  G-5     Tokenomics gate (spend envelope)                                     (closes the #1 pilot blocker)
  G-6     Coordination layer (outer loop: Scope + backlog)
- G-7     Product surface: v3 CLI (replaces v1 launcher) + 2-mode install      ► v3.1 pilot-ready
+ G-7     Product surface: v3 CLI (distinct entry alongside `ce`; v1 retained) + 2-mode install  ► v3.1 pilot-ready
 ```
 
 ## Cluster detail (sub-gates + acceptance)
@@ -30,11 +30,11 @@ The developer test group will pilot CE on a real greenfield OSS project and will
 - **G-3.8 (out-of-envelope):** the one live drive that opens → independent-review → merges a real PR end-to-end using the G-3.7b seams; + the final G-3.7 roadmap flip.
 - **Acceptance:** merge mechanics + `pr_merged` land CI-pure in G-3.7b; the live open→review→merge proven once in G-3.8 (merge identity ≠ run token). **= v3.0.**
 
-### G-3.9 — D1–D6 cleanup (launcher-guarded)
-- D0 already complete (advisory-manifest). D1–D6 per the spec's deletion series: reviewer-venue seam · PCO ledger/leases/panes · strip the hook to classifiers · op-mode carriers · judge-at-time.
-- **⚠️ Launcher guard:** the CLI still owns the active launch/lane surfaces that govern current Controller operation, so **D2 (lane/launch/tmux deletion) is conditioned on a v3 work-driving / seat-launch replacement existing (G-7.0)** — it does NOT run in G-3.9. Each D-step is verified not to remove live governed-execution substrate before it runs.
-- The worker-runtime container-isolation primitives are **retired-or-re-homed into the enforcer**, not blind-deleted.
-- **Acceptance:** the safe cleanups land (suite green); the lane/launch deletion defers to post-G-7.0.
+### G-3.9 — version coexistence / separation
+- **Shipped (PR #152).** Replaces the prior "D1–D6 deletion" with **version coexistence**: declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check — HARD runtime⊥runtime + a baselined `shared→version` allowlist ratchet + integrity guards. The surface the deletion series targeted (reviewer-venue seam · PCO ledger/leases/panes · hook · op-mode carriers · lane/launch/tmux) is **classified `v1` and retained**, not removed.
+- **Launcher guard is moot:** v1 is retained, so there is no D2 deletion to condition on a replacement — the build never cuts the substrate it runs on.
+- The worker-runtime container-isolation primitives are **retained** (a future enforcer may *reuse* them; nothing is blind-deleted).
+- **Acceptance:** suite green; **v1 deleted = ∅**; the boundary holds (0 v1↔v3 edges) and is now machine-enforced. Any future removal is orphaned-only (proven dead to both versions).
 
 ### G-4 — Agent-interaction contract (per-run substrate)
 - A typed `AgentActionEvent` (op × mutation_class × fidelity) + a `runtime_agent_action` hash-chained record (builds on the existing `mutation_class` taxonomy + the evidence spine).
@@ -59,18 +59,18 @@ The developer test group will pilot CE on a real greenfield OSS project and will
 - **Acceptance:** file a Scope → DoR-gated → ratified → dispatched as a governed run → PR; traceable. The idea→governed-delivery spine (Scope-only).
 
 ### G-7 — Product surface → v3.1
-- **7.0** the v3 work-driving CLI (file/ratify/drive/status) + the v3 seat-launch replacement for the v1 launcher.
+- **7.0** the v3 work-driving CLI (file/ratify/drive/status) + the v3 seat-launch entry point — a **distinct** entry alongside the retained v1 launcher (added, not a replacement).
 - **7.1** v3 install/provisioning — **two operator-typeless modes**: a **one-liner** (mirroring the OpenClaw `curl … | bash` → `onboard` installer pattern); and an **agent-native** mode where the operator points their agent at the CE site, which fetches a **signed install spec, verifies it against a pinned CE public key before executing**, and assists the interactive GitHub-App step. Both provision the runtime backend + the GitHub App + PEM-on-tmpfs custody + the policy bundle. **Dependency resolution = detect-don't-assume, fix-with-permission** (check git / Python / runsc / proxy / uv; offer to install missing ones gated on the operator's sudo approval; batched ask; graceful decline; idempotent; trusted/pinned sources) — NOT fail-on-missing. **Human contract:** the operator types nothing; approves only **sudo** (privileged installs) + the **GitHub-App authorization click**. **Hard constraint:** the installer is served + signed (hash/signature published); the agent-native spec MUST be signed + verified-before-execute. **Product-story symmetry:** CE's own governance model applied to its own install — the human ratifies the privileged step, the rest runs under a verifiable spec ("the grader lives outside the agent," at install time). *(Distinct from a runtime guard: the installer FIXES with permission; the runtime `doctor` guard stays fail-closed.)*
 - **7.2** pilot onboarding runbook + greenfield-OSS-repo setup.
-- **7.3** retire the deferred D2 (lane/launch/tmux) — now that 7.0 provides the v3 launcher.
-- **Acceptance:** a developer installs CE, provisions repo+App, files work, gets governed cost-safe PRs+merges end-to-end; the v1 launcher is retired only after its v3 replacement is live. **= v3.1 pilot-ready.**
+- **7.3** — n/a: there is **no D2 teardown**. v1's lane/launch/tmux is retained (classified `v1`, guarded by `version_boundary`); 7.0 **adds** the v3 launcher alongside it.
+- **Acceptance:** a developer installs CE, provisions repo+App, files work, gets governed cost-safe PRs+merges end-to-end; the v1 launcher is **retained**, with the v3 entry point added alongside it. **= v3.1 pilot-ready.**
 
 ## Adopted assumptions (re-confirm at the gate)
-- D1–D6 cleanup early (G-3.9), **except** lane/launch deletion (D2) + worker re-home → post-G-7.0 (the launcher guard).
+- Version coexistence (G-3.9): v1 retained + the v1⊥v3 boundary declared & guarded by `version_boundary`; **no deletion** (the prior D1–D6 deletion plan is superseded; any cleanup is orphaned-only, proven dead to both versions).
 - Deferred to post-first-pilot: the cockpit UI · the ACP/Tier-A transport (pilot on CC-hooks/subprocess) · the durable Skill axis (pilot Scope-only).
 
 ## Build-order rationale
-Contract (G-4) is the per-run substrate the spend gate (G-5, which reuses the action-gate machinery) and coordination (G-6, which dispatches a ratified Scope into one G-4/G-5-governed run) both sit on; the safe D1–D6 cleanups (G-3.9) precede the stack so new code isn't built against soon-deleted machinery — but the launcher deletion defers to post-G-7.0 so the build never removes the substrate it runs on; the product surface (G-7) wraps a finished stack + supplies the v3 launcher before the v1 one is retired. This is the only ordering with no designed-in rework and no self-cut.
+Contract (G-4) is the per-run substrate the spend gate (G-5, which reuses the action-gate machinery) and coordination (G-6, which dispatches a ratified Scope into one G-4/G-5-governed run) both sit on; version coexistence (G-3.9) precedes the stack so the v1⊥v3 boundary is declared and machine-guarded before new v3 code is built (v1 retained throughout — the build never cuts the substrate it runs on); the product surface (G-7) wraps a finished stack + **adds** the v3 launcher as a distinct entry alongside the retained v1 one. This is the only ordering with no designed-in rework and no self-cut.
 
 ## Deferred post-first-pilot backlog
 Cockpit UI · ACP/Tier-A transport · durable Skill axis · MCP-server install tool (agent-native-install upgrade) · OpenShell backend · CEO-mode/BMAD.

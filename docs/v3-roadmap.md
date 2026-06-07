@@ -33,7 +33,7 @@ links resolve only in the authoring instance, not a fresh clone).
 
 | Committed copy (fresh-clone) | Full-fidelity original (gitignored) | What it decides |
 | --- | --- | --- |
-| `docs/architecture/v3-spec.md` | `.hermes/research/v3-spec-architect-20260602T091332Z/` | **The spec** — thin-orchestrator / thick-enforcer, the D0–D6 deletion plan, and the G-i/ii/iii → G-1 → G-2 → G-3 MVP gate map |
+| `docs/architecture/v3-spec.md` | `.hermes/research/v3-spec-architect-20260602T091332Z/` | **The spec** — thin-orchestrator / thick-enforcer, the version-coexistence plan (§6; supersedes the prior D0–D6 deletion plan — v1 retained + boundary-guarded), and the G-i/ii/iii → G-1 → G-2 → G-3 MVP gate map |
 | `docs/architecture/v3-secure-runtime.md` | `.hermes/research/v3-secure-runtime-architect-20260602T114327Z/` | Plane C — gVisor + proxy, OpenShell, the tamper-evident evidence spine |
 | `docs/architecture/v3-product-brief.md` | `.hermes/research/v3-product-architecture-brief-20260602T091332Z/` | The product brief that framed the above |
 | _(not committed)_ | `.hermes/research/v3-evolve-vs-greenfield-architect-20260602T070354Z/` | Evolve this repo (don't greenfield) — the EVOLVE-dominant hybrid decision (its conclusion is captured in the brief §4 + the spec) |
@@ -97,11 +97,11 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.7 | live spike — first working v3: the live OPEN drive (App-JWT mint → one real PR → persisted evidence + CE-owned ratification record → correct revoke), Operator-ratified outside the CI-purity envelope; custody / ratification / leak-hardening landed; **gated merge deferred → G-3.7b/G-3.8** | #140–#145 (+ out-of-envelope live drive 3.7.3b) | `a132534` | MERGED |
 | G-3.7b | CI-pure merge-driving seam + distinct live-merge-identity seam + `pr_merged` run-outcome/schema/spine (`.0` run-outcome model + `.1` merge-driving producer) | #148 (`.0`) + #149 (`.1`) | `af60f06` | MERGED |
 | G-3.8 | out-of-envelope live merge spike — one real PR opened → independently reviewed → squash-merged by a **distinct merge identity** (merge identity ≠ run token); value-free `pr_merged` evidence persisted on the same chain (`verify_chain()==[]`, schema-valid); **zero repo code change** (ran the merged G-3.7b seams) → **v3.0 MVP-complete** | — (out-of-envelope live spike) | — | PROVEN (live) |
-| G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | _this PR_ | _pending_ | DONE |
+| G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | #152 | `a02aca8` | DONE |
 | G-4 | agent-interaction contract (`AgentActionEvent`/`decide()`/`runtime_agent_action`; Tier-B CC-hooks) | — | — | designed |
 | G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
 | G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
-| G-7 | product surface — v3 work-driving CLI + seat-launch replacement + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; retires deferred D2 → **v3.1 pilot-ready** | — | — | designed |
+| G-7 | product surface — v3 work-driving CLI + v3 seat-launch entry (distinct, alongside `ce`) + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; **v1 launcher retained** (no D2 teardown) → **v3.1 pilot-ready** | — | — | designed |
 
 **G-1 (plane C / runtime safety) and G-2 (thin orchestrator + ratification
 gate) are COMPLETE** (G-2.0 / G-2.1 / G-2.2 merged; G-2.3 OpenShell deferred —
@@ -165,10 +165,11 @@ developer pilot, gated by the next milestone:
    circuit-breaker) — closes the #1 pilot blocker.
 4. **G-6** — the coordination layer (the Scope object + `forge/backlog` +
    DoR-wiring + crosswalk; Scope-only for the pilot).
-5. **G-7** — the product surface: the v3 work-driving CLI + the seat-launch
-   replacement + a two-mode operator-typeless install (a human one-liner + a
-   signed, verified-before-execute agent-native `llms-install.md`); retires the
-   deferred D2. **► v3.1 pilot-ready.**
+5. **G-7** — the product surface: the v3 work-driving CLI + the v3 seat-launch
+   entry (a distinct entry point alongside the retained `ce`) + a two-mode
+   operator-typeless install (a human one-liner + a signed, verified-before-execute
+   agent-native `llms-install.md`); **v1 launcher retained, no D2 teardown.**
+   **► v3.1 pilot-ready.**
 6. **G-2.3** — the OpenShell backend, still deferred (research-gated; re-opens on
    the recorded trigger conditions).
 
@@ -212,9 +213,10 @@ The v3 stack is the installable package `validators/creator_engine_validator/`:
 | `evidence_sink.py` | G-3.5 | `file_evidence_sink()` — a `CollectedEvidence` (AuditOverlay hash-chain) → a durable `runtime-evidence-chain` file matching `runtime-evidence.schema.yaml` (persist iff `verify_chain`+schema-valid, else `EvidencePersistRefused`) |
 | `schemas/*.yaml` + `docs/contracts/*.md` | various / G-3.6a | declarative + prose contracts (incl. the G-3.6a `runtime_run_outcome_record` `$def` admitted via a `records.items` `oneOf` in `runtime-evidence.schema.yaml` + its `runtime-evidence.md` run-outcome section) |
 
-The package also retains earlier v2 machinery (lane/PCO/tmux runtime, etc.)
-earmarked for the spec report's D0–D6 deletion plan; the table above is the v3
-surface.
+The package also retains earlier v1/v2 machinery (lane/PCO/tmux runtime, etc.) —
+the v1 surface, retained and classified `v1` under the version-coexistence plan
+(declared in `_versions.py`, guarded by `version_boundary`); the table above is
+the v3 surface.
 
 ## How this is governed
 
