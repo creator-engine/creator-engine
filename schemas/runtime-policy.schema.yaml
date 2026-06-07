@@ -200,7 +200,127 @@ properties:
       Optional free-text note. Advisory only; MUST NOT contain
       secrets, tokens, credentials, or actor ids. G-1.0 does not
       enforce this prohibition mechanically.
+  action_class_allowlist:
+    type: array
+    items:
+      $ref: "#/$defs/action_class_grant"
+    description: |
+      v3 G-4 (additive, optional): the per-action allowlist read by the
+      audit-overlay classifier. Each entry grants one `(op, mutation_class)`
+      cell — the cells a faithfully-observed mutating agent action may perform
+      WITHOUT escalation. Deny-by-default: a mutating op whose cell is absent is
+      denied; reads are never gated and need no grant. Shape only — no host,
+      path, credential, or account identifier. A record WITHOUT this field is a
+      valid G-1.0 policy (the runtime simply grants no agent-action cells).
+  gate_mode_ladder:
+    $ref: "#/$defs/gate_mode_ladder"
+    description: |
+      v3 G-4 (additive, optional): the gate-mode ladder the audit-overlay
+      `decide()` control-point resolves (OpenClaw exec-approvals modes + Zed
+      precedence). Optional; when absent the safe `ask` default applies to every
+      gateable cell.
 $defs:
+  agent_op:
+    type: string
+    enum: [read, write, exec, egress, secret, vcs]
+    description: |
+      The v3 G-4 operation/capability axis: the "do we gate?" axis. `read` is
+      observe-only (never gated); the rest are gateable.
+  agent_mutation_class:
+    type: string
+    enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+    description: |
+      The v3 G-4 blast-radius/severity axis — the shared planning-layer
+      mutation-class taxonomy (`checks.mutation_class`) plus `none`.
+  action_class_grant:
+    type: object
+    required: [op, mutation_class]
+    unevaluatedProperties: false
+    properties:
+      op:
+        $ref: "#/$defs/agent_op"
+      mutation_class:
+        $ref: "#/$defs/agent_mutation_class"
+    description: |
+      One `(op, mutation_class)` allowlist grant.
+  gate_mode_ladder:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      default_mode:
+        type: string
+        enum: [deny, allowlist, ask, auto, full]
+        description: |
+          The fallback gate mode for any cell without an explicit override.
+          `deny` (refuse), `allowlist` (use the classifier verdict), `ask`
+          (escalate gateable actions for human confirmation), `auto`
+          (advisory-only: may downgrade an escalate→allow but NEVER authorizes a
+          deny-class action), `full` (YOLO — allow except built-in denies).
+          Absent → the safe `ask` default.
+      cells:
+        type: array
+        items:
+          type: object
+          required: [op, mutation_class, mode]
+          unevaluatedProperties: false
+          properties:
+            op:
+              $ref: "#/$defs/agent_op"
+            mutation_class:
+              $ref: "#/$defs/agent_mutation_class"
+            mode:
+              type: string
+              enum: [deny, allowlist, ask, auto, full]
+        description: |
+          Per-`(op, mutation_class)` gate-mode overrides; a matching cell wins
+          over `default_mode`.
+      rules:
+        type: array
+        items:
+          $ref: "#/$defs/gate_rule"
+        description: |
+          The `always_*` precedence rules (Zed: `always_deny` > `always_confirm`
+          > `always_allow`, all beaten by the built-in deny tier).
+    description: |
+      The gate-mode ladder shape.
+  gate_rule:
+    type: object
+    required: [effect]
+    unevaluatedProperties: false
+    properties:
+      effect:
+        type: string
+        enum: [always_deny, always_confirm, always_allow]
+        description: |
+          The rule's effect, applied with Zed precedence (deny precedes).
+      op:
+        $ref: "#/$defs/agent_op"
+      mutation_class:
+        $ref: "#/$defs/agent_mutation_class"
+      target_pattern:
+        type: string
+        minLength: 1
+        description: |
+          Optional substring matched against the action `target` (shape only —
+          a pattern, never a concrete host/credential/account binding).
+      require_different_approver:
+        type: boolean
+        description: |
+          Lobster separation-of-duties (shape only): the human resolving an
+          escalation under this rule MUST differ from the initiator.
+      initiated_by:
+        type: string
+        minLength: 1
+        description: |
+          Optional opaque initiator reference (shape only; never a raw account).
+      approved_by:
+        type: string
+        minLength: 1
+        description: |
+          Optional opaque approver reference (shape only; never a raw account).
+    description: |
+      One `always_*` precedence rule, optionally scoped by op / mutation_class /
+      target_pattern, carrying the Lobster approver-identity fields (shape only).
   mount_entry:
     type: object
     required: [path, mode]

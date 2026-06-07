@@ -17,6 +17,22 @@ The Actor/Tool Ownership Matrix at
 Ownership Matrix is normative; this document references it and binds
 its rows to interaction patterns.
 
+**Terminology (current CE canon).** This document's prose uses current
+CE terminology: the **Operator** is the human ratifying authority, and
+the **Controller** is the orchestrating author / coordination role. The
+Feature 001/002 contracts this document defers to retain the legacy
+machine-role names `source` (→ Operator) and `Hermes`-the-role
+(→ Controller); the v2 terminology canon (`ce_terminology_v2`) accepts
+those legacy names *on import* in `specs/001`/`002` and enforces
+`operator` only on new `specs/v2/` artifacts. Crucially, the **Hermes
+harness** — the CE CLI / `.hermes/` toolchain / seat-launch substrate —
+is a *tool* the Controller runs on, NOT the Controller role; the §a
+matrix's "Nefarious / Hermes" actor names that operator machine + that
+harness, distinct from the Controller. The §a Actor/Tool Ownership
+Matrix below mirrors the Feature 002 actor *names* verbatim (so the
+cross-reference and the actor-parity posture in §h hold); everywhere
+else this document uses Operator / Controller.
+
 The deterministic syscall / governed-state-machine doctrine that
 underlies these interaction patterns is canonized in
 [`./agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md)
@@ -25,7 +41,7 @@ agents." The seven interaction patterns below describe how named
 actors cross that syscall boundary in practice: probabilistic agents
 operate inside Assignment Envelopes, evidence flows through the
 audit chain, and ratification of privileged mutations remains
-Source's responsibility.
+Operator's responsibility.
 
 ## a. Actor/Tool Ownership Matrix (cross-reference)
 
@@ -36,7 +52,7 @@ Feature 002 names nine actors/tools with explicit presence categories:
 | Source | Operationally active. |
 | Nefarious / Hermes | Operationally active. |
 | Claude Code | Operationally active. |
-| Codex | Governed first-class actor; identity record deferred with upstream placeholder/unbound provider/tool/model/host/account semantics. Phase 1 authoring posture follows Source-ratified per-batch role assignment between `architect` and `implementer`; `codex-architect` is a tenant/public overlay alias only, not a new baseline role. |
+| Codex | Governed first-class actor; identity record deferred with upstream placeholder/unbound provider/tool/model/host/account semantics. Phase 1 authoring posture follows Operator-ratified per-batch role assignment between `architect` and `implementer`; `codex-architect` is a tenant/public overlay alias only, not a new baseline role. |
 | QA agent | Named; governed identity record deferred to Feature 004. |
 | security agent | Named; governed identity record deferred to Feature 004. |
 | release agent | Named; governed identity record deferred to Feature 006. |
@@ -54,7 +70,7 @@ describes how these actors interact during a governed mutation.
 
 Batch 2A ratified Codex Option C: Codex may be represented as a
 governed first-class actor whose Phase 1 authoring role is selected by
-the Source-ratified envelope for the specific batch. An
+the Operator-ratified envelope for the specific batch. An
 architect-class envelope authorizes architect authoring; an
 implementer-class envelope authorizes implementer authoring. This is
 architect parity as authoring parity only: it is not ratification
@@ -67,49 +83,49 @@ The operating model recognizes seven primary interaction patterns.
 Each pattern names participants, the surface(s) used, and the
 governance artifact produced.
 
-### b.1 Source ↔ Hermes (intent capture, ratification)
+### b.1 Operator ↔ Controller (intent capture, ratification)
 
 - **When**: T1 (Idea/Intent → Discovery); T3, T5, T10, T19, T20, T22
   (ratification points); any Phase 2-promotion amendment.
-- **Surface**: Source-authored or Source-approved commit messages;
+- **Surface**: Operator-authored or Operator-approved commit messages;
   ratification records under `ratification_storage_path`; PR review
   comments where the authority matrix designates that surface as a
   ratification surface for the relevant mutation class.
-- **Artifact**: working-note or tracker entry citing Source intent;
+- **Artifact**: working-note or tracker entry citing Operator intent;
   ratification record YAML per Feature 001 FR-016 and FR-020a.
-- **Invariants**: Hermes never ratifies its own work; Source's
+- **Invariants**: Controller never ratifies its own work; Operator's
   ratification is the human anchor and is not subject to Phase 2
   autonomy expansion.
 
-### b.2 Hermes → governed author (envelope handoff)
+### b.2 Controller → governed author (envelope handoff)
 
 - **When**: T11–T13 (envelope authoring → consumption).
 - **Surface**: the Assignment Envelope YAML file under the
   tenant-declared envelope directory.
 - **Artifact**: the envelope itself (FR-005 fields populated; author
-  is the Hermes role; consumer is the Claude Code role, Codex role, or
-  another Source-ratified governed author role named by the envelope).
+  is the Controller role; consumer is the Claude Code role, Codex role, or
+  another Operator-ratified governed author role named by the envelope).
 - **Invariants**: author MUST ≠ consumer (FR-006); envelope is
-  single-use (FR-007); privileged-class envelopes require Source
+  single-use (FR-007); privileged-class envelopes require Operator
   ratification before consumption (FR-008).
 
-### b.3 Claude Code ↔ Hermes (evidence reporting)
+### b.3 Claude Code ↔ Controller (evidence reporting)
 
 - **When**: T14–T15 (local validation complete → attestation
   drafted).
 - **Surface**: validator output captured on the feature branch; test
   logs; lint/typecheck output; Creator Engine validator output; the
   evidence return path the envelope declares.
-- **Artifact**: pre-merge attestation YAML drafted by Hermes per
+- **Artifact**: pre-merge attestation YAML drafted by Controller per
   Feature 001 FR-004 and FR-020a.
 - **Invariants**: Claude Code MUST NOT ratify its own work; Claude
-  Code reports evidence and Hermes drafts the attestation; the
+  Code reports evidence and Controller drafts the attestation; the
   attestation gate is privileged (`attestation` class) and remains
   Phase 1.
 
-### b.4 Codex ↔ Hermes (per-batch governed authoring and review)
+### b.4 Codex ↔ Controller (per-batch governed authoring and review)
 
-- **When**: T11–T16, when a Source-ratified envelope names Codex as
+- **When**: T11–T16, when a Operator-ratified envelope names Codex as
   the consuming actor for architect-class authoring, implementer-class
   authoring, or independent review. Without that envelope, Codex has
   no standing write authority.
@@ -141,7 +157,7 @@ governance artifact produced.
   to CI policy or workflow files are themselves privileged
   `governance`/`security`/`deploy` mutations per FR-008.
 
-### b.6 Hermes ↔ Source (scope audit and ratification)
+### b.6 Controller ↔ Operator (scope audit and ratification)
 
 - **When**: T18–T20 (scope audit → ratification → merge approval).
 - **Surface**: scope audit summary committed to the feature branch
@@ -151,11 +167,11 @@ governance artifact produced.
   and mutation-class boundaries; ratification record YAML;
   merge-authorization record (may share the ratification record for
   same-class mutations).
-- **Invariants**: Hermes may execute merge mechanics only when
-  explicit Source authorization is recorded; for privileged classes
-  the ratifier MUST be Source (FR-008).
+- **Invariants**: Controller may execute merge mechanics only when
+  explicit Operator authorization is recorded; for privileged classes
+  the ratifier MUST be Operator (FR-008).
 
-### b.7 release agent ↔ Source / Hermes (deploy and post-release
+### b.7 release agent ↔ Operator / Controller (deploy and post-release
 finalization)
 
 - **When**: T21–T24 (release candidate → deploy → deployment
@@ -165,10 +181,10 @@ finalization)
 - **Artifact**: per-stage attestation records and ratification
   records. Schemas for deploy attestation, rollback evidence, and
   post-release evidence are deferred to Feature 006.
-- **Invariants**: the `deploy` mutation class is Source-only per
+- **Invariants**: the `deploy` mutation class is Operator-only per
   FR-008; the release agent never ratifies the `deploy` class. Until
-  Feature 006 instantiates the release agent identity, Hermes acts
-  on Source's explicit authorization for T21 and audits attestation
+  Feature 006 instantiates the release agent identity, Controller acts
+  on Operator's explicit authorization for T21 and audits attestation
   finalization for T24.
 
 ## c. Communication surfaces
@@ -179,7 +195,7 @@ permitted to *carry* governance artifacts; whether a surface counts
 as a *valid ratification surface* for a given mutation class is
 governed by the Feature 001 ratification-flow contract.
 
-- **Tmux sessions**: live operator surface where Hermes and Claude
+- **Tmux sessions**: live operator surface where Controller and Claude
   Code panes coordinate. Conversations and command output on tmux
   are NOT canonical governance artifacts. Anything load-bearing MUST
   be promoted into a repository artifact (commit, sidecar, envelope,
@@ -187,15 +203,15 @@ governed by the Feature 001 ratification-flow contract.
 - **Repository surfaces**:
   - `repo_pr` — pull requests.
   - `repo_review` — PR review comments.
-  - `repo_commit_message` — commit messages (Source-authored or
-    Source-approved commits count as Source-surface artifacts).
+  - `repo_commit_message` — commit messages (Operator-authored or
+    Operator-approved commits count as Operator-surface artifacts).
   - `repo_issue` — issues / tickets.
   - `repo_attestation_record` — YAML records under
     `attestation_storage_path`.
   - `repo_ratification_record` — YAML records under
     `ratification_storage_path`.
 - **Assignment Envelope YAML**: the explicit handoff surface from
-  Hermes to the governed author named by the envelope.
+  Controller to the governed author named by the envelope.
 - **Validator outputs and test logs**: evidence-only surfaces; never
   ratification.
 
@@ -221,7 +237,7 @@ In operating-model practice:
   001 FR-013a).
 - The redaction approver MUST NOT be the author of the underlying
   tenant artifact (Feature 001 FR-021).
-- Source MUST NOT ratify Source's own authored mutation; another
+- Operator MUST NOT ratify Operator's own authored mutation; another
   authorized actor is required (Feature 001 FR-007).
 
 Single-actor approval is invalid regardless of role, seniority, or
@@ -243,22 +259,22 @@ artifacts with separate authorities. Two invariants:
 
 Codex, the future QA agent, and the future security agent are not
 ratifiers. When Codex acts as reviewer, its review evidence is not
-ratification. When Codex acts under a Source-ratified architect or
+ratification. When Codex acts under a Operator-ratified architect or
 implementer envelope, its authored artifacts and evidence are still not
 ratification. Even if findings recommend merge, the merge gate (T20)
-still requires Source authorization for privileged classes.
+still requires Operator authorization for privileged classes.
 
-## f. Envelope handoff sequence (Hermes → governed author)
+## f. Envelope handoff sequence (Controller → governed author)
 
 The envelope handoff is the operational seam where Creator Engine
 governance meets governed authoring mechanics. Every FR-005 field
 is exercised exactly once per handoff.
 
-1. **Batch approval recorded** (T10). Source records the approved
+1. **Batch approval recorded** (T10). Operator records the approved
    task batch in a batch approval record. For privileged-class
-   batches, Source is the only approver.
-2. **Envelope authoring** (T11). Hermes drafts an Assignment Envelope
-   referencing the approved batch. Hermes populates every required
+   batches, Operator is the only approver.
+2. **Envelope authoring** (T11). Controller drafts an Assignment Envelope
+   referencing the approved batch. Controller populates every required
    field:
    - `envelope_id` — fresh UUID or tenant-scheme id; never reused
      (FR-007 single-use).
@@ -279,15 +295,15 @@ is exercised exactly once per handoff.
      authorized.
    - `conflict_policy` — rebase/merge/conflict-resolution authority
      and escalation rules.
-   - `created_by_actor_id` — Hermes role.
+   - `created_by_actor_id` — Controller role.
    - `consuming_actor_id` — Claude Code role, Codex role, or another
-     approved governed author role selected by the Source-ratified
+     approved governed author role selected by the Operator-ratified
      envelope.
-3. **Source ratification for privileged-class envelopes** (FR-008).
+3. **Operator ratification for privileged-class envelopes** (FR-008).
    If `allowed_mutation_classes` declares any privileged class, the
-   envelope is committed only with Source ratification recorded; the
+   envelope is committed only with Operator ratification recorded; the
    consumer MUST NOT begin work until ratification is present.
-4. **Worktree/branch provisioning** (T12). Hermes provisions the
+4. **Worktree/branch provisioning** (T12). Controller provisions the
    worktree at `worktree_path` and ensures the branch
    `feature_branch` exists from the agreed base.
 5. **Envelope consumption** (T13). The envelope's consuming actor
@@ -303,29 +319,29 @@ is exercised exactly once per handoff.
    `required_validation` and captures outputs as the envelope's
    `evidence_requirements` specify.
 8. **Evidence return** (T14 → T15). The consumer reports evidence to
-   Hermes per the envelope's return path; Hermes drafts the
+   Controller per the envelope's return path; Controller drafts the
    pre-merge attestation in §b.3.
 
 The handoff is single-use. If new work is needed (a follow-up batch
 or a conflict-resolution sub-batch), a new envelope is issued with a
 new `envelope_id` and fresh approval.
 
-## g. Escalation paths to Source via the conflict taxonomy
+## g. Escalation paths to Operator via the conflict taxonomy
 
 The four conflict classes in
 [`./parallel-agent-development-model.md`](./parallel-agent-development-model.md)
 §e (and at Feature 002 FR-017, FR-018) anchor every escalation:
 
-| Conflict class | Detector | Resolver | Escalation to Source? |
+| Conflict class | Detector | Resolver | Escalation to Operator? |
 |---|---|---|---|
-| `textual` | git merge/rebase | integration agent or Hermes | No (unless resolution requires scope expansion). |
-| `file/task ownership` | envelope/claim protocol | Hermes (via serialization or explicit dependency order) | No (unless overlap signals a deeper scope conflict). |
-| `semantic` | review / test / architecture audit | architect review; possibly Source ratification if Feature 001 contracts are touched | Yes, if substrate contract semantics are affected. |
-| `authority` | operating model / future substrate validators | Source (HARD-STOP) | Yes — always. |
+| `textual` | git merge/rebase | integration agent or Controller | No (unless resolution requires scope expansion). |
+| `file/task ownership` | envelope/claim protocol | Controller (via serialization or explicit dependency order) | No (unless overlap signals a deeper scope conflict). |
+| `semantic` | review / test / architecture audit | architect review; possibly Operator ratification if Feature 001 contracts are touched | Yes, if substrate contract semantics are affected. |
+| `authority` | operating model / future substrate validators | Operator (HARD-STOP) | Yes — always. |
 
 `authority` conflicts hard-stop work. The agent MUST NOT continue,
 revert, or rebase to conceal an `authority` conflict; the case
-escalates to Source for ratification, and Source either ratifies the
+escalates to Operator for ratification, and Operator either ratifies the
 change as an explicit amendment or directs revert.
 
 Common authority-conflict triggers:
@@ -349,12 +365,74 @@ Every actor and tool named in this document appears in the Feature
 Ownership Matrix with its allowed instruction sources, allowed
 mutation classes, allowed communication surfaces, required ratifier,
 required audit artifacts, Phase 1 authority, Phase 2-eligible
-authority, and prohibited actions. The role-level summary in
+authority, and prohibited actions. Per the terminology note above, the
+current-canon **Operator** and **Controller** used in this document's
+prose map one-to-one onto that matrix's legacy `Source` and
+`Nefarious / Hermes` rows (mirrored verbatim in §a), so the
+actor-parity is exact. The role-level summary in
 [`../governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](../governance/AUTHORITY_AND_RATIFICATION_MODEL.md)
 is the navigational entry point.
 
 The envelope handoff sequence in §f exercises every FR-005 field
 required by Feature 002.
+
+## i. The v3 G-4 per-action substrate (as-built)
+
+The interaction patterns above describe how named actors cross the
+deterministic syscall boundary at the SDLC granularity. v3 G-4 adds the
+**per-run, per-action** substrate underneath them — the typed contract a
+governed run's individual agent actions are recorded and gated against. It
+is additive and CI-pure; the live transport tap is a deferred seam.
+
+The contract (built in `creator_engine_validator.runner.audit_overlay`,
+recorded on the shared `runtime_evidence_spine`):
+
+- **`AgentActionEvent`** — a frozen, two-axis event. `op` (`read`/`write`/
+  `exec`/`egress`/`secret`/`vcs`) is the *"do we gate?"* axis (reads are
+  observe-only); `mutation_class` (the shared `checks.mutation_class`
+  taxonomy plus `none`) is the blast-radius axis. `fidelity` (`faithful`/
+  `best_effort`/`inferred`) is the provenance marker — **stamped by the
+  adapter, never the agent** — and is itself a policy input (lower fidelity
+  earns stricter policy). `timing` is `pre` (preventive) or `post`
+  (detective). `op` decides *whether* to block; `op × mutation_class ×
+  fidelity` decides *how hard*.
+- **`classify()`** — extended with a PURE `AgentActionEvent` branch:
+  reads allow; a faithful mutating op is allowed iff its `(op,
+  mutation_class)` cell is on the policy's `action_class_allowlist`, else
+  deny-by-default; a non-faithful mutating op escalates.
+- **`decide()`** — a deterministic, in-process, zero-token control-point
+  over `classify()`: a built-in deny tier (survives even `full`), then Zed
+  precedence over the policy's `gate_mode_ladder` `always_*` rules
+  (`always_deny` > `always_confirm` > `always_allow`), then the per-cell
+  gate mode (`deny`/`allowlist`/`ask`/`auto`/`full`). `auto` is
+  advisory-only — it may downgrade an escalate→allow but never authorizes a
+  deny-class action.
+- **`runtime_agent_action` record** — every decision (allow/deny/escalate
+  alike) is appended to the same tamper-evident hash chain as the lifecycle,
+  outcome, and ratification records, on its own orthogonal axis. Each action
+  becomes content-addressed, policy-bound, fidelity-tagged grader input.
+
+This is the substrate the tokenomics gate (G-5, which reuses the
+action-gate's escalation + evidence machinery) and the coordination layer
+(G-6, which dispatches a ratified Scope into one G-4/G-5-governed run) sit
+on. Authority remains external and deterministic — the in-run gate is
+evidence + preventive enforcement, never the binding ratifier.
+
+**Transport: Tier-B reuse is boundary-clean (v1 ⊥ v3).** The first
+transport emitter is the OAuth/subscription-first-class Claude-Code hook
+tier (`runner.cc_hook_adapter`: a PURE `PreToolUse`-payload →
+`AgentActionEvent` derivation, `fidelity=best_effort`, `timing=pre`; the
+live hook/stream-json tap is the deferred event source). The earlier
+design phrasing "reuses `hook_check.py`" predates the G-3.9
+`version_boundary`: `hook_check` is a **v1** module and `runner.*` is
+**v3**, so a direct import would be a HARD boundary crossing. The adapter
+therefore derives `mutation_class` through the **shared**
+`checks.mutation_class` taxonomy, never the v1 `hook_check` runtime.
+Reaching parity with `hook_check`'s nuanced secret/command heuristics is a
+ratified follow-on (a shared extraction or a scoped v3 re-derivation), not
+a silent boundary crossing. The ACP (Tier-A) and transcript (Tier-C)
+adapters, plus the late-credential-minting / snapshot-hash-recheck
+hardening, are deferred backlog.
 
 ## Acceptance posture for this document
 

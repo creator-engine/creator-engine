@@ -85,6 +85,37 @@ RUN_OUTCOMES = ("pr_opened", "pr_merged", "review_submitted", "research_delivere
 RATIFICATION_RECORD_KIND = "runtime-ratification"
 RATIFICATION_RECORD_TYPE = "runtime_ratification"
 
+#: v3 G-4 agent-action record. A typed record (``RUNTIME_AGENT_ACTION_RECORD_KIND`` /
+#: ``RUNTIME_AGENT_ACTION_RECORD_TYPE``) the (v3) audit overlay appends per observed
+#: agent action — the per-run substrate the tokenomics (G-5) and coordination (G-6)
+#: gates plug into. It records WHAT an agent did, at WHAT observation fidelity, gated
+#: HOW HARD, on a dimension ORTHOGONAL to the container ``lifecycle_phase``, the run
+#: ``outcome``, and the ``ratification`` — and is NEVER a ``lifecycle_phase`` value.
+#: It is appended to the SAME hash chain (content-addressed + chain-linked +
+#: policy-bound) so each action is itself tamper-evident grader input.
+#:
+#: The vocabulary below is the DURABLE pure-constant taxonomy these records draw on;
+#: the classifier + control-point that PRODUCE the records live in the v3
+#: ``runner.audit_overlay`` (this shared substrate carries only the value-free
+#: constants — no runner/forge import, exactly like the outcome/ratification axes):
+#:   * ``AGENT_ACTION_OPS`` — the capability axis ("do we gate?"): reads observe-only,
+#:     the rest are gateable;
+#:   * ``AGENT_ACTION_FIDELITIES`` — the provenance marker (Fork 1), stamped by the
+#:     adapter (never the agent) and itself a policy input (stricter at lower fidelity);
+#:   * ``AGENT_ACTION_TIMINGS`` — ``pre`` (gateable before execution, preventive) or
+#:     ``post`` (observed after, detective);
+#:   * ``DECISION_MODES`` — the gate-mode ladder a decision was produced under
+#:     (provenance); ``REMEMBER_VALUES`` — the "always" persistence lever.
+#: (The ``mutation_class`` axis reuses the existing planning-layer taxonomy in the
+#: shared ``checks.mutation_class`` module — not re-declared here.)
+RUNTIME_AGENT_ACTION_RECORD_KIND = "runtime-agent-action"
+RUNTIME_AGENT_ACTION_RECORD_TYPE = "runtime_agent_action"
+AGENT_ACTION_OPS = ("read", "write", "exec", "egress", "secret", "vcs")
+AGENT_ACTION_FIDELITIES = ("faithful", "best_effort", "inferred")
+AGENT_ACTION_TIMINGS = ("pre", "post")
+DECISION_MODES = ("deny", "allowlist", "ask", "auto", "full")
+REMEMBER_VALUES = ("none", "allow_always", "reject_always")
+
 #: Semantic finding kinds returned by :func:`verify_chain`. The check maps these
 #: to its own stable error codes — the spine owns the *semantics*, not the codes.
 FINDING_KINDS = ("content_address", "chain_link", "sequence", "policy_unbound")

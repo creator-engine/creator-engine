@@ -294,3 +294,41 @@ def test_tmp_file_skipped(tmp_path):
 def test_run_over_well_formed_example_passes():
     result = run([Path("examples/well-formed/runtime-policy")])
     assert result.ok, [e.format() for e in result.errors]
+
+
+# ---------------------------------------------------------------------------
+# v3 G-4 — additive action-gate fields (action_class_allowlist + gate_mode_ladder)
+# ---------------------------------------------------------------------------
+def test_g4_legacy_policy_without_action_fields_still_validates():
+    # A G-1.0 policy that omits the new fields remains valid (back-compatible).
+    policy = valid_policy()
+    assert "action_class_allowlist" not in policy
+    assert _codes(validate_runtime_policy(policy, Path("x.yml"))) == set()
+
+
+def test_g4_policy_with_action_fields_validates():
+    policy = valid_policy()
+    policy["action_class_allowlist"] = [{"op": "write", "mutation_class": "docs"}]
+    policy["gate_mode_ladder"] = {
+        "default_mode": "ask",
+        "cells": [{"op": "write", "mutation_class": "code", "mode": "auto"}],
+        "rules": [
+            {"effect": "always_deny", "op": "vcs", "mutation_class": "deploy",
+             "require_different_approver": True},
+        ],
+    }
+    assert _codes(validate_runtime_policy(policy, Path("x.yml"))) == set()
+
+
+def test_g4_bad_action_field_enums_fail_schema():
+    bad_op = valid_policy()
+    bad_op["action_class_allowlist"] = [{"op": "frobnicate", "mutation_class": "docs"}]
+    assert CODE_SCHEMA in _codes(validate_runtime_policy(bad_op, Path("x.yml")))
+
+    bad_mode = valid_policy()
+    bad_mode["gate_mode_ladder"] = {"default_mode": "YOLO"}
+    assert CODE_SCHEMA in _codes(validate_runtime_policy(bad_mode, Path("x.yml")))
+
+    bad_effect = valid_policy()
+    bad_effect["gate_mode_ladder"] = {"rules": [{"effect": "always_maybe"}]}
+    assert CODE_SCHEMA in _codes(validate_runtime_policy(bad_effect, Path("x.yml")))

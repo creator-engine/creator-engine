@@ -308,6 +308,7 @@ def _check_examples(json_output: bool) -> int:
         ("malformed", Path("examples/malformed/runtime-evidence/broken-chain-link.yml"), False, "runtime_evidence_chain_link"),
         ("malformed", Path("examples/malformed/runtime-evidence/mutated-content-hash.yml"), False, "runtime_evidence_content_address"),
         ("malformed", Path("examples/malformed/runtime-evidence/unbound-policy-sha.yml"), False, "runtime_evidence_policy_unbound"),
+        ("malformed", Path("examples/malformed/runtime-evidence/agent-action-bad-op.yml"), False, "runtime_evidence_schema_violation"),
     ]
     results: list[dict[str, object]] = []
     errors: list[ValidationError] = []

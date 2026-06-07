@@ -16,6 +16,14 @@ Scope (G-1.0 — substrate / record-shape only):
   mount refusal, rw-mount justification, names-only secret refusal, and
   deny-by-default egress.
 
+v3 G-4 (additive): the schema gained two OPTIONAL plane-C fields the
+audit-overlay classifier/control-point consume at runtime —
+``action_class_allowlist`` (per ``(op, mutation_class)`` grants) and
+``gate_mode_ladder`` (the gate-mode + ``always_*`` precedence rules). They
+are schema-validated here (shape only); a record WITHOUT them remains a
+valid G-1.0 policy. This check enforces only their shape — the gate
+*semantics* live in ``runner.audit_overlay`` (``classify`` / ``decide``).
+
 This check is **defensive** — it hardens the Creator Engine's own agent
 runtime. It NEVER allocates a container, invokes gVisor/Podman/Docker/
 OpenShell, opens a network socket, or implements an egress proxy. Live

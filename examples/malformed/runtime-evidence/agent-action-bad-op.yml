@@ -1,0 +1,36 @@
+kind: runtime-evidence-chain
+record_type: runtime_evidence_chain
+schema_version: '1'
+records:
+- kind: runtime-evidence-record
+  record_type: runtime_evidence
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0042
+  lifecycle_phase: provision
+  classification: allowed
+  recorded_at: '2026-06-07T10:30:00Z'
+  backend_key: gvisor-proxy
+  sequence: 0
+  prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  content_hash: 3bb67b8e065b4c501b5319e153a26f7f301aa215882e792a85614d0ae7b864b7
+- kind: runtime-agent-action
+  record_type: runtime_agent_action
+  schema_version: '1'
+  policy_sha: '1111111111111111111111111111111111111111111111111111111111111111'
+  run_id: run-implementer-0042
+  recorded_at: '2026-06-07T10:30:01Z'
+  op: frobnicate
+  mutation_class: docs
+  target: docs/x.md
+  tool: Edit
+  fidelity: best_effort
+  timing: pre
+  classification: allowed
+  decision_mode: allowlist
+  decision_reason: mode=allowlist:allowed
+  sequence: 1
+  prev_hash: 3bb67b8e065b4c501b5319e153a26f7f301aa215882e792a85614d0ae7b864b7
+  content_hash: 7c6f7ac4e6e20d2629d758cbd5aa7ae69a3e6cecf6433708cfb5cb0ad3eca199
+note: 'v3 G-4 malformed example: a runtime_agent_action record with an invalid op
+  enum -> runtime_evidence_schema_violation.'

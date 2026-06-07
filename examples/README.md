@@ -21,5 +21,6 @@ Malformed fixtures are added story-by-story. Each fixture must remain intentiona
 | `attestation-record.missing-ratifier.yml` | Attestation omits ratifier identity linkage | `FR-004` |
 | `lifecycle-skipped-state.yml` | Lifecycle status skips required intermediate states | `FR-013a` |
 | `redaction-record.missing-policy-version.yml` | Redaction record omits required policy version | `FR-020` |
+| `runtime-evidence/agent-action-bad-op.yml` | v3 G-4 `runtime_agent_action` record carries an `op` outside the operation vocabulary | `runtime_evidence_schema_violation` |
 
 If a new malformed fixture is added, update this table before relying on `check-examples` as acceptance evidence.

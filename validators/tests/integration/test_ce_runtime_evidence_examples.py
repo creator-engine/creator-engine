@@ -37,3 +37,30 @@ def test_check_examples_includes_runtime_evidence(capsys):
     assert "examples/malformed/runtime-evidence/broken-chain-link.yml" in out
     assert "examples/malformed/runtime-evidence/mutated-content-hash.yml" in out
     assert "examples/malformed/runtime-evidence/unbound-policy-sha.yml" in out
+
+
+# ---------------------------------------------------------------------------
+# v3 G-4 — the runtime_agent_action record example pair (in the runtime-evidence
+# chain family; the new record is a chain member, not a new chain wrapper).
+# ---------------------------------------------------------------------------
+def test_runtime_evidence_agent_action_well_formed_example_passes(capsys):
+    assert main([
+        "check",
+        "examples/well-formed/runtime-evidence/example-runtime-evidence-chain-agent-action.yml",
+    ]) == 0
+    out = capsys.readouterr().out
+    assert "PASS ce_runtime_evidence" in out
+
+
+def test_runtime_evidence_agent_action_bad_op_example_fails(capsys):
+    assert main(["check", "examples/malformed/runtime-evidence/agent-action-bad-op.yml"]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL ce_runtime_evidence" in out
+    assert "runtime_evidence_schema_violation" in out
+    assert "docs/contracts/runtime-evidence.md" in out
+
+
+def test_check_examples_includes_agent_action(capsys):
+    assert main(["check-examples"]) == 0
+    out = capsys.readouterr().out
+    assert "examples/malformed/runtime-evidence/agent-action-bad-op.yml" in out

@@ -98,7 +98,7 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.7b | CI-pure merge-driving seam + distinct live-merge-identity seam + `pr_merged` run-outcome/schema/spine (`.0` run-outcome model + `.1` merge-driving producer) | #148 (`.0`) + #149 (`.1`) | `af60f06` | MERGED |
 | G-3.8 | out-of-envelope live merge spike — one real PR opened → independently reviewed → squash-merged by a **distinct merge identity** (merge identity ≠ run token); value-free `pr_merged` evidence persisted on the same chain (`verify_chain()==[]`, schema-valid); **zero repo code change** (ran the merged G-3.7b seams) → **v3.0 MVP-complete** | — (out-of-envelope live spike) | — | PROVEN (live) |
 | G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | #152 | `a02aca8` | DONE |
-| G-4 | agent-interaction contract (`AgentActionEvent`/`decide()`/`runtime_agent_action`; Tier-B CC-hooks) | — | — | designed |
+| G-4 | agent-interaction contract — typed `AgentActionEvent` (op × mutation_class × fidelity) → PURE `classify()` branch → deterministic `decide()` control-point (built-in deny + Zed precedence + gate-mode ladder; `auto` advisory-only) → hash-chained `runtime_agent_action` record; additive runtime-policy `action_class_allowlist`/`gate_mode_ladder`; **boundary-clean Tier-B CC-hook derivation seam** (`runner.cc_hook_adapter` via the **shared** `checks.mutation_class`, never v1 `hook_check`); CI-pure (live tap deferred) | #154 | `pending` | DONE |
 | G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
 | G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
 | G-7 | product surface — v3 work-driving CLI + v3 seat-launch entry (distinct, alongside `ce`) + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; **v1 launcher retained** (no D2 teardown) → **v3.1 pilot-ready** | — | — | designed |
@@ -131,7 +131,7 @@ one tamper-evident, value-free evidence chain (open → `pr_opened` → ratifica
 `pr_merged`; `verify_chain()==[]`, schema-valid), with **zero repo code change**.
 **► v3.0 "MVP-complete" is REACHED.** The remaining full-stack-first arc to a
 developer pilot (G-3.9 → G-7, to the **v3.1 pilot-ready** milestone) is below.
-**G-3.9 (version coexistence) lands here; G-4 is next.**
+**G-3.9 (version coexistence) is DONE; G-4 (agent-interaction contract) lands here; G-5 is next.**
 
 ## What's next
 
@@ -151,15 +151,22 @@ developer pilot, gated by the next milestone:
   file work, and get governed, cost-safe PRs + merges. Reached at the end of
   **G-7**.
 
-1. **G-3.9** *(lands here)* — version coexistence / separation: declare the
-   v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the
+1. **G-3.9** *(DONE — #152)* — version coexistence / separation: declared the
+   v1/v3/shared taxonomy (`_versions.py`) and guards the **v1⊥v3** boundary with the
    `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version`
    allowlist ratchet). **v1.0 is retained whole — no deletion** (this replaces the
    spec §6 "deletion plan"); any future removal is orphaned-only, proven dead to
    both versions. The v3.1 arc proceeds additively with **"v1 retained + v1⊥v3
    held"** as a standing invariant.
-2. **G-4** — the agent-interaction contract (`AgentActionEvent` → `decide()` →
-   `runtime_agent_action`; Tier-B CC-hooks/stream-json transport).
+2. **G-4** *(lands here)* — the agent-interaction contract: a typed
+   `AgentActionEvent` → a PURE `classify()` branch → a deterministic `decide()`
+   control-point (built-in deny + Zed precedence + gate-mode ladder; `auto`
+   advisory-only) → a hash-chained `runtime_agent_action` record; additive
+   runtime-policy `action_class_allowlist`/`gate_mode_ladder`; the **boundary-clean**
+   Tier-B CC-hook derivation seam (`runner.cc_hook_adapter` via the **shared**
+   `checks.mutation_class`, never v1 `hook_check`). CI-pure — the live transport tap
+   and the credential hardening are deferred follow-ons. **The substrate G-5 + G-6
+   plug into.**
 3. **G-5** — the tokenomics gate (spend envelope: `spend_cap` /
    `max_concurrent_runs` + a deny-by-default admission gate + a post-action
    circuit-breaker) — closes the #1 pilot blocker.
