@@ -25,10 +25,11 @@ def _mods():
 
 # --- registration + green on the real package -------------------------------
 
-def test_registered_as_check_44():
+def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
-    assert len(reg) == 44
+    # 45 with the G-4.1 v3_naming_hygiene check registered alongside version_boundary.
+    assert len(reg) == 45
 
 
 def test_green_on_real_package():

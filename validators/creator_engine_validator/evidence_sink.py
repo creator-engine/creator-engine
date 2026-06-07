@@ -23,6 +23,14 @@ resolving the run-outcome / terminal-disposition model is G-3.6. A G-3.1
 ``change-opened`` terminal record is an orchestrator-level run OUTCOME, not a
 RunnerBackend ``lifecycle_phase``; the schema enum does not admit it, so the
 sink REFUSES such a chain here rather than persist non-conforming evidence.
+
+Local-state root (G-4.1): ``root`` is a parameter — this sink is path-neutral.
+Production / the v3 work-driving CLI (G-7) MUST wire it under the neutral
+CE-namespaced local-state root ``creator_engine_validator._versions.V3_LOCAL_STATE_ROOT``
+(``.ce/state``) — never the v1 bootstrapping-harness local-state root (kept frozen
+for v1 only) and never a per-harness tool dir. The ``v3_naming_hygiene`` check
+guards this surface; the prohibited roots are named explicitly in the contract
+``docs/contracts/v3-naming-hygiene.md`` (a doc, outside the guarded code surface).
 """
 
 from __future__ import annotations

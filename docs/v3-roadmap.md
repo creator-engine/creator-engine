@@ -64,6 +64,7 @@ Pilot     post-MVP stack → v3.1 pilot-ready (full-stack-first)
             G-3.8  out-of-envelope LIVE merge spike   ► v3.0 MVP-complete ✓ REACHED
             G-3.9  version coexistence / separation (declare + guard the v1⊥v3 boundary; v1 RETAINED; no deletion)
             G-4    agent-interaction contract (AgentActionEvent → decide() → runtime_agent_action)
+            G-4.1  v3 naming-hygiene guard + neutral .ce/state local-state convention (v3 surface clean by machine)
             G-5    tokenomics gate (spend envelope: admission + circuit-breaker)
             G-6    coordination layer (Scope + backlog + DoR-wiring + crosswalk)
             G-7    product surface (v3 CLI as a DISTINCT entry point alongside `ce` + 2-mode install [one-liner + signed agent-native]; v1 launcher retained)  ► v3.1 pilot-ready
@@ -98,7 +99,8 @@ Merged commits are short SHAs on `main`; re-derive with `git log --oneline main`
 | G-3.7b | CI-pure merge-driving seam + distinct live-merge-identity seam + `pr_merged` run-outcome/schema/spine (`.0` run-outcome model + `.1` merge-driving producer) | #148 (`.0`) + #149 (`.1`) | `af60f06` | MERGED |
 | G-3.8 | out-of-envelope live merge spike — one real PR opened → independently reviewed → squash-merged by a **distinct merge identity** (merge identity ≠ run token); value-free `pr_merged` evidence persisted on the same chain (`verify_chain()==[]`, schema-valid); **zero repo code change** (ran the merged G-3.7b seams) → **v3.0 MVP-complete** | — (out-of-envelope live spike) | — | PROVEN (live) |
 | G-3.9 | version coexistence / separation — declare the v1/v3/shared taxonomy (`_versions.py`) and guard the **v1⊥v3** boundary with the `version_boundary` check (hard runtime⊥runtime + a baselined `shared→version` allowlist ratchet); **v1.0 RETAINED whole, no deletion** (replaces the spec §6 "deletion plan") | #152 | `a02aca8` | DONE |
-| G-4 | agent-interaction contract — typed `AgentActionEvent` (op × mutation_class × fidelity) → PURE `classify()` branch → deterministic `decide()` control-point (built-in deny + Zed precedence + gate-mode ladder; `auto` advisory-only) → hash-chained `runtime_agent_action` record; additive runtime-policy `action_class_allowlist`/`gate_mode_ladder`; **boundary-clean Tier-B CC-hook derivation seam** (`runner.cc_hook_adapter` via the **shared** `checks.mutation_class`, never v1 `hook_check`); CI-pure (live tap deferred) | #154 | `pending` | DONE |
+| G-4 | agent-interaction contract — typed `AgentActionEvent` (op × mutation_class × fidelity) → PURE `classify()` branch → deterministic `decide()` control-point (built-in deny + Zed precedence + gate-mode ladder; `auto` advisory-only) → hash-chained `runtime_agent_action` record; additive runtime-policy `action_class_allowlist`/`gate_mode_ladder`; **boundary-clean Tier-B CC-hook derivation seam** (`runner.cc_hook_adapter` via the **shared** `checks.mutation_class`, never v1 `hook_check`); CI-pure (live tap deferred) | #154 | `ec4eb3a` | DONE |
+| G-4.1 | v3 naming-hygiene guard + neutral local-state convention — a self/structural `v3_naming_hygiene` check (sibling to `version_boundary`) FAILing on CE bootstrapping-harness residue (`.hermes`/`Hermes`/`Nefarious`) in the v3 CODE/SCHEMA surface (green-on-day-one + ratchet; legit adapter names Claude/gVisor/Codex/ACP carved out; v3 docs + legacy corpus excluded); neutral `.ce/state` local-state convention (`_versions.V3_LOCAL_STATE_ROOT`, never `.hermes/`/`.claude/`); standing requirement that G-5…G-7 prompts cite both | #156 | `pending` | DONE |
 | G-5 | tokenomics gate (`spend_cap`/`max_concurrent_runs`/admission + circuit-breaker) | — | — | designed |
 | G-6 | coordination layer (Scope object + backlog + DoR-wiring + crosswalk; Scope-only) | — | — | designed |
 | G-7 | product surface — v3 work-driving CLI + v3 seat-launch entry (distinct, alongside `ce`) + **two-mode operator-typeless install (one-liner + signed agent-native `llms-install.md`)**; **v1 launcher retained** (no D2 teardown) → **v3.1 pilot-ready** | — | — | designed |
@@ -131,7 +133,7 @@ one tamper-evident, value-free evidence chain (open → `pr_opened` → ratifica
 `pr_merged`; `verify_chain()==[]`, schema-valid), with **zero repo code change**.
 **► v3.0 "MVP-complete" is REACHED.** The remaining full-stack-first arc to a
 developer pilot (G-3.9 → G-7, to the **v3.1 pilot-ready** milestone) is below.
-**G-3.9 (version coexistence) is DONE; G-4 (agent-interaction contract) lands here; G-5 is next.**
+**G-4 (agent-interaction contract) is DONE; G-4.1 (v3 naming-hygiene guard + neutral `.ce/state` convention) lands here; G-5 is next.** Standing requirement (G-4.1): every v3.1 planning prompt (G-5…G-7) cites the `v3_naming_hygiene` guard + the neutral local-state convention (see [`docs/contracts/v3-naming-hygiene.md`](contracts/v3-naming-hygiene.md)). Standing invariants: **v1 retained + v1⊥v3 held + v3 surface naming-clean.**
 
 ## What's next
 
