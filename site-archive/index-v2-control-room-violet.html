@@ -390,80 +390,6 @@
 
   .note { font-family: var(--mono); font-size: 13px; color: var(--fg-faint); border-left: 2px solid var(--gate); padding-left: 14px; }
 
-  /* ---------- FOMO: era couplet ---------- */
-  .couplet { font-size: clamp(19px, 2.5vw, 27px); font-weight: 680; letter-spacing: -0.02em; line-height: 1.28; margin: 4px 0 24px; max-width: 24ch; }
-  .couplet .hot { color: var(--gate); }
-  .couplet .cool { color: var(--accent); }
-
-  /* ---------- 3-verb refrain band ---------- */
-  .refrain { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: linear-gradient(180deg, rgba(160,107,255,0.045), transparent); }
-  .refrain .wrap { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 24px; flex-wrap: wrap; }
-  .refrain b { font-family: var(--mono); font-size: clamp(16px, 2.2vw, 22px); letter-spacing: 0.03em; font-weight: 700; color: var(--fg); }
-  .refrain .sep { color: var(--accent); text-shadow: 0 0 10px var(--accent-glow); }
-  .refrain .tail { color: var(--fg-faint); font-size: 13px; font-family: var(--mono); }
-
-  /* ---------- Scoreboard head ---------- */
-  .scorehead { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
-  .scorehead h2 { font-size: clamp(20px, 2.6vw, 27px); }
-  .scorehead .by { font-family: var(--mono); font-size: 12px; color: var(--green); border: 1px solid var(--green-soft); background: var(--green-soft); padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
-  .metric .n.gate-n .u { color: var(--gate); text-shadow: 0 0 14px var(--gate-glow); }
-
-  /* ---------- Governed-flow diagram (Propose -> Evidence -> Ratify -> Merge) ---------- */
-  .flowrow { display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap; }
-  .fnode { flex: 1 1 0; min-width: 0; background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 18px; position: relative; transition: border-color .18s, box-shadow .18s; }
-  .fnode:hover { border-color: var(--accent-deep); box-shadow: 0 0 28px -16px var(--accent-glow); }
-  .fnode.gate { border-color: rgba(255,77,109,0.5); background: linear-gradient(180deg, var(--gate-soft), transparent); box-shadow: 0 0 34px -16px var(--gate-glow); }
-  .fnode .fk { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
-  .fnode.gate .fk { color: var(--gate); }
-  .fnode h3 { font-size: 15.5px; margin: 9px 0 6px; }
-  .fnode p { font-size: 12.5px; color: var(--fg-dim); }
-  .fnode .badge { margin-top: 10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; color: var(--green); }
-  .fnode.gate .badge { color: var(--gate); }
-  .farrow { align-self: center; color: var(--accent); flex: 0 0 auto; padding: 0 8px; font-size: 20px; }
-  .flowloop { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--fg-faint); text-align: center; }
-  .flowloop b { color: var(--accent); }
-  @media (max-width: 860px) { .flowrow { flex-direction: column; } .farrow { transform: rotate(90deg); padding: 6px 0; } }
-
-  /* ---------- Auditable-in-the-open ledger panel ---------- */
-  .auditlog { background: linear-gradient(180deg, var(--ink-800), var(--ink-850)); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .auditlog .albar { display: flex; align-items: center; gap: 8px; padding: 11px 15px; border-bottom: 1px solid var(--line-soft); background: rgba(160,107,255,0.025); font-family: var(--mono); font-size: 12px; color: var(--fg-faint); }
-  .auditlog .albar .ok { color: var(--green); }
-  .auditlog .albody { padding: 16px 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.95; }
-  .auditlog .row { display: flex; gap: 10px; white-space: nowrap; overflow-x: auto; }
-  .auditlog .h { color: var(--accent); }
-  .auditlog .id { color: var(--fg); }
-  .auditlog .ev { color: var(--fg-dim); }
-  .auditlog .rat { color: var(--gate); }
-  .auditlog .vok { color: var(--green); }
-
-  /* ---------- Trust-debt curve ---------- */
-  .curvewrap { border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--ink-850); padding: 20px 22px; }
-  .curvewrap h3 { font-size: 15px; margin-bottom: 4px; }
-  .curvewrap p { font-size: 12.5px; color: var(--fg-dim); margin-bottom: 12px; }
-  .curve-svg { width: 100%; height: auto; display: block; }
-  .curve-svg .rising { stroke-dasharray: 520; stroke-dashoffset: 520; animation: draw 2.6s ease-out forwards; }
-  .curve-svg .flat { stroke-dasharray: 420; stroke-dashoffset: 420; animation: draw 2.6s ease-out .2s forwards; }
-  @keyframes draw { to { stroke-dashoffset: 0; } }
-  .curve-legend { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; font-size: 12px; color: var(--fg-dim); }
-  .curve-legend i { width: 22px; height: 2px; display: inline-block; vertical-align: middle; margin-right: 7px; }
-
-  /* ---------- Maturity ladder ---------- */
-  .ladder { display: grid; gap: 10px; }
-  .rung { display: flex; gap: 16px; align-items: flex-start; padding: 16px 18px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--ink-850); }
-  .rung .lv { font-family: var(--mono); font-size: 12px; color: var(--fg-faint); border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; flex: 0 0 auto; margin-top: 1px; }
-  .rung h3 { font-size: 15px; margin-bottom: 4px; }
-  .rung p { font-size: 13px; color: var(--fg-dim); }
-  .rung.peak { border-color: var(--accent-deep); background: linear-gradient(180deg, var(--accent-glow), transparent); box-shadow: 0 0 30px -18px var(--accent-glow); }
-  .rung.peak .lv { color: var(--accent); border-color: var(--accent-deep); }
-  .rung.deadend { border-color: rgba(255,77,109,0.3); background: linear-gradient(180deg, var(--gate-soft), transparent); }
-  .rung.deadend .lv { color: var(--gate); border-color: rgba(255,77,109,0.4); }
-  .rung.deadend h3 { color: var(--fg-dim); }
-
-  /* ---------- Callout ---------- */
-  .callout { border: 1px solid var(--accent-deep); border-radius: var(--radius); background: linear-gradient(180deg, var(--accent-glow), transparent); padding: 26px 28px; box-shadow: 0 0 40px -24px var(--accent-glow); }
-  .callout h3 { font-size: clamp(18px, 2.4vw, 24px); margin-bottom: 8px; }
-  .callout p { font-size: 15px; color: var(--fg-dim); }
-
   /* ---------- Motion restraint ---------- */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
@@ -507,10 +433,9 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">The new era of software is agentic</span>
-      <h1>AI is already writing your code. Almost none of it is <span class="accent">on the record</span>.</h1>
-      <p class="couplet">It's never been easier to <span class="hot">generate</span> code — or riskier to <span class="cool">merge</span> it.</p>
-      <p class="hero-sub">Creator Engine is the control room for agentic software: agents propose, you ratify, and every change is identity-signed, evidence-verified, and auditable straight from <code>git clone</code>.</p>
+      <span class="eyebrow">Repo-native agentic SDLC governance</span>
+      <h1>Governed SDLC for <span class="accent">autonomous agents</span>.</h1>
+      <p class="hero-sub">Creator Engine binds every agent-authored mutation to identity, mutation class, evidence, and a named ratifier — so agent work is reviewable, ratifiable, and shippable, straight from <code>git clone</code>.</p>
       <div class="badge-row">
         <span class="pill"><span class="dot"></span> Daemonless local <code>ce</code> runtime</span>
         <span class="pill"><span class="dot gate"></span> Operator-ratified gates</span>
@@ -519,9 +444,9 @@
       <div class="hero-actions">
         <a class="btn btn-primary" href="#cli">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
-          Govern your agents — from <code>git clone</code>
+          Read the quick start
         </a>
-        <a class="btn btn-ghost" href="#how">See how it works</a>
+        <a class="btn btn-ghost" href="#how">How it works</a>
       </div>
     </div>
 
@@ -548,28 +473,16 @@
   </div>
 </section>
 
-<!-- ===================== REFRAIN ===================== -->
-<section class="refrain">
+<!-- ===================== METRICS / TRUST ===================== -->
+<section class="band" style="padding:48px 0;">
   <div class="wrap">
-    <b>Propose<span class="sep"> · </span>Ratify<span class="sep"> · </span>Ship</b>
-    <span class="tail">agents do the first. you do the second. the record proves the third.</span>
-  </div>
-</section>
-
-<!-- ===================== GOVERNANCE SCOREBOARD ===================== -->
-<section class="band" style="padding:54px 0;">
-  <div class="wrap">
-    <div class="scorehead">
-      <h2>The numbers that don't move when no one's watching.</h2>
-      <span class="by">✓ true by construction</span>
-    </div>
     <div class="metrics">
-      <div class="metric"><div class="n">100<span class="u">%</span></div><div class="l">Privileged merges human-ratified — never an agent's self-claim</div></div>
-      <div class="metric"><div class="n">0</div><div class="l">Silent or unaudited privileged merges — the gate can't be skipped</div></div>
-      <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Mutation classes governed, with a reserved privileged floor</div></div>
-      <div class="metric"><div class="n gate-n">1<span class="u">⟂</span></div><div class="l">Human gate on the critical path of every change</div></div>
+      <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Baseline mutation classes, privileged floor</div></div>
+      <div class="metric"><div class="n">25<span class="u">→</span></div><div class="l">State SDLC machine, 24 governed transitions</div></div>
+      <div class="metric"><div class="n">13</div><div class="l"><code>ce</code> command groups in the current runtime surface</div></div>
+      <div class="metric"><div class="n">0<span class="u">∞</span></div><div class="l">Daemons &amp; web servers — runs on demand, then exits</div></div>
     </div>
-    <p class="note" style="margin-top:22px;">These are structural guarantees — true by construction, not vanity usage stats. v3.0 MVP-complete is proven by the live open→review→merge spike; the packaged runtime is a 0.1.0 repository-checkout pre-release. Apache-2.0.</p>
+    <p class="note" style="margin-top:22px;">v3.0 MVP-complete is proven by the live open→review→merge spike; v3.1 pilot-ready is the active arc. The packaged runtime is still a repository-checkout 0.1.0 pre-release. Apache-2.0.</p>
   </div>
 </section>
 
@@ -663,9 +576,9 @@
 <section class="band surface">
   <div class="wrap">
     <div class="section-head">
-      <span class="eyebrow">The problem — unaudited merges</span>
-      <h2>Ungoverned agents don't slow you down. They quietly run up a debt you can't see.</h2>
-      <p class="muted">Agents claim completion, humans accept the claim, and "go ahead" in chat becomes de facto merge authority. There's no durable record joining the change to identity, evidence, and an explicit ratifier. Every unreviewed AI merge is a liability that compounds — and the gap that's hard to close isn't velocity, it's the audit trail you never captured.</p>
+      <span class="eyebrow">The problem</span>
+      <h2>Agent work is auditable only by trust. That doesn't scale.</h2>
+      <p class="muted">Today, agents claim completion, humans accept the claim, and "go ahead" in chat becomes de facto merge authority. There is no durable record joining the claim to identity, evidence, and an explicit ratifier. As agent throughput grows, ungoverned mutations become indistinguishable from confabulated progress.</p>
     </div>
     <div class="section-head" style="margin-bottom:0;">
       <span class="eyebrow">The promise</span>
@@ -705,59 +618,6 @@
         <p>Privileged gates route to the Operator — the apex human authority. Deploys, governance changes, and settings flips stay human-ratified.</p>
       </div>
     </div>
-  </div>
-</section>
-
-<!-- ===================== GOVERNED FLOW (critical path) ===================== -->
-<section class="band">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">The critical path</span>
-      <h2>Every change walks through the gate. By construction.</h2>
-      <p class="muted">Other pipelines make the human an optional node off to the side. Creator Engine puts ratification <em>on the line</em> — nothing privileged reaches <code>main</code> without a named human opening the gate, and the evidence that earned it stays in the repo.</p>
-    </div>
-    <div class="flowrow">
-      <div class="fnode">
-        <div class="fk">01 · Propose</div>
-        <h3>Agent proposes</h3>
-        <p>Bounded by an Assignment Envelope — identity, mutation class, and permitted actions fixed before any work begins.</p>
-        <div class="badge">▸ identity-signed</div>
-      </div>
-      <div class="farrow">→</div>
-      <div class="fnode">
-        <div class="fk">02 · Evidence</div>
-        <h3>Evidence assembled</h3>
-        <p>Spec, tests, review, and side-effects fan in to a read-only packet on a hash-chained ledger. CI informs — it never ratifies.</p>
-        <div class="badge">▸ evidence-verified</div>
-      </div>
-      <div class="farrow">→</div>
-      <div class="fnode gate">
-        <div class="fk">03 · Ratify</div>
-        <h3>Human opens the gate</h3>
-        <p>The Operator — the apex authority — ratifies the privileged gate. An agent's own "done" never counts. This step cannot be skipped.</p>
-        <div class="badge">⟂ Operator-ratified</div>
-      </div>
-      <div class="farrow">→</div>
-      <div class="fnode">
-        <div class="fk">04 · Merge</div>
-        <h3>Ships, on the record</h3>
-        <p>The change lands bound to its identity, evidence, and named ratifier — replayable from <code>git clone</code> months later.</p>
-        <div class="badge">▸ audited</div>
-      </div>
-    </div>
-    <div class="flowloop">↻ outcomes feed back to <b>Propose</b> — the loop is governed end to end.</div>
-
-    <!-- Auditable in the open: a real propose->ratify->merge record -->
-    <div style="margin-top:30px;" class="auditlog" role="img" aria-label="Example audit-trail ledger record binding a change to identity, evidence, ratifier, and a verified hash chain">
-      <div class="albar"><span class="ok">✓</span> .ce/side-effect-ledger — hash chain intact · replayable from clone</div>
-      <div class="albody">
-        <div class="row"><span class="h">#0c41a0</span> <span class="ev">change-proposed</span> <span class="id">agent:implementer@lane-3</span> <span class="ev">mutation-class=feature</span></div>
-        <div class="row"><span class="h">#7e8ab3</span> <span class="ev">evidence-built</span> <span class="ev">spec ✓ tests ✓ review ✓</span> <span class="vok">validator: pass</span></div>
-        <div class="row"><span class="h">#a06bff</span> <span class="rat">⟂ privileged-gate</span> <span class="rat">ratified-by Operator</span> <span class="ev">identity-signed</span></div>
-        <div class="row"><span class="h">#6da407</span> <span class="ev">merged → main</span> <span class="vok">chain verified ✓</span> <span class="ev">no self-claim</span></div>
-      </div>
-    </div>
-    <p class="note" style="margin-top:16px;">Illustrative record shape. Every line is a tamper-evident, repo-visible artifact — auditable in the open, by anyone with a clone.</p>
   </div>
 </section>
 
@@ -903,31 +763,9 @@
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Why it matters</span>
-      <h2>Speed without a gate isn't velocity. It's exposure.</h2>
-      <p class="muted">Shipping faster than anyone can read the diff feels like progress — until the day you need to prove what changed, who approved it, and why. The difference isn't how fast you move. It's whether you can still trust the result months later.</p>
+      <h2>Ad-hoc agent coding vs. a governed substrate.</h2>
+      <p class="muted">The difference isn't speed — it's whether you can still trust the result months later.</p>
     </div>
-
-    <div class="curvewrap" style="margin-bottom:18px;">
-      <h3>The cost of skipping the gate compounds.</h3>
-      <p>Every ungoverned merge adds un-auditable liability you can't pay down later — the trail you didn't capture can't be recovered. Governed changes stay flat: each one arrives already on the record.</p>
-      <svg class="curve-svg" viewBox="0 0 520 210" fill="none" aria-label="Chart: un-auditable liability rises steeply for ungoverned agents and stays flat for governed changes over time">
-        <g stroke="#23263A" stroke-width="1">
-          <path d="M44 12 V182 H508"/>
-        </g>
-        <text x="10" y="100" fill="#878DAD" font-family="ui-monospace, monospace" font-size="10" transform="rotate(-90 10 100)">un-auditable liability →</text>
-        <text x="250" y="202" fill="#878DAD" font-family="ui-monospace, monospace" font-size="10">time · merges →</text>
-        <path class="rising" d="M48 176 C 220 172, 360 130, 504 26" stroke="#FF4D6D" stroke-width="2.6" stroke-linecap="round"/>
-        <path class="flat" d="M48 176 C 220 168, 360 160, 504 150" stroke="#A06BFF" stroke-width="2.6" stroke-linecap="round"/>
-        <circle cx="504" cy="26" r="3.5" fill="#FF4D6D"/>
-        <circle cx="504" cy="150" r="3.5" fill="#A06BFF"/>
-      </svg>
-      <div class="curve-legend">
-        <span><i style="background:#FF4D6D;"></i>Ungoverned agents — liability compounds</span>
-        <span><i style="background:#A06BFF;"></i>Creator Engine — auditable from the first merge</span>
-      </div>
-      <p class="note" style="margin-top:12px;">Conceptual — illustrates the compounding shape of un-auditable change, not measured data.</p>
-    </div>
-
     <div class="compare">
       <div class="col bad">
         <h3><span class="b">●</span> Ungoverned agent coding</h3>
@@ -951,25 +789,6 @@
           <li><span class="g">✓</span> Governance is a contract the repository enforces.</li>
         </ul>
       </div>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== MATURITY LADDER ===================== -->
-<section class="band surface">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">Levels of agentic development</span>
-      <h2>Most teams stall where the diffs pile up faster than anyone can read them.</h2>
-      <p class="muted">There's a ladder every team is climbing right now. The trap is treating "no humans left in the loop" as the summit — that's not the top of the ladder, it's the un-auditable liability the whole climb was meant to avoid. The real summit keeps the human, and keeps the record.</p>
-    </div>
-    <div class="ladder">
-      <div class="rung"><span class="lv">L0</span><div><h3>Autocomplete</h3><p>AI suggests the next line. You type, you own everything.</p></div></div>
-      <div class="rung"><span class="lv">L1</span><div><h3>Chat &amp; pair-programming</h3><p>You prompt, paste, and review by hand. Knowledge lives in a chat log no one can audit.</p></div></div>
-      <div class="rung"><span class="lv">L2</span><div><h3>Task agents</h3><p>Agents take whole tasks. Throughput jumps — and so does the volume of change no one fully read.</p></div></div>
-      <div class="rung"><span class="lv">L3</span><div><h3>Human reads every diff <span class="faint">— the plateau</span></h3><p>You try to review it all yourself. The bottleneck moves from typing to reading, and the math gets worse, not better.</p></div></div>
-      <div class="rung peak"><span class="lv">L4</span><div><h3>Governed autonomy — the summit</h3><p>Agents propose at scale; humans ratify by mutation-class; evidence lands on the record automatically. You review what matters, the gate holds the rest, and every change is auditable from clone. <strong>This is Creator Engine.</strong></p></div></div>
-      <div class="rung deadend"><span class="lv">⤳</span><div><h3>The dead-end fork: lights-out, no gate</h3><p>Specs become software with no one reading the diffs. Maximum speed, zero record — the exact liability the ladder was trying to escape, now shipping to production on a schedule.</p></div></div>
     </div>
   </div>
 </section>
@@ -1002,22 +821,12 @@
   </div>
 </section>
 
-<!-- ===================== GAP CALLOUT ===================== -->
-<section class="band" style="padding:56px 0;">
-  <div class="wrap">
-    <div class="callout">
-      <h3>The gap that's hard to close isn't speed. It's the trail you didn't keep.</h3>
-      <p>Agents are already writing code across your team. The teams that govern it now build a clean, auditable record from day one — the ones who wait can't go back and capture the history they never logged. Start the trail today, while it's still cheap.</p>
-    </div>
-  </div>
-</section>
-
 <!-- ===================== FINAL CTA ===================== -->
 <section class="cta-band">
   <div class="wrap inner">
-    <span class="eyebrow" style="justify-content:center;display:inline-flex;">Put your name on the next merge</span>
-    <h2>Govern your agents, straight from <code>git clone</code>.</h2>
-    <p>Clone the repo, run the validator, and watch every change bind to identity, evidence, and a named ratifier. No infrastructure to stand up, no humans removed from the loop — just autonomy you can prove.</p>
+    <span class="eyebrow" style="justify-content:center;display:inline-flex;">Make agent work shippable</span>
+    <h2>Governed autonomy, straight from <code>git clone</code>.</h2>
+    <p>Read the substrate, run the validator, and see every mutation bound to identity, evidence, and a named ratifier. Adopt it by cloning a repository — not by standing up infrastructure.</p>
     <div class="cta-actions">
       <a class="btn btn-primary" href="https://github.com/creator-engine/creator-engine" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
