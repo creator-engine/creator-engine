@@ -8,7 +8,7 @@ The pilot surface = the Operator's **own agent** (Claude Code / Codex) as the co
 ## Requirement: CE must FEEL like CE — even on your own agent
 "On your own agent" must NOT mean "indistinguishable from your bare agent." This is a differentiator for **UX and sales/marketing**: CE injects a **branded, structured, stateful, artifact-aware** experience into the dev's agent TUI. Four elements:
 1. **CE session frame (you're under CE).** A `ce session` launch banner + a **persistent status line** (CE branding + current workflow stage + work counts); every CE action renders **◆ CE-prefixed**. Always-on "your agent, *under CE*."
-2. **A named, staged workflow (where am I).** **SHAPE → READY → RUN → REVIEW → MERGE** (+ a board), shown in the status line with counts. The dev is never lost.
+2. **A named, staged workflow (where am I).** The user-facing cognitive phases **Frame → Shape → Build → Review → Ship** (canon — see [`stage-vocabulary.md`](./stage-vocabulary.md)), shown in the status line with counts, riding over the **conserved** board/mechanical states (`BACKLOG / SHAPE / READY / RUN / REVIEW / MERGE`) underneath. The dev is never lost.
 3. **CE language + the ◆ CE Completion Report.** Per run: **outcome · determination · recommended next step** — the heir to the build-harness completion report, with "CE" in it. Ratification is lightweight (ratify-Scope / merge-PR); the SHA-pinned rigor stays in the plan-approval gate.
 4. **Artifact awareness (inspect anything).** The Completion Report (and `ce artifacts <run>`) enumerate every run artifact with locations + inspect commands: PR · Scope · ratification · closed manifest · evidence-chain (verified) · fidelity-tagged action records · run-outcome · spend.
 
@@ -19,12 +19,12 @@ CE = an **MCP tool surface + the `ce` CLI + the session frame/skin**, observed/d
 ```
 ~/myproject $ ce session
 ◆ Creator Engine · governed session · repo <owner/repo> · transport cc-hooks · backend gvisor
-  stage ▸ BACKLOG   ·   2 shaping · 1 running · 1 awaiting your review
+  stage ▸ FRAME   ·   2 shaping · 1 building · 1 awaiting your review
 ──────────────────────────────────────────────────────────────────────────
 › add rate-limiting to POST /api/login — 100/min per IP, with tests
   ◆ CE · SHAPE → Scope cs-4f2 "rate-limit /api/login"  (AC 3 · appetite S · class code · DoR ✓)
   ◆ CE · ratify & dispatch the bet? › yes
-  ◆ CE · RUN r-91a dispatched (boxed · cap S)
+  ◆ CE · BUILD r-91a dispatched (boxed · cap S)
        ⚠ escalation — wants to edit .github/workflows/ci.yml (class deploy↑). Allow? › no
   ┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ───────────────────────
   │ outcome        pr_opened → PR #7  (ce-app[bot])
@@ -34,7 +34,7 @@ CE = an **MCP tool surface + the `ce` CLI + the session frame/skin**, observed/d
   │                · evidence-chain ✓verified · 14 action records · outcome record · spend
   │ inspect        ce show r-91a   |   ce artifacts r-91a   |   gh pr view 7
   └──────────────────────────────────────────────────────────────────────────
-  stage ▸ REVIEW   ·   2 shaping · 0 running · 2 awaiting your review
+  stage ▸ REVIEW   ·   2 shaping · 0 building · 2 awaiting your review
 ```
 
 ## v1 → v3 mapping (the Controller dissolves)
