@@ -231,6 +231,31 @@ def test_show_missing_scope_returns_2(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# shape — the Frame→Shape grill-me (gaps + minimum questions + the dial)
+# ---------------------------------------------------------------------------
+def test_shape_flags_gaps_and_budget_is_human_only(tmp_path, capsys):
+    code = v3_cli.main(["shape", "rl", "--goal", "rate-limit login", "--change-type", "code", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    fields = {g["field"] for g in payload["gaps"]}
+    assert "acceptance_criteria" in fields and "appetite" in fields  # Done-when + Budget still open
+    budget_gap = [g for g in payload["gaps"] if g["field"] == "appetite"][0]
+    assert budget_gap["human_only"] is True  # the agent never drafts the Budget
+    assert payload["ready"] is False
+
+
+def test_shape_dial_offers_per_persona_risk(capsys):
+    # dev + high-risk (deploy) on a "clear" signal → holds (needs explicit)
+    v3_cli.main(["shape", "x", "--goal", "g", "--change-type", "deploy",
+                 "--persona", "dev", "--signal", "clear", "--json"])
+    assert json.loads(capsys.readouterr().out)["offer"] is False
+    # ceo + low-risk (docs) on an "actionable" signal → offers
+    v3_cli.main(["shape", "x", "--goal", "g", "--change-type", "docs",
+                 "--persona", "ceo", "--signal", "actionable", "--json"])
+    assert json.loads(capsys.readouterr().out)["offer"] is True
+
+
+# ---------------------------------------------------------------------------
 # classification — v3-classified, additive, distinct entry (no v1 import)
 # ---------------------------------------------------------------------------
 def test_v3_cli_is_v3_classified():

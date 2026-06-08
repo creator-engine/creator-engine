@@ -50,7 +50,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_session
+from . import coordination, v3_session, v3_shaping
 from ._versions import V3_LOCAL_STATE_ROOT
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
@@ -375,6 +375,49 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, {"action": "artifacts", "scope_id": args.scope_id, "artifacts": artifacts})
 
 
+def _cmd_shape(args: argparse.Namespace) -> int:
+    """Run the Frame→Shape grill-me over a partial draft (gaps + minimum questions).
+
+    The agent drafts every field EXCEPT the Budget (human-only). Surfaces the
+    gap-aware Scope card, the minimum questions to close, and (with --persona +
+    --signal) the detect-and-offer decision. A pure dialogue helper — it does not
+    write a Scope artifact (that is `cev3 scope` once the gaps are closed).
+    """
+    draft: dict[str, Any] = {"scope_id": args.scope_id}
+    if args.goal:
+        draft["intent"] = args.goal
+    if args.done_when:
+        draft["acceptance_criteria"] = list(args.done_when)
+    if args.change_type:
+        draft["mutation_class"] = args.change_type
+    # NB: Budget (appetite) is intentionally NOT drafted — it is human-only.
+    result = v3_shaping.shape(draft)
+    lines = [result.card]
+    if result.gaps:
+        lines.append(f"{_BRAND} · to reach Ready, close {len(result.gaps)} gap(s):")
+        for g in result.gaps:
+            who = "  (your call — Budget is yours to set)" if g.human_only else ""
+            lines.append(f"    - {g.label}: {g.question}{who}")
+    else:
+        lines.append(f"{_BRAND} · Ready — place the bet with `cev3 ratify {args.scope_id}`")
+    offer = None
+    if args.persona and args.signal:
+        # pass the actual change-type (None when not yet proposed) so the dial
+        # biases conservative for an unknown class, per shaping-ux.md.
+        offer = v3_shaping.should_offer(args.persona, args.change_type, args.signal)
+        thr = v3_shaping.offer_threshold(args.persona, args.change_type)
+        band = v3_shaping.risk_class(args.change_type)
+        verb = "WOULD offer to crystallize this into a Scope" if offer else "holds (free chat — Frame)"
+        lines.append(
+            f"{_BRAND} · detect-and-offer [{args.persona}/{band}-risk · signal {args.signal} · needs {thr}]: {verb}"
+        )
+    return _emit(args, 0, lines, {
+        "action": "shape", "scope_id": args.scope_id, "ready": result.ready,
+        "gaps": [{"field": g.field, "label": g.label, "human_only": g.human_only} for g in result.gaps],
+        "questions": list(result.questions), "offer": offer,
+    })
+
+
 def _cmd_session(args: argparse.Namespace) -> int:
     """The governed session frame + the unified context/spend status line (G-7.1).
 
@@ -465,6 +508,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_art.add_argument("scope_id", metavar="ID", help="the Scope whose artifacts to list")
     _add_root(p_art)
 
+    p_shape = sub.add_parser("shape", help="run the Frame→Shape grill-me on a partial draft (gaps + questions)")
+    p_shape.add_argument("scope_id", metavar="ID", help="working Scope slug")
+    p_shape.add_argument("--goal", default=None, help="Goal (intent) — agent-draftable")
+    p_shape.add_argument("--done-when", action="append", default=[], metavar="CRITERION",
+                         help="a Done-when criterion (repeatable) — agent-draftable")
+    p_shape.add_argument("--change-type", default=None, choices=sorted(coordination.MUTATION_CLASSES),
+                         help="proposed Change-type (mutation_class) — agent proposes; human tightens free")
+    p_shape.add_argument("--persona", default=None, choices=["dev", "ceo"],
+                         help="persona for the detect-and-offer dial")
+    p_shape.add_argument("--signal", default=None, choices=list(v3_shaping.SIGNAL_ORDER),
+                         help="detected intent-to-act signal strength (for the dial)")
+    p_shape.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     p_session = sub.add_parser("session", help="launch the governed session frame + status line")
     p_session.add_argument("--context-pct", type=float, default=None,
                            help="the harness's authoritative context-window %% (consumed, never recomputed)")
@@ -484,6 +540,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 _DISPATCH = {
     "scope": _cmd_scope,
+    "shape": _cmd_shape,
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
     "status": _cmd_status,
