@@ -206,7 +206,24 @@ def test_session_frame_shows_stage_counts(tmp_path, capsys):
     code = v3_cli.main(["session", "--root", str(tmp_path)])
     assert code == 0
     out = capsys.readouterr().out
-    assert "Creator Engine" in out and "stage" in out
+    # banner + the unified status line (stage skin · context · spend)
+    assert "Creator Engine" in out and "Frame" in out and "ctx" in out and "spend" in out
+
+
+def test_session_unified_meters_from_inputs(tmp_path, capsys):
+    _file_ready(tmp_path)
+    spine = tmp_path / "spine.yaml"
+    # one run spend-ledger leaf: $4 of a $5 run cap → 80% → soft
+    spine.write_text(yaml.safe_dump({"records": [
+        {"record_type": "runtime_spend_ledger", "unit": "$", "amount": 4, "run_id": "r-1"},
+    ]}))
+    capsys.readouterr()
+    v3_cli.main(["session", "--root", str(tmp_path), "--context-pct", "62",
+                 "--spine", str(spine), "--cap", "5", "--run-id", "r-1", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["context"] == {"pct": 62.0, "state": "urgent"}
+    assert payload["spend"]["state"] == "soft"
+    assert payload["spend"]["spent"] == "4" and payload["spend"]["cap"] == "5"
 
 
 def test_show_missing_scope_returns_2(tmp_path):

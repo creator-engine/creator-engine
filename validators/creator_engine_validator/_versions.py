@@ -95,6 +95,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "coordination",
         # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)
         "v3_cli",
+        # v3 G-7 product surface: the session frame + unified status line render
+        "v3_session",
     }
 )
 

@@ -50,7 +50,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import coordination
+from . import coordination, v3_session
 from ._versions import V3_LOCAL_STATE_ROOT
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
@@ -376,17 +376,37 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
 
 
 def _cmd_session(args: argparse.Namespace) -> int:
-    """The governed session frame (thin seam — the unified status line lands at G-7.1)."""
-    scopes = _iter_scopes(Path(args.root))
-    counts = _phase_counts(scopes)
-    lines = [
-        f"{_BRAND.replace('CE', 'Creator Engine')} · governed session · root {args.root}",
-        "  stage ▸ "
-        + "   ·   ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
-        f"{_BRAND} · (unified context+spend status line lands at G-7.1; "
-        "this is the work-driving spine)",
-    ]
-    return _emit(args, 0, lines, {"action": "session", "root": args.root, "phase_counts": counts})
+    """The governed session frame + the unified context/spend status line (G-7.1).
+
+    The context-% is the harness's authoritative number (CONSUMED via
+    ``--context-pct``; the live per-turn tap is the deferred seam). The spend
+    meter folds the REAL G-5 ``project_spend`` projection over an evidence spine
+    (``--spine``) against the run cap (``--cap``); absent those it is unmetered.
+    """
+    counts = _phase_counts(_iter_scopes(Path(args.root)))
+    context = v3_session.context_meter(args.context_pct)
+    if args.spine and args.cap is not None:
+        records = yaml.safe_load(Path(args.spine).read_text(encoding="utf-8"))
+        if isinstance(records, dict):
+            records = records.get("records") or records.get("leaves") or []
+        spend = v3_session.spend_meter_from_spine(
+            records or [], args.cap, scope="run", unit=args.unit, run_id=args.run_id
+        )
+    else:
+        spend = v3_session.spend_meter(None, None, args.unit)
+    lines = v3_session.render_session(
+        counts, context=context, spend=spend, at_boundary=not args.mid_output,
+        repo=args.repo, transport=args.transport, backend=args.backend, root=args.root,
+    )
+    return _emit(
+        args, 0, lines,
+        {"action": "session", "root": args.root, "phase_counts": counts,
+         "context": {"pct": context.pct, "state": context.state},
+         "spend": {"state": spend.state, "ratio": spend.ratio,
+                   "spent": v3_session.fmt_amount(spend.spent) if spend.spent is not None else None,
+                   "cap": v3_session.fmt_amount(spend.cap) if spend.cap is not None else None,
+                   "unit": spend.unit}},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +465,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_art.add_argument("scope_id", metavar="ID", help="the Scope whose artifacts to list")
     _add_root(p_art)
 
-    p_session = sub.add_parser("session", help="launch the governed session frame")
+    p_session = sub.add_parser("session", help="launch the governed session frame + status line")
+    p_session.add_argument("--context-pct", type=float, default=None,
+                           help="the harness's authoritative context-window %% (consumed, never recomputed)")
+    p_session.add_argument("--spine", default=None, help="runtime-evidence chain YAML to fold the G-5 spend projection over")
+    p_session.add_argument("--cap", type=float, default=None, help="the run spend cap to meter against")
+    p_session.add_argument("--unit", choices=["$", "%"], default="$", help="spend unit ($=API / %%=seat)")
+    p_session.add_argument("--run-id", default=None, help="restrict the spend fold to this run_id")
+    p_session.add_argument("--mid-output", action="store_true",
+                           help="suppress boundary-only nudges (we are mid-output, not at a turn boundary)")
+    p_session.add_argument("--repo", default="—", help="repo label for the banner")
+    p_session.add_argument("--transport", default="—", help="transport label for the banner")
+    p_session.add_argument("--backend", default="—", help="runtime backend label for the banner")
     _add_root(p_session)
 
     return parser
