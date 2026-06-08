@@ -299,4 +299,4 @@ def test_zero_live_filesystem_write(monkeypatch):
 
 def test_purity_unchanged():
     assert len(registered_checks()) == 47  # G-6 added ce_scope
-    assert available_backends() == ("gvisor-proxy", "local-noop")
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a)

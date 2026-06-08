@@ -15,6 +15,8 @@ from creator_engine_validator.runner import (
     CollectedEvidence,
     LOCAL_NOOP_BACKEND_KEY,
     LocalNoopBackend,
+    OPENSHELL_BACKEND_KEY,
+    OpenShellBackend,
     PolicyRejected,
     ProvisionRequest,
     ProvisionedHandle,
@@ -134,11 +136,17 @@ def test_provision_rejects_non_mapping():
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
-def test_unregistered_backends_raise_until_later_slices():
-    # gvisor-proxy is registered as of G-1.2; openshell remains a fast-follow
-    # backend (not registered yet) and must still raise.
+def test_openshell_registered():
+    # openshell is registered as of v3.5-A.2a (the slice that closes the loop A.1
+    # deferred): it resolves to an OpenShellBackend and joins available_backends().
+    assert OPENSHELL_BACKEND_KEY == "openshell"
+    assert "openshell" in available_backends()
+    backend = get_backend("openshell")
+    assert isinstance(backend, OpenShellBackend)
+    assert isinstance(backend, RunnerBackend)
+    # A genuinely-unknown key still raises — the negative-path teeth stay live.
     with pytest.raises(UnknownBackend):
-        get_backend("openshell")
+        get_backend("no-such-backend")
 
 
 def test_register_and_duplicate():

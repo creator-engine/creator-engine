@@ -10,8 +10,10 @@ runtime-policy that does not validate clean.
 """
 
 import socket
+import subprocess
 
 import pytest
+import yaml
 
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.runner import (
@@ -32,9 +34,16 @@ from creator_engine_validator.runner import (
     RunnerBackend,
     SandboxCreateSpec,
     SandboxPolicy,
+    SubprocessSandboxClient,
+    available_backends,
+    get_backend,
+    render_sandbox_policy_yaml,
     translate_to_sandbox_policy,
 )
-from creator_engine_validator.runner.openshell_backend import SandboxPolicy as _SandboxPolicyModule
+from creator_engine_validator.runner.openshell_backend import (
+    SandboxPolicy as _SandboxPolicyModule,
+    parse_ocsf_jsonl,
+)
 
 _POLICY_SHA = "a" * 64
 _IMAGE_SHA = "sha256:" + "b" * 64
@@ -137,8 +146,8 @@ def test_translate_does_not_carry_image_or_policy_sha():
 
 
 # ---------------------------------------------------------------------------
-# Identity — exercised by DIRECT instantiation (the backend is UNREGISTERED in
-# A.1; registration + the get_backend/available_backends assertions move to A.2).
+# Identity — direct instantiation (still valid). The registry assertions A.1
+# deferred to A.2 now live in the "Registry (v3.5-A.2a)" section at the bottom.
 # ---------------------------------------------------------------------------
 def test_backend_is_a_runner_backend():
     backend = OpenShellBackend(client=FakeSandboxClient())
@@ -292,3 +301,138 @@ def test_importing_runner_registers_no_check():
     names = set(registered_checks())
     assert "ce_runtime_policy" in names
     assert not any("runner" in n or "backend" in n or "openshell" in n for n in names)
+
+
+# ---------------------------------------------------------------------------
+# Registry (v3.5-A.2a) — the now-valid assertions A.1 said belonged in A.2.
+# Registering the backend adds NO validator check (--list-checks byte-identical);
+# register_backend is the BACKEND registry, not the @register check registry.
+# ---------------------------------------------------------------------------
+def test_openshell_registered_in_registry():
+    assert OPENSHELL_BACKEND_KEY in available_backends()
+    # The sorted 3-tuple — the ~10 registry-pinning tests A.1 deferred move to this.
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")
+    backend = get_backend("openshell")
+    assert isinstance(backend, OpenShellBackend)
+    assert isinstance(backend, RunnerBackend)
+
+
+def test_registry_resolved_default_refuses_at_provision():
+    # get_backend("openshell")() returns an instance with NO injected client → the
+    # inert _UnwiredSandboxClient default. Now that the backend is REGISTERED it must
+    # NOT silently shell out: it refuses at provision with BackendUnavailable (the
+    # honest "registered but not auto-live in CI" posture, mirroring gVisor's
+    # availability gate). The live run is A.2b. This extends the A.1
+    # direct-instantiation test_default_client_is_unwired_and_refuses to the
+    # registry-resolved case.
+    backend = get_backend("openshell")
+    with pytest.raises(BackendUnavailable):
+        backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-reg"))
+
+
+# ---------------------------------------------------------------------------
+# Pure policy serialization — render_sandbox_policy_yaml (the --policy wire form)
+# ---------------------------------------------------------------------------
+def test_render_sandbox_policy_yaml_round_trips_structure():
+    rendered = render_sandbox_policy_yaml(translate_to_sandbox_policy(valid_policy()))
+    loaded = yaml.safe_load(rendered)
+    # filesystem (directory allowlists)
+    assert loaded["filesystem"]["include_workdir"] is True
+    assert "/runtime/worktree" in loaded["filesystem"]["read_write"]
+    assert "governance" in loaded["filesystem"]["read_only"]
+    # landlock + process
+    assert loaded["landlock"]["compatibility"] == "best_effort"
+    assert loaded["process"]["run_as_user"] == "sandbox"
+    assert loaded["process"]["run_as_group"] == "sandbox"
+    # network_policies is a MAP keyed by rule name, each value carrying endpoints[]
+    nps = loaded["network_policies"]
+    assert isinstance(nps, dict)
+    assert set(nps) == {"model_provider_example_443", "pkg_example"}
+    mp = nps["model_provider_example_443"]["endpoints"][0]
+    assert mp["host"] == "model-provider.example"
+    assert mp["port"] == 443
+    assert mp["protocol"] == "https"
+    # Every translated endpoint is binding (enforce), not advisory (audit).
+    assert mp["enforcement"] == "enforce"
+    assert mp["access"] == "read-write"
+    # An endpoint with no port omits the key on the wire (no null port).
+    pkg = nps["pkg_example"]["endpoints"][0]
+    assert pkg["host"] == "pkg.example"
+    assert "port" not in pkg
+
+
+def test_render_sandbox_policy_yaml_is_deterministic():
+    a = render_sandbox_policy_yaml(translate_to_sandbox_policy(valid_policy()))
+    b = render_sandbox_policy_yaml(translate_to_sandbox_policy(valid_policy()))
+    assert a == b
+
+
+def test_render_sandbox_policy_yaml_empty_allowlist_is_no_egress():
+    record = valid_policy()
+    record["egress_allowlist"] = []
+    translated = translate_to_sandbox_policy(record)
+    assert translated.no_egress is True
+    loaded = yaml.safe_load(render_sandbox_policy_yaml(translated))
+    # Empty map => the OPA proxy denies all egress (deny-by-default on the wire).
+    assert loaded["network_policies"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Pure OCSF JSONL parser — parse_ocsf_jsonl (the live file read is # pragma: no cover)
+# ---------------------------------------------------------------------------
+def test_parse_ocsf_jsonl_parses_lines_and_skips_blanks():
+    text = (
+        '{"class_uid": 4001, "action": "Allowed", "disposition": "Allowed", "status": "Success"}\n'
+        "\n"
+        "   \n"
+        '{"class_uid": 4001, "action": "Denied", "disposition": "Blocked", '
+        '"status": "Failure", "status_detail": "no matching policy"}\n'
+    )
+    records = parse_ocsf_jsonl(text)
+    assert len(records) == 2
+    assert records[0]["action"] == "Allowed"
+    assert records[1]["action"] == "Denied"
+    assert records[1]["status_detail"] == "no matching policy"
+
+
+def test_parse_ocsf_jsonl_empty_text_is_empty_list():
+    assert parse_ocsf_jsonl("") == []
+    assert parse_ocsf_jsonl("\n  \n") == []
+
+
+def test_parse_ocsf_jsonl_malformed_line_raises():
+    # Audit-log corruption is surfaced, never silently dropped.
+    import json
+
+    with pytest.raises(json.JSONDecodeError):
+        parse_ocsf_jsonl('{"action": "Allowed"}\nthis is not json\n')
+
+
+def test_parsed_ocsf_records_flow_through_collect():
+    # The parser's output is exactly what the backend's collect() maps via the OCSF
+    # decision-field mapper — exercised end-to-end through the injected fake.
+    text = (
+        '{"class_uid": 4001, "action": "Allowed", "disposition": "Allowed", "status": "Success"}\n'
+        '{"class_uid": 4001, "action": "Denied", "disposition": "Blocked", "status": "Failure"}\n'
+    )
+    backend = OpenShellBackend(client=FakeSandboxClient(ocsf_records=parse_ocsf_jsonl(text)))
+    handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ocsf"))
+    evidence = backend.collect(handle)
+    assert [record["action"] for record in evidence.records] == ["Allowed", "Denied"]
+
+
+# ---------------------------------------------------------------------------
+# SubprocessSandboxClient — the live CLI transport. The shell-outs are
+# # pragma: no cover; only the side-effect-free availability probe is exercised.
+# ---------------------------------------------------------------------------
+def test_subprocess_sandbox_client_available_false_for_missing_binary():
+    client = SubprocessSandboxClient(binary="ce-definitely-no-such-openshell-bin")
+    assert client.available() is False
+
+
+def test_subprocess_sandbox_client_available_spawns_no_subprocess(monkeypatch):
+    def explode(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("available() must not spawn a subprocess in CI")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    SubprocessSandboxClient(binary="ce-definitely-no-such-openshell-bin").available()
