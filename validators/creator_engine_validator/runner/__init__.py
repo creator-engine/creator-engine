@@ -74,6 +74,8 @@ from .openshell_backend import (
     SandboxClient,
     SandboxCreateSpec,
     SandboxPolicy,
+    SubprocessSandboxClient,
+    render_sandbox_policy_yaml,
     translate_to_sandbox_policy,
 )
 from .audit_overlay import (
@@ -137,11 +139,13 @@ __all__ = [
     "SandboxCreateSpec",
     "SandboxPolicy",
     "SubprocessContainerRunner",
+    "SubprocessSandboxClient",
     "TeardownResult",
     "UnknownBackend",
     "available_backends",
     "get_backend",
     "register_backend",
+    "render_sandbox_policy_yaml",
     "translate_to_egress_proxy_config",
     "translate_to_runsc_plan",
     "translate_to_sandbox_policy",

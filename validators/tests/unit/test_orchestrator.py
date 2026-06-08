@@ -188,8 +188,19 @@ def test_run_plan_propagates_backend_policy_rejection():
 # Backend resolution path (no injection) — deterministic, no live work
 # ---------------------------------------------------------------------------
 def test_unknown_isolation_backend_raises_unknown_backend():
-    # ``openshell`` is a schema-valid selector but not registered yet → UnknownBackend.
+    # A genuinely-unregistered selector keeps the UnknownBackend teeth live.
+    # (``openshell`` is now registered as of v3.5-A.2a, so it is no longer the
+    # negative case — the positive resolution is asserted below.)
     with pytest.raises(UnknownBackend):
+        run_plan(valid_policy("no-such-backend"), "run-1", ("echo", "hi"), approved())
+
+
+def test_openshell_isolation_backend_resolves_then_refuses_unwired():
+    # ``openshell`` is registered (v3.5-A.2a): run_plan resolves it by the policy
+    # selector with ZERO orchestrator changes, then the default (unwired) client
+    # refuses at provision with ``BackendUnavailable`` — proving the registry path
+    # works end-to-end without a live OpenShell gateway (the live run is A.2b).
+    with pytest.raises(BackendUnavailable):
         run_plan(valid_policy("openshell"), "run-1", ("echo", "hi"), approved())
 
 
@@ -207,7 +218,7 @@ def test_orchestrator_registers_no_check_and_no_backend():
     import creator_engine_validator.orchestrator  # noqa: F401  (import = the side-effect surface)
 
     assert not any("orchestrat" in n for n in registered_checks())
-    assert available_backends() == ("gvisor-proxy", "local-noop")  # no isolation_backend added
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a); orchestrator still adds none
 
 
 def test_run_plan_no_live_subprocess_or_socket(monkeypatch):

@@ -1,13 +1,17 @@
-"""CE v3.5-A plane-C backend: OpenShell governed sandbox (A.1 — pure, green-now).
+"""CE v3.5-A plane-C backend: OpenShell governed sandbox (A.2a — registered + wired).
 
 The second live-capable runner backend behind the G-1.1 ``RunnerBackend``
 adapter: it translates a runtime-policy record (the G-1.0 contract) into an
 **OpenShell** ``SandboxPolicy`` and drives OpenShell's create-then-exec sandbox
 lifecycle (``CreateSandbox -> ExecSandbox -> WatchSandbox/OCSF -> DeleteSandbox``),
 behind the ``openshell`` key the G-1.1 registry reserved from the start
-(``runner/backend.py:187-189``). **This A.1 slice DEFINES the backend but does NOT
-register it** — registration (which flips ``available_backends()``) moves to A.2
-with the live client, so the existing registry-pinning tests stay green untouched.
+(``runner/backend.py:187-189``). **A.1 DEFINED this backend; A.2a (this slice)
+REGISTERS it** (flipping ``available_backends()`` to the sorted 3-tuple) and wires
+a live ``SandboxClient`` over the ``openshell sandbox`` CLI — kept IN this module
+(mirroring how the gVisor backend keeps ``SubprocessContainerRunner`` in
+``gvisor_proxy_backend.py``) so no new ``runner.*`` module enters the v3 runtime
+surface. The recorded real run + its replayable evidence-bundle fixture are the
+SEPARATE follow-on **A.2b**; token/spend metering is **A.3 / v3.5-D**.
 
 Architectural fit (the NVIDIA-partnership arc, ``ce-openshell-integration-research``):
 OpenShell is the *inner* runtime-safety grader at the kernel (Landlock + seccomp +
@@ -15,41 +19,57 @@ an external OPA egress proxy — "the grader lives outside the agent," realized)
 CE stays the *outer* SDLC-correctness grader. They compose; they do not merge —
 CE's binding gate stays external (consistent with the substrate ACP decision).
 
-This is the **A.1** slice — PURE / GREEN-NOW. It ships:
+This slice ships, all green-now in CI (no live gateway, no new dependency):
 
 * ``translate_to_sandbox_policy`` — a PURE policy translation (no I/O), the
-  analog of the gVisor backend's ``translate_to_runsc_plan``; and
+  analog of the gVisor backend's ``translate_to_runsc_plan``;
+* ``render_sandbox_policy_yaml`` — a PURE serializer of that policy into the
+  OpenShell ``SandboxPolicy`` YAML the ``--policy`` flag consumes;
+* ``parse_ocsf_jsonl`` — a PURE OCSF-JSONL-line -> dict parser (the live file
+  read is the only I/O, isolated inside the client);
 * a ``SandboxClient`` Protocol (the analog of the gVisor ``ContainerRunner``
-  seam) with an in-memory ``FakeSandboxClient`` for tests and an inert default
-  that honestly refuses (``BackendUnavailable``) because the live gRPC/SDK client
-  is **A.2**.
+  seam) with an in-memory ``FakeSandboxClient`` for tests, an inert default
+  ``_UnwiredSandboxClient`` (the registered-but-not-auto-live posture: a
+  default-constructed instance refuses at ``provision`` with ``BackendUnavailable``
+  until a live client is injected), and ``SubprocessSandboxClient`` — the live
+  transport over the ``openshell sandbox`` CLI (availability-gated; every live
+  shell-out carries ``# pragma: no cover``).
 
-LOAD-BEARING translate-vs-execute split (CI has no OpenShell daemon / no gRPC):
+LOAD-BEARING translate-vs-execute split (CI has no OpenShell daemon / no SDK):
 
-* ``translate_to_sandbox_policy`` is a **pure** function with NO side effects —
-  fully unit-tested.
-* All live work goes through the injectable ``SandboxClient`` seam: callers
-  inject a fake; tests perform ZERO network/gRPC and importing this module
-  performs no I/O and pulls in no ``grpcio``/``openshell`` dependency.
+* the pure functions above have NO side effects — fully unit-tested.
+* All live work goes through the injectable ``SandboxClient`` seam: tests inject
+  a fake; importing this module performs no I/O and pulls in no ``grpcio`` /
+  ``openshell`` SDK (the gRPC/SDK transport is a deferred, dependency-gated later
+  slice — the CLI rides the same gateway with zero new deps).
 * The deny surface stays load-bearing at the boundary: ``provision`` refuses any
   runtime-policy record that does not validate clean (raises ``PolicyRejected``),
   exactly like the gVisor and noop backends.
 
-Out of scope here (halt + amend if tempted): the real gRPC/SDK ``SandboxClient``
-implementation and any ``grpcio``/``openshell`` dependency (-> **A.2**); token/
-spend metering and the G-5 envelope wiring (-> **A.3 / v3.5-D**, the gap OpenShell
-itself leaves open).
+Out of scope here (halt + amend if tempted): the A.2b recorded-run capture +
+committed evidence-bundle fixture + offline replay test; a gRPC/SDK
+``SandboxClient`` or any ``grpcio``/``openshell`` dependency (-> a deferred later
+A.x); token/spend metering and the G-5 envelope (-> **A.3 / v3.5-D**, the gap
+OpenShell itself leaves open).
 
 Defensive only — hardens our own agent runtime; never an offensive capability.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import shutil
+import subprocess
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+import yaml
 
 from ..checks.ce_runtime_policy import validate_runtime_policy
 from .backend import (
@@ -62,6 +82,7 @@ from .backend import (
     RunRequest,
     RunResult,
     TeardownResult,
+    register_backend,
 )
 
 BACKEND_KEY = "openshell"
@@ -235,6 +256,54 @@ def translate_to_sandbox_policy(runtime_policy: dict[str, Any]) -> SandboxPolicy
     )
 
 
+def render_sandbox_policy_yaml(policy: SandboxPolicy) -> str:
+    """Serialize a :class:`SandboxPolicy` into the OpenShell SandboxPolicy YAML (pure).
+
+    The on-the-wire form ``openshell sandbox create --policy <file>`` consumes
+    (design-of-record §3). The four domains map straight across:
+
+    * ``filesystem.{include_workdir, read_only, read_write}`` (directory allowlists);
+    * ``landlock.compatibility``;
+    * ``process.{run_as_user, run_as_group}``;
+    * ``network_policies`` as a **map keyed by rule name**, each value carrying an
+      ``endpoints[]`` list (``host`` + the optional ``port``/``protocol`` + the
+      binding ``enforcement``/``access``).
+
+    Deny-by-default is preserved on the wire: an EMPTY ``network_policies``
+    (``no_egress``) serializes to an empty map ``{}`` — the OPA proxy then denies
+    all egress. Deterministic (PyYAML ``sort_keys`` default; no insertion-order
+    dependence) and side-effect-free, so it is unit-tested directly.
+    """
+    network_policies: dict[str, Any] = {}
+    for rule in policy.network_policies:
+        endpoints: list[dict[str, Any]] = []
+        for endpoint in rule.endpoints:
+            mapped: dict[str, Any] = {"host": endpoint.host}
+            if endpoint.port is not None:
+                mapped["port"] = endpoint.port
+            if endpoint.protocol is not None:
+                mapped["protocol"] = endpoint.protocol
+            mapped["enforcement"] = endpoint.enforcement
+            mapped["access"] = endpoint.access
+            endpoints.append(mapped)
+        network_policies[rule.name] = {"endpoints": endpoints}
+
+    document: dict[str, Any] = {
+        "filesystem": {
+            "include_workdir": policy.filesystem.include_workdir,
+            "read_only": list(policy.filesystem.read_only),
+            "read_write": list(policy.filesystem.read_write),
+        },
+        "landlock": {"compatibility": policy.landlock.compatibility},
+        "process": {
+            "run_as_user": policy.process.run_as_user,
+            "run_as_group": policy.process.run_as_group,
+        },
+        "network_policies": network_policies,
+    }
+    return yaml.safe_dump(document, default_flow_style=False)
+
+
 def _image_ref_string(runtime_policy: dict[str, Any]) -> str:
     """Assemble the digest-pinned ``template.image`` string from ``image_ref``."""
     image = runtime_policy.get("image_ref") or {}
@@ -267,6 +336,32 @@ def _map_ocsf_record(record: dict[str, Any]) -> dict[str, Any]:
     }
     mapped["raw"] = dict(record)
     return mapped
+
+
+def parse_ocsf_jsonl(text: str) -> list[dict[str, Any]]:
+    """Parse OpenShell OCSF JSONL audit text into raw records (pure; no I/O).
+
+    OpenShell writes one JSON object per line (design-of-record §5: OCSF v1.7.0
+    JSONL, ``/var/log/openshell-ocsf.YYYY-MM-DD.log``, daily rotation). This is
+    the pure line->dict reader the live :meth:`SubprocessSandboxClient.collect_evidence`
+    file read feeds into; the decision-field mapping into the evidence spine stays
+    :func:`_map_ocsf_record`'s job, kept separate so this parser is unit-testable
+    on a fixture with no I/O.
+
+    Blank lines are skipped. Each remaining line is parsed as JSON; a malformed
+    line raises ``json.JSONDecodeError`` (audit-log corruption is surfaced, never
+    silently dropped — consistent with CE's "surface the defect" discipline). A
+    well-formed non-object line (not an OCSF record) is skipped.
+    """
+    records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        record = json.loads(stripped)
+        if isinstance(record, dict):
+            records.append(record)
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +509,109 @@ class FakeSandboxClient:
         return self._delete_released
 
 
+class SubprocessSandboxClient:
+    """The live ``SandboxClient``: drives the ``openshell sandbox`` CLI via subprocess.
+
+    Mirrors the gVisor ``SubprocessContainerRunner`` — the one surface that ever
+    touches a real OpenShell gateway, kept IN this module so A.2a adds no new
+    ``runner.*`` module (and so the version_boundary surface stays untouched).
+    Availability-gated (:meth:`available`); every live shell-out + the OCSF file
+    read carries ``# pragma: no cover`` (CI has no ``openshell`` binary and runs
+    none of it). NO ``grpcio``/``openshell`` SDK and no module-level network — the
+    higher-fidelity gRPC/SDK transport is a deferred, dependency-gated later slice;
+    the CLI rides the SAME gateway with zero new deps (consistent with the
+    substrate ACP decision's "plain-subprocess is a permanent first-class floor").
+
+    NOT the registered backend's default client — that stays ``_UnwiredSandboxClient``
+    (the honest registered-but-not-auto-live posture); inject this explicitly (or
+    via the **A.2b** live harness) to drive a real gateway. The exact CLI flag
+    surface (env passing, the OCSF collection path, UTC-vs-local rotation) is
+    verified + refined against the live gateway in A.2b; the create-then-exec
+    mapping here follows design-of-record §2 against OpenShell ``v0.0.57``.
+    """
+
+    _BINARY = "openshell"
+
+    def __init__(self, binary: str = "openshell", *, ocsf_log_dir: str = "/var/log") -> None:
+        self._binary = binary
+        self._ocsf_log_dir = ocsf_log_dir
+
+    def available(self) -> bool:
+        """True when the ``openshell`` CLI is on PATH (cheap; no side effect).
+
+        A gateway-connected probe (``openshell status``) is intentionally left to
+        the A.2b harness to keep this side-effect-free; the registered backend's
+        default client is ``_UnwiredSandboxClient``, so this is never auto-invoked
+        in CI.
+        """
+        return shutil.which(self._binary) is not None
+
+    def _derive_sandbox_name(self, spec: SandboxCreateSpec) -> str:
+        """A deterministic, content-derived sandbox name (the spec carries no run-id)."""
+        digest = hashlib.sha256(
+            f"{spec.image}\n{render_sandbox_policy_yaml(spec.policy)}".encode("utf-8")
+        ).hexdigest()
+        return f"ce-openshell-{digest[:12]}"
+
+    def create_sandbox(self, spec: SandboxCreateSpec) -> str:  # pragma: no cover - requires a live OpenShell gateway
+        name = self._derive_sandbox_name(spec)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", prefix="ce-openshell-policy-", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(render_sandbox_policy_yaml(spec.policy))
+            policy_path = handle.name
+        try:
+            subprocess.run(
+                [self._binary, "sandbox", "create", "--name", name, "--from", spec.image,
+                 "--policy", policy_path],
+                capture_output=True, text=True, check=True,
+            )
+        finally:
+            Path(policy_path).unlink(missing_ok=True)
+        return name
+
+    def exec_sandbox(  # pragma: no cover - requires a live OpenShell gateway
+        self,
+        sandbox_id: str,
+        command: Sequence[str],
+        *,
+        workdir: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> ExecOutcome:
+        argv = [self._binary, "sandbox", "exec", "-n", sandbox_id]
+        if workdir is not None:
+            argv += ["--workdir", workdir]
+        if timeout_seconds is not None:
+            argv += ["--timeout", str(timeout_seconds)]
+        for key, value in (environment or {}).items():
+            # A.2b verifies the exact env-passing flag against the live CLI.
+            argv += ["--env", f"{key}={value}"]
+        argv += ["--", *command]
+        completed = subprocess.run(argv, capture_output=True, text=True, check=False)
+        return ExecOutcome(
+            exit_code=completed.returncode,
+            stdout=completed.stdout or "",
+            stderr=completed.stderr or "",
+        )
+
+    @staticmethod
+    def _ocsf_log_filename() -> str:  # pragma: no cover - date-derived live path
+        # Daily-rotated OCSF JSONL (design-of-record §5); A.2b confirms UTC-vs-local.
+        return f"openshell-ocsf.{datetime.now(timezone.utc):%Y-%m-%d}.log"
+
+    def collect_evidence(self, sandbox_id: str) -> Sequence[dict[str, Any]]:  # pragma: no cover - reads a live OCSF log
+        log_path = Path(self._ocsf_log_dir) / self._ocsf_log_filename()
+        return parse_ocsf_jsonl(log_path.read_text(encoding="utf-8"))
+
+    def delete_sandbox(self, sandbox_id: str) -> bool:  # pragma: no cover - requires a live OpenShell gateway
+        completed = subprocess.run(
+            [self._binary, "sandbox", "delete", sandbox_id],
+            capture_output=True, text=True, check=False,
+        )
+        return completed.returncode == 0
+
+
 # ---------------------------------------------------------------------------
 # The backend
 # ---------------------------------------------------------------------------
@@ -479,11 +677,16 @@ class OpenShellBackend(RunnerBackend):
         return TeardownResult(handle_ref=handle.ref, released=bool(released))
 
 
-# NOTE: A.1 deliberately does NOT call ``register_backend(BACKEND_KEY, ...)``.
-# This slice *defines* the backend; **A.2 registers it** alongside the live
-# gRPC/SDK client. Registering here would flip ``available_backends()`` and break
-# the ~10 existing tests that pin the registry to ``("gvisor-proxy", "local-noop")``
-# and assert ``openshell`` is unregistered — so registration + those test updates
-# move together to A.2 (consistent with ``backend.py:187-189``: "registered by
-# later slices"). Until then ``get_backend("openshell")`` correctly raises
-# ``UnknownBackend``; callers instantiate ``OpenShellBackend`` directly.
+# A.2a REGISTERS the backend under the ``openshell`` key the G-1.1 registry
+# reserved (``backend.py:187-189``: "registered by later slices"). This flips
+# ``available_backends()`` to the sorted 3-tuple ``("gvisor-proxy", "local-noop",
+# "openshell")`` and resolves ``get_backend("openshell")`` to an ``OpenShellBackend``;
+# the ~10 registry-pinning tests A.1 deferred are updated to that 3-tuple in the
+# same (A.2a) manifest. Registration adds NO validator check (``register_backend``
+# is the BACKEND registry, not the ``@register`` check registry), so ``--list-checks``
+# stays byte-identical. A default (registry-resolved) instance carries the inert
+# ``_UnwiredSandboxClient`` and refuses at ``provision`` with ``BackendUnavailable``
+# (the honest "registered but not auto-live in CI" posture, mirroring gVisor's
+# availability gate) until a ``SubprocessSandboxClient`` (or the A.2b live harness)
+# is injected. Mirrors ``gvisor_proxy_backend.py:289``.
+register_backend(BACKEND_KEY, OpenShellBackend)
