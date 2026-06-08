@@ -231,6 +231,43 @@ def test_show_missing_scope_returns_2(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# report — the ◆ CE Completion Report (canon Outcome/Verdict/Next over evidence)
+# ---------------------------------------------------------------------------
+def test_report_renders_canon_over_evidence(tmp_path, capsys):
+    chain = tmp_path / "chain.yaml"
+    chain.write_text(yaml.safe_dump({"records": [
+        {"record_type": "runtime_spend_ledger", "unit": "$", "amount": 0.7, "run_id": "r-91a"},
+        {"record_type": "runtime_run_outcome", "outcome": "pr_opened", "run_id": "r-91a",
+         "change_set": {"branch": "b", "base": "m", "pr_number": 7}},
+    ]}))
+    code = v3_cli.main(["report", "cs-4f2", "--evidence", str(chain), "--run-id", "r-91a",
+                        "--cap", "5", "--change-type", "code", "--done-when-total", "3",
+                        "--done-when-met", "3", "--ci", "green", "--in-scope", "--budget-size", "S", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "pr_opened"
+    assert payload["outcome_label"] == "PR opened"
+    assert "Done-when 3/3 met" in payload["verdict"] and "14% of Budget S" in payload["verdict"]
+    assert payload["next"].startswith("→ Review PR #7")
+    assert {"pr", "scope", "evidence", "spend"} <= {a["kind"] for a in payload["artifacts"]}
+
+
+def test_artifacts_enriched_with_evidence(tmp_path, capsys):
+    _file_ready(tmp_path)
+    chain = tmp_path / "chain.yaml"
+    chain.write_text(yaml.safe_dump({"records": [
+        {"record_type": "runtime_run_outcome", "outcome": "pr_opened", "run_id": "r-1",
+         "change_set": {"branch": "b", "base": "m", "pr_number": 9}},
+    ]}))
+    capsys.readouterr()
+    v3_cli.main(["artifacts", "rate-limit-login", "--root", str(tmp_path),
+                 "--evidence", str(chain), "--run-id", "r-1", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    kinds = {a["kind"] for a in payload["artifacts"]}
+    assert "scope" in kinds and "pr" in kinds and "evidence" in kinds
+
+
+# ---------------------------------------------------------------------------
 # shape — the Frame→Shape grill-me (gaps + minimum questions + the dial)
 # ---------------------------------------------------------------------------
 def test_shape_flags_gaps_and_budget_is_human_only(tmp_path, capsys):
@@ -267,6 +304,17 @@ def test_v3_cli_imports_no_v1_module():
     # imports only stdlib + yaml + v3/shared siblings; never a v1 launcher module.
     for v1_mod in ("ce_cli", "lane_runtime", "launch_runtime", "tmux_adapter", "worker_runtime"):
         assert f"import {v1_mod}" not in src and f"from .{v1_mod}" not in src
+
+
+def test_user_facing_command_is_ce_not_cev3(tmp_path, capsys):
+    # Operator-ratified directive: users type `ce`; `cev3` is internal-only.
+    assert v3_cli.CE_CMD == "ce"
+    assert v3_cli._build_parser().prog == "ce"
+    # user-facing output never prints the internal `cev3` name
+    _file_ready(tmp_path)
+    v3_cli.main(["artifacts", "rate-limit-login", "--root", str(tmp_path)])
+    v3_cli.main(["shape", "rate-limit-login", "--goal", "g", "--change-type", "code"])
+    assert "cev3" not in capsys.readouterr().out
 
 
 def test_help_reachable():

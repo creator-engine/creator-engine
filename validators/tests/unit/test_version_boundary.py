@@ -64,10 +64,10 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained the G-7 Frame→Shape grill-me + chat→Scope dial (``v3_shaping``)
-    # atop the session render (``v3_session``), the CLI (``v3_cli``), and the G-6
-    # coordination spine: 23 -> 24.
-    assert len(ver.V3_RUNTIME) == 24
+    # v3 gained the G-7 ◆ CE Completion Report render (``v3_report``) atop the
+    # shaping dialogue (``v3_shaping``), the session render (``v3_session``), the
+    # CLI (``v3_cli``), and the G-6 coordination spine: 24 -> 25.
+    assert len(ver.V3_RUNTIME) == 25
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

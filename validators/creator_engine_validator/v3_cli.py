@@ -15,6 +15,14 @@ v3-classified module — added ALONGSIDE the retained v1 ``ce`` launcher
 import edge; see ``_versions.BASELINE_SHARED_TO_VERSION_ALLOWLIST``). v1 is
 retained whole; this surface is purely additive.
 
+USER-FACING NAME (Operator-ratified design-lane directive, 2026-06-08):
+``cev3`` is the INTERNAL console_script name — it exists ONLY to avoid the v1
+``ce`` collision in this coexistence monorepo; users never type it. The
+USER-FACING command is ``ce`` (``CE_CMD``): the pilot installs v3 ONLY (no v1
+``ce`` to collide with), so the 7E installer exposes this CLI AS ``ce``, and all
+user-facing output + help here speaks ``ce`` (the docs are the user-facing truth).
+A version-stamped user command (``cev3``/``cev4``) is the anti-pattern this avoids.
+
 Local state (G-4.1): Scope artifacts persist under the neutral, CE-namespaced
 local-state root ``_versions.V3_LOCAL_STATE_ROOT`` (``.ce/state``) — NEVER the v1
 bootstrapping-harness local-state root (kept frozen for v1 only) and NEVER a
@@ -50,7 +58,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_session, v3_shaping
+from . import coordination, v3_report, v3_session, v3_shaping
 from ._versions import V3_LOCAL_STATE_ROOT
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
@@ -77,6 +85,11 @@ CARD_LABELS = {
 
 #: The brand prefix every CE line carries (``pilot-uiux-model.md``).
 _BRAND = "◆ CE"  # ◆ CE
+
+#: The USER-FACING command name (Operator-ratified directive). Users type ``ce``
+#: (the pilot installs v3-only; the 7E installer exposes this CLI as ``ce``). The
+#: internal console_script is ``cev3`` (monorepo coexistence only) — never shown.
+CE_CMD = "ce"
 
 
 # ---------------------------------------------------------------------------
@@ -368,11 +381,63 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
             [f"{_BRAND} · no Scope {args.scope_id!r} under {_scopes_dir(root)}"],
             {"error": "not_found"},
         )
-    artifacts = [{"kind": "scope", "path": str(path), "inspect": f"cev3 show {args.scope_id}"}]
+    artifacts = [{"kind": "scope", "path": str(path), "label": f"Scope {args.scope_id}",
+                  "inspect": f"{CE_CMD} show {args.scope_id}"}]
+    # G-7.3: with a run evidence chain, also enumerate the run artifacts (PR /
+    # evidence-chain / spend) via the ◆ Completion-Report artifact-awareness fold.
+    if getattr(args, "evidence", None):
+        records = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+        if isinstance(records, dict):
+            records = records.get("records") or records.get("leaves") or []
+        summary = v3_report.summary_from_evidence(
+            records or [], scope_id=args.scope_id, run_id=getattr(args, "run_id", None),
+            budget=getattr(args, "cap", None),
+        )
+        artifacts += [a for a in v3_report.enumerate_artifacts(summary) if a["kind"] != "scope"]
     lines = [f"{_BRAND} · artifacts for Scope {args.scope_id!r}:"]
-    lines += [f"    {a['kind']:>10}  {a['path']}   ({a['inspect']})" for a in artifacts]
-    lines.append(f"{_BRAND} · (run artifacts — PR / evidence / spend — land with the live drive seam)")
+    lines += [f"    {a['kind']:>10}  {a.get('path', a['label'])}   ({a['inspect']})" for a in artifacts]
+    if not getattr(args, "evidence", None):
+        lines.append(f"{_BRAND} · (pass --evidence <chain> to enumerate run artifacts: PR / evidence / spend)")
     return _emit(args, 0, lines, {"action": "artifacts", "scope_id": args.scope_id, "artifacts": artifacts})
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    """Render the per-run ◆ CE Completion Report (Outcome · Verdict · Next + Artifacts).
+
+    Folds the REAL conserved outcome + spend off the run evidence chain
+    (``--evidence``); the grading synthesis (Done-when / CI / in-scope) is injected
+    via flags (its live assembly is the deferred seam).
+    """
+    records: list[Any] = []
+    if args.evidence:
+        loaded = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            loaded = loaded.get("records") or loaded.get("leaves") or []
+        records = loaded or []
+    grading: dict[str, Any] = {}
+    if args.change_type:
+        grading["change_type"] = args.change_type
+    if args.done_when_total is not None:
+        grading["done_when_total"] = args.done_when_total
+        grading["done_when_met"] = args.done_when_met if args.done_when_met is not None else args.done_when_total
+    if args.ci:
+        grading["ci"] = args.ci
+    if args.in_scope is not None:
+        grading["in_scope"] = args.in_scope
+    if args.budget_size:
+        grading["budget_size"] = args.budget_size
+    summary = v3_report.summary_from_evidence(
+        records, scope_id=args.scope_id, run_id=args.run_id, budget=args.cap, unit=args.unit, **grading,
+    )
+    if args.pr is not None:
+        summary["pr"] = args.pr
+    lines = v3_report.render_report(summary)
+    return _emit(args, 0, lines, {
+        "action": "report", "run_id": summary.get("run_id"), "scope_id": args.scope_id,
+        "outcome": summary.get("outcome"), "outcome_label": v3_report.outcome_label(summary.get("outcome")),
+        "verdict": v3_report.render_verdict(summary), "next": v3_report.render_next(summary),
+        "artifacts": v3_report.enumerate_artifacts(summary),
+    })
 
 
 def _cmd_shape(args: argparse.Namespace) -> int:
@@ -381,7 +446,7 @@ def _cmd_shape(args: argparse.Namespace) -> int:
     The agent drafts every field EXCEPT the Budget (human-only). Surfaces the
     gap-aware Scope card, the minimum questions to close, and (with --persona +
     --signal) the detect-and-offer decision. A pure dialogue helper — it does not
-    write a Scope artifact (that is `cev3 scope` once the gaps are closed).
+    write a Scope artifact (that is `ce scope` once the gaps are closed).
     """
     draft: dict[str, Any] = {"scope_id": args.scope_id}
     if args.goal:
@@ -399,7 +464,7 @@ def _cmd_shape(args: argparse.Namespace) -> int:
             who = "  (your call — Budget is yours to set)" if g.human_only else ""
             lines.append(f"    - {g.label}: {g.question}{who}")
     else:
-        lines.append(f"{_BRAND} · Ready — place the bet with `cev3 ratify {args.scope_id}`")
+        lines.append(f"{_BRAND} · Ready — place the bet with `{CE_CMD} ratify {args.scope_id}`")
     offer = None
     if args.persona and args.signal:
         # pass the actual change-type (None when not yet proposed) so the dial
@@ -465,7 +530,7 @@ def _add_root(p: argparse.ArgumentParser) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cev3",
+        prog=CE_CMD,
         description="Creator Engine v3 — file, ratify, and drive work as a governed Scope "
         "(Frame → Shape → Build → Review → Ship).",
     )
@@ -504,9 +569,31 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("scope_id", metavar="ID", help="the Scope to show")
     _add_root(p_show)
 
-    p_art = sub.add_parser("artifacts", help="enumerate a Scope's artifacts")
+    p_art = sub.add_parser("artifacts", help="enumerate a Scope's (and a run's) artifacts")
     p_art.add_argument("scope_id", metavar="ID", help="the Scope whose artifacts to list")
+    p_art.add_argument("--evidence", default=None, help="run evidence chain YAML — also enumerate run artifacts")
+    p_art.add_argument("--run-id", default=None, help="run id to fold the evidence for")
+    p_art.add_argument("--cap", type=float, default=None, help="run spend cap (to surface the spend artifact)")
     _add_root(p_art)
+
+    p_report = sub.add_parser("report", help="render the per-run ◆ CE Completion Report")
+    p_report.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_report.add_argument("--evidence", default=None, help="run evidence chain YAML (folds Outcome + spend)")
+    p_report.add_argument("--run-id", default=None, help="run id")
+    p_report.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
+    p_report.add_argument("--change-type", default=None, choices=sorted(coordination.MUTATION_CLASSES),
+                          help="Change-type (mutation_class) for the Next step")
+    p_report.add_argument("--done-when-total", type=int, default=None, help="number of Done-when criteria")
+    p_report.add_argument("--done-when-met", type=int, default=None, help="Done-when criteria met")
+    p_report.add_argument("--ci", default=None, help="CI status (e.g. green)")
+    p_report.add_argument("--in-scope", dest="in_scope", action="store_true", default=None,
+                          help="the diff stayed inside the closed manifest (in scope ✓)")
+    p_report.add_argument("--out-of-scope", dest="in_scope", action="store_false",
+                          help="the diff left the closed manifest")
+    p_report.add_argument("--cap", type=float, default=None, help="run spend cap (Budget) to meter spend against")
+    p_report.add_argument("--unit", choices=["$", "%"], default="$", help="spend unit")
+    p_report.add_argument("--budget-size", default=None, help="appetite size label (e.g. S) for 'of Budget S'")
+    p_report.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_shape = sub.add_parser("shape", help="run the Frame→Shape grill-me on a partial draft (gaps + questions)")
     p_shape.add_argument("scope_id", metavar="ID", help="working Scope slug")
@@ -546,6 +633,7 @@ _DISPATCH = {
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
+    "report": _cmd_report,
     "session": _cmd_session,
 }
 
