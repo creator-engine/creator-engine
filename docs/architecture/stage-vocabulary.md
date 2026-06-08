@@ -1,6 +1,6 @@
-# CE v3 — Stage Vocabulary (canon)
+# CE v3 — Vocabulary (canon)
 
-*Canon decision + dual-mapping reference (provenance: 2026-06-07 design session; GH #159). **CANON — terminology-canon-tracked.** The user-facing cognitive phases are a presentation layer over the conserved mechanical state machine; this document is the authority for both and their correspondence. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Canon decision + dual-mapping reference for CE's user-facing vocabulary (provenance: 2026-06-07/08 design sessions; GH #159). **CANON — terminology-canon-tracked.** CE presents users **clear words** (the skin) over **conserved mechanical names** (the engine); this document is the authority for both and their correspondence. It covers two user-facing surfaces — the **stage phases** (`Frame → Shape → Build → Review → Ship`) and the **Scope-card / gate fields**. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
 
 ## The decision
 
@@ -65,12 +65,30 @@ CE implements BMAD's four-phase workflow in its own externally-graded way — ea
 - `Build ≈ Implementation`
 - **`Review` / `Ship` = CE's first-class governed tail.** BMAD folds review and ship into Implementation; **CE separates them because external grading plus the governed merge is the differentiator** — the grader lives outside the agent, and "done" is a ratified, merged artifact, not the agent's say-so.
 
+## The Scope-card / gate-field vocabulary (2nd vocabulary — locked 2026-06-08)
+
+The same skin-over-conserved-machine principle applies to the **fields of a Scope** (and the Definition-of-Ready gate it must pass). The user-facing labels are clear; the **schema field-names are conserved verbatim** (the engine/governance layer — `schemas/scope.schema.yaml`, shipped at G-6, is unchanged by this canon):
+
+| User-facing label (skin) | Conserved schema field (engine) | Why clearer |
+| --- | --- | --- |
+| **Goal** | `intent` | plain — "what I'm trying to do" |
+| **Done when** | `acceptance_criteria` | names it as the *testable done-oracle* (the external grader's target), not an Agile artifact |
+| **Budget** | `appetite` | a *fixed cap you commit*, **not an estimate** (a Shape-Up appetite); it also becomes the run's spend cap via the G-5 join |
+| **Change type** | `mutation_class` | "what kind of change, and how risky" — the risk tier (`docs < code < schema < deploy < …`) that drives the back gate |
+| **Ready** | `definition_of_ready` | maps straight onto the board `READY` state — the word already exists in the machine |
+
+So a Scope card reads, e.g.: `◆ CE · Shape → "rate-limit /api/login"  (Done-when 3 · Budget S · Change-type code · Ready ✓)`.
+
+- **The atom-word `Scope` is kept** — distinctive, brandable, and load-bearing across the coordination hierarchy and the G-6 Scope object. It is not relabeled.
+- **Conserve the fields.** As with the stage phases, the labels are a presentation skin; `schemas/scope.schema.yaml`'s `intent / acceptance_criteria / appetite / mutation_class` and the `definition_of_ready` predicate are unchanged. The shaping dialogue that *fills* these fields is designed in [`shaping-ux.md`](./shaping-ux.md); the plain-language walk-through is in [`../guide/understanding-ce.md`](../guide/understanding-ce.md).
+
 ## Non-goals
 
 - **Not** a change to the mechanical state machine — every enum above is conserved verbatim.
+- **Not** a change to the Scope schema or the G-6 contract — the field-names (`intent` / `acceptance_criteria` / `appetite` / `mutation_class`) and the `definition_of_ready` predicate are conserved; only the user-facing labels are added.
 - **Not** a v1 change (v1.0 is frozen).
 - **No** CI terminology guard in this canon — docs-canon is manual hygiene (the existing terminology guard is scoped to `specs/v2/`, never `docs/`); a docs-scoped guard is a separately-grounded follow-on.
 
 ## Provenance & companions
 
-GH issue #159 (2026-06-07); the v3.1 coordination-layer design thread. Pairs with [`pilot-uiux-model.md`](./pilot-uiux-model.md) (where the vocabulary surfaces) and [`pilot-roadmap.md`](./pilot-roadmap.md) (the G-6 coordination layer and the G-7 product surface consume it). The mechanical ground truth is [`agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md).
+GH issue #159 (2026-06-07, the stage phases); the 2nd vocabulary (Scope-card fields) locked 2026-06-08 — both in the v3.1 coordination-layer design thread. Pairs with [`shaping-ux.md`](./shaping-ux.md) (the shaping dialogue that fills the Scope), [`pilot-uiux-model.md`](./pilot-uiux-model.md) (where the vocabulary surfaces), and the user guide [`../guide/understanding-ce.md`](../guide/understanding-ce.md) (the plain-language walk-through). The G-6 coordination layer and the G-7 product surface consume this canon. The mechanical ground truth is [`agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md).
