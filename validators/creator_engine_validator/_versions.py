@@ -91,6 +91,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.noop_backend",
         # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
         "runner.spend_gate",
+        # v3 G-6 coordination: the outer-loop Scope dispatch spine
+        "coordination",
     }
 )
 
@@ -118,6 +120,7 @@ V3_SCHEMAS: frozenset[str] = frozenset(
     {
         "schemas/runtime-policy.schema.yaml",
         "schemas/runtime-evidence.schema.yaml",
+        "schemas/scope.schema.yaml",
     }
 )
 

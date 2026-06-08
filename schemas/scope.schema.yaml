@@ -1,0 +1,172 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/scope.schema.yaml"
+title: "Creator Engine Scope Record"
+description: |
+  Machine-readable schema for a single Scope record — the v3 coordination
+  layer's ephemeral atomic unit of work (the OUTER loop, v3 G-6). A Scope is
+  a ratifiable, scope-boxed task with testable acceptance criteria, a
+  Shape-Up appetite, and an isolated execution: a ratified Scope dispatches
+  ONE isolated run governed by the agent-interaction contract (G-4) + the
+  tokenomics gate (G-5).
+
+  Prose contract: `docs/contracts/scope.md`.
+
+  Stage vocabulary (CANON — `docs/architecture/stage-vocabulary.md`): the
+  Scope's `state` is the CONSERVED mechanical spec-lifecycle
+  (`draft → ready → in_progress → verified → ratified → done`, conserved
+  verbatim, zero new enums). The user-facing cognitive phase
+  (`Frame → Shape → Build → Review → Ship`) is a PRESENTATION SKIN derived
+  from `state` via the canon dual-mapping — never a third vocabulary. The
+  optional `phase` field is a cached projection the `ce_scope` check forces to
+  equal the derivation (so the skin can never drift from the machine).
+
+  G-6 boundary statement: this schema defines the Scope record SHAPE only.
+  The pure coordination substrate (DoR predicate, appetite→spend-cap join,
+  state-as-projection, dispatch-assembly) lives in
+  `creator_engine_validator/coordination.py`; the cross-field semantics (DoR
+  completeness for ready-or-later, appetite derivability, the ratification
+  binding, skin/machine consistency) are enforced by the `ce_scope` check.
+  The LIVE dispatch (actually spawning a run) is a deferred seam.
+
+  Value-free: a Scope carries intent / acceptance-criteria / appetite /
+  mutation_class / opaque ratification digests / optional shape-only refs —
+  NEVER a credential, secret value, raw account, host, or installation id.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - scope_id
+  - intent
+  - mutation_class
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: scope-record
+    description: |
+      Discriminator constant. Records that do not carry this exact value are
+      not governed Scope records and MUST NOT be validated by `ce_scope`.
+  record_type:
+    type: string
+    const: scope
+  schema_version:
+    type: string
+    enum: ["1"]
+  scope_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      Stable slug for this Scope (same pattern as policy_id / controller_id).
+  intent:
+    type: string
+    minLength: 1
+    description: |
+      The framed problem/spec — what is being asked and why. The `Frame`
+      output.
+  acceptance_criteria:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Testable acceptance criteria — the DoR core and the test-first oracle
+      (XP). REQUIRED non-empty for a ready-or-later Scope (enforced by
+      `ce_scope`); a `draft` Scope being framed/shaped may omit it.
+  appetite:
+    $ref: "#/$defs/appetite"
+    description: |
+      Shape-Up fixed effort budget (NOT an estimate). Seeds the per-run
+      tokenomics envelope via the appetite→spend-cap join
+      (`coordination.appetite_to_spend_envelope`). REQUIRED + derivable for a
+      ready-or-later Scope (enforced by `ce_scope`).
+  mutation_class:
+    type: string
+    enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+    description: |
+      The blast-radius/severity axis (the shared planning-layer taxonomy plus
+      `none`). Drives the back gate (the `mutation_class`-tiered
+      `human_ratification_required` ratified-merge — existing machinery).
+  ratification:
+    $ref: "#/$defs/scope_ratification"
+    description: |
+      The betting-table attestation (the FRONT-gate bet): value-free opaque
+      digests proving a ratifier placed the bet. Its presence is REQUIRED for
+      a ready-or-later Scope (the front gate gates dispatch); `ce_scope` emits
+      `VAL-SCOPE-RATIFICATION-UNBOUND` otherwise.
+  skill_refs:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Optional forward hook to the durable Skill axis (deferred). Shape only.
+  crosswalk_parent:
+    type: string
+    minLength: 1
+    description: |
+      Optional light traceability ref up the collapsible crosswalk tree
+      (PRD/epic/story). The register-side `scope_mappings` axis is deferred.
+  state:
+    type: string
+    enum: [draft, ready, in_progress, verified, ratified, done]
+    description: |
+      The CONSERVED mechanical spec-lifecycle state (conserved verbatim from
+      the stage-vocabulary canon). Absent ⇒ treated as `draft`. This is the
+      source of truth; the cognitive phase is derived from it.
+  phase:
+    type: string
+    enum: [Frame, Shape, Build, Review, Ship]
+    description: |
+      OPTIONAL cached cognitive phase (the canon presentation skin). When
+      present it MUST equal the derivation from `state`
+      (`coordination.cognitive_phase`); `ce_scope` emits
+      `VAL-SCOPE-STATE-INCONSISTENT` on drift. The skin never replaces the
+      machine and is never a third vocabulary.
+  note:
+    type: string
+    maxLength: 1024
+    description: |
+      Optional advisory note. MUST NOT contain secrets, tokens, or actor ids.
+$defs:
+  appetite:
+    type: object
+    required: [amount, unit]
+    unevaluatedProperties: false
+    properties:
+      amount:
+        type: number
+        description: |
+          The fixed budget magnitude in `unit`. Kept loose at the schema layer
+          (like `runtime-policy`'s `image_ref.sha`) so `ce_scope` can emit a
+          precise `VAL-SCOPE-APPETITE-INVALID` — the check REQUIRES amount > 0.
+      unit:
+        type: string
+        minLength: 1
+        description: |
+          `$` = API-USD (the fleet regime) · `%` = single-seat subscription
+          meter. Kept loose at the schema layer so `ce_scope` emits a precise
+          `VAL-SCOPE-APPETITE-INVALID`; the check REQUIRES `$` or `%`. The
+          appetite→cap join carries it through to a `run`-scope `spend_envelope`.
+      window:
+        type: string
+        enum: [per_run, rolling_5h, rolling_weekly, total]
+        description: |
+          Optional accounting window. Absent ⇒ `per_run` at the join.
+  scope_ratification:
+    type: object
+    required: [approver_ref, ratified_scope_sha]
+    unevaluatedProperties: false
+    properties:
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest standing in for the ratifying actor (the bet).
+          NEVER a raw account/login.
+      ratified_scope_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 digest of the ratified Scope content the bet is pinned
+          to — an opaque digest, never the Scope body.

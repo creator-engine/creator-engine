@@ -28,8 +28,8 @@ def _mods():
 def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
-    # 46 with the G-5 ce_spend_envelope check registered alongside version_boundary.
-    assert len(reg) == 46
+    # 47 with the G-6 ce_scope check registered alongside version_boundary.
+    assert len(reg) == 47
 
 
 def test_green_on_real_package():
@@ -64,8 +64,8 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained runner.spend_gate (the G-5 tokenomics spend gate): 19 -> 20.
-    assert len(ver.V3_RUNTIME) == 20
+    # v3 gained coordination (the G-6 outer-loop Scope dispatch spine): 20 -> 21.
+    assert len(ver.V3_RUNTIME) == 21
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
