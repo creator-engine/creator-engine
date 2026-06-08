@@ -64,9 +64,9 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained the G-7 work-driving CLI (``v3_cli``) atop the G-6 coordination
-    # spine: 21 -> 22.
-    assert len(ver.V3_RUNTIME) == 22
+    # v3 gained the G-7 session frame + unified status-line render (``v3_session``)
+    # atop the G-7.0 CLI (``v3_cli``) and the G-6 coordination spine: 22 -> 23.
+    assert len(ver.V3_RUNTIME) == 23
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
