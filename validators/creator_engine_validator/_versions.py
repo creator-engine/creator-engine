@@ -97,6 +97,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_cli",
         # v3 G-7 product surface: the session frame + unified status line render
         "v3_session",
+        # v3 G-7 product surface: the Frame→Shape grill-me + chat→Scope dial
+        "v3_shaping",
     }
 )
 
