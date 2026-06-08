@@ -306,6 +306,55 @@ def test_v3_cli_imports_no_v1_module():
         assert f"import {v1_mod}" not in src and f"from .{v1_mod}" not in src
 
 
+def test_onboard_verifies_spec_and_dry_runs(tmp_path, capsys):
+    spec = tmp_path / "llms-install.md"
+    spec.write_text("# Install CE\n", encoding="utf-8")
+    code = v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verified"]["ok"] is True
+    assert payload["expose_cli"]["command"] == "ce"
+    assert payload["profile"]["mode"] == "default"
+    assert "the GitHub-App authorization click" in payload["human_approves"]
+    # honesty: without a published --sig-value the floor only self-attests integrity
+    assert payload["self_attested"] is True
+
+
+def test_onboard_with_published_sig_is_not_self_attested(tmp_path, capsys):
+    from creator_engine_validator import v3_installer
+    spec = tmp_path / "spec.md"
+    spec.write_text("# spec\n", encoding="utf-8")
+    digest = v3_installer.content_digest(spec.read_bytes())
+    v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1", "--sig-value", digest, "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verified"]["ok"] is True and payload["self_attested"] is False
+
+
+def test_onboard_refuses_tampered_spec(tmp_path, capsys):
+    spec = tmp_path / "spec.md"
+    spec.write_text("# real spec\n", encoding="utf-8")
+    # a sig value that does not match the spec content → refuse before execute
+    code = v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1",
+                        "--sig-value", "0" * 64])
+    assert code == 1
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_onboard_optout_requires_ratification_and_educates(tmp_path, capsys):
+    spec = tmp_path / "spec.md"
+    spec.write_text("# spec\n", encoding="utf-8")
+    # opt-out without a valid ratification binding → refused (human-only)
+    assert v3_cli.main(["onboard", "--spec", str(spec), "--opt-out"]) == 1
+    capsys.readouterr()
+    # with a ratified binding → custom profile + the educate copy surfaces
+    code = v3_cli.main(["onboard", "--spec", str(spec), "--opt-out",
+                        "--ratified-prompt-sha", "a" * 64, "--approver-ref", "b" * 64, "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile"]["runtime_policy"]["spend_cap_enforcement"] == "off"
+    assert "won't speed up your runs" in payload["educate"]
+
+
 def test_user_facing_command_is_ce_not_cev3(tmp_path, capsys):
     # Operator-ratified directive: users type `ce`; `cev3` is internal-only.
     assert v3_cli.CE_CMD == "ce"

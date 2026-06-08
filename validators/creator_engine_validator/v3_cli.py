@@ -53,12 +53,13 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_report, v3_session, v3_shaping
+from . import coordination, v3_installer, v3_report, v3_session, v3_shaping
 from ._versions import V3_LOCAL_STATE_ROOT
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
@@ -517,6 +518,70 @@ def _cmd_session(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_onboard(args: argparse.Namespace) -> int:
+    """Two-mode install — verify the signed spec, then DRY-RUN the install plan.
+
+    Reads the served install spec, builds its signature block, and
+    verify-BEFORE-execute against the pinned CE keys (refuse on tamper / unknown
+    key). Then plans dependency resolution from a LIVE read-only probe
+    (``shutil.which`` — detection is read-only; the privileged FIX is deferred),
+    the Default-vs-Custom profile (with the cost opt-out + educate copy), and the
+    ``ce`` exposure. Prints what a live drive WOULD do — the actual execution,
+    backend provisioning, and the GitHub-App click are the deferred live seams.
+    """
+    spec_path = Path(args.spec)
+    if not spec_path.is_file():
+        return _emit(args, 2, [f"{_BRAND} · onboard refused: spec not found: {spec_path}"],
+                     {"error": "spec_not_found"})
+    spec_bytes = spec_path.read_bytes()
+    self_attested = args.sig_value is None
+    signature = {"key_id": args.key_id, "algo": v3_installer.CONTENT_ALGO,
+                 "value": args.sig_value or v3_installer.content_digest(spec_bytes)}
+    optout_ratification = None
+    if args.opt_out:
+        optout_ratification = {"ratified_prompt_sha": args.ratified_prompt_sha or "",
+                               "approver_ref": args.approver_ref or ""}
+    # detect-don't-assume: a LIVE read-only presence probe (no mutation, no sudo)
+    probe = {tool: _which(tool) for tool in v3_installer.REQUIRED_DEPENDENCIES}
+    try:
+        plan = v3_installer.build_install_plan(
+            spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
+            mode=args.mode, opt_out=args.opt_out, optout_ratification=optout_ratification,
+        )
+    except v3_installer.InstallRefused as exc:
+        return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
+    lines = [
+        f"{_BRAND} · onboard (dry-run · {plan['mode']}) — spec verified against pinned key "
+        f"{plan['verified']['key_id']!r}",
+        f"    dependencies · install {plan['dependencies']['install'] or '—'} · "
+        f"skip {plan['dependencies']['skip']} · sudo {'yes' if plan['dependencies']['needs_sudo'] else 'no'}",
+        f"    cost profile · {plan['profile']['mode']} → {plan['profile']['runtime_policy']}",
+    ]
+    if plan["educate"]:
+        lines.append(f"    {_BRAND} opt-out · {plan['educate']}")
+    lines += [
+        f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",
+        f"{_BRAND} · you approve only: {', '.join(plan['human_approves'])}",
+        f"{_BRAND} · deferred live: {'; '.join(plan['deferred_live_seams'])}",
+    ]
+    if self_attested:
+        # honesty: with no published --sig-value the content floor only self-attests
+        # integrity (not authenticity). The real check needs the published signature
+        # value + the asymmetric verifier — pass --sig-value before a live drive.
+        lines.append(
+            f"{_BRAND} · NOTE: no --sig-value given — verification is self-attested integrity "
+            "only (NOT authenticity); pass the published signature value before a live install."
+        )
+    return _emit(args, 0, lines, {"action": "onboard", "self_attested": self_attested, **plan})
+
+
+def _which(tool: str) -> bool:
+    """Read-only presence probe (the FIX is deferred). ``python`` ≈ python3."""
+    if tool == "python":
+        return bool(shutil.which("python") or shutil.which("python3"))
+    return bool(shutil.which(tool))
+
+
 # ---------------------------------------------------------------------------
 # Parser + entry point
 # ---------------------------------------------------------------------------
@@ -608,6 +673,19 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="detected intent-to-act signal strength (for the dial)")
     p_shape.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    p_onboard = sub.add_parser("onboard", help="two-mode install: verify the signed spec + dry-run the plan")
+    p_onboard.add_argument("--spec", required=True, help="path to the served install spec to verify")
+    p_onboard.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
+    p_onboard.add_argument("--sig-value", default=None,
+                           help="the published signature value (default: the spec's own content digest)")
+    p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
+                           help="install mode")
+    p_onboard.add_argument("--opt-out", action="store_true",
+                           help="opt out of spend CAPS (ratified-human-only; detection net stays on)")
+    p_onboard.add_argument("--ratified-prompt-sha", default=None, help="64-hex opt-out ratification digest")
+    p_onboard.add_argument("--approver-ref", default=None, help="64-hex opt-out approver digest")
+    p_onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     p_session = sub.add_parser("session", help="launch the governed session frame + status line")
     p_session.add_argument("--context-pct", type=float, default=None,
                            help="the harness's authoritative context-window %% (consumed, never recomputed)")
@@ -634,6 +712,7 @@ _DISPATCH = {
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
     "report": _cmd_report,
+    "onboard": _cmd_onboard,
     "session": _cmd_session,
 }
 

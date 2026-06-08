@@ -101,6 +101,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_shaping",
         # v3 G-7 product surface: the ◆ CE Completion Report + artifact awareness
         "v3_report",
+        # v3 G-7 product surface: the two-mode installer logic + cost opt-out
+        "v3_installer",
     }
 )
 
