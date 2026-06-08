@@ -93,6 +93,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.spend_gate",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
         "coordination",
+        # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)
+        "v3_cli",
     }
 )
 

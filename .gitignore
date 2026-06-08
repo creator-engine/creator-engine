@@ -36,6 +36,13 @@ __pycache__/
 # never tracked, and never carries a credential value. Additive instance-zone line.
 .ce/connector/cache/
 
+# G-7 v3 work-driving local state. `.ce/state/` is the neutral, CE-namespaced v3
+# instance-local state root (`_versions.V3_LOCAL_STATE_ROOT`) the `cev3` CLI writes
+# Scope artifacts under — instance-local runtime state, never tracked. Additive
+# instance-zone line only: do NOT wholesale-ignore `.ce/` (governance subtrees
+# under `.ce/` must remain trackable).
+.ce/state/
+
 # Instance-local governed-execution working zones. CE gate execution provisions
 # per-gate git worktrees and per-PR reviewer-seat clones INSIDE the repo dir
 # (`ce-worktrees/<gate>/`, `ce-review-venues/pr<N>-<ts>/`). These are separate
