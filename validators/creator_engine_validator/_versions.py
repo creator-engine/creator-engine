@@ -99,6 +99,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_session",
         # v3 G-7 product surface: the Frame→Shape grill-me + chat→Scope dial
         "v3_shaping",
+        # v3 G-7 product surface: the ◆ CE Completion Report + artifact awareness
+        "v3_report",
     }
 )
 
