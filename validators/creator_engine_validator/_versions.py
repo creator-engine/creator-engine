@@ -93,6 +93,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.openshell_backend",
         # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
         "runner.spend_gate",
+        # v3.5-D.0.1 compute-demand artifact: the live usage tap
+        # (transcript → spend-ledger; reuses runner.spend_gate, pure core + 1 I/O edge)
+        "runner.usage_tap",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
         "coordination",
         # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)

@@ -1,0 +1,175 @@
+"""Unit tests for the v3.5-D.0.1 live usage tap (transcript → spend-ledger; pure).
+
+RED->GREEN against fixtures: a handful of transcript JSONL lines in the CONFIRMED
+harness shape (one normal opus turn, one sidechain, one no-usage user line, one
+malformed line); rates are injected; the only filesystem touch is exercised via a
+tmp file. Cost is asserted to come from the shared ``spend_gate.compute_cost`` (NOT
+reimplemented). ``usage_tap`` is imported directly (no ``__init__`` export — mirrors
+``spend_gate``).
+"""
+
+from __future__ import annotations
+
+import json
+
+from creator_engine_validator import runtime_evidence_spine as spine
+from creator_engine_validator.runner import spend_gate as sg
+from creator_engine_validator.runner import usage_tap as ut
+
+# A live-policy-shaped rate table (read live from policy in production; injected here).
+RATES = [
+    {"model": "claude-opus-4-8", "input_per_mtok": 5.0, "output_per_mtok": 25.0},
+]
+
+
+def _assistant_line(*, session_id, model, ts, usage, sidechain=False):
+    """Build one assistant JSONL line in the confirmed harness shape."""
+    return json.dumps(
+        {
+            "type": "assistant",
+            "sessionId": session_id,
+            "timestamp": ts,
+            "isSidechain": sidechain,
+            "requestId": "req_x",
+            "message": {"role": "assistant", "model": model, "usage": usage},
+        }
+    )
+
+
+# A faithful opus usage blob — note the EXTRA keys the tap must ignore.
+OPUS_USAGE = {
+    "input_tokens": 2497,
+    "output_tokens": 303,
+    "cache_creation_input_tokens": 11468,
+    "cache_read_input_tokens": 16272,
+    "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0},
+    "service_tier": "standard",
+    "cache_creation": {"ephemeral_1h_input_tokens": 11468, "ephemeral_5m_input_tokens": 0},
+    "iterations": [{"input_tokens": 2497, "output_tokens": 303, "type": "message"}],
+}
+
+NORMAL = _assistant_line(
+    session_id="sess-1",
+    model="claude-opus-4-8",
+    ts="2026-06-08T07:34:22.526Z",
+    usage=OPUS_USAGE,
+)
+SIDECHAIN = _assistant_line(
+    session_id="sess-1",
+    model="claude-opus-4-8",
+    ts="2026-06-08T07:35:00.000Z",
+    usage={"input_tokens": 10, "output_tokens": 5},
+    sidechain=True,
+)
+USER_LINE = json.dumps(
+    {
+        "type": "user",
+        "sessionId": "sess-1",
+        "timestamp": "2026-06-08T07:33:00.000Z",
+        "isSidechain": False,
+        "message": {"role": "user", "content": "hi"},
+    }
+)
+MALFORMED = "{not valid json,,,"
+
+TRANSCRIPT_LINES = [USER_LINE, NORMAL, SIDECHAIN, MALFORMED]
+
+
+# --- parse_transcript_usage: PURE extraction ---------------------------------
+def test_parse_extracts_only_the_real_assistant_turn():
+    turns = ut.parse_transcript_usage(TRANSCRIPT_LINES)
+    assert len(turns) == 1
+    turn = turns[0]
+    assert turn.session_id == "sess-1"
+    assert turn.model == "claude-opus-4-8"
+    assert turn.recorded_at == "2026-06-08T07:34:22.526Z"
+    # ONLY the 4 cost keys are retained; the extra usage keys are dropped.
+    assert turn.usage == {
+        "input_tokens": 2497,
+        "output_tokens": 303,
+        "cache_creation_input_tokens": 11468,
+        "cache_read_input_tokens": 16272,
+    }
+
+
+def test_parse_skips_sidechain_user_malformed_and_blank():
+    assert ut.parse_transcript_usage([SIDECHAIN]) == []
+    assert ut.parse_transcript_usage([USER_LINE]) == []
+    assert ut.parse_transcript_usage([MALFORMED]) == []
+    assert ut.parse_transcript_usage(["", "   "]) == []
+
+
+def test_parse_skips_assistant_without_model_or_without_usage():
+    no_model = json.dumps(
+        {
+            "type": "assistant",
+            "sessionId": "s",
+            "timestamp": "t",
+            "message": {"usage": {"input_tokens": 1, "output_tokens": 1}},
+        }
+    )
+    no_usage = json.dumps(
+        {
+            "type": "assistant",
+            "sessionId": "s",
+            "timestamp": "t",
+            "message": {"model": "claude-opus-4-8"},
+        }
+    )
+    assert ut.parse_transcript_usage([no_model, no_usage]) == []
+
+
+def test_parse_is_idempotent():
+    assert ut.parse_transcript_usage(TRANSCRIPT_LINES) == ut.parse_transcript_usage(TRANSCRIPT_LINES)
+
+
+# --- usage_turns_to_ledger: PURE projection, reusing spend_gate --------------
+def test_usage_turns_to_ledger_reuses_compute_cost_and_builds_bodies():
+    turns = ut.parse_transcript_usage(TRANSCRIPT_LINES)
+    bodies, unpriced = ut.usage_turns_to_ledger(
+        turns, model_rates=RATES, fleet_id="fleet-x", policy_sha="p" * 64
+    )
+    assert unpriced == []
+    assert len(bodies) == 1
+    body = bodies[0]
+    # Cost is the SHARED spend_gate.compute_cost — proves no reimplementation drift.
+    expected = sg.compute_cost(turns[0].usage, "claude-opus-4-8", RATES)
+    assert body["amount"] == float(expected)
+    assert body["run_id"] == "sess-1"  # defaults to session_id
+    assert body["fleet_id"] == "fleet-x"
+    assert body["model"] == "claude-opus-4-8"
+    assert body["unit"] == "$"
+    assert body["policy_sha"] == "p" * 64
+    assert body["recorded_at"] == "2026-06-08T07:34:22.526Z"
+    assert body["record_type"] == spine.RUNTIME_SPEND_LEDGER_RECORD_TYPE
+    assert body["kind"] == spine.RUNTIME_SPEND_LEDGER_RECORD_KIND
+
+
+def test_unpriced_model_lands_in_unpriced_not_silent_zero():
+    turn = ut.UsageTurn(
+        session_id="s",
+        model="some-unpriced-model",
+        recorded_at="t",
+        usage={"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+    )
+    bodies, unpriced = ut.usage_turns_to_ledger([turn], model_rates=RATES, fleet_id="f")
+    assert bodies == []
+    assert unpriced == [turn]
+
+
+def test_run_id_of_override():
+    turns = ut.parse_transcript_usage([NORMAL])
+    bodies, _ = ut.usage_turns_to_ledger(
+        turns, model_rates=RATES, fleet_id="f", run_id_of=lambda t: "run-42"
+    )
+    assert bodies[0]["run_id"] == "run-42"
+
+
+# --- tap_transcript_file: the ONLY I/O edge ----------------------------------
+def test_tap_transcript_file_reads_and_parses(tmp_path):
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("\n".join(TRANSCRIPT_LINES) + "\n", encoding="utf-8")
+    turns = ut.tap_transcript_file(path)
+    assert len(turns) == 1
+    assert turns[0].model == "claude-opus-4-8"
+    assert turns[0].usage["input_tokens"] == 2497
