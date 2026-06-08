@@ -92,6 +92,43 @@ _BRAND = "◆ CE"  # ◆ CE
 #: internal console_script is ``cev3`` (monorepo coexistence only) — never shown.
 CE_CMD = "ce"
 
+#: In-product help — the SEED of the in-product guide (content reused from
+#: ``docs/guide/understanding-ce.md``, not re-authored). ``ce guide`` prints it.
+_GUIDE = """\
+◆ Creator Engine — your own coding agent, under governance.
+
+CE wraps a structured, stateful, artifact-aware workflow around the agent you
+already use, so real work is planned, tracked, checked, and merged on purpose.
+The thing that decides whether work is good lives OUTSIDE the agent — you judge
+artifacts (a plan, a diff, the evidence, the PR), not a transcript.
+
+The five stages — Frame → Shape → Build → Review → Ship:
+  Frame    understand the problem (just thinking; nothing tracked yet)
+  Shape    turn it into a bet — a Scope (Goal · Done-when · Budget · Change-type)
+  Build    the agent does the work in one governed, sandboxed run
+  Review   the result is graded against your Done-when — with evidence, not vibes
+  Ship     the governed finish: a merged PR, delivered research, or a reasoned no-change
+
+The Scope card (your unit of work):
+  Goal         what you're trying to do
+  Done-when    the checks that say it's finished (these get graded)
+  Budget       a fixed cap you commit — not a time estimate (YOUR call to set)
+  Change-type  what kind of change, and how risky
+  Ready        a ✓ once the other four are valid — then you place the bet
+
+A few things worth knowing:
+  • You set the Budget. The agent never decides how much you'll spend.
+  • The agent can make a change safer on its own, but only you can make it riskier.
+  • Nothing is tracked until you say yes. Plain chat stays plain chat.
+
+Commands:  ce session · ce scope · ce shape · ce ratify · ce drive · ce report
+           ce status · ce show · ce artifacts · ce onboard · ce guide
+
+These friendly words are a clear skin over a precise state machine — you can
+always look underneath. Full guide: docs/guide/understanding-ce.md ; pilot path:
+docs/guide/pilot-runbook.md.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Storage seam — Scope artifacts under .ce/state/scopes/ (path-neutral via --root)
@@ -575,6 +612,15 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, {"action": "onboard", "self_attested": self_attested, **plan})
 
 
+def _cmd_guide(args: argparse.Namespace) -> int:
+    """Print the in-product guide (the seed of ``docs/guide/understanding-ce.md``)."""
+    if getattr(args, "json_output", False):
+        print(json.dumps({"ok": True, "action": "guide", "guide": _GUIDE}, indent=2))
+    else:
+        print(_GUIDE)
+    return 0
+
+
 def _which(tool: str) -> bool:
     """Read-only presence probe (the FIX is deferred). ``python`` ≈ python3."""
     if tool == "python":
@@ -686,6 +732,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_onboard.add_argument("--approver-ref", default=None, help="64-hex opt-out approver digest")
     p_onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    p_guide = sub.add_parser("guide", help="print the in-product CE guide (what CE is + the five stages)")
+    p_guide.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     p_session = sub.add_parser("session", help="launch the governed session frame + status line")
     p_session.add_argument("--context-pct", type=float, default=None,
                            help="the harness's authoritative context-window %% (consumed, never recomputed)")
@@ -713,6 +762,7 @@ _DISPATCH = {
     "artifacts": _cmd_artifacts,
     "report": _cmd_report,
     "onboard": _cmd_onboard,
+    "guide": _cmd_guide,
     "session": _cmd_session,
 }
 
