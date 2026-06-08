@@ -1,6 +1,6 @@
 # CE v3 — Vocabulary (canon)
 
-*Canon decision + dual-mapping reference for CE's user-facing vocabulary (provenance: 2026-06-07/08 design sessions; GH #159). **CANON — terminology-canon-tracked.** CE presents users **clear words** (the skin) over **conserved mechanical names** (the engine); this document is the authority for both and their correspondence. It covers two user-facing surfaces — the **stage phases** (`Frame → Shape → Build → Review → Ship`) and the **Scope-card / gate fields**. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Canon decision + dual-mapping reference for CE's user-facing vocabulary (provenance: 2026-06-07/08 design sessions; GH #159). **CANON — terminology-canon-tracked.** CE presents users **clear words** (the skin) over **conserved mechanical names** (the engine); this document is the authority for both and their correspondence. It covers three user-facing surfaces — the **stage phases** (`Frame → Shape → Build → Review → Ship`), the **Scope-card / gate fields**, and the **◆ CE Completion Report**. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
 
 ## The decision
 
@@ -82,13 +82,35 @@ So a Scope card reads, e.g.: `◆ CE · Shape → "rate-limit /api/login"  (Done
 - **The atom-word `Scope` is kept** — distinctive, brandable, and load-bearing across the coordination hierarchy and the G-6 Scope object. It is not relabeled.
 - **Conserve the fields.** As with the stage phases, the labels are a presentation skin; `schemas/scope.schema.yaml`'s `intent / acceptance_criteria / appetite / mutation_class` and the `definition_of_ready` predicate are unchanged. The shaping dialogue that *fills* these fields is designed in [`shaping-ux.md`](./shaping-ux.md); the plain-language walk-through is in [`../guide/understanding-ce.md`](../guide/understanding-ce.md).
 
+## The ◆ CE Completion Report vocabulary (3rd vocabulary — locked 2026-06-08)
+
+The per-run **◆ CE Completion Report** answers three plain questions — *what happened · did it pass · what's next* — over the conserved evidence chain. Same skin-over-conserved-machine principle:
+
+| User-facing label (skin) | Conserved source (engine) | Note |
+| --- | --- | --- |
+| **Outcome** | the `outcome` enum (`schemas/runtime-evidence.schema.yaml:247`) | label kept; **render the values plainly:** `pr_opened`→"PR opened", `pr_merged`→"Merged", `review_submitted`→"Review submitted", `research_delivered`→"Research delivered", `no_change`→"No change needed" |
+| **Verdict** | the grading synthesis (Done-when met · CI · spend · in-scope) | **was "determination"** — the one real relabel; it *is* the grade, and "Verdict" reinforces that the grader lives outside the agent |
+| **Next** | derived (Outcome × stage × Change-type) | was "next step" |
+| **Artifacts** / **Inspect** | the artifact enumeration + the `ce`-style inspect commands | kept — already plain |
+
+The report inherits the **other two vocabularies** for consistency: `AC`→**Done-when**, `class`→**Change-type**, `spend of S`→`of `**Budget**, and `manifest-fidelity`→**"in scope ✓"** (plain for "the diff stayed inside the closed manifest"). So a report reads:
+
+```
+Outcome   PR opened → #7
+Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
+Next      → Review PR #7  (Change-type code → your approval)
+```
+
+- **Conserve the machine.** The `outcome` enum and the underlying grading signals (acceptance-criteria pass, CI status, spend, manifest-fidelity) are unchanged; only the user-facing labels are added. The cockpit ([`cockpit.md`](./cockpit.md)) re-renders the same report at fleet scale.
+
 ## Non-goals
 
 - **Not** a change to the mechanical state machine — every enum above is conserved verbatim.
 - **Not** a change to the Scope schema or the G-6 contract — the field-names (`intent` / `acceptance_criteria` / `appetite` / `mutation_class`) and the `definition_of_ready` predicate are conserved; only the user-facing labels are added.
+- **Not** a change to the run-outcome model — the `outcome` enum (`runtime-evidence.schema.yaml:247`) and the grading signals are conserved; the Completion-Report labels are presentation only.
 - **Not** a v1 change (v1.0 is frozen).
 - **No** CI terminology guard in this canon — docs-canon is manual hygiene (the existing terminology guard is scoped to `specs/v2/`, never `docs/`); a docs-scoped guard is a separately-grounded follow-on.
 
 ## Provenance & companions
 
-GH issue #159 (2026-06-07, the stage phases); the 2nd vocabulary (Scope-card fields) locked 2026-06-08 — both in the v3.1 coordination-layer design thread. Pairs with [`shaping-ux.md`](./shaping-ux.md) (the shaping dialogue that fills the Scope), [`pilot-uiux-model.md`](./pilot-uiux-model.md) (where the vocabulary surfaces), and the user guide [`../guide/understanding-ce.md`](../guide/understanding-ce.md) (the plain-language walk-through). The G-6 coordination layer and the G-7 product surface consume this canon. The mechanical ground truth is [`agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md).
+GH issue #159 (2026-06-07, the stage phases); the 2nd vocabulary (Scope-card fields) and the 3rd vocabulary (◆ Completion Report) both locked 2026-06-08 — all in the v3.1 coordination-layer design thread. Pairs with [`shaping-ux.md`](./shaping-ux.md) (the shaping dialogue that fills the Scope), [`pilot-uiux-model.md`](./pilot-uiux-model.md) (where the vocabulary surfaces), [`cockpit.md`](./cockpit.md) (the post-pilot graduation that re-renders the same vocabulary at fleet scale), and the user guide [`../guide/understanding-ce.md`](../guide/understanding-ce.md) (the plain-language walk-through). The G-6 coordination layer and the G-7 product surface consume this canon. The mechanical ground truth is [`agentic-sdlc-operating-model.md`](./agentic-sdlc-operating-model.md).
