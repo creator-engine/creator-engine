@@ -64,8 +64,9 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained coordination (the G-6 outer-loop Scope dispatch spine): 20 -> 21.
-    assert len(ver.V3_RUNTIME) == 21
+    # v3 gained the G-7 work-driving CLI (``v3_cli``) atop the G-6 coordination
+    # spine: 21 -> 22.
+    assert len(ver.V3_RUNTIME) == 22
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
