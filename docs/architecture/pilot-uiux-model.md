@@ -9,7 +9,7 @@ The pilot surface = the Operator's **own agent** (Claude Code / Codex) as the co
 "On your own agent" must NOT mean "indistinguishable from your bare agent." This is a differentiator for **UX and sales/marketing**: CE injects a **branded, structured, stateful, artifact-aware** experience into the dev's agent TUI. Four elements:
 1. **CE session frame (you're under CE).** A `ce session` launch banner + a **persistent status line** (CE branding + current workflow stage + work counts); every CE action renders **◆ CE-prefixed**. Always-on "your agent, *under CE*."
 2. **A named, staged workflow (where am I).** The user-facing cognitive phases **Frame → Shape → Build → Review → Ship** (canon — see [`stage-vocabulary.md`](./stage-vocabulary.md)), shown in the status line with counts, riding over the **conserved** board/mechanical states (`BACKLOG / SHAPE / READY / RUN / REVIEW / MERGE`) underneath. The dev is never lost.
-3. **CE language + the ◆ CE Completion Report.** Per run: **outcome · determination · recommended next step** — the heir to the build-harness completion report, with "CE" in it. Ratification is lightweight (ratify-Scope / merge-PR); the SHA-pinned rigor stays in the plan-approval gate.
+3. **CE language + the ◆ CE Completion Report.** Per run: **Outcome · Verdict · Next** — the heir to the build-harness completion report, with "CE" in it. Ratification is lightweight (ratify-Scope / merge-PR); the SHA-pinned rigor stays in the plan-approval gate.
 4. **Artifact awareness (inspect anything).** The Completion Report (and `ce artifacts <run>`) enumerate every run artifact with locations + inspect commands: PR · Scope · ratification · closed manifest · evidence-chain (verified) · fidelity-tagged action records · run-outcome · spend.
 
 ## Mechanism (pilot)
@@ -22,17 +22,17 @@ CE = an **MCP tool surface + the `ce` CLI + the session frame/skin**, observed/d
   stage ▸ FRAME   ·   2 shaping · 1 building · 1 awaiting your review
 ──────────────────────────────────────────────────────────────────────────
 › add rate-limiting to POST /api/login — 100/min per IP, with tests
-  ◆ CE · SHAPE → Scope cs-4f2 "rate-limit /api/login"  (AC 3 · appetite S · class code · DoR ✓)
+  ◆ CE · SHAPE → Scope cs-4f2 "rate-limit /api/login"  (Done-when 3 · Budget S · Change-type code · Ready ✓)
   ◆ CE · ratify & dispatch the bet? › yes
   ◆ CE · BUILD r-91a dispatched (boxed · cap S)
-       ⚠ escalation — wants to edit .github/workflows/ci.yml (class deploy↑). Allow? › no
+       ⚠ escalation — wants to edit .github/workflows/ci.yml (Change-type deploy↑). Allow? › no
   ┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ───────────────────────
-  │ outcome        pr_opened → PR #7  (ce-app[bot])
-  │ determination  AC 3/3 met · tests green · manifest-fidelity ✓ · spend 14% of S
-  │ next step      ▸ REVIEW PR #7  (class code → your approval required)
-  │ artifacts      PR #7 · scope cs-4f2 · ratification · manifest(2 paths)
-  │                · evidence-chain ✓verified · 14 action records · outcome record · spend
-  │ inspect        ce show r-91a   |   ce artifacts r-91a   |   gh pr view 7
+  │ Outcome    PR opened → #7  (ce-app[bot])
+  │ Verdict    Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
+  │ Next       → Review PR #7  (Change-type code → your approval)
+  │ Artifacts  PR #7 · Scope cs-4f2 · ratification · manifest(2 paths)
+  │            · evidence-chain ✓verified · 14 action records · outcome record · spend
+  │ Inspect    ce show r-91a   |   ce artifacts r-91a   |   gh pr view 7
   └──────────────────────────────────────────────────────────────────────────
   stage ▸ REVIEW   ·   2 shaping · 0 building · 2 awaiting your review
 ```
