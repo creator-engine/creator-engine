@@ -1,4 +1,4 @@
-# PR path manifest — feat(v3): G-7.4 two-mode installer + cost opt-out UX + `ce` exposure
+# PR path manifest — feat(v3): G-7.5 pilot runbook + in-product `ce guide` + roadmap flip → v3.1 pilot-ready
 
 This file is the carrier for this PR's closed path manifest under
 `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`. CI passes it to
@@ -7,65 +7,45 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized path-se
 below. The fidelity scan (`scan-path-manifest`) additionally requires the
 declared count and SHA256 to match the fenced block.
 
-Scope: **G-7 slice 7E — the two-mode installer + the cost opt-out UX** (the fifth
-ratified G-7 product-surface slice). Adds a NEW v3-classified PURE module
-`v3_installer.py` + a `cev3 onboard` command + the served artifacts
-(`docs/install/install.sh` one-liner, `docs/install/llms-install.md` agent-native
-signed spec) + the contract `docs/contracts/installer.md`:
+Scope: **G-7 slice 7F — the pilot runbook + in-product help + the roadmap flip**
+(the SIXTH and FINAL ratified G-7 slice — it reaches **v3.1 pilot-ready**):
 
-- **Verify-before-execute** — `require_verified` refuses (`InstallRefused`) an
-  install spec unless it is signed by a **pinned CE key** (`PINNED_KEYS`) and
-  verifies (in-tree content-address floor; the real asymmetric verify is an
-  injectable seam). The grader-outside principle at install time.
-- **Dependency resolution — detect-don't-assume** — `plan_dependencies` plans
-  (never fail-on-missing): present→skip, missing→a permission-gated, **batched**
-  sudo install (`runsc`/`proxy`/`git`/`python` system; `uv` user-space);
-  idempotent. The read-only detection is live (`cev3 onboard` probes
-  `shutil.which`); the privileged FIX is deferred.
-- **Default-vs-Custom profile + the cost opt-out** — `build_profile`: Default →
-  `spend_cap_enforcement: enforce`; Custom opt-out → `off` + a REQUIRED
-  ratified-HUMAN-only `spend_cap_optout {ratified_prompt_sha, approver_ref}`
-  binding (raises without it) + the **verbatim educate copy**. The emitted
-  fragment is exactly what **`ce_spend_envelope`** accepts (CAP off ≠ DETECTION
-  off — the global ceiling + anomaly→escalate stay on).
-- **The `ce` exposure** — `ce_exposure_plan` exposes the v3 CLI as **`ce`** on the
-  v3-only pilot (Operator-ratified directive; the internal `cev3` console_script
-  is unchanged). **Human contract:** the operator approves only **sudo** + the
-  **GitHub-App click**.
+- **Pilot runbook** (`docs/guide/pilot-runbook.md`, NEW) — the operator path:
+  install (two operator-typeless modes) → provision repo+App → file work as a
+  Scope (Frame→Shape→Build→Review→Ship) → ratify → drive → ◆ Completion Report →
+  review → merge, in the canon vocabulary, using `ce`. Includes the greenfield-OSS
+  quickstart + the cost-safety note. Names the deferred first-pilot live seams.
+- **In-product help** — `ce guide` surfaces the seed of
+  `docs/guide/understanding-ce.md` (content reused, not re-authored) via a new
+  `guide` subcommand on the v3 CLI. Speaks `ce` (the user-facing name).
+- **Roadmap flip** (`docs/v3-roadmap.md`) — G-7 row → **DONE** (the 6 slices
+  #164/#166/#167/#168/#169/#170); the gate map + the milestone lines flipped to
+  **v3.1 pilot-ready ✓ REACHED**. **Carry-forward:** the G-6 row SHA `pending` →
+  **`dee9c9b`** (the #162 merge SHA).
 
-Implements `docs/architecture/pilot-deployment-transport.md` +
-`docs/contracts/spend-envelope.md` (opt-out). Boundary (CI-pure): the verify /
-dep-detect / profile / exposure logic + the `onboard` dry-run. **Deferred live
-seams:** the `curl|bash` / privileged execution · the gVisor/proxy provisioning ·
-the interactive GitHub-App click · the live transport probe.
+NO new module, NO new check, NO schema change — `V3_RUNTIME` stays **26**, the
+check surface stays **47**, `test_version_boundary` count-pins unchanged. The
+`guide` command is content added to the already-v3 `v3_cli`.
 
-Standing requirements honored: **v1↔v3 coexistence** (ADDITIVE; **v1 deleted = ∅**;
-internal `cev3` entry unchanged); **G-4.1 naming hygiene** (`v3_installer`
-v3-classified + residue-clean; pure — stdlib only; `v3_naming_hygiene` GREEN 0/0);
-**version boundary** (`v3_installer` imports stdlib only; `v3_cli`→`v3_installer`
-v3→v3; no `shared→v3` edge; `version_boundary` GREEN 0/0; `V3_RUNTIME` **25→26**);
-**G-5** (the opt-out fragment feeds `ce_spend_envelope` unchanged — green). Check
-surface unchanged (**47** — no registered check). `check-examples` stays **78/0**
-(no example fixtures; the served artifacts are docs, not examples). Deferred
-follow-ons (named): the live install drive + GitHub-App click; the pilot runbook +
-roadmap flip (7F).
+Standing requirements honored: **v1↔v3 coexistence** (ADDITIVE; **v1 deleted = ∅**);
+**G-4.1 naming hygiene** (`v3_naming_hygiene` GREEN 0/0 — docs excluded; no v3-code
+residue; `ce guide` text speaks `ce`, no `cev3`); **vocabulary fidelity** (the
+runbook + guide use the ratified canon — stage phases / Scope-card / Completion-
+Report — no third vocabulary). `check-examples` stays **78/0** (docs + CLI help
+text; no example fixtures). The G-7 row SHA stays `pending` (filled post-merge by
+the next PR, per the established deferred-SHA pattern — this is the closing slice).
 
-- **base:** `513797cf312e008e1fbad7c863b1e4eaa98873a2`.
+- **base:** `6889b207aa3923a50a866c6447f064cbf8f6f651`.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=10
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=70e999ce3dcafdac7e1c57e8365bd9895608b7cc5c141340f6247d6d4adffc69
+AUTHORIZED_PATHS_SHA256=ee99cbb4dc64c6090ee598d3b7f8e1b4377a7f1530186b198a45366315b6aa1c
 
 ```text
 .ce/pr-path-manifest.md
-docs/contracts/installer.md
-docs/install/install.sh
-docs/install/llms-install.md
-validators/creator_engine_validator/_versions.py
+docs/guide/pilot-runbook.md
+docs/v3-roadmap.md
 validators/creator_engine_validator/v3_cli.py
-validators/creator_engine_validator/v3_installer.py
 validators/tests/unit/test_v3_cli.py
-validators/tests/unit/test_v3_installer.py
-validators/tests/unit/test_version_boundary.py
 ```

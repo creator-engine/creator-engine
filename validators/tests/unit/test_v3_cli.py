@@ -366,6 +366,19 @@ def test_user_facing_command_is_ce_not_cev3(tmp_path, capsys):
     assert "cev3" not in capsys.readouterr().out
 
 
+def test_guide_prints_in_product_help(capsys):
+    code = v3_cli.main(["guide"])
+    assert code == 0
+    out = capsys.readouterr().out
+    # the seed surfaces what CE is + the five canon stages + the Scope card labels
+    assert "Creator Engine" in out
+    for stage in ("Frame", "Shape", "Build", "Review", "Ship"):
+        assert stage in out
+    for label in ("Goal", "Done-when", "Budget", "Change-type", "Ready"):
+        assert label in out
+    assert "cev3" not in out  # user-facing → speaks `ce`
+
+
 def test_help_reachable():
     with pytest.raises(SystemExit) as exc:
         v3_cli.main(["--help"])
