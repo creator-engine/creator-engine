@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -106,6 +107,19 @@ class SpendDecision:
     scope: str = ""
     tier: str = ""
     escalation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class FleetSpendMeter:
+    """Fleet-level spend projection over runtime spend-ledger leaves (PURE)."""
+
+    fleet_id: str | None
+    unit: str
+    spend: Decimal
+    record_count: int
+    run_count: int
+    span_hours: Decimal | None
+    spend_per_hour: Decimal | None
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +228,124 @@ def project_spend(
             continue
         total += _dec(record.get("amount"))
     return total
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an input ISO-8601 timestamp, accepting a trailing ``Z`` (PURE)."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _span_hours(timestamps: Any) -> Decimal | None:
+    """Return the positive hour span across parseable input timestamps (PURE)."""
+    parsed = [_parse_ts(value) for value in timestamps or []]
+    points = [value for value in parsed if value is not None]
+    if len(points) < 2:
+        return None
+    delta = max(points) - min(points)
+    seconds = (
+        Decimal(delta.days * 86_400 + delta.seconds)
+        + Decimal(delta.microseconds) / Decimal(1_000_000)
+    )
+    if seconds <= 0:
+        return None
+    return seconds / Decimal(3_600)
+
+
+def _inside_wall_clock_window(recorded_at: Any, since: Any, until: Any) -> bool:
+    since_dt = _parse_ts(since)
+    until_dt = _parse_ts(until)
+    if since_dt is None and until_dt is None:
+        return True
+    recorded_dt = _parse_ts(recorded_at)
+    if recorded_dt is None:
+        return False
+    if since_dt is not None and recorded_dt < since_dt:
+        return False
+    if until_dt is not None and recorded_dt > until_dt:
+        return False
+    return True
+
+
+def _fleet_spend_records(
+    records: Any,
+    *,
+    fleet_id: str | None,
+    unit: str,
+    window: str | None,
+    since: Any,
+    until: Any,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for record in records or []:
+        if not isinstance(record, dict):
+            continue
+        if record.get("record_type") != RUNTIME_SPEND_LEDGER_RECORD_TYPE:
+            continue
+        if record.get("unit") != unit:
+            continue
+        if window is not None and record.get("window") not in (None, window):
+            continue
+        if fleet_id is not None and record.get("fleet_id") != fleet_id:
+            continue
+        if not _inside_wall_clock_window(record.get("recorded_at"), since, until):
+            continue
+        out.append(record)
+    return out
+
+
+def fleet_spend_meter(
+    records: Any,
+    *,
+    fleet_id: str | None = None,
+    unit: str = "$",
+    window: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> FleetSpendMeter:
+    """Project fleet spend and spend/hour from spend-ledger leaves (PURE).
+
+    ``window`` is the ledger accounting tag. ``since``/``until`` are optional
+    wall-clock bounds over ``recorded_at``; when present, the total and rate are
+    computed from the same filtered leaf set.
+    """
+    leaves = _fleet_spend_records(
+        records,
+        fleet_id=fleet_id,
+        unit=unit,
+        window=window,
+        since=since,
+        until=until,
+    )
+    if since is None and until is None:
+        scope = "global" if fleet_id is None else "fleet"
+        spend = project_spend(records, scope, fleet_id=fleet_id, unit=unit, window=window)
+    else:
+        spend = sum((_dec(record.get("amount")) for record in leaves), Decimal(0))
+    bounded_span = _span_hours([since, until]) if since is not None and until is not None else None
+    span_hours = bounded_span if bounded_span is not None else _span_hours(record.get("recorded_at") for record in leaves)
+    spend_per_hour = spend / span_hours if span_hours is not None and span_hours > 0 else None
+    return FleetSpendMeter(
+        fleet_id=fleet_id,
+        unit=unit,
+        spend=spend,
+        record_count=len(leaves),
+        run_count=len({record.get("run_id") for record in leaves if record.get("run_id")}),
+        span_hours=span_hours,
+        spend_per_hour=spend_per_hour,
+    )
 
 
 # ---------------------------------------------------------------------------
