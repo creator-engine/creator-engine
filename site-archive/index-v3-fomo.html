@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="dark" />
 <title>Creator Engine — Governed SDLC for autonomous agents</title>
-<meta name="description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, change-type governed, evidence-verified, and Operator-ratified." />
+<meta name="description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
 <link rel="canonical" href="https://creator-engine.dev/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Creator Engine" />
 <meta property="og:title" content="Creator Engine — Governed SDLC for autonomous agents" />
-<meta property="og:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, change-type governed, evidence-verified, and Operator-ratified." />
+<meta property="og:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
 <meta property="og:url" content="https://creator-engine.dev/" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Creator Engine — Governed SDLC for autonomous agents" />
-<meta name="twitter:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, change-type governed, evidence-verified, and Operator-ratified." />
+<meta name="twitter:description" content="Creator Engine is a repo-native agentic SDLC governance substrate. It makes agent-authored software auditable, spec-driven, identity-aware, mutation-class governed, evidence-verified, and Operator-ratified." />
 <!--
   Creator Engine — one-page brand site.
   Self-contained: no external fonts, scripts, images, or network calls.
@@ -230,9 +230,6 @@
   .term-bar .lamp:nth-child(1){ background:#3a2a44; }
   .term-bar .lamp:nth-child(3){ box-shadow: 0 0 7px var(--accent-glow); background:#3a2f55; }
   .term-bar .title { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-faint); }
-  .term-badge { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); border: 1px solid var(--amber); background: var(--amber-soft); padding: 2px 9px; border-radius: 999px; }
-  .term-note { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-faint); }
-  .term-note a { color: var(--accent); }
   .term-body { position: relative; z-index: 2; padding: 18px 18px 20px; font-family: var(--mono); font-size: 14px; line-height: 1.82; overflow-x: auto; }
   .term-body .cmd::before { content: "$ "; color: var(--accent); }
   .term-body .cmd { color: var(--fg); }
@@ -303,15 +300,14 @@
   @keyframes seampulse { 0%,100%{ opacity:.75; } 50%{ opacity:1; } }
 
   /* ---------- Steps ---------- */
-  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
   .step { background: var(--ink-850); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 22px; position: relative; transition: border-color .18s, box-shadow .18s; }
   .step:hover { border-color: var(--accent-deep); box-shadow: 0 0 30px -14px var(--accent-glow); }
   .step .num { font-family: var(--mono); font-size: 12px; color: var(--accent); border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; display: inline-block; margin-bottom: 14px; }
   .step h3 { font-size: 17px; margin-bottom: 8px; }
   .step p { font-size: 14px; color: var(--fg-dim); }
-  @media (max-width: 1000px) { .steps { grid-template-columns: repeat(3, 1fr); } }
-  @media (max-width: 680px) { .steps { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 460px) { .steps { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .steps { grid-template-columns: 1fr; } }
 
   /* ---------- Capability cards ---------- */
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
@@ -529,27 +525,24 @@
       </div>
     </div>
 
-    <!-- Hero terminal: representative ce session shape (per docs/architecture/pilot-uiux-model.md); sample values abbreviated. -->
-    <div class="terminal" role="img" aria-label="Representative Creator Engine governed session inside the developer's own agent, showing the Frame-to-Ship stage line, a Scope card with Goal, Done-when, Budget, Change-type and Ready, and a CE Completion Report with Outcome, Verdict and Next">
+    <!-- Hero terminal: representative ce session shape; sample inputs abbreviated. -->
+    <div class="terminal" role="img" aria-label="Example ce CLI session showing checks passing and a privileged gate routed to the Operator">
       <div class="term-bar">
         <span class="lamp"></span><span class="lamp"></span><span class="lamp"></span>
-        <span class="title">you@your-agent — ce session</span>
-        <span class="term-badge">representative</span>
+        <span class="title">operator@control-plane — ce</span>
       </div>
       <div class="term-body">
-        <div class="out"><span class="k">◆ Creator Engine</span> · governed session · <span class="c">your agent, under CE</span></div>
-        <div class="out"><span class="c">stage ▸</span> Frame · Shape · Build · <span class="k">Review</span> · Ship</div>
-        <div class="cmd">add rate-limiting to POST /api/login — 100/min per IP, with tests</div>
-        <div class="out"><span class="k">◆ CE · Shape</span> → Scope <span class="k">"rate-limit /api/login"</span></div>
-        <div class="cont"><span class="c">Goal</span> rate-limit · <span class="c">Done-when</span> 3 · <span class="c">Budget</span> S · <span class="c">Change-type</span> code · <span class="c">Ready</span> <span class="ok">✓</span></div>
-        <div class="out"><span class="gate">◆ CE · ratify the bet?</span> › yes</div>
-        <div class="out"><span class="ok">✓</span> Build dispatched — boxed, headless worker (cap S)</div>
-        <div class="out gate-line"><span class="gate">⟂ escalation: wants .github/workflows/ci.yml (Change-type deploy↑) — allow?</span> › no</div>
-        <div class="out"><span class="k">◆ CE Completion Report</span> · run r-91a</div>
-        <div class="cont"><span class="c">Outcome</span> PR opened → #7</div>
-        <div class="cont"><span class="c">Verdict</span> <span class="ok">Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S</span></div>
-        <div class="cont"><span class="c">Next</span> → Review PR #7 <span class="c">(Change-type code → your approval)</span></div>
-        <div class="term-note" style="border-top:1px solid var(--line-soft); padding-top:9px;">▸ representative session — the v3.1 pilot UX is in progress · <a href="#roadmap">see Roadmap</a></div>
+        <div class="cmd">ce doctor</div>
+        <div class="out"><span class="ok">✓</span> governed environment verified · rootless podman ready</div>
+        <div class="cmd">ce check</div>
+        <div class="out"><span class="ok">✓</span> conformance: identity, mutation-class, authority — <span class="ok">sample pass set</span></div>
+        <div class="cmd">ce launch <span class="k">--dry-run</span></div>
+        <div class="out"><span class="c"># visible Controller-seat launch plan built</span></div>
+        <div class="cmd">ce ledger verify <span class="k">--side-effect-ledger-root</span> .ce/side-effect-ledger</div>
+        <div class="out"><span class="ok">✓</span> side-effect ledger: hash chain intact (<span class="k">sample ledger</span>)</div>
+        <div class="cmd">ce fanin build <span class="k">--request</span> fanin-request.yml <span class="k">--packet-root</span> .ce/fan-in</div>
+        <div class="out">evidence packet built · spec ✓ tests ✓ review ✓</div>
+        <div class="out gate-line"><span class="gate">⟂ privileged gate: deploy → awaiting Operator ratification</span></div>
       </div>
     </div>
   </div>
@@ -573,7 +566,7 @@
     <div class="metrics">
       <div class="metric"><div class="n">100<span class="u">%</span></div><div class="l">Privileged merges human-ratified — never an agent's self-claim</div></div>
       <div class="metric"><div class="n">0</div><div class="l">Silent or unaudited privileged merges — the gate can't be skipped</div></div>
-      <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Change-type tiers governed, with a reserved privileged floor</div></div>
+      <div class="metric"><div class="n">9<span class="u">+1</span></div><div class="l">Mutation classes governed, with a reserved privileged floor</div></div>
       <div class="metric"><div class="n gate-n">1<span class="u">⟂</span></div><div class="l">Human gate on the critical path of every change</div></div>
     </div>
     <p class="note" style="margin-top:22px;">These are structural guarantees — true by construction, not vanity usage stats. v3.0 MVP-complete is proven by the live open→review→merge spike; the packaged runtime is a 0.1.0 repository-checkout pre-release. Apache-2.0.</p>
@@ -677,7 +670,7 @@
     <div class="section-head" style="margin-bottom:0;">
       <span class="eyebrow">The promise</span>
       <h2>Fix the contract before the agent acts. Record it after.</h2>
-      <p class="muted">Creator Engine treats this as a contract problem, not a tooling problem. Identity, change type, permitted actions, verification evidence, and the named ratifier are fixed <em>before</em> an agent acts — and recorded as durable, repo-visible artifacts after. Agents are productive proposers; humans remain the ratifiers.</p>
+      <p class="muted">Creator Engine treats this as a contract problem, not a tooling problem. Identity, mutation class, permitted actions, verification evidence, and the named ratifier are fixed <em>before</em> an agent acts — and recorded as durable, repo-visible artifacts after. Agents are productive proposers; humans remain the ratifiers.</p>
     </div>
   </div>
 </section>
@@ -686,35 +679,30 @@
 <section class="band" id="how">
   <div class="wrap">
     <div class="section-head">
-      <span class="eyebrow">How it works · where the work is</span>
-      <h2>Five governed phases, one repo-visible trail.</h2>
-      <p class="muted">The same five words name every piece of work, from a one-line ticket to an epic — <strong>Frame → Shape → Build → Review → Ship</strong> — riding over the conserved governed state machine underneath. Each phase lands a ratifiable artifact the next reviewer, or an auditor months later, can replay from the repository alone. This is the <strong>where-the-work-is</strong> axis — paired with the <em>who-decides</em> governance axis below.</p>
+      <span class="eyebrow">How it works</span>
+      <h2>Four governed moves, one repo-visible trail.</h2>
+      <p class="muted">Each agent invocation is bounded by an Assignment Envelope and lands evidence the next reviewer — or an auditor months later — can replay from the repository alone.</p>
     </div>
     <div class="steps">
       <div class="step">
         <span class="num">01</span>
-        <h3>Frame</h3>
-        <p>Understand and bound the work — what's being asked, why, and what "done" means — before any agent acts.</p>
+        <h3>Scope</h3>
+        <p>An Assignment Envelope fixes identity, mutation class, and permitted actions for a single agent invocation — before any work begins.</p>
       </div>
       <div class="step">
         <span class="num">02</span>
-        <h3>Shape</h3>
-        <p>Turn it into a ratifiable bet: a Scope with a Goal, Done-when, Budget, and Change-type. The bet is placed, and the work is Ready.</p>
+        <h3>Propose</h3>
+        <p>Agents implement inside an isolated, rootless worker. Every side effect is appended to a hash-chained ledger you can verify.</p>
       </div>
       <div class="step">
         <span class="num">03</span>
-        <h3>Build</h3>
-        <p>Execute the ratified bet in one governed, boxed run. Every side effect is appended to a hash-chained ledger you can verify.</p>
+        <h3>Verify</h3>
+        <p><code>ce check</code> and fan-in assemble spec, tests, and review into a read-only evidence packet. CI and review inform — they never ratify.</p>
       </div>
       <div class="step">
         <span class="num">04</span>
-        <h3>Review</h3>
-        <p>Grade the result against the Done-when criteria — external grading on evidence, not transcripts. CI and review inform; they never ratify.</p>
-      </div>
-      <div class="step">
-        <span class="num">05</span>
-        <h3>Ship</h3>
-        <p>The governed terminal delivery — a merged PR, delivered research, or a ratified no-change — bound to identity, evidence, and a named ratifier.</p>
+        <h3>Ratify</h3>
+        <p>Privileged gates route to the Operator — the apex human authority. Deploys, governance changes, and settings flips stay human-ratified.</p>
       </div>
     </div>
   </div>
@@ -724,15 +712,15 @@
 <section class="band">
   <div class="wrap">
     <div class="section-head">
-      <span class="eyebrow">The governance axis · who decides</span>
+      <span class="eyebrow">The critical path</span>
       <h2>Every change walks through the gate. By construction.</h2>
-      <p class="muted">Other pipelines make the human an optional node off to the side. Creator Engine puts ratification <em>on the line</em> — nothing privileged reaches <code>main</code> without a named human opening the gate, and the evidence that earned it stays in the repo. This is the <strong>who-decides</strong> axis — orthogonal to the Frame → Ship phases above (<em>where the work is</em>): two lenses on one system, not rival vocabularies.</p>
+      <p class="muted">Other pipelines make the human an optional node off to the side. Creator Engine puts ratification <em>on the line</em> — nothing privileged reaches <code>main</code> without a named human opening the gate, and the evidence that earned it stays in the repo.</p>
     </div>
     <div class="flowrow">
       <div class="fnode">
         <div class="fk">01 · Propose</div>
         <h3>Agent proposes</h3>
-        <p>Bounded by an Assignment Envelope — identity, change type, and permitted actions fixed before any work begins.</p>
+        <p>Bounded by an Assignment Envelope — identity, mutation class, and permitted actions fixed before any work begins.</p>
         <div class="badge">▸ identity-signed</div>
       </div>
       <div class="farrow">→</div>
@@ -763,7 +751,7 @@
     <div style="margin-top:30px;" class="auditlog" role="img" aria-label="Example audit-trail ledger record binding a change to identity, evidence, ratifier, and a verified hash chain">
       <div class="albar"><span class="ok">✓</span> .ce/side-effect-ledger — hash chain intact · replayable from clone</div>
       <div class="albody">
-        <div class="row"><span class="h">#0c41a0</span> <span class="ev">change-proposed</span> <span class="id">agent:implementer · boxed</span> <span class="ev">change-type=code</span></div>
+        <div class="row"><span class="h">#0c41a0</span> <span class="ev">change-proposed</span> <span class="id">agent:implementer@lane-3</span> <span class="ev">mutation-class=feature</span></div>
         <div class="row"><span class="h">#7e8ab3</span> <span class="ev">evidence-built</span> <span class="ev">spec ✓ tests ✓ review ✓</span> <span class="vok">validator: pass</span></div>
         <div class="row"><span class="h">#a06bff</span> <span class="rat">⟂ privileged-gate</span> <span class="rat">ratified-by Operator</span> <span class="ev">identity-signed</span></div>
         <div class="row"><span class="h">#6da407</span> <span class="ev">merged → main</span> <span class="vok">chain verified ✓</span> <span class="ev">no self-claim</span></div>
@@ -794,8 +782,8 @@
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16M9 4v16"/></svg></div>
-        <h3>Change-type governed</h3>
-        <p>Every change is risk-tiered by type — docs, code, schema, deploy and up — and the tier sets how high the gate is. Nine baseline tiers plus a privileged floor. <span class="faint">(The conserved <code>mutation_class</code> underneath.)</span></p>
+        <h3>Mutation-class governed</h3>
+        <p>Nine baseline classes plus a privileged floor. Reserved-action vocabulary makes high-risk operations explicit, not implicit.</p>
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div>
@@ -804,8 +792,8 @@
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></div>
-        <h3>Your agent, under CE</h3>
-        <p>No second agent to babysit. CE rides inside your own coding agent as a governed <code>ce session</code> — branded, staged, artifact-aware — and dispatches boxed, headless workers per ratified Scope. Only escalations surface.</p>
+        <h3>Visible Controller seat</h3>
+        <p><code>ce launch</code> opens a visible tmux Controller seat and governed lanes — orchestration you can watch, not a black box.</p>
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></div>
@@ -845,7 +833,7 @@
           <div class="c"># 4 — preflight + conformance</div>
           <div class="cmd">.venv/bin/ce doctor && .venv/bin/ce check</div>
           <div class="out"><span class="ok">✓</span> environment governed · <span class="ok">conformance passed</span></div>
-          <div class="c"># 5 — open a governed session</div>
+          <div class="c"># 5 — open the visible Controller seat</div>
           <div class="cmd">.venv/bin/ce launch</div>
         </div>
       </div>
@@ -856,7 +844,7 @@
           <div class="cmd-row"><code>ce check</code><span>Run conformance checks</span></div>
           <div class="cmd-row"><code>ce doctor</code><span>Governed-environment preflight</span></div>
           <div class="cmd-row"><code>ce init</code><span>Initialize <code>.ce/</code> state</span></div>
-          <div class="cmd-row"><code>ce launch</code><span>Controller seat (build harness)</span></div>
+          <div class="cmd-row"><code>ce launch</code><span>Visible Controller seat</span></div>
           <div class="cmd-row"><code>ce lane</code><span>Governed visible lanes</span></div>
           <div class="cmd-row"><code>ce worker</code><span>Rootless Podman isolation</span></div>
           <div class="cmd-row"><code>ce ledger</code><span>Append-only hash chain</span></div>
@@ -888,7 +876,7 @@
       </div>
       <div class="prim">
         <span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span>
-        <div><h3>Assignment Envelope</h3><p>Bounds exactly what an agent may do in a single invocation — identity, change type, and permitted actions, fixed up front.</p></div>
+        <div><h3>Assignment Envelope</h3><p>Bounds exactly what an agent may do in a single invocation — identity, mutation class, and permitted actions, fixed up front.</p></div>
       </div>
       <div class="prim">
         <span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span>
@@ -957,7 +945,7 @@
         <ul>
           <li><span class="g">✓</span> Every mutation is a repo-visible artifact, replayable from clone.</li>
           <li><span class="g">✓</span> Ratification is explicit, named, and Operator-only for privileged classes.</li>
-          <li><span class="g">✓</span> Identity, change type, evidence, and ratifier are bound together.</li>
+          <li><span class="g">✓</span> Identity, mutation class, evidence, and ratifier are bound together.</li>
           <li><span class="g">✓</span> Side effects land on a verifiable hash-chained ledger.</li>
           <li><span class="g">✓</span> Privileged operations route to a single human gate.</li>
           <li><span class="g">✓</span> Governance is a contract the repository enforces.</li>
@@ -980,7 +968,7 @@
       <div class="rung"><span class="lv">L1</span><div><h3>Chat &amp; pair-programming</h3><p>You prompt, paste, and review by hand. Knowledge lives in a chat log no one can audit.</p></div></div>
       <div class="rung"><span class="lv">L2</span><div><h3>Task agents</h3><p>Agents take whole tasks. Throughput jumps — and so does the volume of change no one fully read.</p></div></div>
       <div class="rung"><span class="lv">L3</span><div><h3>Human reads every diff <span class="faint">— the plateau</span></h3><p>You try to review it all yourself. The bottleneck moves from typing to reading, and the math gets worse, not better.</p></div></div>
-      <div class="rung peak"><span class="lv">L4</span><div><h3>Governed autonomy — the summit</h3><p>Agents propose at scale; humans ratify by change-type; evidence lands on the record automatically. You review what matters, the gate holds the rest, and every change is auditable from clone. <strong>This is Creator Engine.</strong></p></div></div>
+      <div class="rung peak"><span class="lv">L4</span><div><h3>Governed autonomy — the summit</h3><p>Agents propose at scale; humans ratify by mutation-class; evidence lands on the record automatically. You review what matters, the gate holds the rest, and every change is auditable from clone. <strong>This is Creator Engine.</strong></p></div></div>
       <div class="rung deadend"><span class="lv">⤳</span><div><h3>The dead-end fork: lights-out, no gate</h3><p>Specs become software with no one reading the diffs. Maximum speed, zero record — the exact liability the ladder was trying to escape, now shipping to production on a schedule.</p></div></div>
     </div>
   </div>
@@ -1066,7 +1054,7 @@
         <div class="foot-col">
           <h4>Governance</h4>
           <a href="#governance">Authority model</a>
-          <a href="#governance">Change types</a>
+          <a href="#governance">Mutation classes</a>
           <a href="#governance">Attestation</a>
           <a href="#governance">Security model</a>
         </div>
