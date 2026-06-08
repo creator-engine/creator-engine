@@ -89,6 +89,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.cc_hook_adapter",
         "runner.gvisor_proxy_backend",
         "runner.noop_backend",
+        # v3.5-A.1 OpenShell backend (defined; registration deferred to A.2)
+        "runner.openshell_backend",
         # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
         "runner.spend_gate",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine

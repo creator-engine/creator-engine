@@ -64,10 +64,12 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 def test_taxonomy_counts_and_disjoint():
     assert len(ver.V1_RUNTIME) == 21
-    # v3 gained the G-7 two-mode installer logic (``v3_installer``) atop the
-    # Completion Report (``v3_report``), the shaping dialogue (``v3_shaping``), the
-    # session render (``v3_session``), the CLI (``v3_cli``), and the G-6 spine: 25 -> 26.
-    assert len(ver.V3_RUNTIME) == 26
+    # v3 gained the G-7 product surface — the two-mode installer logic
+    # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
+    # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
+    # (``v3_cli``), and the G-6 spine: 24 -> 26. v3.5-A.1 added the OpenShell
+    # runner backend (``runner.openshell_backend``): 26 -> 27.
+    assert len(ver.V3_RUNTIME) == 27
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
