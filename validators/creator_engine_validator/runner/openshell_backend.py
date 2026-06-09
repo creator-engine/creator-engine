@@ -25,8 +25,9 @@ This slice ships, all green-now in CI (no live gateway, no new dependency):
   analog of the gVisor backend's ``translate_to_runsc_plan``;
 * ``render_sandbox_policy_yaml`` — a PURE serializer of that policy into the
   OpenShell ``SandboxPolicy`` YAML the ``--policy`` flag consumes;
-* ``parse_ocsf_jsonl`` — a PURE OCSF-JSONL-line -> dict parser (the live file
-  read is the only I/O, isolated inside the client);
+* ``parse_ocsf_textlog`` — a PURE OpenShell-OCSF-text-log-line -> dict parser
+  (A.2b LIVE-VERIFIED: the audit surface is text over ``openshell logs``, NOT the
+  empty JSONL sink; the live log read is the only I/O, isolated inside the client);
 * a ``SandboxClient`` Protocol (the analog of the gVisor ``ContainerRunner``
   seam) with an in-memory ``FakeSandboxClient`` for tests, an inert default
   ``_UnwiredSandboxClient`` (the registered-but-not-auto-live posture: a
@@ -58,14 +59,12 @@ Defensive only — hardens our own agent runtime; never an offensive capability.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -106,6 +105,14 @@ ENDPOINT_ENFORCEMENT = "enforce"
 #: "empty allowlist => no egress" — is the deny-by-default gate, not the method
 #: level. A.2 may refine per-endpoint access once CE expresses L7 method policy.
 DEFAULT_ENDPOINT_ACCESS = "read-write"
+# CE egress is all-REST today; websocket is a future per-endpoint refinement;
+# full/raw-tunnel endpoints omit the L7 axis.
+DEFAULT_ENDPOINT_PROTOCOL = "rest"
+
+#: The OpenShell ``SandboxPolicy`` YAML schema version. The live v0.0.57 gateway
+#: REQUIRES a top-level ``version`` (it is the one non-defaulted field in the
+#: ``PolicyFile`` struct; A.2b verified ``version: 1`` against the gateway).
+SANDBOX_POLICY_SCHEMA_VERSION = 1
 
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -138,21 +145,35 @@ class ProcessPolicy:
 
 @dataclass(frozen=True)
 class Endpoint:
-    """One allowed egress endpoint inside a network rule (OPA-proxy enforced)."""
+    """One allowed egress endpoint inside a network rule (OPA-proxy enforced).
+
+    Carries only what the live OpenShell ``NetworkEndpointDef`` consumes from CE's
+    host:port allowlist: ``host`` + the optional ``port`` + the binding
+    ``enforcement``/``access``. The OpenShell render carries ``protocol: rest``,
+    the live-verified L7 value for CE's REST egress today. ``access: full``
+    endpoints omit that L7 axis because raw tunnels are not expressible as
+    OpenShell's ``rest``/``websocket`` enum; websocket is a future per-endpoint
+    refinement once CE expresses such egress.
+    """
 
     host: str
     port: int | None
-    protocol: str | None
     enforcement: str  # "enforce" | "audit" — always "enforce" here
     access: str  # "read-only" | "read-write" | "full"
 
 
 @dataclass(frozen=True)
 class NetworkRule:
-    """A named OpenShell ``network_policies`` entry (one per CE egress entry)."""
+    """A named OpenShell ``network_policies`` entry (one per CE egress entry).
+
+    ``binaries`` carries the optional calling-binary scoping (the live
+    ``NetworkPolicyRuleDef.binaries[{path}]``), populated from a CE egress rule's
+    ``binary_identity`` when present (else empty → the rule applies to any binary).
+    """
 
     name: str
     endpoints: tuple[Endpoint, ...]
+    binaries: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -238,15 +259,26 @@ def translate_to_sandbox_policy(runtime_policy: dict[str, Any]) -> SandboxPolicy
             continue
         host = str(entry.get("host", ""))
         port = entry.get("port") if isinstance(entry.get("port"), int) else None
-        protocol = entry.get("protocol") if isinstance(entry.get("protocol"), str) else None
         endpoint = Endpoint(
             host=host,
             port=port,
-            protocol=protocol,
             enforcement=ENDPOINT_ENFORCEMENT,
             access=DEFAULT_ENDPOINT_ACCESS,
         )
-        rules.append(NetworkRule(name=_network_rule_name(host, port, index), endpoints=(endpoint,)))
+        # CE's optional calling-binary identity -> the rule's binaries[{path}] scope.
+        binary_identity = entry.get("binary_identity")
+        binaries = (
+            (str(binary_identity),)
+            if isinstance(binary_identity, str) and binary_identity
+            else ()
+        )
+        rules.append(
+            NetworkRule(
+                name=_network_rule_name(host, port, index),
+                endpoints=(endpoint,),
+                binaries=binaries,
+            )
+        )
 
     return SandboxPolicy(
         filesystem=filesystem,
@@ -259,15 +291,22 @@ def translate_to_sandbox_policy(runtime_policy: dict[str, Any]) -> SandboxPolicy
 def render_sandbox_policy_yaml(policy: SandboxPolicy) -> str:
     """Serialize a :class:`SandboxPolicy` into the OpenShell SandboxPolicy YAML (pure).
 
-    The on-the-wire form ``openshell sandbox create --policy <file>`` consumes
-    (design-of-record §3). The four domains map straight across:
+    The on-the-wire form ``openshell sandbox create --policy <file>`` consumes,
+    **LIVE-VERIFIED against OpenShell v0.0.57** (A.2b; the gateway's ``PolicyFile``
+    struct uses ``deny_unknown_fields``, so the field names must be exact):
 
-    * ``filesystem.{include_workdir, read_only, read_write}`` (directory allowlists);
+    * top-level ``version`` (REQUIRED — the one non-defaulted field);
+    * ``filesystem_policy.{include_workdir, read_only, read_write}`` — note the key
+      is ``filesystem_policy``, **not** ``filesystem`` (A.2b: the gateway rejects
+      ``filesystem`` as an unknown field);
     * ``landlock.compatibility``;
     * ``process.{run_as_user, run_as_group}``;
-    * ``network_policies`` as a **map keyed by rule name**, each value carrying an
-      ``endpoints[]`` list (``host`` + the optional ``port``/``protocol`` + the
-      binding ``enforcement``/``access``).
+    * ``network_policies`` as a **map keyed by rule name**, each value an OpenShell
+      ``NetworkPolicyRuleDef``: ``name`` + an ``endpoints[]`` list (``host`` + the
+      optional ``port`` + ``protocol: rest`` + the binding
+      ``enforcement``/``access``; ``protocol`` is omitted only for ``access:
+      full`` endpoints) + the optional ``binaries: [{path}]`` calling-binary
+      scope.
 
     Deny-by-default is preserved on the wire: an EMPTY ``network_policies``
     (``no_egress``) serializes to an empty map ``{}`` — the OPA proxy then denies
@@ -281,15 +320,19 @@ def render_sandbox_policy_yaml(policy: SandboxPolicy) -> str:
             mapped: dict[str, Any] = {"host": endpoint.host}
             if endpoint.port is not None:
                 mapped["port"] = endpoint.port
-            if endpoint.protocol is not None:
-                mapped["protocol"] = endpoint.protocol
+            if endpoint.access != "full":
+                mapped["protocol"] = DEFAULT_ENDPOINT_PROTOCOL
             mapped["enforcement"] = endpoint.enforcement
             mapped["access"] = endpoint.access
             endpoints.append(mapped)
-        network_policies[rule.name] = {"endpoints": endpoints}
+        rule_doc: dict[str, Any] = {"name": rule.name, "endpoints": endpoints}
+        if rule.binaries:
+            rule_doc["binaries"] = [{"path": path} for path in rule.binaries]
+        network_policies[rule.name] = rule_doc
 
     document: dict[str, Any] = {
-        "filesystem": {
+        "version": SANDBOX_POLICY_SCHEMA_VERSION,
+        "filesystem_policy": {
             "include_workdir": policy.filesystem.include_workdir,
             "read_only": list(policy.filesystem.read_only),
             "read_write": list(policy.filesystem.read_write),
@@ -312,56 +355,118 @@ def _image_ref_string(runtime_policy: dict[str, Any]) -> str:
     return f"{name}@{sha}" if name and sha else str(name)
 
 
-# OCSF decision fields surfaced into the evidence record (design-of-record §5).
+# ---------------------------------------------------------------------------
+# OpenShell OCSF audit surface = TEXT log lines (A.2b LIVE-VERIFIED).
+#
+# OpenShell v0.0.57 does NOT emit OCSF-v1.7.0 JSONL to a file: the
+# ``ocsf_json_enabled`` JSONL sink stays EMPTY on this release (A.2b finding —
+# the design-of-record §5 "JSONL at /var/log/openshell-ocsf.<date>.log" premise
+# is wrong on the live gateway). The real, retrievable audit records are TEXT log
+# lines over the gRPC log stream (``openshell logs --source all``) and the
+# in-sandbox ``/var/log/openshell.<date>.log``, e.g. (verbatim, captured live)::
+#
+#   [1780982102.452] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED \
+#       /usr/bin/curl(54) -> example.com:443 [policy:- engine:opa] \
+#       [reason:endpoint example.com:443 is not allowed by any policy]
+#
+# Each OCSF line carries an ``EVENT:TYPE [SEVERITY] [ALLOWED|DENIED] <actor ->
+# target> [policy:… engine:…] [reason:…]`` core (after any ``[epoch] [sandbox]
+# [ocsf]`` prefix). ``parse_ocsf_textlog`` extracts those fields and
+# ``_map_ocsf_record`` surfaces them into the evidence record.
+# ---------------------------------------------------------------------------
+
+#: One OCSF event core: ``EVENT:TYPE [SEVERITY] <rest>`` (matched anywhere in the
+#: line, so any ``[epoch]/[sandbox]/[ocsf]`` prefix is skipped).
+_OCSF_LINE_RE = re.compile(
+    r"(?P<event>[A-Z][A-Z0-9_]*:[A-Z][A-Z0-9_]*)\s+\[(?P<severity>[A-Za-z0-9]+)\]\s*(?P<rest>.*)$"
+)
+#: A leading allow/deny disposition token on the event's remainder.
+_OCSF_DISPOSITION_RE = re.compile(r"^(?P<disposition>ALLOWED|DENIED)\b\s*(?P<after>.*)$")
+#: ``actor -> target`` (the NET:* connection lines).
+_OCSF_ARROW_RE = re.compile(r"(?P<actor>\S+)\s+->\s+(?P<target>\S+)")
+#: The bracketed ``policy:`` / ``engine:`` / ``reason:`` metadata.
+_OCSF_POLICY_RE = re.compile(r"policy:(?P<policy>[^\s\]]+)")
+_OCSF_ENGINE_RE = re.compile(r"engine:(?P<engine>[^\s\]]+)")
+_OCSF_REASON_RE = re.compile(r"reason:(?P<reason>[^\]]+)")
+
+#: Decision fields surfaced into the evidence record (A.2b live-verified format).
 _OCSF_DECISION_FIELDS = (
-    "class_uid",
-    "action",
+    "event_type",
+    "severity",
     "disposition",
-    "status",
-    "status_detail",
-    "firewall_rule",
+    "actor",
+    "target",
+    "policy",
+    "engine",
+    "reason",
 )
 
 
-def _map_ocsf_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Map one OpenShell OCSF JSONL record into a CollectedEvidence record.
+def parse_ocsf_textlog(text: str) -> list[dict[str, Any]]:
+    """Parse OpenShell OCSF *text* log output into structured records (pure; no I/O).
 
-    Surfaces the load-bearing decision fields (``action: Allowed/Denied``,
-    ``disposition``, ``status``; design-of-record §5) at the top level while
-    preserving the full raw OCSF record under ``raw`` so the hash-chained
-    evidence spine keeps complete fidelity.
-    """
-    mapped: dict[str, Any] = {
-        field: record.get(field) for field in _OCSF_DECISION_FIELDS if field in record
-    }
-    mapped["raw"] = dict(record)
-    return mapped
-
-
-def parse_ocsf_jsonl(text: str) -> list[dict[str, Any]]:
-    """Parse OpenShell OCSF JSONL audit text into raw records (pure; no I/O).
-
-    OpenShell writes one JSON object per line (design-of-record §5: OCSF v1.7.0
-    JSONL, ``/var/log/openshell-ocsf.YYYY-MM-DD.log``, daily rotation). This is
-    the pure line->dict reader the live :meth:`SubprocessSandboxClient.collect_evidence`
-    file read feeds into; the decision-field mapping into the evidence spine stays
+    The A.2b-verified replacement for the (wrong) JSONL reader: OpenShell v0.0.57
+    streams its OCSF audit as TEXT log lines (``openshell logs --source all`` /
+    ``/var/log/openshell.<date>.log``), not JSONL. Each OCSF line carries an
+    ``EVENT:TYPE [SEVERITY] [ALLOWED|DENIED] <actor -> target> [policy:… engine:…]
+    [reason:…]`` core (after any ``[epoch] [sandbox] [ocsf]`` prefix). This is the
+    pure line->record parser the live :meth:`SubprocessSandboxClient.collect_evidence`
+    log read feeds into; the decision-field mapping into the evidence spine stays
     :func:`_map_ocsf_record`'s job, kept separate so this parser is unit-testable
-    on a fixture with no I/O.
+    with no I/O.
 
-    Blank lines are skipped. Each remaining line is parsed as JSON; a malformed
-    line raises ``json.JSONDecodeError`` (audit-log corruption is surfaced, never
-    silently dropped — consistent with CE's "surface the defect" discipline). A
-    well-formed non-object line (not an OCSF record) is skipped.
+    Only a line that carries an ``ocsf`` marker AND a parseable event core is
+    surfaced; every other line (blank, non-OCSF, or unparseable) is skipped — log
+    noise is never mis-parsed into the evidence chain. Each returned record keeps
+    the full original line under ``raw`` for evidence-spine fidelity.
     """
     records: list[dict[str, Any]] = []
     for line in text.splitlines():
         stripped = line.strip()
-        if not stripped:
+        if not stripped or "ocsf" not in stripped.lower():
             continue
-        record = json.loads(stripped)
-        if isinstance(record, dict):
-            records.append(record)
+        match = _OCSF_LINE_RE.search(stripped)
+        if match is None:
+            continue
+        record: dict[str, Any] = {
+            "event_type": match.group("event"),
+            "severity": match.group("severity"),
+            "raw": stripped,
+        }
+        rest = match.group("rest").strip()
+        disposition = _OCSF_DISPOSITION_RE.match(rest)
+        if disposition is not None:
+            record["disposition"] = disposition.group("disposition")
+            rest = disposition.group("after").strip()
+        arrow = _OCSF_ARROW_RE.search(rest)
+        if arrow is not None:
+            record["actor"] = arrow.group("actor")
+            record["target"] = arrow.group("target")
+        for regex, key in (
+            (_OCSF_POLICY_RE, "policy"),
+            (_OCSF_ENGINE_RE, "engine"),
+            (_OCSF_REASON_RE, "reason"),
+        ):
+            found = regex.search(stripped)
+            if found is not None:
+                record[key] = found.group(key).strip()
+        records.append(record)
     return records
+
+
+def _map_ocsf_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Map one parsed OpenShell OCSF text record into a CollectedEvidence record.
+
+    Surfaces the load-bearing decision fields (``disposition: ALLOWED/DENIED``,
+    plus ``policy``/``engine``/``reason``/``target``; A.2b live-verified) at the
+    top level while preserving the full parsed record (incl. the original ``raw``
+    line) under ``raw`` so the hash-chained evidence spine keeps complete fidelity.
+    """
+    mapped: dict[str, Any] = {
+        field: record[field] for field in _OCSF_DECISION_FIELDS if record.get(field) is not None
+    }
+    mapped["raw"] = dict(record)
+    return mapped
 
 
 # ---------------------------------------------------------------------------
@@ -448,20 +553,31 @@ class FakeSandboxClient:
     gateway, gRPC wire, or network.
     """
 
+    #: Canned records in the live ``parse_ocsf_textlog`` output shape (A.2b format):
+    #: one ALLOWED + one DENIED OCSF connection record.
     _DEFAULT_OCSF: tuple[dict[str, Any], ...] = (
         {
-            "class_uid": 4001,
-            "action": "Allowed",
-            "disposition": "Allowed",
-            "status": "Success",
-            "firewall_rule": "model_provider_example_443",
+            "event_type": "NET:OPEN",
+            "severity": "INFO",
+            "disposition": "ALLOWED",
+            "actor": "/usr/bin/curl(48)",
+            "target": "api.github.com:443",
+            "policy": "model_provider_example_443",
+            "engine": "opa",
+            "raw": "NET:OPEN [INFO] ALLOWED /usr/bin/curl(48) -> api.github.com:443 "
+            "[policy:model_provider_example_443 engine:opa]",
         },
         {
-            "class_uid": 4001,
-            "action": "Denied",
-            "disposition": "Blocked",
-            "status": "Failure",
-            "status_detail": "no matching policy",
+            "event_type": "NET:OPEN",
+            "severity": "MED",
+            "disposition": "DENIED",
+            "actor": "/usr/bin/curl(54)",
+            "target": "example.com:443",
+            "policy": "-",
+            "engine": "opa",
+            "reason": "endpoint example.com:443 is not allowed by any policy",
+            "raw": "NET:OPEN [MED] DENIED /usr/bin/curl(54) -> example.com:443 "
+            "[policy:- engine:opa] [reason:endpoint example.com:443 is not allowed by any policy]",
         },
     )
 
@@ -513,9 +629,9 @@ class SubprocessSandboxClient:
     """The live ``SandboxClient``: drives the ``openshell sandbox`` CLI via subprocess.
 
     Mirrors the gVisor ``SubprocessContainerRunner`` — the one surface that ever
-    touches a real OpenShell gateway, kept IN this module so A.2a adds no new
-    ``runner.*`` module (and so the version_boundary surface stays untouched).
-    Availability-gated (:meth:`available`); every live shell-out + the OCSF file
+    touches a real OpenShell gateway, kept IN this module so the backend adds no
+    new ``runner.*`` module (and so the version_boundary surface stays untouched).
+    Availability-gated (:meth:`available`); every live shell-out + the OCSF log
     read carries ``# pragma: no cover`` (CI has no ``openshell`` binary and runs
     none of it). NO ``grpcio``/``openshell`` SDK and no module-level network — the
     higher-fidelity gRPC/SDK transport is a deferred, dependency-gated later slice;
@@ -524,17 +640,20 @@ class SubprocessSandboxClient:
 
     NOT the registered backend's default client — that stays ``_UnwiredSandboxClient``
     (the honest registered-but-not-auto-live posture); inject this explicitly (or
-    via the **A.2b** live harness) to drive a real gateway. The exact CLI flag
-    surface (env passing, the OCSF collection path, UTC-vs-local rotation) is
-    verified + refined against the live gateway in A.2b; the create-then-exec
-    mapping here follows design-of-record §2 against OpenShell ``v0.0.57``.
+    via the A.2b-ii live harness) to drive a real gateway. The create-then-exec
+    mapping + the OCSF collection are **A.2b-i LIVE-VERIFIED against OpenShell
+    v0.0.57**: ``create`` needs a trailing command to return (it otherwise blocks
+    on an interactive shell); ``exec`` has no ``--env`` flag (env is injected as an
+    ``env K=V`` command prefix); the OCSF audit is TEXT over ``openshell logs``
+    (the JSONL sink is empty on this release — see :func:`parse_ocsf_textlog`).
     """
 
     _BINARY = "openshell"
+    #: Default number of log lines pulled when collecting OCSF evidence.
+    _DEFAULT_LOG_LINES = 1000
 
-    def __init__(self, binary: str = "openshell", *, ocsf_log_dir: str = "/var/log") -> None:
+    def __init__(self, binary: str = "openshell") -> None:
         self._binary = binary
-        self._ocsf_log_dir = ocsf_log_dir
 
     def available(self) -> bool:
         """True when the ``openshell`` CLI is on PATH (cheap; no side effect).
@@ -561,9 +680,12 @@ class SubprocessSandboxClient:
             handle.write(render_sandbox_policy_yaml(spec.policy))
             policy_path = handle.name
         try:
+            # A.2b live finding: `create` with no command drops into an interactive
+            # shell and never returns. A trailing benign command (`-- true`) makes it
+            # return while keeping the sandbox alive (no `--no-keep`) for `exec`.
             subprocess.run(
                 [self._binary, "sandbox", "create", "--name", name, "--from", spec.image,
-                 "--policy", policy_path],
+                 "--policy", policy_path, "--no-tty", "--", "true"],
                 capture_output=True, text=True, check=True,
             )
         finally:
@@ -579,15 +701,18 @@ class SubprocessSandboxClient:
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
     ) -> ExecOutcome:
-        argv = [self._binary, "sandbox", "exec", "-n", sandbox_id]
+        argv = [self._binary, "sandbox", "exec", "-n", sandbox_id, "--no-tty"]
         if workdir is not None:
             argv += ["--workdir", workdir]
         if timeout_seconds is not None:
             argv += ["--timeout", str(timeout_seconds)]
-        for key, value in (environment or {}).items():
-            # A.2b verifies the exact env-passing flag against the live CLI.
-            argv += ["--env", f"{key}={value}"]
-        argv += ["--", *command]
+        # A.2b live finding: `exec` has NO `--env` flag. Inject the environment as
+        # an `env K=V …` command prefix (the POSIX `env` utility is present in the
+        # base sandbox image; verified live).
+        env_prefix: list[str] = []
+        if environment:
+            env_prefix = ["env", *(f"{key}={value}" for key, value in environment.items())]
+        argv += ["--", *env_prefix, *command]
         completed = subprocess.run(argv, capture_output=True, text=True, check=False)
         return ExecOutcome(
             exit_code=completed.returncode,
@@ -595,14 +720,16 @@ class SubprocessSandboxClient:
             stderr=completed.stderr or "",
         )
 
-    @staticmethod
-    def _ocsf_log_filename() -> str:  # pragma: no cover - date-derived live path
-        # Daily-rotated OCSF JSONL (design-of-record §5); A.2b confirms UTC-vs-local.
-        return f"openshell-ocsf.{datetime.now(timezone.utc):%Y-%m-%d}.log"
-
-    def collect_evidence(self, sandbox_id: str) -> Sequence[dict[str, Any]]:  # pragma: no cover - reads a live OCSF log
-        log_path = Path(self._ocsf_log_dir) / self._ocsf_log_filename()
-        return parse_ocsf_jsonl(log_path.read_text(encoding="utf-8"))
+    def collect_evidence(self, sandbox_id: str) -> Sequence[dict[str, Any]]:  # pragma: no cover - reads the live OCSF text log
+        # A.2b live finding: the OCSF JSONL sink stays empty on v0.0.57; the real
+        # audit records are TEXT over the gRPC log stream. Pull the sandbox's log
+        # (gateway + sandbox sources) and parse the OCSF decision lines out of it.
+        completed = subprocess.run(
+            [self._binary, "logs", sandbox_id, "-n", str(self._DEFAULT_LOG_LINES),
+             "--source", "all"],
+            capture_output=True, text=True, check=False,
+        )
+        return parse_ocsf_textlog(completed.stdout or "")
 
     def delete_sandbox(self, sandbox_id: str) -> bool:  # pragma: no cover - requires a live OpenShell gateway
         completed = subprocess.run(

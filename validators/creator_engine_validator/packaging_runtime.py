@@ -21,8 +21,10 @@ is introduced, per the format split B6/B7).
 """
 from __future__ import annotations
 
+import ast
 import re
 import tomllib
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -93,11 +95,45 @@ def wheelhouse_distribution_names(wheelhouse_dir: Path | str) -> list[str]:
     return sorted({_wheel_distribution(w) for w in wheelhouse_wheels(wheelhouse_dir)})
 
 
+def _wheel_filename_parts(filename: str) -> tuple[str, str] | None:
+    """Return ``(normalized distribution, version)`` from a wheel filename."""
+    if not filename.endswith(".whl"):
+        return None
+    parts = filename[:-4].split("-")
+    if len(parts) < 5:
+        return None
+    return normalize_name(parts[0]), parts[1]
+
+
 # --- pyproject / lock / requirements parsing --------------------------------
 
 
 def read_pyproject(path: Path | str) -> dict:
     return tomllib.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _pyproject_version(path: Path | str) -> str | None:
+    p = Path(path)
+    if not p.is_file():
+        return None
+    version = read_pyproject(p).get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
+def _source_declared_version(path: Path | str) -> str | None:
+    p = Path(path)
+    if not p.is_file():
+        return None
+    tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            return node.value.value
+    return None
 
 
 def _split_pin(spec: str) -> tuple[str, str] | None:
@@ -211,6 +247,85 @@ def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str)
     return v
 
 
+def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
+    """Report app-wheel/source drift when both the repo source and wheel exist.
+
+    Installed end-user contexts may have only the wheel (or only a checkout
+    without the shipped wheelhouse), so this guard is intentionally a no-op
+    unless both sides of the fidelity comparison are present.
+    """
+    root = Path(repo_root)
+    validators = root / "validators"
+    source_root = validators / "creator_engine_validator"
+    wheelhouse = validators / "wheelhouse"
+    if not source_root.is_dir() or not wheelhouse.is_dir():
+        return []
+    app_wheels = sorted(wheelhouse.glob("creator_engine_validator-*.whl"))
+    if not app_wheels:
+        return []
+
+    v: list[str] = []
+    pyproject_version = _pyproject_version(validators / "pyproject.toml")
+    source_version = _source_declared_version(source_root / "version.py")
+    if pyproject_version is None:
+        v.append(f"missing project version in {validators / 'pyproject.toml'}")
+    if source_version is None:
+        v.append(f"missing __version__ in {source_root / 'version.py'}")
+    if pyproject_version and source_version and pyproject_version != source_version:
+        v.append(
+            f"pyproject version {pyproject_version!r} differs from "
+            f"creator_engine_validator.version.__version__ {source_version!r}"
+        )
+
+    source_files = {
+        path.relative_to(source_root).as_posix(): path
+        for path in source_root.rglob("*.py")
+        if path.is_file()
+    }
+
+    for wheel in app_wheels:
+        parsed = _wheel_filename_parts(wheel.name)
+        if parsed is None:
+            v.append(f"invalid app wheel filename: {wheel.name}")
+            continue
+        wheel_dist, wheel_version = parsed
+        if wheel_dist != DISTRIBUTION_NAME:
+            v.append(
+                f"app wheel {wheel.name} distribution must be {DISTRIBUTION_NAME!r}, "
+                f"got {wheel_dist!r}"
+            )
+        if pyproject_version and wheel_version != pyproject_version:
+            v.append(
+                f"app wheel {wheel.name} version {wheel_version!r} differs from "
+                f"pyproject version {pyproject_version!r}"
+            )
+        if source_version and wheel_version != source_version:
+            v.append(
+                f"app wheel {wheel.name} version {wheel_version!r} differs from "
+                f"creator_engine_validator.version.__version__ {source_version!r}"
+            )
+
+        try:
+            with zipfile.ZipFile(wheel) as zf:
+                wheel_files = {
+                    name.removeprefix("creator_engine_validator/")
+                    for name in zf.namelist()
+                    if name.startswith("creator_engine_validator/") and name.endswith(".py")
+                }
+                for rel in sorted(wheel_files - source_files.keys()):
+                    v.append(f"app wheel {wheel.name} has no source file for {rel}")
+                for rel in sorted(source_files.keys() - wheel_files):
+                    v.append(f"app wheel {wheel.name} missing source file {rel}")
+                for rel in sorted(source_files.keys() & wheel_files):
+                    wheel_bytes = zf.read(f"creator_engine_validator/{rel}")
+                    source_bytes = source_files[rel].read_bytes()
+                    if wheel_bytes != source_bytes:
+                        v.append(f"app wheel {wheel.name} differs from source file {rel}")
+        except zipfile.BadZipFile:
+            v.append(f"invalid app wheel zip archive: {wheel}")
+    return v
+
+
 def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     """Aggregate the Option B packaging contract for the guard (RED-G-6)."""
     root = Path(repo_root)
@@ -219,6 +334,7 @@ def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     violations += pyproject_violations(validators / "pyproject.toml")
     violations += wheelhouse_violations(validators / "wheelhouse")
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
+    violations += verify_wheel_matches_source(root)
     details = {
         "requires_python": REQUIRES_PYTHON,
         "runtime_pins": dict(RUNTIME_PINS),

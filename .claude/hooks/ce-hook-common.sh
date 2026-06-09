@@ -77,6 +77,18 @@ ce_hook_reviewer_authority_ref() {
     printf '%s\n' "${CE_REVIEWER_AUTHORITY_REF:-}"
 }
 
+# Gate B (posture-claim reachability). A governed lane launched via `ce lane launch`
+# exports the ABSOLUTE Active-Work Ledger root as CE_LEDGER_ROOT into the pane
+# environment (exact analog of CE_REVIEWER_AUTHORITY_REF). Echo it (single value, safe
+# to quote) so the entry hook forwards it to the validator as `--ledger-root`, which
+# scopes §7 posture claim/pane discovery to the seat's REAL ledger — reachable even
+# from a worktree that carries no local ledger. Empty/unset prints nothing: the
+# validator then scopes to <posture_root>/.hermes/active-work-ledger, never the whole
+# tree, so tracked examples/** fixtures can never be matched as governing claims.
+ce_hook_ledger_root() {
+    printf '%s\n' "${CE_LEDGER_ROOT:-}"
+}
+
 # Best-effort observability: append one advisory, non-blocking NDJSON record
 # under the ignored `.hermes/` evidence root. Never blocks, never fails the hook.
 # Usage: ce_hook_log_observation <posture_root> <hook_event_name>

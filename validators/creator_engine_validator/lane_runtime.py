@@ -60,6 +60,15 @@ REVIEWER_VENUE_ROLE = "reviewer"
 REVIEWER_VENUE_LANE_KIND = "review"
 CE_REVIEWER_AUTHORITY_ENV = "CE_REVIEWER_AUTHORITY_REF"
 
+# Gate B (posture-claim reachability). Every governed lane exports the ABSOLUTE
+# Active-Work Ledger root into its pane environment under this launch-pinned env
+# var. The in-band CC-G-C hook reads it (``ce_hook_ledger_root``) and forwards it
+# as ``hook-check --ledger-root <abs>`` so §7 posture is resolved from the seat's
+# REAL claim — reachable even from a worktree that carries no local ledger — instead
+# of the whole posture-root tree (where tracked ``examples/**`` fixtures used to be
+# matched as governing claims). Exact analog of ``CE_REVIEWER_AUTHORITY_ENV``.
+CE_LEDGER_ROOT_ENV = "CE_LEDGER_ROOT"
+
 DEFAULT_HOST_ID = "operator-host"
 DEFAULT_SESSION = "ce-lane"
 TMUX_TERMINAL_KIND = "tmux"
@@ -670,11 +679,13 @@ def launch(
     #    var so the in-band hook can forward it as ce.reviewer_authority_ref.
     session_name = session or DEFAULT_SESSION
     window_name = window or lane_id
-    pane_env = (
-        {CE_REVIEWER_AUTHORITY_ENV: reviewer_authority_ref}
-        if reviewer_authority_ref
-        else None
-    )
+    # Gate B: pin the seat's REAL ledger root into the pane env so the in-band hook
+    # resolves §7 posture from the seat's own claim (reachable from a worktree that
+    # carries no local ledger), not the whole tree. A validated reviewer venue also
+    # carries its authority ref so the hook can forward it as ce.reviewer_authority_ref.
+    pane_env: dict[str, str] = {CE_LEDGER_ROOT_ENV: str(ledger_root.resolve())}
+    if reviewer_authority_ref:
+        pane_env[CE_REVIEWER_AUTHORITY_ENV] = reviewer_authority_ref
     try:
         pane = adapter.ensure_pane(
             session=session_name,

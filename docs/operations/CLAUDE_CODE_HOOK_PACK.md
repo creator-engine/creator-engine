@@ -138,6 +138,14 @@ verbatim:
   lane is never hard-denied) with the advisory context preserved in the reason.
 - `--evidence-root .hermes` keeps ignored instance-evidence writes from being
   denied under governed posture (D3).
+- **`--ledger-root` (Gate B, posture-claim reachability):** a governed lane
+  launched via `ce lane launch` exports its absolute Active-Work Ledger root as
+  `CE_LEDGER_ROOT`; `ce-pretooluse.sh` forwards it as `--ledger-root` so the §7
+  posture is resolved from the seat's **real** claim — reachable even from a
+  worktree that carries no local ledger. When unset, discovery is scoped to
+  `<posture-root>/.hermes/active-work-ledger`, never the whole posture-root tree,
+  so tracked `examples/**` claim/pane fixtures can never be matched as governing
+  claims. Mirrors the `--reviewer-authority-ref` launch-pinned seam.
 
 The Stop bridge shape (`{"decision":"block","reason":"…"}`) exists in Ring 2 but
 is **not** emitted by the CC-G-C Stop hook (advisory-only, D2).
