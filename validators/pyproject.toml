@@ -19,5 +19,6 @@ ce = "creator_engine_validator.ce_cli:main"
 # v1 ``ce`` launcher (additive; never a subcommand on ``ce``/``ce_cli``).
 cev3 = "creator_engine_validator.v3_cli:main"
 
-[tool.setuptools]
-packages = ["creator_engine_validator", "creator_engine_validator.checks"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["creator_engine_validator", "creator_engine_validator.*"]
