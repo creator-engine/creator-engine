@@ -193,6 +193,22 @@ def test_ce_lane_launch_writes_pane_registry_record_bound_to_live_claim(tmp_path
     assert use_fake_tmux.spawned, "tmux pane should have been spawned"
 
 
+def test_ce_lane_launch_injects_abs_ledger_root_into_pane_env(tmp_path, use_fake_tmux):
+    # Gate B (B-1): every governed lane exports its ABSOLUTE Active-Work Ledger root
+    # into the pane environment as CE_LEDGER_ROOT, so the in-band hook can resolve §7
+    # posture from the seat's REAL claim (reachable from a worktree with no local
+    # ledger) rather than the whole posture-root tree.
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha))
+    assert ret == 0
+    env = use_fake_tmux.last_env
+    assert env is not None
+    assert env["CE_LEDGER_ROOT"] == str(ledger.resolve())
+    assert Path(env["CE_LEDGER_ROOT"]).is_absolute()
+
+
 # ---------------------------------------------------------------------------
 # Required RED test — status reads the live pane record
 # ---------------------------------------------------------------------------
