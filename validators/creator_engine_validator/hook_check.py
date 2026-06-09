@@ -503,17 +503,49 @@ def evaluate(event: dict, context: HookContext) -> HookDecision:
 # --------------------------------------------------------------------------
 
 
-def _resolve_posture(ce: dict, posture_mode: str, posture_root: str | None):
+def _posture_discovery_root(
+    ledger_root: str | None, posture_root: str | None
+) -> Path | None:
+    """Resolve the directory under which the §7 posture claims+panes are discovered.
+
+    Gate B (posture-claim reachability): a governed seat's REAL Active-Work Ledger is
+    launch-pinned via ``--ledger-root`` (exported by ``ce lane launch`` as
+    ``CE_LEDGER_ROOT`` — the analog of the proven ``reviewer-authority-ref`` seam).
+    When pinned we discover under it, so a worktree seat — whose own tree carries no
+    real ledger — resolves ``governed`` from its real claim, not a fixture.
+
+    Otherwise we discover under ``<posture_root>/.hermes/active-work-ledger`` — **never
+    the whole posture-root tree** — so tracked ``examples/**`` claim/pane fixtures (and
+    snapshot copies) can never be matched as governing claims. ``None`` when neither a
+    ledger nor a posture root is resolvable (caller falls to ``ungoverned``).
+    """
+    if ledger_root:
+        return Path(ledger_root)
+    if posture_root:
+        return Path(posture_root) / ".hermes" / "active-work-ledger"
+    return None
+
+
+def _resolve_posture(
+    ce: dict,
+    posture_mode: str,
+    posture_root: str | None,
+    ledger_root: str | None = None,
+):
     if posture_mode in {"governed", "ungoverned"}:
         return posture_mode, None
     explicit = ce.get("posture")
     if explicit in {"governed", "ungoverned"}:
         return explicit, None
-    if not posture_root:
+    discovery_root = _posture_discovery_root(ledger_root, posture_root)
+    if discovery_root is None or not discovery_root.is_dir():
+        # No pinned ledger and no live ledger under the posture root → an
+        # unallocated / unpinned seat. Fail to ungoverned (advisory floor); a
+        # tracked examples/** fixture can no longer flip it to governed.
         return "ungoverned", None
     from .checks.pane_registry import evaluate_posture
 
-    result = evaluate_posture([Path(posture_root)])
+    result = evaluate_posture([discovery_root])
     return result.posture, result.claim
 
 
@@ -578,6 +610,7 @@ def build_context(
     *,
     posture: str = "auto",
     posture_root: str | None = None,
+    ledger_root: str | None = None,
     manifest_doc: str | None = None,
     evidence_root: str | None = None,
     closeout_file: str | None = None,
@@ -587,10 +620,15 @@ def build_context(
 
     Resolution precedence: explicit override flags > the event's ``ce``
     extension block > auto-resolution from ``.hermes`` posture inputs.
+
+    ``ledger_root`` is the launch-pinned absolute Active-Work Ledger root (Gate B).
+    When present it scopes the §7 posture claim/pane discovery to the seat's real
+    ledger; otherwise discovery is scoped to ``<posture_root>/.hermes/active-work-ledger``.
     """
     ce = event.get("ce") if isinstance(event.get("ce"), dict) else {}
     posture_root = posture_root or ce.get("posture_root") or event.get("cwd")
-    posture_value, bound_claim = _resolve_posture(ce, posture, posture_root)
+    ledger_root = ledger_root or ce.get("ledger_root")
+    posture_value, bound_claim = _resolve_posture(ce, posture, posture_root, ledger_root)
     manifest_paths = _resolve_manifest(manifest_doc, ce, posture_root, bound_claim)
     evidence_root = evidence_root or ce.get("evidence_root")
     completion_report = completion_report or ce.get("completion_report")

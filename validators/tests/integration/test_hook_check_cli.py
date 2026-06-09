@@ -91,7 +91,12 @@ def test_hook_check_stop_block_via_closeout_file(capsys, tmp_path, monkeypatch):
     assert payload["hookSpecificOutput"]["hookEventName"] == "Stop"
 
 
-def test_hook_check_posture_auto_governed_from_examples(capsys, monkeypatch):
+def test_hook_check_posture_auto_examples_subdir_no_longer_governs(capsys, monkeypatch):
+    # Gate B (posture-claim reachability): pointing --posture-root at a tree that
+    # carries tracked examples/** claim+pane fixtures NO LONGER resolves `governed`.
+    # Posture discovery is scoped to <posture_root>/.hermes/active-work-ledger (or a
+    # launch-pinned --ledger-root), never the whole tree, so a fixture can never be
+    # matched as a live governing claim. (Before Gate B this asserted `governed`.)
     posture_root = EXAMPLES / "well-formed/pane-registry"
     event = {
         "hook_event_name": "PreToolUse",
@@ -107,9 +112,96 @@ def test_hook_check_posture_auto_governed_from_examples(capsys, monkeypatch):
     )
     assert code == 0
     payload = json.loads(out)
-    assert payload["posture"] == "governed"
-    assert payload["decision"] == "allow"  # governed out-of-manifest is advisory (G-i)
+    assert payload["posture"] == "ungoverned"
+    assert payload["decision"] == "allow"
     assert payload["advisory"] is True
+
+
+def _write_ledger_binding(ledger_root: Path, lane: str = "cli-lane", controller: str = "hermes-primary") -> None:
+    """Write a live claim + cleanly-bound live tmux pane under a real ledger root."""
+    claims = ledger_root / "claims" / controller
+    panes = ledger_root / "panes" / controller
+    claims.mkdir(parents=True, exist_ok=True)
+    panes.mkdir(parents=True, exist_ok=True)
+    (claims / f"{lane}.yaml").write_text(
+        "kind: active-work-ledger-record\n"
+        "record_type: claim\n"
+        'schema_version: "1"\n'
+        f"controller_id: {controller}\n"
+        f"lane_id: {lane}\n"
+        f'record_timestamp: "source-controlled:claims/{controller}/{lane}.yaml"\n'
+        f"worktree_path: /worktrees/{lane}\n"
+        f"envelope_ref: .hermes/envelopes/{lane}.md\n"
+        "lease_seconds: 3600\n"
+        f'claimed_at: "source-controlled:claims/{controller}/{lane}.yaml"\n'
+        f'last_heartbeat_at: "source-controlled:claims/{controller}/{lane}.yaml"\n',
+        encoding="utf-8",
+    )
+    (panes / f"{lane}.yaml").write_text(
+        "kind: pane-registry-record\n"
+        "record_type: pane_identity\n"
+        'schema_version: "1"\n'
+        f"controller_id: {controller}\n"
+        f"lane_id: {lane}\n"
+        f"claim_ref: claims/{controller}/{lane}.yaml\n"
+        "host_id: workstation-a\n"
+        f"pane_id: pane-{lane}-001\n"
+        "role: implementer\n"
+        "status: active\n"
+        'record_timestamp: "2026-05-26T00:00:00Z"\n'
+        "visibility: operator_visible\n"
+        "terminal:\n"
+        "  kind: tmux\n"
+        "  session_id: ce\n"
+        "  window_id: w\n"
+        "  pane_id: '1'\n"
+        'registered_at: "2026-05-26T00:00:00Z"\n'
+        "last_seen_at: source-controlled:pane.yaml\n",
+        encoding="utf-8",
+    )
+
+
+def test_hook_check_ledger_root_resolves_governed_via_real_claim(capsys, tmp_path, monkeypatch):
+    # Gate B (B-1 + B-2) full CLI seam: a launch-pinned --ledger-root makes the seat's
+    # REAL claim reachable from a worktree posture-root that carries NO local ledger
+    # (only the examples footgun) -> governed, and the sacred push hard-deny still fires.
+    real_ledger = tmp_path / "root" / ".hermes" / "active-work-ledger"
+    _write_ledger_binding(real_ledger)
+    wt = tmp_path / "wt"
+    (wt / "examples").mkdir(parents=True)  # worktree carries tracked fixtures, no real ledger
+
+    edit_event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "README.md"},
+        "ce": {"manifest_paths": ["schemas/x.yaml"]},
+    }
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture", "auto",
+         "--posture-root", str(wt), "--ledger-root", str(real_ledger)],
+        capsys,
+        json.dumps(edit_event),
+        monkeypatch,
+    )
+    assert code == 0
+    assert json.loads(out)["posture"] == "governed"
+
+    push_event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push origin main"},
+    }
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture", "auto",
+         "--posture-root", str(wt), "--ledger-root", str(real_ledger)],
+        capsys,
+        json.dumps(push_event),
+        monkeypatch,
+    )
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["posture"] == "governed"
+    assert payload["decision"] == "deny"  # SACRED: governed seat push stays hard-denied
 
 
 def test_hook_check_posture_auto_ungoverned_empty(capsys, tmp_path, monkeypatch):

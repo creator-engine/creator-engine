@@ -170,6 +170,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="output shape: 'raw' (default, full CC-G-B decision dict) or 'claude' (minimal Claude Code hook dict)",
     )
     hook_check_p.add_argument("--posture-root", default=None, help="root to resolve .hermes posture inputs (default: event cwd)")
+    hook_check_p.add_argument(
+        "--ledger-root",
+        dest="ledger_root",
+        default=None,
+        help="launch-pinned absolute Active-Work Ledger root (exported as CE_LEDGER_ROOT "
+        "by `ce lane launch`); scopes the §7 posture claim/pane discovery to the seat's "
+        "REAL ledger (Gate B) instead of the whole posture-root tree, so tracked "
+        "examples/** fixtures can never be matched as governing claims",
+    )
     hook_check_p.add_argument("--manifest-doc", default=None, help="handoff/prompt doc carrying the fenced ALLOWED_PATHS manifest")
     hook_check_p.add_argument("--evidence-root", default=None, help="ignored evidence-root prefix the gate may write under")
     hook_check_p.add_argument("--closeout-file", default=None, help="path to the Stop closeout text to verify")
@@ -495,6 +504,7 @@ def _hook_check(args) -> int:
         event,
         posture=args.posture,
         posture_root=args.posture_root,
+        ledger_root=getattr(args, "ledger_root", None),
         manifest_doc=args.manifest_doc,
         evidence_root=args.evidence_root,
         closeout_file=args.closeout_file,

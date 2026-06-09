@@ -14,6 +14,7 @@ never write ``.claude/**``, and never read real credential bytes.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -359,3 +360,160 @@ def test_posture_ambiguous_live_claim_falls_closed_to_governed(tmp_path):
     result = pane_registry.evaluate_posture([tmp_path])
     assert result.posture == "governed"
     assert result.ambiguous_fell_closed is True
+
+
+# --- Gate B: posture-claim reachability (injection-first) ------------------
+#
+# The §7 hard-deny fires ONLY under posture=="governed" (see
+# test_governed_bash_git_push_denies). Before Gate B a seat's posture was
+# resolved by rglob-ing the WHOLE posture-root tree, which matched tracked
+# examples/**/claims fixtures as live governing claims — load-bearing for
+# worktree-seat governance, but a footgun. Gate B makes a seat's REAL ledger
+# reachable via a launch-pinned --ledger-root (CE_LEDGER_ROOT) and scopes
+# discovery to that ledger (else <posture_root>/.hermes/active-work-ledger),
+# never the whole tree. The four tests below are the mandatory regression
+# guards protecting the sacred push/deploy hard-deny.
+
+
+def _write_real_ledger(ledger_root: Path, lane: str = "real-lane", controller: str = "hermes-primary") -> None:
+    """Write a live claim + a cleanly-bound live tmux pane under a real ledger root.
+
+    Mirrors the on-disk layout ``lane_runtime.launch`` writes: claims under
+    ``claims/<controller>/<lane>.yaml`` and panes under ``panes/<controller>/<lane>.yaml``.
+    """
+    claims = ledger_root / "claims" / controller
+    panes = ledger_root / "panes" / controller
+    claims.mkdir(parents=True, exist_ok=True)
+    panes.mkdir(parents=True, exist_ok=True)
+    (claims / f"{lane}.yaml").write_text(
+        "kind: active-work-ledger-record\n"
+        "record_type: claim\n"
+        'schema_version: "1"\n'
+        f"controller_id: {controller}\n"
+        f"lane_id: {lane}\n"
+        f'record_timestamp: "source-controlled:claims/{controller}/{lane}.yaml"\n'
+        f"worktree_path: /worktrees/{lane}\n"
+        f"envelope_ref: .hermes/envelopes/{lane}.md\n"
+        "lease_seconds: 3600\n"
+        f'claimed_at: "source-controlled:claims/{controller}/{lane}.yaml"\n'
+        f'last_heartbeat_at: "source-controlled:claims/{controller}/{lane}.yaml"\n',
+        encoding="utf-8",
+    )
+    (panes / f"{lane}.yaml").write_text(
+        "kind: pane-registry-record\n"
+        "record_type: pane_identity\n"
+        'schema_version: "1"\n'
+        f"controller_id: {controller}\n"
+        f"lane_id: {lane}\n"
+        f"claim_ref: claims/{controller}/{lane}.yaml\n"
+        "host_id: workstation-a\n"
+        f"pane_id: pane-{lane}-001\n"
+        "role: implementer\n"
+        "status: active\n"
+        'record_timestamp: "2026-05-26T00:00:00Z"\n'
+        "visibility: operator_visible\n"
+        "terminal:\n"
+        "  kind: tmux\n"
+        "  session_id: ce\n"
+        "  window_id: w\n"
+        "  pane_id: '1'\n"
+        'registered_at: "2026-05-26T00:00:00Z"\n'
+        "last_seen_at: source-controlled:pane.yaml\n",
+        encoding="utf-8",
+    )
+
+
+def _worktree_with_examples_footgun(base: Path) -> Path:
+    """A worktree-like checkout carrying the tracked examples/** fixtures but NO
+    real local ledger — exactly the layout that used to flip a worktree seat to
+    governed via a fixture. Returns the worktree root."""
+    wt = base / "wt"
+    wt.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(EXAMPLES / "well-formed/pane-registry", wt / "examples/well-formed/pane-registry")
+    return wt
+
+
+def test_gate_b_regression_1_real_ledger_pinned_seat_governed_via_real_claim(tmp_path):
+    # (1) A real allocated (ledger-pinned) worktree seat resolves `governed` via
+    # its REAL claim — not any examples/** fixture. The worktree tree even carries
+    # the examples footgun, yet the pinned ledger wins.
+    real_ledger = tmp_path / "root" / ".hermes" / "active-work-ledger"
+    _write_real_ledger(real_ledger, lane="real-lane")
+    wt = _worktree_with_examples_footgun(tmp_path)
+
+    posture, claim = hook_check._resolve_posture(
+        {}, "auto", str(wt), ledger_root=str(real_ledger)
+    )
+    assert posture == "governed"
+    # The binding is the REAL claim, never the example "pco-slice3-impl" fixture.
+    assert claim is not None
+    assert claim.record["lane_id"] == "real-lane"
+
+    # And the public build_context() path agrees.
+    ctx = hook_check.build_context(
+        _edit_event("README.md"), posture_root=str(wt), ledger_root=str(real_ledger)
+    )
+    assert ctx.posture == "governed"
+
+
+def test_gate_b_regression_2_unpinned_seat_is_ungoverned(tmp_path):
+    # (2) An unallocated / unpinned seat resolves `ungoverned` (advisory). The
+    # worktree carries the examples footgun but, with no ledger pin and no real
+    # local ledger, the fixtures can no longer flip it to governed.
+    wt = _worktree_with_examples_footgun(tmp_path)
+
+    posture, claim = hook_check._resolve_posture({}, "auto", str(wt), ledger_root=None)
+    assert posture == "ungoverned"
+    assert claim is None
+
+    ctx = hook_check.build_context(_edit_event("README.md"), posture_root=str(wt))
+    assert ctx.posture == "ungoverned"
+
+
+def test_gate_b_regression_3_git_push_under_governed_seat_is_hard_denied(tmp_path):
+    # (3) THE SACRED INVARIANT: `git push` under a real governed seat is still
+    # HARD-DENIED (decision=="deny"). This exercises the full posture-resolution
+    # path (ledger pin -> governed) feeding the restricted-mechanic hard deny, so
+    # the Gate B scope-out cannot silently downgrade the hard-deny to advisory.
+    real_ledger = tmp_path / "root" / ".hermes" / "active-work-ledger"
+    _write_real_ledger(real_ledger, lane="real-lane")
+    wt = _worktree_with_examples_footgun(tmp_path)
+
+    ctx = hook_check.build_context(
+        _bash_event("git push origin main"),
+        posture_root=str(wt),
+        ledger_root=str(real_ledger),
+    )
+    assert ctx.posture == "governed"
+    decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+
+
+def test_gate_b_regression_4_examples_can_never_govern_over_root_checkout(tmp_path):
+    # (4) No examples/** (or snapshot) path can ever be the governing claim,
+    # evaluated over a root checkout — even when a real (but live-claim-free)
+    # ledger directory is present. Discovery is scoped to the real ledger, so the
+    # tracked fixtures are excluded by construction.
+    root = tmp_path / "root-checkout"
+    root.mkdir()
+    # A real ledger dir that exists but holds no live claim.
+    (root / ".hermes" / "active-work-ledger").mkdir(parents=True)
+    shutil.copytree(EXAMPLES / "well-formed/pane-registry", root / "examples/well-formed/pane-registry")
+
+    posture, claim = hook_check._resolve_posture({}, "auto", str(root), ledger_root=None)
+    assert posture == "ungoverned"
+    assert claim is None
+
+
+def test_gate_b_ledger_root_via_ce_block_fallback(tmp_path):
+    # The launch-pinned ledger root may also arrive in the event's ce extension
+    # block (ce.ledger_root), mirroring ce.posture_root — build_context honors it.
+    real_ledger = tmp_path / "root" / ".hermes" / "active-work-ledger"
+    _write_real_ledger(real_ledger, lane="real-lane")
+    wt = _worktree_with_examples_footgun(tmp_path)
+
+    event = _edit_event("README.md")
+    event["ce"] = {"ledger_root": str(real_ledger)}
+    ctx = hook_check.build_context(event, posture_root=str(wt))
+    assert ctx.posture == "governed"
