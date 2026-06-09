@@ -1,0 +1,182 @@
+{
+  "schema_version": "ce-openshell-live-bundle/1",
+  "kind": "openshell-live-run-bundle",
+  "recorded_mode": "live",
+  "openshell_version": "v0.0.57",
+  "gateway_status": "Connected",
+  "image_ref": "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e",
+  "run_id": "openshell-live-a2bii",
+  "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+  "policy_yaml": "filesystem_policy:\n  include_workdir: true\n  read_only:\n  - /usr\n  - /lib\n  - /lib64\n  - /bin\n  - /etc\n  - /proc\n  - /dev/urandom\n  - /app\n  - /var/log\n  read_write:\n  - /sandbox\n  - /tmp\n  - /dev/null\nlandlock:\n  compatibility: best_effort\nnetwork_policies:\n  api_github_com_443:\n    binaries:\n    - path: /usr/bin/curl\n    endpoints:\n    - access: read-write\n      enforcement: enforce\n      host: api.github.com\n      port: 443\n      protocol: rest\n    name: api_github_com_443\nprocess:\n  run_as_group: sandbox\n  run_as_user: sandbox\nversion: 1\n",
+  "probes": [
+    {
+      "label": "allowed",
+      "command": [
+        "curl",
+        "-sS",
+        "https://api.github.com/zen"
+      ],
+      "expect": "ALLOWED",
+      "exit_code": 0,
+      "stdout_excerpt": "Practicality beats purity.",
+      "stderr_excerpt": ""
+    },
+    {
+      "label": "denied",
+      "command": [
+        "curl",
+        "-sS",
+        "https://example.com"
+      ],
+      "expect": "DENIED",
+      "exit_code": 56,
+      "stdout_excerpt": "",
+      "stderr_excerpt": "curl: (56) CONNECT tunnel failed, response 403\n"
+    }
+  ],
+  "ocsf_textlog": "[<ts>] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(PID) -> api.github.com:443 [policy:api_github_com_443 engine:opa]\n[<ts>] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET http://api.github.com:443/zen [policy:api_github_com_443 engine:l7]\n[<ts>] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(PID) -> example.com:443 [policy:- engine:opa] [reason:endpoint example.com:443 is not allowed by any policy]\n",
+  "ocsf_records": [
+    {
+      "event_type": "NET:OPEN",
+      "severity": "INFO",
+      "disposition": "ALLOWED",
+      "actor": "/usr/bin/curl(PID)",
+      "target": "api.github.com:443",
+      "policy": "api_github_com_443",
+      "engine": "opa",
+      "raw": {
+        "event_type": "NET:OPEN",
+        "severity": "INFO",
+        "raw": "[<ts>] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(PID) -> api.github.com:443 [policy:api_github_com_443 engine:opa]",
+        "disposition": "ALLOWED",
+        "actor": "/usr/bin/curl(PID)",
+        "target": "api.github.com:443",
+        "policy": "api_github_com_443",
+        "engine": "opa"
+      }
+    },
+    {
+      "event_type": "HTTP:GET",
+      "severity": "INFO",
+      "disposition": "ALLOWED",
+      "policy": "api_github_com_443",
+      "engine": "l7",
+      "raw": {
+        "event_type": "HTTP:GET",
+        "severity": "INFO",
+        "raw": "[<ts>] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET http://api.github.com:443/zen [policy:api_github_com_443 engine:l7]",
+        "disposition": "ALLOWED",
+        "policy": "api_github_com_443",
+        "engine": "l7"
+      }
+    },
+    {
+      "event_type": "NET:OPEN",
+      "severity": "MED",
+      "disposition": "DENIED",
+      "actor": "/usr/bin/curl(PID)",
+      "target": "example.com:443",
+      "policy": "-",
+      "engine": "opa",
+      "reason": "endpoint example.com:443 is not allowed by any policy",
+      "raw": {
+        "event_type": "NET:OPEN",
+        "severity": "MED",
+        "raw": "[<ts>] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(PID) -> example.com:443 [policy:- engine:opa] [reason:endpoint example.com:443 is not allowed by any policy]",
+        "disposition": "DENIED",
+        "actor": "/usr/bin/curl(PID)",
+        "target": "example.com:443",
+        "policy": "-",
+        "engine": "opa",
+        "reason": "endpoint example.com:443 is not allowed by any policy"
+      }
+    }
+  ],
+  "ocsf_dispositions": [
+    "ALLOWED",
+    "ALLOWED",
+    "DENIED"
+  ],
+  "spine_chain": [
+    {
+      "kind": "runtime-evidence-record",
+      "record_type": "runtime_evidence",
+      "schema_version": "1",
+      "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+      "run_id": "openshell-live-a2bii",
+      "lifecycle_phase": "provision",
+      "classification": "allowed",
+      "recorded_at": "t1",
+      "backend_key": "openshell",
+      "sequence": 0,
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "content_hash": "446f01fb534c8e25211ac615ccf29b9a3beed356ac4939d8acd4741c8bf619da"
+    },
+    {
+      "kind": "runtime-evidence-record",
+      "record_type": "runtime_evidence",
+      "schema_version": "1",
+      "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+      "run_id": "openshell-live-a2bii",
+      "lifecycle_phase": "run",
+      "classification": "allowed",
+      "recorded_at": "t2",
+      "backend_key": "openshell",
+      "sequence": 1,
+      "prev_hash": "446f01fb534c8e25211ac615ccf29b9a3beed356ac4939d8acd4741c8bf619da",
+      "content_hash": "05711ada02c6faaf9fa8731a3d6ce1f044bf23f6f69dae22e5c0875964fbbfaf"
+    },
+    {
+      "kind": "runtime-evidence-record",
+      "record_type": "runtime_evidence",
+      "schema_version": "1",
+      "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+      "run_id": "openshell-live-a2bii",
+      "lifecycle_phase": "run",
+      "classification": "allowed",
+      "recorded_at": "t3",
+      "backend_key": "openshell",
+      "sequence": 2,
+      "prev_hash": "05711ada02c6faaf9fa8731a3d6ce1f044bf23f6f69dae22e5c0875964fbbfaf",
+      "content_hash": "34a457397fe7b23f623d8d6da9c9656599257fef4222fe6f442df2acee553f4c"
+    },
+    {
+      "kind": "runtime-evidence-record",
+      "record_type": "runtime_evidence",
+      "schema_version": "1",
+      "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+      "run_id": "openshell-live-a2bii",
+      "lifecycle_phase": "collect",
+      "classification": "allowed",
+      "recorded_at": "t4",
+      "backend_key": "openshell",
+      "sequence": 3,
+      "prev_hash": "34a457397fe7b23f623d8d6da9c9656599257fef4222fe6f442df2acee553f4c",
+      "content_hash": "c2bc5ea45bab044cc5a941216731bde224d46c381773ea14619b9a41b8e38f27"
+    },
+    {
+      "kind": "runtime-evidence-record",
+      "record_type": "runtime_evidence",
+      "schema_version": "1",
+      "policy_sha": "c636160cb6e96cc114788dff53c05a12e97035e8337c67ca6902218ccd3fc4c4",
+      "run_id": "openshell-live-a2bii",
+      "lifecycle_phase": "teardown",
+      "classification": "allowed",
+      "recorded_at": "t5",
+      "backend_key": "openshell",
+      "sequence": 4,
+      "prev_hash": "c2bc5ea45bab044cc5a941216731bde224d46c381773ea14619b9a41b8e38f27",
+      "content_hash": "d25317d8c9ffd08a466264febfccec2383082830c49a50cb33a00677f97b9bcf"
+    }
+  ],
+  "lifecycle_phases": [
+    "provision",
+    "run",
+    "run",
+    "collect",
+    "teardown"
+  ],
+  "verify_chain_clean": true,
+  "sanitization": "epoch timestamps -> [<ts>]; in-sandbox PIDs -> (PID); host home paths -> /home/<user>; decision fields kept verbatim. Each probe's canonical policy verdict is surfaced (api.github.com ALLOWED, example.com DENIED); transient tunnel-teardown lines emitted during gateway policy re-resolution are dropped (operational noise, not a verdict).",
+  "gateway_status_text": "Server Status\n\n  Gateway: openshell\n  Server: https://127.0.0.1:17670\n  Status: Connected\n  Version: 0.0.57"
+}
