@@ -11,6 +11,7 @@ runtime-policy that does not validate clean.
 
 import socket
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -42,11 +43,15 @@ from creator_engine_validator.runner import (
 )
 from creator_engine_validator.runner.openshell_backend import (
     SandboxPolicy as _SandboxPolicyModule,
-    parse_ocsf_jsonl,
+    parse_ocsf_textlog,
 )
 
 _POLICY_SHA = "a" * 64
 _IMAGE_SHA = "sha256:" + "b" * 64
+
+#: Real OpenShell v0.0.57 OCSF text-log lines captured live in A.2b (the parser's
+#: ground truth). Mirrors ``fixtures/openshell_ocsf_textlog.sample``.
+_OCSF_TEXTLOG_FIXTURE = Path(__file__).parent / "fixtures" / "openshell_ocsf_textlog.sample"
 
 
 def valid_policy() -> dict:
@@ -66,7 +71,13 @@ def valid_policy() -> dict:
         ],
         "egress_allowlist": [
             {"host": "model-provider.example", "port": 443, "protocol": "https", "assurance": ["l4"]},
-            {"host": "pkg.example", "protocol": "https", "assurance": ["l7"], "tls_terminated": True},
+            {
+                "host": "pkg.example",
+                "protocol": "https",
+                "assurance": ["l7"],
+                "tls_terminated": True,
+                "binary_identity": "package-installer",
+            },
         ],
         "secret_allowlist": ["model-provider-key"],
         "grant_extensible": False,
@@ -121,12 +132,16 @@ def test_translate_egress_to_network_policies():
     endpoint = mp.endpoints[0]
     assert isinstance(endpoint, Endpoint)
     assert endpoint.port == 443
-    assert endpoint.protocol == "https"
+    # CE carries no OpenShell `protocol` (the axes don't align — A.2b live finding).
+    assert not hasattr(endpoint, "protocol")
     # Every translated endpoint is binding (enforce), not advisory (audit).
     assert endpoint.enforcement == "enforce"
     assert endpoint.access == "read-write"
     # Names are deterministic, map-safe slugs derived from the host(+port).
     assert "model_provider_example_443" in rules
+    # A CE egress rule's binary_identity -> the rule's binaries scope; absent => ().
+    assert mp.binaries == ()
+    assert by_host["pkg.example"].binaries == ("package-installer",)
 
 
 def test_translate_empty_allowlist_is_no_egress():
@@ -239,29 +254,25 @@ def test_full_lifecycle_through_fake_client():
     assert fake.deleted == ["openshell-sandbox-xyz"]
 
 
-def test_collect_maps_ocsf_records_action_allowed_denied():
-    ocsf = [
-        {"class_uid": 4001, "action": "Allowed", "disposition": "Allowed", "status": "Success"},
-        {
-            "class_uid": 4001,
-            "action": "Denied",
-            "disposition": "Blocked",
-            "status": "Failure",
-            "status_detail": "no matching policy",
-        },
-    ]
+def test_collect_maps_ocsf_records_allowed_denied():
+    ocsf = parse_ocsf_textlog(
+        "[ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(1) -> api.github.com:443 [policy:gh engine:opa]\n"
+        "[ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(2) -> example.com:443 [policy:- engine:opa] "
+        "[reason:endpoint example.com:443 is not allowed by any policy]\n"
+    )
     backend = OpenShellBackend(client=FakeSandboxClient(ocsf_records=ocsf))
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-8"))
     evidence = backend.collect(handle)
     assert len(evidence.records) == 2
-    actions = [record["action"] for record in evidence.records]
-    assert actions == ["Allowed", "Denied"]
+    dispositions = [record["disposition"] for record in evidence.records]
+    assert dispositions == ["ALLOWED", "DENIED"]
     denied = evidence.records[1]
-    assert denied["disposition"] == "Blocked"
-    assert denied["status"] == "Failure"
-    assert denied["status_detail"] == "no matching policy"
-    # The full raw OCSF record is preserved for evidence-spine fidelity.
-    assert denied["raw"]["class_uid"] == 4001
+    assert denied["policy"] == "-"
+    assert denied["engine"] == "opa"
+    assert denied["target"] == "example.com:443"
+    assert denied["reason"] == "endpoint example.com:443 is not allowed by any policy"
+    # The full raw parsed record is preserved for evidence-spine fidelity.
+    assert denied["raw"]["disposition"] == "DENIED"
 
 
 def test_teardown_reports_unreleased_when_client_says_so():
@@ -336,29 +347,39 @@ def test_registry_resolved_default_refuses_at_provision():
 def test_render_sandbox_policy_yaml_round_trips_structure():
     rendered = render_sandbox_policy_yaml(translate_to_sandbox_policy(valid_policy()))
     loaded = yaml.safe_load(rendered)
-    # filesystem (directory allowlists)
-    assert loaded["filesystem"]["include_workdir"] is True
-    assert "/runtime/worktree" in loaded["filesystem"]["read_write"]
-    assert "governance" in loaded["filesystem"]["read_only"]
+    # The live v0.0.57 gateway REQUIRES a top-level version (A.2b).
+    assert loaded["version"] == 1
+    # filesystem_policy (NOT `filesystem` — the gateway rejects that key; A.2b).
+    assert "filesystem" not in loaded
+    assert loaded["filesystem_policy"]["include_workdir"] is True
+    assert "/runtime/worktree" in loaded["filesystem_policy"]["read_write"]
+    assert "governance" in loaded["filesystem_policy"]["read_only"]
     # landlock + process
     assert loaded["landlock"]["compatibility"] == "best_effort"
     assert loaded["process"]["run_as_user"] == "sandbox"
     assert loaded["process"]["run_as_group"] == "sandbox"
-    # network_policies is a MAP keyed by rule name, each value carrying endpoints[]
+    # network_policies is a MAP keyed by rule name; each value carries name + endpoints[]
     nps = loaded["network_policies"]
     assert isinstance(nps, dict)
     assert set(nps) == {"model_provider_example_443", "pkg_example"}
+    assert nps["model_provider_example_443"]["name"] == "model_provider_example_443"
     mp = nps["model_provider_example_443"]["endpoints"][0]
     assert mp["host"] == "model-provider.example"
     assert mp["port"] == 443
-    assert mp["protocol"] == "https"
+    # protocol is omitted on the wire (CE's axis != OpenShell rest/websocket; A.2b).
+    assert "protocol" not in mp
     # Every translated endpoint is binding (enforce), not advisory (audit).
     assert mp["enforcement"] == "enforce"
     assert mp["access"] == "read-write"
-    # An endpoint with no port omits the key on the wire (no null port).
-    pkg = nps["pkg_example"]["endpoints"][0]
+    # The model-provider rule has no calling-binary scope => no binaries key.
+    assert "binaries" not in nps["model_provider_example_443"]
+    # An endpoint with no port omits the key on the wire (no null port); the pkg
+    # rule's binary_identity surfaces as binaries: [{path}].
+    pkg_rule = nps["pkg_example"]
+    pkg = pkg_rule["endpoints"][0]
     assert pkg["host"] == "pkg.example"
     assert "port" not in pkg
+    assert pkg_rule["binaries"] == [{"path": "package-installer"}]
 
 
 def test_render_sandbox_policy_yaml_is_deterministic():
@@ -375,50 +396,73 @@ def test_render_sandbox_policy_yaml_empty_allowlist_is_no_egress():
     loaded = yaml.safe_load(render_sandbox_policy_yaml(translated))
     # Empty map => the OPA proxy denies all egress (deny-by-default on the wire).
     assert loaded["network_policies"] == {}
+    # The required version + filesystem_policy keys are still present (A.2b schema).
+    assert loaded["version"] == 1
+    assert "filesystem_policy" in loaded
 
 
 # ---------------------------------------------------------------------------
-# Pure OCSF JSONL parser — parse_ocsf_jsonl (the live file read is # pragma: no cover)
+# Pure OCSF TEXT-log parser — parse_ocsf_textlog (the live log read is # pragma: no cover).
+# A.2b LIVE-VERIFIED: OpenShell v0.0.57 emits OCSF as TEXT (openshell logs), NOT
+# JSONL (the JSONL sink stays empty); the fixture holds real captured gateway lines.
 # ---------------------------------------------------------------------------
-def test_parse_ocsf_jsonl_parses_lines_and_skips_blanks():
+def test_parse_ocsf_textlog_real_fixture_allow_deny():
+    records = parse_ocsf_textlog(_OCSF_TEXTLOG_FIXTURE.read_text(encoding="utf-8"))
+    # 4 OCSF lines: NET:OPEN ALLOWED, HTTP:GET ALLOWED, NET:CLOSE (no disposition), NET:OPEN DENIED.
+    assert len(records) == 4
+    allowed = records[0]
+    assert allowed["event_type"] == "NET:OPEN"
+    assert allowed["disposition"] == "ALLOWED"
+    assert allowed["target"] == "api.github.com:443"
+    assert allowed["policy"] == "github_api"
+    assert allowed["engine"] == "opa"
+    # The lifecycle NET:CLOSE line carries no allow/deny disposition.
+    assert "disposition" not in records[2]
+    denied = records[3]
+    assert denied["event_type"] == "NET:OPEN"
+    assert denied["disposition"] == "DENIED"
+    assert denied["target"] == "example.com:443"
+    assert denied["reason"] == "endpoint example.com:443 is not allowed by any policy"
+    # The full original line is preserved for evidence-spine fidelity.
+    assert "DENIED" in denied["raw"]
+
+
+def test_parse_ocsf_textlog_skips_blank_and_non_ocsf_lines():
     text = (
-        '{"class_uid": 4001, "action": "Allowed", "disposition": "Allowed", "status": "Success"}\n'
         "\n"
         "   \n"
-        '{"class_uid": 4001, "action": "Denied", "disposition": "Blocked", '
-        '"status": "Failure", "status_detail": "no matching policy"}\n'
+        "2026-06-09T05:15:00Z some non-ocsf gateway log line\n"
+        "[1780982102.452] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED "
+        "/usr/bin/curl(54) -> example.com:443 [policy:- engine:opa]\n"
     )
-    records = parse_ocsf_jsonl(text)
-    assert len(records) == 2
-    assert records[0]["action"] == "Allowed"
-    assert records[1]["action"] == "Denied"
-    assert records[1]["status_detail"] == "no matching policy"
+    records = parse_ocsf_textlog(text)
+    assert len(records) == 1
+    assert records[0]["disposition"] == "DENIED"
 
 
-def test_parse_ocsf_jsonl_empty_text_is_empty_list():
-    assert parse_ocsf_jsonl("") == []
-    assert parse_ocsf_jsonl("\n  \n") == []
+def test_parse_ocsf_textlog_empty_text_is_empty_list():
+    assert parse_ocsf_textlog("") == []
+    assert parse_ocsf_textlog("\n  \n") == []
 
 
-def test_parse_ocsf_jsonl_malformed_line_raises():
-    # Audit-log corruption is surfaced, never silently dropped.
-    import json
-
-    with pytest.raises(json.JSONDecodeError):
-        parse_ocsf_jsonl('{"action": "Allowed"}\nthis is not json\n')
+def test_parse_ocsf_textlog_handles_iso_timestamp_variant():
+    # The in-sandbox /var/log/openshell.<date>.log uses an ISO-timestamp prefix
+    # instead of the [epoch] [sandbox] prefix; the parser handles both.
+    records = parse_ocsf_textlog("2026-06-09T05:15:24.365Z OCSF SSH:OPEN [INFO] ALLOWED\n")
+    assert len(records) == 1
+    assert records[0]["event_type"] == "SSH:OPEN"
+    assert records[0]["disposition"] == "ALLOWED"
 
 
 def test_parsed_ocsf_records_flow_through_collect():
     # The parser's output is exactly what the backend's collect() maps via the OCSF
     # decision-field mapper — exercised end-to-end through the injected fake.
-    text = (
-        '{"class_uid": 4001, "action": "Allowed", "disposition": "Allowed", "status": "Success"}\n'
-        '{"class_uid": 4001, "action": "Denied", "disposition": "Blocked", "status": "Failure"}\n'
-    )
-    backend = OpenShellBackend(client=FakeSandboxClient(ocsf_records=parse_ocsf_jsonl(text)))
+    records = parse_ocsf_textlog(_OCSF_TEXTLOG_FIXTURE.read_text(encoding="utf-8"))
+    backend = OpenShellBackend(client=FakeSandboxClient(ocsf_records=records))
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ocsf"))
     evidence = backend.collect(handle)
-    assert [record["action"] for record in evidence.records] == ["Allowed", "Denied"]
+    dispositions = [record.get("disposition") for record in evidence.records]
+    assert "ALLOWED" in dispositions and "DENIED" in dispositions
 
 
 # ---------------------------------------------------------------------------
