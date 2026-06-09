@@ -90,6 +90,18 @@ def _ledger(amount, *, run_id="r1", fleet_id="f1", unit="$", window="total"):
     )
 
 
+def _ledger_at(amount, ts, *, run_id="r1", fleet_id="fleet-a", unit="$", window="total"):
+    return sg.meter_record_body(
+        policy_sha=PSHA,
+        run_id=run_id,
+        recorded_at=ts,
+        amount=amount,
+        unit=unit,
+        fleet_id=fleet_id,
+        window=window,
+    )
+
+
 def test_project_spend_scope_rollup_and_filters():
     records = [
         _ledger(3, run_id="r1", fleet_id="f1"),
@@ -107,6 +119,91 @@ def test_project_spend_scope_rollup_and_filters():
 def test_project_spend_window_filter():
     records = [_ledger(3, window="total"), _ledger(4, window="rolling_5h")]
     assert sg.project_spend(records, "run", run_id="r1", window="rolling_5h") == Decimal("4")
+
+
+# --- fleet spend meter: pure fleet $/hr projection --------------------------
+def test_fleet_spend_meter_totals_match_project_spend_and_rates_by_span():
+    records = [
+        _ledger_at(3, "2026-06-08T00:00:00Z", run_id="r1"),
+        _ledger_at(5, "2026-06-08T02:00:00Z", run_id="r2"),
+        _ledger_at(11, "2026-06-08T01:00:00Z", run_id="other", fleet_id="fleet-b"),
+    ]
+    meter = sg.fleet_spend_meter(records, fleet_id="fleet-a", window="total")
+    assert meter.fleet_id == "fleet-a"
+    assert meter.unit == "$"
+    assert meter.spend == sg.project_spend(records, "fleet", fleet_id="fleet-a", window="total")
+    assert meter.spend == Decimal("8")
+    assert meter.record_count == 2
+    assert meter.run_count == 2
+    assert meter.span_hours == Decimal("2")
+    assert meter.spend_per_hour == Decimal("4")
+
+
+def test_fleet_spend_meter_single_leaf_has_no_rate():
+    meter = sg.fleet_spend_meter(
+        [_ledger_at(3, "2026-06-08T00:00:00Z")],
+        fleet_id="fleet-a",
+    )
+    assert meter.spend == Decimal("3")
+    assert meter.record_count == 1
+    assert meter.run_count == 1
+    assert meter.span_hours is None
+    assert meter.spend_per_hour is None
+
+
+def test_fleet_spend_meter_empty_records_zero_none():
+    meter = sg.fleet_spend_meter([], fleet_id="fleet-a")
+    assert meter.spend == Decimal("0")
+    assert meter.record_count == 0
+    assert meter.run_count == 0
+    assert meter.span_hours is None
+    assert meter.spend_per_hour is None
+
+
+def test_fleet_spend_meter_wall_clock_filter_narrows_total_and_rate():
+    records = [
+        _ledger_at(1, "2026-06-08T00:00:00Z", run_id="r0"),
+        _ledger_at(3, "2026-06-08T01:00:00Z", run_id="r1"),
+        _ledger_at(6, "2026-06-08T03:00:00Z", run_id="r2"),
+    ]
+    meter = sg.fleet_spend_meter(
+        records,
+        fleet_id="fleet-a",
+        since="2026-06-08T00:30:00Z",
+        until="2026-06-08T02:30:00Z",
+    )
+    assert meter.spend == Decimal("3")
+    assert meter.record_count == 1
+    assert meter.run_count == 1
+    assert meter.span_hours == Decimal("2")
+    assert meter.spend_per_hour == Decimal("1.5")
+
+
+def test_fleet_spend_meter_window_passthrough_and_global_fold():
+    records = [
+        _ledger_at(2, "2026-06-08T00:00:00Z", run_id="r1", window=None),
+        _ledger_at(3, "2026-06-08T01:00:00Z", run_id="r2", window="rolling_5h"),
+        _ledger_at(5, "2026-06-08T02:00:00Z", run_id="r3", window="total"),
+        _ledger_at(7, "2026-06-08T01:00:00Z", run_id="r4", fleet_id="fleet-b"),
+    ]
+    rolling = sg.fleet_spend_meter(records, fleet_id="fleet-a", window="rolling_5h")
+    assert rolling.spend == Decimal("5")  # untagged leaves are included, matching project_spend.
+    assert rolling.record_count == 2
+
+    global_meter = sg.fleet_spend_meter(records, fleet_id=None)
+    assert global_meter.spend == sg.project_spend(records, "global")
+    assert global_meter.spend == Decimal("17")
+
+
+def test_fleet_spend_meter_is_deterministic():
+    records = [
+        _ledger_at(1, "2026-06-08T00:00:00Z", run_id="r1"),
+        _ledger_at(2, "2026-06-08T01:00:00Z", run_id="r2"),
+    ]
+    assert sg.fleet_spend_meter(records, fleet_id="fleet-a") == sg.fleet_spend_meter(
+        records,
+        fleet_id="fleet-a",
+    )
 
 
 # --- admission gate (Fork A) -------------------------------------------------

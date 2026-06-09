@@ -1,4 +1,4 @@
-"""CE v3.5-D.0.1: the live usage tap — harness transcript → spend-ledger (PURE core + 1 I/O edge).
+"""CE v3.5-D: the live usage tap — transcript → spend-ledger + token-rate (PURE core + 1 I/O edge).
 
 This is the live ``usage`` tap that ``runner/spend_gate.py``'s docstring names as a
 deferred seam (*"the live ``usage`` / ``/usage`` taps ... are deferred seams"*). It
@@ -9,11 +9,11 @@ rates) and :func:`spend_gate.meter_record_body` (the ledger-body builder). Cost 
 NEVER reimplemented here, and an unpriced model is NEVER silently $0: it honors
 :class:`spend_gate.UnknownModelRate` by routing that turn to ``unpriced_turns``.
 
-Scope (v3.5-D.0.1): pure parse + pure projection-to-ledger-bodies + ONE thin
-file-read edge (:func:`tap_transcript_file`). Out of scope (later slices): fleet
-aggregation across sessions + the tokens/hr time-window meter (D.0.2), running the tap
-over the live fleet to produce the artifact number (D.0.3), and any spine write /
-live drive-loop wiring / in-product v3-driven-run tap.
+Scope (v3.5-D.0.1/D.0.2): pure parse + pure projection-to-ledger-bodies + pure
+token-rate fold + ONE thin file-read edge (:func:`tap_transcript_file`). Out of
+scope (later slices): running the tap over the live fleet to produce the artifact
+number (D.0.3), and any spine write / live drive-loop wiring / in-product
+v3-driven-run tap.
 
 **PURE core.** :func:`parse_transcript_usage` and :func:`usage_turns_to_ledger` do NO
 I/O — no disk, no subprocess, no socket, no wall-clock, no rng. The only file read is
@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from .spend_gate import UnknownModelRate, compute_cost, meter_record_body
+from .spend_gate import UnknownModelRate, _parse_ts, _span_hours, compute_cost, meter_record_body
 
 #: The cost-relevant subset of a transcript ``usage`` object — the only keys
 #: :func:`spend_gate.compute_cost` consumes. Every other usage key (``server_tool_use``,
@@ -61,6 +61,20 @@ class UsageTurn:
     model: str
     recorded_at: str
     usage: dict
+
+
+@dataclass(frozen=True)
+class FleetUsage:
+    """Fleet-level token projection over selected usage turns (PURE)."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    total_tokens: int
+    turn_count: int
+    span_hours: Decimal | None
+    tokens_per_hour: Decimal | None
 
 
 def _cost_subset(usage: dict[str, Any]) -> dict:
@@ -157,6 +171,70 @@ def usage_turns_to_ledger(
             )
         )
     return ledger_bodies, unpriced_turns
+
+
+def _token_count(usage: dict, key: str) -> int:
+    try:
+        return int(usage.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _turn_inside_wall_clock_window(turn: UsageTurn, since: str | None, until: str | None) -> bool:
+    since_dt = _parse_ts(since)
+    until_dt = _parse_ts(until)
+    if since_dt is None and until_dt is None:
+        return True
+    recorded_dt = _parse_ts(turn.recorded_at)
+    if recorded_dt is None:
+        return False
+    if since_dt is not None and recorded_dt < since_dt:
+        return False
+    if until_dt is not None and recorded_dt > until_dt:
+        return False
+    return True
+
+
+def fleet_token_rate(
+    turns: Iterable[UsageTurn],
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> FleetUsage:
+    """Project selected usage turns into fleet token totals and tokens/hour (PURE).
+
+    The caller pre-selects the fleet's turns; :class:`UsageTurn` intentionally has
+    no ``fleet_id`` field. Cache tokens are included in ``total_tokens`` because
+    they are part of the metered usage subset that drives cost.
+    """
+    filtered = [turn for turn in turns or [] if _turn_inside_wall_clock_window(turn, since, until)]
+    input_tokens = sum(_token_count(turn.usage, "input_tokens") for turn in filtered)
+    output_tokens = sum(_token_count(turn.usage, "output_tokens") for turn in filtered)
+    cache_creation_input_tokens = sum(
+        _token_count(turn.usage, "cache_creation_input_tokens") for turn in filtered
+    )
+    cache_read_input_tokens = sum(
+        _token_count(turn.usage, "cache_read_input_tokens") for turn in filtered
+    )
+    total_tokens = (
+        input_tokens
+        + output_tokens
+        + cache_creation_input_tokens
+        + cache_read_input_tokens
+    )
+    bounded_span = _span_hours([since, until]) if since is not None and until is not None else None
+    span_hours = bounded_span if bounded_span is not None else _span_hours(turn.recorded_at for turn in filtered)
+    tokens_per_hour = Decimal(total_tokens) / span_hours if span_hours is not None and span_hours > 0 else None
+    return FleetUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+        total_tokens=total_tokens,
+        turn_count=len(filtered),
+        span_hours=span_hours,
+        tokens_per_hour=tokens_per_hour,
+    )
 
 
 def tap_transcript_file(path: Any) -> list[UsageTurn]:
