@@ -359,3 +359,32 @@ def test_posture_ambiguous_live_claim_falls_closed_to_governed(tmp_path):
     result = pane_registry.evaluate_posture([tmp_path])
     assert result.posture == "governed"
     assert result.ambiguous_fell_closed is True
+
+
+def test_envelope_ref_none_adds_no_write_authority_posture_note(tmp_path):
+    claim_dir = tmp_path / ".hermes/active-work-ledger/claims/hermes-primary"
+    claim_dir.mkdir(parents=True)
+    (claim_dir / "lane.yaml").write_text(
+        "kind: active-work-ledger-record\n"
+        "record_type: claim\n"
+        "schema_version: \"1\"\n"
+        "controller_id: hermes-primary\n"
+        "lane_id: no-authority-lane\n"
+        "record_timestamp: \"source-controlled:lane.yaml\"\n"
+        "worktree_path: /worktrees/no-authority-lane\n"
+        "envelope_ref: none\n"
+        "lease_seconds: 3600\n"
+        "claimed_at: \"source-controlled:lane.yaml\"\n"
+        "last_heartbeat_at: \"source-controlled:lane.yaml\"\n",
+        encoding="utf-8",
+    )
+
+    event = _edit_event("docs/other.md")
+    context = hook_check.build_context(event, posture_root=str(tmp_path))
+    assert context.posture == "governed"
+    assert context.manifest_paths == ()
+    assert context.posture_note == hook_check.NO_WRITE_AUTHORITY_NOTE
+
+    decision = hook_check.evaluate(event, context)
+    assert decision.advisory is True
+    assert hook_check.NO_WRITE_AUTHORITY_NOTE in decision.reason

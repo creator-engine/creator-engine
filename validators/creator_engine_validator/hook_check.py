@@ -43,6 +43,7 @@ CONTRACT = "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md"
 SCOPE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
 
 OUT_OF_MANIFEST_REASON = "tracked path is outside the ratified path manifest"
+NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
 
 
 # --------------------------------------------------------------------------
@@ -72,6 +73,13 @@ class HookContext:
     completion_report_path: str | None = None
     side_effect_authority: dict | None = None
     repo_root: str | None = None
+    posture_note: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedManifest:
+    paths: tuple[str, ...] = ()
+    posture_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -404,6 +412,8 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
         reason = f"advisory (governed; manifest enforcement is advisory): would deny — {would_deny_reason}"
     else:
         reason = f"advisory (ungoverned): would deny — {would_deny_reason}"
+    if context.posture_note:
+        reason = f"{reason}; posture-note: {context.posture_note}"
     return HookDecision(
         ok=True,
         hook_event_name="PreToolUse",
@@ -517,23 +527,25 @@ def _resolve_posture(ce: dict, posture_mode: str, posture_root: str | None):
     return result.posture, result.claim
 
 
-def _resolve_manifest(manifest_doc, ce, posture_root, bound_claim) -> list[str]:
+def _resolve_manifest(manifest_doc, ce, posture_root, bound_claim) -> ResolvedManifest:
     if manifest_doc:
         paths = extract_manifest_paths_from_file(Path(manifest_doc))
         if paths:
-            return paths
+            return ResolvedManifest(tuple(paths))
     ce_paths = ce.get("manifest_paths")
     if isinstance(ce_paths, list):
-        return [str(p) for p in ce_paths]
+        return ResolvedManifest(tuple(str(p) for p in ce_paths))
     if bound_claim is not None and posture_root:
         envelope_ref = bound_claim.record.get("envelope_ref")
+        if envelope_ref == "none":
+            return ResolvedManifest((), NO_WRITE_AUTHORITY_NOTE)
         if isinstance(envelope_ref, str) and envelope_ref:
             for candidate in (Path(posture_root) / envelope_ref, Path(envelope_ref)):
                 if candidate.is_file():
                     paths = extract_manifest_paths_from_file(candidate)
                     if paths:
-                        return paths
-    return []
+                        return ResolvedManifest(tuple(paths))
+    return ResolvedManifest()
 
 
 def _resolve_side_effect_authority(ce: dict, posture_root: str | None) -> dict | None:
@@ -591,7 +603,7 @@ def build_context(
     ce = event.get("ce") if isinstance(event.get("ce"), dict) else {}
     posture_root = posture_root or ce.get("posture_root") or event.get("cwd")
     posture_value, bound_claim = _resolve_posture(ce, posture, posture_root)
-    manifest_paths = _resolve_manifest(manifest_doc, ce, posture_root, bound_claim)
+    manifest = _resolve_manifest(manifest_doc, ce, posture_root, bound_claim)
     evidence_root = evidence_root or ce.get("evidence_root")
     completion_report = completion_report or ce.get("completion_report")
     side_effect_authority = _resolve_side_effect_authority(ce, posture_root)
@@ -605,10 +617,11 @@ def build_context(
 
     return HookContext(
         posture=posture_value,
-        manifest_paths=tuple(manifest_paths),
+        manifest_paths=manifest.paths,
         evidence_root=evidence_root,
         closeout_text=closeout_text,
         completion_report_path=completion_report,
         side_effect_authority=side_effect_authority,
         repo_root=posture_root,
+        posture_note=manifest.posture_note,
     )
