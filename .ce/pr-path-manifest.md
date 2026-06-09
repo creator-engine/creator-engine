@@ -1,4 +1,4 @@
-# PR path manifest — feat(v3.5-D.0.2): add the pure fleet spend and token-rate meters
+# PR path manifest — feat(gate-b): scope governed posture to the live ledger (injection-first)
 
 This file is the carrier for this PR's closed path manifest under
 `docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`. CI passes it to
@@ -7,35 +7,43 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized path-se
 below. The fidelity scan (`scan-path-manifest`) requires the declared count and
 SHA256 to match the fenced block.
 
-Scope: **CODE — v3.5-D.0.2, the pure fleet-level spend and token-rate meter.**
-This slice extends the two existing, already-baselined runner modules:
+Scope: **Gate B — scope the governed posture-reachability decision to the live
+ledger (injection-first), preserving the posture-gated push hard-deny.**
 
-- `spend_gate.py`: add `FleetSpendMeter`, `fleet_spend_meter`, and the shared pure
-  timestamp parse/span helpers for fleet spend and spend/hour over spend-ledger
-  leaves.
-- `usage_tap.py`: add `FleetUsage` and `fleet_token_rate` over selected
-  `UsageTurn` values, importing the shared timestamp helpers from `spend_gate.py`.
-- `test_spend_gate.py` and `test_usage_tap.py`: extend the existing unit coverage
-  for totals, wall-clock windows, accounting-window passthrough, global folding,
-  no div-by-zero, and shared-helper discipline.
+- `.claude/hooks/ce-hook-common.sh`, `.claude/hooks/ce-pretooluse.sh`: the hook
+  pack's posture wiring.
+- `docs/operations/CLAUDE_CODE_HOOK_PACK.md`: the hook-pack doc kept in sync.
+- `validators/creator_engine_validator/cli.py`,
+  `validators/creator_engine_validator/hook_check.py`,
+  `validators/creator_engine_validator/lane_runtime.py`: the posture-reachability
+  decision and its injection-first ledger source.
+- `validators/tests/integration/test_hook_check_cli.py`,
+  `validators/tests/unit/test_ce_lane_cli.py`,
+  `validators/tests/unit/test_hook_check.py`: coverage for the scoped posture.
 
-**Version-boundary impact = ZERO.** This gate adds no new `runner.*` module, no
-schema change, no check registration, and no `runner/__init__.py` export. It does
-not edit `_versions.py` or `test_version_boundary.py`; `V3_RUNTIME` stays **28**
+**Version-boundary impact = ZERO.** No new `runner.*` module, no schema change,
+no check registration, no `runner/__init__.py` export; `V3_RUNTIME` stays **28**
 and `--list-checks` stays byte-identical.
 
-- **base:** `a76cac60b36ecf5d49ba50848af32ec2f28f3845` (current `main`; benign
-  base-only refresh from the ratified prompt's older base).
+- **base:** `97dbc28e8c72717759d572ec4b022e854331048a` (current `main`). NOTE:
+  this PR overlaps `cli.py`/`hook_check.py` with Gate C (#182); Gate C merges
+  first, then this branch rebases. After the rebase, re-pin this `base:` to the
+  post-#182 `main` SHA and regenerate the path-set if it shifts.
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=ec594748b5860b663dc0dab5436e91ebce2dd1bf55ea69f50c6bf23b44b68ee1
+AUTHORIZED_PATHS_SHA256=47cc43755a6476865a23f341ca009c6e6a923b82f81a32bb18b80cb0070479e5
 
 ```text
 .ce/pr-path-manifest.md
-validators/creator_engine_validator/runner/spend_gate.py
-validators/creator_engine_validator/runner/usage_tap.py
-validators/tests/unit/test_spend_gate.py
-validators/tests/unit/test_usage_tap.py
+.claude/hooks/ce-hook-common.sh
+.claude/hooks/ce-pretooluse.sh
+docs/operations/CLAUDE_CODE_HOOK_PACK.md
+validators/creator_engine_validator/cli.py
+validators/creator_engine_validator/hook_check.py
+validators/creator_engine_validator/lane_runtime.py
+validators/tests/integration/test_hook_check_cli.py
+validators/tests/unit/test_ce_lane_cli.py
+validators/tests/unit/test_hook_check.py
 ```
