@@ -143,6 +143,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pco_allocate.add_argument("--worktree-path", required=True, help="path for the new git worktree")
     pco_allocate.add_argument("--branch", required=True, help="new branch name to create in the worktree")
     pco_allocate.add_argument("--envelope-ref", required=True, help="repo-relative path to the Assignment Envelope (or 'none')")
+    pco_allocate.add_argument(
+        "--no-write-authority",
+        action="store_true",
+        help="explicitly allow envelope-ref 'none' and allocate a lane with no tracked-file write authority",
+    )
     pco_allocate.add_argument("--controller-id", default=None, help="controller_id override (resolved from local conventions if omitted)")
     pco_allocate.add_argument("--ledger-root", default=None, help="path to .hermes/active-work-ledger (auto-resolved if omitted)")
     pco_allocate.add_argument("--repo-root", default=None, help="repo root path (defaults to cwd)")
@@ -524,6 +529,14 @@ def _pco_allocate(args) -> int:
         resolve_controller_id,
     )
 
+    if args.envelope_ref == "none" and not args.no_write_authority:
+        print(
+            "ERROR: pco-allocate refused: --envelope-ref none provisions NO write authority; "
+            "pass --no-write-authority to confirm this intentional no-authority lane.",
+            file=sys.stderr,
+        )
+        return 1
+
     repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
     ledger_root = _resolve_ledger_root(args.ledger_root, repo_root)
     controller_id = args.controller_id or resolve_controller_id(repo_root)
@@ -558,6 +571,11 @@ def _pco_allocate(args) -> int:
         print(f"ERROR: pco-allocate failed: {exc}", file=sys.stderr)
         return 1
 
+    if args.envelope_ref == "none":
+        print(
+            "⚠ allocated with NO write authority — this seat cannot author tracked files; "
+            "every Edit/Write will be advisory-flagged."
+        )
     print(f"pco-allocate: lane {args.lane_id!r} allocated at {args.worktree_path}")
     return 0
 

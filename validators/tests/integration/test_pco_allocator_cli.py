@@ -96,6 +96,7 @@ def test_pco_allocate_refuses_root_checkout_via_cli(git_repo: Path, capsys, monk
         "--controller-id", "hermes-primary",
         "--branch", "test/branch",
         "--envelope-ref", "none",
+        "--no-write-authority",
         "--ledger-root", str(git_repo / ".hermes" / "active-work-ledger"),
         "--repo-root", str(git_repo),
     ])
@@ -129,6 +130,34 @@ def test_pco_release_refuses_root_checkout_via_cli(git_repo: Path, capsys, monke
 # ---------------------------------------------------------------------------
 
 
+def test_pco_allocate_refuses_none_envelope_without_opt_in_before_writes(
+    secondary_worktree: Path, tmp_path: Path, capsys
+):
+    """Bare ``--envelope-ref none`` must fail loudly without writing ledger state."""
+    new_wt = tmp_path / "allocated-wt"
+    ledger = secondary_worktree / ".hermes" / "active-work-ledger"
+
+    ret = main([
+        "pco-allocate",
+        "--lane-id", "test-lane",
+        "--worktree-path", str(new_wt),
+        "--controller-id", "hermes-primary",
+        "--branch", "implementer/pco-alloc-refuse-test",
+        "--envelope-ref", "none",
+        "--ledger-root", str(ledger),
+        "--repo-root", str(secondary_worktree),
+    ])
+
+    out = capsys.readouterr()
+    combined = out.out + out.err
+    assert ret == 1
+    assert "--no-write-authority" in combined
+    assert "NO write authority" in combined
+    assert not (ledger / "claims" / "hermes-primary" / "test-lane.yaml").exists()
+    assert not (ledger / "leases" / "hermes-primary" / "test-lane.yaml").exists()
+    assert not new_wt.exists()
+
+
 def test_allocate_release_cycle(secondary_worktree: Path, tmp_path: Path, capsys):
     """End-to-end: allocate a new worktree on a fresh branch, then release it."""
     new_wt = tmp_path / "allocated-wt"
@@ -144,11 +173,14 @@ def test_allocate_release_cycle(secondary_worktree: Path, tmp_path: Path, capsys
         "--controller-id", "hermes-primary",
         "--branch", branch,
         "--envelope-ref", "none",
+        "--no-write-authority",
         "--ledger-root", str(ledger),
         "--repo-root", str(secondary_worktree),
     ])
-    capsys.readouterr()
+    out = capsys.readouterr()
     assert ret == 0, f"pco-allocate must return 0; ledger: {list(ledger.rglob('*'))}"
+    assert "NO write authority" in out.out
+    assert "advisory-flagged" in out.out
 
     claim_path = ledger / "claims" / "hermes-primary" / "test-lane.yaml"
     lease_path = ledger / "leases" / "hermes-primary" / "test-lane.yaml"
