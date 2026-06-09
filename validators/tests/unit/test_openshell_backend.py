@@ -132,7 +132,8 @@ def test_translate_egress_to_network_policies():
     endpoint = mp.endpoints[0]
     assert isinstance(endpoint, Endpoint)
     assert endpoint.port == 443
-    # CE carries no OpenShell `protocol` (the axes don't align — A.2b live finding).
+    # The pure translation model stays host:port+enforcement/access; the renderer
+    # adds OpenShell's live-verified L7 protocol axis.
     assert not hasattr(endpoint, "protocol")
     # Every translated endpoint is binding (enforce), not advisory (audit).
     assert endpoint.enforcement == "enforce"
@@ -366,8 +367,7 @@ def test_render_sandbox_policy_yaml_round_trips_structure():
     mp = nps["model_provider_example_443"]["endpoints"][0]
     assert mp["host"] == "model-provider.example"
     assert mp["port"] == 443
-    # protocol is omitted on the wire (CE's axis != OpenShell rest/websocket; A.2b).
-    assert "protocol" not in mp
+    assert mp["protocol"] == "rest"
     # Every translated endpoint is binding (enforce), not advisory (audit).
     assert mp["enforcement"] == "enforce"
     assert mp["access"] == "read-write"
@@ -380,6 +380,34 @@ def test_render_sandbox_policy_yaml_round_trips_structure():
     assert pkg["host"] == "pkg.example"
     assert "port" not in pkg
     assert pkg_rule["binaries"] == [{"path": "package-installer"}]
+
+
+def test_render_sandbox_policy_yaml_omits_protocol_for_full_access_endpoint():
+    policy = SandboxPolicy(
+        filesystem=FilesystemPolicy(include_workdir=True, read_only=(), read_write=()),
+        landlock=translate_to_sandbox_policy(valid_policy()).landlock,
+        process=translate_to_sandbox_policy(valid_policy()).process,
+        network_policies=(
+            NetworkRule(
+                name="raw_tunnel",
+                endpoints=(
+                    Endpoint(
+                        host="raw.example",
+                        port=443,
+                        enforcement="enforce",
+                        access="full",
+                    ),
+                ),
+            ),
+        ),
+    )
+    loaded = yaml.safe_load(render_sandbox_policy_yaml(policy))
+    endpoint = loaded["network_policies"]["raw_tunnel"]["endpoints"][0]
+    assert endpoint["host"] == "raw.example"
+    assert endpoint["port"] == 443
+    assert "protocol" not in endpoint
+    assert endpoint["enforcement"] == "enforce"
+    assert endpoint["access"] == "full"
 
 
 def test_render_sandbox_policy_yaml_is_deterministic():

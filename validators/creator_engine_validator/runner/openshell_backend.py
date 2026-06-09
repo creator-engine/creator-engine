@@ -105,6 +105,9 @@ ENDPOINT_ENFORCEMENT = "enforce"
 #: "empty allowlist => no egress" — is the deny-by-default gate, not the method
 #: level. A.2 may refine per-endpoint access once CE expresses L7 method policy.
 DEFAULT_ENDPOINT_ACCESS = "read-write"
+# CE egress is all-REST today; websocket is a future per-endpoint refinement;
+# full/raw-tunnel endpoints omit the L7 axis.
+DEFAULT_ENDPOINT_PROTOCOL = "rest"
 
 #: The OpenShell ``SandboxPolicy`` YAML schema version. The live v0.0.57 gateway
 #: REQUIRES a top-level ``version`` (it is the one non-defaulted field in the
@@ -146,14 +149,11 @@ class Endpoint:
 
     Carries only what the live OpenShell ``NetworkEndpointDef`` consumes from CE's
     host:port allowlist: ``host`` + the optional ``port`` + the binding
-    ``enforcement``/``access``. CE deliberately does NOT carry an OpenShell
-    ``protocol`` (A.2b live finding): OpenShell's ``protocol`` axis is L7
-    app-protocol (``rest``/``websocket``), a different dimension than CE's
-    transport ``protocol`` enum (``tcp``/``udp``/``https``/…), so it is OMITTED
-    from the render (the field is optional on the gateway). The host:port +
-    enforcement is the binding deny-by-default gate (A.2b verified: a no-protocol
-    endpoint provisions cleanly AND the OPA proxy still allows the listed host and
-    denies every other host).
+    ``enforcement``/``access``. The OpenShell render carries ``protocol: rest``,
+    the live-verified L7 value for CE's REST egress today. ``access: full``
+    endpoints omit that L7 axis because raw tunnels are not expressible as
+    OpenShell's ``rest``/``websocket`` enum; websocket is a future per-endpoint
+    refinement once CE expresses such egress.
     """
 
     host: str
@@ -303,9 +303,10 @@ def render_sandbox_policy_yaml(policy: SandboxPolicy) -> str:
     * ``process.{run_as_user, run_as_group}``;
     * ``network_policies`` as a **map keyed by rule name**, each value an OpenShell
       ``NetworkPolicyRuleDef``: ``name`` + an ``endpoints[]`` list (``host`` + the
-      optional ``port`` + the binding ``enforcement``/``access``; ``protocol`` is
-      deliberately omitted — see :class:`Endpoint`) + the optional
-      ``binaries: [{path}]`` calling-binary scope.
+      optional ``port`` + ``protocol: rest`` + the binding
+      ``enforcement``/``access``; ``protocol`` is omitted only for ``access:
+      full`` endpoints) + the optional ``binaries: [{path}]`` calling-binary
+      scope.
 
     Deny-by-default is preserved on the wire: an EMPTY ``network_policies``
     (``no_egress``) serializes to an empty map ``{}`` — the OPA proxy then denies
@@ -319,6 +320,8 @@ def render_sandbox_policy_yaml(policy: SandboxPolicy) -> str:
             mapped: dict[str, Any] = {"host": endpoint.host}
             if endpoint.port is not None:
                 mapped["port"] = endpoint.port
+            if endpoint.access != "full":
+                mapped["protocol"] = DEFAULT_ENDPOINT_PROTOCOL
             mapped["enforcement"] = endpoint.enforcement
             mapped["access"] = endpoint.access
             endpoints.append(mapped)
