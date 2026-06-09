@@ -17,6 +17,7 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 from __future__ import annotations
 
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -143,6 +144,35 @@ def test_requirements_has_no_stale_pins(validators_dir: Path):
 def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     result = pkg.verify_packaging_contract(repo_root)
     assert result.ok, f"packaging contract violations: {result.violations}"
+
+
+def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
+    violations = pkg.verify_wheel_matches_source(repo_root)
+    assert violations == []
+
+
+def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
+    validators_dir = tmp_path / "validators"
+    source_dir = validators_dir / "creator_engine_validator"
+    wheelhouse = validators_dir / "wheelhouse"
+    source_dir.mkdir(parents=True)
+    wheelhouse.mkdir()
+    (validators_dir / "pyproject.toml").write_text(
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    (source_dir / "__init__.py").write_text("", encoding="utf-8")
+    (source_dir / "version.py").write_text("__version__ = \"0.1.0\"\n", encoding="utf-8")
+    (source_dir / "drift.py").write_text("VALUE = 'source'\n", encoding="utf-8")
+
+    wheel = wheelhouse / "creator_engine_validator-0.1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr("creator_engine_validator/__init__.py", "")
+        zf.writestr("creator_engine_validator/version.py", "__version__ = \"0.1.0\"\n")
+        zf.writestr("creator_engine_validator/drift.py", "VALUE = 'wheel'\n")
+
+    violations = pkg.verify_wheel_matches_source(tmp_path)
+    assert any("differs from source file drift.py" in violation for violation in violations)
 
 
 def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):
