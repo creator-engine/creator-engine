@@ -2,8 +2,10 @@
 
 **Status:** Canonical. The CI-pure decision substrate is
 `creator_engine_validator/v3_installer.py`; the served artifacts are
-`docs/install/install.sh` (the one-liner) and `docs/install/llms-install.md` (the
-agent-native signed spec). The opt-out wires the G-5 fields validated by
+`docs/install.sh` (the one-liner) and `docs/llms-install.md` (the
+agent-native signed spec) — both at the Pages root, so the served URLs
+(`creator-engine.dev/install.sh`, `creator-engine.dev/llms-install.md`) are the
+file paths. The opt-out wires the G-5 fields validated by
 `ce_spend_envelope`.
 
 ## Purpose
@@ -98,5 +100,5 @@ live transport probe. The read-only dependency *detection* is live; the privileg
 - **G-5:** the opt-out fragment feeds `ce_spend_envelope` unchanged.
 
 See also: `docs/architecture/pilot-deployment-transport.md`,
-`docs/contracts/spend-envelope.md`, `docs/install/llms-install.md`,
-`docs/install/install.sh`.
+`docs/contracts/spend-envelope.md`, `docs/llms-install.md`,
+`docs/install.sh`.

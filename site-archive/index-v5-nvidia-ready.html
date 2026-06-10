@@ -98,17 +98,10 @@
   .secband .shield { flex:0 0 auto; width:22px; height:22px; color:var(--spark); }
   .secband p { font-size:13.5px; color:var(--fg-dim); } .secband b { color:var(--spark); }
   .hero-actions { display:flex; gap:13px; flex-wrap:wrap; align-items:center; }
-  .install-box { margin-top:18px; max-width:62ch; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:linear-gradient(180deg, var(--ink-800), var(--ink-850)); }
-  .install-box .ib-label { display:flex; align-items:center; gap:9px; padding:7px 14px; font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--spark); border-bottom:1px solid var(--line-soft); }
-  .install-box .ib-label i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; }
-  .install-box .ib-cmd { display:block; padding:13px 14px; font-family:var(--mono); font-size:13.5px; color:var(--fg); white-space:nowrap; overflow-x:auto; user-select:all; -webkit-user-select:all; }
-  .install-box .ib-cmd .p { color:var(--spark); user-select:none; -webkit-user-select:none; }
-  .install-box .ib-agent { padding:9px 14px; font-size:13px; color:var(--fg-dim); border-top:1px solid var(--line-soft); }
-  .install-box .ib-agent code { font-size:12.5px; color:var(--violet-bright); }
   .hero-meta { margin-top:16px; font-family:var(--mono); font-size:12px; color:var(--fg-faint); display:flex; gap:14px; flex-wrap:wrap; }
   .hero-meta span { display:inline-flex; align-items:center; gap:7px; }
   .hero-meta i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; } .hero-meta i.v{background:var(--violet);} .hero-meta i.g{background:var(--gate);}
-  @media (max-width:960px){ .hero-grid{grid-template-columns:1fr; gap:36px;} .hero-sub,.secband,.install-box{max-width:none;} }
+  @media (max-width:960px){ .hero-grid{grid-template-columns:1fr; gap:36px;} .hero-sub,.secband{max-width:none;} }
 
   /* ---------- Creator Console (the hero product surface) ---------- */
   .console { position:relative; border:1px solid var(--line); border-radius:16px; overflow:hidden;
@@ -359,11 +352,6 @@
           See it build something
         </a>
         <a class="btn btn-ghost" href="#openshell">AI Safety</a>
-      </div>
-      <div class="install-box" id="install">
-        <div class="ib-label"><i></i> Install Creator Engine</div>
-        <code class="ib-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
-        <p class="ib-agent">or point your coding agent at <code>https://creator-engine.dev/llms-install.md</code></p>
       </div>
       <div class="hero-meta">
         <span><i></i> Idea → app, governed</span>
