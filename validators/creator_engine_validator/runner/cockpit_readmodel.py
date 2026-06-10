@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -85,6 +86,53 @@ OBSERVATIONS_FILENAME = "observations.ndjson"
 #: Source-availability states (honesty tiers for the snapshot itself).
 AVAILABLE = "ok"
 UNAVAILABLE = "unavailable"
+
+#: v3.5-B.3 — the hook-side refusal chain (a ``runtime-evidence-chain``
+#: document the Ring-1 hook appends governed denies to, beside the legacy
+#: advisory log in the same observations directory).
+REFUSAL_CHAIN_FILENAME = "refusal-chain.yaml"
+
+#: The envelope access-matrix rows (rakkess pattern): the Ring-1 hook's
+#: restricted-mechanics surface, mirrored as a declared constant (the v1
+#: ``hook_check`` module is not importable across the version boundary).
+RESTRICTED_MECHANICS = (
+    "merge",
+    "deploy",
+    "publish",
+    "alter_repo_settings",
+    "pr_review",
+    "pr_comment",
+    "pr_lifecycle",
+    "live_lane_launch",
+    "live_integration_queue",
+)
+GRANTED = "granted"
+WITHHELD = "withheld"
+
+#: The standing authority fact ([[ce-governed-seat-cannot-push]]).
+STANDING_PUSH_FACT = (
+    "a governed seat is hard-blocked from `git push`; deploy authority "
+    "lives with the Operator"
+)
+
+#: The G-i hard-vs-advisory posture split (mirrors the hook's governed
+#: enforcement comment block).
+POSTURE_HARD_DENIES = (
+    "secret-path read (credential-like path)",
+    "restricted mechanic without a matching ratified reviewer-venue "
+    "side-effect-authority envelope (G2.007.2)",
+)
+POSTURE_ADVISORY = (
+    "path-manifest mismatch (G-i: author-time scope containment is advisory; "
+    "the PR-diff gate owns scope)",
+)
+
+#: Deciding-clause extraction (IAM explicit-vs-implicit deny pattern): a
+#: governance clause id (e.g. G2.007.2) or a named secret-path rule counts as
+#: an EXPLICIT deny; a reason citing neither is an IMPLICIT deny ("not covered
+#: by any envelope").
+_CLAUSE_RE = re.compile(r"\bG\d[\w.]*\b")
+_SECRET_RULE_RE = re.compile(r"matched rule:\s*([^)]+)")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +184,125 @@ def _board_card(scope: Mapping[str, Any], signals: Mapping[str, Any]) -> dict[st
     }
 
 
+def _envelope_record(candidate: Any) -> dict[str, Any] | None:
+    """Unwrap a ``reviewer_authority_envelope`` mapping (wrapped or bare). PURE."""
+    if not isinstance(candidate, Mapping):
+        return None
+    record = candidate.get("reviewer_authority_envelope", candidate)
+    if not isinstance(record, Mapping):
+        return None
+    if not record.get("envelope_id") or not record.get("mechanic"):
+        return None
+    return dict(record)
+
+
+def _seat_governance(seat: Mapping[str, Any], envelope: Any) -> dict[str, Any]:
+    """Project one seat's authority view: the access matrix + attribution (PURE).
+
+    Rakkess pattern: rows = the restricted mechanics, cells = granted/withheld.
+    A cell is GRANTED only by a validated reviewer-authority envelope naming
+    that exact mechanic; everything else is withheld (deny-by-default — the
+    visible form of envelope isolation).
+    """
+    record = _envelope_record(envelope)
+    matrix = {mechanic: WITHHELD for mechanic in RESTRICTED_MECHANICS}
+    if record and record.get("mechanic") in matrix:
+        matrix[str(record["mechanic"])] = GRANTED
+    envelope_ref = seat.get("envelope_ref")
+    return {
+        "controller_id": seat.get("controller_id"),
+        "lane_id": seat.get("lane_id"),
+        "role": seat.get("role"),
+        "envelope_ref": envelope_ref,
+        "no_write_authority": envelope_ref == "none",
+        "envelope": record,
+        "matrix": matrix,
+    }
+
+
+def can_i(seat_governance: Mapping[str, Any], mechanic: str, *, pr_number: int | None = None) -> dict[str, Any]:
+    """The ``can-i`` probe: answer "may this seat perform <mechanic>?" from the matrix (PURE).
+
+    Answers come from the SAME matrix the panel renders (never a parallel
+    rule set). ``pr_number`` narrows a ``pr_review`` grant to the envelope's
+    exact PR — wrong PR is an implicit deny, exactly like the Ring-1 hook.
+    """
+    matrix = seat_governance.get("matrix") or {}
+    if mechanic not in matrix:
+        return {
+            "allowed": False,
+            "why": f"unknown mechanic {mechanic!r} — withheld by default (deny-by-default)",
+        }
+    if mechanic == "deploy" and matrix.get("deploy") != GRANTED:
+        return {"allowed": False, "why": STANDING_PUSH_FACT}
+    if matrix.get(mechanic) != GRANTED:
+        return {
+            "allowed": False,
+            "why": f"{mechanic} is not covered by any envelope (implicit deny)",
+        }
+    envelope = seat_governance.get("envelope") or {}
+    if mechanic == "pr_review" and pr_number is not None:
+        granted_pr = envelope.get("pr_number")
+        if granted_pr != pr_number:
+            return {
+                "allowed": False,
+                "why": (
+                    f"envelope {envelope.get('envelope_id')} covers pr_number "
+                    f"{granted_pr}, not {pr_number} (implicit deny)"
+                ),
+            }
+    return {
+        "allowed": True,
+        "why": (
+            f"granted by envelope {envelope.get('envelope_id')} "
+            f"(mechanic {mechanic}, ratified_prompt_sha {envelope.get('ratified_prompt_sha')})"
+        ),
+    }
+
+
+def _deciding_clause(reason: Any) -> str | None:
+    """Extract the deciding clause from a deny reason (IAM 'show statement'). PURE."""
+    text = str(reason or "")
+    clause = _CLAUSE_RE.search(text)
+    if clause:
+        return clause.group(0)
+    secret_rule = _SECRET_RULE_RE.search(text)
+    if secret_rule:
+        return f"secret-path rule: {secret_rule.group(1).strip()}"
+    return None
+
+
+def _refusal_entry(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one chain record to a REFUSED-feed entry (OPA decision-log shape). PURE."""
+    clause = _deciding_clause(record.get("decision_reason"))
+    return {
+        "source": "refusal-chain",
+        "advisory": False,
+        "recorded_at": record.get("recorded_at"),
+        "run_id": record.get("run_id"),
+        "op": record.get("op"),
+        "mutation_class": record.get("mutation_class"),
+        "target": record.get("target"),
+        "tool": record.get("tool"),
+        "classification": record.get("classification"),
+        "decision_mode": record.get("decision_mode"),
+        "decision_reason": record.get("decision_reason"),
+        "deny_kind": "explicit" if clause else "implicit",
+        "deciding_clause": clause,
+    }
+
+
+def _legacy_entry(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one legacy NDJSON observation to a labelled advisory entry. PURE."""
+    return {
+        "source": "legacy-observations",
+        "advisory": True,
+        "recorded_at": observation.get("observedAt"),
+        "event": observation.get("hookEventName"),
+        "raw": dict(observation),
+    }
+
+
 def fold_snapshot(
     *,
     panes: list[dict[str, Any]] | None = None,
@@ -143,6 +310,8 @@ def fold_snapshot(
     scope_signals: Mapping[str, Mapping[str, Any]] | None = None,
     chains: Mapping[str, list[dict[str, Any]]] | None = None,
     observations: list[dict[str, Any]] | None = None,
+    refusal_chain: list[dict[str, Any]] | None = None,
+    envelopes: Mapping[str, Any] | None = None,
     demo: bool = False,
     roots: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
@@ -154,10 +323,14 @@ def fold_snapshot(
     ``coordination.project_scope_state`` (``dispatched``/``reviewed``/
     ``final_ratified``/``merged``); live derivation of those signals from
     chains is a later-gate fold — absent signals project the Scope's own
-    derivable state, never an invented one.
+    derivable state, never an invented one. ``refusal_chain`` is the hook-side
+    hash-chained refusal log (v3.5-B.3); ``envelopes`` maps ``lane_id`` to a
+    resolved reviewer-authority envelope (live: read via the pane registry's
+    ``envelope_ref``; demo: provided by the seed).
     """
     signals = scope_signals or {}
     chain_map = dict(chains or {})
+    envelope_map = dict(envelopes or {})
 
     seats = [_seat_card(p, chain_map) for p in (panes or []) if isinstance(p, Mapping)]
     seats.sort(key=lambda s: (str(s.get("controller_id")), str(s.get("lane_id"))))
@@ -172,7 +345,24 @@ def fold_snapshot(
     for card in cards:
         phase_counts[card["phase"]] += 1
 
-    entries = [dict(o) for o in (observations or []) if isinstance(o, Mapping)]
+    # ★ REFUSED (v3.5-B.3): chain-derived entries are first-class; the legacy
+    # advisory log rides along, labelled. Newest first (a live feed).
+    chain_entries = [
+        _refusal_entry(r)
+        for r in (refusal_chain or [])
+        if isinstance(r, Mapping) and r.get("classification") in ("denied", "escalate")
+    ]
+    legacy_entries = [_legacy_entry(o) for o in (observations or []) if isinstance(o, Mapping)]
+    feed = sorted(
+        chain_entries + legacy_entries,
+        key=lambda e: str(e.get("recorded_at") or ""),
+        reverse=True,
+    )
+    source_labels = []
+    if refusal_chain is not None:
+        source_labels.append("refusal-chain (hash-chained)")
+    if observations is not None:
+        source_labels.append("legacy hook observations (advisory)")
 
     evidence = {
         str(run_id): {
@@ -180,6 +370,21 @@ def fold_snapshot(
             "verified": verify_chain(chain) == [],
         }
         for run_id, chain in chain_map.items()
+    }
+
+    governance = {
+        "mechanics": list(RESTRICTED_MECHANICS),
+        "seats": {
+            str(seat.get("lane_id")): _seat_governance(
+                seat, envelope_map.get(str(seat.get("lane_id")))
+            )
+            for seat in seats
+        },
+        "standing_facts": [STANDING_PUSH_FACT],
+        "posture": {
+            "hard_denies": list(POSTURE_HARD_DENIES),
+            "advisory": list(POSTURE_ADVISORY),
+        },
     }
 
     return {
@@ -194,7 +399,11 @@ def fold_snapshot(
             "seats": AVAILABLE if panes is not None else UNAVAILABLE,
             "board": AVAILABLE if scopes is not None else UNAVAILABLE,
             "evidence": AVAILABLE if chains is not None else UNAVAILABLE,
-            "refusals": AVAILABLE if observations is not None else UNAVAILABLE,
+            "refusals": (
+                AVAILABLE
+                if (refusal_chain is not None or observations is not None)
+                else UNAVAILABLE
+            ),
         },
         "seats": seats,
         "board": {
@@ -203,10 +412,14 @@ def fold_snapshot(
             "phase_counts": phase_counts,
         },
         "refusals": {
-            "source_label": "legacy hook observations (advisory)",
-            "count": len(entries),
-            "entries": entries,
+            "source_label": " + ".join(source_labels) or "unavailable",
+            "count": len(feed),
+            "entries": feed,
+            "chain_verified": (
+                verify_chain(refusal_chain) == [] if refusal_chain is not None else None
+            ),
         },
+        "governance": governance,
         "evidence": evidence,
     }
 
@@ -305,6 +518,56 @@ def load_observations(observations_dir: Path) -> list[dict[str, Any]] | None:
     return out
 
 
+def load_refusal_chain(observations_dir: Path) -> list[dict[str, Any]] | None:
+    """Read the hook-side refusal chain document (read-only; v3.5-B.3).
+
+    ``None`` when the chain file is unreachable; malformed documents yield
+    ``None`` too (the feed then declares the source absent, never guesses).
+    """
+    path = Path(observations_dir) / REFUSAL_CHAIN_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    records = doc.get("records")
+    if not isinstance(records, list):
+        return None
+    return [r for r in records if isinstance(r, dict)]
+
+
+def load_envelopes(panes: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Resolve each pane's ``envelope_ref`` to a reviewer-authority envelope (read-only).
+
+    Mirrors the Ring-1 hook's resolution: the ref is honored as an absolute
+    path or a cwd-relative path; only a YAML document carrying a
+    ``reviewer_authority_envelope`` mapping resolves (a manifest-carrier or
+    prompt ref simply yields no envelope — the matrix stays all-withheld).
+    Best-effort: unreadable refs resolve to nothing.
+    """
+    out: dict[str, Any] = {}
+    for pane in panes or []:
+        if not isinstance(pane, Mapping):
+            continue
+        ref = pane.get("envelope_ref")
+        if not isinstance(ref, str) or not ref or ref == "none":
+            continue
+        path = Path(ref)
+        if not path.is_file():
+            continue
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        record = _envelope_record(doc) if isinstance(doc, Mapping) else None
+        if record is not None:
+            out[str(pane.get("lane_id"))] = record
+    return out
+
+
 def _resolve(value: Path | str | None, environ: Mapping[str, str], env_key: str) -> Path | None:
     if value:
         return Path(value)
@@ -334,11 +597,14 @@ def snapshot_from_roots(
     observations = _resolve(observations_dir, env, OBSERVATIONS_DIR_ENV)
 
     chains = load_chains(state) if state.is_dir() else None
+    panes = load_panes(ledger) if ledger else None
     return fold_snapshot(
-        panes=load_panes(ledger) if ledger else None,
+        panes=panes,
         scopes=load_scopes(state),
         chains=chains,
         observations=load_observations(observations) if observations else None,
+        refusal_chain=load_refusal_chain(observations) if observations else None,
+        envelopes=load_envelopes(panes),
         demo=demo,
         roots={
             "state_root": str(state),

@@ -27,15 +27,29 @@ event it is handed.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
+
+import yaml
 
 from .checks import completion_report_required_for_envelope, completion_report_schema
 from .checks import mutation_class
 from .checks.completion_report_terminal_sections import CANONICAL_HEADERS, _header_positions
 from .checks.path_manifest_fidelity import extract_manifest_paths_from_file
+
+# v3.5-B.3 refusal-record seam: the SHARED hash-chain substrate only
+# (V1->shared is the allowed boundary edge). The v3 evidence-persistence sink
+# module is NEVER imported here — that would be the forbidden V1->V3 crossing.
+from .runtime_evidence_spine import (
+    CHAIN_KIND as _SPINE_CHAIN_KIND,
+    RUNTIME_AGENT_ACTION_RECORD_KIND as _AGENT_ACTION_KIND,
+    RUNTIME_AGENT_ACTION_RECORD_TYPE as _AGENT_ACTION_TYPE,
+    append as _spine_append,
+)
 
 CONTRACT = "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md"
 
@@ -366,6 +380,148 @@ def _completion_report_block(report_path: str) -> str | None:
 
 
 # --------------------------------------------------------------------------
+# v3.5-B.3 — the refusal-record spine seam (append-only OBSERVABILITY)
+# --------------------------------------------------------------------------
+# A governed hard deny (restricted mechanic / secret path — the posture-gated
+# deny branch below) additionally appends ONE ``runtime_agent_action``
+# record with ``classification: denied`` onto an instance-local refusal chain
+# under the hook's own v1 root. Invariants (the gate's heart):
+#
+# * **Decide first, record after.** The decision is computed and returned
+#   exactly as before; recording happens after the verdict exists and changes
+#   NO decision semantics. The existing advisory ``observations.ndjson`` stays
+#   untouched as the legacy advisory log.
+# * **Best-effort, fail-safe.** Recording never raises into the hook path: the
+#   deny stands even if the append fails; a failed append never converts a
+#   deny into a crash-allow or a crash-block.
+# * **Boundary-clean.** The chain discipline rides the SHARED
+#   ``runtime_evidence_spine`` (V1->shared); the v3 evidence-persistence sink
+#   is never imported (V1->V3 would be the forbidden crossing), so the tiny
+#   read-append-write below is the hook's own.
+
+#: The refusal chain lives under the hook's own v1 instance-local root,
+#: beside the legacy advisory log (which stays untouched).
+_REFUSAL_CHAIN_DIRPARTS = (".hermes", "cc-g-c-hook-observations")
+_REFUSAL_CHAIN_FILENAME = "refusal-chain.yaml"
+
+#: The refusal record's policy binding: the hook attests against the SEAT
+#: CONTRACT (no runtime-policy record exists on this path), bound as the
+#: deterministic, value-free digest of the contract identity.
+HOOK_POLICY_SHA = hashlib.sha256(CONTRACT.encode("utf-8")).hexdigest()
+
+#: CC-hook observation tier (mirrors the v3 Tier-B adapter conventions —
+#: stamped by this adapter, never the agent; ``pre`` = gated before execution).
+_HOOK_FIDELITY = "best_effort"
+_HOOK_TIMING = "pre"
+
+#: mechanic -> (op, mutation_class) record axes. A provenance-grade first-cut
+#: mirroring the v3 ``runner.cc_hook_adapter`` conventions (``git push`` ->
+#: vcs/deploy) — declared inline because v3 modules are not importable here.
+_MECHANIC_RECORD_AXES: dict[str, tuple[str, str]] = {
+    "merge": ("vcs", "governance"),
+    "deploy": ("vcs", "deploy"),
+    "publish": ("egress", "deploy"),
+    "alter_repo_settings": ("vcs", "governance"),
+    "pr_review": ("egress", "governance"),
+    "pr_comment": ("egress", "none"),
+    "pr_lifecycle": ("egress", "governance"),
+    "live_lane_launch": ("exec", "governance"),
+    "live_integration_queue": ("exec", "governance"),
+}
+
+#: Bound the value-free ``target`` provenance field.
+_TARGET_MAXLEN = 512
+
+
+def _refusal_record_body(event: dict, decision: HookDecision) -> dict[str, Any]:
+    """Build the denied ``runtime_agent_action`` record body for a governed deny.
+
+    Value-free: ``target``/``tool`` are salient-parameter provenance (the
+    attempted command / path), never a credential or secret value — the hook
+    never reads file contents on this path.
+    """
+    tool = event.get("tool_name") or event.get("toolName") or ""
+    tool_input = event.get("tool_input") or event.get("toolInput") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    if tool == "Bash":
+        command = tool_input.get("command")
+        command = command if isinstance(command, str) else ""
+        action = classify_mechanics(command)
+        op, mut_class = _MECHANIC_RECORD_AXES.get(action or "", ("exec", "none"))
+        target = command[:_TARGET_MAXLEN]
+        first = command.split()[0] if command.split() else "Bash"
+        tool_repr = f"Bash:{first}"
+    elif tool == "Read":
+        file_path = tool_input.get("file_path")
+        op, mut_class = "secret", "security"
+        target = str(file_path or "")[:_TARGET_MAXLEN]
+        tool_repr = "Read"
+    else:  # defensive: today only Bash/Read produce governed hard denies
+        op, mut_class = "exec", "none"
+        target = ""
+        tool_repr = str(tool or "unknown")
+    return {
+        "kind": _AGENT_ACTION_KIND,
+        "record_type": _AGENT_ACTION_TYPE,
+        "schema_version": "1",
+        "policy_sha": HOOK_POLICY_SHA,
+        "run_id": str(event.get("session_id") or "cc-hook"),
+        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "op": op,
+        "mutation_class": mut_class,
+        "target": target,
+        "tool": tool_repr,
+        "fidelity": _HOOK_FIDELITY,
+        "timing": _HOOK_TIMING,
+        "classification": "denied",
+        "decision_mode": "deny",
+        "decision_reason": decision.reason,
+    }
+
+
+def _record_refusal(event: dict, context: HookContext, decision: HookDecision) -> None:
+    """Best-effort append of a governed deny onto the refusal chain (NEVER raises).
+
+    The tiny read-append-write: load the existing chain document (skip — never
+    destroy — an unreadable one), seal the new record via the shared spine
+    ``append`` (content-addressed + chain-linked), write the chain document
+    back. Any failure returns silently: the deny already stands.
+    """
+    try:
+        root = context.repo_root
+        if not root:
+            return
+        path = Path(root).joinpath(*_REFUSAL_CHAIN_DIRPARTS) / _REFUSAL_CHAIN_FILENAME
+        records: list[dict[str, Any]] = []
+        if path.exists():
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                return  # unreadable chain: skip recording, never overwrite evidence
+            existing = doc.get("records")
+            if not isinstance(existing, list) or not all(isinstance(r, dict) for r in existing):
+                return
+            records = existing
+        sealed = _spine_append(records, _refusal_record_body(event, decision))
+        chain_doc = {
+            "kind": _SPINE_CHAIN_KIND,
+            "record_type": "runtime_evidence_chain",
+            "schema_version": "1",
+            "records": [*records, sealed],
+            "note": (
+                "Ring-1 hook refusal chain (v3.5-B.3) — append-only observability; "
+                "the deny decision NEVER depends on this file."
+            ),
+        }
+        text = yaml.safe_dump(chain_doc, sort_keys=True, allow_unicode=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except Exception:
+        # Best-effort by contract: recording never raises into the hook path.
+        return
+
+
+# --------------------------------------------------------------------------
 # Event evaluation
 # --------------------------------------------------------------------------
 
@@ -495,7 +651,14 @@ def evaluate(event: dict, context: HookContext) -> HookDecision:
     """Evaluate one Claude hook event against the resolved context."""
     name = event.get("hook_event_name") or event.get("hookEventName") or ""
     if name == "PreToolUse":
-        return _evaluate_pre_tool_use(event, context)
+        decision = _evaluate_pre_tool_use(event, context)
+        if decision.decision == "deny":
+            # v3.5-B.3: decide FIRST, record AFTER. Only the governed hard
+            # denies (restricted mechanic / secret path) reach decision=="deny"
+            # (a governed manifest mismatch is advisory-allow under G-i), and
+            # recording is best-effort — the deny above stands regardless.
+            _record_refusal(event, context, decision)
+        return decision
     if name == "Stop":
         return _evaluate_stop(event, context)
     return HookDecision(

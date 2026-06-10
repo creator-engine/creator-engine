@@ -33,6 +33,8 @@ from typing import Any
 from ..runtime_evidence_spine import (
     RUNTIME_AGENT_ACTION_RECORD_KIND,
     RUNTIME_AGENT_ACTION_RECORD_TYPE,
+    RUNTIME_SPEND_BREACH_RECORD_KIND,
+    RUNTIME_SPEND_BREACH_RECORD_TYPE,
     RUN_OUTCOME_RECORD_KIND,
     RUN_OUTCOME_RECORD_TYPE,
     append,
@@ -52,6 +54,29 @@ PUSH_DENY_REASON = (
     "restricted mechanic (deploy) is denied without a matching ratified "
     "reviewer-venue side-effect-authority envelope (G2.007.2)"
 )
+
+#: The envelope-scope denial (v3.5-B.3): a pr_review attempted OUTSIDE the
+#: envelope's pr_number — textbook IMPLICIT deny (not covered by any grant; no
+#: deciding clause cited).
+ENVELOPE_SCOPE_DENY_REASON = (
+    "pr_review on PR 311 is not covered by envelope rva-demo-pr300 "
+    "(its grant is pr_number: 300) — implicit deny"
+)
+
+#: The seeded reviewer-authority envelope (schema-true per
+#: ``schemas/reviewer-authority-envelope.schema.yaml``): exactly ONE mechanic
+#: on exactly ONE PR, with the ratifier attribution the panel renders.
+DEMO_ENVELOPE = {
+    "envelope_id": "rva-demo-pr300",
+    "mechanic": "pr_review",
+    "pr_number": 300,
+    "head_sha": "f00dfeed1234",
+    "actor": "demo-reviewer-account",
+    "ratified_prompt_sha": hashlib.sha256(b"ce-cockpit-demo-ratified-prompt").hexdigest(),
+    "emitting_role": "operator",
+    "operating_mode": "strict",
+    "recorded_at": "2026-07-01T09:09:00Z",
+}
 
 _HOST = "demo-host"
 
@@ -130,6 +155,7 @@ def _pane(
     minute: int,
     pane_n: int,
     closed: bool = False,
+    envelope_ref: str | None = None,
 ) -> dict[str, Any]:
     """One schema-true pane-registry record (PURE)."""
     record: dict[str, Any] = {
@@ -158,6 +184,8 @@ def _pane(
     if closed:
         record["closed_at"] = _ts(minute)
         record["close_reason"] = "completed"
+    if envelope_ref is not None:
+        record["envelope_ref"] = envelope_ref
     return record
 
 
@@ -198,8 +226,11 @@ def seed() -> dict[str, Any]:
         _pane("ce-demo-shaper", "scope-meter-shape", role="architect", status="active", minute=5, pane_n=2),
         _pane("ce-demo-builder-a", "gate-uploads", role="implementer", status="active", minute=8, pane_n=3),
         # THE demo seat: refused `git push` by the deploy boundary -> blocked.
-        _pane("ce-demo-builder-b", "gate-push-refusal", role="implementer", status="blocked", minute=14, pane_n=4),
-        _pane("ce-demo-reviewer", "pr-300-review", role="reviewer", status="active", minute=11, pane_n=5),
+        # envelope_ref=none = the registry's no-write-authority marker.
+        _pane("ce-demo-builder-b", "gate-push-refusal", role="implementer", status="blocked", minute=14, pane_n=4,
+              envelope_ref="none"),
+        _pane("ce-demo-reviewer", "pr-300-review", role="reviewer", status="active", minute=11, pane_n=5,
+              envelope_ref="envelopes/rva-demo-pr300.yaml"),
         # Envelope-scope denial seat (tried a PR outside its envelope's pr_number).
         _pane("ce-demo-scout", "envelope-scope-denial", role="reviewer", status="active", minute=12, pane_n=6),
         # Spend hard-breach seat (paused at 100% of its run envelope).
@@ -286,7 +317,51 @@ def seed() -> dict[str, Any]:
             _outcome("ship-pr-294", 15, outcome="pr_merged",
                      branch="ce/demo/ship-pr-294", pr_number=294),
         ]),
+        # The spend hard-breach pause (v3.5-B.3 linkage; the ledger leaves that
+        # feed the meter strip land with B.4): a chain-true circuit-breaker trip.
+        "spend-hard-breach": _chain([
+            {
+                "kind": RUNTIME_SPEND_BREACH_RECORD_KIND,
+                "record_type": RUNTIME_SPEND_BREACH_RECORD_TYPE,
+                "schema_version": "1",
+                "policy_sha": DEMO_POLICY_SHA,
+                "run_id": "spend-hard-breach",
+                "recorded_at": _ts(13),
+                "breach_scope": "run",
+                "breach_unit": "$",
+                "tier": "hard",
+                "signal": "budget_exhausted",
+                "limit": 10.0,
+                "observed": 10.0,
+                "decision_reason": (
+                    "run spend envelope exhausted (observed $10.00 of $10.00 cap) — "
+                    "hard breach: pause + escalate; do NOT retry (budget_exhausted)"
+                ),
+                "escalation_id": hashlib.sha256(b"ce-cockpit-demo-hard-breach").hexdigest(),
+            },
+        ]),
     }
+
+    # v3.5-B.3 — the hook-side refusal chain the ★ REFUSED feed projects:
+    # the refused git push (EXPLICIT deny, deciding clause G2.007.2) and the
+    # envelope-scope denial (IMPLICIT deny — not covered by any grant), hash-
+    # chained exactly like the live Ring-1 hook writes them.
+    refusal_chain = _chain([
+        _action(
+            "gate-push-refusal", 14,
+            op="vcs", mutation_class="deploy",
+            target="git push origin ce/demo/gate-push-refusal", tool="Bash:git",
+            classification="denied", decision_mode="deny",
+            decision_reason=PUSH_DENY_REASON,
+        ),
+        _action(
+            "envelope-scope-denial", 16,
+            op="egress", mutation_class="governance",
+            target="gh pr review 311 --approve", tool="Bash:gh",
+            classification="denied", decision_mode="deny",
+            decision_reason=ENVELOPE_SCOPE_DENY_REASON,
+        ),
+    ])
 
     observations = [
         {"hookEventName": "PreToolUse", "observedAt": _ts(14), "advisory": True, "blocking": False},
@@ -299,4 +374,6 @@ def seed() -> dict[str, Any]:
         "scope_signals": scope_signals,
         "chains": chains,
         "observations": observations,
+        "refusal_chain": refusal_chain,
+        "envelopes": {"pr-300-review": dict(DEMO_ENVELOPE)},
     }

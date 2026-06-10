@@ -80,16 +80,76 @@ def _left_rail_text(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _right_rail_text(snapshot: dict[str, Any]) -> str:
-    """The governance/authority rail (placeholder framing; content lands in B.3)."""
-    refusals = snapshot.get("refusals", {})
-    return (
-        "Governance / Authority\n"
-        "Envelope · ★ REFUSED · Ratified-by · Posture\n"
-        "(panel content lands in B.3)\n\n"
-        f"Refusal feed [{refusals.get('source_label', '—')}]: "
-        f"{refusals.get('count', 0)} entr(y/ies)"
+def _refusal_lines(entry: dict[str, Any]) -> list[str]:
+    """Format ONE refusal-feed entry (pure presentation)."""
+    if entry.get("source") == "refusal-chain":
+        clause = entry.get("deciding_clause") or "not covered by any envelope"
+        return [
+            f"⛔ {entry.get('recorded_at', '—')} · {entry.get('run_id', '—')}",
+            f"   {entry.get('tool', '—')} → {entry.get('target', '—')}",
+            f"   {entry.get('deny_kind', '—')} deny · {clause}",
+        ]
+    return [
+        f"·  {entry.get('recorded_at', '—')} · legacy {entry.get('event', '—')} (advisory)"
+    ]
+
+
+def _seat_governance_lines(lane_id: str, seat: dict[str, Any]) -> list[str]:
+    """Format ONE seat's envelope/matrix section (pure presentation)."""
+    lines = [f"{lane_id}:"]
+    envelope = seat.get("envelope")
+    if envelope:
+        lines.append(
+            f"  envelope {envelope.get('envelope_id', '—')} → "
+            f"{envelope.get('mechanic', '—')} on PR {envelope.get('pr_number', '—')}"
+        )
+        lines.append(f"  ratified_prompt_sha {envelope.get('ratified_prompt_sha', '—')}")
+        lines.append(
+            f"  actor {envelope.get('actor', '—')} · {envelope.get('emitting_role', '—')}"
+            f" · {envelope.get('operating_mode', '—')}"
+        )
+    elif seat.get("no_write_authority"):
+        lines.append("  envelope: none (no write authority provisioned)")
+    else:
+        lines.append("  envelope: — (every mechanic withheld)")
+    cells = " ".join(
+        f"{mechanic}={cell}" for mechanic, cell in (seat.get("matrix") or {}).items()
     )
+    lines.append(f"  matrix: {cells}")
+    return lines
+
+
+def _right_rail_text(snapshot: dict[str, Any]) -> str:
+    """The Governance/Authority panel — binds the four L2 sections (B.3)."""
+    governance = snapshot.get("governance", {})
+    refusals = snapshot.get("refusals", {})
+    lines = ["Governance / Authority", ""]
+
+    lines.append(f"★ REFUSED [{refusals.get('source_label', '—')}]")
+    chain_verified = refusals.get("chain_verified")
+    if chain_verified is not None:
+        lines.append(f"  chain verifies: {'clean' if chain_verified else 'FINDINGS'}")
+    for entry in refusals.get("entries", []):
+        lines += _refusal_lines(entry)
+    lines.append("")
+
+    lines.append("Envelope (granted authority):")
+    for lane_id, seat in (governance.get("seats") or {}).items():
+        lines += _seat_governance_lines(str(lane_id), seat)
+    lines.append("")
+
+    lines.append("Ratified by / standing facts:")
+    for fact in governance.get("standing_facts", []):
+        lines.append(f"  • {fact}")
+    lines.append("")
+
+    posture = governance.get("posture", {})
+    lines.append("Posture:")
+    for hard in posture.get("hard_denies", []):
+        lines.append(f"  hard: {hard}")
+    for advisory in posture.get("advisory", []):
+        lines.append(f"  advisory: {advisory}")
+    return "\n".join(lines)
 
 
 class CockpitApp(App[None]):
