@@ -170,6 +170,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="path to an Operator-ratified operating-mode-policy sidecar that ratifies an elevated mode",
     )
     launch.add_argument(
+        "--runtime-policy",
+        dest="runtime_policy",
+        default=None,
+        help="v3.5-F: path to the ratified runtime policy whose resource_envelopes "
+        "bound this seat (systemd-run --user wrap); enforce refuses loudly on an "
+        "unsupported host; advisory/off require a resource_optout ratification binding",
+    )
+    launch.add_argument(
         "--ratification-evidence",
         dest="ratification_evidence_ref",
         default=None,
@@ -613,6 +621,14 @@ def _build_parser() -> argparse.ArgumentParser:
             default=None,
             help="deterministic closeout file pointer recorded for Ring 0 closeout verification",
         )
+        p.add_argument(
+            "--runtime-policy",
+            dest="runtime_policy",
+            default=None,
+            help="v3.5-F: path to the ratified runtime policy whose resource_envelopes "
+            "bound this seat (systemd-run --user wrap); --dry-run renders the "
+            "resource_bound block offline",
+        )
         p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     launch = groups.add_parser(
@@ -660,6 +676,7 @@ def _lane_launch(args) -> int:
             tenant_policy=getattr(args, "tenant_policy", None),
             ratification_evidence_ref=getattr(args, "ratification_evidence_ref", None),
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
+            runtime_policy=getattr(args, "runtime_policy", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:
@@ -1445,6 +1462,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
+            runtime_policy=getattr(args, "runtime_policy", None),
             tmux_adapter=_make_tmux_adapter(),
         )
     except launch_runtime.LaunchError as exc:

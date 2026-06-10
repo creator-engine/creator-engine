@@ -1,0 +1,67 @@
+{
+  "description": "Recorded host evidence for the v3.5-F per-seat bounding wrap (crash host, 2026-06-10; design-of-record §3 probes O6/O9/O10, re-verified live during gate execution). On hosts/CI runners WITHOUT user-level systemd bounding the pure tests replay this fixture as the proof carrier, alongside the skipif-guarded live integration test that re-derives it where the runner supports it. The wrap shape includes --expand-environment=no (systemd >= 254), a gate-execution correction OBSERVED live on the same host: without it systemd-run expands $/${} tokens inside the wrapped command, mutating Ring-0 output. Host-specific uids/paths are normalized; no credential, account, or private hostname material.",
+  "host": {
+    "systemd_version": 259,
+    "cgroup_fs": "cgroup2fs",
+    "delegated_controllers": ["cpu", "memory", "pids"]
+  },
+  "o6_no_root_limits": {
+    "requested": {"memory_max": "64M", "memory_high": "48M", "tasks_max": 16},
+    "observed_in_scope": {"memory_max_bytes": 67108864, "memory_high_bytes": 50331648, "tasks_max": 16}
+  },
+  "o9_isolated_kill": {
+    "requested": {"memory_max": "256M", "memory_swap_max": "0"},
+    "exit_code": 137,
+    "unit_result": "oom-kill",
+    "kill_latency_ms": 442,
+    "peak_bytes": 268435456,
+    "sibling_seats_killed": 0,
+    "host_wobbled": false
+  },
+  "o10_wrap": {
+    "bound": {
+      "unit": "ce-seat-proof",
+      "slice": "ce-fleet.slice",
+      "memory_high": "3500M",
+      "memory_max": "4G",
+      "memory_swap_max": "256M",
+      "tasks_max": 512
+    },
+    "governed_command": [
+      "claude",
+      "--setting-sources",
+      "project",
+      "--strict-mcp-config",
+      "--mcp-config",
+      ".hermes/launch/ce-seat-proof/mcp/ce-mcp.json"
+    ],
+    "wrapped_command": [
+      "systemd-run",
+      "--user",
+      "--scope",
+      "--collect",
+      "--expand-environment=no",
+      "--unit",
+      "ce-seat-proof",
+      "--slice",
+      "ce-fleet.slice",
+      "-p",
+      "MemoryHigh=3500M",
+      "-p",
+      "MemoryMax=4G",
+      "-p",
+      "MemorySwapMax=256M",
+      "-p",
+      "TasksMax=512",
+      "--",
+      "claude",
+      "--setting-sources",
+      "project",
+      "--strict-mcp-config",
+      "--mcp-config",
+      ".hermes/launch/ce-seat-proof/mcp/ce-mcp.json"
+    ],
+    "observed_cgroup_suffix": "ce.slice/ce-fleet.slice/ce-seat-proof.scope",
+    "fleet_cap_applied": "9G"
+  }
+}

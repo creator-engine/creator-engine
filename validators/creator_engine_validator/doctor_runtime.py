@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import environment_guard as guard
+from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
 from .tmux_adapter import TmuxAdapter
 
@@ -29,6 +30,17 @@ from .tmux_adapter import TmuxAdapter
 class DoctorReport:
     ok: bool
     payload: dict
+
+
+def _mem_total_bytes(meminfo_path: Path | str = "/proc/meminfo") -> int | None:
+    """Read MemTotal from /proc/meminfo (kB -> bytes); None when unavailable."""
+    try:
+        for line in Path(meminfo_path).read_text(encoding="ascii").splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
 
 
 def _git_tracks_repo(repo_root: Path) -> bool:
@@ -126,6 +138,7 @@ def run_doctor(
     tmux_adapter: Any | None = None,
     podman_runner: Any | None = None,
     hidden_continuation: bool = False,
+    mem_total_bytes: int | None = None,
 ) -> DoctorReport:
     """Evaluate the guard and assemble a deterministic, JSON-safe report."""
     if facts is None:
@@ -161,6 +174,14 @@ def run_doctor(
         "require_worker": require_worker,
         "check_packaging": check_packaging,
     }
+    # v3.5-F: the §4.4 host-class default materialization. Doctor EMITS the
+    # resource policy fragment for the Operator to ratify INTO the policy file
+    # — launch never computes bounds silently; absent MemTotal -> None (never
+    # fabricated).
+    mem_total = mem_total_bytes if mem_total_bytes is not None else _mem_total_bytes()
+    payload["resource_policy_recommendation"] = (
+        resource_bound_spec.host_class_defaults(mem_total) if mem_total else None
+    )
     return DoctorReport(ok=result.ok, payload=payload)
 
 

@@ -271,6 +271,42 @@ properties:
       v3 G-5 (additive, optional): the ratification binding REQUIRED when
       `spend_cap_enforcement` is `off`. Value-free opaque digests proving the
       opt-out was an explicit ratified human choice.
+  resource_envelopes:
+    type: array
+    items:
+      $ref: "#/$defs/resource_envelope"
+    description: |
+      v3.5-F (additive, optional): the OS-enforced per-seat / per-fleet
+      resource envelopes (the memory axis of fleet resource hardening).
+      Sibling of `spend_envelopes`: shape only here — the systemd-run
+      bounding wrap that enforces them lives in the v1 launch mechanics
+      (`resource_bound_spec`), which reads this policy through the
+      existing policy-read seam. A record WITHOUT this field is a valid
+      policy (no resource governance). Values are materialized into the
+      policy by the installer / `ce doctor` host-class defaults — NEVER
+      computed silently at launch. Never a host / credential / account
+      identifier.
+  resource_enforcement:
+    type: string
+    enum: [enforce, advisory, "off"]
+    default: enforce
+    description: |
+      v3.5-F (additive, optional): the resource-enforcement lever, an
+      OPERATOR-FACING, RATIFIED-HUMAN-ONLY choice mirroring
+      `spend_cap_enforcement`. `enforce` (default): seat launches are
+      wrapped in the OS bound and a host where user-level bounding is
+      unavailable is REFUSED LOUDLY at launch. `advisory` / `off`: the
+      explicit ratified opt-down — the seat launches UNBOUNDED and the
+      launch evidence is stamped `resource_bound: none (<mode>)`. Both
+      opt-downs REQUIRE a `resource_optout` ratification binding (the
+      launch path refuses an unratified opt-down, fail-closed).
+  resource_optout:
+    $ref: "#/$defs/resource_optout"
+    description: |
+      v3.5-F (additive, optional): the ratification binding REQUIRED when
+      `resource_enforcement` is `advisory` or `off`. Value-free opaque
+      digests proving the opt-down was an explicit ratified human choice
+      (mirrors `spend_cap_optout`).
 $defs:
   agent_op:
     type: string
@@ -537,6 +573,86 @@ $defs:
         description: |
           The SHA256 digest of the ratified Operator prompt authorizing the
           opt-out — an opaque digest, never the prompt body.
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest standing in for the approving human actor. NEVER a raw
+          account / login.
+  resource_envelope:
+    type: object
+    required: [scope, memory_max]
+    unevaluatedProperties: false
+    properties:
+      scope:
+        type: string
+        enum: [seat, fleet]
+        description: |
+          The envelope level. `seat`: applied to every launched seat scope
+          (per-seat, not per-run — a seat outlives runs; RSS is a process
+          property). `fleet`: the collective cap on the fleet slice that
+          bounds the SUM of all seats (defense against N seats each
+          individually under-cap).
+      memory_high:
+        type: string
+        pattern: "^[0-9]+(K|M|G|T)?$"
+        description: |
+          Kernel reclaim brake (`MemoryHigh=`). A BRIEF brake only — set
+          close to `memory_max` (~87%); a wide high->max gap with swap
+          available creates a reclaim-stall zombie (observed), which is
+          why this is not a parking state. systemd size string (bytes or
+          K/M/G/T suffix).
+      memory_max:
+        type: string
+        pattern: "^[0-9]+(K|M|G|T)?$"
+        description: |
+          Kernel group-kill ceiling (`MemoryMax=`). The unbypassable
+          floor: at this limit the kernel kills the seat scope as a unit,
+          in isolation — host and sibling seats untouched.
+      memory_swap_max:
+        type: string
+        pattern: "^[0-9]+(K|M|G|T)?$"
+        description: |
+          Swap ceiling (`MemorySwapMax=`). Kept SMALL: it bounds the
+          thrash/stall window (the observed reclaim-stall was swap-funded).
+      tasks_max:
+        type: integer
+        minimum: 1
+        description: |
+          Task/pid ceiling (`TasksMax=`) — the fork-bomb stop. Healthy
+          seats observed at ~30 pids; the default materialization uses 512
+          (huge headroom, still a hard stop).
+      cpu_weight:
+        type: [integer, "null"]
+        minimum: 1
+        maximum: 10000
+        description: |
+          Optional Tier-A fair-share weight (`CPUWeight=`). CPU is a
+          niceness axis, not a crash axis — advisory-tier. `null` / absent
+          = omit the property.
+      cpu_quota:
+        type: [string, "null"]
+        pattern: "^[0-9]+%$"
+        description: |
+          Optional Tier-A hard CPU ceiling (`CPUQuota=`, e.g. "200%").
+          Left unset by default on desktops. `null` / absent = omit the
+          property.
+    description: |
+      One resource envelope (the systemd cgroup-v2 property set the
+      bounding wrap applies). Shape only — never a host / credential /
+      account identifier.
+  resource_optout:
+    type: object
+    required: [ratified_prompt_sha, approver_ref]
+    unevaluatedProperties: false
+    properties:
+      ratified_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 digest of the ratified Operator prompt authorizing the
+          resource-enforcement opt-down — an opaque digest, never the
+          prompt body.
       approver_ref:
         type: string
         pattern: "^[0-9a-f]{64}$"
