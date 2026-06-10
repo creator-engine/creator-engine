@@ -522,3 +522,254 @@ def test_inventory_derives_from_schema_annotations_only():
     # every journey step from host to pilot is represented
     steps = {item.step for item in inst.schema_inventory(ANSWERS_SCHEMA)}
     assert {1, 2, 3, 4, 5} <= steps
+
+
+
+# ===========================================================================
+# v3.5-E.3 E3-G2 — the GitHub leg, decomposed (pure planners, injected probes)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# repo plan — existing vs new, idempotent
+# ---------------------------------------------------------------------------
+def test_plan_repo_existing_uses_probed_repo():
+    plan = inst.plan_repo(mode="existing", repo="owner/name", repo_exists=True)
+    assert plan["action"] == "use_existing" and plan["converged"] and not plan["problems"]
+
+
+def test_plan_repo_existing_refuses_probed_missing_repo():
+    plan = inst.plan_repo(mode="existing", repo="owner/name", repo_exists=False)
+    assert plan["action"] == "refuse" and plan["problems"]
+
+
+def test_plan_repo_new_plans_create_then_converges_on_rerun():
+    plan = inst.plan_repo(mode="new", repo="owner/fresh",
+                          new_repo={"visibility": "private", "default_branch": "main"})
+    assert plan["action"] == "create"
+    assert plan["steps"][0]["step"] == "create_repo"
+    assert plan["steps"][0]["visibility"] == "private"
+    # second run: the repo now exists → create converges to use (idempotent)
+    rerun = inst.plan_repo(mode="new", repo="owner/fresh", repo_exists=True)
+    assert rerun["action"] == "use_existing" and rerun["converged"]
+
+
+def test_plan_repo_unresolved_repo_is_a_problem():
+    plan = inst.plan_repo(mode="existing", repo=None)
+    assert plan["action"] == "refuse"
+    assert any("github.repo" in p for p in plan["problems"])
+
+
+# ---------------------------------------------------------------------------
+# bootstrap-token scope verification (a check, not an input)
+# ---------------------------------------------------------------------------
+def test_bootstrap_scope_table_verifies_minimal_scopes():
+    table = inst.bootstrap_scope_table(inst.REQUIRED_BOOTSTRAP_SCOPES)
+    assert table["ok"] and table["probed"] and table["missing"] == []
+    assert {row["scope"] for row in table["rows"]} == set(inst.REQUIRED_BOOTSTRAP_SCOPES)
+
+
+def test_bootstrap_scope_table_names_missing_scopes():
+    table = inst.bootstrap_scope_table(["contents:write"])
+    assert not table["ok"]
+    assert "administration:write" in table["missing"]
+
+
+def test_bootstrap_scope_table_unprobed_is_fail_closed():
+    table = inst.bootstrap_scope_table(None)
+    assert not table["ok"] and not table["probed"]
+    assert all(row["granted"] is None for row in table["rows"])
+
+
+def test_bootstrap_scope_table_org_create_only_when_needed():
+    assert inst.ORG_CREATE_SCOPE not in [
+        r["scope"] for r in inst.bootstrap_scope_table([])["rows"]
+    ]
+    assert inst.ORG_CREATE_SCOPE in [
+        r["scope"] for r in inst.bootstrap_scope_table([], org_create_needed=True)["rows"]
+    ]
+
+
+# ---------------------------------------------------------------------------
+# the App plan — shared vs own; click-or-detect (re-run convergence)
+# ---------------------------------------------------------------------------
+def test_app_plan_shared_first_run_requires_the_click():
+    plan = inst.plan_github_app(kind="shared")
+    assert plan["click_required"] is True and not plan["converged"]
+    click = plan["steps"][0]
+    assert click["step"] == "app_install_click" and click["human"] is True
+    assert "/installations/new" in click["install_url"]
+
+
+def test_app_plan_detected_installation_skips_the_click():
+    plan = inst.plan_github_app(kind="shared", installation_id=12345678)
+    assert plan["click_required"] is False and plan["converged"]
+    assert plan["steps"] == []
+
+
+def test_app_plan_own_requires_ids_and_pem_ref():
+    plan = inst.plan_github_app(kind="own")
+    assert len(plan["problems"]) == 3
+    plan = inst.plan_github_app(
+        kind="own", app_id="123", client_id="Iv1.abc",
+        pem_ref="file:///dev/shm/ce-app.pem", installation_id=99,
+    )
+    assert plan["problems"] == [] and plan["converged"]
+
+
+def test_app_plan_own_refuses_raw_pem():
+    plan = inst.plan_github_app(kind="own", app_id="123", client_id="Iv1.abc",
+                                pem_ref="-----BEGIN RSA PRIVATE KEY-----")
+    assert any("SecretRef" in p for p in plan["problems"])
+
+
+def test_app_bot_identity_is_the_author_identity():
+    assert inst.app_bot_identity() == f"{inst.SHARED_APP_SLUG}[bot]"
+
+
+# ---------------------------------------------------------------------------
+# branch protection — desired-state diff, reference posture as data
+# ---------------------------------------------------------------------------
+def _floor():
+    return inst.reference_protections(ANSWERS_SCHEMA)
+
+
+def test_protection_diff_unprotected_branch_drifts_everything():
+    plan = inst.plan_branch_protection(None, "reference", floor=_floor())
+    assert not plan["converged"]
+    assert {d["key"] for d in plan["drift"]} == set(_floor().keys())
+
+
+def test_protection_diff_converges_when_current_matches_floor():
+    plan = inst.plan_branch_protection(dict(_floor()), "reference", floor=_floor())
+    assert plan["converged"] and plan["drift"] == []
+
+
+def test_protection_diff_plans_only_the_drift():
+    current = dict(_floor())
+    current["enforce_admins"] = False
+    plan = inst.plan_branch_protection(current, "reference", floor=_floor())
+    assert [d["key"] for d in plan["drift"]] == ["enforce_admins"]
+    assert plan["drift"][0]["desired"] is True
+
+
+def test_protection_required_checks_apply_as_a_union():
+    current = dict(_floor())
+    current["required_checks"] = ["someone-elses-check"]
+    plan = inst.plan_branch_protection(current, "reference", floor=_floor())
+    [entry] = [d for d in plan["drift"] if d["key"] == "required_checks"]
+    assert "someone-elses-check" in entry["desired"]  # never silently dropped
+    assert set(_floor()["required_checks"]) <= set(entry["desired"])
+
+
+def test_effective_protections_overlay_strengthen_and_ratified_weaken():
+    floor = _floor()
+    assert inst.effective_protections("reference", floor=floor) == floor
+    stronger = inst.effective_protections({"required_reviews": 2}, floor=floor)
+    assert stronger["required_reviews"] == 2 and stronger["strict"] is True
+    weakened = inst.effective_protections(
+        {"required_reviews": 0, "ratification": {"x": "ignored"}}, floor=floor
+    )
+    assert weakened["required_reviews"] == 0
+    assert "ratification" not in weakened  # the binding is an attestation, not a setting
+
+
+# ---------------------------------------------------------------------------
+# Actions workflow plan
+# ---------------------------------------------------------------------------
+def test_actions_plan_installs_workflow_and_enables_actions():
+    plan = inst.plan_actions_workflow(
+        actions_enabled=False, workflow_present=False,
+        required_check="Validate governance artifacts",
+    )
+    steps = {s["step"] for s in plan["steps"]}
+    assert steps == {"enable_actions", "install_validate_workflow"}
+
+
+def test_actions_plan_converges_when_present_and_enabled():
+    plan = inst.plan_actions_workflow(
+        actions_enabled=True, workflow_present=True,
+        required_check="Validate governance artifacts",
+    )
+    assert plan["converged"] and plan["steps"] == []
+
+
+# ---------------------------------------------------------------------------
+# the reviewer-identity floor (no self-approval)
+# ---------------------------------------------------------------------------
+def test_reviewer_floor_detected_login_is_the_solo_reviewer():
+    floor = inst.reviewer_identity_floor(token_login="chmod735",
+                                         bot_identity="creator-engine[bot]")
+    assert floor["ok"] and floor["reviewer"] == "chmod735"
+
+
+def test_reviewer_floor_refuses_missing_and_bot_self_review():
+    assert not inst.reviewer_identity_floor(bot_identity="creator-engine[bot]")["ok"]
+    floor = inst.reviewer_identity_floor(reviewer="creator-engine[bot]",
+                                         bot_identity="creator-engine[bot]")
+    assert not floor["ok"] and any("no-self-approval" in p for p in floor["problems"])
+
+
+# ---------------------------------------------------------------------------
+# the composed GitHub leg (dry-run; mutations stay the deferred forge seam)
+# ---------------------------------------------------------------------------
+def _github_probe(**overrides):
+    probe = {
+        "origin_remote": "chmod735/creator-engine-canonical",
+        "token_login": "chmod735",
+        "token_scopes": list(inst.REQUIRED_BOOTSTRAP_SCOPES),
+        "repo_exists": True,
+        "app_installation_id": 12345678,
+        "current_protections": dict(inst.reference_protections(ANSWERS_SCHEMA)),
+        "actions_enabled": True,
+        "workflow_present": True,
+    }
+    probe.update(overrides)
+    return probe
+
+
+def test_github_leg_converges_on_the_fully_provisioned_repo():
+    plan = inst.build_github_leg_plan(GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=_github_probe())
+    assert plan["converged"]
+    assert plan["human_approves"] == []          # installation detected → no click
+    assert plan["branch_protection"]["drift"] == []
+    assert plan["reviewer"]["ok"]
+
+
+def test_github_leg_first_run_plans_the_click_and_the_drift():
+    probe = _github_probe(app_installation_id=None, current_protections=None,
+                          workflow_present=False)
+    answers = _answers(**{"github.app": {"kind": "shared"}})
+    plan = inst.build_github_leg_plan(answers, schema=ANSWERS_SCHEMA, probe=probe)
+    assert not plan["converged"]
+    assert plan["human_approves"] == ["the GitHub-App authorization click"]
+    assert plan["branch_protection"]["drift"]
+    assert any(s["step"] == "install_validate_workflow" for s in plan["actions"]["steps"])
+
+
+def test_github_leg_refuses_invalid_answers_first():
+    with pytest.raises(inst.InstallRefused):
+        inst.build_github_leg_plan(_answers(typo_key=1), schema=ANSWERS_SCHEMA, probe=_github_probe())
+
+
+def test_github_leg_surfaces_detected_repo_conflict():
+    probe = _github_probe(origin_remote="someone-else/other-repo")
+    plan = inst.build_github_leg_plan(GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=probe)
+    assert plan["conflicts"] and plan["conflicts"][0]["key"] == "github.repo"
+
+
+def test_github_leg_unprobed_scopes_fail_closed():
+    plan = inst.build_github_leg_plan(
+        GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=_github_probe(token_scopes=None)
+    )
+    assert not plan["bootstrap_token_scopes"]["ok"] and not plan["converged"]
+
+
+def test_github_detected_facts_projection():
+    detected = inst.github_detected_facts({
+        "origin_remote": "o/r", "token_login": "human", "app_installation_id": 5,
+    })
+    assert detected == {
+        "github.mode": "existing", "github.repo": "o/r",
+        "github.reviewer": "human", "github.app.installation_id": 5,
+    }
+    assert inst.github_detected_facts(None) == {}

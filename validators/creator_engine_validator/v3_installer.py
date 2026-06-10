@@ -819,3 +819,353 @@ def inventory_emission(
             }
         )
     return tuple(rows)
+
+
+# ---------------------------------------------------------------------------
+# v3.5-E.3 E3-G2 — the GitHub leg, decomposed (PURE planners, injected probes)
+#
+# The contract's "the operator approves the GitHub-App authorization click"
+# step, decomposed into plannable parts (design §2.2 step 4): repo plan ·
+# bootstrap-token scope VERIFICATION · App plan (shared vs own,
+# click-or-detect) · branch-protection desired-state diff (the reference
+# posture as data, from the answers schema) · Actions workflow plan · the
+# reviewer-identity floor. All pure, mirroring `plan_dependencies`: the live
+# read-only probes are injected by the CLI; the live API MUTATIONS stay the
+# deferred seam (the forge HTTPS-Bearer App-JWT adapter is the mint leg —
+# `forge.app_jwt_runner` / `forge.github_repo_config` — when the drive goes
+# live; gh cannot App-JWT auth).
+# ---------------------------------------------------------------------------
+
+#: Minimal fine-grained bootstrap-token permissions on the target repo —
+#: VERIFIED by probe (a check, not an input; design §2.2).
+REQUIRED_BOOTSTRAP_SCOPES = (
+    "administration:write",
+    "contents:write",
+    "actions:write",
+    "workflows:write",
+)
+#: Needed additionally ONLY when creating a new repo inside an org.
+ORG_CREATE_SCOPE = "org:repo_create"
+#: The CE-published shared GitHub App (fork F5: the solo-pilot default).
+SHARED_APP_SLUG = "creator-engine"
+
+
+def app_bot_identity(slug: str = SHARED_APP_SLUG) -> str:
+    """The App's bot login — the AUTHOR identity CE opens/merges PRs under
+    (≠ the human), which is what makes solo no-self-approval hold."""
+    return f"{slug}[bot]"
+
+
+def github_detected_facts(probe: dict[str, Any] | None) -> dict[str, Any]:
+    """Project an injected read-only GitHub probe into detected merge facts
+    (the dotted keys `merge_answers` consumes). Probe keys (all optional —
+    detection is read-only; absence = unprobed):
+
+      origin_remote        cwd origin `owner/name` → detect-and-offer existing
+      token_login          the bootstrap token's authenticated login
+      app_installation_id  an existing App installation (re-run convergence)
+    """
+    probe = probe or {}
+    detected: dict[str, Any] = {}
+    if probe.get("origin_remote"):
+        detected["github.mode"] = "existing"
+        detected["github.repo"] = probe["origin_remote"]
+    if probe.get("token_login"):
+        detected["github.reviewer"] = probe["token_login"]
+    if probe.get("app_installation_id"):
+        detected["github.app.installation_id"] = probe["app_installation_id"]
+    return detected
+
+
+def plan_repo(
+    *,
+    mode: str,
+    repo: Any = None,
+    new_repo: dict[str, Any] | None = None,
+    repo_exists: bool | None = None,
+) -> dict[str, Any]:
+    """The existing-vs-new repo plan (pure; `repo_exists` is the injected
+    read-only probe result, None = unprobed)."""
+    problems: list[str] = []
+    steps: list[dict[str, Any]] = []
+    if mode not in ("existing", "new"):
+        problems.append(f"github.mode must be 'existing' or 'new', got {mode!r}")
+    if not repo:
+        problems.append("github.repo is unresolved (owner/name)")
+    if mode == "existing":
+        action = "use_existing"
+        if repo_exists is False:
+            problems.append(f"github.repo {repo!r} was probed and does not exist")
+    else:
+        new_repo = new_repo or {}
+        if repo_exists is True:
+            action = "use_existing"  # idempotent re-run: create converges to use
+        else:
+            action = "create"
+            steps.append({
+                "step": "create_repo",
+                "repo": repo,
+                "visibility": new_repo.get("visibility", "private"),
+                "default_branch": new_repo.get("default_branch", "main"),
+                "description": new_repo.get("description"),
+            })
+    return {
+        "action": action if not problems else "refuse",
+        "repo": repo,
+        "steps": steps if not problems else [],
+        "problems": problems,
+        "converged": not steps and not problems,
+    }
+
+
+def bootstrap_scope_table(
+    granted: Any,
+    *,
+    org_create_needed: bool = False,
+) -> dict[str, Any]:
+    """The bootstrap-token scope VERIFICATION table (a check, not an input).
+
+    ``granted`` is the injected probe result (an iterable of granted scopes);
+    ``None`` = unprobed → fail-closed (every row unverified, ok False)."""
+    required = list(REQUIRED_BOOTSTRAP_SCOPES)
+    if org_create_needed:
+        required.append(ORG_CREATE_SCOPE)
+    probed = granted is not None
+    granted_set = set(granted) if probed else set()
+    rows = [
+        {"scope": scope, "granted": (scope in granted_set) if probed else None}
+        for scope in required
+    ]
+    missing = [r["scope"] for r in rows if r["granted"] is not True]
+    return {"rows": rows, "probed": probed, "missing": missing, "ok": not missing}
+
+
+def plan_github_app(
+    *,
+    kind: str = "shared",
+    app_id: Any = None,
+    client_id: Any = None,
+    pem_ref: Any = None,
+    installation_id: Any = None,
+) -> dict[str, Any]:
+    """The GitHub-App plan: shared vs own; click-or-detect-installation.
+
+    The click cannot be put in a file — it is the contract's second
+    human-approval step. In answers-file mode the installer (a) emits the
+    App-install URL and polls (bounded) for the installation, and (b) on
+    RE-RUN detects an existing installation (or a declared installation_id)
+    and SKIPS the click entirely — converged state is fully declarative;
+    only the FIRST run has the one irreducible interactive step."""
+    problems: list[str] = []
+    if kind not in ("shared", "own"):
+        problems.append(f"github.app.kind must be 'shared' or 'own', got {kind!r}")
+    slug = SHARED_APP_SLUG
+    if kind == "own":
+        if not app_id:
+            problems.append("github.app.app_id is required for an own App")
+        if not client_id:
+            problems.append("github.app.client_id is required for an own App")
+        if pem_ref is None or parse_secret_ref(pem_ref) is None:
+            problems.append(
+                "github.app.pem must be a SecretRef (tmpfs custody, e.g. "
+                "file:///dev/shm/ce-app.pem) — never a raw key"
+            )
+        slug = str(app_id) if app_id else slug
+    click_required = installation_id is None
+    steps: list[dict[str, Any]] = []
+    if click_required:
+        steps.append({
+            "step": "app_install_click",
+            "human": True,
+            "install_url": f"https://github.com/apps/{slug}/installations/new",
+            "then": "poll for the installation (bounded wait)",
+        })
+    return {
+        "kind": kind,
+        "bot_identity": app_bot_identity(slug if kind == "own" else SHARED_APP_SLUG),
+        "click_required": click_required,
+        "installation_id": installation_id,
+        "steps": steps,
+        "problems": problems,
+        "converged": not click_required and not problems,
+        "custody": "PEM on tmpfs → JIT scoped token at open/merge, then revoke (never in the box)",
+    }
+
+
+def effective_protections(desired: Any, *, floor: dict[str, Any]) -> dict[str, Any]:
+    """Overlay an answers-file protections value on the reference floor.
+    `"reference"` (or absence) = the floor verbatim; an object's keys override
+    field-by-field (weakening already required its ratification binding at
+    answers validation — `governance_weakening_problems`)."""
+    effective = dict(floor)
+    if isinstance(desired, dict):
+        for key, value in desired.items():
+            if key != "ratification":
+                effective[key] = value
+    return effective
+
+
+def plan_branch_protection(
+    current: dict[str, Any] | None,
+    desired: Any,
+    *,
+    floor: dict[str, Any],
+) -> dict[str, Any]:
+    """The branch-protection desired-state DIFF (declarative reconciliation,
+    the terraform model): read current state (injected probe; None =
+    unprotected/unprobed), diff against desired, plan ONLY the drift, report
+    the diff before any mutation. Same answers, second run → empty plan.
+
+    `required_checks` compares as a SUBSET (the live apply unions contexts —
+    mirroring `forge.github_repo_config.BranchProtectionPolicy.with_contexts`
+    — so configuring never silently drops a check someone else registered)."""
+    effective = effective_protections(desired, floor=floor)
+    current = current or {}
+    drift: list[dict[str, Any]] = []
+    for key, want in effective.items():
+        have = current.get(key)
+        if key == "required_checks":
+            want_set = set(want if isinstance(want, list) else [])
+            have_set = set(have if isinstance(have, list) else [])
+            if not want_set <= have_set:
+                drift.append({
+                    "key": key,
+                    "current": sorted(have_set),
+                    "desired": sorted(want_set | have_set),
+                    "note": "applied as a union — never drops an existing check",
+                })
+        elif have != want:
+            drift.append({"key": key, "current": have, "desired": want})
+    return {
+        "effective_desired": effective,
+        "drift": drift,
+        "converged": not drift,
+        "apply": "only the drift (the live PUT is the deferred forge seam)",
+    }
+
+
+def plan_actions_workflow(
+    *,
+    install_validate_workflow: bool = True,
+    actions_enabled: bool | None = None,
+    workflow_present: bool | None = None,
+    required_check: str,
+) -> dict[str, Any]:
+    """The Actions plan: enable Actions (org/repo probe) + install CE's
+    validate workflow so the required check exists and runs on every PR."""
+    steps: list[dict[str, Any]] = []
+    if actions_enabled is False:
+        steps.append({"step": "enable_actions"})
+    if install_validate_workflow and workflow_present is not True:
+        steps.append({
+            "step": "install_validate_workflow",
+            "provides_required_check": required_check,
+        })
+    return {
+        "install_validate_workflow": install_validate_workflow,
+        "steps": steps,
+        "converged": not steps,
+    }
+
+
+def reviewer_identity_floor(
+    *,
+    reviewer: Any = None,
+    token_login: Any = None,
+    bot_identity: str | None = None,
+) -> dict[str, Any]:
+    """The no-self-approval floor: a reviewer identity must exist and differ
+    from the AUTHOR identity of CE's PRs — the App bot (solo: the human IS
+    the reviewer; the detected default is the token's authenticated login)."""
+    resolved = reviewer or token_login
+    problems: list[str] = []
+    if not resolved:
+        problems.append("no reviewer identity (github.reviewer unresolved and no token login probed)")
+    elif bot_identity and resolved == bot_identity:
+        problems.append(
+            f"reviewer {resolved!r} IS the PR author identity {bot_identity!r} — "
+            "no-self-approval requires a distinct reviewer"
+        )
+    return {"reviewer": resolved, "author_identity": bot_identity, "ok": not problems, "problems": problems}
+
+
+def build_github_leg_plan(
+    answers: dict[str, Any],
+    *,
+    schema: dict[str, Any],
+    probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compose the full (dry-run) GitHub leg from a VALIDATED answers document
+    plus the injected read-only probe. Pure — nothing is mutated; the live
+    API drive (repo create, App install, protection PUT, workflow commit) is
+    the deferred seam behind the forge mint leg.
+
+    Probe keys consumed here beyond `github_detected_facts`:
+      repo_exists           bool | None
+      token_scopes          iterable of granted scopes | None
+      current_protections   the read current protection state | None
+      actions_enabled       bool | None
+      workflow_present      bool | None
+    """
+    require_valid_answers(answers, schema=schema)
+    probe = probe or {}
+    merged = merge_answers(schema, answers=answers, detected=github_detected_facts(probe))
+    floor = reference_protections(schema)
+    mode = merged.value("github.mode", "existing")
+    repo_plan = plan_repo(
+        mode=mode,
+        repo=merged.value("github.repo"),
+        new_repo={
+            "visibility": merged.value("github.new_repo.visibility", "private"),
+            "default_branch": merged.value("github.new_repo.default_branch", "main"),
+            "description": merged.value("github.new_repo.description"),
+        },
+        repo_exists=probe.get("repo_exists"),
+    )
+    org_create_needed = mode == "new" and "/" in str(merged.value("github.repo") or "") and bool(probe.get("owner_is_org"))
+    scopes = bootstrap_scope_table(probe.get("token_scopes"), org_create_needed=org_create_needed)
+    app_plan = plan_github_app(
+        kind=merged.value("github.app.kind", "shared"),
+        app_id=merged.value("github.app.app_id"),
+        client_id=merged.value("github.app.client_id"),
+        pem_ref=merged.value("github.app.pem"),
+        installation_id=merged.value("github.app.installation_id"),
+    )
+    protection_plan = plan_branch_protection(
+        probe.get("current_protections"),
+        merged.value("github.protections", "reference"),
+        floor=floor,
+    )
+    actions_plan = plan_actions_workflow(
+        install_validate_workflow=bool(merged.value("github.actions.install_validate_workflow", True)),
+        actions_enabled=probe.get("actions_enabled"),
+        workflow_present=probe.get("workflow_present"),
+        required_check=(floor.get("required_checks") or ["Validate governance artifacts"])[0],
+    )
+    reviewer_floor = reviewer_identity_floor(
+        reviewer=merged.value("github.reviewer"),
+        token_login=probe.get("token_login"),
+        bot_identity=app_plan["bot_identity"],
+    )
+    converged = all([
+        repo_plan["converged"], app_plan["converged"], protection_plan["converged"],
+        actions_plan["converged"], scopes["ok"], reviewer_floor["ok"],
+    ])
+    return {
+        "repo": repo_plan,
+        "bootstrap_token_scopes": scopes,
+        "app": app_plan,
+        "branch_protection": protection_plan,
+        "actions": actions_plan,
+        "reviewer": reviewer_floor,
+        "conflicts": [
+            {"key": c.key, "file": c.file_value, "detected": c.detected_value}
+            for c in merged.conflicts
+        ],
+        "converged": converged,
+        "human_approves": (["the GitHub-App authorization click"] if app_plan["click_required"] else []),
+        "deferred_live_seams": [
+            "the live forge API mutations (repo create · App install · protection PUT · workflow commit)",
+            "the HTTPS-Bearer App-JWT mint leg (forge.app_jwt_runner; gh cannot App-JWT auth)",
+        ],
+    }
