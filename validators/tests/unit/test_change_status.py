@@ -208,5 +208,5 @@ def test_change_status_registers_no_check_and_no_backend():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner import available_backends
 
-    assert len(registered_checks()) == 47  # G-6 added ce_scope
+    assert len(registered_checks()) == 48  # G-6 added ce_scope; v3.5-C A-C1 added decision_record
     assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a)

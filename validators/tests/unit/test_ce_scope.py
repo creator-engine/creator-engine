@@ -58,6 +58,14 @@ def test_matching_phase_skin_passes():
     assert _codes(_scope(phase="Shape")) == []  # ready -> Shape
 
 
+def test_scope_with_binding_decisions_validates():
+    # v3.5-C A-C1: the A<->B seam field — ids of Decision Records the Scope cites
+    # as binding context. A-C1 adds the FIELD only; status-must-be-accepted
+    # enforcement is the B-C2 readiness gate.
+    assert _codes(_scope(binding_decisions=["ADR-0007"])) == []
+    assert _codes(_scope(binding_decisions=["ADR-0007", "RFC-0102"])) == []
+
+
 # --- teeth: DoR / appetite / ratification / skin-drift ------------------------
 def test_ready_without_acceptance_criteria_fires_dor():
     assert chk.CODE_DOR_INCOMPLETE in _codes(_scope(acceptance_criteria=[]))

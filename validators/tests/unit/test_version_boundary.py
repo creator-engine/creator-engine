@@ -29,7 +29,8 @@ def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
     # 47 with the G-6 ce_scope check registered alongside version_boundary.
-    assert len(reg) == 47
+    # v3.5-C A-C1 added the decision_record check: 47 -> 48.
+    assert len(reg) == 48
 
 
 def test_green_on_real_package():
