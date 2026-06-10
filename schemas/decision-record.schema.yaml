@@ -1,0 +1,236 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/decision-record.schema.yaml"
+title: "Creator Engine Decision Record front-matter"
+description: |
+  Machine-readable schema for the YAML front-matter of a **Decision Record** —
+  the durable decision knowledge artifact (v3.5-C A-C1, design §A.1/§A.2). A
+  Decision Record is a *sibling of Skill*, NOT a Scope type: governed at the
+  Skill cadence (ratified-once, supersede-don't-delete,
+  higher-blast-because-referenced).
+
+  Two wrapped prior-art forms, mirror-not-invent:
+  - `record_type: adr` — the MADR 4.0.0 ADR form for reversible decisions
+    (`docs/decisions/ADR-NNNN-*.md`).
+  - `record_type: rfc` — the Rust RFC + Final Comment Period form for
+    structural/contested decisions (`docs/rfcs/RFC-NNNN-*.md`); adds
+    `disposition` + `fcp`.
+
+  Prose contract: `docs/contracts/decision-record.md`. Cross-field invariants
+  (self-ratification on privileged classes, supersede-with-link resolution,
+  accepted-requires-ratification, FCP open-concern blocking) are enforced by
+  the `decision_record` check.
+
+  Value-free: the governance fields carry actor *labels* (owner stamps) and
+  opaque digests — NEVER a credential, secret value, token, or host.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - id
+  - title
+  - status
+  - date
+  - decision_makers
+  - review_by
+  - mutation_class
+  - evidence_refs
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: decision-record
+    description: |
+      Discriminator constant. Markdown files whose front-matter does not carry
+      this exact value are not governed Decision Records and MUST NOT be
+      validated by `decision_record`.
+  record_type:
+    type: string
+    enum: [adr, rfc]
+    description: |
+      The wrapped prior-art form: `adr` (MADR 4.0.0; reversible decisions) or
+      `rfc` (Rust RFC + FCP; structural/contested decisions). `disposition` and
+      `fcp` are RFC-only fields.
+  schema_version:
+    type: string
+    enum: ["1"]
+  id:
+    type: string
+    pattern: "^(ADR|RFC)-[0-9]{4}(-[a-z0-9][a-z0-9-]*)?$"
+    description: |
+      Stable record id (`ADR-NNNN` / `RFC-NNNN`, optional slug suffix). Cited
+      by `crosswalk` links and by a Scope's `binding_decisions`.
+  title:
+    type: string
+    minLength: 1
+  status:
+    type: string
+    enum: [proposed, accepted, deprecated, superseded]
+    description: |
+      Lifecycle status. `accepted` is a HUMAN-ratification event (the
+      `decision_record` check requires the `ratification` block for it; nothing
+      auto-promotes a record to `accepted`). `superseded` requires a resolvable
+      `crosswalk.superseded_by` target (supersede-don't-delete).
+  date:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    description: ISO date the decision was recorded.
+  decision_makers:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+    description: |
+      The owner stamp — who made/owns this decision (actor labels, value-free).
+      For privileged `mutation_class`, the ratifier MUST NOT be one of these
+      (no self-ratification; enforced by the check).
+  consulted:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: MADR consulted parties (two-way communication).
+  informed:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: MADR informed parties (one-way communication).
+  review_by:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    description: |
+      REQUIRED freshness horizon: the ISO date by which this decision must be
+      re-reviewed (decisions rot; an unreviewable-forever record is rejected at
+      the schema layer by requiring this field).
+  mutation_class:
+    type: string
+    enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+    description: |
+      The blast-radius axis (the shared planning-layer taxonomy plus `none`).
+      Privileged classes (`PRIVILEGED_NAMES`) tier the ratification bar: the
+      ratifier must be independent of `decision_makers`.
+  evidence_refs:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [kind, ref, tag]
+      unevaluatedProperties: false
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: Evidence kind label (e.g. `doc`, `pr`, `issue`, `spine`, `report`).
+        ref:
+          type: string
+          minLength: 1
+          description: The evidence pointer (path, URL, PR number, spine digest).
+        tag:
+          type: string
+          minLength: 1
+          description: |
+            REQUIRED citation tag — the short handle the record body cites the
+            evidence by. An untagged evidence ref is rejected.
+    description: |
+      REQUIRED non-empty grounding: a decision with zero cited evidence is not
+      a governed Decision Record.
+  policy_sha:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      Optional SHA256 digest of the governing policy/mandate document this
+      record was authored under (an opaque pin, never the document body).
+  ratification:
+    type: object
+    required: [ratified_by, ratified_at, ratification_prompt_sha]
+    unevaluatedProperties: false
+    properties:
+      ratified_by:
+        type: string
+        minLength: 1
+        description: |
+          The HUMAN ratifier's actor label. For privileged `mutation_class`
+          this MUST differ from every entry in `decision_makers` (enforced by
+          the check).
+      ratified_at:
+        type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9:.+Z-]+)?$"
+        description: ISO date(/time) of the ratification event.
+      ratification_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          SHA256 digest of the SHA-pinned ratification prompt/mandate (opaque).
+    description: |
+      The human-ratification attestation. REQUIRED when `status: accepted`
+      (enforced by the check); a `proposed` record carries none.
+  crosswalk:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      supersedes:
+        type: array
+        items:
+          type: string
+          minLength: 1
+        description: Record ids this decision supersedes (supersede-with-link).
+      superseded_by:
+        type: string
+        minLength: 1
+        description: |
+          The successor record id. REQUIRED + resolvable within the scanned
+          record set when `status: superseded` (enforced by the check).
+      informs:
+        type: array
+        items:
+          type: string
+          minLength: 1
+        description: Record/artifact ids this decision informs (light traceability).
+    description: Supersession + traceability links between records.
+  disposition:
+    type: string
+    enum: [merge, close, postpone]
+    description: |
+      RFC-only (Rust model): the motion's disposition. Forbidden on `adr`
+      records (schema-conditional below).
+  fcp:
+    type: object
+    required: [opened_at]
+    unevaluatedProperties: false
+    properties:
+      opened_at:
+        type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        description: ISO date the Final Comment Period opened (timed window).
+      concerns:
+        type: array
+        items:
+          type: object
+          required: [name, status]
+          unevaluatedProperties: false
+          properties:
+            name:
+              type: string
+              minLength: 1
+            status:
+              type: string
+              enum: [open, resolved]
+        description: |
+          Blocking concerns raised during the FCP. The FCP cannot complete
+          while any concern is `open`: an `accepted` RFC with an open concern
+          is rejected by the check.
+    description: |
+      RFC-only (Rust model): the Final Comment Period record. Forbidden on
+      `adr` records (schema-conditional below).
+allOf:
+  - if:
+      properties:
+        record_type:
+          const: adr
+      required: [record_type]
+    then:
+      properties:
+        disposition: false
+        fcp: false

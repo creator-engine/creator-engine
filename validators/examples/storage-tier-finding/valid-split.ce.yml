@@ -1,0 +1,28 @@
+# Passing fixture: ONE artifact split across tiers (ADR-0001 rule 3) — the
+# architecture half is public-safe, the strategy half stays private. The
+# promoted placement carries its spine ratification reference (rule 2).
+kind: storage-tier-finding
+schema_version: "1"
+artifact_ref: ".ce/state/research/v4-design-dossier-20260607.md"
+advisory: true
+classifications:
+  - part_ref: "sections-1-4-architecture"
+    relevance: project-relevant
+    tier: repo-docs
+    rationale: >-
+      Architecture + gate design must travel with the repo (ADR-0001
+      repo-docs tier).
+  - part_ref: "section-7-partner-strategy"
+    relevance: team-relevant
+    tier: ops-private
+    rationale: >-
+      Partner strategy mid-version-dev is genuinely sensitive (ADR-0001
+      ops-private tier).
+  - part_ref: "appendix-scratch-notes"
+    relevance: instance-local-noise
+    tier: instance-local
+    rationale: >-
+      Transient working notes; noise stays local (ADR-0001 rule 5).
+promotion:
+  promoted: true
+  ratification_ref: "9d4e1e23bd5b727046a9e3b4b7db57bd8d6ee684d2d8b1aa176c9f54c5f1a2b3"

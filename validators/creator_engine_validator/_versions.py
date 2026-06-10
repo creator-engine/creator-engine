@@ -80,6 +80,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge",
         "forge._redact",
         "forge.app_jwt_runner",
+        # v3.5-C α-precursor: the Projects-v2 backlog reader/writer + the
+        # forge-projected advisory claim (assignee + Status=Running, §A.4);
+        # consumed by the A-C4 forge_claim_dedup gate.
+        "forge.backlog",
         "forge.change",
         "forge.change_status",
         "forge.credential_runner",

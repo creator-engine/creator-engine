@@ -29,7 +29,11 @@ def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
     # 47 with the G-6 ce_scope check registered alongside version_boundary.
-    assert len(reg) == 47
+    # v3.5-C A-C1 added the decision_record check: 47 -> 48. v3.5-C A-C2 added
+    # the storage_tier_finding check: 48 -> 49. v3.5-C A-C3 added the
+    # peer_authority check: 49 -> 50. v3.5-C A-C4 added the forge_claim_dedup
+    # check: 50 -> 51.
+    assert len(reg) == 51
 
 
 def test_green_on_real_package():
@@ -75,8 +79,9 @@ def test_taxonomy_counts_and_disjoint():
     # Cockpit family — the L2 read-model (= harness-paper F1,
     # ``runner.cockpit_readmodel``), the CE_DEMO seed
     # (``runner.cockpit_demo_seed``, Fork F-b), and the L3 Textual view
-    # (``v3_cockpit``): 28 -> 31.
-    assert len(ver.V3_RUNTIME) == 31
+    # (``v3_cockpit``): 28 -> 31. The v3.5-C α-precursor added the Projects-v2
+    # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
+    assert len(ver.V3_RUNTIME) == 32
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

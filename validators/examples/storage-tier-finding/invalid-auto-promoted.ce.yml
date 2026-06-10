@@ -1,0 +1,14 @@
+# INVALID: promoted: true with NO spine ratification reference — the
+# no-auto-promotion invariant (VAL-STF-AUTO-PROMOTED). A finding is advisory;
+# nothing self-promotes.
+kind: storage-tier-finding
+schema_version: "1"
+artifact_ref: ".ce/state/research/retro-20260609.md"
+advisory: true
+classifications:
+  - part_ref: whole
+    relevance: project-relevant
+    tier: repo-docs
+    rationale: "Retrospective learnings useful to the project."
+promotion:
+  promoted: true

@@ -1,0 +1,42 @@
+# Creator Engine repo coordination policy — governance-as-data (v3.5-C A-C3,
+# design §A.5). Validated by the `peer_authority` check against
+# `schemas/coordination-policy.schema.yaml`; prose contract
+# `docs/contracts/peer-authority.md`.
+#
+# SELF-CLASSIFIED `governance` (privileged): changing this authority map
+# requires the full privileged ratification bar — for two peers, BOTH must
+# ratify. The authority model cannot be unilaterally rewritten.
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+
+ratification_authority:
+  # Area ownership defers to .github/CODEOWNERS (enforced on the forge via
+  # require_code_owner_reviews); the explicit entries below are the
+  # jointly-owned decision surfaces (design §A.5: decisions are jointly owned).
+  defer_to_codeowners: true
+  area_owners:
+    "docs/decisions/**": [peer-operator]
+    "docs/rfcs/**": [peer-operator]
+  quorum_by_tier:
+    non_privileged: 1   # the area owner ratifies solo (constrained-BDFL of the area)
+    privileged: 2       # consensus-on-high-risk: both peers (PRIVILEGED_NAMES)
+  no_self_approval: true
+
+# The {actor → human} resolver (the §11.5 identity-resolution gap, shipped
+# HONESTLY): quorums count humans, not accounts. Today this repo has ONE
+# resolved human — the Operator — holding both GitHub accounts (the authoring
+# `chmod735` and the reviewer-venue `ubuntuaws745-cmyk`): token/account
+# separation alone is NOT sufficient (CE's own rule), so both logins map to
+# the same human_id and can never sum to a privileged quorum of 2. This is
+# §A.5's N=1 special case (constrained-BDFL): privileged ratification is the
+# Operator's, recorded as such. The second `humans` slot is filled when a
+# REAL second peer joins (the VPS team-mode trial); until then any record
+# claiming two-peer quorum through these two accounts FAILS the check —
+# exactly the dishonesty it exists to catch.
+identity_map:
+  humans:
+    - human_id: peer-operator
+      github_logins: [chmod735, ubuntuaws745-cmyk]
+      seats: []
+      app_installations: []

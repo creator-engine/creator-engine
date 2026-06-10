@@ -1,0 +1,31 @@
+# INVALID: a cross-area change touching alice's area (runner/**) ratified
+# without the owning area's peer: VAL-PA-AREA-OWNER-MISSING.
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "runner/**": [alice]
+    "forge/**": [bob]
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: alice
+      github_logins: [alice-gh]
+      seats: [seat-alpha]
+    - human_id: bob
+      github_logins: [bob-gh]
+      seats: [seat-beta]
+    - human_id: carol
+      github_logins: [carol-gh]
+ratifications:
+  - item_ref: "creator-engine/creator-engine#204"
+    mutation_class: code
+    author: bob-gh
+    seat: seat-beta
+    approvers: [carol-gh]              # quorum met (1), but alice's area lacks alice
+    changed_paths: ["runner/spend_gate.py", "forge/backlog.py"]

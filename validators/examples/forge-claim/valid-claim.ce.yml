@@ -1,0 +1,11 @@
+# Passing fixture: a live forge-projected claim. The idempotency_key is the
+# canonical SHA256 over (repo, item_id, claimant_instance, lease_window).
+kind: forge-claim
+schema_version: "1"
+repo: creator-engine/creator-engine
+item_id: PVTI_demo1
+claimant_instance: instance-alpha
+lease_window: "2026-06-10T08:00:00Z/PT4H"
+claimed_at: "2026-06-10T08:00:12Z"
+status: claimed
+idempotency_key: "e7ed484913b74686a2e6cc58e17eefaca7fa2f19e2562bd47255ffd53377de0f"

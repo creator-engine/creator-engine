@@ -1,0 +1,29 @@
+# INVALID: a privileged (security) item ratified by ONE peer — the privileged
+# tier requires BOTH peers (quorum 2 of distinct humans): VAL-PA-QUORUM.
+# Note bob's two logins resolve to ONE human — accounts never sum to a quorum.
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "runner/**": [alice]
+    "forge/**": [bob]
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: alice
+      github_logins: [alice-gh]
+      seats: [seat-alpha]
+    - human_id: bob
+      github_logins: [bob-gh, bob-work-gh]
+      seats: [seat-beta]
+ratifications:
+  - item_ref: "creator-engine/creator-engine#203"
+    mutation_class: security
+    author: alice-gh
+    approvers: [bob-gh, bob-work-gh]   # two ACCOUNTS, one HUMAN -> quorum 1
+    changed_paths: ["forge/scoped_token.py"]
