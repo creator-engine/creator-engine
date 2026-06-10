@@ -46,6 +46,11 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "launch_runtime",
         "claude_launch_spec",
         "hermes_launch_spec",
+        # v3.5-F Q1: the per-seat OS resource-bounding wrap (pure builder +
+        # systemd I/O edges) — launch mechanics, sibling of claude_launch_spec.
+        # Reads the v3 runtime-policy resource fragment as DATA through the
+        # existing policy-read seam (loader.load_yaml); imports no v3 module.
+        "resource_bound_spec",
         "tmux_adapter",
         "transcript_archive",
         "pco_allocator",

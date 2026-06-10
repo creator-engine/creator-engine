@@ -72,7 +72,7 @@ in `hook_check.py` (zero decision-behavior change; `version_boundary` +
 (PyYAML + jsonschema) is unchanged — all new deps are optional extras
 (`cockpit`, `cockpit-serve`), dev-vendored offline.
 
-- **base:** `ea1eea6` (current `main`).
+- **base:** `cb90bdd` (current `main`).
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=44
