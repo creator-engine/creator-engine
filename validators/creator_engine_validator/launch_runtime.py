@@ -26,7 +26,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import claude_launch_spec, hermes_launch_spec
+from . import claude_launch_spec, hermes_launch_spec, resource_bound_spec
+from .loader import LoaderError, load_yaml
 
 DEFAULT_HARNESS = "claude"
 DEFAULT_SESSION = "ce-controller"
@@ -70,6 +71,14 @@ class HermesLaunchRefused(LaunchRefused):
     code = "G6-LAUNCH-HERMES-REFUSED"
 
 
+class ResourceBoundRefused(LaunchError):
+    """v3.5-F: a resource-bounded launch is refused — malformed/unratified resource
+    policy, an unsupported host under ``enforce``, a unit-name collision, or a
+    failed launch-confirm (fleet cap / ``memory.oom.group``). Fail-closed."""
+
+    code = "G6-LAUNCH-RESOURCE-REFUSED"
+
+
 def _confirm_pack(repo_root: Path | str | None) -> bool:
     """Seam: confirm the committed hook-pack is loaded (monkeypatchable in tests).
 
@@ -98,6 +107,11 @@ class LaunchPlan:
     visibility: str
     dry_run: bool
     resume: bool
+    # v3.5-F: the resource-bounding evidence stamp. A dict (the applied
+    # ResourceBound + optional fleet cap) when the seat launches bounded;
+    # the literal string "none (advisory)" / "none (off)" on an explicit
+    # ratified opt-down; None when the policy declares no resource governance.
+    resource_bound: dict | str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +125,7 @@ class LaunchPlan:
             "visibility": self.visibility,
             "dry_run": self.dry_run,
             "resume": self.resume,
+            "resource_bound": self.resource_bound,
         }
 
 
@@ -120,6 +135,9 @@ class LaunchResult:
     spawned: bool = False
     attached: bool = False
     terminal: dict | None = None
+    # v3.5-F: live launch-confirm facts (memory.oom.group write + fleet cap),
+    # None for dry-run / unbounded launches.
+    resource_confirm: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -127,6 +145,7 @@ class LaunchResult:
             "spawned": self.spawned,
             "attached": self.attached,
             "terminal": self.terminal,
+            "resource_confirm": self.resource_confirm,
         }
 
 
@@ -161,6 +180,17 @@ def plan_launch(
     )
 
 
+def _resource_stamp(
+    bound: "resource_bound_spec.ResourceBound",
+    policy: "resource_bound_spec.ResourcePolicy",
+) -> dict:
+    """The launch-evidence ``resource_bound`` block: the applied bound + fleet cap."""
+    stamp = bound.to_dict()
+    if policy.fleet_memory_max:
+        stamp["fleet_memory_max"] = policy.fleet_memory_max
+    return stamp
+
+
 def _session_exists(adapter: Any, session: str) -> bool:
     probe = getattr(adapter, "session_exists", None)
     if callable(probe):
@@ -188,6 +218,10 @@ def launch(
     mcp_config_path: str | None = None,
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
+    runtime_policy: Path | str | None = None,
+    systemctl_runner: Any | None = None,
+    support_probe: Any | None = None,
+    cgroupfs_root: Path | str = "/sys/fs/cgroup",
 ) -> LaunchResult:
     """Open or attach a visible Controller-seat tmux session.
 
@@ -195,6 +229,13 @@ def launch(
     harness, the CC-G-D Ring 0 launch-spec is evaluated and the governed command
     (pinned ``--setting-sources project`` + strict MCP) is built **before** the
     hidden/dry-run/tmux branches.
+
+    v3.5-F: when ``runtime_policy`` names a policy file declaring
+    ``resource_envelopes``, the seat is launched inside an OS-enforced
+    ``systemd-run --user --scope`` bound. The wrap is applied to the OUTPUT of
+    Ring 0 (the governed tokens pass through byte-identical) for EVERY
+    supported harness identically. ``systemctl_runner`` / ``support_probe`` /
+    ``cgroupfs_root`` are test seams for the systemd I/O edges.
     """
     plan = plan_launch(
         harness=harness,
@@ -263,6 +304,32 @@ def launch(
             command=hermes_launch_spec.build_governed_hermes_command(base_argv=requested),
         )
 
+    # v3.5-F Ring-0-adjacent: read the resource policy fragment (pure,
+    # fail-closed) BEFORE any side effect, through the existing policy-read
+    # seam (load_yaml). The bounding wrap is applied to the OUTPUT of the
+    # Ring 0 builders above — never their input — so the governed tokens stay
+    # byte-identical for every harness.
+    resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    if runtime_policy is not None:
+        try:
+            policy_data = load_yaml(Path(runtime_policy))
+        except LoaderError as exc:
+            raise ResourceBoundRefused(
+                f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
+            ) from exc
+        try:
+            resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
+        except resource_bound_spec.ResourcePolicyError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+        if resource_policy.opted_down:
+            # Explicit ratified opt-down: launch unbounded, stamp the evidence.
+            plan = replace(plan, resource_bound=f"none ({resource_policy.enforcement})")
+    bounding = (
+        resource_policy is not None
+        and resource_policy.governed
+        and not resource_policy.opted_down
+    )
+
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
         raise HiddenContinuationRefused(
@@ -270,8 +337,18 @@ def launch(
             "(harness exit/crash/auth-loss must not continue headless)"
         )
 
-    # Dry-run is pure: deterministic plan, no tmux, no provider login.
+    # Dry-run is pure: deterministic plan, no tmux, no provider login, and no
+    # systemd probe — the bounding posture is rendered offline (the plan JSON
+    # gains the `resource_bound` block) with the sanitized base unit name.
     if dry_run:
+        if bounding:
+            unit = resource_bound_spec.sanitize_unit_name(session)
+            bound = resource_policy.seat_bound(unit)
+            plan = replace(
+                plan,
+                command=resource_bound_spec.build_bounded_command(plan.command, bound),
+                resource_bound=_resource_stamp(bound, resource_policy),
+            )
         return LaunchResult(plan=plan, spawned=False, attached=False)
 
     if tmux_adapter is None:
@@ -290,6 +367,30 @@ def launch(
                 f"no live launcher session {session!r} to resume; refusing to spawn a hidden seat"
             )
 
+    # v3.5-F live bounding — still BEFORE any side effect: refuse loudly when
+    # user-level bounding is unavailable under `enforce` (Fork F-2), resolve a
+    # collision-free unit name, then wrap the governed command.
+    bound = None
+    if bounding:
+        probe = support_probe or resource_bound_spec.probe_user_bounding
+        ok, reason = probe(systemctl_runner)
+        if not ok:
+            raise ResourceBoundRefused(
+                f"resource_enforcement is 'enforce' but user-level systemd bounding "
+                f"is unavailable: {reason}; the ratified opt-down is "
+                "resource_enforcement: advisory with a resource_optout binding"
+            )
+        try:
+            unit = resource_bound_spec.resolve_unit_name(session, systemctl_runner)
+        except resource_bound_spec.ResourceBoundError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+        bound = resource_policy.seat_bound(unit)
+        plan = replace(
+            plan,
+            command=resource_bound_spec.build_bounded_command(plan.command, bound),
+            resource_bound=_resource_stamp(bound, resource_policy),
+        )
+
     pane = tmux_adapter.ensure_pane(session=session, window=window, command=plan.command)
     terminal = {
         "kind": "tmux",
@@ -297,4 +398,37 @@ def launch(
         "window_id": pane.window_id,
         "pane_id": pane.pane_id,
     }
-    return LaunchResult(plan=plan, spawned=True, attached=resume, terminal=terminal)
+
+    # v3.5-F launch-confirm: the seat scope must materialize. Write
+    # memory.oom.group=1 (kernel kills the SEAT, never a random child) and
+    # apply the collective fleet cap from the policy (idempotent, runtime-only).
+    resource_confirm = None
+    if bound is not None:
+        try:
+            oom_path = resource_bound_spec.write_oom_group(
+                bound.unit, runner=systemctl_runner, cgroupfs_root=cgroupfs_root
+            )
+            if resource_policy.fleet_memory_max:
+                resource_bound_spec.apply_fleet_cap(
+                    resource_policy.fleet_memory_max,
+                    slice_name=bound.slice,
+                    runner=systemctl_runner,
+                )
+        except resource_bound_spec.ResourceBoundError as exc:
+            raise ResourceBoundRefused(
+                f"launch-confirm failed for bounded seat {bound.unit!r}: {exc} "
+                "(pane left for forensics; retire it per the seat-retirement procedure)"
+            ) from exc
+        resource_confirm = {
+            "oom_group_written": True,
+            "oom_group_path": str(oom_path),
+            "fleet_memory_max": resource_policy.fleet_memory_max,
+        }
+
+    return LaunchResult(
+        plan=plan,
+        spawned=True,
+        attached=resume,
+        terminal=terminal,
+        resource_confirm=resource_confirm,
+    )

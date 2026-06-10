@@ -1,0 +1,164 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/forge-claim.schema.yaml"
+title: "Creator Engine forge-projected claim record"
+description: |
+  Machine-readable schema for the **forge-projected claim record** (v3.5-C
+  A-C4, design §A.4): the team-visible projection of a PCO claim onto the
+  forge (assignee + Projects `Status=Running` — the A.0 invariant: the forge
+  is the only shared state). The live projection machinery is
+  `forge/backlog.py` (the α-precursor); this record is the auditable claim
+  form the `forge_claim_dedup` check grades.
+
+  **Advisory lock, honestly:** assignee + Status are advisory, NOT atomic
+  (claim-side TOCTOU, §11.1). The record therefore carries the idempotency
+  key over `(repo, item_id, claimant_instance, lease_window)` (recomputed by
+  the check), and a contention block whose ONLY valid surfacing is
+  `escalation` — a silent overwrite is rejected.
+
+  **Dedup is a deterministic grader outside the LLM:** a `dedup` link
+  requires deterministic evidence — high embedding similarity (score ≥
+  pinned threshold, model pinned) can suffice; shared-title-token overlap and
+  cross-references are additive corroboration (sufficient together, not
+  alone). The check rejects a dedup link without deterministic evidence.
+
+  Prose contract: `docs/contracts/forge-claim.md`.
+
+  Value-free: instance labels and item ids — NEVER a credential or secret.
+type: object
+required:
+  - kind
+  - schema_version
+  - repo
+  - item_id
+  - claimant_instance
+  - lease_window
+  - claimed_at
+  - status
+  - idempotency_key
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: forge-claim
+    description: |
+      Discriminator constant — records without it are not forge claims and
+      MUST NOT be validated by `forge_claim_dedup`.
+  schema_version:
+    type: string
+    enum: ["1"]
+  repo:
+    type: string
+    pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    description: The `owner/name` of the ONE backlog's repo.
+  item_id:
+    type: string
+    minLength: 1
+    description: The backlog item (Projects-v2 item node id or issue ref).
+  claimant_instance:
+    type: string
+    minLength: 1
+    description: The claiming CE instance's label (value-free).
+  lease_window:
+    type: string
+    minLength: 1
+    description: |
+      The claim's lease window (e.g. an ISO-8601 interval). Part of the
+      idempotency tuple: a retry inside the window is the SAME claim.
+  claimed_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$"
+    description: |
+      ISO-8601 claim timestamp — drives earlier-`claimed_at`-wins
+      reconciliation (surfaced as an escalation, never auto-resolved).
+  status:
+    type: string
+    enum: [planned, claimed, contended, released]
+    description: |
+      `planned` (plan-by-default, nothing written) · `claimed` (projection
+      live) · `contended` (a competing claimant observed → the contention
+      block is REQUIRED, surfaced as escalation) · `released`.
+  idempotency_key:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      SHA256 over the canonical `(repo, item_id, claimant_instance,
+      lease_window)` tuple — recomputed and enforced by the check
+      (`VAL-FC-IDEMPOTENCY`).
+  contention:
+    type: object
+    required: [competing_claimants, surfaced_as]
+    unevaluatedProperties: false
+    properties:
+      competing_claimants:
+        type: array
+        minItems: 1
+        items: {type: string, minLength: 1}
+        description: The other claimant(s) observed on the held item.
+      observed_claimed_at:
+        type: string
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$"
+        description: The competing claim's timestamp, when known.
+      surfaced_as:
+        type: string
+        enum: [escalation, silent-overwrite]
+        description: |
+          How the collision was handled. ONLY `escalation` is valid — the
+          enum admits `silent-overwrite` solely so the check can name the
+          violation precisely (`VAL-FC-SILENT-OVERWRITE`) instead of a
+          generic schema error.
+      winner:
+        type: string
+        minLength: 1
+        description: |
+          The earlier-`claimed_at`-wins reconciliation PROPOSAL (reported,
+          not enforced — a human resolves the escalation).
+    description: |
+      REQUIRED when a second live claimant was observed (`status:
+      contended`). A silent overwrite is never a valid record.
+  dedup:
+    type: object
+    required: [duplicate_of, evidence]
+    unevaluatedProperties: false
+    properties:
+      duplicate_of:
+        type: string
+        minLength: 1
+        description: The backlog item this one duplicates.
+      evidence:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required: [kind]
+          unevaluatedProperties: false
+          properties:
+            kind:
+              type: string
+              enum: [embedding_similarity, title_token_overlap, cross_reference]
+            score:
+              type: number
+              description: embedding_similarity — the measured similarity.
+            threshold:
+              type: number
+              description: embedding_similarity — the pinned accept threshold.
+            model_ref:
+              type: string
+              minLength: 1
+              description: embedding_similarity — the pinned embedding model.
+            shared_tokens:
+              type: array
+              items: {type: string, minLength: 1}
+              description: title_token_overlap — the shared title tokens.
+            ref:
+              type: string
+              minLength: 1
+              description: cross_reference — the corroborating cross-link.
+        description: |
+          Deterministic evidence entries. The check requires: an
+          `embedding_similarity` entry with `score >= threshold` and a
+          pinned `model_ref`, OR a non-empty `title_token_overlap` PLUS a
+          `cross_reference` (additive corroboration). A dedup link without
+          that bar is rejected (`VAL-FC-DEDUP-NONDETERMINISTIC`).
+    description: |
+      OPTIONAL dedup link: the triage side PROPOSES it; the deterministic
+      evidence bar is what makes it bind.

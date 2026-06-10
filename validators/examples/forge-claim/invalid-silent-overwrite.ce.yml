@@ -1,0 +1,18 @@
+# INVALID: a second claimant was observed on a held item and the record
+# claims the collision was resolved by silently overwriting their claim —
+# the advisory lock has NO overwrite semantics; collisions surface as
+# escalations (VAL-FC-SILENT-OVERWRITE).
+kind: forge-claim
+schema_version: "1"
+repo: creator-engine/creator-engine
+item_id: PVTI_demo2
+claimant_instance: instance-beta
+lease_window: "2026-06-10T09:00:00Z/PT4H"
+claimed_at: "2026-06-10T09:00:30Z"
+status: contended
+idempotency_key: "9da95a8a8e6014ff9b139f72c8255be1eb5abdecb6d109cfa77ee3306cdf8237"
+contention:
+  competing_claimants: [instance-alpha]
+  observed_claimed_at: "2026-06-10T08:59:55Z"
+  surfaced_as: silent-overwrite
+  winner: instance-beta

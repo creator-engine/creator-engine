@@ -1,0 +1,17 @@
+# INVALID: a dedup link proposed without the deterministic-evidence bar —
+# title-token overlap ALONE is additive corroboration, not sufficient (no
+# embedding measurement, no cross-reference): VAL-FC-DEDUP-NONDETERMINISTIC.
+kind: forge-claim
+schema_version: "1"
+repo: creator-engine/creator-engine
+item_id: PVTI_demo3
+claimant_instance: instance-alpha
+lease_window: "2026-06-10T10:00:00Z/PT4H"
+claimed_at: "2026-06-10T10:00:05Z"
+status: claimed
+idempotency_key: "5fda4c317e9a8cdd30d8854ff59264c5e7998689cdcdb20d07be311047f3b6e3"
+dedup:
+  duplicate_of: PVTI_demo1
+  evidence:
+    - kind: title_token_overlap
+      shared_tokens: [cockpit]

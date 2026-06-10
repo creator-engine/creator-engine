@@ -544,3 +544,124 @@ def test_gate_b_ledger_root_via_ce_block_fallback(tmp_path):
     event["ce"] = {"ledger_root": str(real_ledger)}
     ctx = hook_check.build_context(event, posture_root=str(wt))
     assert ctx.posture == "governed"
+
+
+# --- v3.5-B.3: the refusal-record spine seam (append-only observability) ----
+#
+# A governed hard deny (restricted mechanic / secret path) appends ONE
+# ``runtime_agent_action{classification: denied}`` record to the instance-local
+# refusal chain under the hook's own v1 root — via the SHARED
+# ``runtime_evidence_spine`` (V1->shared is the allowed edge; ``evidence_sink``
+# is v3 and is never imported here). Decide FIRST, record AFTER; the deny
+# stands even when the writer fails; advisory/ungoverned paths record nothing.
+
+
+def _refusal_chain_file(root: Path) -> Path:
+    return root / ".hermes" / "cc-g-c-hook-observations" / "refusal-chain.yaml"
+
+
+def _load_refusal_records(root: Path) -> list[dict]:
+    import yaml
+
+    doc = yaml.safe_load(_refusal_chain_file(root).read_text(encoding="utf-8"))
+    assert isinstance(doc, dict) and doc.get("kind") == "runtime-evidence-chain"
+    return doc["records"]
+
+
+def _governed_ctx(tmp_path: Path) -> hook_check.HookContext:
+    return hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, repo_root=str(tmp_path)
+    )
+
+
+def test_governed_mechanic_deny_appends_denied_record(tmp_path):
+    event = _bash_event("git push origin main")
+    event["session_id"] = "seat-under-test"
+    decision = hook_check.evaluate(event, _governed_ctx(tmp_path))
+    assert decision.decision == "deny"  # the decision itself is unchanged
+
+    records = _load_refusal_records(tmp_path)
+    assert len(records) == 1
+    record = records[0]
+    assert record["record_type"] == "runtime_agent_action"
+    assert record["classification"] == "denied"
+    assert record["decision_mode"] == "deny"
+    assert record["op"] == "vcs"
+    assert record["mutation_class"] == "deploy"
+    assert record["tool"] == "Bash:git"
+    assert "git push" in record["target"]
+    assert record["run_id"] == "seat-under-test"
+    assert "G2.007.2" in record["decision_reason"]
+    assert record["fidelity"] == "best_effort"
+    assert record["timing"] == "pre"
+
+
+def test_refusal_chain_grows_and_verifies_clean(tmp_path):
+    from creator_engine_validator.runtime_evidence_spine import verify_chain
+
+    ctx = _governed_ctx(tmp_path)
+    hook_check.evaluate(_bash_event("git push origin main"), ctx)
+    hook_check.evaluate(_bash_event("gh pr merge 72 --squash"), ctx)
+    hook_check.evaluate(_read_event(".env"), ctx)
+
+    records = _load_refusal_records(tmp_path)
+    assert len(records) == 3
+    assert verify_chain(records) == []
+    assert [r["sequence"] for r in records] == [0, 1, 2]
+
+
+def test_governed_secret_deny_appends_secret_record(tmp_path):
+    decision = hook_check.evaluate(_read_event("config/.env"), _governed_ctx(tmp_path))
+    assert decision.decision == "deny"
+    record = _load_refusal_records(tmp_path)[0]
+    assert record["op"] == "secret"
+    assert record["mutation_class"] == "security"
+    assert record["tool"] == "Read"
+    assert "matched rule" in record["decision_reason"]
+
+
+def test_deny_stands_when_refusal_writer_raises(tmp_path, monkeypatch):
+    import creator_engine_validator.hook_check as hc
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(hc.yaml, "safe_dump", _boom)
+    decision = hook_check.evaluate(_bash_event("git push origin main"), _governed_ctx(tmp_path))
+    assert decision.decision == "deny"  # the deny STANDS; no exception escaped
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_ungoverned_advisory_deny_records_nothing(tmp_path):
+    ctx = hook_check.HookContext(
+        posture="ungoverned", manifest_paths=MANIFEST, repo_root=str(tmp_path)
+    )
+    decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_governed_manifest_advisory_records_nothing(tmp_path):
+    decision = hook_check.evaluate(_edit_event("README.md"), _governed_ctx(tmp_path))
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_no_repo_root_records_nothing_and_still_denies(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
+    assert decision.decision == "deny"
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_hook_check_never_imports_v3_modules():
+    # The keystone boundary: the seam rides V1->shared (runtime_evidence_spine);
+    # the v3 evidence_sink must NEVER appear in this module's source.
+    source = (
+        REPO_ROOT / "validators" / "creator_engine_validator" / "hook_check.py"
+    ).read_text(encoding="utf-8")
+    assert "evidence_sink" not in source
+    assert "runtime_evidence_spine" in source

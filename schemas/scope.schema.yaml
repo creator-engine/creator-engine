@@ -101,6 +101,16 @@ properties:
       minLength: 1
     description: |
       Optional forward hook to the durable Skill axis (deferred). Shape only.
+  binding_decisions:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    description: |
+      Optional ids of Decision Records (`docs/decisions/` ADRs / `docs/rfcs/`
+      RFCs, e.g. `ADR-0007`) this Scope cites as BINDING context — the A↔B
+      seam (v3.5-C A-C1). A-C1 adds the FIELD only; the readiness enforcement
+      (every cited record must be `status: accepted`) is the B-C2 gate.
   crosswalk_parent:
     type: string
     minLength: 1

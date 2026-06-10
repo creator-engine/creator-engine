@@ -29,7 +29,11 @@ def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
     # 47 with the G-6 ce_scope check registered alongside version_boundary.
-    assert len(reg) == 47
+    # v3.5-C A-C1 added the decision_record check: 47 -> 48. v3.5-C A-C2 added
+    # the storage_tier_finding check: 48 -> 49. v3.5-C A-C3 added the
+    # peer_authority check: 49 -> 50. v3.5-C A-C4 added the forge_claim_dedup
+    # check: 50 -> 51.
+    assert len(reg) == 51
 
 
 def test_green_on_real_package():
@@ -63,14 +67,21 @@ def test_allowlist_has_no_stale_entries_on_main():
 
 
 def test_taxonomy_counts_and_disjoint():
-    assert len(ver.V1_RUNTIME) == 21
+    # v3.5-F Q1 added the per-seat resource-bounding launch mechanics
+    # (``resource_bound_spec``, sibling of ``claude_launch_spec``): 21 -> 22.
+    assert len(ver.V1_RUNTIME) == 22
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
     # (``v3_cli``), and the G-6 spine: 24 -> 26. v3.5-A.1 added the OpenShell
     # runner backend (``runner.openshell_backend``): 26 -> 27. v3.5-D.0.1 added
-    # the live usage tap (``runner.usage_tap``): 27 -> 28.
-    assert len(ver.V3_RUNTIME) == 28
+    # the live usage tap (``runner.usage_tap``): 27 -> 28. v3.5-B.1 added the
+    # Cockpit family — the L2 read-model (= harness-paper F1,
+    # ``runner.cockpit_readmodel``), the CE_DEMO seed
+    # (``runner.cockpit_demo_seed``, Fork F-b), and the L3 Textual view
+    # (``v3_cockpit``): 28 -> 31. The v3.5-C α-precursor added the Projects-v2
+    # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
+    assert len(ver.V3_RUNTIME) == 32
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

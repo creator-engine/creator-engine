@@ -3,3 +3,32 @@ iniconfig==2.3.0
 packaging==26.2
 pluggy==1.6.0
 Pygments==2.20.0
+# v3.5-B.1 cockpit extra (Fork F-a): the pinned transitive closure, vendored in
+# wheelhouse-dev/ so CI's existing offline dev-install exercises what ships.
+textual==8.2.7
+watchfiles==1.2.0
+rich==15.0.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+mdit-py-plugins==0.6.1
+linkify-it-py==2.1.0
+uc-micro-py==2.0.0
+platformdirs==4.10.0
+typing-extensions==4.15.0
+anyio==4.13.0
+idna==3.18
+# v3.5-B.6 cockpit-serve extra: the pinned textual-serve transitive closure,
+# vendored in wheelhouse-dev/ so CI's existing offline dev-install exercises
+# what ships (serve is additive; the B.1 TUI closure above is untouched).
+textual-serve==1.1.3
+aiohttp==3.14.1
+aiohttp-jinja2==1.6
+jinja2==3.1.6
+MarkupSafe==3.0.3
+aiohappyeyeballs==2.6.2
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+multidict==6.7.1
+propcache==0.5.2
+yarl==1.24.2
