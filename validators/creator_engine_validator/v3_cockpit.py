@@ -33,13 +33,19 @@ from typing import Any, Callable, Sequence
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import DataTable, Footer, Header, Static, TabPane, TabbedContent
 
 APP_TITLE = "◆ CE Cockpit"
 
 #: The board table's column headings (presentation labels over snapshot fields).
-_BOARD_COLUMNS = ("Scope", "Stage", "State", "Change-type", "Ready", "Bet")
+_BOARD_COLUMNS = (
+    "Scope", "Stage", "State", "Seat", "Role", "Status",
+    "Harness/Model", "Envelope", "Outcome", "Why blocked",
+)
+
+#: The crabfleet filter triad — keys bind to the L2-precomputed id lists.
+_FILTER_KEYS = ("all", "mine", "live")
 
 SnapshotLoader = Callable[[], dict[str, Any]]
 
@@ -50,13 +56,19 @@ def _mark(flag: Any) -> str:
 
 def _board_row(card: dict[str, Any]) -> tuple[str, ...]:
     """Format ONE card dict into a display row (pure presentation, no derivation)."""
+    seat = card.get("seat") or {}
+    harness_model = f"{seat.get('harness') or '—'}/{seat.get('model') or '—'}"
     return (
         str(card.get("scope_id", "—")),
         str(card.get("phase", "—")),
         str(card.get("state", "—")),
-        str(card.get("mutation_class", "—")),
-        _mark(card.get("ready")),
-        _mark(card.get("ratified")),
+        str(seat.get("controller_id") or "—"),
+        str(card.get("role_badge") or "—"),
+        str(card.get("status_chip", "—")),
+        harness_model,
+        str(card.get("envelope_badge") or "—"),
+        str(card.get("outcome_chip") or "—"),
+        str(card.get("blocked_reason") or "—"),
     )
 
 
@@ -117,6 +129,64 @@ def _seat_governance_lines(lane_id: str, seat: dict[str, Any]) -> list[str]:
     )
     lines.append(f"  matrix: {cells}")
     return lines
+
+
+def _stream_text(detail: dict[str, Any]) -> str:
+    """Format the Stream tab — collapsed event-group spans (pure presentation)."""
+    lines = []
+    for group in (detail.get("stream") or {}).get("groups", []):
+        if group.get("kind") == "actions":
+            retry = f" ×{group['count']} RETRY" if group.get("retry") else ""
+            lines.append(
+                f"[{group.get('color', '—')}] {group.get('first_at', '—')} "
+                f"{group.get('tool', '—')} → {group.get('target', '—')} · "
+                f"{group.get('classification', '—')}{retry}"
+            )
+        else:
+            lines.append(f"·  {group.get('recorded_at', '—')} {group.get('kind', '—')}")
+    return "\n".join(lines) or "—"
+
+
+def _diffs_text(detail: dict[str, Any]) -> str:
+    diffs = detail.get("diffs") or {}
+    lines = [f"source: {diffs.get('source', '—')}"]
+    lines += [f"  {f.get('path', '—')}  ({f.get('writes', 0)} write(s))" for f in diffs.get("files", [])]
+    return "\n".join(lines)
+
+
+def _evidence_text(detail: dict[str, Any]) -> str:
+    evidence = detail.get("evidence") or {}
+    return (
+        f"chain: {evidence.get('record_count', 0)} record(s) · "
+        f"verify_chain: {evidence.get('badge', '—')}"
+    )
+
+
+def _waterfall_text(detail: dict[str, Any]) -> str:
+    lines = []
+    for stage in (detail.get("waterfall") or {}).get("stages", []):
+        duration = stage.get("duration_seconds")
+        duration_text = f"{duration:.0f}s" if duration is not None else "—"
+        lines.append(f"{stage.get('stage', '—'):>10}  {duration_text:>8}  ({stage.get('started_at', '—')})")
+    return "\n".join(lines) or "—"
+
+
+def _outcome_text(detail: dict[str, Any]) -> str:
+    outcome = detail.get("outcome") or {}
+    lines = [f"outcome: {outcome.get('outcome') or '—'}"]
+    change_set = outcome.get("change_set")
+    if change_set:
+        lines.append(
+            f"change: {change_set.get('branch', '—')} → {change_set.get('base', '—')} "
+            f"(PR {change_set.get('pr_number', '—')} · head {change_set.get('head_sha', '—')})"
+        )
+    ratification = outcome.get("ratification")
+    if ratification:
+        lines.append(f"ratified_prompt_sha: {ratification.get('ratified_prompt_sha', '—')}")
+        lines.append(f"approver_ref: {ratification.get('approver_ref', '—')}")
+    else:
+        lines.append("ratification: —")
+    return "\n".join(lines)
 
 
 def _meter_strip_text(snapshot: dict[str, Any]) -> str:
@@ -191,6 +261,9 @@ class CockpitApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh_snapshot", "Refresh"),
+        Binding("a", "filter('all')", "All"),
+        Binding("m", "filter('mine')", "Mine"),
+        Binding("l", "filter('live')", "Live"),
     ]
     CSS = """
     #watermark {
@@ -206,8 +279,15 @@ class CockpitApp(App[None]):
         border-right: solid $primary;
         padding: 0 1;
     }
-    #board {
+    #center {
         width: 1fr;
+    }
+    #board {
+        height: 1fr;
+    }
+    #detail {
+        height: 14;
+        border-top: solid $primary;
     }
     #right-rail {
         width: 40;
@@ -235,6 +315,8 @@ class CockpitApp(App[None]):
         self._reload = reload
         self._watch_paths = list(watch_paths)
         self._watch_task: asyncio.Task[None] | None = None
+        self._active_filter = "all"
+        self._row_lanes: list[str | None] = []
 
     # -- compose / bind -------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -244,7 +326,19 @@ class CockpitApp(App[None]):
             yield Static(str(watermark), id="watermark")
         with Horizontal(id="body"):
             yield VerticalScroll(Static("", id="left-rail-text"), id="left-rail")
-            yield DataTable(id="board")
+            with Vertical(id="center"):
+                yield DataTable(id="board")
+                with TabbedContent(id="detail"):
+                    with TabPane("Stream", id="tab-stream"):
+                        yield Static("", id="detail-stream")
+                    with TabPane("Diffs", id="tab-diffs"):
+                        yield Static("", id="detail-diffs")
+                    with TabPane("Evidence trail", id="tab-evidence"):
+                        yield Static("", id="detail-evidence")
+                    with TabPane("Waterfall", id="tab-waterfall"):
+                        yield Static("", id="detail-waterfall")
+                    with TabPane("Outcome", id="tab-outcome"):
+                        yield Static("", id="detail-outcome")
             yield VerticalScroll(Static("", id="right-rail-text"), id="right-rail")
         yield Static("", id="meters")
         yield Footer()
@@ -252,24 +346,59 @@ class CockpitApp(App[None]):
     def on_mount(self) -> None:
         table = self.query_one("#board", DataTable)
         table.add_columns(*_BOARD_COLUMNS)
+        table.cursor_type = "row"
         self._bind_snapshot()
         if self._watch_paths and self._reload is not None:
             self._watch_task = asyncio.create_task(self._watch_loop())
 
     def _bind_snapshot(self) -> None:
-        """Re-bind every widget to the CURRENT snapshot (no computation)."""
+        """Re-bind every widget to the CURRENT snapshot (no computation).
+
+        The active filter only selects which of the L2-precomputed id lists
+        (``board.filters``) drives row inclusion — the fold happened in L2.
+        """
+        board = self._snapshot.get("board", {})
+        included = set(
+            (board.get("filters") or {}).get(self._active_filter, [])
+            if self._active_filter != "all"
+            else [c.get("scope_id") for c in board.get("cards", [])]
+        )
         table = self.query_one("#board", DataTable)
         table.clear()
-        for card in self._snapshot.get("board", {}).get("cards", []):
+        self._row_lanes = []
+        for card in board.get("cards", []):
+            if card.get("scope_id") not in included:
+                continue
             table.add_row(*_board_row(card))
+            self._row_lanes.append((card.get("seat") or {}).get("lane_id"))
         self.query_one("#left-rail-text", Static).update(_left_rail_text(self._snapshot))
         self.query_one("#right-rail-text", Static).update(_right_rail_text(self._snapshot))
         self.query_one("#meters", Static).update(_meter_strip_text(self._snapshot))
+        self._bind_detail(self._row_lanes[0] if self._row_lanes else None)
 
-    # -- refresh / live tail --------------------------------------------------
+    def _bind_detail(self, lane_id: str | None) -> None:
+        """Bind the seat-detail tabs to ONE seat's L2-folded detail structures."""
+        detail = (self._snapshot.get("seat_detail") or {}).get(str(lane_id)) or {}
+        self.query_one("#detail-stream", Static).update(_stream_text(detail))
+        self.query_one("#detail-diffs", Static).update(_diffs_text(detail))
+        self.query_one("#detail-evidence", Static).update(_evidence_text(detail))
+        self.query_one("#detail-waterfall", Static).update(_waterfall_text(detail))
+        self.query_one("#detail-outcome", Static).update(_outcome_text(detail))
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        index = event.cursor_row
+        if 0 <= index < len(self._row_lanes):
+            self._bind_detail(self._row_lanes[index])
+
+    # -- refresh / filters / live tail ----------------------------------------
     def action_refresh_snapshot(self) -> None:
         if self._reload is not None:
             self._snapshot = self._reload()
+            self._bind_snapshot()
+
+    def action_filter(self, name: str) -> None:
+        if name in _FILTER_KEYS:
+            self._active_filter = name
             self._bind_snapshot()
 
     async def _watch_loop(self) -> None:

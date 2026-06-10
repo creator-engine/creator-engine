@@ -147,6 +147,36 @@ def _outcome(run_id: str, minute: int, *, outcome: str, branch: str, pr_number: 
     }
 
 
+def _lifecycle(run_id: str, minute: int, phase: str) -> dict[str, Any]:
+    """One ``runtime_evidence`` lifecycle attestation (the waterfall's input)."""
+    return {
+        "kind": "runtime-evidence-record",
+        "record_type": "runtime_evidence",
+        "schema_version": "1",
+        "policy_sha": DEMO_POLICY_SHA,
+        "run_id": run_id,
+        "recorded_at": _ts(minute),
+        "lifecycle_phase": phase,
+        "classification": "allowed",
+    }
+
+
+def _ratification(run_id: str, minute: int) -> dict[str, Any]:
+    """One value-free ``runtime_ratification`` record (the Outcome tab's input)."""
+    return {
+        "kind": "runtime-ratification",
+        "record_type": "runtime_ratification",
+        "schema_version": "1",
+        "policy_sha": DEMO_POLICY_SHA,
+        "run_id": run_id,
+        "recorded_at": _ts(minute),
+        "ratified_prompt_sha": hashlib.sha256(f"demo-ratified-{run_id}".encode()).hexdigest(),
+        "approver_ref": _DEMO_APPROVER,
+        "ratified_head_sha": hashlib.sha256(f"demo-head-{run_id}".encode()).hexdigest()[:12],
+        "binding_ref": hashlib.sha256(f"demo-binding-{run_id}".encode()).hexdigest(),
+    }
+
+
 def _ledger_leaf(run_id: str, minute: int, amount: float, model: str) -> dict[str, Any]:
     """One metered ``runtime_spend_ledger`` leaf via the REAL G-5 builder (PURE)."""
     return meter_record_body(
@@ -253,34 +283,36 @@ def seed() -> dict[str, Any]:
         _pane("ce-demo-shipper", "ship-pr-294", role="implementer", status="closed", minute=15, pane_n=8, closed=True),
     ]
 
+    # Scope ids equal their seats' lane_ids (the documented board join rule —
+    # a lane allocated FOR a Scope is named after it).
     scopes = [
-        _scope("demo-billing-probe", "frame the metered-billing probe", mutation_class="docs"),
+        _scope("scope-billing-frame", "frame the metered-billing probe", mutation_class="docs"),
         _scope(
-            "demo-meter-tiles", "shape the meter-tile slice",
+            "scope-meter-shape", "shape the meter-tile slice",
             mutation_class="code", done_when=["tiles render with badges"], budget=8.0, ratified=True,
         ),
         _scope(
-            "demo-upload-gate", "gate the upload pipeline",
+            "gate-uploads", "gate the upload pipeline",
             mutation_class="code", done_when=["gate denies oversize uploads"], budget=12.0, ratified=True,
         ),
         _scope(
-            "demo-release-push", "land the release branch",
+            "gate-push-refusal", "land the release branch",
             mutation_class="deploy", done_when=["release branch green"], budget=15.0, ratified=True,
         ),
         _scope(
-            "demo-review-pr300", "independently review PR 300",
+            "pr-300-review", "independently review PR 300",
             mutation_class="governance", done_when=["review submitted through the hook"], budget=5.0, ratified=True,
         ),
         _scope(
-            "demo-data-migration", "migrate the demo dataset",
+            "envelope-scope-denial", "probe a review outside the envelope",
+            mutation_class="governance", done_when=["denial recorded on the spine"], budget=3.0, ratified=True,
+        ),
+        _scope(
+            "spend-hard-breach", "migrate the demo dataset",
             mutation_class="schema", done_when=["migration replayed clean"], budget=10.0, ratified=True,
         ),
         _scope(
-            "demo-attest-bundle", "attest the release bundle",
-            mutation_class="attestation", done_when=["bundle attested"], budget=6.0, ratified=True,
-        ),
-        _scope(
-            "demo-ship-294", "ship the docs refresh (PR 294)",
+            "ship-pr-294", "ship the docs refresh (PR 294)",
             mutation_class="docs", done_when=["PR 294 merged head-pinned"], budget=4.0, ratified=True,
         ),
     ]
@@ -288,17 +320,18 @@ def seed() -> dict[str, Any]:
     # Committed-signal projections (state-as-projection; the seed states the
     # signals, project_scope_state derives the conserved state).
     scope_signals = {
-        "demo-upload-gate": {"dispatched": True},
-        "demo-release-push": {"dispatched": True},
-        "demo-data-migration": {"dispatched": True},
-        "demo-review-pr300": {"reviewed": True},
-        "demo-attest-bundle": {"final_ratified": True},
-        "demo-ship-294": {"merged": True},
+        "gate-uploads": {"dispatched": True},
+        "gate-push-refusal": {"dispatched": True},
+        "envelope-scope-denial": {"dispatched": True},
+        "spend-hard-breach": {"dispatched": True},
+        "pr-300-review": {"reviewed": True},
+        "ship-pr-294": {"merged": True},
     }
 
     chains = {
         # The 01-Jul moment: an allowed in-manifest write, then `git push`
-        # DENIED by the deploy boundary — on a verifying hash chain.
+        # DENIED by the deploy boundary — TWICE (a Temporal-style retry span
+        # on the Stream tab) — on a verifying hash chain.
         "gate-push-refusal": _chain([
             _action(
                 "gate-push-refusal", 13,
@@ -309,6 +342,13 @@ def seed() -> dict[str, Any]:
             ),
             _action(
                 "gate-push-refusal", 14,
+                op="vcs", mutation_class="deploy",
+                target="git push origin ce/demo/gate-push-refusal", tool="Bash:git push",
+                classification="denied", decision_mode="deny",
+                decision_reason=PUSH_DENY_REASON,
+            ),
+            _action(
+                "gate-push-refusal", 15,
                 op="vcs", mutation_class="deploy",
                 target="git push origin ce/demo/gate-push-refusal", tool="Bash:git push",
                 classification="denied", decision_mode="deny",
@@ -327,15 +367,36 @@ def seed() -> dict[str, Any]:
             _outcome("pr-300-review", 11, outcome="review_submitted",
                      branch="ce/demo/pr-300-review", pr_number=300),
         ]),
-        # The shipped seat: terminal pr_merged disposition.
+        # The shipped seat: full lifecycle (the Waterfall tab), the terminal
+        # pr_merged disposition, and the value-free ratification record.
         "ship-pr-294": _chain([
+            _lifecycle("ship-pr-294", 2, "provision"),
+            _lifecycle("ship-pr-294", 5, "run"),
+            _lifecycle("ship-pr-294", 14, "collect"),
             _outcome("ship-pr-294", 15, outcome="pr_merged",
                      branch="ce/demo/ship-pr-294", pr_number=294),
+            _ratification("ship-pr-294", 15),
+            _lifecycle("ship-pr-294", 16, "teardown"),
         ]),
         # The fleet's other metered run (v3.5-B.4): two ledger leaves on the
-        # active builder, so the MEASURED fleet spend exceeds the breached run.
+        # active builder, so the MEASURED fleet spend exceeds the breached run
+        # — plus two in-manifest writes (the Diffs tab's input).
         "gate-uploads": _chain([
             _ledger_leaf("gate-uploads", 3, 1.80, "claude-fable-5"),
+            _action(
+                "gate-uploads", 4,
+                op="write", mutation_class="code",
+                target="src/uploads/gate.py", tool="Edit",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="permitted under active manifest / mechanics / secret policy",
+            ),
+            _action(
+                "gate-uploads", 7,
+                op="write", mutation_class="code",
+                target="src/uploads/gate.py", tool="Edit",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="permitted under active manifest / mechanics / secret policy",
+            ),
             _ledger_leaf("gate-uploads", 8, 1.50, "claude-fable-5"),
         ]),
         # The spend hard-breach pause: the run's metered leaves ($10.00 of a
@@ -433,4 +494,16 @@ def seed() -> dict[str, Any]:
         "envelopes": {"pr-300-review": dict(DEMO_ENVELOPE)},
         "usage_turns": usage_turns,
         "context_pct": 52.0,
+        # Harness provenance (live: the governance sidecar beside each pane
+        # record); the demo fleet is deliberately mixed-harness.
+        "harnesses": {
+            "scope-billing-frame": "claude",
+            "scope-meter-shape": "codex",
+            "gate-uploads": "claude",
+            "gate-push-refusal": "claude",
+            "pr-300-review": "claude",
+            "envelope-scope-denial": "codex",
+            "spend-hard-breach": "claude",
+            "ship-pr-294": "claude",
+        },
     }

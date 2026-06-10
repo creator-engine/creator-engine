@@ -151,19 +151,35 @@ SUBSCRIPTION_PLACEHOLDER = (
 #: Breach-tier action semantics (the G-5 two-tier circuit breaker, verbatim).
 _BREACH_ACTIONS = {"soft": "alert + continue", "hard": "pause + escalate"}
 
+#: v3.5-B.2 — outcome colors for stream spans (Temporal pattern), expressed in
+#: CE's semantic palette names (refused -> gate, verified/allowed -> spark,
+#: pending/escalate -> amber).
+_CLASS_COLORS = {"allowed": "spark", "denied": "gate", "escalate": "amber"}
+
+#: Seat statuses that count as LIVE for the crabfleet all/mine/live filters.
+_LIVE_STATUSES = frozenset({"starting", "active", "blocked", "closing"})
+
 
 # ---------------------------------------------------------------------------
 # The PURE fold — L1-shaped values -> ONE JSON-serializable snapshot
 # ---------------------------------------------------------------------------
-def _seat_card(pane: Mapping[str, Any], chains: Mapping[str, Any]) -> dict[str, Any]:
+def _seat_card(
+    pane: Mapping[str, Any],
+    chains: Mapping[str, Any],
+    models: Mapping[str, str],
+    harnesses: Mapping[str, str],
+) -> dict[str, Any]:
     """Project one pane-registry record to a seat card (PURE).
 
     ``run_id`` is attributed by the documented join rule: a chain whose
     ``run_id`` equals the seat's ``lane_id`` belongs to the seat (the demo seed
     follows it; a live seat without such a chain carries ``None`` — declared,
-    not guessed).
+    not guessed). ``model`` is the newest spend-ledger leaf's model on the
+    seat's chain; ``harness`` comes from the governance sidecar beside the pane
+    record — both real provenance, ``None`` where absent.
     """
     lane_id = pane.get("lane_id")
+    lane_key = str(lane_id)
     terminal = pane.get("terminal") if isinstance(pane.get("terminal"), Mapping) else {}
     return {
         "controller_id": pane.get("controller_id"),
@@ -176,19 +192,58 @@ def _seat_card(pane: Mapping[str, Any], chains: Mapping[str, Any]) -> dict[str, 
         "worktree_path": pane.get("worktree_path"),
         "branch": pane.get("branch"),
         "run_id": lane_id if lane_id in chains else None,
+        "model": models.get(lane_key),
+        "harness": harnesses.get(lane_key),
     }
 
 
-def _board_card(scope: Mapping[str, Any], signals: Mapping[str, Any]) -> dict[str, Any]:
-    """Project one Scope artifact (+ its committed signals) to a board card (PURE).
+def _board_card(
+    scope: Mapping[str, Any],
+    signals: Mapping[str, Any],
+    *,
+    pane: Mapping[str, Any] | None = None,
+    envelope: Any = None,
+    harness: str | None = None,
+    model: str | None = None,
+    outcome: Mapping[str, Any] | None = None,
+    refusal: Mapping[str, Any] | None = None,
+    breach: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project one Scope (+ seat join + evidence terminals) to a board card (PURE).
 
     The stage column is the canon skin: ``coordination.project_scope_state``
     derives the conserved ``state`` from the signals, and ``PHASE_BY_STATE`` /
     ``BOARD_BY_STATE`` project the phase/board labels — never a third
-    vocabulary.
+    vocabulary. Seat join rule: the pane whose ``lane_id`` equals the
+    ``scope_id`` (a lane allocated FOR a Scope is named after it); no match =
+    an unseated card, never a guess. A BLOCKED card surfaces *why* inline —
+    the latest refusal-chain entry or spend breach for its run — linking to
+    the governance panel.
     """
     projection = coordination.project_scope_state(dict(scope), **dict(signals))
     ready, _reasons = coordination.scope_is_ready(scope)
+    pane = pane if isinstance(pane, Mapping) else None
+    envelope_record = _envelope_record(envelope)
+    envelope_ref = pane.get("envelope_ref") if pane else None
+    if envelope_record:
+        envelope_badge: str | None = f"granted:{envelope_record.get('mechanic')}"
+    elif envelope_ref == "none":
+        envelope_badge = "none"
+    else:
+        envelope_badge = None
+    status = pane.get("status") if pane else None
+    blocked = status == "blocked"
+    blocked_source = None
+    blocked_reason = None
+    if blocked:
+        if refusal is not None:
+            blocked_source = "refusal-chain"
+            blocked_reason = refusal.get("decision_reason")
+        elif breach is not None:
+            blocked_source = "spend-breach"
+            blocked_reason = breach.get("reason")
+        else:
+            blocked_reason = "blocked (no refusal or breach on the spine)"
     return {
         "scope_id": scope.get("scope_id"),
         "title": scope.get("intent"),
@@ -198,6 +253,24 @@ def _board_card(scope: Mapping[str, Any], signals: Mapping[str, Any]) -> dict[st
         "mutation_class": scope.get("mutation_class"),
         "ready": bool(ready),
         "ratified": coordination.is_ratified(scope),
+        "seat": {
+            "controller_id": pane.get("controller_id") if pane else None,
+            "lane_id": pane.get("lane_id") if pane else None,
+            "role": pane.get("role") if pane else None,
+            "status": status,
+            "harness": harness,
+            "model": model,
+        },
+        "status_chip": status or "unseated",
+        "role_badge": pane.get("role") if pane else None,
+        "envelope_badge": envelope_badge,
+        # The per-seat resource-headroom sparkline SLOT (Fork 5 honesty: the
+        # estimator is unshipped, so the slot is declared UNAVAILABLE).
+        "headroom_slot": {"badge": BADGE_UNAVAILABLE, "points": []},
+        "outcome_chip": outcome.get("outcome") if outcome else None,
+        "blocked": blocked,
+        "blocked_source": blocked_source,
+        "blocked_reason": blocked_reason,
     }
 
 
@@ -322,6 +395,179 @@ def _legacy_entry(observation: Mapping[str, Any]) -> dict[str, Any]:
 
 def _float_or_none(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+# ---------------------------------------------------------------------------
+# v3.5-B.2 — board-card enrichment + seat-detail folds (PURE)
+# ---------------------------------------------------------------------------
+def _parse_iso(value: Any) -> Any:
+    """Parse an input ISO-8601 stamp (Z-tolerant) or None (PURE — stamps are inputs)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _models_from_chains(chain_map: Mapping[str, list[dict[str, Any]]]) -> dict[str, str]:
+    """run_id -> the newest spend-ledger leaf's model (real provenance, never guessed)."""
+    out: dict[str, str] = {}
+    for run_id, chain in chain_map.items():
+        for record in chain:  # chain order == append order; last wins (newest)
+            if isinstance(record, Mapping) and record.get("record_type") == "runtime_spend_ledger":
+                model = record.get("model")
+                if model:
+                    out[str(run_id)] = str(model)
+    return out
+
+
+def _last_of_type(chain: list[dict[str, Any]], record_type: str) -> dict[str, Any] | None:
+    found = None
+    for record in chain:
+        if isinstance(record, Mapping) and record.get("record_type") == record_type:
+            found = record
+    return dict(found) if found else None
+
+
+def _stream_groups(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse consecutive identical agent actions into Temporal-style spans (PURE).
+
+    Group key = (op, target, tool, classification); ``count > 1`` on one span
+    is the RETRY badge; outcome color = the CE semantic palette name. Non-action
+    records project as single labelled events in stream order.
+    """
+    groups: list[dict[str, Any]] = []
+    last_key: tuple[Any, ...] | None = None
+    for record in chain:
+        if not isinstance(record, Mapping):
+            continue
+        if record.get("record_type") == "runtime_agent_action":
+            key = (
+                record.get("op"),
+                record.get("target"),
+                record.get("tool"),
+                record.get("classification"),
+            )
+            if groups and last_key == key:
+                groups[-1]["count"] += 1
+                groups[-1]["last_at"] = record.get("recorded_at")
+            else:
+                groups.append(
+                    {
+                        "kind": "actions",
+                        "op": record.get("op"),
+                        "mutation_class": record.get("mutation_class"),
+                        "target": record.get("target"),
+                        "tool": record.get("tool"),
+                        "classification": record.get("classification"),
+                        "decision_reason": record.get("decision_reason"),
+                        "count": 1,
+                        "first_at": record.get("recorded_at"),
+                        "last_at": record.get("recorded_at"),
+                        "color": _CLASS_COLORS.get(str(record.get("classification")), "amber"),
+                    }
+                )
+            last_key = key
+        else:
+            groups.append(
+                {
+                    "kind": str(record.get("record_type") or "record"),
+                    "recorded_at": record.get("recorded_at"),
+                }
+            )
+            last_key = None
+    for group in groups:
+        if group.get("kind") == "actions":
+            group["retry"] = group["count"] > 1
+    return groups
+
+
+def _fold_seat_detail(chain: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold ONE seat's evidence chain into the five seat-detail tabs (PURE).
+
+    Stream = collapsed event-groups; Diffs = write-target summary off the
+    action records; Evidence = the chain + a TRUTHFUL ``verify_chain`` badge
+    (a tampered chain shows findings, never a green badge); Waterfall = stage
+    durations between consecutive lifecycle attestations; Outcome = the
+    terminal disposition + the ratification record.
+    """
+    write_counts: dict[str, int] = {}
+    for record in chain:
+        if (
+            isinstance(record, Mapping)
+            and record.get("record_type") == "runtime_agent_action"
+            and record.get("op") == "write"
+            and record.get("classification") == "allowed"
+            and record.get("target")
+        ):
+            path = str(record["target"])
+            write_counts[path] = write_counts.get(path, 0) + 1
+
+    if chain:
+        verified = verify_chain(chain) == []
+        evidence = {
+            "record_count": len(chain),
+            "verified": verified,
+            "badge": "clean" if verified else "findings",
+        }
+    else:
+        evidence = {"record_count": 0, "verified": None, "badge": "no-chain"}
+
+    lifecycle = [
+        record
+        for record in chain
+        if isinstance(record, Mapping) and record.get("record_type") == "runtime_evidence"
+        and record.get("lifecycle_phase")
+    ]
+    stages: list[dict[str, Any]] = []
+    for current, following in zip(lifecycle, lifecycle[1:]):
+        start = _parse_iso(current.get("recorded_at"))
+        end = _parse_iso(following.get("recorded_at"))
+        stages.append(
+            {
+                "stage": current.get("lifecycle_phase"),
+                "started_at": current.get("recorded_at"),
+                "ended_at": following.get("recorded_at"),
+                "duration_seconds": (
+                    (end - start).total_seconds() if start is not None and end is not None else None
+                ),
+            }
+        )
+
+    outcome_record = _last_of_type(chain, "runtime_run_outcome")
+    ratification_record = _last_of_type(chain, "runtime_ratification")
+    return {
+        "stream": {"groups": _stream_groups(chain)},
+        "diffs": {
+            "source": "evidence-records",
+            "files": [
+                {"path": path, "writes": count} for path, count in sorted(write_counts.items())
+            ],
+        },
+        "evidence": evidence,
+        "waterfall": {"stages": stages},
+        "outcome": {
+            "outcome": outcome_record.get("outcome") if outcome_record else None,
+            "change_set": dict(outcome_record.get("change_set") or {}) if outcome_record else None,
+            "ratification": (
+                {
+                    "ratified_prompt_sha": ratification_record.get("ratified_prompt_sha"),
+                    "approver_ref": ratification_record.get("approver_ref"),
+                    "ratified_head_sha": ratification_record.get("ratified_head_sha"),
+                    "binding_ref": ratification_record.get("binding_ref"),
+                    "recorded_at": ratification_record.get("recorded_at"),
+                }
+                if ratification_record
+                else None
+            ),
+        },
+    }
 
 
 def _fold_meters(
@@ -462,6 +708,8 @@ def fold_snapshot(
     envelopes: Mapping[str, Any] | None = None,
     usage_turns: list[dict[str, Any]] | None = None,
     context_pct: Any = None,
+    harnesses: Mapping[str, str] | None = None,
+    controller_id: str | None = None,
     demo: bool = False,
     roots: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
@@ -484,19 +732,72 @@ def fold_snapshot(
     signals = scope_signals or {}
     chain_map = dict(chains or {})
     envelope_map = dict(envelopes or {})
+    harness_map = {str(k): str(v) for k, v in (harnesses or {}).items()}
+    models = _models_from_chains(chain_map)
+    meters = _fold_meters(chains, usage_turns, context_pct)
 
-    seats = [_seat_card(p, chain_map) for p in (panes or []) if isinstance(p, Mapping)]
-    seats.sort(key=lambda s: (str(s.get("controller_id")), str(s.get("lane_id"))))
-
-    cards = [
-        _board_card(s, signals.get(str(s.get("scope_id")), {}))
-        for s in (scopes or [])
-        if isinstance(s, Mapping)
+    seats = [
+        _seat_card(p, chain_map, models, harness_map)
+        for p in (panes or [])
+        if isinstance(p, Mapping)
     ]
+    seats.sort(key=lambda s: (str(s.get("controller_id")), str(s.get("lane_id"))))
+    panes_by_lane = {
+        str(p.get("lane_id")): p for p in (panes or []) if isinstance(p, Mapping)
+    }
+
+    # Per-run terminals + blocked-why inputs (the board join sources).
+    outcome_by_run = {
+        run_id: _last_of_type(chain, "runtime_run_outcome")
+        for run_id, chain in chain_map.items()
+    }
+    refusal_by_run: dict[str, dict[str, Any]] = {}
+    for record in refusal_chain or []:
+        if isinstance(record, Mapping) and record.get("classification") == "denied":
+            refusal_by_run[str(record.get("run_id"))] = dict(record)
+    breach_by_run: dict[str, dict[str, Any]] = {}
+    for banner in meters["banners"]:  # newest first; keep the newest per run
+        breach_by_run.setdefault(str(banner.get("run_id")), banner)
+
+    cards = []
+    for scope in scopes or []:
+        if not isinstance(scope, Mapping):
+            continue
+        scope_id = str(scope.get("scope_id"))
+        pane = panes_by_lane.get(scope_id)
+        cards.append(
+            _board_card(
+                scope,
+                signals.get(scope_id, {}),
+                pane=pane,
+                envelope=envelope_map.get(scope_id),
+                harness=harness_map.get(scope_id),
+                model=models.get(scope_id),
+                outcome=outcome_by_run.get(scope_id),
+                refusal=refusal_by_run.get(scope_id),
+                breach=breach_by_run.get(scope_id),
+            )
+        )
     cards.sort(key=lambda c: str(c.get("scope_id")))
     phase_counts = {phase: 0 for phase in coordination.COGNITIVE_PHASES}
     for card in cards:
         phase_counts[card["phase"]] += 1
+
+    # The crabfleet all/mine/live filter triad, FOLDED HERE (principle 6):
+    # L3 only binds the precomputed id lists.
+    filters = {
+        "all": [c["scope_id"] for c in cards],
+        "mine": [
+            c["scope_id"]
+            for c in cards
+            if controller_id is not None and c["seat"]["controller_id"] == controller_id
+        ],
+        "live": [c["scope_id"] for c in cards if c["seat"]["status"] in _LIVE_STATUSES],
+    }
+
+    seat_detail = {
+        lane: _fold_seat_detail(chain_map.get(lane) or []) for lane in panes_by_lane
+    }
 
     # ★ REFUSED (v3.5-B.3): chain-derived entries are first-class; the legacy
     # advisory log rides along, labelled. Newest first (a live feed).
@@ -563,7 +864,9 @@ def fold_snapshot(
             "columns": list(coordination.COGNITIVE_PHASES),
             "cards": cards,
             "phase_counts": phase_counts,
+            "filters": filters,
         },
+        "seat_detail": seat_detail,
         "refusals": {
             "source_label": " + ".join(source_labels) or "unavailable",
             "count": len(feed),
@@ -573,7 +876,7 @@ def fold_snapshot(
             ),
         },
         "governance": governance,
-        "meters": _fold_meters(chains, usage_turns, context_pct),
+        "meters": meters,
         "evidence": evidence,
     }
 
@@ -672,6 +975,28 @@ def load_observations(observations_dir: Path) -> list[dict[str, Any]] | None:
     return out
 
 
+def load_harnesses(ledger_root: Path) -> dict[str, str]:
+    """Read each lane's harness from the governance sidecar beside its pane record.
+
+    The sidecar layout is ``panes/<controller>/<lane>.<harness>-governance.json``
+    carrying a ``harness`` field; the lane id is the filename stem before the
+    first dot. Best-effort and read-only.
+    """
+    panes_dir = Path(ledger_root) / PANES_SUBDIR
+    if not panes_dir.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    for path in sorted(panes_dir.rglob("*.json")):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("harness"), str):
+            lane_id = path.name.split(".", 1)[0]
+            out[lane_id] = doc["harness"]
+    return out
+
+
 def load_refusal_chain(observations_dir: Path) -> list[dict[str, Any]] | None:
     """Read the hook-side refusal chain document (read-only; v3.5-B.3).
 
@@ -759,6 +1084,7 @@ def snapshot_from_roots(
         observations=load_observations(observations) if observations else None,
         refusal_chain=load_refusal_chain(observations) if observations else None,
         envelopes=load_envelopes(panes),
+        harnesses=load_harnesses(ledger) if ledger else None,
         demo=demo,
         roots={
             "state_root": str(state),
