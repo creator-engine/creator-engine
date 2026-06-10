@@ -14,10 +14,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from creator_engine_validator import claude_launch_spec, resource_bound_spec as rbs
+from creator_engine_validator.schema import load_schema
 
 FIXTURE = Path(__file__).parent / "fixtures" / "resource_bound_observed.json"
+GIB = 1024 ** 3
 
 BOUND = rbs.ResourceBound(
     unit="ce-seat-proof",
@@ -253,31 +256,73 @@ def test_non_mapping_policy_is_refused():
 # ---------------------------------------------------------------------------
 
 
-def test_host_class_defaults_desktop_table_row():
-    fragment = rbs.host_class_defaults(14 * 1024 ** 3)
-    assert fragment["host_class"] == "desktop-14g"
+def _host_class_envelopes(total: int):
+    fragment = rbs.host_class_defaults(total)
     seat, fleet = fragment["resource_envelopes"]
+    return fragment, seat, fleet
+
+
+def test_host_class_defaults_desktop_table_row():
+    fragment, seat, fleet = _host_class_envelopes(14 * GIB)
+    assert fragment["host_class"] == "desktop-14g"
     assert (seat["memory_high"], seat["memory_max"], seat["memory_swap_max"]) == (
         "3500M", "4G", "256M",
     )
     assert seat["tasks_max"] == 512
+    assert seat["cpu_weight"] == 100
+    assert "cpu_quota" not in seat
     assert fleet == {"scope": "fleet", "memory_max": "9G"}
     assert fragment["resource_enforcement"] == "enforce"
 
 
 def test_host_class_defaults_small_host_table_row():
-    fragment = rbs.host_class_defaults(8 * 1024 ** 3)
+    fragment, seat, fleet = _host_class_envelopes(8 * GIB)
     assert fragment["host_class"] == "small-host-8g"
-    seat, fleet = fragment["resource_envelopes"]
     assert (seat["memory_high"], seat["memory_max"], seat["memory_swap_max"]) == (
         "2G", "2500M", "128M",
     )
+    assert seat["tasks_max"] == 512
+    assert seat["cpu_weight"] == 100
+    assert "cpu_quota" not in seat
     assert fleet["memory_max"] == "5500M"
+
+
+def test_host_class_defaults_large_host_boundary_and_caps():
+    below_floor, below_seat, below_fleet = _host_class_envelopes(int(23.99 * GIB))
+    assert below_floor["host_class"] == "desktop-14g"
+    assert below_seat["memory_max"] == "4G"
+    assert "cpu_quota" not in below_seat
+    assert below_fleet == {"scope": "fleet", "memory_max": "9G"}
+
+    for total in (24 * GIB, 30 * GIB):
+        fragment, seat, fleet = _host_class_envelopes(total)
+        assert fragment["host_class"] == "large-host-30g"
+        assert seat == {
+            "scope": "seat",
+            "memory_high": "5500M",
+            "memory_max": "6G",
+            "memory_swap_max": "256M",
+            "tasks_max": 512,
+            "cpu_weight": 100,
+            "cpu_quota": "400%",
+        }
+        assert fleet == {"scope": "fleet", "memory_max": "20G"}
+        assert fragment["resource_enforcement"] == "enforce"
+
+
+def test_host_class_defaults_large_host_resource_envelopes_match_schema_shape():
+    schema = load_schema("schemas/runtime-policy.schema.yaml")
+    envelope_schema = {"$defs": schema["$defs"], **schema["properties"]["resource_envelopes"]}
+    validator = Draft202012Validator(envelope_schema)
+
+    fragment = rbs.host_class_defaults(30 * GIB)
+
+    assert list(validator.iter_errors(fragment["resource_envelopes"])) == []
 
 
 def test_host_class_defaults_round_trip_through_the_parser():
     # The fragment doctor emits is exactly what the launch paths accept.
-    for total in (8 * 1024 ** 3, 14 * 1024 ** 3, 64 * 1024 ** 3):
+    for total in (8 * GIB, 14 * GIB, 30 * GIB, 64 * GIB):
         rp = rbs.parse_resource_policy(rbs.host_class_defaults(total))
         assert rp.governed and rp.seat_bound("u") is not None
 

@@ -208,3 +208,24 @@ that omits them is a valid G-1.0/G-4 policy (no spend governance). The
   choice (an agent can never set it). `off` disables the sub-allocated CAPS but never
   the runaway-DETECTION net (the mandatory global ceiling + anomaly → escalate), and
   REQUIRES a `spend_cap_optout` `{ratified_prompt_sha, approver_ref}` binding.
+
+## v3.5-F - resource envelopes and §4.4 host classes
+
+v3.5-F adds optional `resource_envelopes`, `resource_enforcement`, and
+`resource_optout` fields. These fields are materialized into the runtime policy
+by the installer / `ce doctor`; launch paths read the policy fragment and never
+compute host caps silently.
+
+The §4.4 default materialization is a pure function of `MemTotal`:
+
+| Host class | Boundary | Seat envelope | Fleet envelope |
+|---|---:|---|---|
+| `large-host-30g` | `MemTotal >= 24 GiB` | `memory_high: 5500M`, `memory_max: 6G`, `memory_swap_max: 256M`, `tasks_max: 512`, `cpu_weight: 100`, `cpu_quota: "400%"` | `memory_max: 20G` |
+| `desktop-14g` | `12 GiB <= MemTotal < 24 GiB` | `memory_high: 3500M`, `memory_max: 4G`, `memory_swap_max: 256M`, `tasks_max: 512`, `cpu_weight: 100` | `memory_max: 9G` |
+| `small-host-8g` | `MemTotal < 12 GiB` | `memory_high: 2G`, `memory_max: 2500M`, `memory_swap_max: 128M`, `tasks_max: 512`, `cpu_weight: 100` | `memory_max: 5500M` |
+
+The `large-host-30g` class is for a headless 30 GiB development host: a 6G
+seat ceiling leaves room for several bounded seats and full-suite headroom,
+while the 20G fleet cap leaves at least 10G for page cache and host services.
+`cpu_quota: "400%"` caps one seat at four CPU cores so a runaway seat cannot
+starve the fleet.
