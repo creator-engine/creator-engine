@@ -39,6 +39,7 @@ from ..runtime_evidence_spine import (
     RUN_OUTCOME_RECORD_TYPE,
     append,
 )
+from .spend_gate import meter_record_body
 
 #: The seed's value-free policy binding — a deterministic digest, never a real
 #: runtime-policy (the watermark declares the data seeded).
@@ -144,6 +145,20 @@ def _outcome(run_id: str, minute: int, *, outcome: str, branch: str, pr_number: 
             "pr_number": pr_number,
         },
     }
+
+
+def _ledger_leaf(run_id: str, minute: int, amount: float, model: str) -> dict[str, Any]:
+    """One metered ``runtime_spend_ledger`` leaf via the REAL G-5 builder (PURE)."""
+    return meter_record_body(
+        policy_sha=DEMO_POLICY_SHA,
+        run_id=run_id,
+        recorded_at=_ts(minute),
+        amount=amount,
+        unit="$",
+        fleet_id="demo-fleet",
+        model=model,
+        window="per_run",
+    )
 
 
 def _pane(
@@ -317,9 +332,18 @@ def seed() -> dict[str, Any]:
             _outcome("ship-pr-294", 15, outcome="pr_merged",
                      branch="ce/demo/ship-pr-294", pr_number=294),
         ]),
-        # The spend hard-breach pause (v3.5-B.3 linkage; the ledger leaves that
-        # feed the meter strip land with B.4): a chain-true circuit-breaker trip.
+        # The fleet's other metered run (v3.5-B.4): two ledger leaves on the
+        # active builder, so the MEASURED fleet spend exceeds the breached run.
+        "gate-uploads": _chain([
+            _ledger_leaf("gate-uploads", 3, 1.80, "claude-fable-5"),
+            _ledger_leaf("gate-uploads", 8, 1.50, "claude-fable-5"),
+        ]),
+        # The spend hard-breach pause: the run's metered leaves ($10.00 of a
+        # $10.00 cap) then the chain-true circuit-breaker trip (v3.5-B.3/B.4).
         "spend-hard-breach": _chain([
+            _ledger_leaf("spend-hard-breach", 1, 4.00, "claude-opus-4-8"),
+            _ledger_leaf("spend-hard-breach", 6, 3.50, "claude-opus-4-8"),
+            _ledger_leaf("spend-hard-breach", 12, 2.50, "claude-opus-4-8"),
             {
                 "kind": RUNTIME_SPEND_BREACH_RECORD_KIND,
                 "record_type": RUNTIME_SPEND_BREACH_RECORD_TYPE,
@@ -368,6 +392,37 @@ def seed() -> dict[str, Any]:
         {"hookEventName": "Stop", "observedAt": _ts(15), "advisory": True, "blocking": False},
     ]
 
+    # v3.5-B.4 — the meter-strip inputs whose LIVE taps are deferred seams:
+    # UsageTurn-shaped dicts (the token-rate fold) and the harness's
+    # authoritative context-% (CONSUMED, never recomputed; 52% -> a visible
+    # 'warn' nudge state, reusing the v3_session thresholds).
+    usage_turns = [
+        {
+            "session_id": "spend-hard-breach", "model": "claude-opus-4-8",
+            "recorded_at": _ts(1),
+            "usage": {"input_tokens": 52_000, "output_tokens": 9_000,
+                      "cache_read_input_tokens": 180_000, "cache_creation_input_tokens": 12_000},
+        },
+        {
+            "session_id": "spend-hard-breach", "model": "claude-opus-4-8",
+            "recorded_at": _ts(6),
+            "usage": {"input_tokens": 48_000, "output_tokens": 11_000,
+                      "cache_read_input_tokens": 210_000, "cache_creation_input_tokens": 8_000},
+        },
+        {
+            "session_id": "gate-uploads", "model": "claude-fable-5",
+            "recorded_at": _ts(8),
+            "usage": {"input_tokens": 30_000, "output_tokens": 7_500,
+                      "cache_read_input_tokens": 120_000, "cache_creation_input_tokens": 6_000},
+        },
+        {
+            "session_id": "spend-hard-breach", "model": "claude-opus-4-8",
+            "recorded_at": _ts(12),
+            "usage": {"input_tokens": 41_000, "output_tokens": 8_200,
+                      "cache_read_input_tokens": 160_000, "cache_creation_input_tokens": 5_000},
+        },
+    ]
+
     return {
         "panes": panes,
         "scopes": scopes,
@@ -376,4 +431,6 @@ def seed() -> dict[str, Any]:
         "observations": observations,
         "refusal_chain": refusal_chain,
         "envelopes": {"pr-300-review": dict(DEMO_ENVELOPE)},
+        "usage_turns": usage_turns,
+        "context_pct": 52.0,
     }

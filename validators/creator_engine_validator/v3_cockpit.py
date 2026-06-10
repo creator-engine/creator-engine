@@ -119,6 +119,38 @@ def _seat_governance_lines(lane_id: str, seat: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _meter_strip_text(snapshot: dict[str, Any]) -> str:
+    """Format the unified meter strip — every tile shows its honesty badge (B.4)."""
+    meters = snapshot.get("meters", {})
+    spend = meters.get("spend", {})
+    token = meters.get("token_rate", {})
+    context = meters.get("context", {})
+    headroom = meters.get("subscription_headroom", {})
+
+    spend_value = spend.get("spend")
+    spend_text = f"${spend_value:.2f}" if spend_value is not None else "—"
+    rate = token.get("tokens_per_hour")
+    rate_text = f"{rate:,.0f} tok/hr" if rate is not None else "—"
+    pct = context.get("pct")
+    ctx_text = f"{pct:.0f}% {context.get('state', '—')}" if pct is not None else "—"
+
+    segments = [
+        f"spend {spend_text} [{spend.get('badge', '—')}]",
+        f"rate {rate_text} [{token.get('badge', '—')}]",
+        f"ctx {ctx_text} [{context.get('badge', '—')}]",
+        f"headroom {headroom.get('placeholder', '—')} [{headroom.get('badge', '—')}]",
+    ]
+    lines = ["  │  ".join(segments)]
+    for banner in meters.get("banners", []):
+        lines.append(
+            f"⛔ {str(banner.get('tier', '—')).upper()} BREACH · {banner.get('run_id', '—')} · "
+            f"{banner.get('unit', '')}{banner.get('observed', '—')}/"
+            f"{banner.get('unit', '')}{banner.get('limit', '—')} · "
+            f"{banner.get('signal', '—')} → {banner.get('action', '—')}"
+        )
+    return "\n".join(lines)
+
+
 def _right_rail_text(snapshot: dict[str, Any]) -> str:
     """The Governance/Authority panel — binds the four L2 sections (B.3)."""
     governance = snapshot.get("governance", {})
@@ -182,6 +214,13 @@ class CockpitApp(App[None]):
         border-left: solid $primary;
         padding: 0 1;
     }
+    #meters {
+        dock: bottom;
+        height: auto;
+        max-height: 4;
+        border-top: solid $primary;
+        padding: 0 1;
+    }
     """
 
     def __init__(
@@ -207,6 +246,7 @@ class CockpitApp(App[None]):
             yield VerticalScroll(Static("", id="left-rail-text"), id="left-rail")
             yield DataTable(id="board")
             yield VerticalScroll(Static("", id="right-rail-text"), id="right-rail")
+        yield Static("", id="meters")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -224,6 +264,7 @@ class CockpitApp(App[None]):
             table.add_row(*_board_row(card))
         self.query_one("#left-rail-text", Static).update(_left_rail_text(self._snapshot))
         self.query_one("#right-rail-text", Static).update(_right_rail_text(self._snapshot))
+        self.query_one("#meters", Static).update(_meter_strip_text(self._snapshot))
 
     # -- refresh / live tail --------------------------------------------------
     def action_refresh_snapshot(self) -> None:

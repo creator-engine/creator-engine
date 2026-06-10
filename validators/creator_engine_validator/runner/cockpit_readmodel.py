@@ -54,8 +54,10 @@ from typing import Any, Mapping
 
 import yaml
 
-from .. import coordination
+from .. import coordination, v3_session
 from ..runtime_evidence_spine import verify_chain
+from .spend_gate import fleet_spend_meter
+from .usage_tap import UsageTurn, fleet_token_rate
 
 #: Snapshot shape version (bumped additively; consumers tolerate additions).
 SNAPSHOT_VERSION = 1
@@ -133,6 +135,21 @@ POSTURE_ADVISORY = (
 #: by any envelope").
 _CLAUSE_RE = re.compile(r"\bG\d[\w.]*\b")
 _SECRET_RULE_RE = re.compile(r"matched rule:\s*([^)]+)")
+
+#: v3.5-B.4 — the honesty-tier badge enum (mandatory on every meter tile).
+MEASURED = "MEASURED"
+ESTIMATED = "ESTIMATED"
+BADGE_UNAVAILABLE = "UNAVAILABLE"
+
+#: Fork 5 (ratified): the subscription-headroom slot ships as a LABELLED
+#: placeholder — never a fabricated estimate. The real estimator lands
+#: post-research as its own gate.
+SUBSCRIPTION_PLACEHOLDER = (
+    "ESTIMATED — estimator not yet shipped; method TBD by its own research task"
+)
+
+#: Breach-tier action semantics (the G-5 two-tier circuit breaker, verbatim).
+_BREACH_ACTIONS = {"soft": "alert + continue", "hard": "pause + escalate"}
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +320,137 @@ def _legacy_entry(observation: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _float_or_none(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _fold_meters(
+    chains: Mapping[str, list[dict[str, Any]]] | None,
+    usage_turns: list[dict[str, Any]] | None,
+    context_pct: Any,
+) -> dict[str, Any]:
+    """Fold the unified resource/health meter strip (v3.5-B.4). PURE.
+
+    REUSE, never re-implement (the no-parallel-math law): spend ($) rides
+    ``spend_gate.fleet_spend_meter``; token-rate rides
+    ``usage_tap.fleet_token_rate``; context-% rides ``v3_session.context_meter``
+    (the harness's authoritative number, CONSUMED — never recomputed); the
+    per-run breaker state on a breach banner rides
+    ``v3_session.spend_meter_from_spine`` (the real G-5 projection). The
+    subscription-headroom slot is the Fork-5 LABELLED PLACEHOLDER — never a
+    number. Every tile carries a MEASURED/ESTIMATED/UNAVAILABLE badge; an
+    absent source is UNAVAILABLE, never a guess.
+    """
+    flat_records: list[dict[str, Any]] = [
+        record for chain in (chains or {}).values() for record in chain
+    ]
+
+    if chains is not None:
+        spend = fleet_spend_meter(flat_records, unit="$")
+        spend_tile: dict[str, Any] = {
+            "badge": MEASURED,
+            "unit": spend.unit,
+            "spend": _float_or_none(spend.spend),
+            "record_count": spend.record_count,
+            "run_count": spend.run_count,
+            "span_hours": _float_or_none(spend.span_hours),
+            "spend_per_hour": _float_or_none(spend.spend_per_hour),
+        }
+    else:
+        spend_tile = {
+            "badge": BADGE_UNAVAILABLE,
+            "unit": "$",
+            "spend": None,
+            "record_count": None,
+            "run_count": None,
+            "span_hours": None,
+            "spend_per_hour": None,
+        }
+
+    if usage_turns is not None:
+        turns = [
+            UsageTurn(
+                session_id=str(t.get("session_id") or ""),
+                model=str(t.get("model") or ""),
+                recorded_at=str(t.get("recorded_at") or ""),
+                usage=dict(t.get("usage") or {}),
+            )
+            for t in usage_turns
+            if isinstance(t, Mapping)
+        ]
+        rate = fleet_token_rate(turns)
+        token_tile: dict[str, Any] = {
+            "badge": MEASURED,
+            "total_tokens": rate.total_tokens,
+            "turn_count": rate.turn_count,
+            "span_hours": _float_or_none(rate.span_hours),
+            "tokens_per_hour": _float_or_none(rate.tokens_per_hour),
+        }
+    else:
+        token_tile = {
+            "badge": BADGE_UNAVAILABLE,
+            "total_tokens": None,
+            "turn_count": None,
+            "span_hours": None,
+            "tokens_per_hour": None,
+        }
+
+    if context_pct is not None:
+        context = v3_session.context_meter(context_pct)
+        context_tile: dict[str, Any] = {
+            "badge": MEASURED,
+            "pct": context.pct,
+            "state": context.state,
+        }
+    else:
+        context_tile = {"badge": BADGE_UNAVAILABLE, "pct": None, "state": "unknown"}
+
+    banners: list[dict[str, Any]] = []
+    for record in flat_records:
+        if not isinstance(record, Mapping):
+            continue
+        if record.get("record_type") != "runtime_spend_breach":
+            continue
+        run_id = record.get("run_id")
+        limit = record.get("limit")
+        run_meter = v3_session.spend_meter_from_spine(
+            flat_records, limit, run_id=str(run_id), unit=str(record.get("breach_unit") or "$")
+        )
+        banners.append(
+            {
+                "tier": record.get("tier"),
+                "action": _BREACH_ACTIONS.get(str(record.get("tier")), "alert + continue"),
+                "signal": record.get("signal"),
+                "breach_scope": record.get("breach_scope"),
+                "unit": record.get("breach_unit"),
+                "limit": limit,
+                "observed": record.get("observed"),
+                "run_id": run_id,
+                "reason": record.get("decision_reason"),
+                "recorded_at": record.get("recorded_at"),
+                "run_meter": {
+                    "spent": _float_or_none(run_meter.spent),
+                    "cap": _float_or_none(run_meter.cap),
+                    "ratio": run_meter.ratio,
+                    "state": run_meter.state,
+                },
+            }
+        )
+    banners.sort(key=lambda b: str(b.get("recorded_at") or ""), reverse=True)
+
+    return {
+        "spend": spend_tile,
+        "token_rate": token_tile,
+        "context": context_tile,
+        "subscription_headroom": {
+            "badge": ESTIMATED,
+            "value": None,
+            "placeholder": SUBSCRIPTION_PLACEHOLDER,
+        },
+        "banners": banners,
+    }
+
+
 def fold_snapshot(
     *,
     panes: list[dict[str, Any]] | None = None,
@@ -312,6 +460,8 @@ def fold_snapshot(
     observations: list[dict[str, Any]] | None = None,
     refusal_chain: list[dict[str, Any]] | None = None,
     envelopes: Mapping[str, Any] | None = None,
+    usage_turns: list[dict[str, Any]] | None = None,
+    context_pct: Any = None,
     demo: bool = False,
     roots: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
@@ -326,7 +476,10 @@ def fold_snapshot(
     derivable state, never an invented one. ``refusal_chain`` is the hook-side
     hash-chained refusal log (v3.5-B.3); ``envelopes`` maps ``lane_id`` to a
     resolved reviewer-authority envelope (live: read via the pane registry's
-    ``envelope_ref``; demo: provided by the seed).
+    ``envelope_ref``; demo: provided by the seed). ``usage_turns`` (UsageTurn-
+    shaped dicts) and ``context_pct`` (the harness's authoritative number) feed
+    the v3.5-B.4 meter strip — their LIVE taps are deferred seams, so live
+    snapshots carry them as ``None`` (UNAVAILABLE) until those land.
     """
     signals = scope_signals or {}
     chain_map = dict(chains or {})
@@ -420,6 +573,7 @@ def fold_snapshot(
             ),
         },
         "governance": governance,
+        "meters": _fold_meters(chains, usage_turns, context_pct),
         "evidence": evidence,
     }
 
