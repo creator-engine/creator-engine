@@ -101,6 +101,12 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # v3.5-D.0.1 compute-demand artifact: the live usage tap
         # (transcript → spend-ledger; reuses runner.spend_gate, pure core + 1 I/O edge)
         "runner.usage_tap",
+        # v3.5-B.1 Cockpit: the L2 read-model (= the harness-paper F1
+        # Deep-Telemetry projection; pure JSON-serializable fold, principle 6)
+        "runner.cockpit_readmodel",
+        # v3.5-B.1 Cockpit: the CE_DEMO seed (Fork F-b: its own module — the
+        # independently-reviewable pitch artifact)
+        "runner.cockpit_demo_seed",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
         "coordination",
         # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)
@@ -113,6 +119,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_report",
         # v3 G-7 product surface: the two-mode installer logic + cost opt-out
         "v3_installer",
+        # v3.5-B.1 Cockpit: the L3 Textual view (binds to L2 snapshots ONLY;
+        # a future GUI replaces this module alone — principle 6)
+        "v3_cockpit",
     }
 )
 

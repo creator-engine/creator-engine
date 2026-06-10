@@ -19,6 +19,23 @@ ce = "creator_engine_validator.ce_cli:main"
 # v1 ``ce`` launcher (additive; never a subcommand on ``ce``/``ce_cli``).
 cev3 = "creator_engine_validator.v3_cli:main"
 
+# v3.5-B.1 (Fork F-a, ratified): the Cockpit TUI deps land as an OPTIONAL extra —
+# the core install surface stays PyYAML+jsonschema only; non-cockpit installs pay
+# zero cost. CI exercises the pinned transitive closure OFFLINE via
+# requirements-dev.txt + the vendored wheelhouse-dev/ (no validate.yml edit).
+[project.optional-dependencies]
+cockpit = [
+  "textual==8.2.7",
+  "watchfiles==1.2.0",
+]
+# v3.5-B.6: `ce cockpit --serve` — the serve mechanism ships in textual-serve
+# (NOT Textual core) and brings the aiohttp web ecosystem; its own extra keeps
+# the plain-TUI install serve-free (serve is additive). Pinned closure vendored
+# in wheelhouse-dev/ for CI's offline exercise, same as the cockpit extra.
+cockpit-serve = [
+  "textual-serve==1.1.3",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["creator_engine_validator", "creator_engine_validator.*"]
