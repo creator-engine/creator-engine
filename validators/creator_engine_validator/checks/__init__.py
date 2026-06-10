@@ -87,3 +87,4 @@ from . import decision_record as decision_record  # noqa: E402,F401
 from . import storage_tier_finding as storage_tier_finding  # noqa: E402,F401
 from . import peer_authority as peer_authority  # noqa: E402,F401
 from . import forge_claim_dedup as forge_claim_dedup  # noqa: E402,F401
+from . import install_answers as install_answers  # noqa: E402,F401
