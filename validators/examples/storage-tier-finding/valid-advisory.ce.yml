@@ -1,0 +1,14 @@
+# Passing fixture: an advisory storage-tier finding — proposed, not promoted.
+kind: storage-tier-finding
+schema_version: "1"
+artifact_ref: ".ce/state/research/competitive-scan-20260608.md"
+advisory: true
+classifications:
+  - part_ref: whole
+    relevance: team-relevant
+    tier: ops-private
+    rationale: >-
+      Competitive intel mid-version-dev is project-relevant but genuinely
+      sensitive — ops-private per ADR-0001 rule 1 (default = private).
+promotion:
+  promoted: false

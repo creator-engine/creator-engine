@@ -1,0 +1,119 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/storage-tier-finding.schema.yaml"
+title: "Creator Engine storage-tier advisory finding"
+description: |
+  Machine-readable schema for the **advisory storage-tier finding** (v3.5-C
+  A-C2, design §A.3/§A.2): when a CE instance produces a knowledge artifact,
+  two ADVISORY classifications — relevance (project/team-relevant vs
+  instance-local noise) and storage tier (`instance-local` · `repo-docs` ·
+  `ops-private`) — run BEFORE anything reaches a shared surface, emitting this
+  finding. A finding may SPLIT one artifact across tiers (one classification
+  entry per part).
+
+  The finding is advisory BY CONSTRUCTION (`advisory: const true`): it
+  proposes, it never promotes. Promotion into the backlog / opening a
+  committing record is a HUMAN-ratified event — `promotion.promoted: true` is
+  valid ONLY with a `promotion.ratification_ref` pointing at the
+  human-ratification record on the evidence-spine (enforced by the
+  `storage_tier_finding` check; `VAL-STF-AUTO-PROMOTED` otherwise).
+
+  The rule governing tier choice is itself a ratified governance Decision
+  Record: `docs/decisions/ADR-0001-public-private-storage-policy.md`.
+
+  Prose contract: `docs/contracts/storage-tier-finding.md`.
+
+  Value-free: refs are paths/labels/opaque digests — NEVER a credential,
+  secret value, or host.
+type: object
+required:
+  - kind
+  - schema_version
+  - artifact_ref
+  - advisory
+  - classifications
+  - promotion
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: storage-tier-finding
+    description: |
+      Discriminator constant. Records without this exact value are not
+      governed storage-tier findings and MUST NOT be validated by
+      `storage_tier_finding`.
+  schema_version:
+    type: string
+    enum: ["1"]
+  artifact_ref:
+    type: string
+    minLength: 1
+    description: |
+      Pointer to the classified knowledge artifact (path or opaque ref).
+  advisory:
+    type: boolean
+    const: true
+    description: |
+      ALWAYS true — a storage-tier finding is advisory by construction. A
+      record claiming otherwise is rejected at the schema layer.
+  classifications:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [part_ref, relevance, tier, rationale]
+      unevaluatedProperties: false
+      properties:
+        part_ref:
+          type: string
+          minLength: 1
+          description: |
+            The artifact part this entry classifies (`whole` for an unsplit
+            artifact; section labels for a split). Distinct per entry —
+            duplicate part_refs are rejected by the check.
+        relevance:
+          type: string
+          enum: [project-relevant, team-relevant, instance-local-noise]
+          description: |
+            The relevance axis: is this part project/team-relevant, or
+            instance-local noise? Noise never reaches a shared tier (the
+            check rejects noise paired with `repo-docs`/`ops-private`).
+        tier:
+          type: string
+          enum: [instance-local, repo-docs, ops-private]
+          description: |
+            The PROPOSED storage tier: `instance-local` (private to the
+            instance) · `repo-docs` (`docs/` in the code repo — shareable,
+            travels with the repo) · `ops-private` (the single private ops
+            repo — project-relevant but genuinely sensitive). A proposal a
+            human ratifies, never a placement.
+        rationale:
+          type: string
+          minLength: 1
+          description: |
+            Why this part lands in this tier under the written policy
+            (cites `ADR-0001-public-private-storage-policy`).
+    description: |
+      One entry per artifact part. More than one entry = the SPLIT form (one
+      artifact, several tiers).
+  promotion:
+    type: object
+    required: [promoted]
+    unevaluatedProperties: false
+    properties:
+      promoted:
+        type: boolean
+        description: |
+          Whether a human has ratified the proposed placement/promotion.
+          `true` REQUIRES `ratification_ref` (the no-auto-promotion
+          invariant, enforced by the check).
+      ratification_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 content digest of the human-ratification record on the
+          evidence-spine that authorized the promotion (an opaque pin, never
+          an actor account).
+    description: |
+      The promotion state. A finding is BORN unpromoted; the transition is a
+      human-ratification event recorded on the spine — there is NO code path
+      that flips `promoted` without `ratification_ref`.
