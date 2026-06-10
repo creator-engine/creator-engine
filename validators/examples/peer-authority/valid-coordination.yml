@@ -1,0 +1,44 @@
+# Passing fixture: a symmetric 2-peer coordination policy with ratification
+# attestations that satisfy quorum, area ownership, and independence.
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "runner/**": [alice]
+    "forge/**": [bob]
+    "docs/decisions/**": [alice, bob]   # decisions are jointly owned
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: alice
+      github_logins: [alice-gh]
+      seats: [seat-alpha]
+      app_installations: ["12345678"]
+    - human_id: bob
+      github_logins: [bob-gh, bob-work-gh]
+      seats: [seat-beta]
+      app_installations: ["87654321"]
+    - human_id: carol
+      github_logins: [carol-gh]
+      seats: [seat-gamma]
+ratifications:
+  # non-privileged change inside bob's area, ratified solo by the area owner
+  - item_ref: "creator-engine/creator-engine#201"
+    mutation_class: code
+    author: alice-gh
+    seat: seat-alpha
+    approvers: [bob-gh]
+    changed_paths: ["forge/backlog.py"]
+  # privileged (governance) change on the jointly-owned decision surface:
+  # authored by carol's seat; the privileged quorum = both area peers, neither
+  # of whom is the author's human (no self-approval at the HUMAN level)
+  - item_ref: "creator-engine/creator-engine#202"
+    mutation_class: governance
+    author: seat-gamma
+    approvers: [alice-gh, bob-work-gh]
+    changed_paths: ["docs/decisions/ADR-0002-example.md"]

@@ -99,11 +99,68 @@ def _parse_markers(body: str) -> dict[str, str]:
     return markers
 
 
+def _quorum_approvers(
+    reviews: list,
+    *,
+    head_sha: str,
+    author: str,
+    seat_identity: str,
+    authority: dict,
+    mutation_class: str | None,
+    changed_paths: Sequence[str],
+) -> str | None:
+    """Grade the commit-pinned APPROVED set against the area+tier authority map.
+
+    v3.5-C A-C3: the per-area × risk-tiered quorum (design §A.5). The latest
+    commit-pinned review state per login decides whether that login approves
+    (a later CHANGES_REQUESTED supersedes an earlier approval, mirroring
+    GitHub's own dismissal semantics). The surviving set is graded by the
+    SHARED ``peer_authority`` helpers — quorum of distinct resolved humans
+    per tier, area-owner coverage for the changed paths, no self-approval at
+    the HUMAN level (two accounts of one human never sum), unresolved actors
+    fail closed. Returns the comma-joined approver logins, or ``None``.
+    """
+    latest: dict[str, str] = {}
+    for review in reviews:
+        if not isinstance(review, dict):
+            continue
+        if review.get("commit_id") != head_sha:  # stale: not pinned to head
+            continue
+        login = ((review.get("user") or {}).get("login")) or ""
+        if not login:
+            continue
+        latest[login] = review.get("state") or ""
+    approvers = sorted(
+        login for login, state in latest.items()
+        if state == "APPROVED" and login != author and login != seat_identity
+    )
+    if not approvers:
+        return None
+    # Lazy import: the authority grading lives in the SHARED peer_authority
+    # check module (a v3->shared edge, allowed). Imported at CALL time so that
+    # importing forge/ still registers no validator check (--list-checks
+    # byte-identical, the package invariant).
+    from ..checks.peer_authority import authority_satisfied
+
+    ok, _reasons = authority_satisfied(
+        authority,
+        author=author,
+        seat=seat_identity,
+        approvers=approvers,
+        mutation_class=mutation_class,
+        changed_paths=changed_paths,
+    )
+    return ",".join(approvers) if ok else None
+
+
 def plan_approved(
     query: ApprovalQuery,
     *,
     seat_identity: str,
     gh_runner: GhRunner | None = None,
+    authority: dict | None = None,
+    mutation_class: str | None = None,
+    changed_paths: Sequence[str] = (),
 ) -> ApprovedPlan | None:
     """Resolve an :class:`ApprovedPlan` from the forge, or ``None`` if not ratified.
 
@@ -112,6 +169,15 @@ def plan_approved(
     independent (non-author, non-seat) ``APPROVED`` review exists. Returns ``None``
     for any clean "not ratified" condition; raises :class:`ForgeConfigError` only on
     a transport failure (the PR or reviews read errored).
+
+    **v3.5-C A-C3 — peer authority.** When ``authority`` (the parsed
+    ``.ce/coordination.yml`` policy) is supplied, the approval bar generalizes
+    from one-independent-reviewer to the per-area × risk-tiered quorum:
+    ``mutation_class`` picks the tier (privileged → both peers),
+    ``changed_paths`` drives area-owner coverage, and quorum counts DISTINCT
+    resolved humans (identity_map; fail-closed on unresolved actors). The
+    ``approver != author != seat`` rule is preserved on both paths.
+    Without ``authority`` the pre-A-C3 single-approver behaviour is unchanged.
     """
     runner = gh_runner or _default_gh_runner
     repo, pr = query.repo, query.pr_number
@@ -139,6 +205,25 @@ def plan_approved(
         )
     if not isinstance(reviews, list):
         return None
+
+    if authority is not None:
+        approved_by = _quorum_approvers(
+            reviews,
+            head_sha=head_sha,
+            author=author,
+            seat_identity=seat_identity,
+            authority=authority,
+            mutation_class=mutation_class,
+            changed_paths=changed_paths,
+        )
+        if approved_by is None:
+            return None
+        return ApprovedPlan(
+            run_id=query.run_id,
+            policy_sha=query.policy_sha,
+            approved_by=approved_by,
+            approval_ref=f"{repo}#{pr}@{head_sha}",
+        )
 
     # Latest independent, commit-pinned APPROVED review wins (reviews are chronological).
     approver: str | None = None

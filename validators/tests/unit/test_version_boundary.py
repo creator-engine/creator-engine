@@ -30,8 +30,9 @@ def test_registered_in_check_surface():
     assert CHECK_NAME in reg
     # 47 with the G-6 ce_scope check registered alongside version_boundary.
     # v3.5-C A-C1 added the decision_record check: 47 -> 48. v3.5-C A-C2 added
-    # the storage_tier_finding check: 48 -> 49.
-    assert len(reg) == 49
+    # the storage_tier_finding check: 48 -> 49. v3.5-C A-C3 added the
+    # peer_authority check: 49 -> 50.
+    assert len(reg) == 50
 
 
 def test_green_on_real_package():

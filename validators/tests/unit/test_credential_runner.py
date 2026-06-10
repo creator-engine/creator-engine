@@ -192,5 +192,5 @@ def test_purity_unchanged():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner.backend import available_backends
 
-    assert len(registered_checks()) == 49  # G-6 added ce_scope; v3.5-C A-C1/A-C2 added decision_record + storage_tier_finding
+    assert len(registered_checks()) == 50  # G-6 added ce_scope; v3.5-C A-C1..A-C3 added decision_record + storage_tier_finding + peer_authority
     assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a)

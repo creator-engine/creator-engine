@@ -1,0 +1,168 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/coordination-policy.schema.yaml"
+title: "Creator Engine repo coordination policy (.ce/coordination.yml)"
+description: |
+  Machine-readable schema for the repo-level coordination policy
+  `.ce/coordination.yml` — governance-as-data (v3.5-C A-C3, design §A.5).
+  This schema pins the `ratification_authority` block (peer authority =
+  per-area ownership × a risk-tiered quorum), the `identity_map` (the
+  {seat ↔ human} / {App-installation ↔ human} resolver data), and the
+  optional `ratifications` attestation list the `peer_authority` check
+  validates against the policy.
+
+  The TOP LEVEL deliberately allows additional properties: the
+  coordination-layer design (§9.9) reserves room for further policy blocks;
+  the blocks declared here are strict.
+
+  The policy file is SELF-CLASSIFIED `governance` (`mutation_class` is a
+  const): changing the authority map is a privileged mutation — for two
+  peers, BOTH must ratify; the authority model cannot be unilaterally
+  rewritten.
+
+  Prose contract: `docs/contracts/peer-authority.md`.
+
+  Value-free: actor entries are labels/logins/installation ids — NEVER a
+  credential, token, or secret value.
+type: object
+required:
+  - kind
+  - schema_version
+  - mutation_class
+  - ratification_authority
+properties:
+  kind:
+    type: string
+    const: coordination-policy
+    description: |
+      Discriminator constant — records without it are not coordination
+      policies and MUST NOT be validated by `peer_authority`.
+  schema_version:
+    type: string
+    enum: ["1"]
+  mutation_class:
+    type: string
+    const: governance
+    description: |
+      SELF-CLASSIFICATION, pinned by the schema: the policy file is always a
+      `governance`-class artifact (privileged) — changing it requires the
+      full privileged ratification bar (both peers).
+  ratification_authority:
+    type: object
+    required: [quorum_by_tier, no_self_approval]
+    unevaluatedProperties: false
+    properties:
+      defer_to_codeowners:
+        type: boolean
+        description: |
+          When true, area ownership defers to `.github/CODEOWNERS` (enforced
+          on the forge via `require_code_owner_reviews`); `area_owners`
+          entries below are additive overrides.
+      area_owners:
+        type: object
+        propertyNames:
+          minLength: 1
+        additionalProperties:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+        description: |
+          Map of path-glob → owning peers (human ids from `identity_map`).
+          A glob with several owners is a JOINTLY-owned area (e.g.
+          `docs/decisions/**`). At least one of `defer_to_codeowners: true`
+          or a non-empty `area_owners` must be present (enforced by the
+          check: VAL-PA-AREA-CONFIG).
+      quorum_by_tier:
+        type: object
+        required: [non_privileged, privileged]
+        unevaluatedProperties: false
+        properties:
+          non_privileged:
+            type: integer
+            minimum: 1
+            description: The area owner ratifies solo (constrained-BDFL of the area).
+          privileged:
+            type: integer
+            minimum: 2
+            description: |
+              Consensus-on-high-risk: every `PRIVILEGED_NAMES` mutation_class
+              requires at least both peers (≥ 2 DISTINCT humans).
+        description: Required ratifier count per risk tier.
+      no_self_approval:
+        type: boolean
+        const: true
+        description: |
+          Pinned true: the ratifier is never the author or the running seat
+          (the existing `plan_approved` independence rule, generalized).
+    description: The peer-authority block (per-area ownership × risk-tiered quorum).
+  identity_map:
+    type: object
+    required: [humans]
+    unevaluatedProperties: false
+    properties:
+      humans:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required: [human_id]
+          unevaluatedProperties: false
+          properties:
+            human_id:
+              type: string
+              minLength: 1
+            github_logins:
+              type: array
+              items: {type: string, minLength: 1}
+            seats:
+              type: array
+              items: {type: string, minLength: 1}
+            app_installations:
+              type: array
+              items: {type: string, minLength: 1}
+          description: |
+            One HUMAN with every actor label that resolves to them: GitHub
+            logins, governed seat identities, App installation ids. Two
+            logins of one human are ONE ratifier (quorum counts humans,
+            not accounts).
+    description: |
+      The {actor → human} resolver data (the §11.5 identity-resolution gap,
+      shipped honestly): an actor not resolvable through this map FAILS
+      CLOSED (VAL-PA-IDENTITY-UNRESOLVED) — it never silently counts toward
+      a quorum. Declared limits in `docs/contracts/peer-authority.md`.
+  ratifications:
+    type: array
+    items:
+      type: object
+      required: [item_ref, mutation_class, author, approvers]
+      unevaluatedProperties: false
+      properties:
+        item_ref:
+          type: string
+          minLength: 1
+          description: The ratified item (PR/issue/record ref).
+        mutation_class:
+          type: string
+          enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+        author:
+          type: string
+          minLength: 1
+          description: The authoring actor label (resolved via identity_map).
+        seat:
+          type: string
+          minLength: 1
+          description: The running seat's actor label, when one drove the item.
+        approvers:
+          type: array
+          items: {type: string, minLength: 1}
+          description: Actor labels that ratified (resolved + deduped to humans).
+        changed_paths:
+          type: array
+          items: {type: string, minLength: 1}
+          description: Repo-relative paths the item touches (drives area checks).
+    description: |
+      OPTIONAL ratification attestations validated against the policy (quorum
+      per tier, area-owner coverage, no self-approval). The LIVE enforcement
+      path is the generalized `forge.plan_approval.plan_approved`; this list
+      is the offline/auditable record form the check grades.
