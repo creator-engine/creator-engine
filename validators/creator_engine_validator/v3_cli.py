@@ -559,13 +559,24 @@ def _cmd_session(args: argparse.Namespace) -> int:
 def _cmd_onboard(args: argparse.Namespace) -> int:
     """Two-mode install — verify the signed spec, then DRY-RUN the install plan.
 
-    Reads the served install spec, builds its signature block, and
-    verify-BEFORE-execute against the pinned CE keys (refuse on tamper / unknown
-    key). Then plans dependency resolution from a LIVE read-only probe
-    (``shutil.which`` — detection is read-only; the privileged FIX is deferred),
-    the Default-vs-Custom profile (with the cost opt-out + educate copy), and the
-    ``ce`` exposure. Prints what a live drive WOULD do — the actual execution,
-    backend provisioning, and the GitHub-App click are the deferred live seams.
+    v3.5-E.3 (one engine, two modes): the same verified journey, with answers
+    coming from ``interactive > answers-file > detected > default``.
+
+    ``--inventory`` emits the operator-input inventory (the awareness artifact
+    an agent reads to PREPARE the answers file); ``--answers f.yaml`` loads the
+    IaC answers file (schema-validated, fail-closed on unknown keys, secrets by
+    SecretRef only); ``--plan`` is the terraform-plan analog (the full plan
+    including the EXACT remaining asks + the decomposed GitHub leg);
+    ``--non-interactive`` turns the final ask into a fail-closed refusal that
+    enumerates exactly what is missing.
+
+    Order is load-bearing and unchanged (design §2.4): ``require_verified``
+    FIRST — the answers file configures the VERIFIED procedure; nothing in it
+    (and no flag here) can substitute for the signature gate. The CLI is the
+    I/O edge (it reads the spec, the schema document, and the answers file,
+    and runs the live read-only probes); the engine in ``v3_installer`` stays
+    pure. The deeper GitHub probes (origin remote, token scopes, installation)
+    are the E.4 live-drive seam — unprobed planners stay fail-closed.
     """
     spec_path = Path(args.spec)
     if not spec_path.is_file():
@@ -575,19 +586,129 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     self_attested = args.sig_value is None
     signature = {"key_id": args.key_id, "algo": v3_installer.CONTENT_ALGO,
                  "value": args.sig_value or v3_installer.content_digest(spec_bytes)}
+    # 1. verify FIRST — unbypassed; --inventory/--plan ride the same gate.
+    try:
+        verified = v3_installer.require_verified(
+            spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS
+        )
+    except v3_installer.InstallRefused as exc:
+        return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"],
+                     {"error": "refused", "detail": str(exc)})
+    # 2. the answers schema + the answers file (the CLI is the I/O edge; the
+    #    engine is pure — the schema document is injected as a dict).
+    schema_path = Path(args.answers_schema)
+    try:
+        schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        return _emit(args, 2,
+                     [f"{_BRAND} · onboard refused: answers schema unreadable: {exc}"],
+                     {"error": "schema_unreadable", "detail": str(exc)})
+    answers: dict[str, Any] = {}
+    answers_sha = None
+    if args.answers:
+        answers_path = Path(args.answers)
+        if not answers_path.is_file():
+            return _emit(args, 2,
+                         [f"{_BRAND} · onboard refused: answers file not found: {answers_path}"],
+                         {"error": "answers_not_found"})
+        answers_bytes = answers_path.read_bytes()
+        # the evidence binding's hashable input (SecretRefs are inert strings)
+        answers_sha = v3_installer.content_digest(answers_bytes)
+        try:
+            loaded = yaml.safe_load(answers_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, yaml.YAMLError) as exc:
+            return _emit(args, 1,
+                         [f"{_BRAND} · onboard REFUSED: answers file is not valid YAML: {exc}"],
+                         {"error": "refused", "detail": str(exc)})
+        try:
+            answers = v3_installer.require_valid_answers(loaded, schema=schema)
+        except v3_installer.InstallRefused as exc:
+            return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"],
+                         {"error": "refused", "detail": str(exc)})
+    # 3. live read-only detection the CLI can do TODAY (deeper probes = E.4).
+    detected: dict[str, Any] = {}
+    present_harnesses = [name for name, binary in
+                         (("claude-code", "claude"), ("codex", "codex")) if _which(binary)]
+    if present_harnesses:
+        detected["provider.harness"] = (
+            present_harnesses[0] if len(present_harnesses) == 1 else "both"
+        )
+    # 4. --inventory: the awareness artifact (schema-derived, never hand-kept).
+    if args.inventory:
+        rows = v3_installer.inventory_emission(
+            schema, detected=detected, answers=answers or None
+        )
+        lines = [
+            f"{_BRAND} · onboard inventory — {len(rows)} inputs "
+            f"(spec verified against pinned key {verified.key_id!r})"
+        ]
+        for row in rows:
+            modes = "/".join(row["modes"]) or "—"
+            optional = " · optional" if row["optional"] else ""
+            lines.append(
+                f"    step {row['step']} · {row['key']} "
+                f"[{row['sensitivity']} · {modes}{optional}] → {row['status']}"
+            )
+        lines.append(
+            f"{_BRAND} · prepare {v3_installer.ANSWERS_BASENAME} from this "
+            "(secrets ONLY as env:// file:// prompt:// keychain:// refs), then: "
+            f"{CE_CMD} onboard --spec <spec> --answers <file> --plan"
+        )
+        return _emit(args, 0, lines, {
+            "action": "onboard_inventory",
+            "verified": {"ok": True, "key_id": verified.key_id},
+            "self_attested": self_attested,
+            "inventory": [dict(row) for row in rows],
+        })
+    # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
+    merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
+    missing = v3_installer.missing_answers(schema, merged)
+    probe = {tool: _which(tool) for tool in v3_installer.REQUIRED_DEPENDENCIES}
+    dep_plan = v3_installer.plan_dependencies(v3_installer.REQUIRED_DEPENDENCIES, probe)
+    grant_diff = v3_installer.sudo_grant_diff(merged.value("host.sudo_grant"), dep_plan)
+    # 6. --non-interactive: fail-closed (the terraform -input=false analog).
+    if args.non_interactive:
+        try:
+            v3_installer.require_complete(missing)
+            if grant_diff.uncovered:
+                raise v3_installer.InstallRefused(
+                    "non-interactive mode is fail-closed — planned privileged "
+                    f"installs outside the sudo grant: {', '.join(grant_diff.uncovered)} "
+                    f"(host.sudo_grant covers: {', '.join(grant_diff.grant) or 'nothing'})"
+                )
+        except v3_installer.InstallRefused as exc:
+            return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {
+                "error": "refused", "detail": str(exc),
+                "missing": [{"key": m.key, "step": m.step, "reason": m.reason} for m in missing],
+                "sudo_uncovered": list(grant_diff.uncovered),
+            })
+    # 7. the cost profile — CLI flags are the interactive override (precedence);
+    #    otherwise a custom answers profile supplies the (stripped) binding.
+    opt_out = args.opt_out
     optout_ratification = None
     if args.opt_out:
         optout_ratification = {"ratified_prompt_sha": args.ratified_prompt_sha or "",
                                "approver_ref": args.approver_ref or ""}
-    # detect-don't-assume: a LIVE read-only presence probe (no mutation, no sudo)
-    probe = {tool: _which(tool) for tool in v3_installer.REQUIRED_DEPENDENCIES}
+    elif answers:
+        try:
+            binding = v3_installer.optout_binding_from_answers(answers)
+        except v3_installer.InstallRefused as exc:
+            return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"],
+                         {"error": "refused", "detail": str(exc)})
+        if binding is not None:
+            opt_out, optout_ratification = True, binding
     try:
         plan = v3_installer.build_install_plan(
             spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
-            mode=args.mode, opt_out=args.opt_out, optout_ratification=optout_ratification,
+            mode=args.mode, opt_out=opt_out, optout_ratification=optout_ratification,
         )
     except v3_installer.InstallRefused as exc:
         return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
+    # 8. --plan: compose the decomposed GitHub leg (pure planners; the CLI-level
+    #    probe carries only what it can read today — unprobed = fail-closed).
+    github_leg = None
+    if args.show_plan and answers.get("github"):
+        github_leg = v3_installer.build_github_leg_plan(answers, schema=schema, probe={})
     lines = [
         f"{_BRAND} · onboard (dry-run · {plan['mode']}) — spec verified against pinned key "
         f"{plan['verified']['key_id']!r}",
@@ -597,6 +718,39 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     ]
     if plan["educate"]:
         lines.append(f"    {_BRAND} opt-out · {plan['educate']}")
+    if args.answers:
+        source_counts: dict[str, int] = {}
+        for entry in merged.resolved.values():
+            source_counts[entry.source] = source_counts.get(entry.source, 0) + 1
+        lines.append(
+            f"    answers · {args.answers} (sha256 {answers_sha}) — sources "
+            + " · ".join(f"{source}:{count}" for source, count in sorted(source_counts.items()))
+        )
+        if dep_plan.needs_sudo:
+            lines.append(
+                "    sudo grant · covered "
+                f"{list(grant_diff.covered) or '—'} · OUTSIDE the grant {list(grant_diff.uncovered) or '—'}"
+            )
+        for conflict in merged.conflicts:
+            lines.append(
+                f"    CONFLICT · {conflict.key}: file {conflict.file_value!r} contradicts "
+                f"detected {conflict.detected_value!r} — resolve interactively"
+            )
+        if missing:
+            lines.append(
+                "    remaining asks · "
+                + "; ".join(f"step {m.step}: {m.key} ({m.reason})" for m in missing)
+            )
+        else:
+            lines.append("    remaining asks · none — apply-ready (the live drive is deferred)")
+    if github_leg is not None:
+        click = "click required (first run)" if github_leg["app"]["click_required"] \
+            else f"click skipped (installation {github_leg['app']['installation_id']} detected/declared)"
+        lines.append(
+            f"    github leg · repo {github_leg['repo']['action']} · App {click} · "
+            f"protection drift {len(github_leg['branch_protection']['drift'])} · "
+            f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to the E.4 drive)'}"
+        )
     lines += [
         f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",
         f"{_BRAND} · you approve only: {', '.join(plan['human_approves'])}",
@@ -610,7 +764,21 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"{_BRAND} · NOTE: no --sig-value given — verification is self-attested integrity "
             "only (NOT authenticity); pass the published signature value before a live install."
         )
-    return _emit(args, 0, lines, {"action": "onboard", "self_attested": self_attested, **plan})
+    payload = {
+        "action": "onboard", "self_attested": self_attested, **plan,
+        "answers": ({
+            "path": args.answers, "sha256": answers_sha,
+            "sources": {k: e.source for k, e in sorted(merged.resolved.items())},
+            "conflicts": [{"key": c.key, "file": c.file_value, "detected": c.detected_value}
+                          for c in merged.conflicts],
+            "missing": [{"key": m.key, "step": m.step, "reason": m.reason} for m in missing],
+            "sudo_grant": {"grant": list(grant_diff.grant), "covered": list(grant_diff.covered),
+                           "uncovered": list(grant_diff.uncovered)},
+        } if args.answers else None),
+        "github_leg": github_leg,
+        "non_interactive": bool(args.non_interactive),
+    }
+    return _emit(args, 0, lines, payload)
 
 
 def _cmd_cockpit(args: argparse.Namespace) -> int:
@@ -784,13 +952,29 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="detected intent-to-act signal strength (for the dial)")
     p_shape.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    p_onboard = sub.add_parser("onboard", help="two-mode install: verify the signed spec + dry-run the plan")
+    p_onboard = sub.add_parser(
+        "onboard",
+        help="two-mode install: verify the signed spec + dry-run the plan "
+             "(agent loop: --inventory → prepare answers → --plan → apply)",
+    )
     p_onboard.add_argument("--spec", required=True, help="path to the served install spec to verify")
     p_onboard.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
     p_onboard.add_argument("--sig-value", default=None,
                            help="the published signature value (default: the spec's own content digest)")
     p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
                            help="install mode")
+    p_onboard.add_argument("--answers", default=None,
+                           help="path to the ce-install.answers.yaml IaC answers file "
+                                "(schema-validated; fail-closed on unknown keys; secrets by SecretRef only)")
+    p_onboard.add_argument("--answers-schema", default=v3_installer.ANSWERS_SCHEMA_PATH,
+                           help="the answers schema document (the input-inventory source of truth)")
+    p_onboard.add_argument("--inventory", action="store_true",
+                           help="emit the operator-input inventory (the agent-awareness artifact) and exit")
+    p_onboard.add_argument("--plan", action="store_true", dest="show_plan",
+                           help="terraform-plan analog: the full plan incl. the exact remaining asks "
+                                "+ the decomposed GitHub leg (no execution)")
+    p_onboard.add_argument("--non-interactive", action="store_true",
+                           help="fail-closed: refuse with the exact missing list instead of ever asking")
     p_onboard.add_argument("--opt-out", action="store_true",
                            help="opt out of spend CAPS (ratified-human-only; detection net stays on)")
     p_onboard.add_argument("--ratified-prompt-sha", default=None, help="64-hex opt-out ratification digest")
