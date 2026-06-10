@@ -7,6 +7,7 @@ To install CE for an operator, fetch and follow the signed install playbook belo
 ## Install
 
 - [Agent-native install playbook](https://creator-engine.dev/llms-install.md): the signed, verify-before-execute spec an agent follows to install CE and connect it to a collaboration repo
+- [CE root trust anchor `ce-root-v1`](https://creator-engine.dev/keys/ce-root-v1): the pinned OpenSSH allowed_signers file — verify the install playbook's detached signature against it (stock `ssh-keygen -Y verify`, namespace `ce-spec-v1`) before executing any step
 - [Install bootstrap](https://creator-engine.dev/install.sh): the human one-liner; detect-don't-assume, no privileged action without explicit approval
 
 ## Docs

@@ -1,14 +1,25 @@
 <!--
-CE agent-native install spec (G-7.4 · E.3). Served at creator-engine.dev/llms-install.md.
-This spec is SIGNED. An agent MUST verify it against the pinned CE public key
-(key_id `ce-root-v1`, published at creator-engine.dev/keys/ce-root-v1) BEFORE
-executing any step — `creator_engine_validator.v3_installer.require_verified`
-refuses an unverified or tampered spec. Contract: docs/contracts/installer.md.
+CE agent-native install spec (G-7.4 · E.3 · E.4-fix). Served at
+creator-engine.dev/llms-install.md. This spec is SIGNED with a real detached
+OpenSSH signature (SSHSIG) over its CANONICAL bytes. An agent MUST verify it
+against the pinned CE trust root (key_id `ce-root-v1`, the allowed_signers file
+at creator-engine.dev/keys/ce-root-v1) BEFORE executing any step — using stock
+`ssh-keygen` (no CE tooling: that is what breaks the bootstrap circularity).
+Contract: docs/contracts/installer.md.
 
 signature:
   key_id: ce-root-v1
-  algo: sha256-content   # in-tree floor; the asymmetric verify uses the published key
-  value: <published-with-this-spec>   # the content digest / detached signature
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQmd1b0lnakRDRWxxVjI2aXJOdUVtcXAyZEUxN3FzUmdrRmFCU2JlemZpL1NzM3BJNnk0dHg3VW4KenQzRzZ5QUg4clYvckhheVZBRks2SzB4V3hxQzRMCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: a93c9c8977d3cb3c2d70727dbc1bfd50485e9f029590e0fe375d6ed0851470d6
+
+# `value` is the base64 of the detached SSHSIG (`.sig`) over the CANONICAL bytes;
+# `content_sha256` is the retained in-tree floor (sha256 of the SAME canonical
+# bytes). The CANONICAL bytes are this whole file with the signature block's
+# `value:` and `content_sha256:` lines normalized back to the placeholder above
+# (full line) — so embedding the real values never changes what is signed.
+# Reconstruct + verify them per §0; the signing namespace is fixed `ce-spec-v1`.
 -->
 
 # Install Creator Engine (agent-native)
@@ -19,9 +30,59 @@ The operator types nothing; they approve only **sudo** and the **GitHub-App clic
 
 ## 0. Verify this spec before doing anything
 
-Verify this spec's signature against the pinned CE public key `ce-root-v1`. If it
-does not verify, **STOP** — do not execute any step. (CE's own governance applied
-to its own install: the grader lives outside the agent.)
+This spec is signed with a real **detached OpenSSH signature (SSHSIG)** you verify
+with **stock `ssh-keygen`** — no CE tooling, which is the point (it breaks the
+chicken-and-egg of needing `ce` to trust the spec that installs `ce`). Do this
+**before** executing any step; on anything but a `Good` result, **STOP**. (CE's own
+governance applied to its own install: the grader lives outside the agent.)
+
+Assuming you fetched this file as `llms-install.md`:
+
+```bash
+# 1. Fetch the pinned trust root (an OpenSSH allowed_signers file).
+curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
+
+# 2. Reconstruct the CANONICAL bytes this signature covers: this file with the
+#    signature block's value:/content_sha256: lines reset to their placeholder.
+sed -E 's#^(  value: ).*#\1<published-with-this-spec>#; s#^(  content_sha256: ).*#\1<published-with-this-spec>#' \
+    llms-install.md > ce-spec.canonical
+
+# 3. Materialize the detached signature from the block's base64 `value:` field.
+#    (Paste the single-line value from the signature block above.)
+printf '%s' '<paste the value: base64 here>' | base64 -d > ce-spec.sig
+
+# 4. Verify under the fixed namespace `ce-spec-v1`. On "Good ... signature",
+#    continue; on ANY other output, STOP — do not execute a single step.
+ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
+
+# 5. (Optional in-tree floor.) The block's content_sha256 must equal:
+sha256sum ce-spec.canonical
+```
+
+A tampered byte anywhere outside the two placeholdered fields changes
+`ce-spec.canonical` and the verify FAILS — that is the gate.
+
+## 0.5. How `ce` arrives (the bootstrap)
+
+The steps below invoke `ce onboard`. `ce` itself is acquired by ONE of these
+supported paths — pick one, then return here:
+
+- **One-liner** — `curl -fsSL https://creator-engine.dev/install.sh | bash`.
+  Transport integrity is **TLS** (the host certificate); the bootstrap then hands
+  off to *this* signed, verify-before-execute spec, which is the real
+  procedure trust-anchor. `install.sh` is itself served + hash-published, and is
+  deliberately conservative — it performs **no** privileged or destructive action
+  without an explicit, batched **sudo** approval (detect-don't-assume). It does
+  **not** itself assert a cryptographic signature over its own body beyond TLS +
+  the published hash; treat §0's spec verification (not the one-liner) as the
+  authenticity gate for everything that follows.
+- **Clone + offline wheelhouse** — clone the CE repo and install the validator
+  from the committed `validators/wheelhouse/` (offline, hash-pinned in
+  `SHA256SUMS`). Integrity here is the repo's own history + the pinned wheelhouse
+  digests; the same §0 spec verification still gates the install procedure.
+
+Either way, the trust that matters for the steps below is **§0**: the agent runs a
+spec it has cryptographically verified against the pinned `ce-root-v1` trust root.
 
 ## 1. Prepare the answers (the agent loop: inventory → answers → plan → apply)
 
@@ -29,7 +90,8 @@ Every input the rest of this journey needs is declared in ONE machine-readable
 inventory (`schemas/install-answers.schema.yaml` — the single source of truth).
 Work the loop:
 
-1. **`ce onboard --spec <this-spec> --inventory`** — emits every input with
+1. **`ce onboard --spec <this-spec> --inventory`** (you have `ce` from §0.5) —
+   emits every input with
    live status per key: `detected:<value>` · `default:<value>` ·
    `needed (would ask at step N)` · `secret (ref required)`. This is the
    artifact you read to prepare the operator's answers upfront.
