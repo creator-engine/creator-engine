@@ -213,5 +213,5 @@ def test_app_jwt_runner_registers_no_check_and_no_backend():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner import available_backends
 
-    assert len(registered_checks()) == 51  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup
+    assert len(registered_checks()) == 52  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup; v3.5-E.3 E3-G1 added install_answers
     assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a)

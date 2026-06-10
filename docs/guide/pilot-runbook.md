@@ -18,7 +18,7 @@ contracts/designs.*
 - A greenfield (or existing) GitHub repository you want CE to drive work on.
 - Permission to install dependencies (sudo) and to authorize a GitHub App.
 
-## 1. Install (two operator-typeless modes)
+## 1. Install (one engine, two modes — operator-typeless)
 
 You type nothing during setup; you approve only **sudo** (privileged dependency
 installs) and the **GitHub-App authorization click**. Contract:
@@ -31,6 +31,29 @@ installs) and the **GitHub-App authorization click**. Contract:
 - **Agent-native** — point your agent at `https://creator-engine.dev/llms-install.md`.
   Your agent fetches the **signed** install spec, **verifies it against the pinned
   CE public key before executing**, and assists the GitHub-App step.
+
+Both modes are the SAME journey; the only difference is *where answers come
+from* (`interactive > answers-file > detected > default`). You can prepare
+every answer **upfront, IaC-style**, in a committable
+`ce-install.answers.yaml` (schema:
+[`../../schemas/install-answers.schema.yaml`](../../schemas/install-answers.schema.yaml)) —
+or answer interactively as each journey step batches its asks. The agent loop:
+
+```
+ce onboard --spec llms-install.md --inventory          # every input + live status
+# prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
+# sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
+ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan
+ce onboard --spec llms-install.md --answers ce-install.answers.yaml --non-interactive
+```
+
+`--plan` shows the full plan plus the *exact remaining asks*;
+`--non-interactive` is fail-closed — it refuses with that list instead of ever
+asking (unattended/VPS runs). The one-liner passes a file through too:
+`CE_ANSWERS=ce-install.answers.yaml curl … | bash` (or
+`bash -s -- --answers <file>`). An answers value can configure anything
+**except a weaker grader** — weakening (the cost opt-out, protections below
+the CE floor) requires your explicit ratified binding, educate-first.
 
 The installer exposes the CE CLI as **`ce`** (this is a v3-only install — there is
 no v1 to collide with). Preview the plan first with a dry-run:
@@ -60,6 +83,19 @@ JIT scoped token only at open/merge, then revokes — never in the box). You com
 the **GitHub-App authorization click** in your browser. CE opens and merges as the
 **App bot identity** (≠ you), so on a solo repo **you are the reviewer** and
 no-self-approval holds.
+
+The GitHub leg is fully decomposed and **re-run convergent**:
+
+- The **click is first-run-only** — a detected (or declared
+  `github.app.installation_id`) installation skips it; the converged state is
+  fully declarative.
+- Your one-time **bootstrap token** enters only as a SecretRef
+  (`prompt://github-bootstrap-token` asks at the moment of use); its minimal
+  scopes are *verified by probe, not asked*, and it is never stored.
+- **Branch protections reconcile as a desired-state diff** against the CE
+  reference floor (required CE check · strict up-to-date · dismiss-stale ·
+  enforce-admins · reviews ≥ 1 · squash-only): read current → diff → apply
+  ONLY the drift, shown to you first. Same answers, second run → empty plan.
 
 ## 3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)
 

@@ -383,3 +383,188 @@ def test_help_reachable():
     with pytest.raises(SystemExit) as exc:
         v3_cli.main(["--help"])
     assert exc.value.code == 0
+
+
+
+# ---------------------------------------------------------------------------
+# v3.5-E.3 E3-G3 — onboard: --answers / --inventory / --plan / --non-interactive
+# ---------------------------------------------------------------------------
+_GOOD_ANSWERS_YAML = """\
+answers_version: 1
+profile: solo-pilot
+host:
+  sudo_grant: [git, python, runsc, proxy]
+cost:
+  profile: default
+provider:
+  harness: claude-code
+  anthropic_api_key: env://ANTHROPIC_API_KEY
+github:
+  mode: existing
+  repo: chmod735/creator-engine-canonical
+  bootstrap_token: prompt://github-bootstrap-token
+  app:
+    kind: shared
+    installation_id: 12345678
+  protections: reference
+  reviewer: chmod735
+"""
+
+
+def _spec(tmp_path):
+    spec = tmp_path / "llms-install.md"
+    spec.write_text("# Install CE\n", encoding="utf-8")
+    return spec
+
+
+def _answers_file(tmp_path, content=_GOOD_ANSWERS_YAML):
+    path = tmp_path / "ce-install.answers.yaml"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_inventory"
+    assert payload["verified"]["ok"] is True   # verify stays first, even for awareness
+    rows = {row["key"]: row for row in payload["inventory"]}
+    assert rows["github.bootstrap_token"]["status"] == "secret (ref required)"
+    assert rows["cost.profile"]["status"] == "default:default"
+
+
+def test_onboard_answers_file_resolves_the_asks(tmp_path, capsys, monkeypatch):
+    # pin the live probe (host-independent): claude present, codex absent
+    monkeypatch.setattr(
+        v3_cli, "_which",
+        lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"),
+    )
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(_answers_file(tmp_path)), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["answers"]["missing"] == []
+    assert payload["answers"]["sha256"] and len(payload["answers"]["sha256"]) == 64
+    assert payload["answers"]["sources"]["github.repo"] == "answers"
+
+
+def test_onboard_refuses_typo_key_fail_closed(tmp_path, capsys):
+    bad = _answers_file(tmp_path, _GOOD_ANSWERS_YAML + "workspce_root: typo\n")
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
+    assert code == 1
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_onboard_refuses_raw_secret_in_answers(tmp_path, capsys):
+    bad = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
+        "prompt://github-bootstrap-token", "ghp_rawsecret123"))
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and "SecretRef" in out
+
+
+def test_onboard_non_interactive_refuses_with_exact_missing_list(tmp_path, capsys):
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--non-interactive", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    missing_keys = {m["key"] for m in payload["missing"]}
+    assert "github.mode" in missing_keys and "github.bootstrap_token" in missing_keys
+
+
+def test_onboard_non_interactive_succeeds_on_complete_answers(tmp_path, capsys, monkeypatch):
+    # pin the live probe (host-independent): claude present, codex absent; the
+    # grant covers every privileged tool, so even a host missing runsc/proxy
+    # stays inside the operator's written upfront approval
+    monkeypatch.setattr(
+        v3_cli, "_which",
+        lambda tool: tool in ("git", "python", "uv", "claude"),
+    )
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(_answers_file(tmp_path)),
+                        "--non-interactive", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["non_interactive"] is True
+    assert payload["answers"]["missing"] == []
+    assert payload["answers"]["sudo_grant"]["uncovered"] == []
+
+
+def test_onboard_non_interactive_refuses_sudo_outside_the_grant(tmp_path, capsys, monkeypatch):
+    # force a privileged install the grant does not cover
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv"))
+    narrow = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
+        "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: [runsc]"))
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(narrow), "--non-interactive", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sudo_uncovered"] == ["proxy"]
+
+
+def test_onboard_answers_custom_cost_profile_flows_to_the_g5_fragment(tmp_path, capsys):
+    custom = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
+        "cost:\n  profile: default",
+        "cost:\n  profile: custom\n  optout:\n"
+        f"    ratified_prompt_sha: {'a' * 64}\n"
+        f"    approver_ref: {'b' * 64}\n"
+        "    educate_acknowledged: true",
+    ))
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(custom), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile"]["runtime_policy"]["spend_cap_enforcement"] == "off"
+    # the answers-file ack is stripped — the fragment matches the G-5 schema
+    assert "educate_acknowledged" not in payload["profile"]["runtime_policy"]["spend_cap_optout"]
+    assert "won't speed up your runs" in payload["educate"]
+
+
+def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(_answers_file(tmp_path)), "--plan", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    leg = payload["github_leg"]
+    assert leg["app"]["click_required"] is False          # installation declared → no click
+    assert leg["human_approves"] == []
+    # unprobed live facts stay fail-closed in the dry run (the E.4 drive probes them)
+    assert leg["bootstrap_token_scopes"]["probed"] is False
+
+
+def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsys, monkeypatch):
+    # detected harness contradicts the file's harness → surfaced, never silent
+    monkeypatch.setattr(
+        v3_cli, "_which",
+        lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "codex"),
+    )
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+                        "--answers", str(_answers_file(tmp_path)), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["answers"]["conflicts"] == [
+        {"key": "provider.harness", "file": "claude-code", "detected": "codex"}
+    ]
+
+
+def test_shipped_llms_install_spec_verifies_through_the_real_path(capsys):
+    """The served spec re-signs with the in-tree mechanism: its published
+    content digest must verify through the actual CLI gate (design §2.4 —
+    the installer's verify step still passes after the E.3 regeneration)."""
+    from creator_engine_validator import v3_installer
+
+    spec = Path(__file__).resolve().parents[3] / "docs" / "llms-install.md"
+    digest = v3_installer.content_digest(spec.read_bytes())
+    code = v3_cli.main(["onboard", "--spec", str(spec), "--sig-value", digest, "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["verified"]["ok"] is True and payload["self_attested"] is False
+
+
+def test_onboard_inventory_help_names_the_loop():
+    # the agent loop is discoverable from --help (inventory → answers → plan)
+    parser = v3_cli._build_parser()
+    help_text = parser.format_help()
+    assert "onboard" in help_text

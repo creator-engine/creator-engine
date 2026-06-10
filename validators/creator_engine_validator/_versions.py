@@ -154,6 +154,10 @@ V3_SCHEMAS: frozenset[str] = frozenset(
         "schemas/runtime-policy.schema.yaml",
         "schemas/runtime-evidence.schema.yaml",
         "schemas/scope.schema.yaml",
+        # v3.5-E.3: the two-mode-installer answers file (the v3 installer
+        # surface's input inventory — single source of truth for the
+        # `install_answers` check + the `v3_installer` engine).
+        "schemas/install-answers.schema.yaml",
     }
 )
 

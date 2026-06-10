@@ -1,4 +1,4 @@
-"""Unit tests for the two-mode installer logic (``v3_installer``) — G-7.4.
+"""Unit tests for the two-mode installer logic (``v3_installer``) — G-7.4 + E.3.
 
 Pure decision substrate. Asserts: verify-BEFORE-execute (accept signed, REJECT
 tampered / unknown-key, refuse-on-fail); detect-don't-assume dependency planning
@@ -6,10 +6,20 @@ tampered / unknown-key, refuse-on-fail); detect-don't-assume dependency planning
 Default-vs-Custom profile + the ratified-HUMAN-only cost opt-out (emits a fragment
 ``ce_spend_envelope`` accepts; refuses an unratified opt-out); the ``ce`` exposure;
 and that the full plan verifies first. Module is v3-classified and pure.
+
+v3.5-E.3 (the unified two-mode engine): the answers schema is valid + the
+single source of truth; answers validation fails closed (unknown keys, raw
+secrets, unratified governance weakenings); SecretRef is pattern-only; the
+precedence merge (`interactive > answers > detected > default`) surfaces
+detected-fact conflicts; the inventory/missing-list derive from the schema;
+the scoped sudo-grant diff refuses drift outside the grant.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from creator_engine_validator import _versions as ver
 from creator_engine_validator import v3_installer as inst
@@ -19,6 +29,55 @@ SPEC = b"# Install CE\nsteps: ...\n"
 PINNED = inst.PINNED_KEYS
 KEY = "ce-root-v1"
 HEX = "a" * 64
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+ANSWERS_SCHEMA = yaml.safe_load(
+    (_REPO_ROOT / inst.ANSWERS_SCHEMA_PATH).read_text(encoding="utf-8")
+)
+
+#: A representative full answers document (the design-of-record skeleton).
+GOOD_ANSWERS = {
+    "answers_version": 1,
+    "profile": "solo-pilot",
+    "host": {
+        "sudo_grant": ["runsc", "proxy"],
+        "workspace_root": "~/ce-workspaces",
+    },
+    "cost": {"profile": "default"},
+    "provider": {
+        "harness": "claude-code",
+        "anthropic_api_key": "env://ANTHROPIC_API_KEY",
+    },
+    "github": {
+        "mode": "existing",
+        "repo": "chmod735/creator-engine-canonical",
+        "bootstrap_token": "prompt://github-bootstrap-token",
+        "app": {"kind": "shared", "installation_id": 12345678},
+        "protections": "reference",
+        "actions": {"install_validate_workflow": True},
+        "reviewer": "chmod735",
+    },
+    "pilot": {"target_repo": "chmod735/creator-engine-canonical"},
+}
+
+
+def _answers(**overrides):
+    import copy
+
+    doc = copy.deepcopy(GOOD_ANSWERS)
+    for dotted, value in overrides.items():
+        node = doc
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        if value is _DELETE:
+            node.pop(parts[-1], None)
+        else:
+            node[parts[-1]] = value
+    return doc
+
+
+_DELETE = object()
 
 
 # ---------------------------------------------------------------------------
@@ -153,3 +212,564 @@ def test_v3_classified_and_pure():
     src = inspect.getsource(inst)
     for io_marker in ("open(", "read_text", "write_text", "Path.home", "os.environ", "import subprocess"):
         assert io_marker not in src, f"installer logic must stay pure (found {io_marker!r})"
+
+
+# ===========================================================================
+# v3.5-E.3 — the answers file + the operator-input inventory
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# the schema document (the single source of truth)
+# ---------------------------------------------------------------------------
+def test_answers_schema_is_valid_draft202012():
+    from jsonschema import Draft202012Validator
+
+    Draft202012Validator.check_schema(ANSWERS_SCHEMA)
+
+
+def test_answers_schema_is_declared_v3_surface():
+    assert inst.ANSWERS_SCHEMA_PATH in ver.V3_SCHEMAS
+
+
+def test_good_answers_validate_clean():
+    assert inst.validate_answers(GOOD_ANSWERS, schema=ANSWERS_SCHEMA) == ()
+    assert inst.require_valid_answers(GOOD_ANSWERS, schema=ANSWERS_SCHEMA) is GOOD_ANSWERS
+
+
+def test_minimal_answers_validate_clean():
+    assert inst.validate_answers({"answers_version": 1}, schema=ANSWERS_SCHEMA) == ()
+
+
+def test_unknown_key_fails_closed_top_level_and_nested():
+    # the classic IaC footgun: a typo'd key must ERROR, never look consumed
+    problems = inst.validate_answers(_answers(workspce_root="x"), schema=ANSWERS_SCHEMA)
+    assert any("workspce_root" in p for p in problems)
+    problems = inst.validate_answers(
+        _answers(**{"github.protectons": "reference"}), schema=ANSWERS_SCHEMA
+    )
+    assert any("protectons" in p for p in problems)
+    with pytest.raises(inst.InstallRefused):
+        inst.require_valid_answers(_answers(workspce_root="x"), schema=ANSWERS_SCHEMA)
+
+
+def test_answers_version_is_required_and_pinned():
+    assert inst.validate_answers({}, schema=ANSWERS_SCHEMA)
+    assert inst.validate_answers({"answers_version": 2}, schema=ANSWERS_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# SecretRef — secrets never by value
+# ---------------------------------------------------------------------------
+def test_secret_ref_parses_every_scheme():
+    for ref in (
+        "env://ANTHROPIC_API_KEY",
+        "file:///dev/shm/ce-app.pem",
+        "prompt://github-bootstrap-token",
+        "keychain://ce-bootstrap",
+    ):
+        parsed = inst.parse_secret_ref(ref)
+        assert parsed is not None and parsed.ref == ref
+
+
+def test_secret_ref_rejects_raw_values_and_non_strings():
+    for raw in ("ghp_abc123secret", "sk-ant-xyz", "", None, 42, "http://not-a-scheme"):
+        assert inst.parse_secret_ref(raw) is None
+    with pytest.raises(inst.InstallRefused):
+        inst.require_secret_ref("ghp_abc123secret", field_key="github.bootstrap_token")
+
+
+def test_raw_secret_in_answers_refused_by_schema_and_belt():
+    doc = _answers(**{"github.bootstrap_token": "ghp_rawtoken123"})
+    problems = inst.validate_answers(doc, schema=ANSWERS_SCHEMA)
+    # both layers fire: the schema pattern AND the belt-and-braces parser
+    assert any(p.startswith("schema:") and "bootstrap_token" in p for p in problems)
+    assert any(p.startswith("secret: github.bootstrap_token") for p in problems)
+
+
+# ---------------------------------------------------------------------------
+# the generalized ratification binding (one shape, every weakening)
+# ---------------------------------------------------------------------------
+def test_valid_ratification_generalizes_the_optout_shape():
+    binding = {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64}
+    assert inst.valid_ratification(binding) is True
+    assert inst.valid_ratification(binding, require_ack=True) is False
+    assert inst.valid_ratification({**binding, "educate_acknowledged": True}, require_ack=True)
+    assert inst.valid_ratification(None) is False
+    assert inst.valid_ratification({"ratified_prompt_sha": "short", "approver_ref": HEX}) is False
+    # the legacy alias build_profile uses is the same predicate
+    assert inst._valid_optout(binding) is True
+
+
+def test_custom_cost_profile_requires_acked_binding():
+    doc = _answers(**{"cost.profile": "custom"})
+    problems = inst.validate_answers(doc, schema=ANSWERS_SCHEMA)
+    assert any("cost.optout" in p for p in problems)
+    doc = _answers(**{
+        "cost.profile": "custom",
+        "cost.optout": {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64,
+                        "educate_acknowledged": True},
+    })
+    assert inst.validate_answers(doc, schema=ANSWERS_SCHEMA) == ()
+
+
+def test_optout_binding_bridge_strips_ack_for_the_g5_fragment():
+    doc = _answers(**{
+        "cost.profile": "custom",
+        "cost.optout": {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64,
+                        "educate_acknowledged": True},
+    })
+    binding = inst.optout_binding_from_answers(doc)
+    assert binding == {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64}
+    # the stripped binding feeds build_profile → exactly what ce_spend_envelope accepts
+    profile = inst.build_profile(opt_out=True, optout_ratification=binding)
+    assert _check_optout(profile.runtime_policy, Path("x")) == []
+    # default profile → no binding
+    assert inst.optout_binding_from_answers(GOOD_ANSWERS) is None
+    with pytest.raises(inst.InstallRefused):
+        inst.optout_binding_from_answers(_answers(**{"cost.profile": "custom"}))
+
+
+# ---------------------------------------------------------------------------
+# the governance floor (reference posture as data) + weakening detection
+# ---------------------------------------------------------------------------
+def test_reference_protections_come_from_the_schema():
+    floor = inst.reference_protections(ANSWERS_SCHEMA)
+    assert floor["required_reviews"] == 1
+    assert floor["strict"] is True and floor["enforce_admins"] is True
+    assert floor["squash_only"] is True and floor["dismiss_stale"] is True
+    assert floor["required_checks"], "the CE required check must be on the floor"
+
+
+def test_protection_weakenings_detect_each_axis():
+    floor = inst.reference_protections(ANSWERS_SCHEMA)
+    assert inst.protection_weakenings({}, floor=floor) == ()
+    assert inst.protection_weakenings({"required_reviews": 2}, floor=floor) == ()  # strengthen
+    weak = inst.protection_weakenings(
+        {"required_reviews": 0, "enforce_admins": False, "required_checks": [],
+         "squash_only": False},
+        floor=floor,
+    )
+    assert len(weak) == 4
+
+
+def test_weakened_protections_require_acked_binding():
+    doc = _answers(**{"github.protections": {"required_reviews": 0}})
+    problems = inst.validate_answers(doc, schema=ANSWERS_SCHEMA)
+    assert any("weaker grader" in p for p in problems)
+    doc = _answers(**{"github.protections": {
+        "required_reviews": 0,
+        "ratification": {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64,
+                         "educate_acknowledged": True},
+    }})
+    assert inst.validate_answers(doc, schema=ANSWERS_SCHEMA) == ()
+
+
+def test_strengthened_protections_need_no_binding():
+    doc = _answers(**{"github.protections": {"required_reviews": 2, "strict": True}})
+    assert inst.validate_answers(doc, schema=ANSWERS_SCHEMA) == ()
+
+
+def test_bare_sudo_true_is_schema_invalid():
+    doc = _answers(**{"host.sudo_grant": True})
+    problems = inst.validate_answers(doc, schema=ANSWERS_SCHEMA)
+    assert any("sudo_grant" in p for p in problems)
+
+
+# ---------------------------------------------------------------------------
+# the precedence merge — interactive > answers > detected > default
+# ---------------------------------------------------------------------------
+def test_merge_precedence_order():
+    merged = inst.merge_answers(
+        ANSWERS_SCHEMA,
+        answers={"answers_version": 1, "provider": {"harness": "codex"}},
+        detected={"provider.harness": "claude-code"},
+        interactive={"provider.harness": "both"},
+    )
+    entry = merged.resolved["provider.harness"]
+    assert entry.value == "both" and entry.source == "interactive"
+    merged = inst.merge_answers(
+        ANSWERS_SCHEMA,
+        answers={"answers_version": 1},
+        detected={"provider.harness": "claude-code"},
+    )
+    assert merged.resolved["provider.harness"].source == "detected"
+    merged = inst.merge_answers(ANSWERS_SCHEMA)
+    assert merged.resolved["cost.profile"].value == "default"
+    assert merged.resolved["cost.profile"].source == "default"
+
+
+def test_merge_surfaces_detected_fact_conflict():
+    merged = inst.merge_answers(
+        ANSWERS_SCHEMA,
+        answers=GOOD_ANSWERS,
+        detected={"github.repo": "someone-else/other-repo"},
+    )
+    assert any(c.key == "github.repo" for c in merged.conflicts)
+    # the conflict joins the missing list (ask interactively / refuse non-interactively)
+    missing = inst.missing_answers(ANSWERS_SCHEMA, merged)
+    assert any(m.key == "github.repo" and m.reason == "conflict" for m in missing)
+    # an interactive answer settles it
+    merged = inst.merge_answers(
+        ANSWERS_SCHEMA,
+        answers=GOOD_ANSWERS,
+        detected={"github.repo": "someone-else/other-repo"},
+        interactive={"github.repo": "chmod735/creator-engine-canonical"},
+    )
+    missing = inst.missing_answers(ANSWERS_SCHEMA, merged)
+    assert not any(m.key == "github.repo" for m in missing)
+
+
+def test_cross_key_default_seeds_pilot_target():
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers={
+        "answers_version": 1,
+        "github": {"repo": "owner/name"},
+    })
+    entry = merged.resolved["pilot.target_repo"]
+    assert entry.value == "owner/name" and entry.source == "default"
+
+
+# ---------------------------------------------------------------------------
+# the missing list + the fail-closed non-interactive gate
+# ---------------------------------------------------------------------------
+def test_missing_answers_on_empty_input_names_the_load_bearing_keys():
+    merged = inst.merge_answers(ANSWERS_SCHEMA)
+    missing = {m.key: m for m in inst.missing_answers(ANSWERS_SCHEMA, merged)}
+    assert "provider.harness" in missing
+    assert "github.mode" in missing and "github.repo" in missing
+    assert missing["github.bootstrap_token"].reason == "secret_ref_required"
+    assert "github.reviewer" in missing
+    # conditional inputs stay out while their condition is unmet
+    assert "github.app.pem" not in missing            # app.kind defaults to shared
+    assert "github.new_repo.visibility" not in missing  # mode is not "new"
+    assert "cost.optout" not in missing               # profile defaults to "default"
+
+
+def test_conditional_inputs_join_when_condition_holds():
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers={
+        "answers_version": 1,
+        "github": {"mode": "new", "app": {"kind": "own"}},
+    })
+    missing = {m.key for m in inst.missing_answers(ANSWERS_SCHEMA, merged)}
+    assert {"github.app.app_id", "github.app.client_id", "github.app.pem"} <= missing
+    # new_repo fields with defaults resolve; only true gaps ask
+    assert "github.new_repo.visibility" not in missing
+
+
+def test_complete_answers_resolve_everything():
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers=GOOD_ANSWERS)
+    assert inst.missing_answers(ANSWERS_SCHEMA, merged) == ()
+    inst.require_complete(())  # no-op on a complete merge
+
+
+def test_require_complete_refuses_with_the_exact_list():
+    merged = inst.merge_answers(ANSWERS_SCHEMA)
+    missing = inst.missing_answers(ANSWERS_SCHEMA, merged)
+    with pytest.raises(inst.InstallRefused) as exc:
+        inst.require_complete(missing)
+    message = str(exc.value)
+    assert "fail-closed" in message
+    for item in missing:
+        assert item.key in message
+
+
+# ---------------------------------------------------------------------------
+# the scoped sudo pre-grant diff (fork F4)
+# ---------------------------------------------------------------------------
+def test_sudo_grant_diff_scoped_grant_covers_planned_installs():
+    plan = inst.plan_dependencies(
+        inst.REQUIRED_DEPENDENCIES,
+        {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True},
+    )
+    diff = inst.sudo_grant_diff(["runsc", "proxy"], plan)
+    assert diff.converged and set(diff.covered) == {"runsc", "proxy"}
+
+
+def test_sudo_grant_diff_refuses_drift_outside_the_grant():
+    plan = inst.plan_dependencies(
+        inst.REQUIRED_DEPENDENCIES,
+        {"git": False, "python": True, "runsc": False, "proxy": True, "uv": True},
+    )
+    diff = inst.sudo_grant_diff(["runsc"], plan)   # git drifted INTO the install set
+    assert not diff.converged and diff.uncovered == ("git",)
+    # no grant at all → every privileged install needs the ask
+    diff = inst.sudo_grant_diff(None, plan)
+    assert set(diff.uncovered) == {"git", "runsc"}
+
+
+# ---------------------------------------------------------------------------
+# the --inventory emission (the awareness artifact)
+# ---------------------------------------------------------------------------
+def test_inventory_emission_statuses():
+    rows = {r["key"]: r for r in inst.inventory_emission(
+        ANSWERS_SCHEMA,
+        detected={"provider.harness": "claude-code"},
+        answers={"answers_version": 1, "github": {"repo": "owner/name"}},
+    )}
+    assert rows["provider.harness"]["status"] == "detected:claude-code"
+    assert rows["github.repo"]["status"] == "answered:owner/name"
+    assert rows["cost.profile"]["status"] == "default:default"
+    assert rows["github.bootstrap_token"]["status"] == "secret (ref required)"
+    assert rows["github.mode"]["status"].startswith("needed (would ask at step 4")
+    assert rows["github.app.pem"]["status"] == "not-applicable"
+    assert rows["github.bootstrap_token"]["sensitivity"] == "secret"
+    assert "D" in rows["github.repo"]["modes"]
+
+
+def test_inventory_derives_from_schema_annotations_only():
+    keys = {item.key for item in inst.schema_inventory(ANSWERS_SCHEMA)}
+    # the meta key carries no x-ce-step → never an operator input
+    assert "answers_version" not in keys
+    # every journey step from host to pilot is represented
+    steps = {item.step for item in inst.schema_inventory(ANSWERS_SCHEMA)}
+    assert {1, 2, 3, 4, 5} <= steps
+
+
+
+# ===========================================================================
+# v3.5-E.3 E3-G2 — the GitHub leg, decomposed (pure planners, injected probes)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# repo plan — existing vs new, idempotent
+# ---------------------------------------------------------------------------
+def test_plan_repo_existing_uses_probed_repo():
+    plan = inst.plan_repo(mode="existing", repo="owner/name", repo_exists=True)
+    assert plan["action"] == "use_existing" and plan["converged"] and not plan["problems"]
+
+
+def test_plan_repo_existing_refuses_probed_missing_repo():
+    plan = inst.plan_repo(mode="existing", repo="owner/name", repo_exists=False)
+    assert plan["action"] == "refuse" and plan["problems"]
+
+
+def test_plan_repo_new_plans_create_then_converges_on_rerun():
+    plan = inst.plan_repo(mode="new", repo="owner/fresh",
+                          new_repo={"visibility": "private", "default_branch": "main"})
+    assert plan["action"] == "create"
+    assert plan["steps"][0]["step"] == "create_repo"
+    assert plan["steps"][0]["visibility"] == "private"
+    # second run: the repo now exists → create converges to use (idempotent)
+    rerun = inst.plan_repo(mode="new", repo="owner/fresh", repo_exists=True)
+    assert rerun["action"] == "use_existing" and rerun["converged"]
+
+
+def test_plan_repo_unresolved_repo_is_a_problem():
+    plan = inst.plan_repo(mode="existing", repo=None)
+    assert plan["action"] == "refuse"
+    assert any("github.repo" in p for p in plan["problems"])
+
+
+# ---------------------------------------------------------------------------
+# bootstrap-token scope verification (a check, not an input)
+# ---------------------------------------------------------------------------
+def test_bootstrap_scope_table_verifies_minimal_scopes():
+    table = inst.bootstrap_scope_table(inst.REQUIRED_BOOTSTRAP_SCOPES)
+    assert table["ok"] and table["probed"] and table["missing"] == []
+    assert {row["scope"] for row in table["rows"]} == set(inst.REQUIRED_BOOTSTRAP_SCOPES)
+
+
+def test_bootstrap_scope_table_names_missing_scopes():
+    table = inst.bootstrap_scope_table(["contents:write"])
+    assert not table["ok"]
+    assert "administration:write" in table["missing"]
+
+
+def test_bootstrap_scope_table_unprobed_is_fail_closed():
+    table = inst.bootstrap_scope_table(None)
+    assert not table["ok"] and not table["probed"]
+    assert all(row["granted"] is None for row in table["rows"])
+
+
+def test_bootstrap_scope_table_org_create_only_when_needed():
+    assert inst.ORG_CREATE_SCOPE not in [
+        r["scope"] for r in inst.bootstrap_scope_table([])["rows"]
+    ]
+    assert inst.ORG_CREATE_SCOPE in [
+        r["scope"] for r in inst.bootstrap_scope_table([], org_create_needed=True)["rows"]
+    ]
+
+
+# ---------------------------------------------------------------------------
+# the App plan — shared vs own; click-or-detect (re-run convergence)
+# ---------------------------------------------------------------------------
+def test_app_plan_shared_first_run_requires_the_click():
+    plan = inst.plan_github_app(kind="shared")
+    assert plan["click_required"] is True and not plan["converged"]
+    click = plan["steps"][0]
+    assert click["step"] == "app_install_click" and click["human"] is True
+    assert "/installations/new" in click["install_url"]
+
+
+def test_app_plan_detected_installation_skips_the_click():
+    plan = inst.plan_github_app(kind="shared", installation_id=12345678)
+    assert plan["click_required"] is False and plan["converged"]
+    assert plan["steps"] == []
+
+
+def test_app_plan_own_requires_ids_and_pem_ref():
+    plan = inst.plan_github_app(kind="own")
+    assert len(plan["problems"]) == 3
+    plan = inst.plan_github_app(
+        kind="own", app_id="123", client_id="Iv1.abc",
+        pem_ref="file:///dev/shm/ce-app.pem", installation_id=99,
+    )
+    assert plan["problems"] == [] and plan["converged"]
+
+
+def test_app_plan_own_refuses_raw_pem():
+    plan = inst.plan_github_app(kind="own", app_id="123", client_id="Iv1.abc",
+                                pem_ref="-----BEGIN RSA PRIVATE KEY-----")
+    assert any("SecretRef" in p for p in plan["problems"])
+
+
+def test_app_bot_identity_is_the_author_identity():
+    assert inst.app_bot_identity() == f"{inst.SHARED_APP_SLUG}[bot]"
+
+
+# ---------------------------------------------------------------------------
+# branch protection — desired-state diff, reference posture as data
+# ---------------------------------------------------------------------------
+def _floor():
+    return inst.reference_protections(ANSWERS_SCHEMA)
+
+
+def test_protection_diff_unprotected_branch_drifts_everything():
+    plan = inst.plan_branch_protection(None, "reference", floor=_floor())
+    assert not plan["converged"]
+    assert {d["key"] for d in plan["drift"]} == set(_floor().keys())
+
+
+def test_protection_diff_converges_when_current_matches_floor():
+    plan = inst.plan_branch_protection(dict(_floor()), "reference", floor=_floor())
+    assert plan["converged"] and plan["drift"] == []
+
+
+def test_protection_diff_plans_only_the_drift():
+    current = dict(_floor())
+    current["enforce_admins"] = False
+    plan = inst.plan_branch_protection(current, "reference", floor=_floor())
+    assert [d["key"] for d in plan["drift"]] == ["enforce_admins"]
+    assert plan["drift"][0]["desired"] is True
+
+
+def test_protection_required_checks_apply_as_a_union():
+    current = dict(_floor())
+    current["required_checks"] = ["someone-elses-check"]
+    plan = inst.plan_branch_protection(current, "reference", floor=_floor())
+    [entry] = [d for d in plan["drift"] if d["key"] == "required_checks"]
+    assert "someone-elses-check" in entry["desired"]  # never silently dropped
+    assert set(_floor()["required_checks"]) <= set(entry["desired"])
+
+
+def test_effective_protections_overlay_strengthen_and_ratified_weaken():
+    floor = _floor()
+    assert inst.effective_protections("reference", floor=floor) == floor
+    stronger = inst.effective_protections({"required_reviews": 2}, floor=floor)
+    assert stronger["required_reviews"] == 2 and stronger["strict"] is True
+    weakened = inst.effective_protections(
+        {"required_reviews": 0, "ratification": {"x": "ignored"}}, floor=floor
+    )
+    assert weakened["required_reviews"] == 0
+    assert "ratification" not in weakened  # the binding is an attestation, not a setting
+
+
+# ---------------------------------------------------------------------------
+# Actions workflow plan
+# ---------------------------------------------------------------------------
+def test_actions_plan_installs_workflow_and_enables_actions():
+    plan = inst.plan_actions_workflow(
+        actions_enabled=False, workflow_present=False,
+        required_check="Validate governance artifacts",
+    )
+    steps = {s["step"] for s in plan["steps"]}
+    assert steps == {"enable_actions", "install_validate_workflow"}
+
+
+def test_actions_plan_converges_when_present_and_enabled():
+    plan = inst.plan_actions_workflow(
+        actions_enabled=True, workflow_present=True,
+        required_check="Validate governance artifacts",
+    )
+    assert plan["converged"] and plan["steps"] == []
+
+
+# ---------------------------------------------------------------------------
+# the reviewer-identity floor (no self-approval)
+# ---------------------------------------------------------------------------
+def test_reviewer_floor_detected_login_is_the_solo_reviewer():
+    floor = inst.reviewer_identity_floor(token_login="chmod735",
+                                         bot_identity="creator-engine[bot]")
+    assert floor["ok"] and floor["reviewer"] == "chmod735"
+
+
+def test_reviewer_floor_refuses_missing_and_bot_self_review():
+    assert not inst.reviewer_identity_floor(bot_identity="creator-engine[bot]")["ok"]
+    floor = inst.reviewer_identity_floor(reviewer="creator-engine[bot]",
+                                         bot_identity="creator-engine[bot]")
+    assert not floor["ok"] and any("no-self-approval" in p for p in floor["problems"])
+
+
+# ---------------------------------------------------------------------------
+# the composed GitHub leg (dry-run; mutations stay the deferred forge seam)
+# ---------------------------------------------------------------------------
+def _github_probe(**overrides):
+    probe = {
+        "origin_remote": "chmod735/creator-engine-canonical",
+        "token_login": "chmod735",
+        "token_scopes": list(inst.REQUIRED_BOOTSTRAP_SCOPES),
+        "repo_exists": True,
+        "app_installation_id": 12345678,
+        "current_protections": dict(inst.reference_protections(ANSWERS_SCHEMA)),
+        "actions_enabled": True,
+        "workflow_present": True,
+    }
+    probe.update(overrides)
+    return probe
+
+
+def test_github_leg_converges_on_the_fully_provisioned_repo():
+    plan = inst.build_github_leg_plan(GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=_github_probe())
+    assert plan["converged"]
+    assert plan["human_approves"] == []          # installation detected → no click
+    assert plan["branch_protection"]["drift"] == []
+    assert plan["reviewer"]["ok"]
+
+
+def test_github_leg_first_run_plans_the_click_and_the_drift():
+    probe = _github_probe(app_installation_id=None, current_protections=None,
+                          workflow_present=False)
+    answers = _answers(**{"github.app": {"kind": "shared"}})
+    plan = inst.build_github_leg_plan(answers, schema=ANSWERS_SCHEMA, probe=probe)
+    assert not plan["converged"]
+    assert plan["human_approves"] == ["the GitHub-App authorization click"]
+    assert plan["branch_protection"]["drift"]
+    assert any(s["step"] == "install_validate_workflow" for s in plan["actions"]["steps"])
+
+
+def test_github_leg_refuses_invalid_answers_first():
+    with pytest.raises(inst.InstallRefused):
+        inst.build_github_leg_plan(_answers(typo_key=1), schema=ANSWERS_SCHEMA, probe=_github_probe())
+
+
+def test_github_leg_surfaces_detected_repo_conflict():
+    probe = _github_probe(origin_remote="someone-else/other-repo")
+    plan = inst.build_github_leg_plan(GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=probe)
+    assert plan["conflicts"] and plan["conflicts"][0]["key"] == "github.repo"
+
+
+def test_github_leg_unprobed_scopes_fail_closed():
+    plan = inst.build_github_leg_plan(
+        GOOD_ANSWERS, schema=ANSWERS_SCHEMA, probe=_github_probe(token_scopes=None)
+    )
+    assert not plan["bootstrap_token_scopes"]["ok"] and not plan["converged"]
+
+
+def test_github_detected_facts_projection():
+    detected = inst.github_detected_facts({
+        "origin_remote": "o/r", "token_login": "human", "app_installation_id": 5,
+    })
+    assert detected == {
+        "github.mode": "existing", "github.repo": "o/r",
+        "github.reviewer": "human", "github.app.installation_id": 5,
+    }
+    assert inst.github_detected_facts(None) == {}

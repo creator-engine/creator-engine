@@ -14,6 +14,20 @@ set -euo pipefail
 CE_SITE="${CE_SITE:-https://creator-engine.dev}"
 SPEC_URL="${CE_SITE}/llms-install.md"
 KEY_ID="ce-root-v1"
+# IaC mode (v3.5-E.3): an answers file may be supplied upfront — either
+#   CE_ANSWERS=ce-install.answers.yaml curl … | bash
+# or
+#   curl … | bash -s -- --answers ce-install.answers.yaml
+# It is passed through to the verified onboard (schema-validated, fail-closed
+# on unknown keys, secrets by SecretRef only); missing values still become ONE
+# batched ask per step — `--non-interactive` refuses instead of asking.
+CE_ANSWERS="${CE_ANSWERS:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --answers) CE_ANSWERS="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 say() { printf '◆ CE · %s\n' "$*"; }
 
@@ -42,6 +56,13 @@ say "verify against pinned key ${KEY_ID} before executing (the grader lives outs
 # 3. Hand off to the verified onboard (dry-run shown first; the operator approves
 #    only sudo + the GitHub-App click). The privileged drive is intentionally not
 #    executed by this published bootstrap without explicit confirmation.
+ANSWERS_ARG=""
+if [ -n "${CE_ANSWERS}" ]; then
+  say "answers file: ${CE_ANSWERS} (IaC mode — validated fail-closed; secrets as refs only)"
+  ANSWERS_ARG=" --answers ${CE_ANSWERS}"
+else
+  say "tip: prepare answers upfront — 'ce onboard --spec <spec> --inventory' lists every input"
+fi
 say "next: review the dry-run plan, then approve sudo + the GitHub-App click"
-say "  cev3 onboard --spec <verified-spec>   # or, once exposed:  ce onboard --spec <spec>"
+say "  cev3 onboard --spec <verified-spec>${ANSWERS_ARG}   # or, once exposed:  ce onboard --spec <spec>${ANSWERS_ARG}"
 say "install bootstrap complete — no privileged action was taken without your approval"
