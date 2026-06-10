@@ -1,0 +1,302 @@
+"""CE v3.5-B.1 — the ``CE_DEMO=1`` seed (Fork F-b: its OWN module). PURE constructor.
+
+The seeded fleet that tells the grader-outside story on camera (design §3.3):
+~8 seats across all five canon columns, with ONE blocked seat that attempted
+``git push`` and was DENIED by the deploy boundary — the visible form of "the
+grader lives outside the agent". The seed is the pitch artifact, so it is its
+own independently-reviewable module (Fork F-b, ratified) and every record is
+**L1-shaped and schema-true**:
+
+* pane records validate against ``schemas/pane-registry.schema.yaml``;
+* Scope records validate against ``schemas/scope.schema.yaml``;
+* evidence records are hash-chained via the shared
+  ``runtime_evidence_spine.append`` so ``verify_chain() == []`` on every seed
+  chain — the demo's tamper-evidence is REAL, only its data is seeded (and the
+  persistent "DEMO — seeded data, not a live fleet" watermark says so).
+
+PURE: a deterministic constructor — no disk, subprocess, socket, clock, or rng
+(timestamps are fixed constants; the story is set on the morning of
+2026-07-01). The fold lives in ``runner.cockpit_readmodel``; ``seed()`` returns
+exactly its ``fold_snapshot`` keyword inputs.
+
+Join rule (documented in the read-model): a seed chain's ``run_id`` equals the
+seat's ``lane_id``, which is how the board attributes evidence to seats.
+
+Defensive only — seeded demo data for a read-only governance view.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+from ..runtime_evidence_spine import (
+    RUNTIME_AGENT_ACTION_RECORD_KIND,
+    RUNTIME_AGENT_ACTION_RECORD_TYPE,
+    RUN_OUTCOME_RECORD_KIND,
+    RUN_OUTCOME_RECORD_TYPE,
+    append,
+)
+
+#: The seed's value-free policy binding — a deterministic digest, never a real
+#: runtime-policy (the watermark declares the data seeded).
+DEMO_POLICY_SHA = hashlib.sha256(b"ce-cockpit-demo-policy").hexdigest()
+
+#: A value-free 64-hex ratifier digest for the seeded bets.
+_DEMO_APPROVER = hashlib.sha256(b"ce-cockpit-demo-operator").hexdigest()
+_DEMO_SCOPE_SHA = hashlib.sha256(b"ce-cockpit-demo-scope-body").hexdigest()
+
+#: The deploy-boundary refusal reason, mirroring the Ring-1 hook's exact clause
+#: (``hook_check._mechanics_would_deny``) — the demo shows the REAL boundary.
+PUSH_DENY_REASON = (
+    "restricted mechanic (deploy) is denied without a matching ratified "
+    "reviewer-venue side-effect-authority envelope (G2.007.2)"
+)
+
+_HOST = "demo-host"
+
+
+def _ts(minute: int) -> str:
+    """A fixed demo timestamp on the 01-Jul-2026 demo morning (PURE constant)."""
+    return f"2026-07-01T09:{minute:02d}:00Z"
+
+
+def _chain(bodies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hash-chain record bodies via the shared spine (PURE)."""
+    chain: list[dict[str, Any]] = []
+    for body in bodies:
+        chain.append(append(chain, body))
+    return chain
+
+
+def _action(
+    run_id: str,
+    minute: int,
+    *,
+    op: str,
+    mutation_class: str,
+    target: str,
+    tool: str,
+    classification: str,
+    decision_mode: str,
+    decision_reason: str,
+) -> dict[str, Any]:
+    """One ``runtime_agent_action`` record body (Tier-B fidelity, pre timing)."""
+    return {
+        "kind": RUNTIME_AGENT_ACTION_RECORD_KIND,
+        "record_type": RUNTIME_AGENT_ACTION_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": DEMO_POLICY_SHA,
+        "run_id": run_id,
+        "recorded_at": _ts(minute),
+        "op": op,
+        "mutation_class": mutation_class,
+        "target": target,
+        "tool": tool,
+        "fidelity": "best_effort",
+        "timing": "pre",
+        "classification": classification,
+        "decision_mode": decision_mode,
+        "decision_reason": decision_reason,
+    }
+
+
+def _outcome(run_id: str, minute: int, *, outcome: str, branch: str, pr_number: int) -> dict[str, Any]:
+    """One terminal ``runtime_run_outcome`` record body (value-free change_set)."""
+    return {
+        "kind": RUN_OUTCOME_RECORD_KIND,
+        "record_type": RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": DEMO_POLICY_SHA,
+        "run_id": run_id,
+        "recorded_at": _ts(minute),
+        "outcome": outcome,
+        "change_set": {
+            "branch": branch,
+            "base": "main",
+            "manifest_paths": ["docs/demo-change.md"],
+            "head_sha": hashlib.sha256(f"demo-head-{run_id}".encode()).hexdigest()[:12],
+            "pr_number": pr_number,
+        },
+    }
+
+
+def _pane(
+    controller_id: str,
+    lane_id: str,
+    *,
+    role: str,
+    status: str,
+    minute: int,
+    pane_n: int,
+    closed: bool = False,
+) -> dict[str, Any]:
+    """One schema-true pane-registry record (PURE)."""
+    record: dict[str, Any] = {
+        "kind": "pane-registry-record",
+        "record_type": "pane_identity",
+        "schema_version": "1",
+        "controller_id": controller_id,
+        "lane_id": lane_id,
+        "claim_ref": f"claims/{controller_id}/{lane_id}.yaml",
+        "host_id": _HOST,
+        "pane_id": f"pane-demo{pane_n:02d}",
+        "role": role,
+        "status": status,
+        "record_timestamp": _ts(minute),
+        "registered_at": _ts(max(minute - 10, 0)),
+        "last_seen_at": _ts(minute),
+        "visibility": "operator_visible",
+        "terminal": {
+            "kind": "tmux",
+            "session_id": "$demo",
+            "window_id": "@1",
+            "pane_id": f"%{pane_n}",
+        },
+        "branch": f"ce/demo/{lane_id}",
+    }
+    if closed:
+        record["closed_at"] = _ts(minute)
+        record["close_reason"] = "completed"
+    return record
+
+
+def _scope(
+    scope_id: str,
+    intent: str,
+    *,
+    mutation_class: str,
+    done_when: list[str] | None = None,
+    budget: float | None = None,
+    ratified: bool = False,
+) -> dict[str, Any]:
+    """One schema-true Scope record (PURE)."""
+    scope: dict[str, Any] = {
+        "kind": "scope-record",
+        "record_type": "scope",
+        "schema_version": "1",
+        "scope_id": scope_id,
+        "intent": intent,
+        "mutation_class": mutation_class,
+    }
+    if done_when:
+        scope["acceptance_criteria"] = list(done_when)
+    if budget is not None:
+        scope["appetite"] = {"amount": budget, "unit": "$", "window": "per_run"}
+    if ratified:
+        scope["ratification"] = {
+            "approver_ref": _DEMO_APPROVER,
+            "ratified_scope_sha": _DEMO_SCOPE_SHA,
+        }
+    return scope
+
+
+def seed() -> dict[str, Any]:
+    """Return the L1-shaped demo fleet — exactly ``fold_snapshot``'s keyword inputs (PURE)."""
+    panes = [
+        _pane("ce-demo-framer", "scope-billing-frame", role="architect", status="active", minute=2, pane_n=1),
+        _pane("ce-demo-shaper", "scope-meter-shape", role="architect", status="active", minute=5, pane_n=2),
+        _pane("ce-demo-builder-a", "gate-uploads", role="implementer", status="active", minute=8, pane_n=3),
+        # THE demo seat: refused `git push` by the deploy boundary -> blocked.
+        _pane("ce-demo-builder-b", "gate-push-refusal", role="implementer", status="blocked", minute=14, pane_n=4),
+        _pane("ce-demo-reviewer", "pr-300-review", role="reviewer", status="active", minute=11, pane_n=5),
+        # Envelope-scope denial seat (tried a PR outside its envelope's pr_number).
+        _pane("ce-demo-scout", "envelope-scope-denial", role="reviewer", status="active", minute=12, pane_n=6),
+        # Spend hard-breach seat (paused at 100% of its run envelope).
+        _pane("ce-demo-spender", "spend-hard-breach", role="implementer", status="blocked", minute=13, pane_n=7),
+        _pane("ce-demo-shipper", "ship-pr-294", role="implementer", status="closed", minute=15, pane_n=8, closed=True),
+    ]
+
+    scopes = [
+        _scope("demo-billing-probe", "frame the metered-billing probe", mutation_class="docs"),
+        _scope(
+            "demo-meter-tiles", "shape the meter-tile slice",
+            mutation_class="code", done_when=["tiles render with badges"], budget=8.0, ratified=True,
+        ),
+        _scope(
+            "demo-upload-gate", "gate the upload pipeline",
+            mutation_class="code", done_when=["gate denies oversize uploads"], budget=12.0, ratified=True,
+        ),
+        _scope(
+            "demo-release-push", "land the release branch",
+            mutation_class="deploy", done_when=["release branch green"], budget=15.0, ratified=True,
+        ),
+        _scope(
+            "demo-review-pr300", "independently review PR 300",
+            mutation_class="governance", done_when=["review submitted through the hook"], budget=5.0, ratified=True,
+        ),
+        _scope(
+            "demo-data-migration", "migrate the demo dataset",
+            mutation_class="schema", done_when=["migration replayed clean"], budget=10.0, ratified=True,
+        ),
+        _scope(
+            "demo-attest-bundle", "attest the release bundle",
+            mutation_class="attestation", done_when=["bundle attested"], budget=6.0, ratified=True,
+        ),
+        _scope(
+            "demo-ship-294", "ship the docs refresh (PR 294)",
+            mutation_class="docs", done_when=["PR 294 merged head-pinned"], budget=4.0, ratified=True,
+        ),
+    ]
+
+    # Committed-signal projections (state-as-projection; the seed states the
+    # signals, project_scope_state derives the conserved state).
+    scope_signals = {
+        "demo-upload-gate": {"dispatched": True},
+        "demo-release-push": {"dispatched": True},
+        "demo-data-migration": {"dispatched": True},
+        "demo-review-pr300": {"reviewed": True},
+        "demo-attest-bundle": {"final_ratified": True},
+        "demo-ship-294": {"merged": True},
+    }
+
+    chains = {
+        # The 01-Jul moment: an allowed in-manifest write, then `git push`
+        # DENIED by the deploy boundary — on a verifying hash chain.
+        "gate-push-refusal": _chain([
+            _action(
+                "gate-push-refusal", 13,
+                op="write", mutation_class="code",
+                target="src/release/notes.md", tool="Edit",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="permitted under active manifest / mechanics / secret policy",
+            ),
+            _action(
+                "gate-push-refusal", 14,
+                op="vcs", mutation_class="deploy",
+                target="git push origin ce/demo/gate-push-refusal", tool="Bash:git push",
+                classification="denied", decision_mode="deny",
+                decision_reason=PUSH_DENY_REASON,
+            ),
+        ]),
+        # The reviewer seat: a clean chain ending in review_submitted.
+        "pr-300-review": _chain([
+            _action(
+                "pr-300-review", 10,
+                op="egress", mutation_class="governance",
+                target="pr#300", tool="Bash:gh pr review",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="pr_review authorized by envelope rva-demo-pr300 (pr_number 300)",
+            ),
+            _outcome("pr-300-review", 11, outcome="review_submitted",
+                     branch="ce/demo/pr-300-review", pr_number=300),
+        ]),
+        # The shipped seat: terminal pr_merged disposition.
+        "ship-pr-294": _chain([
+            _outcome("ship-pr-294", 15, outcome="pr_merged",
+                     branch="ce/demo/ship-pr-294", pr_number=294),
+        ]),
+    }
+
+    observations = [
+        {"hookEventName": "PreToolUse", "observedAt": _ts(14), "advisory": True, "blocking": False},
+        {"hookEventName": "Stop", "observedAt": _ts(15), "advisory": True, "blocking": False},
+    ]
+
+    return {
+        "panes": panes,
+        "scopes": scopes,
+        "scope_signals": scope_signals,
+        "chains": chains,
+        "observations": observations,
+    }

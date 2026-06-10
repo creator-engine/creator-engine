@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -612,6 +613,43 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, {"action": "onboard", "self_attested": self_attested, **plan})
 
 
+def _cmd_cockpit(args: argparse.Namespace) -> int:
+    """The Cockpit (v3.5-B.1): the governed fleet board, read-only.
+
+    Principle-6 routing: the L2 snapshot fold (``runner.cockpit_readmodel``) is
+    textual-free and ``--json`` dumps it directly — the future-GUI seam as a
+    first-class invocation. ONLY the TUI path lazy-imports ``v3_cockpit`` (and
+    thereby ``textual``); non-cockpit subcommands and ``--json`` never do.
+    ``CE_DEMO=1`` swaps the data source for the seeded demo fleet (with the
+    persistent watermark); live mode reads the v3 state root plus the
+    launch-pinned ``CE_LEDGER_ROOT`` / ``CE_HOOK_OBSERVATIONS_DIR`` seams.
+    """
+    from .runner import cockpit_readmodel as _readmodel  # L2 — textual-free
+
+    demo = os.environ.get(_readmodel.DEMO_ENV) == "1"
+    root = Path(args.root)
+    if demo:
+        from .runner import cockpit_demo_seed as _seed
+
+        def _load() -> dict[str, Any]:
+            return _readmodel.fold_snapshot(demo=True, **_seed.seed())
+
+        watch: list[str] = []
+    else:
+
+        def _load() -> dict[str, Any]:
+            return _readmodel.snapshot_from_roots(root)
+
+        watch = _readmodel.watch_paths(root)
+    snapshot = _load()
+    if getattr(args, "json_output", False):
+        print(json.dumps(snapshot, indent=2, sort_keys=True))
+        return 0
+    from . import v3_cockpit  # LAZY: textual loads ONLY on the TUI path
+
+    return v3_cockpit.run_app(snapshot, reload=_load, watch_paths=watch)
+
+
 def _cmd_guide(args: argparse.Namespace) -> int:
     """Print the in-product guide (the seed of ``docs/guide/understanding-ce.md``)."""
     if getattr(args, "json_output", False):
@@ -735,6 +773,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_guide = sub.add_parser("guide", help="print the in-product CE guide (what CE is + the five stages)")
     p_guide.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    p_cockpit = sub.add_parser(
+        "cockpit",
+        help="the governed fleet Cockpit — read-only board + governance view "
+        "(CE_DEMO=1 for the seeded demo; --json dumps the L2 snapshot, textual-free)",
+    )
+    _add_root(p_cockpit)
+
     p_session = sub.add_parser("session", help="launch the governed session frame + status line")
     p_session.add_argument("--context-pct", type=float, default=None,
                            help="the harness's authoritative context-window %% (consumed, never recomputed)")
@@ -764,6 +809,7 @@ _DISPATCH = {
     "onboard": _cmd_onboard,
     "guide": _cmd_guide,
     "session": _cmd_session,
+    "cockpit": _cmd_cockpit,
 }
 
 

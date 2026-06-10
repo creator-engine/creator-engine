@@ -69,8 +69,12 @@ def test_taxonomy_counts_and_disjoint():
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
     # (``v3_cli``), and the G-6 spine: 24 -> 26. v3.5-A.1 added the OpenShell
     # runner backend (``runner.openshell_backend``): 26 -> 27. v3.5-D.0.1 added
-    # the live usage tap (``runner.usage_tap``): 27 -> 28.
-    assert len(ver.V3_RUNTIME) == 28
+    # the live usage tap (``runner.usage_tap``): 27 -> 28. v3.5-B.1 added the
+    # Cockpit family — the L2 read-model (= harness-paper F1,
+    # ``runner.cockpit_readmodel``), the CE_DEMO seed
+    # (``runner.cockpit_demo_seed``, Fork F-b), and the L3 Textual view
+    # (``v3_cockpit``): 28 -> 31.
+    assert len(ver.V3_RUNTIME) == 31
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
