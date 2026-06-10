@@ -32,7 +32,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import claude_launch_spec
+from . import claude_launch_spec, resource_bound_spec
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -167,6 +167,14 @@ class ReviewerVenueIdentityInvalid(LaneLaunchError):
     code = "G3-REVIEWER-VENUE-IDENTITY"
 
 
+class ResourceBoundRefused(LaneLaunchError):
+    """v3.5-F: a resource-bounded lane launch is refused — malformed/unratified
+    resource policy, an unsupported host under ``enforce``, a unit-name
+    collision, or a failed launch-confirm. Fail-closed."""
+
+    code = "G3-RESOURCE-REFUSED"
+
+
 # G2.002.1 operating-mode runtime-carrier refusals. Each is raised before any
 # side effect (no tmux spawn, no Pane Registry write, no ledger write), mirroring
 # the G3-* ordering. They preserve — never relax — the Operator-only floor.
@@ -239,6 +247,11 @@ class LaunchResult:
     # reviewer venue (exported to the pane env + recorded in the ignored sidecar).
     # ``None`` for non-reviewer lanes or a reviewer lane launched without a ref.
     reviewer_authority_ref: str | None = None
+    # v3.5-F: the resource-bounding evidence stamp (also written to the ignored
+    # sidecar, never the schema-locked pane record). A dict when bounded;
+    # "none (advisory)" / "none (off)" on a ratified opt-down; None when the
+    # policy declares no resource governance.
+    resource_bound: dict[str, Any] | str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -501,11 +514,22 @@ def launch(
     tenant_policy: Path | str | None = None,
     ratification_evidence_ref: str | None = None,
     reviewer_authority_ref: str | None = None,
+    runtime_policy: Path | str | None = None,
+    systemctl_runner: Any | None = None,
+    support_probe: Any | None = None,
+    cgroupfs_root: Path | str = "/sys/fs/cgroup",
 ) -> LaunchResult:
     """Launch a governed visible lane and write its Pane Registry record.
 
     All refusals raise before any side effect (no tmux spawn, no Pane Registry
     write). See module docstring for the requirement mapping.
+
+    v3.5-F: when ``runtime_policy`` names a policy file declaring
+    ``resource_envelopes``, the lane command launches inside an OS-enforced
+    ``systemd-run --user --scope`` bound. The wrap is applied to the OUTPUT of
+    the step-6 Ring-0 governed-command build — never its input.
+    ``systemctl_runner`` / ``support_probe`` / ``cgroupfs_root`` are test seams
+    for the systemd I/O edges.
     """
     prompt = Path(prompt)
     ledger_root = Path(ledger_root)
@@ -536,6 +560,28 @@ def launch(
         reviewer_authority_ref = _validate_reviewer_authority_ref(
             reviewer_authority_ref, repo_root
         )
+
+    # 0c. v3.5-F resource policy. Read the resource fragment (pure, fail-closed)
+    #     BEFORE any side effect, through the existing policy-read seam
+    #     (load_yaml — the same seam the tenant policy rides). An advisory/off
+    #     opt-down without a resource_optout ratification binding is refused here.
+    resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    if runtime_policy is not None:
+        try:
+            policy_data = load_yaml(Path(runtime_policy))
+        except LoaderError as exc:
+            raise ResourceBoundRefused(
+                f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
+            ) from exc
+        try:
+            resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
+        except resource_bound_spec.ResourcePolicyError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+    bounding = (
+        resource_policy is not None
+        and resource_policy.governed
+        and not resource_policy.opted_down
+    )
 
     # 1. Prompt pointer must exist and match its SHA (RV1-031) — before side effects.
     if not prompt.is_file():
@@ -665,6 +711,36 @@ def launch(
             "completion_report_ref": completion_report_ref,
         }
 
+    # 6c. v3.5-F bounding wrap — applied to the OUTPUT of the step-6 Ring-0
+    #     build (never its input; the governed tokens stay byte-identical) and
+    #     identically to non-Claude lane commands. Still BEFORE any side
+    #     effect: the support probe refuses loudly under `enforce` (Fork F-2),
+    #     and a unit-name collision refuses loudly on relaunch.
+    resource_bound = None
+    resource_bound_stamp: dict[str, Any] | str | None = None
+    if resource_policy is not None and resource_policy.opted_down:
+        resource_bound_stamp = f"none ({resource_policy.enforcement})"
+    if bounding:
+        probe = support_probe or resource_bound_spec.probe_user_bounding
+        ok, reason = probe(systemctl_runner)
+        if not ok:
+            raise ResourceBoundRefused(
+                f"resource_enforcement is 'enforce' but user-level systemd bounding "
+                f"is unavailable: {reason}; the ratified opt-down is "
+                "resource_enforcement: advisory with a resource_optout binding"
+            )
+        try:
+            unit = resource_bound_spec.resolve_unit_name(lane_id, systemctl_runner)
+        except resource_bound_spec.ResourceBoundError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+        resource_bound = resource_policy.seat_bound(unit)
+        launch_command = resource_bound_spec.build_bounded_command(
+            launch_command, resource_bound
+        )
+        resource_bound_stamp = resource_bound.to_dict()
+        if resource_policy.fleet_memory_max:
+            resource_bound_stamp["fleet_memory_max"] = resource_policy.fleet_memory_max
+
     # 6b. tmux must be available for a tmux lane — before pane write (RV1-030).
     adapter = tmux_adapter if tmux_adapter is not None else TmuxAdapter()
     if terminal_kind == TMUX_TERMINAL_KIND and not adapter.is_available():
@@ -696,6 +772,27 @@ def launch(
         )
     except TmuxUnavailable as exc:
         raise TmuxUnavailableError(str(exc)) from exc
+
+    # 7b. v3.5-F launch-confirm: the seat scope must materialize. Write
+    #     memory.oom.group=1 (the kernel kills the SEAT as a unit, never a
+    #     random child — there is no systemd property for it) and apply the
+    #     collective fleet cap from the policy (idempotent, runtime-only).
+    if resource_bound is not None:
+        try:
+            resource_bound_spec.write_oom_group(
+                resource_bound.unit, runner=systemctl_runner, cgroupfs_root=cgroupfs_root
+            )
+            if resource_policy.fleet_memory_max:
+                resource_bound_spec.apply_fleet_cap(
+                    resource_policy.fleet_memory_max,
+                    slice_name=resource_bound.slice,
+                    runner=systemctl_runner,
+                )
+        except resource_bound_spec.ResourceBoundError as exc:
+            raise ResourceBoundRefused(
+                f"launch-confirm failed for bounded seat {resource_bound.unit!r}: {exc} "
+                "(pane left for forensics; retire it per the seat-retirement procedure)"
+            ) from exc
 
     # 8. Build + write the Pane Registry record bound to the claim (PCO-050).
     timestamp = _utc_now_str(now)
@@ -752,6 +849,8 @@ def launch(
     #    distinct reviewer venue identity (role/lane_kind) plus the injected
     #    reviewer_authority_ref, so the venue's authority is auditable from CE evidence.
     sidecar_payload: dict[str, Any] = dict(claude_governance) if claude_governance else {}
+    if resource_bound_stamp is not None:
+        sidecar_payload["resource_bound"] = resource_bound_stamp
     if reviewer_authority_ref or is_distinct_reviewer_venue(
         role=role, lane_kind=mode_resolution.lane_kind
     ):
@@ -779,6 +878,7 @@ def launch(
         autonomy_class=mode_resolution.autonomy_class,
         lane_kind=mode_resolution.lane_kind,
         reviewer_authority_ref=reviewer_authority_ref,
+        resource_bound=resource_bound_stamp,
     )
 
 

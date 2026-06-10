@@ -33,9 +33,24 @@ secret_allowlist:
   - per-task-scoped-token
 grant_extensible: false
 grant_authority: controller
+resource_envelopes:
+  # v3.5-F: OS-enforced per-seat memory bounding + collective fleet cap.
+  # The 14 GB desktop host-class defaults (materialized into the policy
+  # by the installer / `ce doctor`; never computed silently at launch).
+  - scope: seat
+    memory_high: 3500M
+    memory_max: 4G
+    memory_swap_max: 256M
+    tasks_max: 512
+    cpu_weight: 100
+  - scope: fleet
+    memory_max: 9G
+resource_enforcement: enforce
 note: >
   Implementer seat policy. Digest-pinned image; read-write only on the
   allocated worktree; read-only governance/schemas; deny-by-default
   egress to a model provider (L4) and a package registry (L7,
   TLS-terminated); names-only secrets (never the controller-key). No
   forbidden mounts. Record-shape only — G-1.0 stands up no live runtime.
+  v3.5-F adds the OS-enforced resource envelopes (seat + fleet memory
+  bounds) under `resource_enforcement: enforce`.
