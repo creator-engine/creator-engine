@@ -20,7 +20,7 @@ Per-file purpose:
 - **`site-archive/README.md`** *(M)* — ledger note (v6 = this change).
 - **`.ce/pr-path-manifest.md`** *(this carrier)*.
 
-- **base:** `ea1eea6` (current `main`).
+- **base:** `60b5287` (current `main`).
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=8
