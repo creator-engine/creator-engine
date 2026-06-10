@@ -106,11 +106,6 @@
   .install-box .ib-label i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; }
   .install-box .ib-cmd { display:block; padding:13px 14px; font-family:var(--mono); font-size:13.5px; color:var(--fg); white-space:nowrap; overflow-x:auto; user-select:all; -webkit-user-select:all; }
   .install-box .ib-cmd .p { color:var(--spark); user-select:none; -webkit-user-select:none; }
-  .install-box .ib-row { display:flex; align-items:center; gap:8px; padding-right:10px; }
-  .install-box .ib-row .ib-cmd { flex:1 1 auto; min-width:0; }
-  .install-box .ib-copy { flex:0 0 auto; font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--violet-bright); background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, color .15s ease; }
-  .install-box .ib-copy:hover { border-color:var(--violet-deep); box-shadow:0 0 18px -10px var(--violet-glow); }
-  .install-box .ib-copy.ok { color:var(--spark); border-color:var(--spark); }
   .install-box .ib-agent { padding:9px 14px; font-size:13px; color:var(--fg-dim); border-top:1px solid var(--line-soft); }
   .install-box .ib-agent code { font-size:12.5px; color:var(--violet-bright); }
   .quick-start { position:relative; z-index:1; padding:0 0 22px; overflow:hidden; }
@@ -374,10 +369,7 @@
   <div class="wrap">
     <div class="install-box">
       <div class="ib-label"><i></i> Install Creator Engine</div>
-      <div class="ib-row">
-        <code class="ib-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
-        <button class="ib-copy" type="button" aria-label="Copy the install command" onclick="ceCopyInstall(this)">Copy</button>
-      </div>
+      <code class="ib-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
       <p class="ib-agent">or point your coding agent at <code>https://creator-engine.dev/llms-install.md</code></p>
     </div>
   </div>
@@ -674,15 +666,5 @@
   </div>
 </footer>
 
-<script>
-  /* The only script on this page: clipboard for the install one-liner. No network, no tracking. */
-  function ceCopyInstall(btn){
-    var cmd = 'curl -fsSL https://creator-engine.dev/install.sh | bash';
-    navigator.clipboard.writeText(cmd).then(function(){
-      btn.classList.add('ok'); btn.textContent = 'Copied';
-      setTimeout(function(){ btn.classList.remove('ok'); btn.textContent = 'Copy'; }, 1600);
-    });
-  }
-</script>
 </body>
 </html>
