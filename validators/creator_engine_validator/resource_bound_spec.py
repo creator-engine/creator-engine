@@ -369,6 +369,7 @@ def parse_resource_policy(policy: Any) -> ResourcePolicy:
 # ---------------------------------------------------------------------------
 
 _GIB = 1024 ** 3
+_LARGE_HOST_FLOOR_BYTES = 24 * _GIB
 _DESKTOP_FLOOR_BYTES = 12 * _GIB
 
 
@@ -377,9 +378,14 @@ def host_class_defaults(mem_total_bytes: int) -> dict[str, Any]:
 
     Emitted by the installer / ``ce doctor`` INTO the policy file (the
     ratified policy stays the single source of truth; nothing is computed
-    silently at launch). Two host classes:
+    silently at launch). Three host classes:
 
-    * desktop-class (MemTotal >= 12 GiB, shared with a UI): seat
+    * large-host class (MemTotal >= 24 GiB, e.g. a headless 30 GiB dev host):
+      seat 5.5G/6G/256M + CPUQuota 400%, fleet 20G — supports ~6-10 bounded
+      seats plus full-suite headroom; leaves >=10G for page cache + host
+      services; caps one runaway seat to 4 of 16 vCPU so it cannot starve the
+      fleet.
+    * desktop-class (12 GiB <= MemTotal < 24 GiB, shared with a UI): seat
       3.5G/4G/256M, fleet 9G — kills a 9.1 GB-class leak at <30% of RAM while
       leaving >=5G for the desktop + page cache.
     * small-host class (e.g. the 8 GB headless VPS pilot): seat 2G/2.5G/128M,
@@ -387,23 +393,31 @@ def host_class_defaults(mem_total_bytes: int) -> dict[str, Any]:
     """
     if not isinstance(mem_total_bytes, int) or mem_total_bytes <= 0:
         raise ResourcePolicyError(f"mem_total_bytes {mem_total_bytes!r} is not a positive integer")
-    if mem_total_bytes >= _DESKTOP_FLOOR_BYTES:
+    cpu_quota = None
+    if mem_total_bytes >= _LARGE_HOST_FLOOR_BYTES:
+        host_class = "large-host-30g"
+        seat_high, seat_max, swap_max, fleet_max = "5500M", "6G", "256M", "20G"
+        cpu_quota = "400%"
+    elif mem_total_bytes >= _DESKTOP_FLOOR_BYTES:
         host_class = "desktop-14g"
         seat_high, seat_max, swap_max, fleet_max = "3500M", "4G", "256M", "9G"
     else:
         host_class = "small-host-8g"
         seat_high, seat_max, swap_max, fleet_max = "2G", "2500M", "128M", "5500M"
+    seat_envelope = {
+        "scope": SCOPE_SEAT,
+        "memory_high": seat_high,
+        "memory_max": seat_max,
+        "memory_swap_max": swap_max,
+        "tasks_max": 512,
+        "cpu_weight": 100,
+    }
+    if cpu_quota is not None:
+        seat_envelope["cpu_quota"] = cpu_quota
     return {
         "host_class": host_class,
         "resource_envelopes": [
-            {
-                "scope": SCOPE_SEAT,
-                "memory_high": seat_high,
-                "memory_max": seat_max,
-                "memory_swap_max": swap_max,
-                "tasks_max": 512,
-                "cpu_weight": 100,
-            },
+            seat_envelope,
             {"scope": SCOPE_FLEET, "memory_max": fleet_max},
         ],
         "resource_enforcement": ENFORCE,

@@ -1,32 +1,36 @@
-# PR path manifest — site v6.1: copy button on the install one-liner
+# PR path manifest - v3.5-F.2-mini large-host-30g host class
 
 CI passes this to `verify-path-manifest --base <PR base sha> --manifest .ce/pr-path-manifest.md`
 and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; the
 fidelity scan requires the declared count + SHA256 to match the fenced block.
 
-Operator-directed convention fix (2026-06-10): the install one-liner gets a `Copy` button to its
-right, per the convention on every referenced site. **Site/archive only — zero validator code, no
-installer artifact changes, no check-registry or `V3_RUNTIME` change.**
+Ratified gate:
+`/home/nefarious/projects/creator-engine-canonical/.hermes/research/v35f-vps-host-class-gate-20260610T152800Z/GATE_VPS_HOST_CLASS_composed.md`
+(v2 sha256 `fb9258ae0233e4f98b72e1524a37c5dbe607e3b6b062267f3a8bb1259e33a7b3`).
 
 Per-file purpose:
-- **`docs/index.html`** *(M)* — wrap the one-liner in a flex `.ib-row`, add the `.ib-copy` ghost
-  button (violet, lime "Copied" confirm) + its CSS + the page's first/only inline script
-  (clipboard-only, no network, no tracking). Nothing else touched.
-- **`site-archive/index-v6-buildfromhome.html`** *(A)* — verbatim snapshot of the outgoing v6 index
-  (sha256 `29d4e614…4329` = the ledger's v6 row).
-- **`site-archive/README.md`** *(M)* — demote v6 to snapshot; promote v6.1 as current.
-- **`.ce/pr-path-manifest.md`** *(this carrier)*.
+- **`validators/creator_engine_validator/resource_bound_spec.py`** *(M)* - add the pure
+  `large-host-30g` host-class default at `MemTotal >= 24 GiB`.
+- **`validators/tests/unit/test_resource_bound_spec.py`** *(M)* - pin the 23.99/24/30 GiB
+  boundaries, exact large-host caps, regression rows, and schema-shape validation.
+- **`docs/contracts/runtime-policy.md`** *(M)* - document the third §4.4 host class and boundary.
+- **`validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl`** *(M)* -
+  rebuilt from this branch source so the wheel oracle stays green.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - re-pinned to the rebuilt app wheel.
+- **`.ce/pr-path-manifest.md`** *(M)* - this carrier.
 
-- **base:** `60cc607`.
+- **base:** `6118a1c` (origin/main post-#192/#194; rebased under the base-only-refresh microauth — content unchanged from the reviewed `4efccbc`).
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=7bdf3db559d862aff23ce75071c4da6dd0eba3c711a3e532658bd3e37a78afba
+AUTHORIZED_PATHS_SHA256=53d4b455df72d4ddc29e5646bf4cc75987c8f24d468210e71b36a03b8dbb62a0
 
 ```text
 .ce/pr-path-manifest.md
-docs/index.html
-site-archive/README.md
-site-archive/index-v6-buildfromhome.html
+docs/contracts/runtime-policy.md
+validators/creator_engine_validator/resource_bound_spec.py
+validators/tests/unit/test_resource_bound_spec.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl
 ```
