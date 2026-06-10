@@ -78,8 +78,9 @@ def test_taxonomy_counts_and_disjoint():
     # Cockpit family — the L2 read-model (= harness-paper F1,
     # ``runner.cockpit_readmodel``), the CE_DEMO seed
     # (``runner.cockpit_demo_seed``, Fork F-b), and the L3 Textual view
-    # (``v3_cockpit``): 28 -> 31.
-    assert len(ver.V3_RUNTIME) == 31
+    # (``v3_cockpit``): 28 -> 31. The v3.5-C α-precursor added the Projects-v2
+    # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
+    assert len(ver.V3_RUNTIME) == 32
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
