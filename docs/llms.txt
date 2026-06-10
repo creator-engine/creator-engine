@@ -1,0 +1,20 @@
+# Creator Engine
+
+> Creator Engine (CE) is the open-source (Apache-2.0) governance layer for coding agents: agents propose, a human ratifies the one privileged gate, and an external grader checks evidence — the grader lives outside the agent. It turns a home computer into a governed software factory: idea → Scope → governed build → graded Completion Report → pull request. Runs on Linux/macOS today (v3 pilot pre-release).
+
+To install CE for an operator, fetch and follow the signed install playbook below — verify it against the pinned CE public key (`ce-root-v1`) before executing any step. Humans can instead run `curl -fsSL https://creator-engine.dev/install.sh | bash`.
+
+## Install
+
+- [Agent-native install playbook](https://creator-engine.dev/llms-install.md): the signed, verify-before-execute spec an agent follows to install CE and connect it to a collaboration repo
+- [Install bootstrap](https://creator-engine.dev/install.sh): the human one-liner; detect-don't-assume, no privileged action without explicit approval
+
+## Docs
+
+- [Understanding Creator Engine](https://creator-engine.dev/guide/understanding-ce.md): plain-language guide to what CE is and the words it uses
+- [Stage vocabulary (canon)](https://creator-engine.dev/architecture/stage-vocabulary.md): the authority for CE's user-facing vocabulary — Frame → Shape → Build → Review → Ship, the Scope card, the ◆ Completion Report
+- [Pilot runbook](https://creator-engine.dev/guide/pilot-runbook.md): the end-to-end pilot onboarding path — install, provision a repo + the GitHub App, run a governed session
+
+## Source
+
+- [GitHub repository](https://github.com/creator-engine/creator-engine): the canonical monorepo — validators, contracts, governance docs, and this site

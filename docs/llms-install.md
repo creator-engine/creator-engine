@@ -61,3 +61,44 @@ command). The operator drives work with `ce session` / `ce scope` / `ce drive` /
 
 Run `ce session` to show the governed session frame. Installation is complete when
 the operator can file a Scope, ratify it, and get a governed, cost-safe PR.
+
+## 6. Connect to your collaboration repo
+
+CE governs work **in a repo**. Connect one using the same two-mode pattern as
+every step above (`docs/contracts/installer.md`): for each value, **use an
+operator-provided answer if present** (upfront, IaC-style); otherwise **batch
+the missing values into ONE interactive ask** — never assume, never proceed on
+a guess. (The full provided-answers file schema is specified separately; this
+section names the values it must cover.)
+
+Values this leg needs:
+
+- **`repo_mode`** — `existing` (connect an operator-owned repo) or `create`
+  (create a new one; ask where: personal account or named org).
+- **`repo`** — `owner/name` of the target (existing mode) or the new repo's
+  name + owner (create mode), and its **default branch**.
+- **`setup_token`** — a short-lived operator-supplied token used **only for
+  this one-time configuration**, with admin rights on the target repo
+  (fine-grained: *Administration* read/write + *Contents* read; classic:
+  `repo`). It is **not** stored: runtime forge access is the GitHub App's
+  JIT scoped token (§3), never this one. Tell the operator exactly why each
+  scope is needed before they mint it.
+- **The GitHub-App installation** on the target repo — the operator's
+  authorization click (§3) must cover this repo.
+
+With the values resolved, configure the repo to CE's governed floor and show
+the operator the plan before applying it:
+
+1. **Branch protection on the default branch:** required pull-request review
+   (≥1 approver distinct from the author), required status check = the CE
+   governance-validation workflow (Actions enabled), strict up-to-date
+   requirement, no force pushes, enforced for admins. Squash-merge only.
+2. **The CE governance workflow** present so the required check exists and
+   runs on every PR.
+3. **Verify, don't trust:** re-read the applied settings and show the operator
+   the resulting protection state; CE's external gate — not this installer —
+   is what enforces governance from here on.
+
+**For the CE pilot the target is the CE repo itself** — it is already
+configured to this floor; **detect and confirm** the settings above rather
+than re-applying them.
