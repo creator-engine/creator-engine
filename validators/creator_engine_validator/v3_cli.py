@@ -623,7 +623,34 @@ def _cmd_cockpit(args: argparse.Namespace) -> int:
     ``CE_DEMO=1`` swaps the data source for the seeded demo fleet (with the
     persistent watermark); live mode reads the v3 state root plus the
     launch-pinned ``CE_LEDGER_ROOT`` / ``CE_HOOK_OBSERVATIONS_DIR`` seams.
+
+    ``--serve`` (v3.5-B.6) opens the SAME app in a browser on demand:
+    loopback-only bind + token gate + Host validation, enforced by the pure
+    serve config in ``v3_cockpit``; the serve deps load ONLY on this path. A
+    non-loopback ``--host`` is refused loudly before any socket exists.
     """
+    if getattr(args, "serve", False):
+        import shlex
+        import sys
+
+        from . import v3_cockpit  # LAZY: the serve path is a cockpit path
+
+        command = (
+            f"{shlex.quote(sys.executable)} -m creator_engine_validator.v3_cli "
+            f"cockpit --root {shlex.quote(str(args.root))}"
+        )
+        try:
+            config = v3_cockpit.build_serve_config(
+                command=command,
+                token=v3_cockpit.generate_token(),
+                host=args.host,
+                port=args.port,
+            )
+        except ValueError as exc:
+            print(f"{CE_CMD} cockpit --serve: {exc}", file=sys.stderr)
+            return 2
+        return v3_cockpit.run_serve(config)
+
     from .runner import cockpit_readmodel as _readmodel  # L2 — textual-free
 
     demo = os.environ.get(_readmodel.DEMO_ENV) == "1"
@@ -776,9 +803,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p_cockpit = sub.add_parser(
         "cockpit",
         help="the governed fleet Cockpit — read-only board + governance view "
-        "(CE_DEMO=1 for the seeded demo; --json dumps the L2 snapshot, textual-free)",
+        "(CE_DEMO=1 for the seeded demo; --json dumps the L2 snapshot, textual-free; "
+        "--serve opens the same app in a browser: loopback-only, token-gated)",
     )
     _add_root(p_cockpit)
+    p_cockpit.add_argument(
+        "--serve", action="store_true",
+        help="serve the SAME app in a browser on demand (127.0.0.1-only, "
+        "token-gated, Host-validated; exits with the command — no daemon)",
+    )
+    p_cockpit.add_argument(
+        "--host", default="127.0.0.1",
+        help="serve bind host — loopback ONLY; any non-loopback value is refused",
+    )
+    p_cockpit.add_argument(
+        "--port", type=int, default=8000, help="serve port (default: 8000)",
+    )
 
     p_session = sub.add_parser("session", help="launch the governed session frame + status line")
     p_session.add_argument("--context-pct", type=float, default=None,

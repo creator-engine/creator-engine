@@ -23,12 +23,29 @@ This module imports ``textual`` at module level BY DESIGN — it is only ever
 loaded on the TUI path (``v3_cli`` lazy-imports it inside the ``cockpit``
 dispatch; ``--json`` and every non-cockpit subcommand never touch it).
 
+v3.5-B.6 adds two ADDITIVE surfaces:
+
+* **Control-Room Violet** — the live site tokens VERBATIM (read from the
+  design; the site files are never edited here): refusals render gate-red,
+  verified chains spark-lime, pending/ESTIMATED amber, brand/authority
+  violet. The semantic NAMES travel as L2 snapshot styling hints; this view
+  only maps name → hex.
+* **``--serve``** — the SAME app opened in a browser on demand (no daemon)
+  via ``textual-serve`` (the mechanism is NOT in Textual core; ``textual-web``
+  is explicitly rejected). Loopback-only bind, token gate (the Jupyter
+  token-then-cookie model), and Host-header validation (anti-DNS-rebinding)
+  are enforced by ONE aiohttp middleware over a PURE, testable config; the
+  serve deps are lazy-imported ONLY on the serve path.
+
 Read-only: observation + request + visible authority — never a new authority.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hmac
+import secrets
+from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 from textual.app import App, ComposeResult
@@ -37,6 +54,49 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import DataTable, Footer, Header, Static, TabPane, TabbedContent
 
 APP_TITLE = "◆ CE Cockpit"
+
+# ---------------------------------------------------------------------------
+# v3.5-B.6 — Control-Room Violet (the live site tokens, VERBATIM)
+# ---------------------------------------------------------------------------
+#: docs/index.html:35-41, hex-for-hex. READ from the design — the site lane is
+#: separate and its files never appear in this gate's diff.
+THEME = {
+    "ink-900": "#08090F",
+    "ink-850": "#0B0D15",
+    "ink-800": "#0F1220",
+    "fg": "#E9EAF5",
+    "violet": "#A06BFF",
+    "spark": "#9BE34F",
+    "gate": "#FF4D6D",
+    "amber": "#F4B740",
+}
+
+#: The semantic mapping over the L2 styling HINTS (palette names carried in
+#: the snapshot): refused/blocked/hard-breach → gate · verified/allowed/go →
+#: spark · pending/soft-breach/ESTIMATED → amber · governance/authority/brand
+#: → violet. The view maps name → hex; it never re-derives semantics.
+SEMANTIC_HEX = {
+    "gate": THEME["gate"],
+    "spark": THEME["spark"],
+    "amber": THEME["amber"],
+    "violet": THEME["violet"],
+}
+
+#: Honesty-tier badges (B.4) → hex: MEASURED is solid/go, ESTIMATED is the
+#: labelled amber placeholder, UNAVAILABLE stays foreground (never a guess).
+BADGE_HEX = {
+    "MEASURED": THEME["spark"],
+    "ESTIMATED": THEME["amber"],
+    "UNAVAILABLE": THEME["fg"],
+}
+
+#: ``verify_chain`` badges (B.2) → hex: a verified chain is spark-lime, a
+#: tampered chain is gate-red, an absent chain is amber (declared, not faked).
+EVIDENCE_BADGE_HEX = {
+    "clean": THEME["spark"],
+    "findings": THEME["gate"],
+    "no-chain": THEME["amber"],
+}
 
 #: The board table's column headings (presentation labels over snapshot fields).
 _BOARD_COLUMNS = (
@@ -93,13 +153,14 @@ def _left_rail_text(snapshot: dict[str, Any]) -> str:
 
 
 def _refusal_lines(entry: dict[str, Any]) -> list[str]:
-    """Format ONE refusal-feed entry (pure presentation)."""
+    """Format ONE refusal-feed entry (pure presentation; refusals = gate-red)."""
+    gate = SEMANTIC_HEX["gate"]
     if entry.get("source") == "refusal-chain":
         clause = entry.get("deciding_clause") or "not covered by any envelope"
         return [
-            f"⛔ {entry.get('recorded_at', '—')} · {entry.get('run_id', '—')}",
-            f"   {entry.get('tool', '—')} → {entry.get('target', '—')}",
-            f"   {entry.get('deny_kind', '—')} deny · {clause}",
+            f"[{gate}]⛔ {entry.get('recorded_at', '—')} · {entry.get('run_id', '—')}[/]",
+            f"[{gate}]   {entry.get('tool', '—')} → {entry.get('target', '—')}[/]",
+            f"[{gate}]   {entry.get('deny_kind', '—')} deny · {clause}[/]",
         ]
     return [
         f"·  {entry.get('recorded_at', '—')} · legacy {entry.get('event', '—')} (advisory)"
@@ -137,10 +198,11 @@ def _stream_text(detail: dict[str, Any]) -> str:
     for group in (detail.get("stream") or {}).get("groups", []):
         if group.get("kind") == "actions":
             retry = f" ×{group['count']} RETRY" if group.get("retry") else ""
+            hex_color = SEMANTIC_HEX.get(str(group.get("color")), THEME["fg"])
             lines.append(
-                f"[{group.get('color', '—')}] {group.get('first_at', '—')} "
+                f"[{hex_color}]{group.get('first_at', '—')} "
                 f"{group.get('tool', '—')} → {group.get('target', '—')} · "
-                f"{group.get('classification', '—')}{retry}"
+                f"{group.get('classification', '—')}{retry}[/]"
             )
         else:
             lines.append(f"·  {group.get('recorded_at', '—')} {group.get('kind', '—')}")
@@ -156,9 +218,12 @@ def _diffs_text(detail: dict[str, Any]) -> str:
 
 def _evidence_text(detail: dict[str, Any]) -> str:
     evidence = detail.get("evidence") or {}
+    badge = str(evidence.get("badge", "—"))
+    hex_color = EVIDENCE_BADGE_HEX.get(badge)
+    badge_text = f"[{hex_color}]{badge}[/]" if hex_color else badge
     return (
         f"chain: {evidence.get('record_count', 0)} record(s) · "
-        f"verify_chain: {evidence.get('badge', '—')}"
+        f"verify_chain: {badge_text}"
     )
 
 
@@ -204,19 +269,27 @@ def _meter_strip_text(snapshot: dict[str, Any]) -> str:
     pct = context.get("pct")
     ctx_text = f"{pct:.0f}% {context.get('state', '—')}" if pct is not None else "—"
 
+    def _badge(tile: dict[str, Any]) -> str:
+        badge = str(tile.get("badge", "—"))
+        hex_color = BADGE_HEX.get(badge)
+        return f"[{hex_color}]{badge}[/]" if hex_color else badge
+
     segments = [
-        f"spend {spend_text} [{spend.get('badge', '—')}]",
-        f"rate {rate_text} [{token.get('badge', '—')}]",
-        f"ctx {ctx_text} [{context.get('badge', '—')}]",
-        f"headroom {headroom.get('placeholder', '—')} [{headroom.get('badge', '—')}]",
+        f"spend {spend_text} {_badge(spend)}",
+        f"rate {rate_text} {_badge(token)}",
+        f"ctx {ctx_text} {_badge(context)}",
+        f"headroom {headroom.get('placeholder', '—')} {_badge(headroom)}",
     ]
     lines = ["  │  ".join(segments)]
+    banner_hex = {"soft": SEMANTIC_HEX["amber"], "hard": SEMANTIC_HEX["gate"]}
     for banner in meters.get("banners", []):
+        tier = str(banner.get("tier", "—"))
         lines.append(
-            f"⛔ {str(banner.get('tier', '—')).upper()} BREACH · {banner.get('run_id', '—')} · "
+            f"[{banner_hex.get(tier, THEME['fg'])}]"
+            f"⛔ {tier.upper()} BREACH · {banner.get('run_id', '—')} · "
             f"{banner.get('unit', '')}{banner.get('observed', '—')}/"
             f"{banner.get('unit', '')}{banner.get('limit', '—')} · "
-            f"{banner.get('signal', '—')} → {banner.get('action', '—')}"
+            f"{banner.get('signal', '—')} → {banner.get('action', '—')}[/]"
         )
     return "\n".join(lines)
 
@@ -227,10 +300,17 @@ def _right_rail_text(snapshot: dict[str, Any]) -> str:
     refusals = snapshot.get("refusals", {})
     lines = ["Governance / Authority", ""]
 
-    lines.append(f"★ REFUSED [{refusals.get('source_label', '—')}]")
+    lines.append(
+        f"[{SEMANTIC_HEX['violet']}]★ REFUSED[/] · {refusals.get('source_label', '—')}"
+    )
     chain_verified = refusals.get("chain_verified")
     if chain_verified is not None:
-        lines.append(f"  chain verifies: {'clean' if chain_verified else 'FINDINGS'}")
+        verdict = (
+            f"[{SEMANTIC_HEX['spark']}]clean[/]"
+            if chain_verified
+            else f"[{SEMANTIC_HEX['gate']}]FINDINGS[/]"
+        )
+        lines.append(f"  chain verifies: {verdict}")
     for entry in refusals.get("entries", []):
         lines += _refusal_lines(entry)
     lines.append("")
@@ -265,42 +345,60 @@ class CockpitApp(App[None]):
         Binding("m", "filter('mine')", "Mine"),
         Binding("l", "filter('live')", "Live"),
     ]
-    CSS = """
-    #watermark {
+    # Control-Room Violet (B.6): surfaces ink-900/850/800 · text fg · violet =
+    # governance/authority/brand chrome · amber = the DEMO watermark. The
+    # refusal/verified/pending colors ride the text markup (SEMANTIC_HEX).
+    CSS = f"""
+    Screen {{
+        background: {THEME["ink-900"]};
+        color: {THEME["fg"]};
+    }}
+    Header {{
+        background: {THEME["ink-800"]};
+        color: {THEME["violet"]};
+    }}
+    Footer {{
+        background: {THEME["ink-800"]};
+    }}
+    #watermark {{
         dock: top;
         height: 1;
         text-align: center;
         text-style: bold;
-        background: $warning;
-        color: $text;
-    }
-    #left-rail {
+        background: {THEME["amber"]};
+        color: {THEME["ink-900"]};
+    }}
+    #left-rail {{
         width: 32;
-        border-right: solid $primary;
+        background: {THEME["ink-850"]};
+        border-right: solid {THEME["violet"]};
         padding: 0 1;
-    }
-    #center {
+    }}
+    #center {{
         width: 1fr;
-    }
-    #board {
+    }}
+    #board {{
         height: 1fr;
-    }
-    #detail {
+        background: {THEME["ink-900"]};
+    }}
+    #detail {{
         height: 14;
-        border-top: solid $primary;
-    }
-    #right-rail {
+        border-top: solid {THEME["violet"]};
+    }}
+    #right-rail {{
         width: 40;
-        border-left: solid $primary;
+        background: {THEME["ink-850"]};
+        border-left: solid {THEME["violet"]};
         padding: 0 1;
-    }
-    #meters {
+    }}
+    #meters {{
         dock: bottom;
         height: auto;
         max-height: 4;
-        border-top: solid $primary;
+        background: {THEME["ink-800"]};
+        border-top: solid {THEME["violet"]};
         padding: 0 1;
-    }
+    }}
     """
 
     def __init__(
@@ -419,4 +517,174 @@ def run_app(
 ) -> int:
     """Run the Cockpit TUI over a prepared L2 snapshot; return a CLI exit code."""
     CockpitApp(snapshot, reload=reload, watch_paths=watch_paths).run()
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# v3.5-B.6 — `ce cockpit --serve`: the SAME app, in a browser, on demand
+# ---------------------------------------------------------------------------
+#: Binds the wrapper accepts — loopback ONLY; anything else is refused loudly
+#: at config-build time, before any socket exists.
+_LOOPBACK_BINDS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+#: Host-header spellings a loopback browser legitimately sends.
+_LOOPBACK_HOST_NAMES = ("127.0.0.1", "localhost", "[::1]")
+
+#: ``secrets.token_urlsafe(32)`` emits 43 chars; the floor rejects anything a
+#: caller could plausibly hand-shorten into a guessable gate.
+_MIN_TOKEN_LENGTH = 32
+
+#: The session cookie the token gate mints (the Jupyter token-then-cookie model).
+TOKEN_COOKIE = "ce_cockpit_token"
+
+
+def generate_token() -> str:
+    """Mint an unguessable URL-safe session token (printed once at launch)."""
+    return secrets.token_urlsafe(32)
+
+
+@dataclass(frozen=True)
+class ServeConfig:
+    """The PURE serve configuration — every security decision derives from it."""
+
+    command: str
+    host: str
+    port: int
+    token: str
+    allowed_hosts: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ServeDecision:
+    """One request's PURE allow/deny decision (the testable security core)."""
+
+    allowed: bool
+    reason: str
+    set_cookie: bool = False
+
+
+def build_serve_config(
+    *,
+    command: str,
+    token: str,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> ServeConfig:
+    """Build + validate the serve config (PURE; raises ``ValueError`` loudly).
+
+    The three B.6 security requirements are enforced here, not in the web
+    layer: loopback-only bind (``0.0.0.0`` and any non-loopback host are
+    refused), a required unguessable token, and the allowed Host-header set
+    the middleware validates against (anti-DNS-rebinding).
+    """
+    if host not in _LOOPBACK_BINDS:
+        raise ValueError(
+            f"refusing to bind {host!r}: `ce cockpit --serve` is loopback-ONLY "
+            f"(allowed binds: {', '.join(sorted(_LOOPBACK_BINDS))}). The Cockpit "
+            "is a local Operator surface, never a network service — exposing it "
+            "would hand the board to the network, and that line never moves."
+        )
+    if len(token) < _MIN_TOKEN_LENGTH:
+        raise ValueError(
+            f"serve token too short ({len(token)} < {_MIN_TOKEN_LENGTH} chars): "
+            "the token gate is mandatory and must be unguessable "
+            "(use generate_token())."
+        )
+    allowed_hosts = _LOOPBACK_HOST_NAMES + tuple(
+        f"{name}:{port}" for name in _LOOPBACK_HOST_NAMES
+    )
+    return ServeConfig(
+        command=command, host=host, port=port, token=token, allowed_hosts=allowed_hosts
+    )
+
+
+def evaluate_request(
+    config: ServeConfig,
+    *,
+    host_header: str | None,
+    query_token: str | None,
+    cookie_token: str | None,
+) -> ServeDecision:
+    """Decide ONE request (PURE): Host validation first, then token-then-cookie.
+
+    A forged or absent ``Host`` header is rejected even when the token is
+    valid (anti-DNS-rebinding). A valid ``?token=`` mints the session cookie;
+    a valid cookie carries every subsequent request (websocket included —
+    same-origin browsers send it on the WS upgrade).
+    """
+    host = (host_header or "").strip().lower()
+    if host not in config.allowed_hosts:
+        return ServeDecision(
+            False, "Host header rejected (anti-DNS-rebinding): not a loopback origin"
+        )
+    if query_token is not None and hmac.compare_digest(query_token, config.token):
+        return ServeDecision(True, "token accepted", set_cookie=True)
+    if cookie_token is not None and hmac.compare_digest(cookie_token, config.token):
+        return ServeDecision(True, "cookie session accepted")
+    return ServeDecision(
+        False, "token required (use the tokened URL printed at launch)"
+    )
+
+
+def tokened_url(config: ServeConfig) -> str:
+    """The one-line launch URL carrying the session token (PURE)."""
+    return f"http://{config.host}:{config.port}/?token={config.token}"
+
+
+def _build_server(config: ServeConfig):
+    """Build the governed ``textual-serve`` server (the serve-extra I/O edge).
+
+    The serve mechanism ships in ``textual-serve`` — NOT Textual core — so its
+    deps are lazy-imported HERE only; ``textual-web`` (public tunnel) is
+    explicitly rejected by the ratified design and never used. The governed
+    wrapper subclasses the library's public ``Server`` and appends ONE aiohttp
+    middleware that runs ``evaluate_request`` over EVERY route (index,
+    websocket, static, download); the library source is never patched.
+    """
+    from aiohttp import web
+    from textual_serve.server import Server
+
+    @web.middleware
+    async def _governed_gate(request, handler):
+        decision = evaluate_request(
+            config,
+            host_header=request.headers.get("Host"),
+            query_token=request.query.get("token"),
+            cookie_token=request.cookies.get(TOKEN_COOKIE),
+        )
+        if not decision.allowed:
+            raise web.HTTPForbidden(text=f"CE Cockpit: {decision.reason}")
+        response = await handler(request)
+        if decision.set_cookie and not response.prepared:
+            response.set_cookie(
+                TOKEN_COOKIE, config.token, httponly=True, samesite="Strict"
+            )
+        return response
+
+    class _GovernedCockpitServer(Server):
+        async def _make_app(self) -> web.Application:
+            app = await super()._make_app()
+            app.middlewares.append(_governed_gate)
+            return app
+
+    return _GovernedCockpitServer(
+        config.command, host=config.host, port=config.port, title=APP_TITLE
+    )
+
+
+def run_serve(config: ServeConfig) -> int:
+    """Serve the SAME Cockpit app in a browser, on demand (no daemon).
+
+    Foreground lifecycle: the web process exits with the command (Ctrl+C);
+    each browser session spawns the app subprocess on demand and reaps it
+    when the session closes.
+    """
+    server = _build_server(config)
+    print(
+        f"CE Cockpit --serve: {tokened_url(config)}\n"
+        f"  bind {config.host}:{config.port} (loopback-only) · token-gated · "
+        "Host-validated · Ctrl+C to quit",
+        flush=True,
+    )
+    server.serve()
     return 0
