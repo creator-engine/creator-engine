@@ -276,6 +276,130 @@ def test_drive_spawn_surfaces_launch_refusal(tmp_path, capsys, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# v3.1-G1b — cev3 collect: run → conserved evidence chain (read-model sees it)
+# ---------------------------------------------------------------------------
+_RATES_POLICY = {"model_rates": [{"model": "claude-opus-4-8", "input_per_mtok": 15, "output_per_mtok": 75}]}
+
+
+def _transcript(path: Path, *, n_turns: int = 2) -> Path:
+    lines = []
+    for i in range(n_turns):
+        lines.append(json.dumps({
+            "type": "assistant",
+            "sessionId": "seat-1",
+            "timestamp": f"2026-06-11T09:3{i}:00Z",
+            "message": {"model": "claude-opus-4-8",
+                        "usage": {"input_tokens": 1000, "output_tokens": 200}},
+        }))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _dispatch_a_run(tmp_path, monkeypatch, *, policy: dict | None = None) -> str:
+    """file → ratify → drive --spawn (faked) → return the run_id with a dispatch on disk."""
+    _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    argv = ["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"]
+    if policy is not None:
+        ppath = tmp_path / "op-policy.yaml"
+        ppath.write_text(yaml.safe_dump(policy), encoding="utf-8")
+        argv += ["--policy", str(ppath)]
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        v3_cli.main(argv)
+    return json.loads(buf.getvalue())["run_id"]
+
+
+def test_collect_folds_transcript_and_outcome_into_chain(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "--outcome", "research_delivered", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "collected"
+    assert payload["outcome"] == "research_delivered"
+    assert payload["spend_leaves"] == 2
+    # the conserved chain persisted under the neutral runs root + verifies clean
+    chain_path = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
+    assert chain_path.is_file()
+    doc = yaml.safe_load(chain_path.read_text(encoding="utf-8"))
+    from creator_engine_validator import runtime_evidence_spine as spine
+    assert spine.verify_chain(doc["records"]) == []
+    # the dispatch is marked collected (drives the read-model back off Build)
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["collected_at"]
+
+
+def test_collect_report_renders_outcome_and_spend(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "--outcome", "research_delivered", "--root", str(tmp_path),
+    ])
+    capsys.readouterr()
+    chain_path = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
+    code = v3_cli.main([
+        "report", "rate-limit-login", "--evidence", str(chain_path), "--run-id", run_id,
+        "--cap", "5", "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "research_delivered"
+    # spend folded off the persisted chain (2 turns * (1000*15 + 200*75)/1e6 = 0.06)
+    assert "Research delivered" in payload["outcome_label"]
+
+
+def test_collect_refuses_double_collect(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    args = ["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+            "--outcome", "no_change", "--root", str(tmp_path)]
+    assert v3_cli.main(args) == 0
+    capsys.readouterr()
+    assert v3_cli.main(args) == 2  # second collect refuses (append-only)
+    assert "already collected" in capsys.readouterr().out
+
+
+def test_collect_refuses_unknown_run(tmp_path, capsys):
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", "run-ghost-x", "--outcome", "no_change",
+        "--root", str(tmp_path),
+    ])
+    assert code == 2
+    assert "no dispatch record" in capsys.readouterr().out
+
+
+def test_collect_refuses_scope_mismatch(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "other-scope", "--run", run_id, "--outcome", "no_change", "--root", str(tmp_path),
+    ])
+    assert code == 2
+    assert "not" in capsys.readouterr().out
+
+
+def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["spend_leaves"] == 0
+    assert payload["outcome"] == "no_change"
+
+
+# ---------------------------------------------------------------------------
 # the canon skin — stage phase projection (Frame→Shape) over the machine
 # ---------------------------------------------------------------------------
 def test_status_projects_phase_skin(tmp_path, capsys):

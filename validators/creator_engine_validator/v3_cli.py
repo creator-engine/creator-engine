@@ -55,13 +55,25 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_installer, v3_report, v3_seat_bridge, v3_session, v3_shaping
+from . import (
+    coordination,
+    evidence_sink,
+    runtime_evidence_spine,
+    v3_installer,
+    v3_report,
+    v3_seat_bridge,
+    v3_session,
+    v3_shaping,
+)
 from ._versions import V3_LOCAL_STATE_ROOT
+from .runner import usage_tap
+from .runner.backend import CollectedEvidence
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
 SCOPES_SUBDIR = "scopes"
@@ -417,6 +429,191 @@ def _drive_spawn(
          "mutation_class": plan.mutation_class, "unattended": unattended,
          "dispatch_path": str(record.dispatch_path), "pane_id": pane,
          "terminal": spawn.terminal, "resource_bound": spawn.resource_bound},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dispatch-record storage seam + run evidence (G1b — .ce/state/dispatches, runs)
+# ---------------------------------------------------------------------------
+DISPATCHES_SUBDIR = "dispatches"
+RUNS_SUBDIR = "runs"
+
+
+def _dispatch_path(root: Path, run_id: str) -> Path:
+    return root / DISPATCHES_SUBDIR / run_id / "dispatch.yaml"
+
+
+def _run_evidence_path(root: Path, run_id: str) -> Path:
+    return root / RUNS_SUBDIR / f"{run_id}.runtime-evidence.yaml"
+
+
+def _load_dispatch(root: Path, run_id: str) -> dict[str, Any]:
+    path = _dispatch_path(root, run_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"no dispatch record for run {run_id!r} under {root / DISPATCHES_SUBDIR}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"malformed dispatch record at {path}")
+    return data
+
+
+def _find_dispatch_for_scope(root: Path, scope_id: str) -> dict[str, Any] | None:
+    """The newest dispatch record for ``scope_id`` (run_id sorts lexically by utcstamp), or None."""
+    ddir = root / DISPATCHES_SUBDIR
+    if not ddir.is_dir():
+        return None
+    found: list[dict[str, Any]] = []
+    for child in sorted(ddir.iterdir()):
+        drec = child / "dispatch.yaml"
+        if not drec.is_file():
+            continue
+        data = yaml.safe_load(drec.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("scope_id") == scope_id:
+            found.append(data)
+    if not found:
+        return None
+    return sorted(found, key=lambda d: str(d.get("run_id")))[-1]
+
+
+def _policy_sha(policy: dict[str, Any]) -> str:
+    """The 64-hex policy binding for the run's records.
+
+    Uses the policy's own ``policy_sha`` when it is a valid 64-hex digest, else
+    derives a deterministic SHA256 over the canonical policy body (the chain check
+    enforces ``^[0-9a-f]{64}$`` on every record's ``policy_sha``).
+    """
+    existing = policy.get("policy_sha")
+    if isinstance(existing, str) and _HEX64_RE.match(existing):
+        return existing
+    body = {k: v for k, v in policy.items() if k != "policy_sha"}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cmd_collect(args: argparse.Namespace) -> int:
+    """Fold a finished seat run into a conserved evidence chain (G1b run→evidence).
+
+    Reads the dispatch record, folds the harness transcript into
+    ``runtime_spend_ledger`` leaves (the live per-turn tap stays the declared
+    deferred seam — this is post-hoc metering), appends the typed terminal
+    ``runtime_run_outcome``, hash-chains them, and persists
+    ``<root>/runs/<run_id>.runtime-evidence.yaml`` (refusing to overwrite an
+    existing chain). Marks the dispatch ``collected_at``.
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · collect refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    chain_path = _run_evidence_path(root, run_id)
+    if chain_path.exists():
+        # Conserved evidence is append-only; never silently re-fold a collected run.
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: run {run_id!r} already collected at {chain_path}"],
+            {"error": "already_collected", "run_id": run_id, "evidence": str(chain_path)},
+        )
+
+    # The merged runtime policy the seat ran under — read AS DATA for the rates + binding.
+    policy: dict[str, Any] = {}
+    policy_ref = dispatch.get("runtime_policy_ref")
+    if policy_ref and Path(policy_ref).is_file():
+        loaded = yaml.safe_load(Path(policy_ref).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            policy = loaded
+    policy_sha = _policy_sha(policy)
+    model_rates = policy.get("model_rates") or []
+
+    # 1) Spend ledger leaves — fold the transcript by REUSING the usage tap
+    #    (compute_cost + meter_record_body); unpriced turns are surfaced, never $0.
+    ledger_bodies: list[dict[str, Any]] = []
+    unpriced = 0
+    if args.transcript:
+        tpath = Path(args.transcript)
+        if not tpath.is_file():
+            return _emit(
+                args, 2,
+                [f"{_BRAND} · collect refused: transcript not found: {tpath}"],
+                {"error": "transcript_not_found", "transcript": str(tpath)},
+            )
+        turns = usage_tap.tap_transcript_file(tpath)
+        ledger_bodies, unpriced_turns = usage_tap.usage_turns_to_ledger(
+            turns, model_rates=model_rates, fleet_id=run_id,
+            policy_sha=policy_sha, run_id_of=lambda _t: run_id,
+        )
+        unpriced = len(unpriced_turns)
+
+    # 2) The typed terminal outcome + its value-free change_set pointer.
+    change_set: dict[str, Any] = {
+        "branch": args.branch or run_id,
+        "base": args.base,
+        "manifest_paths": list(args.manifest_paths or []),
+        "head_sha": args.head_sha or run_id,
+    }
+    if args.pr is not None:
+        change_set["pr_number"] = args.pr
+    outcome_body = {
+        "kind": runtime_evidence_spine.RUN_OUTCOME_RECORD_KIND,
+        "record_type": runtime_evidence_spine.RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": policy_sha,
+        "run_id": run_id,
+        "recorded_at": _utc_now_iso(),
+        "outcome": args.outcome,
+        "change_set": change_set,
+    }
+
+    # 3) Hash-chain the leaves then the terminal outcome; persist via the existing
+    #    sink (refuses empty / non-uniform run_id / hash-broken / schema-invalid).
+    chain: list[dict[str, Any]] = []
+    for body in [*ledger_bodies, outcome_body]:
+        chain.append(runtime_evidence_spine.append(chain, body))
+    sink = evidence_sink.file_evidence_sink(_run_evidence_path(root, run_id).parent)
+    try:
+        receipt = sink(CollectedEvidence(
+            handle_ref=run_id,
+            records=tuple(chain),
+            note=f"v3.1-G1 collect: run {run_id} folded {len(ledger_bodies)} spend leaf(s) "
+                 f"+ outcome {args.outcome}",
+        ))
+    except evidence_sink.EvidencePersistRefused as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · collect refused: {exc}"],
+            {"error": "persist_refused", "detail": str(exc), "run_id": run_id},
+        )
+
+    # 4) Mark the dispatch collected (an uncollected dispatch projects Build/RUN).
+    dispatch["collected_at"] = _utc_now_iso()
+    _dispatch_path(root, run_id).write_text(
+        yaml.safe_dump(dispatch, sort_keys=True, default_flow_style=False), encoding="utf-8"
+    )
+
+    lines = [
+        f"{_BRAND} · COLLECTED run {run_id!r} for Scope {args.scope_id!r} "
+        f"(outcome {args.outcome}, {len(ledger_bodies)} spend leaf(s)"
+        + (f", {unpriced} unpriced" if unpriced else "") + ")",
+        f"    evidence: {receipt.path}",
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "collected", "scope_id": args.scope_id, "run_id": run_id,
+         "outcome": args.outcome, "pr": args.pr, "evidence": str(receipt.path),
+         "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
+         "record_count": receipt.record_count},
     )
 
 
@@ -965,6 +1162,21 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="opt the spawned seat back into interactive approval modals")
     _add_root(p_drive)
 
+    p_collect = sub.add_parser("collect", help="fold a finished seat run's transcript + outcome into evidence")
+    p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
+    p_collect.add_argument("--transcript", default=None, help="the seat harness .jsonl transcript to meter")
+    p_collect.add_argument("--outcome", required=True, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
+                           help="the conserved terminal outcome")
+    p_collect.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
+    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id)")
+    p_collect.add_argument("--base", default="main", help="value-free change base ref (default: main)")
+    p_collect.add_argument("--head-sha", default=None, dest="head_sha",
+                           help="value-free change head sha (default: run id)")
+    p_collect.add_argument("--manifest-path", action="append", default=None, dest="manifest_paths",
+                           help="value-free change manifest path (repeatable)")
+    _add_root(p_collect)
+
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
 
@@ -1085,6 +1297,7 @@ _DISPATCH = {
     "shape": _cmd_shape,
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
+    "collect": _cmd_collect,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
