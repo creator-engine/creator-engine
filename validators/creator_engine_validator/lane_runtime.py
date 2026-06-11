@@ -311,7 +311,7 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
     return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
 
 
-def _ensure_lane_mcp_config(target: Path) -> None:
+def ensure_lane_mcp_config(target: Path) -> None:
     """Idempotently provision the strict lane MCP config at ``target``.
 
     A governed Claude lane is pinned to ``--strict-mcp-config`` pointing at
@@ -321,6 +321,10 @@ def _ensure_lane_mcp_config(target: Path) -> None:
     An existing regular file is left untouched (an Operator/launcher-supplied
     config wins); a non-regular file is a fail-closed refusal before any side
     effect (never clobbered).
+
+    Public since v3.1-G1: ``launch_runtime.launch`` reuses this helper to fix the
+    plain-``ce launch`` MCP-provisioning defect (v1→v1 reuse; the v1⊥v3 boundary
+    is untouched). The private name remains as a deprecation alias.
     """
     if target.exists():
         if not target.is_file():
@@ -334,6 +338,11 @@ def _ensure_lane_mcp_config(target: Path) -> None:
         json.dumps(DEFAULT_MCP_CONFIG_PAYLOAD, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+# Deprecation alias — the helper was private (``_ensure_lane_mcp_config``) before
+# v3.1-G1 promoted it to public for cross-module reuse from ``launch_runtime``.
+_ensure_lane_mcp_config = ensure_lane_mcp_config
 
 
 def is_distinct_reviewer_venue(*, role: str | None, lane_kind: str | None) -> bool:
@@ -684,7 +693,7 @@ def launch(
         if not mcp_target.is_absolute():
             mcp_base = Path(worktree_path) if worktree_path else Path(repo_root)
             mcp_target = mcp_base / mcp_target
-        _ensure_lane_mcp_config(mcp_target)
+        ensure_lane_mcp_config(mcp_target)
         try:
             launch_command = claude_launch_spec.build_governed_claude_command(
                 base_argv=requested,
