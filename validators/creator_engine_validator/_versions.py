@@ -85,6 +85,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # consumed by the A-C4 forge_claim_dedup gate.
         "forge.backlog",
         "forge.change",
+        # v3.1-G2a: the missing branch-push primitive — pushes the governed seat's
+        # authored head to the CONSTRUCTED HTTPS remote (never the SSH origin) so
+        # `open_change` can claim its PR; plan-by-default, never force-pushes.
+        "forge.change_push",
         "forge.change_status",
         "forge.credential_runner",
         "forge.github_repo_config",

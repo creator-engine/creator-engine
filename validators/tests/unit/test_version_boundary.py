@@ -77,7 +77,8 @@ def test_taxonomy_counts_and_disjoint():
     # (``v3_cockpit``): 28 -> 31. The v3.5-C α-precursor added the Projects-v2
     # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
     # v3.1-G1 added the live-spawn bridge (``v3_seat_bridge``): 32 -> 33.
-    assert len(ver.V3_RUNTIME) == 33
+    # v3.1-G2a added the branch-push primitive (``forge.change_push``): 33 -> 34.
+    assert len(ver.V3_RUNTIME) == 34
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
