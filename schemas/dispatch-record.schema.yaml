@@ -138,7 +138,28 @@ properties:
         minLength: 1
     description: |
       UTC stamp `cev3 collect` folded the run's evidence chain. Null until the
-      run is collected (an uncollected dispatch projects the Scope to Build/RUN).
+      run is collected. A LIVE (spawned, uncollected, non-failure-stamped)
+      dispatch projects the Scope to Build/RUN.
+  spawn_failed_at:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      UTC stamp the v1 launch leg (or the brief seed) was REFUSED. Fail-closed: a
+      dispatch carrying this stamp was materialized but never became a live run,
+      so the read-model never projects it as Build/RUN. The failed attempt is
+      conserved (stamped, never deleted) — a failure is evidence. Absent on a
+      clean spawn.
+  spawn_failure_reason:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      The value-free refusal text for `spawn_failed_at` (the same message
+      surfaced to the operator) — NEVER a credential/host/account. Absent on a
+      clean spawn.
 $defs:
   scope_ratification:
     type: object

@@ -268,6 +268,27 @@ def _write_record(record: DispatchRecord) -> None:
     record.dispatch_path.write_text(_yaml_bytes(record.data), encoding="utf-8")
 
 
+def mark_spawn_failed(
+    record: DispatchRecord,
+    reason: Any,
+    *,
+    now: datetime | None = None,
+) -> DispatchRecord:
+    """Fail-closed: stamp a value-free spawn failure on the record (not a pending run).
+
+    A refused spawn (or a post-spawn seed failure) must NEVER be left shaped like a
+    live dispatch — the read-model keys Build/RUN off ``spawned_at``/``terminal``
+    AND the absence of this stamp, so a half/refused spawn projects as neither
+    pending nor live. The failed attempt is conserved (stamped, never deleted): a
+    failure is evidence. ``reason`` is the refusal text already surfaced to the
+    operator — value-free, no credential/host/account.
+    """
+    record.data["spawn_failed_at"] = _utcstamp(now or datetime.now(timezone.utc))
+    record.data["spawn_failure_reason"] = str(reason)
+    _write_record(record)
+    return record
+
+
 def _resolve_ce_exe(ce_exe: str | None) -> str:
     """Resolve the v1 ``ce`` console_script; refuse if absent (fail-closed)."""
     if ce_exe:

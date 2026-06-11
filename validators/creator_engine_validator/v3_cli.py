@@ -418,6 +418,12 @@ def _drive_spawn(
         spawn = v3_seat_bridge.spawn_seat(record)
         v3_seat_bridge.seed_brief(record)
     except v3_seat_bridge.SeatBridgeError as exc:
+        # Fail-closed: the dispatch was materialized before the v1 launch leg, so a
+        # refused spawn would otherwise sit on disk with terminal/spawned_at unset —
+        # which the read-model would have mistaken for a live Build/RUN run. Stamp
+        # the failure (value-free) so it projects as neither pending nor live; the
+        # attempt is conserved, not deleted.
+        v3_seat_bridge.mark_spawn_failed(record, exc)
         return _emit(
             args, 1,
             [f"{_BRAND} · drive --spawn refused: {exc}"],
@@ -487,9 +493,19 @@ def _find_dispatch_for_scope(root: Path, scope_id: str) -> dict[str, Any] | None
 
 
 def _has_uncollected_dispatch(root: Path, scope_id: str) -> bool:
-    """True iff a dispatch exists for ``scope_id`` whose run is not yet collected."""
+    """True iff a LIVE dispatched run exists for ``scope_id`` (drives Build/RUN).
+
+    A dispatch projects Build/RUN ONLY when it was ACTUALLY spawned (``spawned_at``
+    / ``terminal`` stamped) and is neither collected nor spawn-failure-stamped. A
+    materialized-but-refused/half spawn (terminal/spawned_at unset, or
+    ``spawn_failed_at`` set) is NOT a live run — fail-closed, so a stale dispatch is
+    never mistaken for an active one.
+    """
     drec = _find_dispatch_for_scope(root, scope_id)
-    return bool(drec and not drec.get("collected_at"))
+    if not drec:
+        return False
+    spawned = bool(drec.get("spawned_at") or drec.get("terminal"))
+    return bool(spawned and not drec.get("collected_at") and not drec.get("spawn_failed_at"))
 
 
 def _collected_run_evidence(root: Path, scope_id: str) -> Path | None:

@@ -275,6 +275,36 @@ def test_drive_spawn_surfaces_launch_refusal(tmp_path, capsys, monkeypatch):
     assert "CC-D-6 refused" in capsys.readouterr().out
 
 
+def test_drive_spawn_refusal_is_not_projected_as_live_build(tmp_path, capsys, monkeypatch):
+    # FIX-1 (PR #198 review repro): a refused spawn must NOT leave a dispatch the
+    # read-model reports as a live Build/RUN run. The record is failure-stamped and
+    # never shaped like a pending/live run.
+    def boom(record):
+        raise v3_seat_bridge.SpawnRefused("CC-D-6 refused: unconfirmed hook-pack")
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", boom)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "spawn_refused"
+    run_id = payload["run_id"]
+    # the dispatch is failure-stamped (conserved), terminal/spawned_at unset
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    assert "CC-D-6" in drec["spawn_failure_reason"]
+    assert drec["terminal"] is None and drec["spawned_at"] is None
+    # the read-model does NOT project Build/RUN for the refused spawn
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj = json.loads(capsys.readouterr().out)["projection"]
+    assert proj["state"] != "in_progress"
+    assert proj["phase"] != "Build"
+    assert proj["board"] != "RUN"
+
+
 # ---------------------------------------------------------------------------
 # v3.1-G1b — cev3 collect: run → conserved evidence chain (read-model sees it)
 # ---------------------------------------------------------------------------

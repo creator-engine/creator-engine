@@ -153,6 +153,37 @@ def test_materialized_record_conforms_to_schema(tmp_path):
     jsonschema.validate(rec.data, schema)
 
 
+def test_mark_spawn_failed_stamps_value_free_failure(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    out = v3_seat_bridge.mark_spawn_failed(
+        rec, v3_seat_bridge.SpawnRefused("CC-D-6 refused: unconfirmed hook-pack"), now=_FIXED_NOW
+    )
+    assert out is rec
+    assert rec.data["spawn_failed_at"] == "20260611T093000Z"
+    assert "CC-D-6 refused" in rec.data["spawn_failure_reason"]
+    # fail-closed: a refused spawn is NOT shaped like a live run
+    assert rec.data["terminal"] is None and rec.data["spawned_at"] is None
+    # persisted to disk
+    on_disk = yaml.safe_load((rec.dispatch_dir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert on_disk["spawn_failed_at"] == "20260611T093000Z"
+    # value-free: no credential/host/account leaked into the stamp
+    blob = json.dumps(rec.data).lower()
+    for forbidden in ("token", "secret", "password", "credential", "@", "http"):
+        assert forbidden not in blob
+
+
+def test_failure_stamped_record_conforms_to_schema(tmp_path):
+    import jsonschema  # vendored dev dep
+
+    schema = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "dispatch-record.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.mark_spawn_failed(rec, "CC-D-6 refused", now=_FIXED_NOW)
+    jsonschema.validate(rec.data, schema)
+
+
 def test_materialize_unattended_flag_recorded(tmp_path):
     rec = v3_seat_bridge.materialize_dispatch(
         _plan(), tmp_path, unattended=False, now=_FIXED_NOW
