@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
-from creator_engine_validator import v3_cli
+from creator_engine_validator import v3_cli, v3_seat_bridge
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,9 @@ def test_drive_assembles_run_inputs_with_appetite_cap(tmp_path, capsys):
     # the G-5 join: the appetite became a run-scope spend envelope, fed unchanged
     envs = payload["runtime_policy"]["spend_envelopes"]
     assert {"scope": "run", "amount": 7, "unit": "$", "window": "per_run"} in envs
-    assert payload["live_spawn"] == "deferred"
+    # default drive stays assemble-only (additive --spawn opt-in; no behavior change)
+    assert payload["live_spawn"] == "available_via_--spawn"
+    assert payload["action"] == "dispatch_assembled"
 
 
 def test_drive_refuses_missing_policy_file(tmp_path, capsys):
@@ -168,6 +170,109 @@ def test_drive_merges_envelope_additively_into_operator_policy(tmp_path, capsys)
     envs = payload["runtime_policy"]["spend_envelopes"]
     scopes = sorted(e["scope"] for e in envs)
     assert scopes == ["global", "run"]  # operator global retained + run cap added
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G1 — drive --spawn: assemble → REAL governed seat (subprocess seams faked)
+# ---------------------------------------------------------------------------
+def _fake_bridge(monkeypatch):
+    """Replace the bridge's subprocess legs with in-memory fakes; record calls."""
+    calls: dict[str, list] = {"spawn": [], "seed": []}
+
+    def fake_spawn(record):
+        record.data["terminal"] = {
+            "kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%9",
+        }
+        record.data["resource_bound"] = {"unit": "ce-seat-x"}
+        record.data["spawned_at"] = "20260611T000000Z"
+        v3_seat_bridge._write_record(record)
+        calls["spawn"].append(record.run_id)
+        return v3_seat_bridge.SpawnResult(
+            run_id=record.run_id,
+            terminal=dict(record.data["terminal"]),
+            resource_bound={"unit": "ce-seat-x"},
+        )
+
+    def fake_seed(record):
+        calls["seed"].append(record.run_id)
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", fake_spawn)
+    monkeypatch.setattr(v3_seat_bridge, "seed_brief", fake_seed)
+    return calls
+
+
+def test_drive_spawn_refuses_unratified_without_touching_disk(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)  # filed, NOT ratified → front gate must hold
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path)])
+    assert code == 1
+    assert "front gate held" in capsys.readouterr().out
+    assert calls["spawn"] == [] and calls["seed"] == []
+    assert not (tmp_path / "dispatches").exists()  # no dispatch materialized
+
+
+def test_drive_spawn_materializes_and_spawns_governed_seat(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "spawned"
+    assert payload["pane_id"] == "%9"
+    assert payload["unattended"] is True  # default
+    run_id = payload["run_id"]
+    assert calls["spawn"] == [run_id] and calls["seed"] == [run_id]
+    # the dispatch record + brief landed on disk, terminal stamped
+    ddir = tmp_path / "dispatches" / run_id
+    assert (ddir / "dispatch.yaml").is_file() and (ddir / "brief.md").is_file()
+    data = yaml.safe_load((ddir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["terminal"]["pane_id"] == "%9"
+
+
+def test_drive_spawn_refuses_non_claude_harness(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(
+        ["drive", "rate-limit-login", "--spawn", "--harness", "codex", "--root", str(tmp_path)]
+    )
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "G1-codex" in out and "not bridged" in out
+    assert calls["spawn"] == []  # never reached the spawn leg
+
+
+def test_drive_spawn_no_unattended_omits_skip_perms(tmp_path, capsys, monkeypatch):
+    _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(
+        ["drive", "rate-limit-login", "--spawn", "--no-unattended", "--root", str(tmp_path), "--json"]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["unattended"] is False
+    run_id = payload["run_id"]
+    data = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["unattended"] is False
+
+
+def test_drive_spawn_surfaces_launch_refusal(tmp_path, capsys, monkeypatch):
+    def boom(record):
+        raise v3_seat_bridge.SpawnRefused("CC-D-6 refused: unconfirmed hook-pack")
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", boom)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path)])
+    assert code == 1
+    assert "CC-D-6 refused" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

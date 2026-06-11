@@ -60,7 +60,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_installer, v3_report, v3_session, v3_shaping
+from . import coordination, v3_installer, v3_report, v3_seat_bridge, v3_session, v3_shaping
 from ._versions import V3_LOCAL_STATE_ROOT
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
@@ -353,17 +353,70 @@ def _cmd_drive(args: argparse.Namespace) -> int:
             {"action": "refused", "reason": result.reason, "detail": list(result.detail)},
         )
     envelopes = result.runtime_policy.get("spend_envelopes", [])
+    if getattr(args, "spawn", False):
+        return _drive_spawn(args, root, result, envelopes)
     lines = [
         f"{_BRAND} · BUILD dispatch assembled for Scope {result.scope_id!r} "
         f"(class {result.mutation_class})",
         f"    spend_envelopes: {json.dumps(envelopes, sort_keys=True)}",
-        f"{_BRAND} · (live run spawn is the deferred seam — inputs produced, not executed)",
+        f"{_BRAND} · (assemble-only — pass --spawn to launch the governed seat)",
     ]
     return _emit(
         args, 0, lines,
         {"action": "dispatch_assembled", "scope_id": result.scope_id,
          "mutation_class": result.mutation_class, "runtime_policy": result.runtime_policy,
-         "live_spawn": "deferred"},
+         "live_spawn": "available_via_--spawn"},
+    )
+
+
+def _drive_spawn(
+    args: argparse.Namespace,
+    root: Path,
+    plan: coordination.DispatchPlan,
+    envelopes: list[Any],
+) -> int:
+    """`--spawn`: materialize the dispatch → spawn the governed seat → seed the brief.
+
+    The front gate already held (caller has a DispatchPlan). Scoped to the
+    ``claude`` harness (defect-c declared OUT; codex is the G1-codex follow-up).
+    The subprocess seams live in ``v3_seat_bridge`` (faked in CI).
+    """
+    if args.harness != v3_seat_bridge.BRIDGE_HARNESS:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · drive --spawn refused: harness {args.harness!r} is not bridged "
+             f"(only {v3_seat_bridge.BRIDGE_HARNESS!r}); codex drive-spawn is the G1-codex follow-up"],
+            {"action": "spawn_refused", "reason": "harness_not_supported",
+             "harness": args.harness, "followup": "G1-codex"},
+        )
+    unattended = not args.no_unattended
+    record = v3_seat_bridge.materialize_dispatch(plan, root, unattended=unattended)
+    try:
+        spawn = v3_seat_bridge.spawn_seat(record)
+        v3_seat_bridge.seed_brief(record)
+    except v3_seat_bridge.SeatBridgeError as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · drive --spawn refused: {exc}"],
+            {"action": "spawn_refused", "reason": "launch_refused",
+             "run_id": record.run_id, "detail": str(exc),
+             "dispatch_path": str(record.dispatch_path)},
+        )
+    pane = spawn.terminal.get("pane_id")
+    lines = [
+        f"{_BRAND} · SPAWNED governed seat for Scope {plan.scope_id!r} "
+        f"(class {plan.mutation_class}, run {record.run_id})",
+        f"    spend_envelopes: {json.dumps(envelopes, sort_keys=True)}",
+        f"    dispatch: {record.dispatch_path}",
+        f"    pane: {pane}"
+        + ("  [unattended]" if unattended else "  [interactive]"),
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "spawned", "scope_id": plan.scope_id, "run_id": record.run_id,
+         "mutation_class": plan.mutation_class, "unattended": unattended,
+         "dispatch_path": str(record.dispatch_path), "pane_id": pane,
+         "terminal": spawn.terminal, "resource_bound": spawn.resource_bound},
     )
 
 
@@ -901,9 +954,15 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="value-free 64-hex opaque ratifier digest (never a raw account)")
     _add_root(p_ratify)
 
-    p_drive = sub.add_parser("drive", help="assemble the governed dispatch (front gate; live spawn deferred)")
+    p_drive = sub.add_parser("drive", help="assemble the governed dispatch (front gate); --spawn launches the seat")
     p_drive.add_argument("scope_id", metavar="ID", help="the Scope to drive")
     p_drive.add_argument("--policy", default=None, help="optional runtime-policy YAML to merge the run envelope into")
+    p_drive.add_argument("--spawn", action="store_true",
+                         help="materialize the dispatch and spawn a real governed seat (v3.1-G1)")
+    p_drive.add_argument("--harness", default="claude",
+                         help="seat harness (only 'claude' is bridged; codex is the G1-codex follow-up)")
+    p_drive.add_argument("--no-unattended", action="store_true",
+                         help="opt the spawned seat back into interactive approval modals")
     _add_root(p_drive)
 
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
