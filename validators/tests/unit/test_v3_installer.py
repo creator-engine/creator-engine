@@ -123,6 +123,185 @@ def test_injected_asymmetric_verifier_seam():
 
 
 # ---------------------------------------------------------------------------
+# E.4-fix: the ssh-ed25519 SSHSIG verifier (injected runner) + trust root
+# ---------------------------------------------------------------------------
+import base64 as _b64
+import hashlib as _hashlib
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
+import tempfile as _tempfile
+
+_LLMS_INSTALL = _REPO_ROOT / "docs" / "llms-install.md"
+_KEY_FILE = _REPO_ROOT / "docs" / "keys" / "ce-root-v1"
+_ALLOWED_SIGNERS = "ce-root-v1 ssh-ed25519 AAAAB3Nza-fake-blob"
+
+
+def _capturing_runner(accept=True, record=None):
+    """A fake ssh-keygen runner: records the kwargs it was handed; returns accept."""
+    def _run(**kwargs):
+        if record is not None:
+            record.update(kwargs)
+        return accept
+    return _run
+
+
+def test_ssh_ed25519_verifier_passes_with_accepting_runner():
+    rec: dict = {}
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    v = inst.ssh_ed25519_verifier(_capturing_runner(True, rec))
+    r = inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v)
+    assert r.ok and r.key_id == KEY
+    # the runner received the DECODED sig, the canonical message, the identity + fixed namespace
+    assert rec["signature"] == b"SIG"
+    assert rec["message"] == b"spec"
+    assert rec["identity"] == "ce-root-v1"
+    assert rec["namespace"] == inst.SSH_SIG_NAMESPACE
+    assert rec["allowed_signers"] == _ALLOWED_SIGNERS
+
+
+def test_ssh_ed25519_verifier_fails_when_runner_rejects():
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    v = inst.ssh_ed25519_verifier(_capturing_runner(False))
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v).ok is False
+
+
+def test_ssh_ed25519_verifier_fail_closed_no_runner_or_missing_binary():
+    # a missing ssh-keygen (runner None) ⇒ fail-closed, never half-open
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    v = inst.ssh_ed25519_verifier(None)
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v).ok is False
+
+
+def test_ssh_ed25519_verifier_fail_closed_on_runner_exception():
+    def _boom(**kwargs):
+        raise OSError("ssh-keygen: not found")
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    v = inst.ssh_ed25519_verifier(_boom)
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v).ok is False
+
+
+def test_ssh_ed25519_verifier_rejects_bad_base64():
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": "not valid base64 !!!"}
+    v = inst.ssh_ed25519_verifier(_capturing_runner(True))
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v).ok is False
+
+
+def test_ssh_ed25519_verifier_rejects_non_ssh_algo():
+    sig = {"key_id": KEY, "algo": "sha256-content", "value": _b64.b64encode(b"x").decode()}
+    v = inst.ssh_ed25519_verifier(_capturing_runner(True))
+    # the ssh verifier only accepts ssh-ed25519; another algo ⇒ False
+    assert v("sha256-content", b"spec", sig["value"], _ALLOWED_SIGNERS) is False
+
+
+def test_ssh_ed25519_verify_rejects_unknown_key():
+    sig = {"key_id": "rogue", "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    v = inst.ssh_ed25519_verifier(_capturing_runner(True))
+    r = inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=v)
+    assert not r.ok and "unpinned" in r.reason
+
+
+def test_wrong_namespace_factory_fails_a_faithful_runner():
+    # a runner that only honors the fixed namespace rejects a verifier built wrong
+    def _ns_strict(**kwargs):
+        return kwargs["namespace"] == inst.SSH_SIG_NAMESPACE
+    sig = {"key_id": KEY, "algo": inst.SSH_ED25519_ALGO, "value": _b64.b64encode(b"SIG").decode()}
+    good = inst.ssh_ed25519_verifier(_ns_strict)
+    bad = inst.ssh_ed25519_verifier(_ns_strict, namespace="ce-spec-WRONG")
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=good).ok is True
+    assert inst.verify_spec(b"spec", sig, pinned_keys={KEY: _ALLOWED_SIGNERS}, verifier=bad).ok is False
+
+
+def test_parse_allowed_signers_and_pinned_key_matches_served_root():
+    text = _KEY_FILE.read_text(encoding="utf-8")
+    pinned = inst.parse_allowed_signers(text)
+    assert "ce-root-v1" in pinned
+    line = pinned["ce-root-v1"]
+    assert line.split()[:2] == ["ce-root-v1", "ssh-ed25519"]
+    # the module-pinned key mirrors the served allowed_signers line byte-for-byte
+    assert inst.PINNED_KEYS["ce-root-v1"] == line
+    # comments / blank lines never pin anything
+    assert inst.parse_allowed_signers("# just a comment\n\n") == {}
+
+
+def test_canonical_spec_bytes_normalizes_dynamic_fields_and_is_idempotent():
+    spec = (
+        "head\n  key_id: ce-root-v1\n  value: AAAAREALbase64==\n"
+        "  content_sha256: " + ("a" * 64) + "\ntail\n"
+    )
+    canon = inst.canonical_spec_bytes(spec)
+    assert b"  value: <published-with-this-spec>\n" in canon
+    assert b"  content_sha256: <published-with-this-spec>\n" in canon
+    assert b"AAAAREALbase64" not in canon and (b"a" * 64) not in canon
+    # idempotent: re-canonicalizing changes nothing (embedding never moves the target)
+    assert inst.canonical_spec_bytes(canon) == canon
+    # matches the §0 stock-sed rule byte-for-byte
+    import subprocess as sp
+    out = sp.run(
+        ["sed", "-E",
+         r"s#^(  value: ).*#\1<published-with-this-spec>#; "
+         r"s#^(  content_sha256: ).*#\1<published-with-this-spec>#"],
+        input=spec.encode("utf-8"), capture_output=True,
+    )
+    assert out.stdout == canon
+
+
+def test_content_floor_regression_unbroken():
+    # the in-tree sha256-content floor still verifies/refuses exactly as before
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+    assert sig["algo"] == inst.CONTENT_ALGO
+    assert inst.verify_spec(SPEC, sig, pinned_keys=PINNED).ok is True
+    assert inst.verify_spec(SPEC + b"x", sig, pinned_keys=PINNED).ok is False
+
+
+# --- the E2E proof: a REAL detached SSHSIG, stock ssh-keygen, clean dir --------
+def _real_ssh_keygen_runner(**kwargs):
+    """The injected runner the CLI/live-drive uses: shell `ssh-keygen -Y verify`
+    in a clean scratch dir. Tests MAY use subprocess; the engine never does."""
+    with _tempfile.TemporaryDirectory() as d:
+        from pathlib import Path as _P
+        sd = _P(d)
+        (sd / "allowed_signers").write_text(kwargs["allowed_signers"] + "\n", encoding="utf-8")
+        (sd / "msg").write_bytes(kwargs["message"])
+        (sd / "sig").write_bytes(kwargs["signature"])
+        proc = _subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", "allowed_signers",
+             "-I", kwargs["identity"], "-n", kwargs["namespace"], "-s", "sig"],
+            cwd=d, stdin=(sd / "msg").open("rb"),
+            capture_output=True,
+        )
+        return proc.returncode == 0
+
+
+def _embedded_signature_value(spec_text: str):
+    m = _re.search(r"(?m)^  value: (.+)$", spec_text)
+    return m.group(1).strip() if m else None
+
+
+_SSH_KEYGEN = _shutil.which("ssh-keygen")
+_SPEC_TEXT = _LLMS_INSTALL.read_text(encoding="utf-8") if _LLMS_INSTALL.exists() else ""
+_EMBEDDED_VALUE = _embedded_signature_value(_SPEC_TEXT)
+_SIGNED = _EMBEDDED_VALUE is not None and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
+
+
+@pytest.mark.skipif(_SSH_KEYGEN is None, reason="stock ssh-keygen not available")
+@pytest.mark.skipif(not _SIGNED, reason="spec not yet signed (value still placeholder)")
+def test_e2e_real_sshsig_through_require_verified_positive_and_tampered():
+    pinned = inst.parse_allowed_signers(_KEY_FILE.read_text(encoding="utf-8"))
+    canonical = inst.canonical_spec_bytes(_SPEC_TEXT)
+    sig = {"key_id": "ce-root-v1", "algo": inst.SSH_ED25519_ALGO, "value": _EMBEDDED_VALUE}
+    verifier = inst.ssh_ed25519_verifier(_real_ssh_keygen_runner)
+    # positive: require_verified (the real onboard gate) accepts the signed spec
+    assert inst.require_verified(canonical, sig, pinned_keys=pinned, verifier=verifier).ok
+    # the retained content_sha256 floor matches sha256 of the SAME canonical bytes
+    m = _re.search(r"(?m)^  content_sha256: (.+)$", _SPEC_TEXT)
+    assert m and m.group(1).strip() == _hashlib.sha256(canonical).hexdigest()
+    # tampered: one extra byte in the signed region FAILS both checks
+    with pytest.raises(inst.InstallRefused):
+        inst.require_verified(canonical + b"x", sig, pinned_keys=pinned, verifier=verifier)
+
+
+# ---------------------------------------------------------------------------
 # detect-don't-assume dependency planning
 # ---------------------------------------------------------------------------
 def test_plan_present_skips_missing_installs():

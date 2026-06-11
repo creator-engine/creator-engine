@@ -51,6 +51,8 @@ spec); never an offensive capability.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -76,14 +78,34 @@ EDUCATE_AT_OPTOUT = (
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 #: The in-tree integrity-floor algorithm (a content address; not asymmetric crypto).
 CONTENT_ALGO = "sha256-content"
+#: The real asymmetric algorithm the served spec is signed with (an OpenSSH
+#: detached SSHSIG over the canonical bytes — verifiable with stock ``ssh-keygen``,
+#: no CE tooling, which is what breaks the install-time bootstrap circularity).
+SSH_ED25519_ALGO = "ssh-ed25519"
+#: The fixed SSHSIG namespace the trust root signs/verifies under (``-n`` to
+#: ``ssh-keygen -Y``). Pinned in-spec; a wrong namespace fails verification.
+SSH_SIG_NAMESPACE = "ce-spec-v1"
+#: The repo-served trust root (the OpenSSH ``allowed_signers`` file) — Pages maps it
+#: to ``creator-engine.dev/keys/ce-root-v1`` (extension-less). The PURE
+#: :func:`parse_allowed_signers` loader turns its bytes into :data:`PINNED_KEYS`;
+#: this module never reads it from disk (the CLI/tests inject the text).
+PINNED_KEY_FILE = "docs/keys/ce-root-v1"
+#: The placeholder token a dynamic signature field carries in the CANONICAL bytes
+#: (reused byte-for-byte from E.3: the served spec's content digest covered the
+#: file with ``value:`` set to exactly this token). The canonical bytes normalize
+#: every dynamic signature field back to this token, so embedding the real
+#: ``value:``/``content_sha256:`` never changes what the signature covers.
+SIGNATURE_PLACEHOLDER = "<published-with-this-spec>"
 
-#: The PINNED CE signing keys (key_id → published public-key material). The agent
-#: verifies a served install spec against these BEFORE executing. The in-tree floor
-#: verifies content-address integrity + key_id pinning; the real asymmetric verify
-#: against the published material is the injected verifier (deferred live). The
-#: material here is an out-of-band-published placeholder marker, not a secret.
+#: The PINNED CE signing key (key_id → the published ``allowed_signers``-format
+#: line: ``<principal> <keytype> <base64-key>``). The agent verifies a served
+#: install spec against this BEFORE executing. Mirrors the repo-served trust root
+#: :data:`PINNED_KEY_FILE`; the public key is published material, never a secret.
 PINNED_KEYS: dict[str, str] = {
-    "ce-root-v1": "ed25519:published-out-of-band-at-creator-engine.dev/keys/ce-root-v1",
+    "ce-root-v1": (
+        "ce-root-v1 ssh-ed25519 "
+        "AAAAC3NzaC1lZDI1NTE5AAAAIG/El7UgQWNbfCv0so+P8eERg8oGkQqr6HjumrcnMLpJ"
+    ),
 }
 
 
@@ -101,16 +123,61 @@ def content_digest(spec_bytes: bytes | str) -> str:
     return hashlib.sha256(spec_bytes).hexdigest()
 
 
-def sign_spec(spec_bytes: bytes | str, *, key_id: str, signer: Callable[[bytes], str] | None = None) -> dict[str, Any]:
+def sign_spec(
+    spec_bytes: bytes | str,
+    *,
+    key_id: str,
+    signer: Callable[[bytes], str] | None = None,
+    algo: str | None = None,
+) -> dict[str, Any]:
     """Produce a signature block ``{key_id, algo, value}`` for an install spec.
 
     The default (no ``signer``) emits the content-address floor (sha256). A real
-    asymmetric ``signer`` (injected) produces an ``algo``-tagged value — deferred.
+    asymmetric ``signer`` (injected) produces an ``algo``-tagged value — the
+    Operator's offline ``ssh-keygen -Y sign`` flow passes ``algo="ssh-ed25519"``
+    and a ``signer`` that returns the base64 of the detached ``.sig`` (see
+    :func:`operator_sign_recipe`). The private key never touches this module.
     """
     raw = spec_bytes.encode("utf-8") if isinstance(spec_bytes, str) else spec_bytes
     if signer is None:
         return {"key_id": key_id, "algo": CONTENT_ALGO, "value": content_digest(raw)}
-    return {"key_id": key_id, "algo": "asymmetric", "value": signer(raw)}
+    return {"key_id": key_id, "algo": algo or "asymmetric", "value": signer(raw)}
+
+
+def operator_sign_recipe(
+    canonical_bytes_path: str = "ce-spec.canonical",
+    *,
+    key_path: str = "~/.ce-keys/ce-root-v1",
+) -> str:
+    """The Operator's offline detached-signing act (DOCUMENTED, never automated;
+    the private key never reaches the repo or any seat). Signs the canonical
+    bytes under the fixed namespace, then base64-encodes the ``.sig`` for the
+    ``value:`` field. Returned as a shell template for the runbook — pure."""
+    return (
+        f"ssh-keygen -Y sign -f {key_path} -n {SSH_SIG_NAMESPACE} {canonical_bytes_path} "
+        f"&& base64 -w0 {canonical_bytes_path}.sig"
+    )
+
+
+def parse_allowed_signers(text: str) -> dict[str, str]:
+    """Parse an OpenSSH ``allowed_signers`` file into ``{principal: line}`` (PURE).
+
+    Each non-comment line is ``<principal> <keytype> <base64-key> [comment]``;
+    the principal is the pinned ``key_id``. The whole line is retained as the
+    pinned material (the verifier hands it back to ``ssh-keygen -Y verify -f``).
+    Lines that do not parse as at least ``principal keytype key`` are skipped —
+    the loader never raises; an empty result simply pins nothing (fail-closed)."""
+    pinned: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        principal = fields[0].split(",")[0]
+        pinned[principal] = line
+    return pinned
 
 
 @dataclass(frozen=True)
@@ -125,6 +192,77 @@ def _default_verifier(algo: str, raw: bytes, value: Any, key_material: Any) -> b
     if algo == CONTENT_ALGO:
         return isinstance(value, str) and value == content_digest(raw)
     return False  # a real asymmetric algo needs an injected verifier
+
+
+def ssh_ed25519_verifier(
+    runner: Callable[..., bool] | None,
+    *,
+    namespace: str = SSH_SIG_NAMESPACE,
+) -> Callable[[str, bytes, Any, Any], bool]:
+    """Build the ``ssh-ed25519`` SSHSIG verifier on an INJECTED runner (PURE here;
+    fail-closed). The asymmetric primitive — ``ssh-keygen -Y verify`` — has no
+    place in this CI-pure module (no subprocess), so the CLI/tests inject a
+    ``runner`` that performs it; this returns the verifier
+    :func:`verify_spec` plugs in.
+
+    The verifier:
+      * accepts ONLY ``algo == "ssh-ed25519"`` (any other ⇒ ``False``);
+      * base64-decodes the block's ``value`` into the detached ``.sig`` bytes
+        (malformed base64 ⇒ ``False``);
+      * derives the ``-I`` identity (principal) from the pinned
+        ``allowed_signers`` line (``key_material``);
+      * hands ``(message=raw, signature, allowed_signers, identity, namespace)``
+        to ``runner`` and returns its boolean.
+
+    A missing runner (no ``ssh-keygen`` wired), a missing-binary failure, or ANY
+    runner exception ⇒ ``False`` — verification fails CLOSED, never half-open."""
+    def _verify(algo: str, raw: bytes, value: Any, key_material: Any) -> bool:
+        if algo != SSH_ED25519_ALGO or runner is None:
+            return False
+        if not isinstance(value, str) or not isinstance(key_material, str):
+            return False
+        try:
+            signature = base64.b64decode(value.encode("ascii"), validate=True)
+        except (binascii.Error, ValueError):
+            return False
+        fields = key_material.split()
+        if len(fields) < 3:
+            return False
+        identity = fields[0].split(",")[0]
+        try:
+            return bool(runner(
+                message=raw,
+                signature=signature,
+                allowed_signers=key_material,
+                identity=identity,
+                namespace=namespace,
+            ))
+        except Exception:
+            return False
+
+    return _verify
+
+
+def canonical_spec_bytes(spec_bytes: bytes | str) -> bytes:
+    """Normalize a served spec to the CANONICAL bytes the signature covers (PURE).
+
+    Reuses the E.3 canonicalization byte-for-byte and extends it to every dynamic
+    signature field: this is the spec with the signature block's ``value:`` and
+    ``content_sha256:`` lines reset to exactly ``  <field>: <placeholder>`` (full
+    line, no trailing comment), everything else byte-for-byte UTF-8. Embedding the
+    real values therefore never changes what the detached SSHSIG / the
+    ``content_sha256`` floor cover — and an agent reproduces these bytes with one
+    stock ``sed`` (the §0 recipe). Lines are matched anywhere a signature field
+    appears; the indentation (two spaces) matches the in-comment YAML block."""
+    raw = spec_bytes.encode("utf-8") if isinstance(spec_bytes, str) else spec_bytes
+    text = raw.decode("utf-8")
+    for field_name in ("value", "content_sha256"):
+        text = re.sub(
+            rf"(?m)^(  {field_name}: ).*$",
+            rf"\g<1>{SIGNATURE_PLACEHOLDER}",
+            text,
+        )
+    return text.encode("utf-8")
 
 
 def verify_spec(

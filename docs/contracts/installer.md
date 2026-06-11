@@ -134,6 +134,52 @@ the algorithm backend) — mirroring the forge App-JWT injected-signer pattern. 
 load-bearing logic (verify before execute · refuse on tamper / unknown key) is
 CI-pure; only the cryptographic primitive is the injected/deferred backend.
 
+### The served trust root + the real detached signature (E.4-fix)
+
+The served `llms-install.md` carries a **real detached OpenSSH signature
+(SSHSIG)**, verifiable with **stock `ssh-keygen`** — no CE tooling, which is what
+breaks the install-time bootstrap circularity (you should not need `ce` to trust
+the spec that installs `ce`).
+
+- **Trust root** — `docs/keys/ce-root-v1` (Pages → `creator-engine.dev/keys/ce-root-v1`,
+  extension-less) is an OpenSSH `allowed_signers` file: one
+  `ce-root-v1 ssh-ed25519 <pubkey>` line (the principal IS the `key_id`), listed
+  in `docs/llms.txt`. **Custody (Fork A, ratified 2026-06-10):**
+  Operator-authorized, orchestrator-generated 2026-06-10; the **private key is
+  Operator-held offline** at `~/.ce-keys` (0700/0600) and never enters the repo
+  or any seat. Signing a spec is a **manual Operator act per release**
+  (`ssh-keygen -Y sign`). Single key, v1 — **no rotation machinery**.
+- **Namespace** — the SSHSIG namespace is fixed in-spec: **`ce-spec-v1`**
+  (`v3_installer.SSH_SIG_NAMESPACE`). A wrong namespace fails verification.
+- **Canonical-bytes rule** — the signature (and the retained `content_sha256`
+  floor) cover the **canonical bytes**: the whole spec with the signature block's
+  `value:` and `content_sha256:` lines normalized back to the placeholder token
+  `<published-with-this-spec>` (full line; everything else byte-for-byte UTF-8).
+  This reuses the E.3 content canonicalization and extends it to every dynamic
+  signature field, so embedding the real values never changes what is signed; an
+  agent reproduces the bytes with one stock `sed` (`canonical_spec_bytes` is the
+  in-tree mirror). The agent recipe lives in `llms-install.md` §0.
+- **Validator seam** — `v3_installer.ssh_ed25519_verifier(runner)` is the
+  `algo: ssh-ed25519` verifier built on an **injected runner** (the CLI/tests
+  shell `ssh-keygen -Y verify`; the module stays subprocess-free) — a missing
+  runner / missing binary / any runner error ⇒ fail-closed `VerifyResult(False)`.
+  `parse_allowed_signers` loads the pinned key from the served file (PURE; text
+  injected). The content floor (`content_sha256`) is retained as the in-tree
+  integrity check. `sign_spec(..., signer=…, algo="ssh-ed25519")` /
+  `operator_sign_recipe()` document the Operator's offline signing flow — never
+  automated, the private key never touches the repo.
+
+### How `ce` arrives (the bootstrap leg)
+
+`llms-install.md` §0.5 states the supported acquisition paths for `ce` itself —
+the served **one-liner** (`curl …/install.sh | bash`) and **clone + offline
+wheelhouse** — each with an **honest** integrity note: transport integrity is TLS
+(+ the published hash for `install.sh`); the cryptographically **verified** trust
+anchor for the install *procedure* is this signed spec (§0), not the one-liner.
+`install.sh`'s own posture is stated, not overstated — it asserts no signature
+over its own body beyond TLS + the published hash, and takes no privileged action
+without an explicit batched sudo approval.
+
 ## Dependency resolution — detect-don't-assume, fix-with-permission
 
 `v3_installer.plan_dependencies` plans, never fail-on-missing: it **detects** each
