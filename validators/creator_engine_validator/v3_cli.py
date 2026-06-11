@@ -203,14 +203,25 @@ def _content_sha(scope: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Rendering — surface the canon skin (Scope card + stage phase)
 # ---------------------------------------------------------------------------
-def _projection(scope: dict[str, Any]) -> dict[str, str]:
-    """The {state, phase, board} projection over the conserved spec-lifecycle."""
-    return coordination.project_scope_state(scope)
+def _projection(scope: dict[str, Any], root: Path | None = None) -> dict[str, str]:
+    """The {state, phase, board} projection over the conserved spec-lifecycle.
+
+    v3.1-G1b: when ``root`` is given and an UNcollected dispatch record exists for
+    the Scope, the projection feeds ``dispatched=True`` so a live run is visible
+    (→ in_progress / Build / RUN) — the read-model sees the spawned seat. A
+    collected dispatch no longer drives the signal (the run has folded its
+    evidence; the Scope projects off its own committed state again).
+    """
+    dispatched = False
+    scope_id = scope.get("scope_id")
+    if root is not None and scope_id:
+        dispatched = _has_uncollected_dispatch(root, str(scope_id))
+    return coordination.project_scope_state(scope, dispatched=dispatched)
 
 
-def _card_line(scope: dict[str, Any]) -> str:
+def _card_line(scope: dict[str, Any], root: Path | None = None) -> str:
     """One-line Scope card in the canon vocabulary (the skin over the fields)."""
-    proj = _projection(scope)
+    proj = _projection(scope, root)
     ready, _ = coordination.scope_is_ready(scope)
     ac = scope.get("acceptance_criteria") or []
     appetite = scope.get("appetite") or {}
@@ -228,10 +239,10 @@ def _card_line(scope: dict[str, Any]) -> str:
     )
 
 
-def _phase_counts(scopes: list[dict[str, Any]]) -> dict[str, int]:
+def _phase_counts(scopes: list[dict[str, Any]], root: Path | None = None) -> dict[str, int]:
     counts = {phase: 0 for phase in coordination.COGNITIVE_PHASES}
     for s in scopes:
-        counts[_projection(s)["phase"]] += 1
+        counts[_projection(s, root)["phase"]] += 1
     return counts
 
 
@@ -475,6 +486,41 @@ def _find_dispatch_for_scope(root: Path, scope_id: str) -> dict[str, Any] | None
     return sorted(found, key=lambda d: str(d.get("run_id")))[-1]
 
 
+def _has_uncollected_dispatch(root: Path, scope_id: str) -> bool:
+    """True iff a dispatch exists for ``scope_id`` whose run is not yet collected."""
+    drec = _find_dispatch_for_scope(root, scope_id)
+    return bool(drec and not drec.get("collected_at"))
+
+
+def _collected_run_evidence(root: Path, scope_id: str) -> Path | None:
+    """The evidence chain path of ``scope_id``'s newest COLLECTED dispatch, if any."""
+    drec = _find_dispatch_for_scope(root, scope_id)
+    if not drec or not drec.get("collected_at"):
+        return None
+    chain = _run_evidence_path(root, str(drec.get("run_id")))
+    return chain if chain.is_file() else None
+
+
+def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | None, str | None]:
+    """Resolve (evidence-path, run_id) for report/artifacts.
+
+    An explicit ``--evidence`` always wins; otherwise, when the Scope has a
+    COLLECTED dispatch, default to its persisted chain
+    (``<root>/runs/<run_id>.runtime-evidence.yaml``) so the read-model surfaces a
+    finished run with zero extra flags.
+    """
+    evidence = getattr(args, "evidence", None)
+    run_id = getattr(args, "run_id", None)
+    if not evidence:
+        drec = _find_dispatch_for_scope(root, args.scope_id)
+        if drec and drec.get("collected_at"):
+            chain = _run_evidence_path(root, str(drec.get("run_id")))
+            if chain.is_file():
+                evidence = str(chain)
+                run_id = run_id or str(drec.get("run_id"))
+    return evidence, run_id
+
+
 def _policy_sha(policy: dict[str, Any]) -> str:
     """The 64-hex policy binding for the run's records.
 
@@ -619,31 +665,33 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     """List Scopes with their projected stage (the canon skin over the machine)."""
-    scopes = _iter_scopes(Path(args.root))
-    counts = _phase_counts(scopes)
+    root = Path(args.root)
+    scopes = _iter_scopes(root)
+    counts = _phase_counts(scopes, root)
     lines = [
         f"{_BRAND} · {len(scopes)} Scope(s) · "
         + " · ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
     ]
     for s in sorted(scopes, key=lambda x: str(x.get("scope_id"))):
-        lines.append("  " + _card_line(s))
+        lines.append("  " + _card_line(s, root))
     return _emit(
         args, 0, lines,
         {"action": "status", "count": len(scopes), "phase_counts": counts,
-         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s)} for s in scopes]},
+         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s, root)} for s in scopes]},
     )
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
     """Show one Scope: the canon-labelled fields + its projection + readiness."""
+    root = Path(args.root)
     try:
-        scope = _load_scope(Path(args.root), args.scope_id)
+        scope = _load_scope(root, args.scope_id)
     except (FileNotFoundError, ValueError) as exc:
         return _emit(args, 2, [f"{_BRAND} · {exc}"], {"error": str(exc)})
-    proj = _projection(scope)
+    proj = _projection(scope, root)
     ready, reasons = coordination.scope_is_ready(scope)
     lines = [
-        _card_line(scope),
+        _card_line(scope, root),
         f"    Goal (intent):        {scope.get('intent')}",
         f"    Done-when (criteria): {scope.get('acceptance_criteria') or '—'}",
         f"    Budget (appetite):    {scope.get('appetite') or '—'}",
@@ -672,20 +720,22 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
         )
     artifacts = [{"kind": "scope", "path": str(path), "label": f"Scope {args.scope_id}",
                   "inspect": f"{CE_CMD} show {args.scope_id}"}]
-    # G-7.3: with a run evidence chain, also enumerate the run artifacts (PR /
+    # G-7.3 / G1b: with a run evidence chain, also enumerate the run artifacts (PR /
     # evidence-chain / spend) via the ◆ Completion-Report artifact-awareness fold.
-    if getattr(args, "evidence", None):
-        records = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+    # The chain defaults to a collected dispatch's chain (explicit --evidence wins).
+    evidence, run_id = _resolve_run_evidence(args, root)
+    if evidence:
+        records = yaml.safe_load(Path(evidence).read_text(encoding="utf-8"))
         if isinstance(records, dict):
             records = records.get("records") or records.get("leaves") or []
         summary = v3_report.summary_from_evidence(
-            records or [], scope_id=args.scope_id, run_id=getattr(args, "run_id", None),
+            records or [], scope_id=args.scope_id, run_id=run_id,
             budget=getattr(args, "cap", None),
         )
         artifacts += [a for a in v3_report.enumerate_artifacts(summary) if a["kind"] != "scope"]
     lines = [f"{_BRAND} · artifacts for Scope {args.scope_id!r}:"]
     lines += [f"    {a['kind']:>10}  {a.get('path', a['label'])}   ({a['inspect']})" for a in artifacts]
-    if not getattr(args, "evidence", None):
+    if not evidence:
         lines.append(f"{_BRAND} · (pass --evidence <chain> to enumerate run artifacts: PR / evidence / spend)")
     return _emit(args, 0, lines, {"action": "artifacts", "scope_id": args.scope_id, "artifacts": artifacts})
 
@@ -697,9 +747,11 @@ def _cmd_report(args: argparse.Namespace) -> int:
     (``--evidence``); the grading synthesis (Done-when / CI / in-scope) is injected
     via flags (its live assembly is the deferred seam).
     """
+    root = Path(getattr(args, "root", V3_LOCAL_STATE_ROOT))
+    evidence, run_id = _resolve_run_evidence(args, root)
     records: list[Any] = []
-    if args.evidence:
-        loaded = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+    if evidence:
+        loaded = yaml.safe_load(Path(evidence).read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             loaded = loaded.get("records") or loaded.get("leaves") or []
         records = loaded or []
@@ -716,7 +768,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
     if args.budget_size:
         grading["budget_size"] = args.budget_size
     summary = v3_report.summary_from_evidence(
-        records, scope_id=args.scope_id, run_id=args.run_id, budget=args.cap, unit=args.unit, **grading,
+        records, scope_id=args.scope_id, run_id=run_id, budget=args.cap, unit=args.unit, **grading,
     )
     if args.pr is not None:
         summary["pr"] = args.pr
@@ -780,7 +832,7 @@ def _cmd_session(args: argparse.Namespace) -> int:
     meter folds the REAL G-5 ``project_spend`` projection over an evidence spine
     (``--spine``) against the run cap (``--cap``); absent those it is unmetered.
     """
-    counts = _phase_counts(_iter_scopes(Path(args.root)))
+    counts = _phase_counts(_iter_scopes(Path(args.root)), Path(args.root))
     context = v3_session.context_meter(args.context_pct)
     if args.spine and args.cap is not None:
         records = yaml.safe_load(Path(args.spine).read_text(encoding="utf-8"))
@@ -1208,6 +1260,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--cap", type=float, default=None, help="run spend cap (Budget) to meter spend against")
     p_report.add_argument("--unit", choices=["$", "%"], default="$", help="spend unit")
     p_report.add_argument("--budget-size", default=None, help="appetite size label (e.g. S) for 'of Budget S'")
+    p_report.add_argument(
+        "--root", default=V3_LOCAL_STATE_ROOT,
+        help=f"v3 local-state root (to default --evidence from a collected run; default: {V3_LOCAL_STATE_ROOT})",
+    )
     p_report.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_shape = sub.add_parser("shape", help="run the Frame→Shape grill-me on a partial draft (gaps + questions)")

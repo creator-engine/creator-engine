@@ -386,6 +386,54 @@ def test_collect_refuses_scope_mismatch(tmp_path, capsys, monkeypatch):
     assert "not" in capsys.readouterr().out
 
 
+def test_uncollected_dispatch_projects_scope_to_build(tmp_path, capsys, monkeypatch):
+    # A live (spawned, uncollected) run makes the read-model show Build/in_progress.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj = json.loads(capsys.readouterr().out)["projection"]
+    assert proj["state"] == "in_progress" and proj["phase"] == "Build"
+    # …and once collected, the Scope projects off its own state again (not Build).
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                 "--outcome", "no_change", "--root", str(tmp_path)])
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj2 = json.loads(capsys.readouterr().out)["projection"]
+    assert proj2["state"] != "in_progress"
+
+
+def test_report_defaults_evidence_from_collected_dispatch(tmp_path, capsys, monkeypatch):
+    # With a collected dispatch, `report` needs no --evidence — it finds the chain.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                 "--outcome", "research_delivered", "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "research_delivered"
+    assert payload["run_id"] == run_id  # defaulted from the collected dispatch
+
+
+def test_e2e_scope_to_spawn_to_collect_to_report(tmp_path, capsys, monkeypatch):
+    # The named keystone: scope → ratify → drive --spawn → collect → report,
+    # all subprocess seams faked. Proves the spine end to end.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl", n_turns=3)
+    capsys.readouterr()
+    assert v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                        "--outcome", "research_delivered", "--root", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert v3_cli.main(["artifacts", "rate-limit-login", "--cap", "5", "--root", str(tmp_path), "--json"]) == 0
+    arts = {a["kind"] for a in json.loads(capsys.readouterr().out)["artifacts"]}
+    assert {"scope", "evidence", "spend"} <= arts  # run artifacts surfaced sans --evidence
+    assert v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path)]) == 0
+    block = capsys.readouterr().out
+    assert "Research delivered" in block
+
+
 def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch)
     capsys.readouterr()
