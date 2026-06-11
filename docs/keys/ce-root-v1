@@ -4,12 +4,21 @@
 # spec (docs/llms-install.md) with stock `ssh-keygen -Y verify` — no CE tooling,
 # which is what breaks the install-time bootstrap circularity.
 #
-# Custody (Fork A, ratified 2026-06-10): Operator-authorized, orchestrator-
-# generated 2026-06-10; the PRIVATE key is Operator-laptop-held at ~/.ce-keys
-# (0700/0600), offline, and NEVER enters the repo or any governed seat. Signing
-# the spec is a manual Operator act per release (ssh-keygen -Y sign,
-# namespace `ce-spec-v1`). Single key, v1 — no rotation machinery here.
+# Custody:
+# - ce-root-v1 (Fork A, ratified 2026-06-10): Operator-authorized,
+#   orchestrator-generated 2026-06-10; the PRIVATE key is Operator-laptop-held
+#   at ~/.ce-keys (0700/0600), offline, and NEVER enters the repo or any
+#   governed seat.
+# - ce-dev1-root-v1 (ce-ops#6, escalation esc-dev1-trust-root, 2026-06-11):
+#   Operator-authorized, CE-DEV-1-generated; the PRIVATE key is CE-DEV-1-held,
+#   encrypted at ~/.ce-keys (0700/0600), and NEVER enters the repo or any
+#   governed seat.
+# Signing the spec is a manual host-bound team-mode act per release
+# (ssh-keygen -Y sign, namespace `ce-spec-v1`). Both principals use the same
+# namespace `ce-spec-v1`; identities are host-bound team-mode signing
+# identities per ce-ops#6.
 #
 # Format: <principal> <keytype> <base64-key>. Verify with:
 #   ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s <sig> < <canonical-bytes>
 ce-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG/El7UgQWNbfCv0so+P8eERg8oGkQqr6HjumrcnMLpJ
+ce-dev1-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjl3sHqj5cutQvwHrFL6qfyQyOgz+2fssoJH29nSvTf
