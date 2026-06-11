@@ -113,6 +113,11 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.cockpit_demo_seed",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
         "coordination",
+        # v3.1-G1 live-spawn keystone: the assemble->spawn bridge. Crosses to the
+        # v1 launcher as SUBPROCESS + DATA only (`ce launch --json`, files + argv +
+        # JSON) — imports NO v1 module, so the HARD invariant + the ratchet stay
+        # untouched by construction (AST-asserted in test_v3_seat_bridge).
+        "v3_seat_bridge",
         # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)
         "v3_cli",
         # v3 G-7 product surface: the session frame + unified status line render
