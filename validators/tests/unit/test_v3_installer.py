@@ -215,11 +215,12 @@ def test_wrong_namespace_factory_fails_a_faithful_runner():
 def test_parse_allowed_signers_and_pinned_key_matches_served_root():
     text = _KEY_FILE.read_text(encoding="utf-8")
     pinned = inst.parse_allowed_signers(text)
-    assert "ce-root-v1" in pinned
-    line = pinned["ce-root-v1"]
-    assert line.split()[:2] == ["ce-root-v1", "ssh-ed25519"]
-    # the module-pinned key mirrors the served allowed_signers line byte-for-byte
-    assert inst.PINNED_KEYS["ce-root-v1"] == line
+    for principal in ("ce-root-v1", "ce-dev1-root-v1"):
+        assert principal in pinned
+        line = pinned[principal]
+        assert line.split()[:2] == [principal, "ssh-ed25519"]
+        # the module-pinned key mirrors the served allowed_signers line byte-for-byte
+        assert inst.PINNED_KEYS[principal] == line
     # comments / blank lines never pin anything
     assert inst.parse_allowed_signers("# just a comment\n\n") == {}
 

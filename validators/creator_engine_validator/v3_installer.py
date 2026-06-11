@@ -106,6 +106,10 @@ PINNED_KEYS: dict[str, str] = {
         "ce-root-v1 ssh-ed25519 "
         "AAAAC3NzaC1lZDI1NTE5AAAAIG/El7UgQWNbfCv0so+P8eERg8oGkQqr6HjumrcnMLpJ"
     ),
+    "ce-dev1-root-v1": (
+        "ce-dev1-root-v1 ssh-ed25519 "
+        "AAAAC3NzaC1lZDI1NTE5AAAAIMjl3sHqj5cutQvwHrFL6qfyQyOgz+2fssoJH29nSvTf"
+    ),
 }
 
 
