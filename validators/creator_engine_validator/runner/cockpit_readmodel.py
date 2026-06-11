@@ -18,7 +18,7 @@ The three-layer law (HARD constraint, testable):
   governance state — it is observation + request + visible authority, never a
   new authority.
 * **L2 — this module**: :func:`fold_snapshot` is a PURE fold (no disk,
-  subprocess, socket, terminal, clock, rng) from L1-shaped values to ONE
+  process-spawn, network, terminal, clock, rng) from L1-shaped values to ONE
   JSON-serializable snapshot dict. File-reads live ONLY in the narrow,
   injectable load seams (:func:`load_chains` / :func:`load_scopes` /
   :func:`load_panes` / :func:`load_observations`, composed by
@@ -60,7 +60,7 @@ from .spend_gate import fleet_spend_meter
 from .usage_tap import UsageTurn, fleet_token_rate
 
 #: Snapshot shape version (bumped additively; consumers tolerate additions).
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2
 
 #: The demo flag (Fork 4): ``CE_DEMO=1`` swaps the data source for the seed and
 #: renders the persistent watermark.
@@ -82,6 +82,8 @@ DEMO_WATERMARK = "DEMO — seeded data, not a live fleet"
 CHAIN_SUFFIX = ".runtime-evidence.yaml"
 SCOPES_SUBDIR = "scopes"
 SCOPE_SUFFIX = ".scope.yaml"
+ESCALATIONS_SUBDIR = "escalations"
+DISPATCHES_SUBDIR = "dispatches"
 PANES_SUBDIR = "panes"
 OBSERVATIONS_FILENAME = "observations.ndjson"
 
@@ -697,6 +699,127 @@ def _fold_meters(
     }
 
 
+def _fold_escalations(escalations: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Fold local escalation records into the AWAITING-OPERATOR queue (PURE)."""
+    records = [e for e in (escalations or []) if isinstance(e, Mapping)]
+    open_records = [e for e in records if not e.get("resolved_at")]
+    open_records.sort(key=lambda e: str(e.get("created_at") or ""))
+    open_entries = []
+    for rank, record in enumerate(open_records, start=1):
+        open_entries.append(
+            {
+                "escalation_id": record.get("escalation_id"),
+                "title": record.get("title"),
+                "decision_needed": record.get("decision_needed"),
+                "recommendation": record.get("recommendation"),
+                "created_at": record.get("created_at"),
+                "source_ref": record.get("source_ref"),
+                "age_rank": rank,
+            }
+        )
+    return {
+        "open": open_entries,
+        "open_count": len(open_entries),
+        "resolved_count": len([e for e in records if e.get("resolved_at")]),
+    }
+
+
+def _normalized_spend_envelope(candidate: Any) -> dict[str, Any] | None:
+    """Project a runtime-policy spend envelope to the Cockpit's cap/unit/window shape."""
+    if not isinstance(candidate, Mapping):
+        return None
+    cap = candidate.get("amount")
+    if cap is None:
+        cap = candidate.get("cap")
+    if cap is None:
+        cap = candidate.get("cap_usd")
+    unit = candidate.get("unit")
+    if unit is None and candidate.get("cap_usd") is not None:
+        unit = "$"
+    window = candidate.get("window")
+    if cap is None and unit is None and window is None:
+        return None
+    return {"cap": cap, "unit": unit, "window": window}
+
+
+def _run_spend_envelope(policy: Any) -> dict[str, Any] | None:
+    """Extract the run-scope spend envelope from a runtime-policy mapping (PURE)."""
+    if not isinstance(policy, Mapping):
+        return None
+    for envelope in policy.get("spend_envelopes") or []:
+        if isinstance(envelope, Mapping) and envelope.get("scope") == "run":
+            return _normalized_spend_envelope(envelope)
+    return None
+
+
+def _dispatch_payload(item: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return (dispatch-record, spend-envelope) from raw or loader-wrapped input."""
+    if not isinstance(item, Mapping):
+        return None, None
+    if isinstance(item.get("dispatch"), Mapping):
+        return dict(item["dispatch"]), _normalized_spend_envelope(item.get("spend_envelope"))
+    envelope = item.get("_spend_envelope")
+    return dict(item), _normalized_spend_envelope(envelope)
+
+
+def _dispatch_state(record: Mapping[str, Any]) -> str:
+    """Derive the G1 lifecycle state from value-free stamp presence (PURE)."""
+    if record.get("spawn_failed_at"):
+        return "failed"
+    if record.get("collected_at"):
+        return "collected"
+    if record.get("spawned_at") or record.get("terminal"):
+        return "spawned"
+    return "assembled"
+
+
+def _fold_dispatches(
+    dispatches: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any], set[str]]:
+    """Fold G1 dispatch records and return dispatch-derived board signals (PURE)."""
+    entries: list[dict[str, Any]] = []
+    dispatch_signal_scope_ids: set[str] = set()
+    for item in dispatches or []:
+        record, spend_envelope = _dispatch_payload(item)
+        if not isinstance(record, Mapping) or record.get("kind") != "dispatch-record":
+            continue
+        state = _dispatch_state(record)
+        scope_id = record.get("scope_id")
+        if scope_id and state in {"assembled", "spawned"}:
+            dispatch_signal_scope_ids.add(str(scope_id))
+        terminal = record.get("terminal") if isinstance(record.get("terminal"), Mapping) else {}
+        entries.append(
+            {
+                "run_id": record.get("run_id"),
+                "scope_id": scope_id,
+                "mutation_class": record.get("mutation_class"),
+                "harness": record.get("harness"),
+                "unattended": record.get("unattended"),
+                "state": state,
+                "spawned_at": record.get("spawned_at"),
+                "collected_at": record.get("collected_at"),
+                "spawn_failed_at": record.get("spawn_failed_at"),
+                "spawn_failure_reason": record.get("spawn_failure_reason"),
+                "terminal_kind": terminal.get("kind"),
+                "resource_bound": record.get("resource_bound"),
+                "spend_envelope": spend_envelope,
+            }
+        )
+    entries.sort(
+        key=lambda e: (e.get("spawned_at") is not None, str(e.get("spawned_at") or "")),
+        reverse=True,
+    )
+    return (
+        {
+            "entries": entries,
+            "count": len(entries),
+            "live_count": len([e for e in entries if e.get("state") == "spawned"]),
+            "failed_count": len([e for e in entries if e.get("state") == "failed"]),
+        },
+        dispatch_signal_scope_ids,
+    )
+
+
 def fold_snapshot(
     *,
     panes: list[dict[str, Any]] | None = None,
@@ -705,6 +828,8 @@ def fold_snapshot(
     chains: Mapping[str, list[dict[str, Any]]] | None = None,
     observations: list[dict[str, Any]] | None = None,
     refusal_chain: list[dict[str, Any]] | None = None,
+    escalations: list[dict[str, Any]] | None = None,
+    dispatches: list[dict[str, Any]] | None = None,
     envelopes: Mapping[str, Any] | None = None,
     usage_turns: list[dict[str, Any]] | None = None,
     context_pct: Any = None,
@@ -729,12 +854,16 @@ def fold_snapshot(
     the v3.5-B.4 meter strip — their LIVE taps are deferred seams, so live
     snapshots carry them as ``None`` (UNAVAILABLE) until those land.
     """
-    signals = scope_signals or {}
+    dispatch_section, dispatch_signal_scope_ids = _fold_dispatches(dispatches)
+    signals = {str(k): dict(v) for k, v in (scope_signals or {}).items()}
+    for scope_id in dispatch_signal_scope_ids:
+        signals.setdefault(scope_id, {}).setdefault("dispatched", True)
     chain_map = dict(chains or {})
     envelope_map = dict(envelopes or {})
     harness_map = {str(k): str(v) for k, v in (harnesses or {}).items()}
     models = _models_from_chains(chain_map)
     meters = _fold_meters(chains, usage_turns, context_pct)
+    escalation_section = _fold_escalations(escalations)
 
     seats = [
         _seat_card(p, chain_map, models, harness_map)
@@ -853,6 +982,8 @@ def fold_snapshot(
             "seats": AVAILABLE if panes is not None else UNAVAILABLE,
             "board": AVAILABLE if scopes is not None else UNAVAILABLE,
             "evidence": AVAILABLE if chains is not None else UNAVAILABLE,
+            "escalations": AVAILABLE if escalations is not None else UNAVAILABLE,
+            "dispatches": AVAILABLE if dispatches is not None else UNAVAILABLE,
             "refusals": (
                 AVAILABLE
                 if (refusal_chain is not None or observations is not None)
@@ -875,6 +1006,8 @@ def fold_snapshot(
                 verify_chain(refusal_chain) == [] if refusal_chain is not None else None
             ),
         },
+        "escalations": escalation_section,
+        "dispatches": dispatch_section,
         "governance": governance,
         "meters": meters,
         "evidence": evidence,
@@ -927,6 +1060,56 @@ def load_scopes(state_root: Path) -> list[dict[str, Any]] | None:
             continue
         if isinstance(doc, dict) and doc.get("kind") == "scope-record":
             out.append(doc)
+    return out
+
+
+def load_escalations(state_root: Path) -> list[dict[str, Any]] | None:
+    """Read escalation records under ``<state_root>/escalations/`` (read-only).
+
+    ``None`` when the escalations directory is unreachable. Malformed files are
+    skipped so one bad local mirror record cannot crash the Cockpit.
+    """
+    escalations_dir = Path(state_root) / ESCALATIONS_SUBDIR
+    if not escalations_dir.is_dir():
+        return None
+    out: list[dict[str, Any]] = []
+    for path in sorted(escalations_dir.glob("*.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(doc, dict) and doc.get("kind") == "escalation-record":
+            out.append(doc)
+    return out
+
+
+def load_dispatches(state_root: Path) -> list[dict[str, Any]] | None:
+    """Read dispatch records under ``<state_root>/dispatches/*/dispatch.yaml``.
+
+    The sibling ``runtime-policy.yaml`` is best-effort-read as data to expose
+    the run-scope spend envelope. ``None`` means the dispatches directory is
+    unreachable; malformed records are skipped.
+    """
+    dispatches_dir = Path(state_root) / DISPATCHES_SUBDIR
+    if not dispatches_dir.is_dir():
+        return None
+    out: list[dict[str, Any]] = []
+    for path in sorted(dispatches_dir.glob("*/dispatch.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not (isinstance(doc, dict) and doc.get("kind") == "dispatch-record"):
+            continue
+        spend_envelope = None
+        policy_path = path.parent / "runtime-policy.yaml"
+        if policy_path.is_file():
+            try:
+                policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError):
+                policy = None
+            spend_envelope = _run_spend_envelope(policy)
+        out.append({"dispatch": doc, "spend_envelope": spend_envelope})
     return out
 
 
@@ -1083,6 +1266,8 @@ def snapshot_from_roots(
         chains=chains,
         observations=load_observations(observations) if observations else None,
         refusal_chain=load_refusal_chain(observations) if observations else None,
+        escalations=load_escalations(state) if state.is_dir() else None,
+        dispatches=load_dispatches(state) if state.is_dir() else None,
         envelopes=load_envelopes(panes),
         harnesses=load_harnesses(ledger) if ledger else None,
         demo=demo,
@@ -1107,8 +1292,11 @@ def watch_paths(
     this helper only names the directories worth watching.
     """
     env = environ if environ is not None else os.environ
+    state = Path(state_root)
     candidates = [
-        Path(state_root),
+        state,
+        state / ESCALATIONS_SUBDIR,
+        state / DISPATCHES_SUBDIR,
         _resolve(ledger_root, env, LEDGER_ROOT_ENV),
         _resolve(observations_dir, env, OBSERVATIONS_DIR_ENV),
     ]

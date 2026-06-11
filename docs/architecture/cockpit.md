@@ -31,7 +31,9 @@ Three layers; the split is enforced by tests, not convention:
   and hook-observation log (reached ONLY via the launch-pinned environment
   seams `CE_LEDGER_ROOT` and `CE_HOOK_OBSERVATIONS_DIR` — v3 code never embeds
   the v1 state-root names), envelope artifacts, and the spend-ledger records on
-  the spine. The Cockpit **writes no governance state**.
+  the spine, local escalation records (`.ce/state/escalations/*.yaml`), and G1
+  dispatch records (`.ce/state/dispatches/*/dispatch.yaml` plus sibling runtime
+  policies). The Cockpit **writes no governance state**.
 - **L2 — the pure projection/read-model** (`runner/cockpit_readmodel.py` — this
   IS the harness-paper **F1** "read-only Deep-Telemetry projection"): one pure,
   JSON-serializable snapshot fold over L1. ALL board/refusal/envelope/meter
@@ -60,15 +62,50 @@ skin derived via `coordination.PHASE_BY_STATE` over the conserved Scope
 card surfaces *why* (a refusal or a spend breach) inline — the grader-outside
 twist no cooperative-verification competitor can show.
 
+## Live feeds in snapshot version 2
+
+`snapshot_version: 2` adds two first-class, JSON-serializable L2 feeds:
+
+- **`escalations`** — the AWAITING-OPERATOR queue. Records live one per file at
+  `.ce/state/escalations/<escalation_id>.yaml`, validate against
+  `schemas/escalation-record.schema.yaml`, and carry only value-free decision
+  metadata: title, decision needed, required recommendation, timestamps, and an
+  optional `source_ref`. Open items sort oldest-first and render at the top of
+  the governance rail. This is the machine guard for ce-ops#10: an
+  awaiting-Operator marker must not rot invisibly in prose.
+- **`dispatches`** — the local G1 dispatch read-model. The loader reads
+  `.ce/state/dispatches/*/dispatch.yaml` and best-effort reads the sibling
+  `runtime-policy.yaml` to surface the run-scope spend envelope. State is
+  derived only from stamps: `assembled`, `spawned`, `collected`, or `failed`
+  when `spawn_failed_at` is present. Failure-stamped spawns are shown
+  distinctly and never project a Scope as live Build/RUN.
+
+Both feeds follow the existing honesty-tier rule: absent directories produce
+`availability.<feed> = "unavailable"` with empty entries; reachable empty
+directories produce `ok` with zero entries. `ce cockpit --json` and `--serve`
+receive the whole snapshot automatically; the Textual view only renders these
+sections from snapshot data.
+
+## Escalation sync edge
+
+`ce escalation open` and `ce escalation resolve` write local escalation records.
+`ce escalation sync --repo <owner/repo> [--label awaiting-operator]` is the only
+forge mirror edge: it runs `gh issue list` at the CLI boundary, projects the
+JSON payload to escalation records, validates every planned record, then writes
+all-or-nothing. A non-zero `gh` exit, unparsable JSON, or malformed issue body
+refuses with zero partial writes. The Cockpit fold never calls `gh`, polls a
+forge, or performs network I/O.
+
 ## `CE_DEMO=1` (the seeded demo board)
 
 One flag swaps the data source for a seeded, schema-true, hash-chain-verified
 fleet telling the grader-outside story: a populated five-column board with one
 seat **refused a `git push`** by the deploy boundary (attribution visible), an
 envelope-scope denial, a spend hard-breach pause, and a reviewer seat with a
-clean `verify_chain()` badge. A persistent **"DEMO — seeded data, not a live
-fleet"** watermark renders the honesty tier — a pitch demo is never mistaken
-for live governance.
+clean `verify_chain()` badge. The demo also includes an open hard-breach
+Operator escalation, a resolved escalation, a spawned dispatch, and a collected
+dispatch. A persistent **"DEMO — seeded data, not a live fleet"** watermark
+renders the honesty tier — a pitch demo is never mistaken for live governance.
 
 ## Meters and honesty tiers
 

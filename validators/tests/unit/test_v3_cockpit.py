@@ -54,6 +54,8 @@ def test_cockpit_json_demo_runs_without_textual(tmp_path):
     assert snapshot["source"]["demo"] is True
     assert snapshot["source"]["watermark"].startswith("DEMO")
     assert snapshot["board"]["cards"], "the demo board must carry cards"
+    assert snapshot["escalations"]["open_count"] >= 1
+    assert len(snapshot["dispatches"]["entries"]) >= 2
 
 
 def test_cockpit_json_live_runs_without_textual(tmp_path):
@@ -121,6 +123,35 @@ def test_l3_source_performs_no_direct_reads():
             f"token {token!r} in v3_cockpit.py"
         )
     assert "textual" in source, "v3_cockpit IS the Textual view"
+
+
+# --- rail rendering for B2 live-feed additions ------------------------------
+
+@pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")
+def test_rails_render_escalations_and_dispatches():
+    from creator_engine_validator import v3_cockpit
+    from creator_engine_validator.runner import cockpit_demo_seed, cockpit_readmodel
+
+    snapshot = cockpit_readmodel.fold_snapshot(demo=True, **cockpit_demo_seed.seed())
+    left = v3_cockpit._left_rail_text(snapshot)
+    right = v3_cockpit._right_rail_text(snapshot)
+
+    assert "Dispatches" in left
+    assert "gate-uploads · spawned · code · cap $12.0 per_run" in left
+    assert "ship-pr-294 · collected" in left
+    assert "AWAITING OPERATOR" in right
+    assert "Spend hard-breach needs Operator decision" in right
+    assert "recommend: Halt and re-scope before raising the cap." in right
+
+
+@pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")
+def test_rails_render_unavailable_new_feeds_honestly():
+    from creator_engine_validator import v3_cockpit
+    from creator_engine_validator.runner import cockpit_readmodel
+
+    snapshot = cockpit_readmodel.fold_snapshot(demo=False)
+    assert "Dispatches (unavailable)" in v3_cockpit._left_rail_text(snapshot)
+    assert "escalation source unavailable" in v3_cockpit._right_rail_text(snapshot)
 
 
 # --- L3 smoke (CI-exercised; skipif-absent for minimal local envs only) ------
