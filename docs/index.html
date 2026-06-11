@@ -3,686 +3,836 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="color-scheme" content="dark" />
-<title>Creator Engine — turn your home computer into a software factory</title>
-<meta name="description" content="Creator Engine is the open-source governance layer that turns your own computer into a professional software factory — anyone can build real apps with AI, taken from A to Z with automation you can trust: agents propose, you ratify, an external grader checks the result. Built to run secured by NVIDIA OpenShell isolation." />
+<title>Creator Engine — turn your computer into a software factory</title>
+<meta name="description" content="Creator Engine is the open-source governance layer for coding agents: agents do the work, you hold the only gate, an external grader checks everything that ships. Hand the red pill to your coding agent — the install playbook is signed, and your agent verifies it before executing a step. Built for security with NVIDIA OpenShell." />
 <link rel="canonical" href="https://creator-engine.dev/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Creator Engine" />
-<meta property="og:title" content="Creator Engine — turn your home computer into a software factory" />
-<meta property="og:description" content="Open-source governance for AI builders: turn ideas into real apps safely — agents propose, you ratify, the grader lives outside the agent, every change on the record. Built for security with NVIDIA OpenShell." />
+<meta property="og:title" content="Creator Engine — turn your computer into a software factory" />
+<meta property="og:description" content="Take the red pill: send the signed install playbook to your coding agent. Agents propose, you ratify, the grader lives outside the agent. Open source. Built for security with NVIDIA OpenShell." />
 <meta property="og:url" content="https://creator-engine.dev/" />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Creator Engine — turn your home computer into a software factory" />
-<meta name="twitter:description" content="Turn your computer into a professional software factory, with automation you can trust. Open source. Built for security with NVIDIA OpenShell." />
 <!--
-  Creator Engine — one-page brand site (v5 round 2: "NVIDIA-ready" consumer reframe).
-  Self-contained: no external fonts, scripts, images, or network calls. Inline CSS/SVG only.
-  Design system "Control-Room Violet → Creator": off-black base; NEON LIME (#9BE34F) =
-  create / safe / go / verified (consumer altitude, NVIDIA-adjacent); NEON VIOLET (#A06BFF)
-  = governance / CE signature (mechanism altitude); CRIMSON reserved for the one human gate.
-  Vocabulary canon (KEEP): Frame → Shape → Build → Review → Ship; the Scope card; the
-  ◆ CE Completion Report; the grader lives outside the agent; agents propose, one gate ratifies.
-  Honesty discipline: NVIDIA OpenShell = the open-source isolation/security layer CE's boxed
-  agents are built to run sandboxed on (accurate security architecture). RTX-Spark / native
-  consumer-laptop availability = announced fall 2026, NOT shipped; today CE runs on Linux/macOS.
-  "Pre-installed Creator app" = vision, not fact. v3.1 pilot-ready; 0.1.0 repo-checkout pre-release.
-  All motion gated behind prefers-reduced-motion. Apache-2.0.
+  Creator Engine — v7 "The Choice" (LIVE; Operator-approved v7.8, 2026-06-11; trail ce-ops#10).
+  Implements the §8 FINAL CONCEPT LOCK of ~/Documents/ce-website-v7-redesign-handoff-20260611.md:
+  the landing IS the choice. State A (default) = the two-hands blue-pill/red-pill composition,
+  verbatim caption, truth toggle, OpenShell line — nothing else. State B = the informative site.
+
+  Design system "PAPER GATE": Claude-Code-derived DNA (serif display / warm paper / warm black /
+  flat restraint — tokens documented in the companion report §4) with deliberate divergences:
+  CE violet (#5B3FB8) never clay; own neutrals (#FAF8F1/#191712/#16140F); system serif stack
+  (no custom fonts — zero external requests preserved); CE hexagon mark.
+
+  HERO ART: Operator-provided, shipped as assets/the-choice-agent.webp (q86, 55KB from the
+  1.6MB source PNG) — the suited agent offers the choice; pill hotspots overlay the palms.
+  Likeness note: the art evokes a recognizable film aesthetic; the Operator approved shipping
+  this version (v7.8 ratification); an anonymous-agent variant remains a tracked option (ce-ops#10).
+  The caption is a verbatim cultural allusion.
+
+  RATIFIED CHANGES (Operator, 2026-06-11 v7.1): (A) choice-state background = pure #000 to match
+  the art's black field, + a "signal interrupted" glitch every few seconds (CSS-only, killed by
+  prefers-reduced-motion); (B) the "operator concept art" overlay note removed (the licensing fork
+  itself stays OPEN — tracked here and in ce-ops#10, no longer rendered on the page); (C) the
+  bottom OpenShell line restyled to the claude-v2 round-2 "secband" badge (shield icon, spark
+  green, framed) without the "every agent runs…" tail; (D) new CE mark — the hexagon kept, the
+  checkmark recast as a six-axis robotic arm in the classic arched welding pose, warm weld spark.
+
+  RATIFIED CHANGES round 2 (Operator, 2026-06-11 v7.2): (A) the mark rebuilt BOLD (filled-weight
+  limbs per the celogoidea.png reference; thin skeleton was unreadable small), brand logos enlarged,
+  and every logo navigates — choice logo → the truth state, reveal logo (new, top-left) → back to
+  the choice; (B) the truth state re-synced to the LIVE creator-engine.dev design it will replace:
+  live Control-Room palette (token values remapped, names kept), sans/bold display type, GitHub
+  octocat icons restored on nav + CTA buttons, the live `.openshell-badge` pill restored top-right
+  of the hero → #openshell, hero copy = live H1 (minus "home") + the ratified v6 subtitle,
+  "Honest about where the build is" roadmap section removed, and the red-pill reveal keeps its
+  ORIGINAL colors/behavior (red status line, copy→Copied-in-green) — its oxide accent pinned
+  literal so the token remap can't leak in.
+
+  Honesty discipline carried from v6: v3.1 pilot-ready; Linux/macOS repo-checkout pre-release;
+  OpenShell-native consumer hardware announced fall 2026, NOT shipped. Motion gated behind
+  prefers-reduced-motion. Apache-2.0. No external fonts/scripts/network; images + favicon are
+  same-origin files under assets/ (tracked + versioned in-repo).
 -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2308090f'/%3E%3Cpath%20d='M32%206%2054%2019v26L32%2058%2010%2045V19L32%206Z'%20fill='none'%20stroke='%23a06bff'%20stroke-width='4'/%3E%3Cpath%20d='M27%2032%2031%2036%2039%2027'%20fill='none'%20stroke='%239be34f'%20stroke-width='4'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="icon" href="assets/ce-favicon-v2.svg" />
 <style>
-  :root {
-    --ink-900:#08090F; --ink-850:#0B0D15; --ink-800:#0F1220; --ink-700:#161A2B;
+  :root{
+    /* v7.2 SYNC (Operator, 2026-06-11): the truth state adopts the LIVE creator-engine.dev
+       Control-Room palette. The paper/ink/moss/oxide token NAMES are kept (every truth rule
+       reads them) but their VALUES now map to the live site's ink/fg/spark/gate system.
+       The choice state runs on night/bone tokens + literals, so it is untouched. */
+    --paper:#08090F; --paper-2:#0B0D15; --paper-3:#0F1220;
+    --ink:#E9EAF5; --ink-soft:#B7BCD6; --ink-faint:#878DAD;
+    --night:#16140F; --night-2:#1E1B14; --night-line:#2E2A20;
+    --bone:#EFEAE0; --bone-dim:#B3AB9B; --bone-faint:#807866;
+    --violet:#A06BFF; --violet-bright:#B98CFF; --violet-deep:#6E3CD6; --violet-soft:rgba(160,107,255,.16);
+    --moss:#9BE34F; --moss-soft:rgba(155,227,79,.10);
+    --oxide:#FF4D6D; --oxide-soft:rgba(255,77,109,.13);
+    --amber:#F4B740;
+    --pill-red:#C03B2E; --pill-red-hi:#E0604F; --pill-blue:#3D5A99; --pill-blue-hi:#6584C2;
+    --spark:#9BE34F; --spark-bright:#B6F06F; --spark-deep:#5FA82C; --spark-glow:rgba(155,227,79,.16);
     --line:#23263A; --line-soft:#181B2B;
-    --fg:#E9EAF5; --fg-dim:#B7BCD6; --fg-faint:#878DAD;
-    --spark:#9BE34F; --spark-bright:#B6F06F; --spark-deep:#5FA82C; --spark-glow:rgba(155,227,79,0.16);
-    --violet:#A06BFF; --violet-bright:#B98CFF; --violet-deep:#6E3CD6; --violet-glow:rgba(160,107,255,0.16);
-    --gate:#FF4D6D; --gate-soft:rgba(255,77,109,0.13); --gate-glow:rgba(255,77,109,0.20);
-    --amber:#F4B740; --amber-soft:rgba(244,183,64,0.13);
-    --radius:14px; --radius-sm:10px; --maxw:1160px;
-    --mono:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    /* cockpit-serve theme contract (pinned by validators test_v3_cockpit_serve.SITE_HEX —
+       the cockpit web UI mirrors the live site palette): canonical names, same values as
+       the v7 tokens above. Keep in sync with the cockpit THEME. */
+    --ink-900:#08090F; --ink-850:#0B0D15; --ink-800:#0F1220; --fg:#E9EAF5; --gate:#FF4D6D;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Charter,Georgia,serif;
     --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --maxw:1060px;
   }
-  * { box-sizing:border-box; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; font-family:var(--sans); color:var(--fg); background:var(--ink-900); line-height:1.6; overflow-x:hidden; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
-  a { color:inherit; text-decoration:none; }
-  a:focus-visible, button:focus-visible { outline:2px solid var(--spark); outline-offset:3px; border-radius:8px; }
-  h1,h2,h3 { line-height:1.1; letter-spacing:0; margin:0; font-weight:700; }
-  p { margin:0; }
-  code { font-family:var(--mono); }
-  ::selection { background:var(--spark-glow); color:#fff; }
-  .wrap { max-width:var(--maxw); margin:0 auto; padding:0 24px; }
-  .eyebrow { font-family:var(--mono); font-size:12px; letter-spacing:0.16em; text-transform:uppercase; margin:0 0 14px; display:inline-flex; align-items:center; gap:9px; color:var(--violet); }
-  .eyebrow::before { content:""; width:18px; height:1px; background:currentColor; box-shadow:0 0 8px currentColor; display:inline-block; }
-  .eyebrow.lime { color:var(--spark); }
-  .muted { color:var(--fg-dim); } .faint { color:var(--fg-faint); }
-  .hl-lime { color:var(--spark); } .hl-violet { color:var(--violet); } .hl-gate { color:var(--gate); }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--paper);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body.state-choice{background:#000;overflow:hidden;height:100vh}
+  body.state-choice #truth{display:none}
+  body.state-truth #choice{display:none}
+  a{color:inherit}
+  button{font:inherit}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--violet);outline-offset:3px;border-radius:8px}
+  body.state-choice a:focus-visible,body.state-choice button:focus-visible{outline-color:var(--bone)}
+  code{font-family:var(--mono)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
 
-  .btn { display:inline-flex; align-items:center; gap:9px; font-weight:620; font-size:15px; padding:12px 21px; border-radius:999px; border:1px solid transparent; cursor:pointer; transition:transform .12s, background .15s, border-color .15s, box-shadow .15s; }
-  .btn:hover { transform:translateY(-1px); }
-  .btn-spark { background:var(--spark); color:#0a1a05; box-shadow:0 0 0 1px var(--spark-deep), 0 14px 44px -14px var(--spark-glow), 0 0 22px -4px var(--spark-glow); }
-  .btn-spark:hover { background:var(--spark-bright); }
-  .btn-ghost { background:rgba(255,255,255,0.03); color:var(--fg); border-color:var(--line); }
-  .btn-ghost:hover { border-color:var(--violet-deep); box-shadow:0 0 22px -10px var(--violet-glow); }
-  .btn svg { width:16px; height:16px; }
+  /* ============================================================
+     STATE A — THE CHOICE
+     ============================================================ */
+  /* Pure #000 — seamless with the hero art's black field (ratified change A) */
+  #choice{position:fixed;inset:0;display:flex;flex-direction:column;color:var(--bone);background:#000}
+  /* v7.2: the brand is a BUTTON — pressing the logo always enters the actual site */
+  .c-brand{position:absolute;top:22px;left:30px;display:flex;align-items:center;gap:12px;font-family:var(--serif);font-size:17px;letter-spacing:.02em;color:var(--bone-dim);background:transparent;border:0;padding:0;cursor:pointer;transition:color .2s ease}
+  .c-brand:hover{color:var(--bone)}
+  .c-brand svg{width:40px;height:40px;opacity:.95}
+  .c-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0 20px}
 
-  /* Nav */
-  header.nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(12px); background:color-mix(in srgb, var(--ink-900) 84%, transparent); border-bottom:1px solid var(--line-soft); }
-  .nav-inner { display:flex; align-items:center; justify-content:space-between; height:64px; gap:16px; }
-  .brand { display:flex; align-items:center; gap:11px; font-weight:700; font-size:16px; }
-  .brand .mark { width:27px; height:27px; filter:drop-shadow(0 0 6px var(--violet-glow)); }
-  .nav-links { display:flex; align-items:center; gap:23px; }
-  .nav-links a { font-size:14.5px; color:var(--fg-dim); transition:color .15s; }
-  .nav-links a:hover { color:var(--fg); }
-  .nav-cta { display:flex; align-items:center; gap:12px; }
-  .oss-pill { font-family:var(--mono); font-size:11px; letter-spacing:0.06em; color:var(--spark); border:1px solid var(--spark-deep); background:var(--spark-glow); padding:3px 10px; border-radius:999px; }
-  @media (max-width:940px){ .nav-links{display:none;} }
-  @media (max-width:540px){ .oss-pill{display:none;} .nav-cta .btn{padding:10px 14px;} }
+  /* Composition container — Operator-provided concept art (AgentSmithPillsCalm.png).
+     Pills are IN the artwork; the buttons below are invisible hotspots aligned to the palms. */
+  .hands{position:relative;width:min(760px,94vw);aspect-ratio:1586/992;margin:0 auto;overflow:hidden}
+  .hands img.art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 
-  /* Hero */
-  .hero { position:relative; overflow:hidden; padding:58px 0 24px; }
-  .hero::before { content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
-    background:radial-gradient(900px 480px at 14% -6%, rgba(155,227,79,0.12), transparent 60%), radial-gradient(780px 460px at 94% 6%, rgba(160,107,255,0.11), transparent 58%); }
-  .hero::after { content:""; position:absolute; inset:0; z-index:0; opacity:.4;
-    background-image:linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size:54px 54px;
-    mask-image:radial-gradient(760px 480px at 28% 14%, #000 0%, transparent 72%); -webkit-mask-image:radial-gradient(760px 480px at 28% 14%, #000 0%, transparent 72%); }
-  .hero-minimal { border-bottom:0; }
-  .hero-stack { position:relative; z-index:1; max-width:820px; }
-  .hero-eyebrow { margin:0 0 14px; font-family:var(--mono); font-size:12px; color:var(--spark); letter-spacing:0.06em; }
-  .hero h1 { max-width:760px; font-size:56px; margin-bottom:18px; letter-spacing:0; }
-  .hero h1 .make { color:var(--spark); text-shadow:0 0 26px var(--spark-glow); }
-  .hero h1 .trust { color:var(--violet); }
-  .hero-sub { font-size:18px; color:var(--fg-dim); max-width:76ch; margin-bottom:0; }
-  .hero-sub strong { color:var(--fg); }
-  .openshell-badge { position:absolute; z-index:2; top:22px; right:24px; font-family:var(--mono); font-size:12px; color:var(--spark); border:1px solid var(--spark-deep); background:rgba(155,227,79,0.08); border-radius:999px; padding:8px 12px; }
-  .openshell-badge:hover { color:var(--spark-bright); border-color:var(--spark); }
-  .secband { display:flex; align-items:center; gap:11px; padding:11px 14px; border:1px solid var(--spark-deep); background:linear-gradient(90deg, var(--spark-glow), transparent); border-radius:12px; margin-bottom:18px; max-width:46ch; }
-  .secband .shield { flex:0 0 auto; width:22px; height:22px; color:var(--spark); }
-  .secband p { font-size:13.5px; color:var(--fg-dim); } .secband b { color:var(--spark); }
-  .hero-actions { display:flex; gap:13px; flex-wrap:wrap; align-items:center; }
-  .install-box { margin-top:18px; max-width:62ch; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:linear-gradient(180deg, var(--ink-800), var(--ink-850)); }
-  .install-box .ib-label { display:flex; align-items:center; gap:9px; padding:7px 14px; font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--spark); border-bottom:1px solid var(--line-soft); }
-  .install-box .ib-label i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; }
-  .install-box .ib-cmd { display:block; padding:13px 14px; font-family:var(--mono); font-size:13.5px; color:var(--fg); white-space:nowrap; overflow-x:auto; user-select:all; -webkit-user-select:all; }
-  .install-box .ib-cmd .p { color:var(--spark); user-select:none; -webkit-user-select:none; }
-  .install-box .ib-row { display:flex; align-items:center; gap:8px; padding-right:10px; }
-  .install-box .ib-row .ib-cmd { flex:1 1 auto; min-width:0; }
-  .install-box .ib-copy { flex:0 0 auto; font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--violet-bright); background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, color .15s ease; }
-  .install-box .ib-copy:hover { border-color:var(--violet-deep); box-shadow:0 0 18px -10px var(--violet-glow); }
-  .install-box .ib-copy.ok { color:var(--spark); border-color:var(--spark); }
-  .install-box .ib-agent { padding:9px 14px; font-size:13px; color:var(--fg-dim); border-top:1px solid var(--line-soft); }
-  .install-box .ib-agent code { font-size:12.5px; color:var(--violet-bright); }
-  .quick-start { position:relative; z-index:1; padding:0 0 22px; overflow:hidden; }
-  .quick-start .install-box { margin-top:0; max-width:760px; }
-  .cockpit-showcase { padding:0 0 34px; overflow:hidden; }
-  .cockpit-frame { margin:0; border:1px solid var(--line); border-radius:12px; background:linear-gradient(180deg, var(--ink-800), var(--ink-850)); overflow:hidden; box-shadow:0 30px 90px -56px rgba(0,0,0,.9), 0 20px 66px -46px var(--violet-glow); }
-  .cockpit-frame img { display:block; width:100%; height:auto; }
-  .bridge-line { margin:18px 0 0; text-align:center; font-size:18px; color:var(--fg); }
-  .hero-meta { margin-top:16px; font-family:var(--mono); font-size:12px; color:var(--fg-faint); display:flex; gap:14px; flex-wrap:wrap; }
-  .hero-meta span { display:inline-flex; align-items:center; gap:7px; }
-  .hero-meta i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; } .hero-meta i.v{background:var(--violet);} .hero-meta i.g{background:var(--gate);}
-  @media (max-width:960px){ .hero-sub,.secband,.install-box{max-width:none;} .hero h1{font-size:44px;} .openshell-badge{position:relative; top:auto; right:auto; display:inline-flex; margin-bottom:22px;} }
-  @media (max-width:560px){ .hero{padding-top:38px;} .hero h1{font-size:34px;} .hero-sub,.bridge-line{font-size:16px;} .quick-start .install-box{max-width:none;} }
+  /* "Signal interrupted" (ratified change A): every few seconds the feed tears for ~250ms —
+     the base frame flickers while two chroma-split clones flash displaced slice bands.
+     Clones rest at opacity:0, so the reduced-motion kill-switch leaves a clean still. */
+  .hands img.g1,.hands img.g2{opacity:0;pointer-events:none;mix-blend-mode:screen}
+  .hands img.g1{filter:saturate(5) hue-rotate(-55deg) brightness(1.5)}
+  .hands img.g2{filter:saturate(5) hue-rotate(160deg) brightness(1.5)}
+  .hands img.base{animation:sig-base 4.5s linear infinite}
+  .hands img.g1{animation:sig-r 4.5s linear infinite}
+  .hands img.g2{animation:sig-b 4.5s linear infinite}
+  @keyframes sig-base{
+    0%,37.8%,39.2%,92.9%,96.6%,100%{opacity:1;transform:none;filter:none}
+    38.2%{opacity:.55;transform:translateX(2px)}
+    38.6%{opacity:1;transform:none}
+    93.1%{opacity:.5;transform:translateX(4px) skewX(.6deg);filter:brightness(1.5) contrast(1.25)}
+    93.7%{opacity:1;transform:translateX(-3px);filter:none}
+    94.3%{opacity:.22;transform:none;filter:brightness(.55)}
+    94.9%{opacity:1;transform:translate(2px,-1px);filter:brightness(1.3)}
+    95.7%{opacity:.7;transform:none;filter:none}
+  }
+  @keyframes sig-r{
+    0%,37.9%,38.9%,92.9%,96.4%,100%{opacity:0;transform:none;clip-path:inset(0 0 0 0)}
+    38.3%{opacity:.55;transform:translateX(-6px);clip-path:inset(34% 0 52% 0)}
+    93.2%{opacity:.7;transform:translateX(-9px);clip-path:inset(10% 0 76% 0)}
+    94.1%{opacity:.6;transform:translateX(7px);clip-path:inset(56% 0 27% 0)}
+    95.1%{opacity:.65;transform:translateX(-5px);clip-path:inset(80% 0 5% 0)}
+  }
+  @keyframes sig-b{
+    0%,37.9%,38.9%,92.9%,96.4%,100%{opacity:0;transform:none;clip-path:inset(0 0 0 0)}
+    38.3%{opacity:.55;transform:translateX(6px);clip-path:inset(48% 0 38% 0)}
+    93.2%{opacity:.7;transform:translateX(8px);clip-path:inset(22% 0 62% 0)}
+    94.1%{opacity:.6;transform:translateX(-8px);clip-path:inset(64% 0 18% 0)}
+    95.1%{opacity:.65;transform:translateX(5px);clip-path:inset(4% 0 84% 0)}
+  }
+  .pill-btn{position:absolute;width:13%;aspect-ratio:1/1;border-radius:50%;border:0;cursor:pointer;
+    background:transparent;transition:box-shadow .22s ease,transform .22s ease}
+  .pill-btn:hover,.pill-btn:focus-visible{transform:scale(1.06)}
+  .pill-btn.red{left:26.5%;top:60%;}
+  .pill-btn.red:hover,.pill-btn.red:focus-visible{box-shadow:0 0 56px -6px rgba(224,96,79,.95),inset 0 0 34px -10px rgba(224,96,79,.55)}
+  .pill-btn.blue{left:60.5%;top:60%;}
+  .pill-btn.blue:hover,.pill-btn.blue:focus-visible{box-shadow:0 0 56px -6px rgba(101,132,194,.95),inset 0 0 34px -10px rgba(101,132,194,.55)}
 
-  /* ---------- Creator Console (the hero product surface) ---------- */
-  .console { position:relative; border:1px solid var(--line); border-radius:16px; overflow:hidden;
-    background:linear-gradient(180deg, var(--ink-800), var(--ink-850));
-    box-shadow:0 50px 110px -55px rgba(0,0,0,.92), inset 0 1px 0 rgba(255,255,255,.025), 0 0 0 1px rgba(155,227,79,0.05), 0 26px 70px -34px var(--spark-glow); }
-  .console-bar { display:flex; align-items:center; gap:9px; padding:12px 15px; border-bottom:1px solid var(--line-soft); background:rgba(255,255,255,0.015); }
-  .console-bar .dots { display:flex; gap:7px; } .console-bar .dots i { width:11px; height:11px; border-radius:50%; background:#2a2740; display:inline-block; }
-  .console-bar .dots i:nth-child(3){ background:#2c3a22; box-shadow:0 0 7px var(--spark-glow); }
-  .console-bar .ctitle { margin-left:6px; font-family:var(--mono); font-size:12.5px; color:var(--fg-dim); }
-  .console-bar .cbadge { margin-left:auto; font-family:var(--mono); font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--amber); border:1px solid var(--amber); background:var(--amber-soft); padding:2px 9px; border-radius:999px; }
-  .stage-rail { display:flex; gap:6px; padding:11px 15px; border-bottom:1px solid var(--line-soft); background:var(--ink-850); overflow-x:auto; }
-  .stage-rail span { font-family:var(--mono); font-size:11.5px; color:var(--fg-faint); padding:4px 11px; border-radius:999px; border:1px solid transparent; white-space:nowrap; }
-  .stage-rail span.done { color:var(--spark); } .stage-rail span.done::before { content:"✓ "; }
-  .stage-rail span.on { color:var(--violet); border-color:var(--violet-deep); background:var(--violet-glow); }
-  .console-body { padding:17px 17px 19px; display:grid; gap:12px; background:radial-gradient(600px 300px at 80% 0%, rgba(160,107,255,0.05), transparent 60%); }
-  .umsg { justify-self:end; max-width:80%; background:var(--spark-glow); border:1px solid var(--spark-deep); color:var(--fg); font-size:13.5px; padding:9px 13px; border-radius:13px 13px 4px 13px; }
-  .umsg .who { display:block; font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--spark); margin-bottom:3px; }
-  .pcard { border:1px solid var(--line-soft); border-radius:12px; background:var(--ink-850); overflow:hidden; }
-  .pcard.scope { border-color:rgba(160,107,255,0.28); box-shadow:0 0 34px -22px var(--violet-glow); }
-  .pcard.report { border-color:rgba(155,227,79,0.26); }
-  .pcard-h { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 13px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
-  .pcard-h .ce { color:var(--violet); } .pcard.report .pcard-h .ce { color:var(--spark); }
-  .pcard-h .tagr { color:var(--fg-faint); } .pcard-h .ready { color:var(--spark); }
-  .pcard-title { font-size:15px; font-weight:680; padding:13px 14px 6px; color:var(--fg); }
-  .frow { display:grid; grid-template-columns:96px 1fr; gap:12px; padding:8px 14px; font-size:12.5px; }
-  .frow + .frow { border-top:1px solid var(--line-soft); } .frow:last-child { padding-bottom:13px; }
-  .frow b { font-family:var(--mono); font-size:11px; color:var(--violet); font-weight:600; }
-  .frow span { color:var(--fg-dim); } .frow .ok { color:var(--spark); }
-  .gate-prompt { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:11px 13px; border:1px solid rgba(255,77,109,0.4); background:var(--gate-soft); border-radius:12px; box-shadow:0 0 30px -12px var(--gate-glow); animation:gp 3.2s ease-in-out infinite; }
-  @keyframes gp { 0%,100%{ box-shadow:0 0 24px -12px var(--gate-glow);} 50%{ box-shadow:0 0 34px -6px var(--gate-glow);} }
-  .gate-prompt .q { font-family:var(--mono); font-size:13px; color:var(--gate); }
-  .gate-prompt .q::before { content:"⟂ "; }
-  .gbtns { display:flex; gap:8px; }
-  .gbtns .gy { font-family:var(--sans); font-size:12.5px; font-weight:680; color:#0a1a05; background:var(--spark); padding:6px 14px; border-radius:999px; }
-  .gbtns .gn { font-family:var(--sans); font-size:12.5px; font-weight:600; color:var(--fg-dim); border:1px solid var(--line); padding:6px 13px; border-radius:999px; }
-  .build-chip { display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:12px; color:var(--fg-dim); padding:2px 2px; }
-  .build-chip .d { width:8px; height:8px; border-radius:50%; background:var(--spark); box-shadow:0 0 8px var(--spark); }
-  .build-chip .bar { flex:1; height:5px; border-radius:999px; background:var(--ink-700); overflow:hidden; }
-  .build-chip .bar > span { display:block; height:100%; width:18%; background:linear-gradient(90deg, var(--spark), var(--violet)); }
-  .rrow { display:grid; grid-template-columns:78px 1fr; gap:12px; padding:8px 14px; font-family:var(--mono); font-size:12.5px; }
-  .rrow + .rrow { border-top:1px solid var(--line-soft); }
-  .rrow b { color:var(--spark); font-weight:600; } .rrow span { color:var(--fg-dim); } .rrow .ok { color:var(--spark); }
-  .viewpr { display:inline-flex; align-items:center; gap:7px; margin:11px 14px 14px; font-family:var(--sans); font-size:12.5px; font-weight:680; color:#0a1a05; background:var(--spark); padding:7px 14px; border-radius:999px; }
-  .console-note { font-family:var(--mono); font-size:11.5px; color:var(--fg-faint); border-top:1px solid var(--line-soft); padding:9px 15px; } .console-note a { color:var(--violet); }
+  .c-caption{margin:8px auto 0;max-width:46ch;text-align:center;font-family:var(--serif);font-style:italic;font-size:clamp(17px,2.5vw,23px);line-height:1.5;color:var(--bone)}
+  .c-hint{height:22px;margin-top:14px;text-align:center;font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--bone-faint);opacity:0;transition:opacity .25s ease}
+  .c-hint.show{opacity:1}
 
-  /* Refrain */
-  .refrain { border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); background:linear-gradient(180deg, rgba(155,227,79,0.04), transparent); }
-  .refrain .wrap { display:flex; align-items:center; justify-content:center; gap:22px; padding:22px 24px; flex-wrap:wrap; }
-  .refrain b { font-family:var(--mono); font-size:clamp(15px,2.1vw,21px); letter-spacing:0.03em; font-weight:700; }
-  .refrain .sep { color:var(--violet); }
-  .refrain .tail { color:var(--fg-faint); font-size:13px; font-family:var(--mono); }
+  .c-foot{display:flex;flex-direction:column;align-items:center;gap:18px;padding:0 20px 30px}
+  .truth-toggle{display:inline-flex;align-items:center;gap:12px;background:transparent;border:0;cursor:pointer;color:var(--bone-dim);font-family:var(--serif);font-style:italic;font-size:15.5px;padding:8px 10px;transition:color .2s ease}
+  .truth-toggle:hover{color:var(--bone)}
+  .truth-toggle .sw{position:relative;width:42px;height:22px;border-radius:999px;border:1px solid var(--night-line);background:var(--night-2);transition:border-color .2s ease;flex:0 0 auto}
+  .truth-toggle:hover .sw{border-color:var(--bone-faint)}
+  .truth-toggle .sw::after{content:"";position:absolute;top:2.5px;left:3px;width:15px;height:15px;border-radius:50%;background:var(--bone-dim);transition:transform .2s ease,background .2s ease}
+  .truth-toggle:hover .sw::after{background:var(--bone)}
+  /* OpenShell secband — ported from the round-2 claude-v2 design: shield icon, spark green,
+     framed plate (ratified change C; the "every agent runs…" tail deliberately omitted) */
+  .c-secband{display:inline-flex;align-items:center;gap:11px;padding:11px 14px;border:1px solid var(--spark-deep);background:linear-gradient(90deg,var(--spark-glow),transparent);border-radius:12px}
+  .c-secband .shield{flex:0 0 auto;width:22px;height:22px;color:var(--spark)}
+  .c-secband p{margin:0;font-size:13.5px;color:var(--bone-dim)}
+  .c-secband b{color:var(--spark);font-weight:600}
 
-  /* Sections */
-  section { position:relative; }
-  .band { padding:78px 0; border-top:1px solid var(--line-soft); }
-  .band.surface { background:linear-gradient(180deg, var(--ink-850), var(--ink-800)); border-top:1px solid var(--line); }
-  .band.surface::before { content:""; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, var(--violet-glow) 30%, var(--violet) 50%, var(--violet-glow) 70%, transparent); opacity:.6; }
-  .band.surface.lime::before { background:linear-gradient(90deg, transparent, var(--spark-glow) 30%, var(--spark) 50%, var(--spark-glow) 70%, transparent); }
-  .section-head { max-width:62ch; margin-bottom:40px; }
-  .section-head h2 { font-size:clamp(27px,3.5vw,38px); margin-bottom:14px; }
-  .section-head h3 { font-size:clamp(20px,2.4vw,26px); margin-bottom:14px; }
-  .section-head p { font-size:17px; color:var(--fg-dim); }
+  /* The red-pill reveal */
+  .reveal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(10,9,6,.78);backdrop-filter:blur(6px);padding:24px}
+  .reveal.open{display:flex}
+  /* v7.2: the reveal carries the brand top-left; pressing it returns to the promise */
+  .rv-brand{position:absolute;top:22px;left:30px;display:flex;align-items:center;gap:10px;font-family:var(--serif);font-size:16px;letter-spacing:.02em;color:var(--bone-dim);background:transparent;border:0;padding:0;cursor:pointer;transition:color .2s ease}
+  .rv-brand:hover{color:var(--bone)}
+  .rv-brand svg{width:30px;height:30px;opacity:.95}
+  .rv-card{width:min(680px,100%);max-height:90vh;overflow:auto;background:var(--night-2);border:1px solid var(--night-line);border-radius:14px;padding:30px 30px 26px;color:var(--bone);box-shadow:0 40px 120px -40px rgba(0,0,0,.9)}
+  .rv-card h2{margin:0 0 6px;font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.2}
+  .rv-status{margin:0 0 18px;font-size:14.5px;color:var(--bone-dim)}
+  .rv-status b{color:#E0604F;font-weight:600}
+  .rv-status .rp{color:#E0604F}
+  .rv-block{border:1px solid var(--night-line);border-radius:10px;background:#12100B;overflow:hidden;margin-bottom:14px}
+  .rv-block .lbl{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--night-line);font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--bone-faint)}
+  .rv-block .txt{display:block;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--bone);white-space:pre-wrap;word-break:break-word;user-select:all;-webkit-user-select:all}
+  .rv-copy{flex:0 0 auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--bone-dim);background:transparent;border:1px solid var(--night-line);border-radius:7px;padding:4px 11px;cursor:pointer;transition:color .15s,border-color .15s}
+  .rv-copy:hover{color:var(--bone);border-color:var(--bone-faint)}
+  .rv-copy.ok{color:#9CC069;border-color:#56711F}
+  /* original reveal oxide pinned literal (v7.2) — the truth-state token remap must not leak in */
+  .rv-sig{margin:16px 0 18px;padding-left:14px;border-left:2px solid #B3372E;font-size:14px;color:var(--bone-dim)}
+  .rv-sig b{color:var(--bone)}
+  .rv-foot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;font-size:13.5px;color:var(--bone-faint)}
+  .rv-foot a{color:var(--bone-dim);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+  .rv-foot a:hover{color:var(--bone)}
+  .rv-close{background:transparent;border:1px solid var(--night-line);color:var(--bone-dim);border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px}
+  .rv-close:hover{color:var(--bone);border-color:var(--bone-faint)}
 
-  /* Persona strip */
-  .personas { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; background:var(--ink-850); }
-  .persona { padding:22px; border-right:1px solid var(--line-soft); }
-  .persona:last-child { border-right:0; }
-  .persona .n { font-family:var(--mono); font-size:12px; color:var(--spark); margin-bottom:16px; }
-  .persona h3 { font-size:17px; margin-bottom:8px; } .persona p { font-size:13.5px; color:var(--fg-dim); }
-  @media (max-width:820px){ .personas{ grid-template-columns:repeat(2,1fr);} .persona:nth-child(2){border-right:0;} .persona:nth-child(1),.persona:nth-child(2){border-bottom:1px solid var(--line-soft);} }
-  @media (max-width:460px){ .personas{grid-template-columns:1fr;} .persona{border-right:0; border-bottom:1px solid var(--line-soft);} .persona:last-child{border-bottom:0;} }
+  /* ============================================================
+     STATE B — THE TRUTH (informative; Paper Gate light)
+     ============================================================ */
+  .t-nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
+  .t-nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px;gap:14px}
+  .t-brand{display:flex;align-items:center;gap:10px;font-family:var(--serif);font-size:17px;text-decoration:none}
+  .t-brand svg{width:30px;height:30px}
+  .t-navlinks{display:flex;align-items:center;gap:20px;font-size:14px;color:var(--ink-soft)}
+  .t-navlinks a{text-decoration:none}
+  .t-navlinks a:hover{color:var(--ink)}
+  .back-choice{background:transparent;border:0;cursor:pointer;color:var(--ink-faint);font-size:13.5px;font-style:italic;font-family:var(--serif);padding:6px 8px}
+  .back-choice:hover{color:var(--ink)}
+  .wake{display:none;border-bottom:1px solid var(--line-soft);background:var(--paper-2)}
+  .wake .wrap{padding:13px 28px;font-family:var(--serif);font-style:italic;font-size:15.5px;color:var(--ink-soft);text-align:center}
 
-  /* OpenShell complementarity */
-  .compl { display:grid; grid-template-columns:1fr auto 1fr; gap:20px; align-items:stretch; }
-  .compl .plate { border:1px solid var(--line-soft); border-radius:var(--radius); padding:24px; background:var(--ink-850); }
-  .compl .plate.os { border-color:rgba(155,227,79,0.28); }
-  .compl .plate.ce { border-color:var(--violet-deep); box-shadow:0 0 40px -24px var(--violet-glow); }
-  .compl .plate .k { font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--fg-faint); }
-  .compl .plate.os .k { color:var(--spark); } .compl .plate.ce .k { color:var(--violet); }
-  .compl .plate h3 { font-size:19px; margin:9px 0 8px; } .compl .plate p { font-size:14px; color:var(--fg-dim); }
-  .compl .plus { align-self:center; font-size:26px; color:var(--fg-faint); }
-  @media (max-width:820px){ .compl{grid-template-columns:1fr;} .compl .plus{transform:rotate(90deg);} }
-  .honest { margin-top:18px; font-family:var(--mono); font-size:13px; color:var(--fg-faint); border-left:2px solid var(--amber); padding-left:14px; }
+  .t-hero{padding:84px 0 30px}
+  .t-hero h1{margin:0 0 18px;font-family:var(--serif);font-weight:600;font-size:clamp(38px,6vw,62px);line-height:1.12;letter-spacing:-.01em}
+  .t-hero h1 em{font-style:normal;color:var(--violet)}
+  .t-sub{margin:0;max-width:52ch;font-size:18.5px;line-height:1.65;color:var(--ink-soft)}
+  .t-sub b{color:var(--ink);font-weight:600}
 
-  /* Phases */
-  .steps { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; }
-  .step { background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:20px; transition:border-color .18s, box-shadow .18s; }
-  .step:hover { border-color:var(--violet-deep); box-shadow:0 0 30px -14px var(--violet-glow); }
-  .step .num { font-family:var(--mono); font-size:12px; color:var(--violet); border:1px solid var(--line); border-radius:8px; padding:3px 9px; display:inline-block; margin-bottom:12px; }
-  .step h3 { font-size:16px; margin-bottom:7px; } .step p { font-size:13px; color:var(--fg-dim); }
-  @media (max-width:1000px){ .steps{grid-template-columns:repeat(3,1fr);} }
-  @media (max-width:680px){ .steps{grid-template-columns:repeat(2,1fr);} }
-  @media (max-width:460px){ .steps{grid-template-columns:1fr;} }
+  .install{padding:34px 0 10px}
+  .in-card{max-width:680px;border:1px solid var(--line);border-radius:12px;background:var(--paper-2);overflow:hidden;box-shadow:0 16px 44px -30px rgba(0,0,0,.55)}
+  .in-card .lbl{display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--moss)}
+  .in-card .lbl i{width:6px;height:6px;border-radius:50%;background:var(--moss)}
+  .in-row{display:flex;align-items:center;gap:8px;padding-right:10px}
+  .in-cmd{flex:1 1 auto;min-width:0;display:block;padding:14px 16px;font-family:var(--mono);font-size:13.5px;color:var(--ink);white-space:nowrap;overflow-x:auto;user-select:all;-webkit-user-select:all}
+  .in-cmd .p{color:var(--moss);user-select:none;-webkit-user-select:none}
+  .in-copy{flex:0 0 auto;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--violet);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;transition:border-color .15s,color .15s}
+  .in-copy:hover{border-color:var(--violet)}
+  .in-copy.ok{color:var(--moss);border-color:var(--moss)}
+  .in-agent{padding:10px 16px;border-top:1px solid var(--line-soft);font-size:13.5px;color:var(--ink-soft)}
+  .in-agent a{color:var(--violet);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 
-  /* Scope section (Codex base) */
-  .scope-grid { display:grid; grid-template-columns:0.95fr 1.05fr; gap:20px; align-items:start; }
-  @media (max-width:880px){ .scope-grid{grid-template-columns:1fr;} }
-  .scard { border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--ink-850); overflow:hidden; }
-  .scard.scope { border-color:rgba(160,107,255,0.26); }
-  .scard.report { border-color:rgba(155,227,79,0.24); }
-  .scard-h { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12px; color:var(--fg-faint); }
-  .scard-h .ce { color:var(--violet); } .scard.report .scard-h .ce { color:var(--spark); } .scard-h .ok { color:var(--spark); }
-  .scard-body { padding:20px; }
-  .scard-title { font-size:19px; font-weight:700; margin-bottom:16px; }
-  .sfield { display:grid; grid-template-columns:120px 1fr; gap:14px; padding:11px 0; border-top:1px solid var(--line-soft); }
-  .sfield:first-of-type { border-top:0; }
-  .sfield b { font-family:var(--mono); font-size:12px; color:var(--violet); } .sfield span { font-size:14px; color:var(--fg-dim); } .sfield .ok { color:var(--spark); }
-  .reportrows { display:grid; gap:10px; font-family:var(--mono); font-size:13px; }
-  .reportrows .row { display:grid; grid-template-columns:84px 1fr; gap:12px; padding:11px; border:1px solid var(--line-soft); border-radius:10px; background:rgba(0,0,0,.16); }
-  .reportrows .row b { color:var(--spark); } .reportrows .row span { color:var(--fg-dim); } .reportrows .row .ok { color:var(--spark); }
-  .reportrows code { color:var(--violet); font-size:12px; }
+  .refrain{margin:46px 0 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);background:var(--paper-2)}
+  .refrain .wrap{display:flex;align-items:baseline;justify-content:center;gap:18px;flex-wrap:wrap;padding:18px 28px}
+  .refrain b{font-family:var(--serif);font-weight:600;font-size:clamp(16px,2.2vw,21px)}
+  .refrain .v{color:var(--violet)} .refrain .m{color:var(--moss)}
+  .refrain .tail{font-size:13px;color:var(--ink-faint)}
 
-  /* Governed flow */
-  .flowrow { display:flex; align-items:stretch; gap:0; }
-  .fnode { flex:1 1 0; min-width:0; background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:18px; transition:border-color .18s, box-shadow .18s; }
-  .fnode:hover { border-color:var(--violet-deep); box-shadow:0 0 28px -16px var(--violet-glow); }
-  .fnode.gate { border-color:rgba(255,77,109,0.5); background:linear-gradient(180deg, var(--gate-soft), transparent); box-shadow:0 0 34px -16px var(--gate-glow); }
-  .fnode .fk { font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--violet); }
-  .fnode.gate .fk { color:var(--gate); }
-  .fnode h3 { font-size:15px; margin:9px 0 6px; } .fnode p { font-size:12.5px; color:var(--fg-dim); }
-  .fnode .b { margin-top:9px; font-family:var(--mono); font-size:10.5px; color:var(--spark); } .fnode.gate .b { color:var(--gate); }
-  .farrow { align-self:center; color:var(--violet); flex:0 0 auto; padding:0 8px; font-size:20px; }
-  @media (max-width:860px){ .flowrow{flex-direction:column;} .farrow{transform:rotate(90deg); padding:6px 0;} }
-  .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line-soft); border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; margin-top:26px; }
-  .metric { position:relative; background:var(--ink-850); padding:24px 20px; }
-  .metric::before { content:""; position:absolute; top:0; left:0; width:100%; height:2px; background:linear-gradient(90deg, var(--violet), transparent); opacity:.55; }
-  .metric .n { font-family:var(--mono); font-size:28px; font-weight:700; letter-spacing:-0.03em; } .metric .n .u { color:var(--violet); text-shadow:0 0 14px var(--violet-glow); } .metric .n.g .u { color:var(--gate); text-shadow:0 0 14px var(--gate-glow); }
-  .metric .l { font-size:13.5px; color:var(--fg-dim); margin-top:4px; }
-  @media (max-width:760px){ .metrics{grid-template-columns:repeat(2,1fr);} }
-  .by { font-family:var(--mono); font-size:12px; color:var(--spark); border:1px solid var(--spark-deep); background:var(--spark-glow); padding:4px 10px; border-radius:999px; }
+  .band{padding:72px 0}
+  .band.alt{background:var(--paper-2);border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+  .sec-head{max-width:60ch;margin-bottom:34px}
+  .sec-eyebrow{display:block;margin-bottom:12px;font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--violet)}
+  .sec-head h2{margin:0 0 12px;font-family:var(--serif);font-weight:600;font-size:clamp(26px,3.4vw,36px);line-height:1.15}
+  .sec-head p{margin:0;font-size:16.5px;color:var(--ink-soft)}
 
-  /* Why governance: benefit (without/with) + fear map */
-  .ben { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:26px; }
-  @media (max-width:760px){ .ben{grid-template-columns:1fr;} }
-  .bencard { border:1px solid var(--line-soft); border-radius:var(--radius); padding:24px; }
-  .bencard.bad { border-color:rgba(255,77,109,0.25); background:linear-gradient(180deg, var(--gate-soft), transparent); }
-  .bencard.good { border-color:var(--spark-deep); background:linear-gradient(180deg, var(--spark-glow), transparent); box-shadow:0 0 40px -24px var(--spark-glow); }
-  .bencard h3 { font-size:18px; margin-bottom:14px; display:flex; gap:10px; align-items:center; }
-  .bencard ul { list-style:none; padding:0; margin:0; display:grid; gap:11px; }
-  .bencard li { display:flex; gap:11px; font-size:14.5px; color:var(--fg-dim); }
-  .bencard.bad li .m { color:var(--gate); flex:0 0 auto; } .bencard.good li .m { color:var(--spark); flex:0 0 auto; }
-  .safe { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  @media (max-width:820px){ .safe{grid-template-columns:1fr;} }
-  .srow { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; background:var(--ink-850); }
-  .srow .fear { padding:15px 17px; border-right:1px solid var(--line-soft); }
-  .srow .mech { padding:15px 17px; background:rgba(160,107,255,0.04); }
-  .srow .lab { font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px; }
-  .srow .fear .lab { color:var(--gate); } .srow .mech .lab { color:var(--violet); }
-  .srow .fear p { font-size:14px; color:var(--fg); } .srow .mech p { font-size:13px; color:var(--fg-dim); } .srow .mech code { color:var(--spark); font-size:12.5px; }
-  @media (max-width:460px){ .srow{grid-template-columns:1fr;} .srow .fear{border-right:0; border-bottom:1px solid var(--line-soft);} }
+  /* B-1 The Refusal — dark terminal prop on paper (Claude-DNA vignette) */
+  .refusal{max-width:760px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--paper-3);color:var(--ink);box-shadow:0 36px 80px -46px rgba(0,0,0,.6)}
+  .refusal .bar{display:flex;gap:7px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--ink-faint)}
+  .refusal .bar i{width:10px;height:10px;border-radius:50%;background:var(--line)}
+  .refusal pre{margin:0;padding:18px 20px;font-family:var(--mono);font-size:13px;line-height:1.85;overflow-x:auto;color:var(--ink-soft)}
+  .refusal .a{color:var(--ink)} .refusal .deny{color:var(--oxide);font-weight:700} .refusal .gate{color:var(--amber)} .refusal .ok{color:var(--spark)} .refusal .dim{color:var(--ink-faint)}
+  .refusal-note{margin:16px 0 0;font-family:var(--serif);font-style:italic;font-size:16px;color:var(--ink-soft)}
 
-  /* Capabilities */
-  .caps { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-  .cap { background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:22px; transition:border-color .18s, box-shadow .18s; }
-  .cap:hover { border-color:var(--violet-deep); box-shadow:0 0 30px -16px var(--violet-glow); }
-  .cap .icon { width:36px; height:36px; border-radius:9px; display:grid; place-items:center; background:var(--violet-glow); border:1px solid var(--line); margin-bottom:14px; }
-  .cap .icon svg { width:18px; height:18px; stroke:var(--violet); }
-  .cap h3 { font-size:16px; margin-bottom:7px; } .cap p { font-size:13.5px; color:var(--fg-dim); } .cap code { color:var(--spark); font-size:12.5px; }
-  @media (max-width:880px){ .caps{grid-template-columns:repeat(2,1fr);} }
-  @media (max-width:560px){ .caps{grid-template-columns:1fr;} }
+  /* B-2 Scope / Report pair */
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  @media (max-width:860px){.pair{grid-template-columns:1fr}}
+  .pcard{border:1px solid var(--line);border-radius:12px;background:var(--paper-2);overflow:hidden}
+  .pcard.scope{border-color:rgba(160,107,255,.26)} .pcard.report{border-color:rgba(155,227,79,.24)}
+  .pcard .h{display:flex;justify-content:space-between;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11.5px;color:var(--ink-faint)}
+  .pcard .h .ce{color:var(--violet)} .pcard.report .h .ce{color:var(--moss)} .pcard .h .ok{color:var(--moss)}
+  .pcard .b{padding:18px 18px 8px}
+  .pcard .t{font-family:var(--serif);font-size:18px;font-weight:600;margin:0 0 12px}
+  .fld{display:grid;grid-template-columns:104px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--line-soft);font-size:13.5px}
+  .fld b{font-family:var(--mono);font-size:11px;color:var(--violet);font-weight:600}
+  .fld span{color:var(--ink-soft)} .fld .ok{color:var(--moss)}
+  .pcard.report .fld b{color:var(--moss)}
 
-  /* OSS */
-  .oss { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-  .ocard { border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--ink-850); overflow:hidden; }
-  .ocard-h { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12px; color:var(--fg-faint); }
-  .ocard-b { padding:20px; } .ocard h3 { font-size:18px; margin-bottom:9px; } .ocard p { font-size:13.5px; color:var(--fg-dim); }
-  @media (max-width:820px){ .oss{grid-template-columns:1fr;} }
+  /* stages */
+  .stages{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  @media (max-width:920px){.stages{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:600px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{border:1px solid var(--line);border-radius:12px;background:var(--paper-2);padding:16px}
+  .stage .n{font-family:var(--mono);font-size:11px;color:var(--violet)}
+  .stage h3{margin:8px 0 5px;font-family:var(--serif);font-weight:600;font-size:16.5px}
+  .stage p{margin:0;font-size:12.5px;color:var(--ink-soft)}
 
-  /* Roadmap */
-  .road { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
-  .stage-c { border:1px solid var(--line-soft); border-radius:var(--radius); padding:20px; background:var(--ink-850); }
-  .stage-c .s-tag { font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; padding:4px 10px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; margin-bottom:12px; }
-  .stage-c .s-tag .lamp { width:7px; height:7px; border-radius:50%; }
-  .stage-c.proven .s-tag { color:var(--spark); background:var(--spark-glow); } .stage-c.proven .lamp { background:var(--spark); box-shadow:0 0 8px var(--spark); animation:live 2.4s ease-in-out infinite; }
-  @keyframes live { 0%,100%{box-shadow:0 0 5px var(--spark);} 50%{box-shadow:0 0 12px var(--spark);} }
-  .stage-c.now .s-tag { color:var(--violet); background:var(--violet-glow); } .stage-c.now .lamp { background:var(--violet); box-shadow:0 0 8px var(--violet); }
-  .stage-c.pre .s-tag { color:var(--amber); background:var(--amber-soft); } .stage-c.pre .lamp { background:var(--amber); }
-  .stage-c.vision .s-tag { color:var(--fg-faint); background:rgba(255,255,255,0.03); } .stage-c.vision .lamp { background:var(--fg-faint); }
-  .stage-c h3 { font-size:15px; margin-bottom:7px; } .stage-c p { font-size:13px; color:var(--fg-dim); }
-  @media (max-width:900px){ .road{grid-template-columns:repeat(2,1fr);} }
-  @media (max-width:480px){ .road{grid-template-columns:1fr;} }
+  /* OpenShell */
+  .compl{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:stretch}
+  @media (max-width:780px){.compl{grid-template-columns:1fr}.compl .plus{transform:rotate(90deg);justify-self:center}}
+  .plate{border:1px solid var(--line);border-radius:12px;background:var(--paper-2);padding:22px}
+  .plate .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .plate.ce{border-color:rgba(160,107,255,.26)} .plate.ce .k{color:var(--violet)} .plate.os .k{color:var(--moss)}
+  .plate h3{margin:8px 0 6px;font-family:var(--serif);font-weight:600;font-size:19px}
+  .plate p{margin:0;font-size:14px;color:var(--ink-soft)}
+  .plus{align-self:center;font-size:24px;color:var(--ink-faint)}
+  .honest{margin-top:18px;padding-left:14px;border-left:2px solid var(--amber);font-family:var(--mono);font-size:12.5px;color:var(--ink-faint);max-width:72ch}
 
-  /* CTA + footer */
-  .cta-band { position:relative; overflow:hidden; padding:86px 0; text-align:center; border-top:1px solid var(--line-soft); }
-  .cta-band::before { content:""; position:absolute; inset:0; background:radial-gradient(620px 320px at 34% 0%, var(--spark-glow), transparent 70%), radial-gradient(560px 300px at 72% 14%, var(--violet-glow), transparent 70%); }
-  .cta-band .inner { position:relative; z-index:1; max-width:62ch; margin:0 auto; }
-  .cta-band h2 { font-size:clamp(30px,4.4vw,46px); margin-bottom:16px; } .cta-band h2 .make { color:var(--spark); }
-  .cta-band p { font-size:17px; color:var(--fg-dim); margin-bottom:30px; }
-  .cta-actions { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
-  footer { border-top:1px solid var(--line-soft); padding:46px 0 60px; background:linear-gradient(180deg, transparent, rgba(0,0,0,0.25)); }
-  .foot-grid { display:flex; justify-content:space-between; gap:30px; flex-wrap:wrap; }
-  .foot-brand { max-width:40ch; } .foot-brand p { font-size:13.5px; color:var(--fg-faint); margin-top:12px; }
-  .foot-cols { display:flex; gap:52px; flex-wrap:wrap; }
-  .foot-col h4 { font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--fg-faint); margin-bottom:14px; font-weight:600; }
-  .foot-col a { display:block; font-size:14px; color:var(--fg-dim); margin-bottom:9px; } .foot-col a:hover { color:var(--fg); }
-  .foot-base { margin-top:38px; padding-top:22px; border-top:1px solid var(--line-soft); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--fg-faint); }
-  .note { font-family:var(--mono); font-size:13px; color:var(--fg-faint); border-left:2px solid var(--violet); padding-left:14px; }
+  /* fear map — live-site .safe/.srow styling (v7.3) */
+  .safe{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:820px){.safe{grid-template-columns:1fr}}
+  .srow{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line-soft);border-radius:14px;overflow:hidden;background:var(--paper-2)}
+  .srow .fear{padding:15px 17px;border-right:1px solid var(--line-soft)}
+  .srow .mech{padding:15px 17px;background:rgba(160,107,255,0.04)}
+  .srow .lab{font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px}
+  .srow .fear .lab{color:var(--oxide)} .srow .mech .lab{color:var(--violet)}
+  .srow .fear p{margin:0;font-size:14px;color:var(--ink)} .srow .mech p{margin:0;font-size:13px;color:var(--ink-soft)} .srow .mech code{color:var(--spark);font-size:12.5px}
+  @media (max-width:460px){.srow{grid-template-columns:1fr}.srow .fear{border-right:0;border-bottom:1px solid var(--line-soft)}}
 
-  @media (prefers-reduced-motion: reduce){ *,*::before,*::after{ animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+  /* technical credibility — live-site .caps/.cap styling (v7.3) */
+  .caps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .cap{background:var(--paper-2);border:1px solid var(--line-soft);border-radius:14px;padding:22px;transition:border-color .18s,box-shadow .18s}
+  .cap:hover{border-color:var(--violet-deep);box-shadow:0 0 30px -16px var(--violet-soft)}
+  .cap .icon{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;background:var(--violet-soft);border:1px solid var(--line);margin-bottom:14px}
+  .cap .icon svg{width:18px;height:18px;stroke:var(--violet)}
+  .cap h3{font-size:16px;margin:0 0 7px} .cap p{margin:0;font-size:13.5px;color:var(--ink-soft)} .cap code{color:var(--spark);font-size:12.5px}
+  .cap .faint{color:var(--ink-faint)}
+  @media (max-width:880px){.caps{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:560px){.caps{grid-template-columns:1fr}}
+
+  /* CTA — live-site .cta-band styling (v7.3): "Be a Creator. Safely." */
+  .cta{position:relative;overflow:hidden;padding:86px 0;text-align:center;border-top:1px solid var(--line-soft)}
+  .cta::before{content:"";position:absolute;inset:0;background:radial-gradient(620px 320px at 34% 0%,var(--spark-glow),transparent 70%),radial-gradient(560px 300px at 72% 14%,var(--violet-soft),transparent 70%)}
+  .cta .inner{position:relative;z-index:1;max-width:62ch;margin:0 auto}
+  .cta .eyebrow-lime{display:inline-flex;justify-content:center;font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;margin:0 0 14px;color:var(--spark)}
+  .cta h2{margin:0 0 16px;font-size:clamp(30px,4.4vw,46px)} .cta h2 .make{color:var(--spark)}
+  .cta p{margin:0 0 30px;color:var(--ink-soft);font-size:17px}
+  .cta .row{display:flex;justify-content:center;gap:14px;flex-wrap:wrap}
+  .btn svg{width:16px;height:16px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 22px;border-radius:999px;font-size:15px;font-weight:600;text-decoration:none;border:1px solid transparent;cursor:pointer}
+  .btn.dark{background:var(--spark);color:#0a1a05;box-shadow:0 0 0 1px var(--spark-deep)}
+  .btn.dark:hover{background:var(--spark-bright)}
+  .btn.ghost{background:var(--violet);color:#08090F;border-color:var(--violet-deep)}
+  .btn.ghost:hover{background:var(--violet-bright);border-color:var(--violet)}
+
+  footer{border-top:1px solid var(--line-soft);padding:34px 0 50px;font-size:13px;color:var(--ink-faint)}
+  footer .row{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+  footer a{color:var(--ink-soft);text-decoration:none;margin-right:18px}
+  footer a:hover{color:var(--ink)}
+  footer .honesty{margin-top:14px;font-family:var(--mono);font-size:11.5px}
+
+  /* v7.5 "digital rain" — a canvas runs the classic matrix rain (fade-rect trails,
+     per-column drops) and is composited 'destination-in' against the headline word each
+     frame, so rain exists ONLY inside the letter shapes. The span text itself is undrawn
+     (turned transparent once the canvas is live) — the bounded rain is what makes each
+     letter discernible. No outline. Fallback = plain spark green if the canvas never starts;
+     reduced-motion renders a static fill. */
+  .t-hero h1 .rain{position:relative;display:inline-block;color:var(--spark);font-size:1.25em}
+  .t-hero h1 .rain.on{color:transparent;-webkit-text-stroke:1px rgba(155,227,79,.28)}
+  .t-hero h1 .rain canvas{position:absolute;left:0;top:0;pointer-events:none}
+  @media (max-width:700px){.h1br{display:none}}
+  @media (max-width:420px){.t-hero h1{font-size:34px}}
+
+  /* ---- v7.2 live-design sync (the page this replaces = creator-engine.dev v5/v6) ---- */
+  /* Control-Room display type: truth-state headings go sans/bold; the choice film keeps serif */
+  #truth h1,#truth h2,#truth h3,#truth .pcard .t{font-family:var(--sans);font-weight:700;letter-spacing:-.02em}
+  /* the live site's OpenShell badge, restored verbatim — top-right of the hero, links down-page */
+  .t-hero{position:relative}
+  .openshell-badge{position:absolute;z-index:2;top:22px;right:24px;font-family:var(--mono);font-size:12px;color:var(--spark);border:1px solid var(--spark-deep);background:rgba(155,227,79,0.08);border-radius:999px;padding:8px 12px;text-decoration:none}
+  .openshell-badge:hover{color:var(--spark-bright);border-color:var(--spark)}
+  /* GitHub link carries the octocat again, nav + CTA */
+  .t-navlinks a.gh{display:inline-flex;align-items:center;gap:7px}
+  .t-navlinks a.gh svg{width:16px;height:16px;fill:currentColor}
+
+  @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+  @media (max-width:700px){
+    .c-brand{font-size:15px}
+    .c-brand svg{width:32px;height:32px}
+    .hands{width:96vw}
+    .pill-btn{width:13%}
+    .t-navlinks .hide-m{display:none}
+  }
+  @media (max-width:960px){
+    .openshell-badge{position:relative;top:auto;right:auto;display:inline-flex;margin:0 0 18px}
+  }
 </style>
 </head>
-<body>
+<body class="state-choice">
 
-<!-- ===================== NAV ===================== -->
-<header class="nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="#top" aria-label="Creator Engine home">
-      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
-        <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
-        <path d="M13 16 L15.5 18.5 L20 13" stroke="#9BE34F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      Creator&nbsp;Engine
-    </a>
-    <nav class="nav-links" aria-label="Primary">
-      <a href="#creator">Every Creator</a>
-      <a href="#openshell">OpenShell</a>
-      <a href="#how">How it works</a>
-      <a href="#scope">The Scope card</a>
-      <a href="#roadmap">Roadmap</a>
-    </nav>
-    <div class="nav-cta">
-      <span class="oss-pill">Open source · Apache-2.0</span>
-      <a class="btn btn-ghost" href="https://github.com/creator-engine/creator-engine" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
-        GitHub
+<!-- ============================================================
+     STATE A — THE CHOICE (the entire default page)
+     ============================================================ -->
+<div id="choice" role="main" aria-label="Creator Engine — the choice">
+  <button class="c-brand" type="button" onclick="ceTruth()" aria-label="Creator Engine — enter the site">
+    <!-- CE mark v2.1 BOLD (v7.2, celogoidea.png reference): hexagon kept; a filled-weight
+         six-axis arm in the arched welding pose — trapezoid foot, heavy boom, down-torch,
+         workpiece, warm weld spark. Joint holes punched in the page color. -->
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M32 6 54 19v26L32 58 10 45V19L32 6Z" stroke="#5B3FB8" stroke-width="3.2" fill="rgba(91,63,184,0.07)"/>
+      <path d="M19 49h16l-3.3-7h-9.4Z" fill="#B3AB9B"/>
+      <path d="M27 42.5 29 24 44 26.5" stroke="#B3AB9B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M45 29 46.3 36" stroke="#B3AB9B" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="27.3" cy="40" r="2.1" fill="#000"/>
+      <circle cx="29" cy="24" r="2.1" fill="#000"/>
+      <circle cx="44" cy="26.5" r="2.1" fill="#000"/>
+      <path d="M39 46.5h11" stroke="#807866" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="46.5" cy="40" r="1.9" fill="#E0604F"/>
+      <path d="M43.7 41.6l-2.2 1.5M49.3 41.5l2.2 1.4M46.5 42.9v2.3" stroke="#E0604F" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    Creator Engine
+  </button>
+
+  <div class="c-stage">
+    <div class="hands" role="group" aria-label="Two hands offering a blue pill and a red pill">
+      <!-- Operator-provided hero: assets/the-choice-agent.webp — the agent offers the choice.
+           The two extra imgs are the glitch chroma-split clones (same URL = one fetch, browser-cached). -->
+      <img class="art base" src="assets/the-choice-agent.webp" alt="" aria-hidden="true"/>
+      <img class="art g1" src="assets/the-choice-agent.webp" alt="" aria-hidden="true"/>
+      <img class="art g2" src="assets/the-choice-agent.webp" alt="" aria-hidden="true"/>
+      <!-- The pills are real controls resting on the palms -->
+      <button class="pill-btn blue" type="button" aria-label="Take the blue pill — the story ends; see the ordinary site"
+        onmouseenter="ceHint('the story ends.')" onmouseleave="ceHint('')" onfocus="ceHint('the story ends.')" onblur="ceHint('')"
+        onclick="ceBlue()"></button>
+      <button class="pill-btn red" type="button" aria-label="Take the red pill — send the signed install playbook to your coding agent"
+        onmouseenter="ceHint('your agent takes this one.')" onmouseleave="ceHint('')" onfocus="ceHint('your agent takes this one.')" onblur="ceHint('')"
+        onclick="ceRed()"></button>
+    </div>
+
+    <p class="c-caption">&ldquo;take the red pill &ndash; you stay in Wonderland, and I&nbsp;show you how deep the rabbit&nbsp;hole&nbsp;goes&rdquo;</p>
+    <p class="c-hint" id="pillHint" aria-live="polite">&nbsp;</p>
+  </div>
+
+  <div class="c-foot">
+    <button class="truth-toggle" type="button" onclick="ceTruth()" aria-label="Flip to the informative site">
+      <span class="sw" aria-hidden="true"></span>
+      I&rsquo;m prepared for the truth
+    </button>
+    <div class="c-secband">
+      <svg class="shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="M9 12l2 2 4-4" stroke-width="2.2"/></svg>
+      <p><b>Built for security with NVIDIA OpenShell</b></p>
+    </div>
+  </div>
+</div>
+
+<!-- The red-pill reveal -->
+<div class="reveal" id="reveal" role="dialog" aria-modal="true" aria-labelledby="rvTitle">
+  <button class="rv-brand" type="button" onclick="ceCloseReveal()" aria-label="Creator Engine — back to the choice">
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M32 6 54 19v26L32 58 10 45V19L32 6Z" stroke="#5B3FB8" stroke-width="3.2" fill="rgba(91,63,184,0.07)"/>
+      <path d="M19 49h16l-3.3-7h-9.4Z" fill="#B3AB9B"/>
+      <path d="M27 42.5 29 24 44 26.5" stroke="#B3AB9B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M45 29 46.3 36" stroke="#B3AB9B" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="27.3" cy="40" r="2.1" fill="#000"/>
+      <circle cx="29" cy="24" r="2.1" fill="#000"/>
+      <circle cx="44" cy="26.5" r="2.1" fill="#000"/>
+      <path d="M39 46.5h11" stroke="#807866" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="46.5" cy="40" r="1.9" fill="#E0604F"/>
+      <path d="M43.7 41.6l-2.2 1.5M49.3 41.5l2.2 1.4M46.5 42.9v2.3" stroke="#E0604F" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    Creator Engine
+  </button>
+  <div class="rv-card">
+    <h2 id="rvTitle">There is no install wizard.</h2>
+    <p class="rv-status" id="rvStatus"><b>The red pill is in your clipboard.</b> Paste it to your coding agent.</p>
+
+    <div class="rv-block">
+      <div class="lbl"><span>the red pill — an instruction for your agent</span>
+        <button class="rv-copy" type="button" onclick="ceCopy(this, AGENT_PROMPT)">Copy</button></div>
+      <code class="txt" id="agentPromptText"></code>
+    </div>
+
+    <div class="rv-block">
+      <div class="lbl"><span>or hand it over from the terminal</span>
+        <button class="rv-copy" type="button" onclick="ceCopy(this, CMD_CLAUDE)">Copy</button></div>
+      <code class="txt">claude "$(curl -fsSL https://creator-engine.dev/llms-install.md)"</code>
+    </div>
+    <div class="rv-block">
+      <div class="lbl"><span>codex form</span>
+        <button class="rv-copy" type="button" onclick="ceCopy(this, CMD_CODEX)">Copy</button></div>
+      <code class="txt">codex "$(curl -fsSL https://creator-engine.dev/llms-install.md)"</code>
+    </div>
+
+    <p class="rv-sig"><b>The pill is signed.</b> The playbook carries a detached OpenSSH signature over its canonical bytes; your agent verifies it against the pinned trust root (<code>ce-root-v1</code>) with stock <code>ssh-keygen</code> — before executing a single step. Governance starts at hello.</p>
+
+    <div class="rv-foot">
+      <a onclick="ceHuman()">prefer to type it yourself? take the human path &rarr;</a>
+      <button class="rv-close" type="button" onclick="ceCloseReveal()">close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     STATE B — THE TRUTH (the informative site; Paper Gate)
+     ============================================================ -->
+<div id="truth">
+  <header class="t-nav">
+    <div class="wrap">
+      <a class="t-brand" href="#top" aria-label="Creator Engine home">
+        <!-- CE mark v2.1 BOLD — Control-Room variant: live violet hexagon, fg-dim arm, spark-green weld -->
+        <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <path d="M32 6 54 19v26L32 58 10 45V19L32 6Z" stroke="#A06BFF" stroke-width="3.2" fill="rgba(160,107,255,0.08)"/>
+          <path d="M19 49h16l-3.3-7h-9.4Z" fill="#B7BCD6"/>
+          <path d="M27 42.5 29 24 44 26.5" stroke="#B7BCD6" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M45 29 46.3 36" stroke="#B7BCD6" stroke-width="3.2" stroke-linecap="round"/>
+          <circle cx="27.3" cy="40" r="2.1" fill="#08090F"/>
+          <circle cx="29" cy="24" r="2.1" fill="#08090F"/>
+          <circle cx="44" cy="26.5" r="2.1" fill="#08090F"/>
+          <path d="M39 46.5h11" stroke="#878DAD" stroke-width="2.6" stroke-linecap="round"/>
+          <circle cx="46.5" cy="40" r="1.9" fill="#9BE34F"/>
+          <path d="M43.7 41.6l-2.2 1.5M49.3 41.5l2.2 1.4M46.5 42.9v2.3" stroke="#9BE34F" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Creator&nbsp;Engine
       </a>
+      <nav class="t-navlinks" aria-label="Primary">
+        <a class="hide-m" href="#how">How it works</a>
+        <a class="hide-m" href="#openshell">OpenShell</a>
+        <a class="gh" href="https://github.com/creator-engine/creator-engine" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+          GitHub
+        </a>
+        <button class="back-choice" type="button" onclick="ceBack()">&larr; back to the choice</button>
+      </nav>
     </div>
-  </div>
-</header>
+  </header>
 
-<a id="top"></a>
+  <div class="wake" id="wake"><div class="wrap">You wake up in your bed and believe whatever you want to believe.</div></div>
 
-<!-- ===================== HERO ===================== -->
-<section class="hero hero-minimal">
-  <a class="openshell-badge" href="#openshell">Built for security with NVIDIA OpenShell</a>
-  <div class="wrap">
-    <div class="hero-stack">
-      <p class="hero-eyebrow">Build from home</p>
-      <h1>Turn your home computer into a software factory.</h1>
-      <p class="hero-sub">Turn your ideas into real, working apps — today, right from home. Agents propose, you ratify, and an external grader checks every result before anything ships.</p>
+  <a id="top"></a>
+  <section class="t-hero">
+    <a class="openshell-badge" href="#openshell">Built for security with NVIDIA OpenShell</a>
+    <div class="wrap">
+      <h1>Turn your computer<br class="h1br"> into a <span class="rain" id="rainWord">software factory<canvas id="rainCv" aria-hidden="true"></canvas></span>.</h1>
+      <p class="t-sub">Turn your ideas into real, working apps — today, right from home. Agents propose, you ratify, and an external grader checks every result before anything ships.</p>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===================== QUICK-START ===================== -->
-<section class="quick-start" id="install">
-  <div class="wrap">
-    <div class="install-box">
-      <div class="ib-label"><i></i> Install Creator Engine</div>
-      <div class="ib-row">
-        <code class="ib-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
-        <button class="ib-copy" type="button" aria-label="Copy the install command" onclick="ceCopyInstall(this)">Copy</button>
-      </div>
-      <p class="ib-agent">or point your coding agent at <code>https://creator-engine.dev/llms-install.md</code></p>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== COCKPIT VISUAL ===================== -->
-<section class="cockpit-showcase" aria-label="Creator Engine demo cockpit">
-  <div class="wrap">
-    <figure class="cockpit-frame">
-      <img src="assets/cockpit-demo-v6.svg" alt="SVG screenshot of CE_DEMO=1 ce cockpit showing the demo watermark, stage board, and governance authority panel." />
-    </figure>
-    <p class="bridge-line">From beginner solo devs to elite engineering teams — end-to-end SDLC automation you can trust.</p>
-  </div>
-</section>
-
-<!-- ===================== REFRAIN ===================== -->
-<section class="refrain">
-  <div class="wrap">
-    <b><span class="hl-lime">Propose</span><span class="sep"> · </span><span class="hl-violet">Ratify</span><span class="sep"> · </span>Ship</b>
-    <span class="tail">the agent drafts it · you open the gate · the record proves it shipped</span>
-  </div>
-</section>
-
-<!-- ===================== EVERY PERSON, A CREATOR ===================== -->
-<section class="band" id="creator">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow lime">Every person, a Creator</span>
-      <h2>Now, anyone can turn an idea into software. The hard part won't be building it — it'll be trusting it.</h2>
-      <p>The audience is no longer only developers who run agents. A <strong>Creator</strong> is anyone who turns an idea into working software with AI. The promise has to be legible to a consumer and credible to the operator who must trust the trail.</p>
-    </div>
-    <div class="personas">
-      <div class="persona"><div class="n">01</div><h3>Founder</h3><p>Shape a product idea into a ratified Scope instead of a vague chat thread.</p></div>
-      <div class="persona"><div class="n">02</div><h3>Student</h3><p>Build a real app without giving an agent unlimited authority over your machine.</p></div>
-      <div class="persona"><div class="n">03</div><h3>Team lead</h3><p>Let agents move faster while every change still binds to evidence and a ratifier.</p></div>
-      <div class="persona"><div class="n">04</div><h3>Operator</h3><p>Keep the privileged floor human: deploys, identity, security, governance, and merge authority.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== OPENSHELL ALIGNMENT ===================== -->
-<section class="band surface lime" id="openshell">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow lime">Built for security with NVIDIA OpenShell</span>
-      <h2>OpenShell isolates the runtime. Creator Engine governs the work.</h2>
-      <p>Personal AI agents are heading to consumer machines. Runtime isolation keeps an agent contained — but isolation doesn't decide <em>whether the work was right, what it cost, or whether a human approved it.</em> That's a different layer, and it's the one we build. CE's boxed agents are built to run sandboxed on OpenShell, the open isolation layer — so consumer power never means free rein.</p>
-    </div>
-    <div class="compl">
-      <div class="plate os">
-        <div class="k">The runtime — OpenShell</div>
-        <h3>Isolates &amp; runs</h3>
-        <p>An open, sandboxed place for a personal agent to execute, with local model routing. Contains the blast radius of a single run.</p>
-      </div>
-      <div class="plus">+</div>
-      <div class="plate ce">
-        <div class="k">The work — Creator Engine</div>
-        <h3>Governs &amp; proves</h3>
-        <p>Bounds the task, caps the spend, routes risk to a human gate, grades the result from outside the agent, and lands a repo-visible record. The missing safety layer.</p>
-      </div>
-    </div>
-    <p class="honest">Honesty check: NVIDIA OpenShell is real open-source software, and CE's sandbox layer is built to target it. Native Windows / RTX-Spark consumer-agent <em>hardware</em> is <strong>announced for fall 2026, not shipped</strong>; today CE runs on Linux and macOS, open-source and independent. Alignment is the forward story — the governance is real now.</p>
-  </div>
-</section>
-
-<!-- ===================== HOW IT WORKS — phases ===================== -->
-<section class="band" id="how">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">HOW IT WORKS</span>
-      <h2>How CE turns ideas into governed software</h2>
-      <p>Five governed phases, one repo-visible trail. The same five words name every piece of work, from a one-line idea to a full feature — <strong>Frame → Shape → Build → Review → Ship</strong> — riding over a conserved governed state machine. Each phase lands a ratifiable artifact anyone can replay from the repository alone.</p>
-    </div>
-    <div class="steps">
-      <div class="step"><span class="num">01</span><h3>Frame</h3><p>Understand the idea, the risk, and what done should mean before the agent acts.</p></div>
-      <div class="step"><span class="num">02</span><h3>Shape</h3><p>Turn the idea into a Scope: Goal, Done-when, Budget, Change type, Ready.</p></div>
-      <div class="step"><span class="num">03</span><h3>Build</h3><p>Run the agent inside the ratified envelope, with bounded authority and captured side effects.</p></div>
-      <div class="step"><span class="num">04</span><h3>Review</h3><p>The grader lives outside the agent and checks evidence against the Done-when criteria.</p></div>
-      <div class="step"><span class="num">05</span><h3>Ship</h3><p>Land a merged PR, delivered research, or ratified no-change with the trail intact.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== SCOPE CARD — consumer promise w/ technical floor ===================== -->
-<section class="band surface" id="scope">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">The consumer promise with a technical floor</span>
-      <h2>The Scope card is where safety becomes concrete.</h2>
-      <p>CE does not ask users to trust agent confidence. It asks them to ratify a bounded bet before work starts, then judge the result through a completion report after external grading.</p>
-    </div>
-    <div class="scope-grid">
-      <div class="scard scope">
-        <div class="scard-h"><span class="ce">◆ CE · Shape</span><span class="ok">Ready ✓</span></div>
-        <div class="scard-body">
-          <div class="scard-title">"Make a booking app for my workshop"</div>
-          <div class="sfield"><b>Goal</b><span>Working local app with a booking form, admin list, and saved reservations.</span></div>
-          <div class="sfield"><b>Done when</b><span>Form submits, validation works, tests pass, data persists locally.</span></div>
-          <div class="sfield"><b>Budget</b><span>S — a fixed appetite cap, not an agent estimate.</span></div>
-          <div class="sfield"><b>Change type</b><span>code — can build app files, cannot deploy or touch secrets.</span></div>
-          <div class="sfield"><b>Ready</b><span><span class="ok">✓</span> The bet can be ratified and dispatched.</span></div>
+  <section class="install" id="install">
+    <div class="wrap">
+      <div class="in-card">
+        <div class="lbl"><i></i> Install Creator Engine</div>
+        <div class="in-row">
+          <code class="in-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
+          <button class="in-copy" type="button" aria-label="Copy the install command" onclick="ceCopy(this, CMD_HUMAN)">Copy</button>
         </div>
+        <p class="in-agent">or <a onclick="ceOpenReveal(false)">hand the red pill to your coding agent</a> — the signed playbook at <code>creator-engine.dev/llms-install.md</code></p>
       </div>
-      <div class="scard report">
-        <div class="scard-h"><span class="ce">◆ CE Completion Report</span><span>external grade</span></div>
-        <div class="scard-body">
-          <div class="reportrows">
-            <div class="row"><b>Outcome</b><span>PR opened → #42</span></div>
-            <div class="row"><b>Verdict</b><span class="ok">Done-when 4/4 met · tests green · in scope ✓ · 18% of Budget S</span></div>
-            <div class="row"><b>Next</b><span>Review PR #42. A deploy request would require a higher Change-type and explicit ratification.</span></div>
-            <div class="row"><b>Inspect</b><span><code>ce fanin show</code> · <code>ce ledger verify</code> · <code>ce check</code></span></div>
+    </div>
+  </section>
+
+  <div class="refrain">
+    <div class="wrap">
+      <b><span class="m">Propose</span> &middot; <span class="v">Ratify</span> &middot; Ship</b>
+      <span class="tail">the agent drafts it &middot; you open the gate &middot; the record proves it shipped</span>
+    </div>
+  </div>
+
+  <!-- B-2 THE BET -->
+  <section class="band" id="scope">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Ratify a bounded scope. Judge a graded result.</h2>
+        <p>CE never asks you to trust agent confidence. You ratify a Scope before work starts; an external grader checks the evidence after.</p>
+      </div>
+      <div class="pair">
+        <div class="pcard scope">
+          <div class="h"><span class="ce">◆ CE &middot; Shape</span><span class="ok">Ready &#10003;</span></div>
+          <div class="b">
+            <p class="t">"Make a booking app for my workshop"</p>
+            <div class="fld"><b>Goal</b><span>Working local app: booking form, admin list, saved reservations.</span></div>
+            <div class="fld"><b>Done when</b><span>Form submits, validation works, tests pass, data persists.</span></div>
+            <div class="fld"><b>Budget</b><span>S — a fixed appetite cap, not an agent estimate.</span></div>
+            <div class="fld"><b>Change type</b><span>code — can build app files; cannot deploy or touch secrets.</span></div>
+          </div>
+        </div>
+        <div class="pcard report">
+          <div class="h"><span class="ce">◆ CE Completion Report</span><span>external grade</span></div>
+          <div class="b">
+            <div class="fld"><b>Outcome</b><span>PR opened &rarr; #42</span></div>
+            <div class="fld"><b>Verdict</b><span class="ok">Done-when 4/4 met &middot; tests green &middot; in scope &#10003; &middot; 18% of Budget S</span></div>
+            <div class="fld"><b>Next</b><span>Review PR #42. A deploy would require a higher Change-type and explicit ratification.</span></div>
+            <div class="fld"><b>Inspect</b><span><code>ce fanin show</code> &middot; <code>ce ledger verify</code> &middot; <code>ce check</code></span></div>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===================== WHO DECIDES — governed flow ===================== -->
-<section class="band" id="gate">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">Who decides</span>
-      <h2>Agents propose. One gate ratifies. The grader lives outside the agent.</h2>
-      <p>Governance is the product. CI, review, and fan-in inform the decision — they never become the decision. Every privileged change walks through the gate by construction, and the evidence that earned it stays in the repo.</p>
-    </div>
-    <div class="flowrow">
-      <div class="fnode"><div class="fk">01 · Propose</div><h3>Agent proposes</h3><p>Bounded by a Scope — identity, Change-type, and permitted actions fixed before any work begins.</p><div class="b">▸ identity-signed</div></div>
-      <div class="farrow">→</div>
-      <div class="fnode"><div class="fk">02 · Evidence</div><h3>Evidence assembles</h3><p>Spec, tests, side-effects, and validator output become a read-only packet on a hash-chained ledger.</p><div class="b">▸ graded outside the agent</div></div>
-      <div class="farrow">→</div>
-      <div class="fnode gate"><div class="fk">03 · Ratify</div><h3>A human opens the gate</h3><p>You ratify the privileged gate. The agent's own "done" never counts.</p><div class="b">⟂ human-ratified</div></div>
-      <div class="farrow">→</div>
-      <div class="fnode"><div class="fk">04 · Ship</div><h3>Record survives</h3><p>The change lands bound to its identity, evidence, and named ratifier — replayable from <code>git clone</code>.</p><div class="b">▸ audited</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== WHY GOVERNANCE — benefit + fear map ===================== -->
-<section class="band surface" id="why">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow lime">Why consumer agents need governance</span>
-      <h2>The safety gap is not theoretical.</h2>
-      <p>If personal agents ship broadly without a governance layer, every laptop becomes a place where cost, files, secrets, and deploy authority blur into a chat permission. Creator Engine makes the boundaries explicit and replayable — and the difference is legible to anyone.</p>
-    </div>
-    <div class="ben">
-      <div class="bencard bad">
-        <h3><span class="hl-gate">●</span> Without governance — exposure</h3>
-        <ul>
-          <li><span class="m">✕</span> "Go ahead" becomes unlimited authority.</li>
-          <li><span class="m">✕</span> Runaway spend is discovered after the fact.</li>
-          <li><span class="m">✕</span> File and secret boundaries are implicit.</li>
-          <li><span class="m">✕</span> "Done" is whatever the agent claims in chat.</li>
-          <li><span class="m">✕</span> No durable trail joins intent, diff, evidence, and ratifier.</li>
-        </ul>
+  <!-- B-1 THE REFUSAL -->
+  <section class="band alt" id="refusal">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">The grader lives outside the agent</span>
+        <h2>Watch the machine say no to a machine.</h2>
+        <p>Ring-1 enforcement is OS-level, not a system prompt. An agent under CE can build anything inside its ratified Scope — and can't push, deploy, or touch secrets past the gate. <em>(Static frame below; animated loop is a post-ratification asset.)</em></p>
       </div>
-      <div class="bencard good">
-        <h3><span class="hl-lime">●</span> With Creator Engine — governed</h3>
-        <ul>
-          <li><span class="m">✓</span> Budget is a fixed cap placed before Build.</li>
-          <li><span class="m">✓</span> Change-type decides how high the gate is.</li>
-          <li><span class="m">✓</span> External grading checks evidence, not transcripts.</li>
-          <li><span class="m">✓</span> Privileged changes require named human ratification.</li>
-          <li><span class="m">✓</span> The repo holds the trail: Scope, evidence, ledger, verdict.</li>
-        </ul>
+      <div class="refusal" role="img" aria-label="Terminal transcript: the agent's git push is denied by Ring-1; the change reroutes to a pull request; a human ratifies; the merge lands with evidence on the chain.">
+        <div class="bar"><i></i><i></i><i></i> seat-03 &middot; governed</div>
+        <pre>
+<span class="a">agent</span>  tests green &middot; 14 files changed &middot; attempting <span class="a">git push</span>
+<span class="deny">ring-1 ▌DENY</span>   push authority is not in this seat's envelope
+<span class="a">agent</span>  rerouting &rarr; opening pull request #43 with evidence packet
+<span class="gate">⟂ gate</span>   deploy-class change requests ratification &mdash; <span class="dim">waiting for a human</span>
+<span class="a">you</span>    ratify &#10003;
+<span class="ok">merged</span> #43 &middot; identity-signed &middot; evidence on the hash chain &middot; <span class="dim">replayable from git clone</span></pre>
+      </div>
+      <p class="refusal-note">Governance isn't paperwork. It's the reason you can let the fleet run.</p>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">How it works</span>
+        <h2>Five governed phases. One repo-visible trail.</h2>
+        <p>The same five words name every piece of work, from a one-line idea to a full feature. Each phase lands a ratifiable artifact anyone can replay from the repository alone.</p>
+      </div>
+      <div class="stages">
+        <div class="stage"><span class="n">01</span><h3>Frame</h3><p>Understand the idea, the risk, and what done should mean.</p></div>
+        <div class="stage"><span class="n">02</span><h3>Shape</h3><p>Turn it into a Scope: Goal, Done-when, Budget, Change type.</p></div>
+        <div class="stage"><span class="n">03</span><h3>Build</h3><p>The agent runs inside the ratified envelope, side effects captured.</p></div>
+        <div class="stage"><span class="n">04</span><h3>Review</h3><p>The external grader checks evidence against Done-when.</p></div>
+        <div class="stage"><span class="n">05</span><h3>Ship</h3><p>A merged PR or ratified outcome — with the trail intact.</p></div>
       </div>
     </div>
-    <div class="section-head" style="margin-top:30px;margin-bottom:18px;">
-        <h3>Every consumer fear maps to a mechanism you can read in the repo.</h3>
-        <p class="muted" style="font-size:15px;">A non-technical Creator should feel safe; a technical operator should believe the mechanism. Same safety, two altitudes.</p>
+  </section>
+
+  <!-- OPENSHELL -->
+  <section class="band alt" id="openshell">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">Built for security with NVIDIA OpenShell</span>
+        <h2>OpenShell isolates the runtime. Creator Engine governs the work.</h2>
+        <p>Runtime isolation contains an agent — but isolation doesn't decide whether the work was right, what it cost, or whether a human approved it. That's the layer we build.</p>
       </div>
-    <div class="safe">
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll spend a fortune looping."</p></div><div class="mech"><div class="lab">The mechanism</div><p>A fixed <strong>Budget</strong> per Scope caps the run — <code>can't outspend the cap</code>.</p></div></div>
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll change something dangerous."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Risk-tiered <strong>Change-type</strong> escalates deploy/secrets to <code>the human gate</code>.</p></div></div>
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll leak my code or secrets."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Boxed isolation + a credential broker + a redaction gate — <code>nothing leaks by default</code>.</p></div></div>
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"How do I know it actually worked?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>An external grader checks <strong>Done-when</strong> — <code>evidence, not the agent's say-so</code>.</p></div></div>
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"What did it change, exactly?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>Every effect on a tamper-evident ledger — <code>replayable from git clone</code>.</p></div></div>
-      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"Who said it could ship?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>A named ratifier binds to the change — <code>the privileged floor stays human</code>.</p></div></div>
+      <div class="compl">
+        <div class="plate os"><div class="k">The runtime — OpenShell</div><h3>Isolates &amp; runs</h3><p>An open, sandboxed place for a personal agent to execute. Contains the blast radius of a single run.</p></div>
+        <div class="plus">+</div>
+        <div class="plate ce"><div class="k">The work — Creator Engine</div><h3>Governs &amp; proves</h3><p>Bounds the task, caps the spend, routes risk to a human gate, grades the result from outside the agent, lands a repo-visible record.</p></div>
+      </div>
+      <p class="honest">Honesty check: NVIDIA OpenShell is real open-source software and CE's sandbox layer is built to target it. OpenShell-native consumer hardware is announced for fall 2026, not shipped; today CE runs on Linux and macOS, open-source and independent.</p>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===================== TECHNICAL CREDIBILITY ===================== -->
-<section class="band" id="credibility">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">Technical credibility</span>
-      <h2>Open-source primitives, not a trust-us cloud.</h2>
-      <p>CE is independent, repo-native, and inspectable. It can align with OpenShell-native machines without becoming a closed runtime or hiding governance behind a hosted service.</p>
+  <!-- FEAR MAP -->
+  <section class="band" id="why">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">Why governance</span>
+        <h2>Every creator fear maps to a mechanism you can read in the repo.</h2>
+      </div>
+      <div class="safe">
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll spend a fortune looping."</p></div><div class="mech"><div class="lab">The mechanism</div><p>A fixed <strong>Budget</strong> per Scope caps the run — <code>can't outspend the cap</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll change something dangerous."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Risk-tiered <strong>Change-type</strong> escalates deploy/secrets to <code>the human gate</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll leak my code or secrets."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Boxed isolation + a credential broker + a redaction gate — <code>nothing leaks by default</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"How do I know it actually worked?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>An external grader checks <strong>Done-when</strong> — <code>evidence, not the agent's say-so</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"What did it change, exactly?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>Every effect on a tamper-evident ledger — <code>replayable from git clone</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"Who said it could ship?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>A named ratifier binds to the change — <code>the privileged floor stays human</code>.</p></div></div>
+      </div>
     </div>
-    <div class="caps">
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h16"/></svg></div><h3>Spec-driven by default</h3><p>Work traces through spec, plan, tasks, Scope, and acceptance evidence.</p></div>
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg></div><h3>Identity-aware authority</h3><p>Each run binds identity, permissions, Change-type, and a ratifier taxonomy.</p></div>
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 3v18M18 3v18M6 8h12M6 16h12"/></svg></div><h3>Change-type governed</h3><p>docs, code, schema, deploy, governance, identity, security, attestation, redaction — plus a privileged floor. <span class="faint">(The conserved <code>mutation_class</code>.)</span></p></div>
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div><h3>Evidence-verified</h3><p>The grader lives outside the agent. Done is a verdict, not a self-claim.</p></div>
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="4" y="4" width="16" height="14" rx="2"/><path d="M8 9l3 3-3 3M13 15h3"/></svg></div><h3>Your agent, under CE</h3><p>CE wraps your own coding agent instead of replacing the tool you already like.</p></div>
-      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div><h3>Repo-visible trail</h3><p>Ledger, fan-in, validator output, and the report are replayable from a clone.</p></div>
-    </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===================== INDEPENDENT / OSS ===================== -->
-<section class="band surface">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow lime">Independent by design</span>
-      <h2>Best on local agent hardware. Not locked to it.</h2>
-      <p>The strongest posture is partner-and-stay-independent: open-source governance that rides the local OpenShell stack when it arrives, while still running anywhere the repo and runtime are supported.</p>
+  <!-- CREDIBILITY -->
+  <section class="band alt" id="credibility">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">Technical credibility</span>
+        <h2>Open-source primitives, not a trust-us cloud.</h2>
+        <p>CE is independent, repo-native, and inspectable. It can align with OpenShell-native machines without becoming a closed runtime or hiding governance behind a hosted service.</p>
+      </div>
+      <div class="caps">
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h16"/></svg></div><h3>Spec-driven by default</h3><p>Work traces through spec, plan, tasks, Scope, and acceptance evidence.</p></div>
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg></div><h3>Identity-aware authority</h3><p>Each run binds identity, permissions, Change-type, and a ratifier taxonomy.</p></div>
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 3v18M18 3v18M6 8h12M6 16h12"/></svg></div><h3>Change-type governed</h3><p>docs, code, schema, deploy, governance, identity, security, attestation, redaction — plus a privileged floor. <span class="faint">(The conserved <code>mutation_class</code>.)</span></p></div>
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div><h3>Evidence-verified</h3><p>The grader lives outside the agent. Done is a verdict, not a self-claim.</p></div>
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="4" y="4" width="16" height="14" rx="2"/><path d="M8 9l3 3-3 3M13 15h3"/></svg></div><h3>Your agent, under CE</h3><p>CE wraps your own coding agent instead of replacing the tool you already like.</p></div>
+        <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div><h3>Repo-visible trail</h3><p>Ledger, fan-in, validator output, and the report are replayable from a clone.</p></div>
+      </div>
     </div>
-    <div class="oss">
-      <div class="ocard"><div class="ocard-h"><span>Open source</span><span>Apache-2.0</span></div><div class="ocard-b"><h3>Governance you can inspect</h3><p>The safety story is strongest when the mechanism is visible: schemas, ledgers, validators, and docs in the repository.</p></div></div>
-      <div class="ocard"><div class="ocard-h"><span>Local-first</span><span>no daemon</span></div><div class="ocard-b"><h3>Runs on demand</h3><p>The current runtime is repo-checkout based. It operates over local <code>.ce/</code> state and exits when finished.</p></div></div>
-      <div class="ocard"><div class="ocard-h"><span>Future alignment</span><span>fall 2026</span></div><div class="ocard-b"><h3>OpenShell-native vision</h3><p>If the partnership lands, CE could become the built-in "turn ideas into software" governance app on OpenShell-native laptops. Vision, not shipped.</p></div></div>
-    </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===================== ROADMAP ===================== -->
-<section class="band" id="roadmap">
-  <div class="wrap">
-    <div class="section-head">
-      <span class="eyebrow">Honest about where the build is</span>
-      <h2>Real today. Independent always. Aligned with what's coming.</h2>
-      <p>We name stages plainly. The governance is real and running now; the consumer and NVIDIA-native chapters are the forward story — labeled as such.</p>
-    </div>
-    <div class="road">
-      <div class="stage-c proven"><span class="s-tag"><span class="lamp"></span> Proven · now</span><h3>Governed loop, live</h3><p>A real change opened, externally reviewed, and squash-merged by a distinct identity — schema-valid evidence on the hash chain.</p></div>
-      <div class="stage-c now"><span class="s-tag"><span class="lamp"></span> In progress · v3.1</span><h3>Pilot-ready</h3><p>The <code>ce session</code> in your own agent: the Scope card, the gate, the ◆ Completion Report. Runs on Linux/macOS.</p></div>
-      <div class="stage-c pre"><span class="s-tag"><span class="lamp"></span> Pre-release · 0.1.0</span><h3>Repository-checkout</h3><p>Install from the repo's checked-in wheelhouse — open-source, no hosted service, no daemon.</p></div>
-      <div class="stage-c vision"><span class="s-tag"><span class="lamp"></span> Forward story</span><h3>Creator, for everyone</h3><p>As OpenShell-native machines arrive (announced fall 2026), CE aims to be the built-in safe-building layer. Vision, not shipped.</p></div>
-    </div>
-  </div>
-</section>
+  <!-- roadmap section removed (Operator, v7.2) — the footer honesty line keeps the status facts -->
 
-<!-- ===================== CTA ===================== -->
-<section class="cta-band">
-  <div class="wrap inner">
-    <span class="eyebrow lime" style="justify-content:center;display:inline-flex;">Be a Creator. Safely.</span>
-    <h2>Turn your ideas into real software — and keep the <span class="make">gate</span>.</h2>
-    <p>Clone the open-source project, inspect the governance model, and build toward a world where every person can be a Creator — without handing unlimited authority to an agent. Open source, independent, runs anywhere; built for security with OpenShell.</p>
-    <div class="cta-actions">
-      <a class="btn btn-spark" href="https://github.com/creator-engine/creator-engine" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
-        Start on GitHub
-      </a>
-      <a class="btn btn-ghost" href="#scope">Inspect the Scope loop</a>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== FOOTER ===================== -->
-<footer>
-  <div class="wrap">
-    <div class="foot-grid">
-      <div class="foot-brand">
-        <a class="brand" href="#top">
-          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
-            <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
-            <path d="M13 16 L15.5 18.5 L20 13" stroke="#9BE34F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Creator&nbsp;Engine
+  <section class="cta">
+    <div class="wrap inner">
+      <span class="eyebrow-lime">Be a Creator. Safely.</span>
+      <h2>Turn your ideas into real software — and keep the <span class="make">gate</span>.</h2>
+      <p>Clone the open-source project, inspect the governance model, and build toward a world where every person can be a Creator — without handing unlimited authority to an agent. Open source, independent, runs anywhere; built for security with OpenShell.</p>
+      <div class="row">
+        <a class="btn dark" href="https://github.com/creator-engine/creator-engine" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+          Start on GitHub
         </a>
-        <p>The open governance layer that makes it safe to turn every person into a Creator. Agents propose; humans ratify; the grader lives outside the agent. Apache License 2.0.</p>
+        <button class="btn ghost" type="button" onclick="ceOpenReveal(false)">Install with your Agent</button>
       </div>
-      <div class="foot-cols">
-        <div class="foot-col">
-          <h4>Product</h4>
-          <a href="#how">How it works</a>
-          <a href="#scope">The Scope card</a>
-          <a href="#gate">The gate</a>
-          <a href="#roadmap">Roadmap</a>
-        </div>
-        <div class="foot-col">
-          <h4>Aligned</h4>
-          <a href="#openshell">OpenShell / NVIDIA</a>
-          <a href="#creator">Every person a Creator</a>
-          <a href="#gate">Grader outside the agent</a>
-        </div>
-        <div class="foot-col">
-          <h4>Project</h4>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div class="row">
+        <span>© 2026 Creator Engine &middot; Apache-2.0 &middot; Independent</span>
+        <span>
           <a href="https://github.com/creator-engine/creator-engine" rel="noopener">GitHub</a>
-          <a href="https://github.com/creator-engine/creator-engine/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
-          <a href="https://github.com/creator-engine/creator-engine/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a>
-          <a href="https://github.com/creator-engine/creator-engine/blob/main/LICENSE" rel="noopener">License</a>
-        </div>
+          <a href="https://creator-engine.dev/guide/understanding-ce.md">Understanding CE</a>
+          <a href="https://creator-engine.dev/llms.txt">llms.txt</a>
+          <a href="https://creator-engine.dev/llms-install.md">llms-install.md</a>
+        </span>
       </div>
+      <p class="honesty">Today: Linux/macOS repo-checkout pre-release &middot; Forward story: NVIDIA OpenShell / RTX alignment, fall 2026 (announced, not shipped).</p>
     </div>
-    <div class="foot-base">
-      <span>© 2026 Creator Engine. Open source under Apache-2.0. Independent.</span>
-      <span>Today: Linux/macOS repo-checkout pre-release · Forward story: OpenShell / RTX alignment, fall 2026.</span>
-    </div>
-  </div>
-</footer>
+  </footer>
+</div>
 
 <script>
-  /* The only script on this page: clipboard for the install one-liner. No network, no tracking. */
-  function ceCopyInstall(btn){
-    var cmd = 'curl -fsSL https://creator-engine.dev/install.sh | bash';
-    navigator.clipboard.writeText(cmd).then(function(){
-      btn.classList.add('ok'); btn.textContent = 'Copied';
-      setTimeout(function(){ btn.classList.remove('ok'); btn.textContent = 'Copy'; }, 1600);
-    });
+/* v7 mock — the only scripts: state flip, red-pill handoff, clipboard. No network, no tracking. */
+var AGENT_PROMPT = 'Install Creator Engine for me. Fetch https://creator-engine.dev/llms-install.md — it is a signed install playbook. Verify its detached SSHSIG against the pinned trust root at https://creator-engine.dev/keys/ce-root-v1 (stock ssh-keygen -Y verify, namespace ce-spec-v1) before executing any step, then follow it exactly.';
+var CMD_CLAUDE = 'claude "$(curl -fsSL https://creator-engine.dev/llms-install.md)"';
+var CMD_CODEX  = 'codex "$(curl -fsSL https://creator-engine.dev/llms-install.md)"';
+var CMD_HUMAN  = 'curl -fsSL https://creator-engine.dev/install.sh | bash';
+
+document.getElementById('agentPromptText').textContent = AGENT_PROMPT;
+
+function ceHint(t){
+  var h = document.getElementById('pillHint');
+  h.textContent = t || ' ';
+  h.classList.toggle('show', !!t);
+}
+function ceCopy(btn, text){
+  /* v7.4: feedback is unconditional — green + COPIED, then back to normal. The legacy
+     textarea path covers non-secure contexts where navigator.clipboard is absent. */
+  function ok(){
+    if (btn._t) clearTimeout(btn._t);
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    btn.classList.add('ok'); btn.textContent = 'Copied';
+    btn._t = setTimeout(function(){ btn.classList.remove('ok'); btn.textContent = btn.dataset.label; }, 1600);
   }
+  function legacy(){
+    var ta = document.createElement('textarea'); ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { if (document.execCommand('copy')) ok(); } catch(e){}
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(ok, legacy);
+  } else { legacy(); }
+}
+/* RED PILL: copy the agent prompt + open the reveal (visible fallback = the same panel). */
+function ceRed(){ ceOpenReveal(true); }
+function ceOpenReveal(fromPill){
+  var status = document.getElementById('rvStatus');
+  var copied = false;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(AGENT_PROMPT).then(function(){
+      status.innerHTML = '<b>The red pill is in your clipboard.</b> Paste it to your coding agent.';
+    }, function(){
+      status.innerHTML = 'Copy the <span class="rp">red pill</span> below and paste it to your coding agent.';
+    });
+  } else {
+    status.innerHTML = 'Copy the <span class="rp">red pill</span> below and paste it to your coding agent.';
+  }
+  document.getElementById('reveal').classList.add('open');
+}
+function ceCloseReveal(){ document.getElementById('reveal').classList.remove('open'); }
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') ceCloseReveal(); });
+document.getElementById('reveal').addEventListener('click', function(e){ if (e.target === this) ceCloseReveal(); });
+
+/* BLUE PILL: the story ends — wake up in the ordinary world (the informative site). */
+function ceBlue(){ enterTruth(true); }
+/* TRUTH TOGGLE */
+function ceTruth(){ enterTruth(false); }
+function enterTruth(viaBlue){
+  ceCloseReveal();
+  document.body.classList.remove('state-choice');
+  document.body.classList.add('state-truth');
+  document.getElementById('wake').style.display = viaBlue ? 'block' : 'none';
+  window.scrollTo(0,0);
+  if (window.ceRainStart) window.ceRainStart();
+}
+function ceBack(){
+  document.body.classList.remove('state-truth');
+  document.body.classList.add('state-choice');
+  window.scrollTo(0,0);
+}
+/* Human path from inside the reveal */
+/* v7.5: the human path lands like a normal visit — top of the page, hero first */
+function ceHuman(){ enterTruth(false); ceCloseReveal(); }
+
+/* v7.5 digital rain — classic matrix rain (per dev.to/javascriptacademy 4hep: fade-rect
+   trails, per-column drops, 0.975 reset) on a canvas sized to the headline word, then
+   masked 'destination-in' with the word so the rain is bounded to the undrawn letters. */
+(function(){
+  var span = document.getElementById('rainWord'), cv = document.getElementById('rainCv');
+  if (!span || !cv || !cv.getContext) return;
+  var ctx = cv.getContext('2d');
+  var WORD = 'software factory';
+  var ALPHABET = 'アァカサタナハマヤラワガザダバパイキシチニヒミリギジビウクスツヌフムユルグズブエケセテネヘメレゲゼデベオコソトノホモヨロヲゴゾドボポヴンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  var W = 0, H = 0, fontCss = '', fontSize = 16, drops = [], timer = null;
+  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function size(){
+    var r = span.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    var dpr = window.devicePixelRatio || 1;
+    W = Math.round(r.width); H = Math.round(r.height);
+    cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+    cv.style.width = W+'px'; cv.style.height = H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    var cs = getComputedStyle(span);
+    fontCss = cs.fontStyle+' '+cs.fontWeight+' '+cs.fontSize+' '+cs.fontFamily;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = cs.letterSpacing;
+    fontSize = Math.max(8, Math.round(parseFloat(cs.fontSize)/3.0));
+    drops = [];
+    var cols = Math.ceil(W/fontSize);
+    for (var i=0;i<cols;i++) drops[i] = Math.floor(Math.random()*(H/fontSize));
+    ctx.clearRect(0,0,W,H);
+    span.classList.add('on');
+    return true;
+  }
+  function frame(){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(8,9,15,0.10)';
+    ctx.fillRect(0,0,W,H);
+    ctx.font = fontSize+'px monospace';
+    ctx.textBaseline = 'alphabetic';
+    for (var i=0;i<drops.length;i++){
+      var ch = ALPHABET.charAt(Math.floor(Math.random()*ALPHABET.length));
+      ctx.fillStyle = Math.random() > 0.92 ? '#D6FFB0' : '#9BE34F';
+      ctx.fillText(ch, i*fontSize, drops[i]*fontSize);
+      if (drops[i]*fontSize > H && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = '#fff';
+    ctx.font = fontCss; ctx.textBaseline = 'middle';
+    ctx.fillText(WORD, 0, H*0.54);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  function start(){
+    if (!size()) return;
+    if (timer){ clearInterval(timer); timer = null; }
+    if (still){ for (var k = 0; k < 220; k++) frame(); return; }
+    timer = setInterval(frame, 42);
+  }
+  window.ceRainStart = start;
+  if (window.ResizeObserver){ new ResizeObserver(function(){ start(); }).observe(span); }
+  else { window.addEventListener('resize', start); }
+  start();
+})();
+
+/* Deep links: a hash naming a truth-state section opens the truth state directly. */
+(function(){
+  var h = location.hash;
+  if (h && h.length > 1){
+    var el = document.getElementById(h.slice(1));
+    if (el && document.getElementById('truth').contains(el)){ enterTruth(false); el.scrollIntoView(); }
+  }
+})();
 </script>
 </body>
 </html>
