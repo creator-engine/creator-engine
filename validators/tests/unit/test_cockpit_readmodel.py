@@ -52,6 +52,12 @@ def test_importing_readmodel_leaves_textual_and_watchfiles_unimported():
     assert proc.returncode == 0, proc.stderr
 
 
+def test_readmodel_source_has_no_live_forge_or_network_tokens():
+    source = Path(cockpit_readmodel.__file__).read_text(encoding="utf-8")
+    for token in ("subprocess", "socket", "urllib", "requests", "http"):
+        assert token not in source
+
+
 # --- principle 6.3: JSON round-trip identity ---------------------------------
 
 def test_demo_snapshot_json_round_trips():
@@ -162,6 +168,52 @@ def test_seed_scopes_are_schema_true():
         assert not errors, [e.format() for e in errors]
 
 
+def test_seed_escalations_are_schema_true():
+    seed = cockpit_demo_seed.seed()
+    assert len(seed["escalations"]) == 2
+    for escalation in seed["escalations"]:
+        errors = validate_with_schema(
+            escalation,
+            "schemas/escalation-record.schema.yaml",
+            Path("cockpit-demo-seed"),
+            code="test_escalation_schema",
+            contract="schemas/escalation-record.schema.yaml",
+        )
+        assert not errors, [e.format() for e in errors]
+
+
+def test_seed_dispatches_are_schema_true():
+    seed = cockpit_demo_seed.seed()
+    assert len(seed["dispatches"]) == 2
+    for item in seed["dispatches"]:
+        errors = validate_with_schema(
+            item["dispatch"],
+            "schemas/dispatch-record.schema.yaml",
+            Path("cockpit-demo-seed"),
+            code="test_dispatch_schema",
+            contract="schemas/dispatch-record.schema.yaml",
+        )
+        assert not errors, [e.format() for e in errors]
+
+
+def test_demo_snapshot_contains_new_live_feeds():
+    snapshot = _demo_snapshot()
+    assert snapshot["snapshot_version"] == 2
+    assert snapshot["availability"]["escalations"] == "ok"
+    assert snapshot["availability"]["dispatches"] == "ok"
+    assert snapshot["escalations"]["open_count"] >= 1
+    open_item = snapshot["escalations"]["open"][0]
+    assert open_item["recommendation"]
+    assert open_item["source_ref"]
+    dispatches = snapshot["dispatches"]["entries"]
+    assert len(dispatches) >= 2
+    states = {entry["state"] for entry in dispatches}
+    assert {"spawned", "collected"} <= states
+    gate_uploads = [entry for entry in dispatches if entry["run_id"] == "gate-uploads"][0]
+    assert gate_uploads["resource_bound"]
+    assert gate_uploads["spend_envelope"] == {"cap": 12.0, "unit": "$", "window": "per_run"}
+
+
 # --- the stage column is the canon skin (no third vocabulary) ----------------
 
 def test_stage_column_derives_via_phase_by_state():
@@ -244,9 +296,180 @@ def test_absent_sources_degrade_honestly_never_fabricate(tmp_path):
     snapshot = cockpit_readmodel.snapshot_from_roots(tmp_path / "nowhere", environ={})
     assert snapshot["availability"]["seats"] == "unavailable"
     assert snapshot["availability"]["refusals"] == "unavailable"
+    assert snapshot["availability"]["escalations"] == "unavailable"
+    assert snapshot["availability"]["dispatches"] == "unavailable"
     assert snapshot["seats"] == []
     assert snapshot["board"]["cards"] == []
     assert snapshot["refusals"]["entries"] == []
+    assert snapshot["escalations"]["open"] == []
+    assert snapshot["dispatches"]["entries"] == []
+
+
+def test_empty_new_sources_are_ok_and_empty():
+    snapshot = cockpit_readmodel.fold_snapshot(escalations=[], dispatches=[])
+    assert snapshot["availability"]["escalations"] == "ok"
+    assert snapshot["availability"]["dispatches"] == "ok"
+    assert snapshot["escalations"] == {"open": [], "open_count": 0, "resolved_count": 0}
+    assert snapshot["dispatches"]["entries"] == []
+
+
+def test_escalations_sort_open_oldest_first_and_count_resolved():
+    snapshot = cockpit_readmodel.fold_snapshot(
+        escalations=[
+            {
+                "kind": "escalation-record",
+                "escalation_id": "newer",
+                "title": "newer",
+                "decision_needed": "choose",
+                "recommendation": "wait",
+                "created_at": "2026-07-01T09:20:00Z",
+            },
+            {
+                "kind": "escalation-record",
+                "escalation_id": "done",
+                "title": "done",
+                "decision_needed": "choose",
+                "recommendation": "done",
+                "created_at": "2026-07-01T09:00:00Z",
+                "resolved_at": "2026-07-01T09:01:00Z",
+            },
+            {
+                "kind": "escalation-record",
+                "escalation_id": "older",
+                "title": "older",
+                "decision_needed": "choose",
+                "recommendation": "go",
+                "created_at": "2026-07-01T09:10:00Z",
+            },
+        ]
+    )
+    assert [e["escalation_id"] for e in snapshot["escalations"]["open"]] == ["older", "newer"]
+    assert [e["age_rank"] for e in snapshot["escalations"]["open"]] == [1, 2]
+    assert snapshot["escalations"]["resolved_count"] == 1
+
+
+def _ready_scope(scope_id: str = "live-scope") -> dict:
+    return {
+        "kind": "scope-record",
+        "record_type": "scope",
+        "schema_version": "1",
+        "scope_id": scope_id,
+        "intent": "ship live feed",
+        "mutation_class": "code",
+        "acceptance_criteria": ["feed renders"],
+        "appetite": {"amount": 5.0, "unit": "$"},
+        "ratification": {"approver_ref": "a" * 64, "ratified_scope_sha": "b" * 64},
+    }
+
+
+def _dispatch(scope_id: str = "live-scope", **overrides) -> dict:
+    record = {
+        "kind": "dispatch-record",
+        "record_type": "dispatch",
+        "schema_version": "1",
+        "scope_id": scope_id,
+        "run_id": f"run-{scope_id}-20260701T090000Z",
+        "mutation_class": "code",
+        "scope_ratification": {"approver_ref": "a" * 64, "ratified_scope_sha": "b" * 64},
+        "harness": "claude",
+        "unattended": True,
+        "session": "s",
+        "window": "w",
+        "runtime_policy_ref": "runtime-policy.yaml",
+        "brief_ref": "brief.md",
+        "terminal": {"kind": "tmux", "session_id": "$1", "window_id": "@1", "pane_id": "%1"},
+        "resource_bound": {"unit": "ce-seat"},
+        "spawned_at": "2026-07-01T09:00:00Z",
+        "collected_at": None,
+    }
+    record.update(overrides)
+    return record
+
+
+def test_dispatch_state_derivation_and_board_join():
+    snapshot = cockpit_readmodel.fold_snapshot(
+        scopes=[_ready_scope()],
+        dispatches=[
+            {"dispatch": _dispatch(), "spend_envelope": {"scope": "run", "amount": 5, "unit": "$"}},
+        ],
+    )
+    entry = snapshot["dispatches"]["entries"][0]
+    assert entry["state"] == "spawned"
+    assert entry["terminal_kind"] == "tmux"
+    assert entry["spend_envelope"] == {"cap": 5, "unit": "$", "window": None}
+    assert snapshot["board"]["cards"][0]["state"] == "in_progress"
+
+
+def test_explicit_scope_signal_wins_over_dispatch_signal():
+    snapshot = cockpit_readmodel.fold_snapshot(
+        scopes=[_ready_scope()],
+        scope_signals={"live-scope": {"dispatched": False}},
+        dispatches=[{"dispatch": _dispatch(), "spend_envelope": None}],
+    )
+    assert snapshot["board"]["cards"][0]["state"] == "ready"
+
+
+def test_failed_spawn_is_distinct_and_not_projected_live():
+    failed = _dispatch(
+        terminal=None,
+        resource_bound=None,
+        spawned_at=None,
+        spawn_failed_at="2026-07-01T09:00:01Z",
+        spawn_failure_reason="CC-D-6 refused",
+    )
+    snapshot = cockpit_readmodel.fold_snapshot(
+        scopes=[_ready_scope()],
+        dispatches=[{"dispatch": failed, "spend_envelope": None}],
+    )
+    assert snapshot["dispatches"]["entries"][0]["state"] == "failed"
+    assert snapshot["dispatches"]["failed_count"] == 1
+    assert snapshot["board"]["cards"][0]["state"] == "ready"
+
+
+def test_collected_dispatch_is_not_projected_live():
+    collected = _dispatch(collected_at="2026-07-01T09:30:00Z")
+    snapshot = cockpit_readmodel.fold_snapshot(
+        scopes=[_ready_scope()],
+        dispatches=[{"dispatch": collected, "spend_envelope": None}],
+    )
+    assert snapshot["dispatches"]["entries"][0]["state"] == "collected"
+    assert snapshot["board"]["cards"][0]["state"] == "ready"
+
+
+def test_loaders_read_escalations_dispatches_and_spend_envelope(tmp_path):
+    state = tmp_path / "state"
+    (state / "escalations").mkdir(parents=True)
+    (state / "escalations" / "operator-call.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "kind": "escalation-record",
+                "record_type": "escalation",
+                "schema_version": "1",
+                "escalation_id": "operator-call",
+                "title": "Operator call",
+                "decision_needed": "choose",
+                "recommendation": "go",
+                "created_at": "2026-07-01T09:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ddir = state / "dispatches" / "run-live-scope-20260701T090000Z"
+    ddir.mkdir(parents=True)
+    (ddir / "dispatch.yaml").write_text(yaml.safe_dump(_dispatch()), encoding="utf-8")
+    (ddir / "runtime-policy.yaml").write_text(
+        yaml.safe_dump({"spend_envelopes": [{"scope": "run", "amount": 5, "unit": "$", "window": "per_run"}]}),
+        encoding="utf-8",
+    )
+    snapshot = cockpit_readmodel.snapshot_from_roots(state, environ={})
+    assert snapshot["availability"]["escalations"] == "ok"
+    assert snapshot["availability"]["dispatches"] == "ok"
+    assert snapshot["escalations"]["open_count"] == 1
+    assert snapshot["dispatches"]["entries"][0]["spend_envelope"] == {
+        "cap": 5,
+        "unit": "$",
+        "window": "per_run",
+    }
 
 
 def test_watch_paths_lists_only_existing_roots(tmp_path):
@@ -258,3 +481,12 @@ def test_watch_paths_lists_only_existing_roots(tmp_path):
     assert str(ledger_root) in paths
     assert str(obs_dir) in paths
     assert cockpit_readmodel.watch_paths(tmp_path / "missing", environ={}) == []
+
+
+def test_watch_paths_includes_new_record_dirs(tmp_path):
+    state = tmp_path / "state"
+    (state / "escalations").mkdir(parents=True)
+    (state / "dispatches").mkdir()
+    paths = cockpit_readmodel.watch_paths(state, environ={})
+    assert str(state / "escalations") in paths
+    assert str(state / "dispatches") in paths

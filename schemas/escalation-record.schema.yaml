@@ -1,0 +1,74 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/escalation-record.schema.yaml"
+title: "Creator Engine Escalation Record"
+description: |
+  Machine-readable schema for one AWAITING-OPERATOR escalation mirrored into
+  the v3 local-state root. Records live under
+  `<v3-local-state>/escalations/<escalation_id>.yaml` and are read by the
+  Cockpit L2 fold as a local, value-free queue. They may point at a forge issue
+  marker via `source_ref`, but the Cockpit never calls the forge.
+
+  Value-free: an escalation record carries only the decision title, what the
+  Operator must decide, the recommended option, timestamps, and an optional
+  source reference. It never carries a credential, token, host, account secret,
+  or raw installation identifier.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - escalation_id
+  - title
+  - decision_needed
+  - recommendation
+  - created_at
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: escalation-record
+    description: |
+      Discriminator constant. Records without this exact value are not governed
+      escalation records.
+  record_type:
+    type: string
+    const: escalation
+  schema_version:
+    type: string
+    enum: ["1"]
+  escalation_id:
+    type: string
+    anyOf:
+      - pattern: "^[a-z][a-z0-9-]{2,63}$"
+      - pattern: "^[0-9a-f]{64}$"
+    description: |
+      Stable slug or digest; also the filename stem under `.ce/state/escalations`.
+  title:
+    type: string
+    minLength: 1
+  decision_needed:
+    type: string
+    minLength: 1
+    description: The decision the Operator must make.
+  recommendation:
+    type: string
+    minLength: 1
+    description: |
+      Required recommendation for the Operator. This machine-enforces the
+      standing offer-recommendation-on-options rule.
+  created_at:
+    type: string
+    minLength: 1
+    description: ISO-8601 timestamp or forge-created timestamp string.
+  source_ref:
+    type: string
+    minLength: 1
+    description: Optional value-free forge marker or local source reference.
+  resolved_at:
+    type: string
+    minLength: 1
+    description: Present when the Operator decision is resolved.
+  resolution:
+    type: string
+    minLength: 1
+    description: Optional value-free resolution summary.

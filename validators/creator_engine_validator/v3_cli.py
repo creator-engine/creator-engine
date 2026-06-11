@@ -55,9 +55,10 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -74,10 +75,13 @@ from . import (
 from ._versions import V3_LOCAL_STATE_ROOT
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
+from .schema import validate_with_schema
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
 SCOPES_SUBDIR = "scopes"
 _SCOPE_SUFFIX = ".scope.yaml"
+ESCALATIONS_SUBDIR = "escalations"
+_ESCALATION_SCHEMA = "schemas/escalation-record.schema.yaml"
 
 #: The conserved Scope-record envelope constants (``schemas/scope.schema.yaml``).
 _KIND = "scope-record"
@@ -86,6 +90,7 @@ _SCHEMA_VERSION = "1"
 
 #: Scope-id slug (mirrors ``schemas/scope.schema.yaml``'s ``scope_id`` pattern).
 _SCOPE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
+_ESCALATION_ID_RE = re.compile(r"(^[a-z][a-z0-9-]{2,63}$)|(^[0-9a-f]{64}$)")
 #: Value-free 64-hex opaque digest (the bet's ``approver_ref``).
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -554,6 +559,309 @@ def _policy_sha(policy: dict[str, Any]) -> str:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class EscalationSyncRefused(Exception):
+    """Fail-closed refusal for `ce escalation sync`."""
+
+
+def _escalations_dir(root: Path) -> Path:
+    return root / ESCALATIONS_SUBDIR
+
+
+def _escalation_path(root: Path, escalation_id: str) -> Path:
+    return _escalations_dir(root) / f"{escalation_id}.yaml"
+
+
+def _escalation_bytes(record: dict[str, Any]) -> str:
+    return yaml.safe_dump(record, sort_keys=True, default_flow_style=False)
+
+
+def _escalation_schema_errors(record: dict[str, Any], path: Path) -> list[str]:
+    return [
+        e.format()
+        for e in validate_with_schema(
+            record,
+            _ESCALATION_SCHEMA,
+            path,
+            code="VAL-ESCALATION-RECORD-SCHEMA",
+            contract=_ESCALATION_SCHEMA,
+        )
+    ]
+
+
+def _write_escalation(root: Path, record: dict[str, Any]) -> Path:
+    path = _escalation_path(root, str(record["escalation_id"]))
+    _escalations_dir(root).mkdir(parents=True, exist_ok=True)
+    path.write_text(_escalation_bytes(record), encoding="utf-8")
+    return path
+
+
+def _load_escalation(root: Path, escalation_id: str) -> dict[str, Any]:
+    path = _escalation_path(root, escalation_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"no escalation {escalation_id!r} under {_escalations_dir(root)}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("kind") != "escalation-record":
+        raise ValueError(f"malformed escalation record at {path}")
+    return data
+
+
+def _iter_escalations(root: Path) -> list[dict[str, Any]]:
+    d = _escalations_dir(root)
+    if not d.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(d.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and data.get("kind") == "escalation-record":
+            out.append(data)
+    return out
+
+
+def _require_valid_escalation_id(args: argparse.Namespace, escalation_id: str) -> int | None:
+    if _ESCALATION_ID_RE.match(escalation_id or ""):
+        return None
+    return _emit(
+        args,
+        2,
+        [f"{_BRAND} · escalation refused: id must be a slug or 64-hex digest"],
+        {"error": "invalid_escalation_id"},
+    )
+
+
+def _cmd_escalation_open(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    invalid = _require_valid_escalation_id(args, args.escalation_id)
+    if invalid is not None:
+        return invalid
+    path = _escalation_path(root, args.escalation_id)
+    if path.exists():
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · escalation open refused: {args.escalation_id!r} already exists"],
+            {"error": "duplicate_escalation_id", "path": str(path)},
+        )
+    record: dict[str, Any] = {
+        "kind": "escalation-record",
+        "record_type": "escalation",
+        "schema_version": "1",
+        "escalation_id": args.escalation_id,
+        "title": args.title,
+        "decision_needed": args.decision,
+        "recommendation": args.recommend,
+        "created_at": _utc_now_iso(),
+    }
+    if args.source_ref:
+        record["source_ref"] = args.source_ref
+    errors = _escalation_schema_errors(record, path)
+    if errors:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · escalation open refused: schema-invalid", *errors],
+            {"error": "schema_invalid", "detail": errors},
+        )
+    written = _write_escalation(root, record)
+    return _emit(
+        args,
+        0,
+        [f"{_BRAND} · opened AWAITING-OPERATOR escalation {args.escalation_id!r} → {written}"],
+        {"action": "escalation_opened", "escalation_id": args.escalation_id, "path": str(written)},
+    )
+
+
+def _cmd_escalation_resolve(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    invalid = _require_valid_escalation_id(args, args.escalation_id)
+    if invalid is not None:
+        return invalid
+    try:
+        record = _load_escalation(root, args.escalation_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · escalation resolve refused: {exc}"], {"error": str(exc)})
+    record["resolved_at"] = _utc_now_iso()
+    if args.resolution:
+        record["resolution"] = args.resolution
+    path = _escalation_path(root, args.escalation_id)
+    errors = _escalation_schema_errors(record, path)
+    if errors:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · escalation resolve refused: schema-invalid", *errors],
+            {"error": "schema_invalid", "detail": errors},
+        )
+    written = _write_escalation(root, record)
+    return _emit(
+        args,
+        0,
+        [f"{_BRAND} · resolved escalation {args.escalation_id!r} → {written}"],
+        {"action": "escalation_resolved", "escalation_id": args.escalation_id, "path": str(written)},
+    )
+
+
+def _extract_issue_field(body: Any, *labels: str) -> str | None:
+    text = str(body or "")
+    wanted = {label.lower().replace("_", " ") for label in labels}
+    for line in text.splitlines():
+        clean = line.strip().strip("*").strip()
+        if ":" not in clean:
+            continue
+        name, value = clean.split(":", 1)
+        normalized = name.strip().lower().replace("_", " ")
+        if normalized in wanted and value.strip():
+            return value.strip()
+    return None
+
+
+def _issue_escalation_id(issue: dict[str, Any]) -> str:
+    number = issue.get("number")
+    if isinstance(number, int) or (isinstance(number, str) and number.isdigit()):
+        return f"awaiting-operator-{number}"
+    source = str(issue.get("url") or issue.get("title") or "awaiting-operator")
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _project_issue_to_escalation(
+    issue: dict[str, Any],
+    *,
+    existing_by_source: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    source_ref = str(issue.get("url") or "")
+    if not source_ref:
+        raise EscalationSyncRefused("gh issue payload missing url")
+    title = str(issue.get("title") or "").strip()
+    created_at = str(issue.get("createdAt") or "").strip()
+    if not title or not created_at:
+        raise EscalationSyncRefused(f"gh issue payload for {source_ref} missing title/createdAt")
+    decision = _extract_issue_field(issue.get("body"), "decision needed", "decision_needed", "decision")
+    recommendation = _extract_issue_field(issue.get("body"), "recommendation", "recommended")
+    if not decision or not recommendation:
+        raise EscalationSyncRefused(
+            f"gh issue {source_ref} must contain 'Decision needed:' and 'Recommendation:' lines"
+        )
+
+    existing = existing_by_source.get(source_ref) or {}
+    record = {
+        "kind": "escalation-record",
+        "record_type": "escalation",
+        "schema_version": "1",
+        "escalation_id": existing.get("escalation_id") or _issue_escalation_id(issue),
+        "title": title,
+        "decision_needed": decision,
+        "recommendation": recommendation,
+        "created_at": created_at,
+        "source_ref": source_ref,
+    }
+    state = str(issue.get("state") or "").lower()
+    if state == "closed":
+        closed_at = str(issue.get("closedAt") or "").strip()
+        if not closed_at:
+            raise EscalationSyncRefused(f"closed gh issue {source_ref} missing closedAt")
+        record["resolved_at"] = closed_at
+        record["resolution"] = "closed on forge"
+    return record
+
+
+def project_escalation_sync(
+    issues: list[Any],
+    existing: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """PURE gh-issue JSON payload -> escalation-record bodies."""
+    existing_by_source = {
+        str(record.get("source_ref")): record
+        for record in existing
+        if isinstance(record, Mapping) and record.get("source_ref")
+    }
+    planned: dict[str, dict[str, Any]] = {}
+    for issue in issues:
+        if not isinstance(issue, dict):
+            raise EscalationSyncRefused("gh issue payload must be a list of objects")
+        record = _project_issue_to_escalation(issue, existing_by_source=existing_by_source)
+        planned[str(record["source_ref"])] = record
+    return [planned[k] for k in sorted(planned)]
+
+
+def _load_gh_issues(
+    repo: str,
+    label: str,
+    *,
+    runner: Any | None = None,
+) -> list[Any]:
+    if runner is None:
+        runner = subprocess.run
+    argv = [
+        "gh",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--label",
+        label,
+        "--state",
+        "all",
+        "--json",
+        "number,title,url,body,createdAt,closedAt,state",
+    ]
+    completed = runner(argv, capture_output=True, text=True)
+    if getattr(completed, "returncode", 1) != 0:
+        stderr = getattr(completed, "stderr", "") or ""
+        raise EscalationSyncRefused(stderr.strip() or "gh issue list failed")
+    try:
+        payload = json.loads(getattr(completed, "stdout", "") or "")
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise EscalationSyncRefused(f"gh issue list returned unparsable JSON: {exc}") from exc
+    if not isinstance(payload, list):
+        raise EscalationSyncRefused("gh issue list JSON must be a list")
+    return payload
+
+
+def _cmd_escalation_sync(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    try:
+        payload = _load_gh_issues(args.repo, args.label)
+        planned = project_escalation_sync(payload, _iter_escalations(root))
+    except EscalationSyncRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · escalation sync REFUSED: {exc}"],
+            {"error": "sync_refused", "detail": str(exc), "written": 0},
+        )
+
+    all_errors: list[str] = []
+    for record in planned:
+        all_errors.extend(_escalation_schema_errors(record, _escalation_path(root, str(record["escalation_id"]))))
+    if all_errors:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · escalation sync REFUSED: schema-invalid payload", *all_errors],
+            {"error": "schema_invalid", "detail": all_errors, "written": 0},
+        )
+
+    written = [_write_escalation(root, record) for record in planned]
+    return _emit(
+        args,
+        0,
+        [f"{_BRAND} · synced {len(written)} escalation record(s) from {args.repo} label {args.label!r}"],
+        {"action": "escalation_synced", "count": len(written), "paths": [str(p) for p in written]},
+    )
+
+
+def _cmd_escalation(args: argparse.Namespace) -> int:
+    if args.escalation_command == "open":
+        return _cmd_escalation_open(args)
+    if args.escalation_command == "resolve":
+        return _cmd_escalation_resolve(args)
+    if args.escalation_command == "sync":
+        return _cmd_escalation_sync(args)
+    return 2
 
 
 def _cmd_collect(args: argparse.Namespace) -> int:
@@ -1245,6 +1553,39 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="value-free change manifest path (repeatable)")
     _add_root(p_collect)
 
+    p_escalation = sub.add_parser(
+        "escalation",
+        help="manage local AWAITING-OPERATOR escalation records",
+    )
+    escalation_sub = p_escalation.add_subparsers(dest="escalation_command", required=True)
+
+    p_escalation_open = escalation_sub.add_parser(
+        "open",
+        help="write a local AWAITING-OPERATOR escalation record",
+    )
+    p_escalation_open.add_argument("--id", required=True, dest="escalation_id", help="escalation slug or digest")
+    p_escalation_open.add_argument("--title", required=True, help="short escalation title")
+    p_escalation_open.add_argument("--decision", required=True, help="decision the Operator must make")
+    p_escalation_open.add_argument("--recommend", required=True, help="recommended option")
+    p_escalation_open.add_argument("--source-ref", default=None, help="optional value-free source marker")
+    _add_root(p_escalation_open)
+
+    p_escalation_resolve = escalation_sub.add_parser(
+        "resolve",
+        help="stamp a local escalation resolved",
+    )
+    p_escalation_resolve.add_argument("escalation_id", metavar="ID", help="escalation slug or digest")
+    p_escalation_resolve.add_argument("--resolution", default=None, help="optional value-free resolution summary")
+    _add_root(p_escalation_resolve)
+
+    p_escalation_sync = escalation_sub.add_parser(
+        "sync",
+        help="mirror awaiting-operator issues from gh into local escalation records",
+    )
+    p_escalation_sync.add_argument("--repo", required=True, help="GitHub repo in owner/name form")
+    p_escalation_sync.add_argument("--label", default="awaiting-operator", help="issue label to mirror")
+    _add_root(p_escalation_sync)
+
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
 
@@ -1370,6 +1711,7 @@ _DISPATCH = {
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
     "collect": _cmd_collect,
+    "escalation": _cmd_escalation,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,

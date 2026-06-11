@@ -167,6 +167,9 @@ V3_SCHEMAS: frozenset[str] = frozenset(
         # --spawn` materializes (`v3_seat_bridge`) and `cev3 collect` folds.
         # Value-free: digests + shape refs only.
         "schemas/dispatch-record.schema.yaml",
+        # v3.5-B live feeds: the local AWAITING-OPERATOR queue consumed by the
+        # Cockpit L2 read-model. Value-free local mirror records only.
+        "schemas/escalation-record.schema.yaml",
     }
 )
 

@@ -1,67 +1,69 @@
-# PR path manifest - v3.1-G1 live-spawn gate
+# PR path manifest - v3.5-B2 Cockpit live-feeds gate
 
 CI passes this to `verify-path-manifest --base <PR base sha> --manifest .ce/pr-path-manifest.md`
 and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; the
 fidelity scan requires the declared count and SHA256 to match the fenced block.
 
 Ratified gate:
-`~/ce-launch/v31-g1-wave/v31-g1-live-spawn-gate-RATIFIED-20260611.md`
-(sha256 `c5439f4fa89c90e6cb30a4367ccdbb384d83d95e811d163c787e514eefae4a5c`;
-Operator-ratified 2026-06-11, Section 6 fork resolutions binding).
+`~/ce-launch/v35b-livefeeds-wave/v35b-cockpit-livefeeds-gate-RATIFIED-20260611.md`
+(sha256 `b7fc78ff027e93bdbbd45e1282d24b82b25d993cf94c01582e117152f59e5c0b`;
+Operator-ratified 2026-06-11, §7 fork resolutions binding).
 
 Implementer mandate:
-`~/ce-launch/v31-g1-wave/G1_IMPL_MANDATE.md`.
+`~/ce-launch/v35b-livefeeds-wave/B2_IMPL_MANDATE.md`.
 
-Per-file purpose (the closed 15-row manifest — two serial gates, one branch):
-- **`validators/creator_engine_validator/v3_seat_bridge.py`** *(NEW)* - G1a: the assemble→spawn
-  bridge (`materialize_dispatch` / `spawn_seat` / `seed_brief`); crosses to the v1 launcher as
-  subprocess + DATA only, importing NO v1 module.
-- **`validators/creator_engine_validator/v3_cli.py`** *(M)* - G1a `drive --spawn` (additive opt-in
-  + `--no-unattended` + non-claude refusal) + G1b `collect` evidence fold + status/report/artifacts
-  read-model wiring.
-- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - G1a defect-a: provision the
-  strict MCP config before the tmux spawn (reusing the lane helper; exception → `LaunchRefused`).
-- **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - G1a: promote
-  `_ensure_lane_mcp_config` to public `ensure_lane_mcp_config` (deprecation alias kept).
-- **`validators/creator_engine_validator/_versions.py`** *(M)* - G1a `V3_RUNTIME` += `v3_seat_bridge`
-  (32→33) + G1b `V3_SCHEMAS` += `dispatch-record.schema.yaml` (4→5).
-- **`schemas/dispatch-record.schema.yaml`** *(NEW)* - G1b: the value-free dispatch-record shape.
-- **`validators/tests/unit/test_v3_seat_bridge.py`** *(NEW)* - G1a+G1b: the bridge unit suite,
-  including the AST no-v1-import invariant + the schema-conformance test.
-- **`validators/tests/unit/test_v3_cli.py`** *(M)* - G1a+G1b: `drive --spawn` / `collect` / read-model
-  + the end-to-end faked-seam keystone test.
-- **`validators/tests/unit/test_launch_runtime.py`** *(M)* - G1a: defect-a MCP provisioning + defect-b
-  CC-D-6 unattended-flag tests.
-- **`validators/tests/unit/test_lane_runtime.py`** *(M)* - G1a: the helper rename + alias tests.
-- **`validators/tests/unit/test_version_boundary.py`** *(M)* - G1a: `len(V3_RUNTIME)` 32→33 (ships in
-  the same commit as the `_versions.py` baseline edit).
-- **`validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl`** *(M)* - landing: app
-  wheel rebuilt ONCE from the combined branch source.
-- **`validators/wheelhouse/SHA256SUMS`** *(M)* - landing: re-pinned for the rebuilt app wheel.
-- **`docs/v3-roadmap.md`** *(M)* - landing: the v3.1-G1 row in the gate-status table.
+Base:
+`86ca1d31f034b6b841fa266e6cbf0f47f8a9c01f` (origin/main post-G1).
+
+Per-file purpose (the closed §2 manifest — 14 paths, as ratified):
+- **`schemas/escalation-record.schema.yaml`** *(A)* - Feed 1 value-free
+  AWAITING-OPERATOR local record schema with required recommendation.
+- **`validators/creator_engine_validator/_versions.py`** *(M)* - `V3_SCHEMAS`
+  += `schemas/escalation-record.schema.yaml` only; runtime counters stay flat.
+- **`validators/creator_engine_validator/runner/cockpit_readmodel.py`** *(M)* -
+  `SNAPSHOT_VERSION` 2, escalation/dispatch loaders, pure feed folds,
+  availability keys, watch paths, and dispatch-derived board signals.
+- **`validators/creator_engine_validator/runner/cockpit_demo_seed.py`** *(M)* -
+  CE_DEMO parity for two escalation records and two schema-true dispatch records.
+- **`validators/creator_engine_validator/v3_cockpit.py`** *(M)* - render-only
+  left/right rail additions for dispatches and AWAITING-OPERATOR items.
+- **`validators/creator_engine_validator/v3_cli.py`** *(M)* - `ce escalation
+  open|resolve|sync`; sync is a fail-closed `gh issue list` edge with no fold call.
+- **`validators/tests/unit/test_cockpit_readmodel.py`** *(M)* - feed fold,
+  loader, purity, failed-dispatch, board-signal, and demo parity tests.
+- **`validators/tests/unit/test_v3_cockpit.py`** *(M)* - rail-render tests plus
+  `CE_DEMO=1 ce cockpit --json` feed assertions.
+- **`validators/tests/unit/test_v3_cli.py`** *(M)* - escalation CLI tests with
+  faked runner and zero-write refusal proofs.
+- **`docs/architecture/cockpit.md`** *(M)* - live-feed architecture, local
+  escalation layout, sync posture, and snapshot-shape bump.
+- **`validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl`** *(M)* -
+  landing: app wheel rebuilt once from final branch source.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - landing: re-pinned for the
+  rebuilt app wheel.
+- **`docs/v3-roadmap.md`** *(M)* - landing: G1 merged at `86ca1d3`; B2 row added.
 - **`.ce/pr-path-manifest.md`** *(M)* - this carrier.
 
-- **base:** `c3dcae0a3dc8793a9ebf601fe1d5539af9aa0141` (origin/main post-#197, per mandate).
-- **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
+Canonicalization:
+`sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=14
 
-AUTHORIZED_PATHS_SHA256=a7b2ed86bef96ff21f3cce58f41649bcb3b57bbf5748b1f9b0f85a4c01165e15
+AUTHORIZED_PATHS_SHA256=c2c29e112597df9f482fed641ce934b266326af60fe643f1cdaf6e5b581b6cd5
 
 ```text
 .ce/pr-path-manifest.md
+docs/architecture/cockpit.md
 docs/v3-roadmap.md
-schemas/dispatch-record.schema.yaml
+schemas/escalation-record.schema.yaml
 validators/creator_engine_validator/_versions.py
-validators/creator_engine_validator/lane_runtime.py
-validators/creator_engine_validator/launch_runtime.py
+validators/creator_engine_validator/runner/cockpit_demo_seed.py
+validators/creator_engine_validator/runner/cockpit_readmodel.py
 validators/creator_engine_validator/v3_cli.py
-validators/creator_engine_validator/v3_seat_bridge.py
-validators/tests/unit/test_lane_runtime.py
-validators/tests/unit/test_launch_runtime.py
+validators/creator_engine_validator/v3_cockpit.py
+validators/tests/unit/test_cockpit_readmodel.py
 validators/tests/unit/test_v3_cli.py
-validators/tests/unit/test_v3_seat_bridge.py
-validators/tests/unit/test_version_boundary.py
+validators/tests/unit/test_v3_cockpit.py
 validators/wheelhouse/SHA256SUMS
 validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl
 ```

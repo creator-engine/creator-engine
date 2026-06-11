@@ -19,6 +19,7 @@ import yaml
 
 from creator_engine_validator import _versions as ver
 from creator_engine_validator import v3_cli, v3_seat_bridge
+from creator_engine_validator.schema import validate_with_schema
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,22 @@ def _file_ready(root: Path, scope_id: str = "rate-limit-login", **over) -> int:
 def _scope_on_disk(root: Path, scope_id: str) -> dict:
     p = root / v3_cli.SCOPES_SUBDIR / f"{scope_id}{v3_cli._SCOPE_SUFFIX}"
     return yaml.safe_load(p.read_text(encoding="utf-8"))
+
+
+def _escalation_on_disk(root: Path, escalation_id: str) -> dict:
+    p = root / v3_cli.ESCALATIONS_SUBDIR / f"{escalation_id}.yaml"
+    return yaml.safe_load(p.read_text(encoding="utf-8"))
+
+
+def _assert_escalation_schema(record: dict):
+    errors = validate_with_schema(
+        record,
+        "schemas/escalation-record.schema.yaml",
+        "test-escalation",
+        code="test_escalation",
+        contract="schemas/escalation-record.schema.yaml",
+    )
+    assert not errors, [e.format() for e in errors]
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +492,163 @@ def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monk
     payload = json.loads(capsys.readouterr().out)
     assert payload["spend_leaves"] == 0
     assert payload["outcome"] == "no_change"
+
+
+# ---------------------------------------------------------------------------
+# v3.5-B live feeds — escalation open/resolve/sync
+# ---------------------------------------------------------------------------
+def test_escalation_open_writes_schema_valid_record(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: "2026-07-01T09:00:00+00:00")
+    code = v3_cli.main([
+        "escalation", "open",
+        "--id", "operator-call",
+        "--title", "Operator call",
+        "--decision", "Raise cap or halt?",
+        "--recommend", "Halt and re-scope.",
+        "--source-ref", "https://github.com/example/repo/issues/10",
+        "--root", str(tmp_path),
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "escalation_opened"
+    record = _escalation_on_disk(tmp_path, "operator-call")
+    assert record["created_at"] == "2026-07-01T09:00:00+00:00"
+    assert record["recommendation"] == "Halt and re-scope."
+    _assert_escalation_schema(record)
+
+
+def test_escalation_open_refuses_duplicate_id(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: "2026-07-01T09:00:00+00:00")
+    argv = [
+        "escalation", "open",
+        "--id", "operator-call",
+        "--title", "Operator call",
+        "--decision", "Choose",
+        "--recommend", "Go",
+        "--root", str(tmp_path),
+    ]
+    assert v3_cli.main(argv) == 0
+    capsys.readouterr()
+    assert v3_cli.main(argv) == 2
+    assert "already exists" in capsys.readouterr().out
+
+
+def test_escalation_resolve_stamps_resolved_at(tmp_path, capsys, monkeypatch):
+    stamps = iter(["2026-07-01T09:00:00+00:00", "2026-07-01T09:05:00+00:00"])
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: next(stamps))
+    assert v3_cli.main([
+        "escalation", "open", "--id", "operator-call", "--title", "Operator call",
+        "--decision", "Choose", "--recommend", "Go", "--root", str(tmp_path),
+    ]) == 0
+    capsys.readouterr()
+    code = v3_cli.main([
+        "escalation", "resolve", "operator-call",
+        "--resolution", "Operator chose go.",
+        "--root", str(tmp_path),
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "escalation_resolved"
+    record = _escalation_on_disk(tmp_path, "operator-call")
+    assert record["resolved_at"] == "2026-07-01T09:05:00+00:00"
+    assert record["resolution"] == "Operator chose go."
+    _assert_escalation_schema(record)
+
+
+class _GhCompleted:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _issue(number: int, *, state: str = "OPEN", closed_at: str | None = None) -> dict:
+    return {
+        "number": number,
+        "title": f"Awaiting operator #{number}",
+        "url": f"https://github.com/example/repo/issues/{number}",
+        "body": "Decision needed: choose path\nRecommendation: choose the safe path\n",
+        "createdAt": f"2026-07-01T09:{number:02d}:00Z",
+        "closedAt": closed_at,
+        "state": state,
+    }
+
+
+def test_escalation_sync_upserts_open_and_resolves_closed_issue(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: "2026-07-01T08:00:00+00:00")
+    # Existing open mirror for issue #2 should be updated to resolved when gh says closed.
+    v3_cli.main([
+        "escalation", "open",
+        "--id", "awaiting-operator-2",
+        "--title", "old",
+        "--decision", "old",
+        "--recommend", "old",
+        "--source-ref", "https://github.com/example/repo/issues/2",
+        "--root", str(tmp_path),
+    ])
+    capsys.readouterr()
+
+    payload = [_issue(1), _issue(2, state="CLOSED", closed_at="2026-07-01T09:30:00Z")]
+
+    def fake_run(argv, **kw):
+        assert argv[:3] == ["gh", "issue", "list"]
+        assert "--repo" in argv and "example/repo" in argv
+        return _GhCompleted(stdout=json.dumps(payload))
+
+    monkeypatch.setattr(v3_cli.subprocess, "run", fake_run)
+    code = v3_cli.main([
+        "escalation", "sync",
+        "--repo", "example/repo",
+        "--root", str(tmp_path),
+        "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["action"] == "escalation_synced"
+    open_record = _escalation_on_disk(tmp_path, "awaiting-operator-1")
+    resolved_record = _escalation_on_disk(tmp_path, "awaiting-operator-2")
+    assert "resolved_at" not in open_record
+    assert resolved_record["resolved_at"] == "2026-07-01T09:30:00Z"
+    _assert_escalation_schema(open_record)
+    _assert_escalation_schema(resolved_record)
+
+
+def test_escalation_sync_nonzero_gh_exit_writes_nothing(tmp_path, capsys, monkeypatch):
+    def fake_run(argv, **kw):
+        return _GhCompleted(returncode=1, stderr="offline")
+
+    monkeypatch.setattr(v3_cli.subprocess, "run", fake_run)
+    code = v3_cli.main([
+        "escalation", "sync",
+        "--repo", "example/repo",
+        "--root", str(tmp_path),
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["written"] == 0
+    assert not (tmp_path / v3_cli.ESCALATIONS_SUBDIR).exists()
+
+
+def test_escalation_sync_schema_invalid_payload_writes_nothing(tmp_path, capsys, monkeypatch):
+    bad_payload = [_issue(3) | {"body": "Decision needed: choose\n"}]
+
+    def fake_run(argv, **kw):
+        return _GhCompleted(stdout=json.dumps(bad_payload))
+
+    monkeypatch.setattr(v3_cli.subprocess, "run", fake_run)
+    code = v3_cli.main([
+        "escalation", "sync",
+        "--repo", "example/repo",
+        "--root", str(tmp_path),
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["written"] == 0
+    assert not (tmp_path / v3_cli.ESCALATIONS_SUBDIR).exists()
 
 
 # ---------------------------------------------------------------------------

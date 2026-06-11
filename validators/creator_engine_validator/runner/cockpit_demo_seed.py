@@ -64,6 +64,8 @@ ENVELOPE_SCOPE_DENY_REASON = (
     "(its grant is pr_number: 300) — implicit deny"
 )
 
+HARD_BREACH_ESCALATION_ID = hashlib.sha256(b"ce-cockpit-demo-hard-breach").hexdigest()
+
 #: The seeded reviewer-authority envelope (schema-true per
 #: ``schemas/reviewer-authority-envelope.schema.yaml``): exactly ONE mechanic
 #: on exactly ONE PR, with the ratifier attribution the panel renders.
@@ -264,6 +266,47 @@ def _scope(
     return scope
 
 
+def _dispatch(
+    scope_id: str,
+    *,
+    mutation_class: str,
+    spawned_minute: int,
+    spend_envelope: dict[str, Any],
+    collected_minute: int | None = None,
+    resource_bound: Any = None,
+) -> dict[str, Any]:
+    """One demo dispatch wrapper: schema-true record + sibling policy projection."""
+    record: dict[str, Any] = {
+        "kind": "dispatch-record",
+        "record_type": "dispatch",
+        "schema_version": "1",
+        "scope_id": scope_id,
+        # Demo join rule: run_id equals the seat lane_id, like the evidence chains.
+        "run_id": scope_id,
+        "mutation_class": mutation_class,
+        "scope_ratification": {
+            "approver_ref": _DEMO_APPROVER,
+            "ratified_scope_sha": _DEMO_SCOPE_SHA,
+        },
+        "harness": "claude",
+        "unattended": True,
+        "session": "ce-demo",
+        "window": "drive",
+        "runtime_policy_ref": f"demo/dispatches/{scope_id}/runtime-policy.yaml",
+        "brief_ref": f"demo/dispatches/{scope_id}/brief.md",
+        "terminal": {
+            "kind": "tmux",
+            "session_id": "$demo",
+            "window_id": "@1",
+            "pane_id": f"%demo-{scope_id}",
+        },
+        "resource_bound": resource_bound,
+        "spawned_at": _ts(spawned_minute),
+        "collected_at": _ts(collected_minute) if collected_minute is not None else None,
+    }
+    return {"dispatch": record, "spend_envelope": dict(spend_envelope)}
+
+
 def seed() -> dict[str, Any]:
     """Return the L1-shaped demo fleet — exactly ``fold_snapshot``'s keyword inputs (PURE)."""
     panes = [
@@ -422,7 +465,7 @@ def seed() -> dict[str, Any]:
                     "run spend envelope exhausted (observed $10.00 of $10.00 cap) — "
                     "hard breach: pause + escalate; do NOT retry (budget_exhausted)"
                 ),
-                "escalation_id": hashlib.sha256(b"ce-cockpit-demo-hard-breach").hexdigest(),
+                "escalation_id": HARD_BREACH_ESCALATION_ID,
             },
         ]),
     }
@@ -484,6 +527,51 @@ def seed() -> dict[str, Any]:
         },
     ]
 
+    escalations = [
+        {
+            "kind": "escalation-record",
+            "record_type": "escalation",
+            "schema_version": "1",
+            "escalation_id": HARD_BREACH_ESCALATION_ID,
+            "title": "Spend hard-breach needs Operator decision",
+            "decision_needed": "Raise the run cap for spend-hard-breach, or halt the migration?",
+            "recommendation": "Halt and re-scope before raising the cap.",
+            "created_at": _ts(13),
+            "source_ref": "https://github.com/creator-engine/demo/issues/10",
+        },
+        {
+            "kind": "escalation-record",
+            "record_type": "escalation",
+            "schema_version": "1",
+            "escalation_id": "resolved-demo-escalation",
+            "title": "Reviewer venue confirmed",
+            "decision_needed": "Confirm whether PR 300 review may proceed through the envelope.",
+            "recommendation": "Proceed through the ratified PR-300 envelope only.",
+            "created_at": _ts(4),
+            "source_ref": "https://github.com/creator-engine/demo/issues/8",
+            "resolved_at": _ts(9),
+            "resolution": "Operator confirmed the PR-300 envelope.",
+        },
+    ]
+
+    dispatches = [
+        _dispatch(
+            "gate-uploads",
+            mutation_class="code",
+            spawned_minute=12,
+            spend_envelope={"scope": "run", "amount": 12.0, "unit": "$", "window": "per_run"},
+            resource_bound={"unit": "ce-seat-demo-gate-uploads"},
+        ),
+        _dispatch(
+            "ship-pr-294",
+            mutation_class="docs",
+            spawned_minute=10,
+            collected_minute=15,
+            spend_envelope={"scope": "run", "amount": 4.0, "unit": "$", "window": "per_run"},
+            resource_bound={"unit": "ce-seat-demo-ship-pr-294"},
+        ),
+    ]
+
     return {
         "panes": panes,
         "scopes": scopes,
@@ -491,6 +579,8 @@ def seed() -> dict[str, Any]:
         "chains": chains,
         "observations": observations,
         "refusal_chain": refusal_chain,
+        "escalations": escalations,
+        "dispatches": dispatches,
         "envelopes": {"pr-300-review": dict(DEMO_ENVELOPE)},
         "usage_turns": usage_turns,
         "context_pct": 52.0,

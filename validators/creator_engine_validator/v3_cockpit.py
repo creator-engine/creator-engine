@@ -140,6 +140,19 @@ def _seat_line(seat: dict[str, Any]) -> str:
     )
 
 
+def _dispatch_line(entry: dict[str, Any]) -> str:
+    """Format ONE dispatch-feed entry (pure presentation)."""
+    spend = entry.get("spend_envelope") or {}
+    cap = spend.get("cap")
+    unit = spend.get("unit") or ""
+    window = spend.get("window") or "—"
+    cap_text = f"{unit}{cap} {window}" if cap is not None else "—"
+    return (
+        f"{entry.get('run_id', '—')} · {entry.get('state', '—')} · "
+        f"{entry.get('mutation_class', '—')} · cap {cap_text}"
+    )
+
+
 def _left_rail_text(snapshot: dict[str, Any]) -> str:
     """Assemble the fleet-nav rail text from snapshot fields (presentation only)."""
     board = snapshot.get("board", {})
@@ -149,6 +162,14 @@ def _left_rail_text(snapshot: dict[str, Any]) -> str:
     availability = snapshot.get("availability", {})
     lines = [header or "—", "", f"Seats ({availability.get('seats', '—')}):"]
     lines += [_seat_line(seat) for seat in seats]
+    dispatches = snapshot.get("dispatches", {})
+    dispatch_availability = availability.get("dispatches", "—")
+    if dispatch_availability == "unavailable":
+        lines += ["", "Dispatches (unavailable):", "—"]
+    else:
+        entries = dispatches.get("entries", [])
+        lines += ["", f"Dispatches ({dispatches.get('count', len(entries))}):"]
+        lines += [_dispatch_line(entry) for entry in entries] or ["—"]
     return "\n".join(lines)
 
 
@@ -164,6 +185,17 @@ def _refusal_lines(entry: dict[str, Any]) -> list[str]:
         ]
     return [
         f"·  {entry.get('recorded_at', '—')} · legacy {entry.get('event', '—')} (advisory)"
+    ]
+
+
+def _escalation_lines(entry: dict[str, Any]) -> list[str]:
+    """Format ONE AWAITING-OPERATOR entry (pure presentation)."""
+    gate = SEMANTIC_HEX["gate"]
+    return [
+        f"[{gate}]⚠ {entry.get('title', '—')}[/]",
+        f"[{gate}]   decide: {entry.get('decision_needed', '—')}[/]",
+        f"[{gate}]   recommend: {entry.get('recommendation', '—')}[/]",
+        f"[{gate}]   source: {entry.get('source_ref') or '—'}[/]",
     ]
 
 
@@ -298,7 +330,22 @@ def _right_rail_text(snapshot: dict[str, Any]) -> str:
     """The Governance/Authority panel — binds the four L2 sections (B.3)."""
     governance = snapshot.get("governance", {})
     refusals = snapshot.get("refusals", {})
+    escalations = snapshot.get("escalations", {})
+    availability = snapshot.get("availability", {})
     lines = ["Governance / Authority", ""]
+
+    escalation_status = availability.get("escalations", "—")
+    open_count = escalations.get("open_count", 0)
+    heading_hex = SEMANTIC_HEX["gate"] if open_count else SEMANTIC_HEX["amber"]
+    lines.append(f"[{heading_hex}]⚠ AWAITING OPERATOR ({open_count})[/]")
+    if escalation_status == "unavailable":
+        lines.append(f"[{SEMANTIC_HEX['amber']}]  escalation source unavailable[/]")
+    else:
+        for entry in escalations.get("open", []):
+            lines += _escalation_lines(entry)
+        if not escalations.get("open"):
+            lines.append("  —")
+    lines.append("")
 
     lines.append(
         f"[{SEMANTIC_HEX['violet']}]★ REFUSED[/] · {refusals.get('source_label', '—')}"
