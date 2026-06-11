@@ -1,0 +1,23 @@
+# N=1 carve-out fixture (VALID solo path): a one-human coordination policy.
+# Co-located with ADR-0201-n1-solo.md; `peer_authority` grades that Decision
+# Record's `ratification.quorum` against THIS map (area_owners scopes the
+# cross-check to the co-located decision surface). Exactly one resolved human ⇒
+# a privileged ratification carrying `quorum: n1_solo` by that sole human is
+# lawful. `quorum_by_tier.privileged` stays 2 (no policy downgrade).
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "*.md": [solo-operator]   # the co-located Decision Records area
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: solo-operator
+      github_logins: [solo-gh]
+      seats: []
+      app_installations: []

@@ -58,6 +58,14 @@ CODE_SELF_RATIFIED = "VAL-DR-SELF-RATIFIED"
 CODE_SUPERSEDED_UNRESOLVED = "VAL-DR-SUPERSEDED-UNRESOLVED"
 CODE_RATIFICATION_MISSING = "VAL-DR-RATIFICATION-MISSING"
 CODE_FCP_OPEN_CONCERN = "VAL-DR-FCP-OPEN-CONCERN"
+# N=1 carve-out: local SHAPE guard for the honest `quorum: n1_solo` marker (the
+# map-sensitive auto-expiry/laundered-quorum checks live in `peer_authority`,
+# which owns the coordination-policy identity map). NEW failure class on the
+# EXISTING check — no new check, no check-count delta.
+CODE_N1_SOLO_MISUSED = "VAL-DR-N1-SOLO-MISUSED"
+
+# The only lawful value of the honest solo-mode marker.
+_N1_SOLO = "n1_solo"
 
 # A file that *names itself* a decision record (ADR-/RFC-NNNN...) gets a parse
 # error surfaced instead of being silently skipped.
@@ -239,6 +247,43 @@ def _check_fcp_concerns(record: dict[str, Any], path: Path) -> list[ValidationEr
     return []
 
 
+def _check_n1_solo_quorum(record: dict[str, Any], path: Path) -> list[ValidationError]:
+    """Local shape guard for `ratification.quorum: n1_solo`.
+
+    The honest solo-mode marker is meaningful ONLY on an `accepted` privileged
+    Decision Record. This check owns that shape rule and the assurance that the
+    marker never relaxes privileged self-ratification (the existing
+    VAL-DR-SELF-RATIFIED check is unconditional and still applies). It does NOT
+    claim auto-expiry — that is map-sensitive and owned by `peer_authority`,
+    which holds the current coordination-policy identity map.
+    """
+    ratification = record.get("ratification")
+    quorum = ratification.get("quorum") if isinstance(ratification, dict) else None
+    if quorum is None:
+        return []  # absent ⇒ ordinary team-mode record (schema pins any value to n1_solo)
+    problems: list[str] = []
+    if record.get("status") != "accepted":
+        problems.append(
+            f"it is set on a non-accepted record (status={record.get('status')!r}); the marker "
+            "records a completed ratification, so it is meaningful only on `accepted` records"
+        )
+    if record.get("mutation_class") not in PRIVILEGED_NAMES:
+        problems.append(
+            f"it is set on a non-privileged record (mutation_class={record.get('mutation_class')!r}); "
+            "the solo quorum mode is reserved for privileged ratifications"
+        )
+    if not problems:
+        return []
+    return [make_error(
+        CODE_N1_SOLO_MISUSED, path, "ratification/quorum",
+        "quorum: n1_solo is meaningful only on an accepted privileged Decision Record: "
+        + "; ".join(problems)
+        + ". (The map-sensitive auto-expiry / laundered-quorum checks are owned by "
+        "peer_authority, which holds the identity map.)",
+        CONTRACT,
+    )]
+
+
 def validate_decision_record(
     record: dict[str, Any], path: Path, known_ids: frozenset[str] = frozenset()
 ) -> list[ValidationError]:
@@ -249,13 +294,14 @@ def validate_decision_record(
     errors.extend(_check_self_ratification(record, path))
     errors.extend(_check_superseded_link(record, path, known_ids))
     errors.extend(_check_fcp_concerns(record, path))
+    errors.extend(_check_n1_solo_quorum(record, path))
     return errors
 
 
 @register(
     CHECK_NAME,
     [CODE_SCHEMA, CODE_INVALID, CODE_SELF_RATIFIED, CODE_SUPERSEDED_UNRESOLVED,
-     CODE_RATIFICATION_MISSING, CODE_FCP_OPEN_CONCERN],
+     CODE_RATIFICATION_MISSING, CODE_FCP_OPEN_CONCERN, CODE_N1_SOLO_MISUSED],
 )
 def run(paths: Iterable[Path]) -> CheckResult:
     records, errors = iter_decision_records([Path(p) for p in paths])

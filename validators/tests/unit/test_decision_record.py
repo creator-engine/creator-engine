@@ -180,6 +180,51 @@ def test_proposed_rfc_may_carry_open_concerns():
     assert chk.CODE_FCP_OPEN_CONCERN not in _codes(rec)
 
 
+# --- N=1 carve-out: local `ratification.quorum: n1_solo` shape guard -----------
+def _ratification(ratified_by="bob", **extra):
+    base = {
+        "ratified_by": ratified_by, "ratified_at": "2026-06-02",
+        "ratification_prompt_sha": "a" * 64,
+    }
+    base.update(extra)
+    return base
+
+
+def test_n1_solo_quorum_field_allowed_on_privileged_accepted_record():
+    rec = _record(
+        status="accepted", mutation_class="governance", decision_makers=["alice"],
+        ratification=_ratification("bob", quorum="n1_solo"),
+    )
+    assert chk.CODE_N1_SOLO_MISUSED not in _codes(rec)
+    assert _codes(rec) == []  # a clean honest solo record
+
+
+def test_n1_solo_quorum_field_rejected_on_non_privileged_record():
+    rec = _record(
+        status="accepted", mutation_class="docs", decision_makers=["alice"],
+        ratification=_ratification("bob", quorum="n1_solo"),
+    )
+    assert chk.CODE_N1_SOLO_MISUSED in _codes(rec)
+
+
+def test_n1_solo_quorum_field_rejected_without_ratification_or_on_proposed_record():
+    # the marker records a COMPLETED ratification -> meaningful only on accepted.
+    rec = _record(
+        status="proposed", mutation_class="governance", decision_makers=["alice"],
+        ratification=_ratification("bob", quorum="n1_solo"),
+    )
+    assert chk.CODE_N1_SOLO_MISUSED in _codes(rec)
+
+
+def test_n1_solo_still_rejects_privileged_self_ratification():
+    # the marker NEVER relaxes privileged no-self-ratification.
+    rec = _record(
+        status="accepted", mutation_class="governance", decision_makers=["alice"],
+        ratification=_ratification("alice", quorum="n1_solo"),
+    )
+    assert chk.CODE_SELF_RATIFIED in _codes(rec)
+
+
 # --- discovery + run() ---------------------------------------------------------
 def test_run_resolves_supersession_within_scanned_set(tmp_path):
     _write_md(tmp_path / "ADR-0001-old.md",

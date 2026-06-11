@@ -157,6 +157,21 @@ properties:
           type: array
           items: {type: string, minLength: 1}
           description: Actor labels that ratified (resolved + deduped to humans).
+        quorum:
+          type: string
+          const: n1_solo
+          description: |
+            OPTIONAL honest solo-mode marker. The ONLY allowed value is
+            `n1_solo`: this attestation was ratified under CE's native N=1
+            mode, where the `identity_map` resolves to exactly ONE distinct
+            human and that sole human's privileged ratification is lawful.
+            ABSENCE means the record claims the normal `quorum_by_tier`
+            threshold — it is NOT a hidden solo marker. `n1_solo` AUTO-EXPIRES
+            (VAL-PA-N1-SOLO-EXPIRED) the instant the map resolves ≥ 2 humans;
+            it is not quorum 2, not two-account laundering, and never a
+            no-self-approval bypass. No `quorum: 2`/`two_human`/`privileged`
+            laundering label is permitted: normal team-mode quorum is computed
+            from policy, never hand-claimed by a record.
         changed_paths:
           type: array
           items: {type: string, minLength: 1}

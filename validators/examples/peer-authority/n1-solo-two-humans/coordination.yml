@@ -1,0 +1,25 @@
+# N=1 carve-out fixture (AUTO-EXPIRY): a TWO-human coordination policy. The
+# co-located ADR-0202 still claims `quorum: n1_solo`, but the identity map now
+# resolves two distinct humans — so `peer_authority` fails that record with
+# VAL-PA-N1-SOLO-EXPIRED. Automatic expiry at the second human, not a migration.
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "*.md": [operator-one, operator-two]
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: operator-one
+      github_logins: [op-one-gh]
+      seats: []
+      app_installations: []
+    - human_id: operator-two
+      github_logins: [op-two-gh]
+      seats: []
+      app_installations: []

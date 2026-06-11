@@ -163,6 +163,21 @@ properties:
         pattern: "^[0-9a-f]{64}$"
         description: |
           SHA256 digest of the SHA-pinned ratification prompt/mandate (opaque).
+      quorum:
+        type: string
+        const: n1_solo
+        description: |
+          OPTIONAL honest solo-mode marker for the ratification. The ONLY
+          allowed value is `n1_solo`: this privileged accepted record was
+          ratified under CE's native N=1 mode, where the governing
+          coordination-policy `identity_map` resolves to exactly ONE distinct
+          human. ABSENCE means an ordinary two-human/team-mode record. The
+          marker is meaningful ONLY on `status: accepted` privileged records
+          (`decision_record` rejects misuse via VAL-DR-N1-SOLO-MISUSED) and
+          NEVER relaxes privileged no-self-ratification. The map-sensitive
+          auto-expiry (VAL-PA-N1-SOLO-EXPIRED at ≥ 2 humans) and the
+          laundered-quorum guard (VAL-PA-N1-SOLO-REQUIRED) are owned by
+          `peer_authority`, which holds the current identity map.
     description: |
       The human-ratification attestation. REQUIRED when `status: accepted`
       (enforced by the check); a `proposed` record carries none.

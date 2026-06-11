@@ -26,6 +26,12 @@ ratification:
   ratified_by: chmod735
   ratified_at: "2026-06-10"
   ratification_prompt_sha: "c16f1749fe8c29d658cef6ad60c94339b5f3cbf3afa578c25e5d799772cb85ea"
+  # N=1 native mode (v3.5-C N1-CARVEOUT): this privileged, accepted governance
+  # record was ratified by the sole resolved human (`chmod735` → `peer-operator`
+  # in `.ce/coordination.yml`'s identity_map), with a distinct authoring stamp
+  # (`ce-gate-architect`). Honest solo quorum — NOT quorum 2, never two-account
+  # laundering. Auto-expires the instant the identity map resolves a second human.
+  quorum: n1_solo
 crosswalk:
   informs: []
 ---

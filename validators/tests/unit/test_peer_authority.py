@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from creator_engine_validator.checks import decision_record as dr_chk
 from creator_engine_validator.checks import peer_authority as chk
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.mutation_class import PRIVILEGED_NAMES
@@ -221,6 +222,124 @@ def test_missing_area_configuration_rejected():
 def test_room_for_future_coordination_fields_is_left_open():
     # §9.9: unknown top-level blocks are allowed (the declared blocks stay strict).
     assert _codes(_policy(future_block={"anything": True})) == []
+
+
+# --- N=1 carve-out: the honest `quorum: n1_solo` recording mode -----------------
+
+def _n1_policy(humans):
+    """A minimal one/many-human coordination policy that governs co-located *.md."""
+    return {
+        "kind": "coordination-policy", "schema_version": "1",
+        "mutation_class": "governance",
+        "ratification_authority": {
+            "defer_to_codeowners": False,
+            "area_owners": {"*.md": [h["human_id"] for h in humans]},
+            "quorum_by_tier": {"non_privileged": 1, "privileged": 2},
+            "no_self_approval": True,
+        },
+        "identity_map": {"humans": humans},
+    }
+
+
+def _dr(**overrides):
+    base = {
+        "kind": "decision-record", "record_type": "adr", "schema_version": "1",
+        "id": "ADR-0299", "title": "n1", "status": "accepted",
+        "date": "2026-06-10", "decision_makers": ["agent-seat"],
+        "review_by": "2026-12-10", "mutation_class": "governance",
+        "evidence_refs": [{"kind": "doc", "ref": "x", "tag": "x"}],
+        "ratification": {
+            "ratified_by": "solo-gh", "ratified_at": "2026-06-10",
+            "ratification_prompt_sha": "a" * 64, "quorum": "n1_solo",
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+def test_distinct_humans_counts_humans_not_accounts():
+    pol = _n1_policy([{"human_id": "solo", "github_logins": ["a", "b"], "seats": ["s"]}])
+    assert chk.distinct_humans(pol) == {"solo"}
+
+
+def test_n1_solo_decision_record_passes_with_exactly_one_human():
+    # the bundled valid fixture passes BOTH checks (the gate green-def).
+    valid = _fixture("n1-solo-valid")
+    assert chk.run([valid]).ok, [e.format() for e in chk.run([valid]).errors]
+    assert dr_chk.run([valid]).ok, [e.format() for e in dr_chk.run([valid]).errors]
+
+
+def test_n1_solo_claimed_with_two_humans_fails_auto_expiry():
+    result = chk.run([_fixture("n1-solo-two-humans")])
+    assert any(e.code == chk.CODE_N1_SOLO_EXPIRED for e in result.errors), \
+        [e.format() for e in result.errors]
+
+
+def test_privileged_solo_without_n1_marker_fails_laundered_quorum():
+    result = chk.run([_fixture("n1-solo-laundered-quorum")])
+    laundered = [e for e in result.errors if e.code == chk.CODE_N1_SOLO_REQUIRED]
+    assert laundered, [e.format() for e in result.errors]
+    # the failure names DISTINCT HUMANS, not the account count.
+    assert any("distinct humans = 1" in e.message for e in laundered)
+
+
+def test_n1_solo_does_not_bypass_no_self_approval():
+    # the sole human is BOTH a decision_maker and the ratifier -> self-approval,
+    # even with the honest marker present.
+    pol = _n1_policy([{"human_id": "solo", "github_logins": ["solo-gh"]}])
+    record = _dr(decision_makers=["solo-gh"])  # maker resolves to the sole human
+    errors = chk.grade_decision_record_quorum(pol, Path("ADR.md"), record)
+    assert any(e.code == chk.CODE_SELF_APPROVAL for e in errors), [e.format() for e in errors]
+
+
+def test_n1_solo_unresolved_ratifier_fails_closed():
+    pol = _n1_policy([{"human_id": "solo", "github_logins": ["solo-gh"]}])
+    record = _dr(ratification={
+        "ratified_by": "ghost-login", "ratified_at": "2026-06-10",
+        "ratification_prompt_sha": "a" * 64, "quorum": "n1_solo",
+    })
+    errors = chk.grade_decision_record_quorum(pol, Path("ADR.md"), record)
+    assert any(e.code == chk.CODE_IDENTITY_UNRESOLVED for e in errors), \
+        [e.format() for e in errors]
+
+
+def test_n1_solo_lawful_solo_record_has_no_findings():
+    pol = _n1_policy([{"human_id": "solo", "github_logins": ["solo-gh"]}])
+    assert chk.grade_decision_record_quorum(pol, Path("ADR.md"), _dr()) == []
+
+
+def test_example_decision_records_not_graded_against_repo_one_human_map():
+    # §10 watch-item: the fictional alice/bob decision-record fixtures have NO
+    # co-located coordination policy, and their paths fall outside the repo
+    # policy's declared decision surfaces -> the repo's one-human map must not
+    # grade them. Scanning the repo policy alongside those fixtures stays clean.
+    repo_policy = REPO_ROOT / ".ce" / "coordination.yml"
+    dr_fixtures = REPO_ROOT / "validators" / "examples" / "decision-record"
+    result = chk.run([repo_policy, dr_fixtures])
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_repo_adr_0001_passes_cross_scan_under_repo_policy():
+    # the canonical first consumer of the marker: ADR-0001 carries quorum:
+    # n1_solo and passes the map-sensitive cross-check at repo scope.
+    repo_policy = REPO_ROOT / ".ce" / "coordination.yml"
+    decisions = REPO_ROOT / "docs" / "decisions"
+    result = chk.run([repo_policy, decisions])
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_two_human_team_record_without_marker_is_unaffected():
+    # regression: an ordinary two-human map + a record that omits the marker is
+    # NOT a laundered-quorum failure (the guard only fires at exactly one human).
+    pol = _n1_policy([
+        {"human_id": "a", "github_logins": ["a-gh"]},
+        {"human_id": "b", "github_logins": ["b-gh"]},
+    ])
+    record = _dr(decision_makers=["a-gh"], ratification={
+        "ratified_by": "b-gh", "ratified_at": "2026-06-10",
+        "ratification_prompt_sha": "a" * 64,  # no quorum marker
+    })
+    assert chk.grade_decision_record_quorum(pol, Path("ADR.md"), record) == []
 
 
 # --- the generalized plan_approved (the live forge-side enforcement) ----------------
