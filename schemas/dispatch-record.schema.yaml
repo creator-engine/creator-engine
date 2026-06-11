@@ -160,7 +160,87 @@ properties:
       The value-free refusal text for `spawn_failed_at` (the same message
       surfaced to the operator) — NEVER a credential/host/account. Absent on a
       clean spawn.
+  change:
+    $ref: "#/$defs/change"
+    description: |
+      v3.1-G2a: the value-free pointer to the PR a `cev3 pr --apply` opened for
+      this run's authored branch (stamped by `v3_forge_join.open_change_for_run`).
+      Shape refs ONLY — branch / base / pr_number / head_sha / manifest_paths /
+      opened_at — NEVER a credential, token, App id, or installation id. Absent
+      until a PR is opened (a run may end at research_delivered / no_change with
+      no `change` block); `cev3 collect` derives the `change_set` + `pr_opened`
+      outcome from it when present.
+  role:
+    type: string
+    enum: [implementer, reviewer]
+    description: |
+      v3.1-G2b: the seat role. ABSENT = the G1 implementer dispatch (an authoring
+      seat). `reviewer` marks a distinct CE-governed reviewer venue (provisioned
+      by `v3_seat_bridge.materialize_review_dispatch` + `spawn_review_venue`),
+      whose authority is the reviewer-authority envelope referenced in `review_of`.
+  review_of:
+    $ref: "#/$defs/review_of"
+    description: |
+      v3.1-G2b: present ONLY on a `role: reviewer` dispatch. The value-free pointer
+      back to the author run + the PR under review + the reviewer-authority envelope
+      path — NEVER a credential, token, or reviewer login (the login lives in the
+      envelope FILE, which the Ring-1 hook records; the record carries only the ref).
 $defs:
+  change:
+    type: object
+    required: [branch, base, pr_number, manifest_paths, opened_at]
+    unevaluatedProperties: false
+    properties:
+      branch:
+        type: string
+        minLength: 1
+        description: The seat-authored head branch the PR was opened for.
+      base:
+        type: string
+        minLength: 1
+        description: The target branch the PR merges into (e.g. `main`).
+      pr_number:
+        type: integer
+        minimum: 1
+        description: The opened/claimed PR number (push = claim; one PR per branch).
+      head_sha:
+        oneOf:
+          - type: "null"
+          - type: string
+            pattern: "^[0-9a-f]{7,40}$"
+        description: |
+          The PR head commit sha (the value the merge head-pins). Null only when
+          the forge did not return a head on open.
+      manifest_paths:
+        type: array
+        items:
+          type: string
+          minLength: 1
+        description: The authorized path-set this change carries (the carrier mirror).
+      opened_at:
+        type: string
+        minLength: 1
+        description: UTC stamp the PR was opened (`%Y-%m-%dT%H:%M:%SZ`).
+  review_of:
+    type: object
+    required: [author_run_id, pr_number, envelope_ref]
+    unevaluatedProperties: false
+    properties:
+      author_run_id:
+        type: string
+        minLength: 1
+        description: The authoring run whose PR this venue reviews.
+      pr_number:
+        type: integer
+        minimum: 1
+        description: The PR the venue is authorized to review.
+      envelope_ref:
+        type: string
+        minLength: 1
+        description: |
+          Shape-only path ref to the reviewer-authority envelope file (one
+          `pr_review` mechanic on this one PR). A path ref, never the envelope body
+          and never the reviewer login it carries.
   scope_ratification:
     type: object
     required: [approver_ref, ratified_scope_sha]

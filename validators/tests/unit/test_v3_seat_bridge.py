@@ -304,3 +304,198 @@ def test_seed_brief_refuses_without_pane(tmp_path):
     rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
     with pytest.raises(v3_seat_bridge.SpawnRefused):
         v3_seat_bridge.seed_brief(rec, runner=_RecordingRunner())
+
+
+# ===========================================================================
+# v3.1-G2b — the reviewer-venue leg
+# ===========================================================================
+import hashlib as _hashlib
+
+_REVIEWER_LOGIN = "ubuntuaws745-cmyk"
+_PR_HEAD = "d" * 40
+
+
+def _author_dispatch(tmp_path, scope_id="rate-limit-login"):
+    """Materialize a spawned author dispatch dict (the input to the review leg)."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(scope_id), tmp_path, now=_FIXED_NOW)
+    rec.data["terminal"] = {"kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3"}
+    rec.data["spawned_at"] = "20260611T093000Z"
+    v3_seat_bridge._write_record(rec)
+    return rec.data
+
+
+class _ReviewRunner:
+    """Routes the venue subprocess chain (pco-allocate / lane launch --json / tmux seed)."""
+
+    def __init__(self, *, pco_rc=0, launch_rc=0, pane="%7", launch_stdout=None):
+        self.calls = []
+        self.pco_rc = pco_rc
+        self.launch_rc = launch_rc
+        self.pane = pane
+        self.launch_stdout = launch_stdout
+
+    def __call__(self, argv, **kw):
+        argv = list(argv)
+        self.calls.append({"argv": argv, "kw": kw})
+        if "pco-allocate" in argv:
+            return _FakeCompleted(returncode=self.pco_rc, stderr="pco boom" if self.pco_rc else "")
+        if "launch" in argv and "lane" in argv:
+            if self.launch_rc:
+                return _FakeCompleted(returncode=self.launch_rc, stderr="lane boom")
+            stdout = self.launch_stdout if self.launch_stdout is not None else json.dumps({
+                "pane_path": "/venue/panes/x.yaml",
+                "record": {"terminal": {
+                    "kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": self.pane}},
+            })
+            return _FakeCompleted(returncode=0, stdout=stdout)
+        if "send-keys" in argv:
+            return _FakeCompleted(returncode=0)
+        raise AssertionError(f"unexpected argv: {argv}")  # pragma: no cover
+
+    def argv_for(self, needle):
+        for c in self.calls:
+            if needle in c["argv"]:
+                return c["argv"]
+        return None
+
+
+def _envelope_schema():
+    return yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "reviewer-authority-envelope.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+
+
+def _dispatch_schema():
+    return yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "dispatch-record.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+
+
+def test_compose_reviewer_envelope_is_schema_valid(tmp_path):
+    import jsonschema
+    path = v3_seat_bridge.compose_reviewer_envelope(
+        tmp_path, scope_id="rate-limit-login", pr_number=7, head_sha=_PR_HEAD,
+        actor=_REVIEWER_LOGIN, ratified_prompt_sha="b" * 64, now=_FIXED_NOW,
+    )
+    env = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    jsonschema.validate(env, _envelope_schema())
+    rae = env["reviewer_authority_envelope"]
+    assert rae["mechanic"] == "pr_review" and rae["pr_number"] == 7
+    assert rae["actor"] == _REVIEWER_LOGIN and rae["ratified_prompt_sha"] == "b" * 64
+    assert rae["envelope_id"].startswith("rva-rev-rate-limit-login-")
+
+
+def test_materialize_review_dispatch_role_and_review_of(tmp_path):
+    import jsonschema
+    author = _author_dispatch(tmp_path)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    assert rec.data["role"] == "reviewer"
+    assert rec.data["review_of"]["author_run_id"] == author["run_id"]
+    assert rec.data["review_of"]["pr_number"] == 7
+    assert Path(rec.data["review_of"]["envelope_ref"]).is_file()
+    # the review dispatch record validates against the (additively-extended) schema
+    jsonschema.validate(rec.data, _dispatch_schema())
+
+
+def test_review_dispatch_record_is_value_free(tmp_path):
+    author = _author_dispatch(tmp_path)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    # the reviewer LOGIN lives in the envelope FILE, never in the dispatch RECORD bytes
+    record_bytes = rec.dispatch_path.read_text(encoding="utf-8")
+    assert _REVIEWER_LOGIN not in record_bytes
+    envelope_bytes = Path(rec.data["review_of"]["envelope_ref"]).read_text(encoding="utf-8")
+    assert _REVIEWER_LOGIN in envelope_bytes  # the schema requires the login here
+
+
+def test_reviewer_brief_names_pr_and_collect_handoff(tmp_path):
+    author = _author_dispatch(tmp_path)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    brief = Path(rec.brief_ref).read_text(encoding="utf-8")
+    assert "PR #7" in brief
+    assert "gh pr review 7" in brief
+    assert "--outcome review_submitted" in brief
+
+
+def test_spawn_review_venue_runs_pco_then_lane_launch_then_seed(tmp_path):
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"
+    venue_root.mkdir()
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    runner = _ReviewRunner(pane="%7")
+    result = v3_seat_bridge.spawn_review_venue(
+        rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "ledger",
+        runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+    )
+    assert result.terminal["pane_id"] == "%7"
+    # pco-allocate ran with cwd OUTSIDE the repo (the venue zone)
+    pco = runner.argv_for("pco-allocate")
+    assert pco is not None and "--no-write-authority" in pco
+    pco_call = next(c for c in runner.calls if "pco-allocate" in c["argv"])
+    assert pco_call["kw"].get("cwd") == str(venue_root)
+    # lane launch bound the reviewer envelope on a distinct reviewer venue, JSON-mode
+    launch = runner.argv_for("launch")
+    assert "--role" in launch and launch[launch.index("--role") + 1] == "reviewer"
+    assert "--lane-kind" in launch and launch[launch.index("--lane-kind") + 1] == "review"
+    assert "--reviewer-authority-ref" in launch and "--json" in launch
+    # the terminal got stamped + the brief got seeded
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["terminal"]["pane_id"] == "%7" and drec["spawned_at"]
+    assert runner.argv_for("send-keys") is not None
+
+
+def test_spawn_review_venue_fail_closed_on_pco_refusal(tmp_path):
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"; venue_root.mkdir()
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD, now=_FIXED_NOW)
+    runner = _ReviewRunner(pco_rc=1)
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW)
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"] and drec["terminal"] is None
+    assert runner.argv_for("launch") is None  # never reached lane launch
+
+
+def test_spawn_review_venue_fail_closed_on_lane_launch_refusal(tmp_path):
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"; venue_root.mkdir()
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD, now=_FIXED_NOW)
+    runner = _ReviewRunner(launch_rc=1)
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW)
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"] and drec["terminal"] is None
+    assert runner.argv_for("send-keys") is None  # never seeded a half-venue
+
+
+def test_spawn_review_venue_fail_closed_on_no_pane(tmp_path):
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"; venue_root.mkdir()
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD, now=_FIXED_NOW)
+    runner = _ReviewRunner(launch_stdout=json.dumps({"pane_path": "x", "record": {"terminal": {}}}))
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW)
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]

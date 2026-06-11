@@ -407,3 +407,34 @@ def test_ce_lane_launch_refuses_agent_ratifier_active_tenant_policy(tmp_path, us
     )
     assert ret == 1
     assert "G2-AGENT-RATIFIER-ACTIVE" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2b — `ce lane launch --json` consumption seam (the reviewer-venue bridge)
+# ---------------------------------------------------------------------------
+def test_ce_lane_launch_json_emits_record_and_pane_path(tmp_path, use_fake_tmux, capsys):
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha, json=True))
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["pane_path"] == str(_pane_path(ledger))
+    term = payload["record"]["terminal"]
+    assert term == {"kind": "tmux", "session_id": "$1", "window_id": "@2",
+                    "pane_id": "%3", "pane_tty": "/dev/pts/9", "pane_pid": 4242}
+    assert payload["record"]["claim_ref"] == "claims/hermes-primary/gate3-lane.yaml"
+
+
+def test_ce_lane_launch_human_output_is_byte_unchanged(tmp_path, use_fake_tmux, capsys):
+    # The flagless human line is byte-identical to today's (the --json addition is additive).
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha))
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert out == (
+        f"ce lane launch: wrote {_pane_path(ledger)} "
+        f"(tmux session=$1 window=@2 pane=%3)\n"
+    )

@@ -66,6 +66,7 @@ from . import (
     coordination,
     evidence_sink,
     runtime_evidence_spine,
+    v3_forge_join,
     v3_installer,
     v3_report,
     v3_seat_bridge,
@@ -73,6 +74,7 @@ from . import (
     v3_shaping,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
+from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
 from .schema import validate_with_schema
@@ -522,6 +524,37 @@ def _collected_run_evidence(root: Path, scope_id: str) -> Path | None:
     return chain if chain.is_file() else None
 
 
+def _forge_surface_for_scope(root: Path, scope_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The newest author ``change`` block + the newest live reviewer dispatch for a Scope (G2c).
+
+    Returns ``(change_block, review_dispatch)`` — either may be ``None``. The author change block is
+    the value-free PR pointer a ``cev3 pr --apply`` stamped; the review dispatch is a ``role:
+    reviewer`` dispatch that was spawned and not failure-stamped (a LIVE venue).
+    """
+    ddir = root / DISPATCHES_SUBDIR
+    if not ddir.is_dir():
+        return None, None
+    authors: list[dict[str, Any]] = []
+    reviews: list[dict[str, Any]] = []
+    for child in sorted(ddir.iterdir()):
+        drec = child / "dispatch.yaml"
+        if not drec.is_file():
+            continue
+        data = yaml.safe_load(drec.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("scope_id") != scope_id:
+            continue
+        if data.get("role") == "reviewer":
+            if data.get("spawned_at") and not data.get("spawn_failed_at"):
+                reviews.append(data)
+        elif data.get("change"):
+            authors.append(data)
+    change_block = (
+        sorted(authors, key=lambda d: str(d.get("run_id")))[-1].get("change") if authors else None
+    )
+    review = sorted(reviews, key=lambda d: str(d.get("run_id")))[-1] if reviews else None
+    return change_block, review
+
+
 def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | None, str | None]:
     """Resolve (evidence-path, run_id) for report/artifacts.
 
@@ -545,16 +578,11 @@ def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | N
 def _policy_sha(policy: dict[str, Any]) -> str:
     """The 64-hex policy binding for the run's records.
 
-    Uses the policy's own ``policy_sha`` when it is a valid 64-hex digest, else
-    derives a deterministic SHA256 over the canonical policy body (the chain check
-    enforces ``^[0-9a-f]{64}$`` on every record's ``policy_sha``).
+    Delegates to the canonical derivation (``v3_forge_join.policy_sha``) so the ``cev3 collect``
+    fold and the ``cev3 pr`` forge-join bind a run's records under the SAME policy digest — the
+    derivation lives in exactly one place (extracted, not duplicated).
     """
-    existing = policy.get("policy_sha")
-    if isinstance(existing, str) and _HEX64_RE.match(existing):
-        return existing
-    body = {k: v for k, v in policy.items() if k != "policy_sha"}
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return v3_forge_join.policy_sha(policy)
 
 
 def _utc_now_iso() -> str:
@@ -927,14 +955,28 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         unpriced = len(unpriced_turns)
 
     # 2) The typed terminal outcome + its value-free change_set pointer.
+    #    v3.1-G2a: when the dispatch carries a forge-stamped `change` block (a `cev3 pr --apply`
+    #    opened a real PR), derive the change_set FROM IT — closing G1's "head_sha defaults to the
+    #    run id" honesty gap with a forge-derived fact — and default --outcome to pr_opened. Explicit
+    #    flags still win; the operator-typed fallback is byte-conserved for runs that opened no PR.
+    change_block = dispatch.get("change") or {}
+    outcome = args.outcome or ("pr_opened" if change_block else None)
+    if outcome is None:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: --outcome is required "
+             f"(run {run_id!r} carries no stamped change block to derive it from)"],
+            {"error": "outcome_required", "run_id": run_id},
+        )
     change_set: dict[str, Any] = {
-        "branch": args.branch or run_id,
-        "base": args.base,
-        "manifest_paths": list(args.manifest_paths or []),
-        "head_sha": args.head_sha or run_id,
+        "branch": args.branch or change_block.get("branch") or run_id,
+        "base": args.base or change_block.get("base") or "main",
+        "manifest_paths": list(args.manifest_paths or change_block.get("manifest_paths") or []),
+        "head_sha": args.head_sha or change_block.get("head_sha") or run_id,
     }
-    if args.pr is not None:
-        change_set["pr_number"] = args.pr
+    pr_number = args.pr if args.pr is not None else change_block.get("pr_number")
+    if pr_number is not None:
+        change_set["pr_number"] = pr_number
     outcome_body = {
         "kind": runtime_evidence_spine.RUN_OUTCOME_RECORD_KIND,
         "record_type": runtime_evidence_spine.RUN_OUTCOME_RECORD_TYPE,
@@ -942,7 +984,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         "policy_sha": policy_sha,
         "run_id": run_id,
         "recorded_at": _utc_now_iso(),
-        "outcome": args.outcome,
+        "outcome": outcome,
         "change_set": change_set,
     }
 
@@ -957,7 +999,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
             handle_ref=run_id,
             records=tuple(chain),
             note=f"v3.1-G1 collect: run {run_id} folded {len(ledger_bodies)} spend leaf(s) "
-                 f"+ outcome {args.outcome}",
+                 f"+ outcome {outcome}",
         ))
     except evidence_sink.EvidencePersistRefused as exc:
         return _emit(
@@ -974,17 +1016,243 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     lines = [
         f"{_BRAND} · COLLECTED run {run_id!r} for Scope {args.scope_id!r} "
-        f"(outcome {args.outcome}, {len(ledger_bodies)} spend leaf(s)"
+        f"(outcome {outcome}, {len(ledger_bodies)} spend leaf(s)"
         + (f", {unpriced} unpriced" if unpriced else "") + ")",
         f"    evidence: {receipt.path}",
     ]
     return _emit(
         args, 0, lines,
         {"action": "collected", "scope_id": args.scope_id, "run_id": run_id,
-         "outcome": args.outcome, "pr": args.pr, "evidence": str(receipt.path),
+         "outcome": outcome, "pr": pr_number, "evidence": str(receipt.path),
          "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
          "record_count": receipt.record_count},
     )
+
+
+def _cmd_pr(args: argparse.Namespace) -> int:
+    """Push the seat's authored branch + open its PR through the v3 forge (G2a, plan-by-default).
+
+    Plan-by-default: without ``--apply`` it prints the would-push/would-open plan and mutates
+    nothing. With ``--apply`` it drives ``v3_forge_join.open_change_for_run``
+    (mint→push→open under a JIT least-privilege token, revoked in a finally) and stamps the
+    value-free ``change`` block onto the dispatch. The ORCHESTRATOR/Operator session invokes this —
+    a §7-governed seat is hook-denied the underlying push anyway (the authority model is conserved,
+    now with the mechanical push automated v3-side).
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    # Precondition: the run must belong to the named Scope (the collect discipline).
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · pr refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · pr refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    try:
+        app_config = v3_forge_join.load_app_config(args.app_config)
+        ref = v3_forge_join.open_change_for_run(
+            root, run_id, app_config=app_config, branch=args.branch,
+            manifest_paths=args.manifest_paths, base=args.base,
+            source_dir=args.source_dir, apply=args.apply,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · pr refused: {exc}"],
+            {"action": "pr_refused", "run_id": run_id, "detail": str(exc)},
+        )
+    opened = bool(args.apply) and ref.pr_number is not None
+    if opened:
+        lines = [
+            f"{_BRAND} · OPENED PR #{ref.pr_number} for Scope {args.scope_id!r} (run {run_id})",
+            f"    branch {ref.branch} → {ref.base} · head {ref.head_sha}",
+            f"    dispatch: {_dispatch_path(root, run_id)}",
+            f"    next: {CE_CMD} review {args.scope_id} --run {run_id} --spawn",
+        ]
+    else:
+        lines = [
+            f"{_BRAND} · PR PLAN for Scope {args.scope_id!r} (run {run_id}) — nothing mutated",
+            f"    would push branch {ref.branch} → {ref.base} on {ref.repo}",
+            f"{_BRAND} · (plan-only — pass --apply to push + open the PR)",
+        ]
+    return _emit(
+        args, 0, lines,
+        {"action": "pr_opened" if opened else "pr_planned",
+         "scope_id": args.scope_id, "run_id": run_id, "apply": bool(args.apply),
+         "pr_number": ref.pr_number, "branch": ref.branch, "base": ref.base,
+         "head_sha": ref.head_sha, "repo": ref.repo,
+         "dispatch_path": str(_dispatch_path(root, run_id))},
+    )
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Dispatch a distinct CE-governed reviewer venue for a run's opened PR (G2b).
+
+    Preconditions: the author dispatch exists, belongs to the named Scope, and carries a
+    forge-stamped ``change`` block with a real ``pr_number``/``head_sha`` (no PR ⇒ refuse with a
+    pointer to ``cev3 pr``). Materializes the reviewer-authority envelope + a ``role: reviewer``
+    dispatch; with ``--spawn`` it provisions + launches the venue (pco-allocate → ``ce lane launch
+    --json`` → seed). The review SUBMISSION (``gh pr review``) stays the venue's OWN governed act
+    under the live Ring-1 hook + envelope; v3 RECORDS the venue and later folds its outcome via the
+    unchanged ``cev3 collect ... --outcome review_submitted``.
+    """
+    root = Path(args.root)
+    author_run_id = args.run_id
+    try:
+        author = _load_dispatch(root, author_run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · review refused: {exc}"], {"error": str(exc)})
+    if author.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review refused: run {author_run_id!r} belongs to Scope "
+             f"{author.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": author_run_id,
+             "dispatch_scope_id": author.get("scope_id")},
+        )
+    change = author.get("change") or {}
+    pr_number = change.get("pr_number")
+    head_sha = change.get("head_sha")
+    if not pr_number or not head_sha:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review refused: run {author_run_id!r} has no opened PR to review",
+             f"{_BRAND} · open it first: {CE_CMD} pr {args.scope_id} --run {author_run_id} "
+             f"--branch <branch> --manifest-path <path> --app-config <cfg> --apply"],
+            {"error": "no_pr", "run_id": author_run_id},
+        )
+    if args.spawn and (not args.venue_root or not args.ledger_root):
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review --spawn refused: --venue-root and --ledger-root are required "
+             "to provision the out-of-repo reviewer venue"],
+            {"error": "spawn_inputs_missing", "run_id": author_run_id},
+        )
+
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, root, reviewer_actor=args.reviewer_actor,
+        pr_number=int(pr_number), head_sha=str(head_sha),
+    )
+    if not args.spawn:
+        lines = [
+            f"{_BRAND} · REVIEW dispatch assembled for Scope {args.scope_id!r} "
+            f"(PR #{pr_number}, review run {rec.run_id})",
+            f"    envelope: {rec.data['review_of']['envelope_ref']}",
+            f"    dispatch: {rec.dispatch_path}",
+            f"{_BRAND} · (assemble-only — pass --spawn to launch the governed reviewer venue)",
+        ]
+        return _emit(
+            args, 0, lines,
+            {"action": "review_assembled", "scope_id": args.scope_id,
+             "author_run_id": author_run_id, "review_run_id": rec.run_id,
+             "pr_number": int(pr_number),
+             "envelope_ref": rec.data["review_of"]["envelope_ref"],
+             "dispatch_path": str(rec.dispatch_path)},
+        )
+    try:
+        spawn = v3_seat_bridge.spawn_review_venue(
+            rec, controller_id=args.controller_id,
+            venue_root=args.venue_root, ledger_root=args.ledger_root,
+        )
+    except v3_seat_bridge.SeatBridgeError as exc:
+        # spawn_review_venue stamps mark_spawn_failed on any leg's refusal (conserved, not deleted).
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · review --spawn refused: {exc}"],
+            {"action": "spawn_refused", "reason": "venue_launch_refused",
+             "review_run_id": rec.run_id, "detail": str(exc),
+             "dispatch_path": str(rec.dispatch_path)},
+        )
+    pane = spawn.terminal.get("pane_id")
+    lines = [
+        f"{_BRAND} · SPAWNED reviewer venue for Scope {args.scope_id!r} "
+        f"(PR #{pr_number}, review run {rec.run_id})",
+        f"    envelope: {rec.data['review_of']['envelope_ref']}",
+        f"    dispatch: {rec.dispatch_path}",
+        f"    pane: {pane}  [reviewer]",
+        f"    next: {CE_CMD} collect {args.scope_id} --run {rec.run_id} "
+        f"--outcome review_submitted --pr {pr_number}",
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "spawned_review", "scope_id": args.scope_id,
+         "author_run_id": author_run_id, "review_run_id": rec.run_id,
+         "pr_number": int(pr_number), "pane_id": pane, "terminal": spawn.terminal,
+         "envelope_ref": rec.data["review_of"]["envelope_ref"],
+         "dispatch_path": str(rec.dispatch_path)},
+    )
+
+
+def _cmd_merge(args: argparse.Namespace) -> int:
+    """Gate-read (or apply) a squash-merge of the run's opened PR through the v3 forge (G2c).
+
+    Plan-by-default surfaces the gate snapshot (would_merge / review / checks / mergeable) and
+    mutates nothing. ``--apply`` is the Operator's explicit gated act (human-gate RATIFY+MERGE
+    conserved — the merge MECHANISM goes through v3, the DECISION stays human; server-side branch
+    protection + CODEOWNERS still rule), driven under the Operator's ambient ``gh`` as the DISTINCT
+    merge identity (never the per-run token). A non-merged result attests NOTHING.
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · merge refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · merge refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    merge_runner = v3_forge_join.ambient_gh_runner()
+    try:
+        result = v3_forge_join.merge_for_run(
+            root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · merge refused: {exc}"],
+            {"action": "merge_refused", "run_id": run_id, "detail": str(exc)},
+        )
+    snapshot = {
+        "pr_number": result.pr_number, "eligible": result.eligible,
+        "would_merge": result.would_merge, "merged": result.merged,
+        "merge_commit_sha": result.merge_commit_sha,
+        "review_decision": result.review_decision, "rollup_state": result.rollup_state,
+        "merge_state_status": result.merge_state_status, "mergeable": result.mergeable,
+    }
+    if args.apply and result.merged:
+        lines = [
+            f"{_BRAND} · MERGED PR #{result.pr_number} for Scope {args.scope_id!r} (run {run_id})",
+            f"    squash commit: {result.merge_commit_sha}",
+            f"    next: {CE_CMD} report {args.scope_id} --run {run_id}",
+        ]
+        return _emit(args, 0, lines, {"action": "merged", "scope_id": args.scope_id,
+                                      "run_id": run_id, **snapshot})
+    if args.apply:
+        # eligible gate but the server reported merged=false (rare) — attests nothing.
+        lines = [f"{_BRAND} · merge NOT completed for PR #{result.pr_number} "
+                 f"(merged={result.merged}); nothing attested"]
+        return _emit(args, 1, lines, {"action": "merge_not_completed", "scope_id": args.scope_id,
+                                      "run_id": run_id, **snapshot})
+    verdict = "WOULD merge" if result.would_merge else "would NOT merge (gate not satisfied)"
+    lines = [
+        f"{_BRAND} · MERGE PLAN for PR #{result.pr_number} (Scope {args.scope_id!r}, run {run_id})",
+        f"    {verdict}: review={result.review_decision} · checks={result.rollup_state} · "
+        f"mergeable={result.mergeable}",
+        f"{_BRAND} · (plan-only — pass --apply for the Operator's gated merge)",
+    ]
+    return _emit(args, 0, lines, {"action": "merge_planned", "scope_id": args.scope_id,
+                                  "run_id": run_id, **snapshot})
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -996,12 +1264,21 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"{_BRAND} · {len(scopes)} Scope(s) · "
         + " · ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
     ]
+    scope_payloads: list[dict[str, Any]] = []
     for s in sorted(scopes, key=lambda x: str(x.get("scope_id"))):
-        lines.append("  " + _card_line(s, root))
+        # v3.1-G2c: surface the opened PR + a live reviewer venue on the Scope line.
+        change_block, review = _forge_surface_for_scope(root, str(s.get("scope_id")))
+        pr_number = change_block.get("pr_number") if change_block else None
+        review_run_id = review.get("run_id") if review else None
+        badge = (f"  · PR #{pr_number}" if pr_number else "") + ("  · ⊙ review" if review else "")
+        lines.append("  " + _card_line(s, root) + badge)
+        scope_payloads.append(
+            {"scope_id": s.get("scope_id"), "projection": _projection(s, root),
+             "pr": pr_number, "review_run_id": review_run_id}
+        )
     return _emit(
         args, 0, lines,
-        {"action": "status", "count": len(scopes), "phase_counts": counts,
-         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s, root)} for s in scopes]},
+        {"action": "status", "count": len(scopes), "phase_counts": counts, "scopes": scope_payloads},
     )
 
 
@@ -1024,11 +1301,23 @@ def _cmd_show(args: argparse.Namespace) -> int:
         f"    Ready: {'yes' if ready else 'no — ' + '; '.join(reasons)}"
         f" · bet placed: {'yes' if coordination.is_ratified(scope) else 'no'}",
     ]
+    # v3.1-G2c: surface the forge state — the opened PR + a live reviewer venue, if any.
+    change_block, review = _forge_surface_for_scope(root, str(scope.get("scope_id")))
+    pr_number = change_block.get("pr_number") if change_block else None
+    review_run_id = review.get("run_id") if review else None
+    if change_block:
+        lines.append(
+            f"    PR: #{pr_number} ({change_block.get('branch')} → {change_block.get('base')})"
+        )
+    if review:
+        rv = review.get("review_of") or {}
+        lines.append(f"    Review venue: {review_run_id} (PR #{rv.get('pr_number')})")
     return _emit(
         args, 0, lines,
         {"action": "show", "scope_id": scope.get("scope_id"), "scope": scope,
          "projection": proj, "ready": ready, "reasons": reasons,
-         "ratified": coordination.is_ratified(scope)},
+         "ratified": coordination.is_ratified(scope),
+         "pr": pr_number, "review_run_id": review_run_id},
     )
 
 
@@ -1542,16 +1831,68 @@ def _build_parser() -> argparse.ArgumentParser:
     p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
     p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
     p_collect.add_argument("--transcript", default=None, help="the seat harness .jsonl transcript to meter")
-    p_collect.add_argument("--outcome", required=True, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
-                           help="the conserved terminal outcome")
+    p_collect.add_argument("--outcome", default=None, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
+                           help="the conserved terminal outcome (defaults to pr_opened when the "
+                                "dispatch carries a forge-stamped change block; otherwise required)")
     p_collect.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
-    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id)")
-    p_collect.add_argument("--base", default="main", help="value-free change base ref (default: main)")
+    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id / change block)")
+    p_collect.add_argument("--base", default=None, help="value-free change base ref (default: main / change block)")
     p_collect.add_argument("--head-sha", default=None, dest="head_sha",
                            help="value-free change head sha (default: run id)")
     p_collect.add_argument("--manifest-path", action="append", default=None, dest="manifest_paths",
                            help="value-free change manifest path (repeatable)")
     _add_root(p_collect)
+
+    p_pr = sub.add_parser(
+        "pr", help="push the seat's authored branch + open its PR through the v3 forge "
+                   "(plan-by-default; --apply pushes + opens)")
+    p_pr.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_pr.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
+    p_pr.add_argument("--branch", required=True, help="the seat's authored head branch to push + open")
+    p_pr.add_argument("--manifest-path", action="append", required=True, dest="manifest_paths",
+                      metavar="PATH", help="an authorized change manifest path (repeatable, required)")
+    p_pr.add_argument("--base", default="main", help="the PR base branch (default: main)")
+    p_pr.add_argument(
+        "--app-config", required=True, dest="app_config",
+        help="REQUIRED path to the host GitHub-App config JSON — NO default (host filenames "
+             "differ: laptop ~/.ce-keys/ce-forge-app.json, CE-DEV-1 ~/.ce-keys/ce-forge-dev1.json; "
+             "a default would silently miss on one host)",
+    )
+    p_pr.add_argument("--source-dir", default=".", dest="source_dir",
+                      help="local checkout holding the authored branch (default: cwd)")
+    p_pr.add_argument("--apply", action="store_true",
+                      help="push + open the PR for real (default: plan-only — mutates nothing)")
+    _add_root(p_pr)
+
+    p_review = sub.add_parser(
+        "review", help="dispatch a distinct CE-governed reviewer venue for a run's opened PR "
+                       "(assemble-only; --spawn launches the venue)")
+    p_review.add_argument("scope_id", metavar="ID", help="the Scope the author run delivered")
+    p_review.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                          help="the AUTHOR run id whose opened PR is reviewed")
+    p_review.add_argument("--reviewer-actor", required=True, dest="reviewer_actor",
+                          help="the host-bound reviewer LOGIN (DATA — a login, never a token; e.g. "
+                               "ubuntuaws745-cmyk on the laptop, cedev1vps-cmd on CE-DEV-1)")
+    p_review.add_argument("--spawn", action="store_true",
+                          help="provision + launch the governed reviewer venue (default: assemble-only)")
+    p_review.add_argument("--venue-root", default=None, dest="venue_root",
+                          help="out-of-repo zone the venue worktree is provisioned under "
+                               "(required with --spawn; execution-zones directive)")
+    p_review.add_argument("--ledger-root", default=None, dest="ledger_root",
+                          help="Active-Work ledger root for the venue claim (required with --spawn)")
+    p_review.add_argument("--controller-id", default="cev3-review", dest="controller_id",
+                          help="controller id for the venue lane (default: cev3-review)")
+    _add_root(p_review)
+
+    p_merge = sub.add_parser(
+        "merge", help="gate-read (or apply) a squash-merge of a run's opened PR "
+                      "(plan-by-default; --apply is the Operator's gated act)")
+    p_merge.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_merge.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                         help="the run whose collected chain carries the opened PR")
+    p_merge.add_argument("--apply", action="store_true",
+                         help="perform the gated squash-merge (default: plan-only — read the gate)")
+    _add_root(p_merge)
 
     p_escalation = sub.add_parser(
         "escalation",
@@ -1711,6 +2052,9 @@ _DISPATCH = {
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
     "collect": _cmd_collect,
+    "pr": _cmd_pr,
+    "review": _cmd_review,
+    "merge": _cmd_merge,
     "escalation": _cmd_escalation,
     "status": _cmd_status,
     "show": _cmd_show,

@@ -203,6 +203,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="refuse-only flag: request a non-visible terminal (always refused for visible roles)",
     )
+    launch.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit the machine-readable launch record (pane_path + the Pane Registry record) — "
+        "the v3.1-G2b consumption seam for the reviewer-venue bridge; default output unchanged",
+    )
 
     st = lane_sub.add_parser("status", help="read the live Pane Registry record for a lane")
     st.add_argument("--controller-id", required=True)
@@ -682,11 +689,20 @@ def _lane_launch(args) -> int:
     except lane_runtime.LaneLaunchError as exc:
         print(f"ERROR: ce lane launch refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
-    term = result.record["terminal"]
-    print(
-        f"ce lane launch: wrote {result.pane_path} "
-        f"(tmux session={term['session_id']} window={term['window_id']} pane={term['pane_id']})"
-    )
+    if getattr(args, "json_output", False):
+        # v3.1-G2b: the lane-launch consumption seam (twin of `ce launch --json`). The Pane
+        # Registry record already carries the value-free terminal {session_id, window_id, pane_id};
+        # the v3 reviewer-venue bridge parses this to stamp the review dispatch.
+        print(json.dumps(
+            {"pane_path": str(result.pane_path), "record": result.record},
+            indent=2, sort_keys=True,
+        ))
+    else:
+        term = result.record["terminal"]
+        print(
+            f"ce lane launch: wrote {result.pane_path} "
+            f"(tmux session={term['session_id']} window={term['window_id']} pane={term['pane_id']})"
+        )
     return 0
 
 

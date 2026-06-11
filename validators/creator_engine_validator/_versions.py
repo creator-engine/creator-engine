@@ -85,6 +85,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # consumed by the A-C4 forge_claim_dedup gate.
         "forge.backlog",
         "forge.change",
+        # v3.1-G2a: the missing branch-push primitive — pushes the governed seat's
+        # authored head to the CONSTRUCTED HTTPS remote (never the SSH origin) so
+        # `open_change` can claim its PR; plan-by-default, never force-pushes.
+        "forge.change_push",
         "forge.change_status",
         "forge.credential_runner",
         "forge.github_repo_config",
@@ -118,6 +122,12 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # JSON) — imports NO v1 module, so the HARD invariant + the ratchet stay
         # untouched by construction (AST-asserted in test_v3_seat_bridge).
         "v3_seat_bridge",
+        # v3.1-G2a: the forge-leg composition root joining the G1 dispatch to the
+        # forge (push→open→merge). Imports forge.*/run_assembly/orchestrator — all
+        # v3; imports NO v1 module (AST-asserted in test_v3_forge_join). The JIT
+        # token value + the App private key stay behind the credential_runner /
+        # openssl seams; never argv/log/disk/record.
+        "v3_forge_join",
         # v3 G-7 product surface: the distinct work-driving CLI (``cev3``)
         "v3_cli",
         # v3 G-7 product surface: the session frame + unified status line render
