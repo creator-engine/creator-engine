@@ -160,7 +160,52 @@ properties:
       The value-free refusal text for `spawn_failed_at` (the same message
       surfaced to the operator) — NEVER a credential/host/account. Absent on a
       clean spawn.
+  change:
+    $ref: "#/$defs/change"
+    description: |
+      v3.1-G2a: the value-free pointer to the PR a `cev3 pr --apply` opened for
+      this run's authored branch (stamped by `v3_forge_join.open_change_for_run`).
+      Shape refs ONLY — branch / base / pr_number / head_sha / manifest_paths /
+      opened_at — NEVER a credential, token, App id, or installation id. Absent
+      until a PR is opened (a run may end at research_delivered / no_change with
+      no `change` block); `cev3 collect` derives the `change_set` + `pr_opened`
+      outcome from it when present.
 $defs:
+  change:
+    type: object
+    required: [branch, base, pr_number, manifest_paths, opened_at]
+    unevaluatedProperties: false
+    properties:
+      branch:
+        type: string
+        minLength: 1
+        description: The seat-authored head branch the PR was opened for.
+      base:
+        type: string
+        minLength: 1
+        description: The target branch the PR merges into (e.g. `main`).
+      pr_number:
+        type: integer
+        minimum: 1
+        description: The opened/claimed PR number (push = claim; one PR per branch).
+      head_sha:
+        oneOf:
+          - type: "null"
+          - type: string
+            pattern: "^[0-9a-f]{7,40}$"
+        description: |
+          The PR head commit sha (the value the merge head-pins). Null only when
+          the forge did not return a head on open.
+      manifest_paths:
+        type: array
+        items:
+          type: string
+          minLength: 1
+        description: The authorized path-set this change carries (the carrier mirror).
+      opened_at:
+        type: string
+        minLength: 1
+        description: UTC stamp the PR was opened (`%Y-%m-%dT%H:%M:%SZ`).
   scope_ratification:
     type: object
     required: [approver_ref, ratified_scope_sha]
