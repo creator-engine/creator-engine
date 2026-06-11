@@ -478,3 +478,156 @@ def test_token_value_only_in_authenticated_call_env(tmp_path):
             assert "GH_TOKEN" not in c["env"]
         if "push" in c["argv"]:
             assert c["env"].get("GH_TOKEN") == SENTINEL
+
+
+# ===========================================================================
+# v3.1-G2c — merge_for_run (gated merge; distinct identity; pr_merged on real merge)
+# ===========================================================================
+from creator_engine_validator import evidence_sink as _evidence_sink
+from creator_engine_validator import runtime_evidence_spine as _spine
+from creator_engine_validator.forge.merge import MergeRefused
+from creator_engine_validator.runner.backend import CollectedEvidence
+from creator_engine_validator.v3_forge_join import ambient_gh_runner, merge_for_run
+
+
+class FakeMergeGh:
+    """Routes the gated-merge gh calls (graphql review/checks/conflict reads + the squash PUT)."""
+
+    def __init__(self, *, review="APPROVED", rollup="SUCCESS", merge_state="CLEAN",
+                 mergeable="MERGEABLE", merged=True, commit="f" * 40):
+        self.calls = []
+        self.review = review
+        self.rollup = rollup
+        self.merge_state = merge_state
+        self.mergeable = mergeable
+        self.merged = merged
+        self.commit = commit
+
+    def __call__(self, argv, input_text=None):
+        argv = list(argv)
+        self.calls.append(argv)
+        joined = " ".join(argv)
+        if "-X" in argv and "PUT" in argv:
+            return _CP(argv, 0, stdout=json.dumps({"merged": self.merged, "sha": self.commit}))
+        if "reviewDecision" in joined:
+            return _CP(argv, 0, stdout=json.dumps(
+                {"data": {"repository": {"pullRequest": {"reviewDecision": self.review}}}}))
+        if "statusCheckRollup" in joined:
+            return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
+                "headRefOid": "d" * 40,
+                "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": self.rollup}}}]}}}}}))
+        if "mergeStateStatus" in joined:
+            return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
+                "mergeStateStatus": self.merge_state, "mergeable": self.mergeable}}}}))
+        raise AssertionError(f"unexpected merge gh argv: {joined}")  # pragma: no cover
+
+    def did_put(self):
+        return any("-X" in c and "PUT" in c for c in self.calls)
+
+
+def _collected_author_run(tmp_path, *, pr_number=7, head_sha="d" * 40, policy_sha="e" * 64):
+    """A spawned+collected author dispatch with a persisted pr_opened chain; returns run_id."""
+    run_id = _seed_dispatch(tmp_path)  # spawned
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text())
+    drec["collected_at"] = "2026-06-11T09:31:00Z"
+    (tmp_path / "dispatches" / run_id / "dispatch.yaml").write_text(
+        yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
+    body = {
+        "kind": _spine.RUN_OUTCOME_RECORD_KIND, "record_type": _spine.RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1", "policy_sha": policy_sha, "run_id": run_id,
+        "recorded_at": "2026-06-11T09:30:00+00:00", "outcome": "pr_opened",
+        "change_set": {"branch": BRANCH, "base": "main", "manifest_paths": ["validators/x.py"],
+                       "head_sha": head_sha, "pr_number": pr_number},
+    }
+    chain = [_spine.append([], body)]
+    sink = _evidence_sink.file_evidence_sink(tmp_path / "runs")
+    sink(CollectedEvidence(handle_ref=run_id, records=tuple(chain), note="g2c-test"))
+    return run_id
+
+
+def test_merge_plan_reads_gate_and_attests_nothing(tmp_path):
+    run_id = _collected_author_run(tmp_path)
+    gh = FakeMergeGh()
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=False)
+    assert result.would_merge is True and result.merged is False and result.eligible is True
+    assert not gh.did_put()  # plan mode never PUTs
+    # the chain is unchanged (no pr_merged appended)
+    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
+    outcomes = [r["outcome"] for r in doc["records"] if r.get("outcome")]
+    assert outcomes == ["pr_opened"]
+
+
+def test_merge_apply_eligible_attests_pr_merged_and_repersists(tmp_path):
+    run_id = _collected_author_run(tmp_path, pr_number=7)
+    gh = FakeMergeGh(merged=True, commit="f" * 40)
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True)
+    assert result.merged is True and result.merge_commit_sha == "f" * 40
+    assert gh.did_put()
+    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
+    outcomes = [r["outcome"] for r in doc["records"] if r.get("outcome")]
+    assert outcomes == ["pr_opened", "pr_merged"]  # appended onto the SAME chain
+    assert _spine.verify_chain(doc["records"]) == []  # re-persisted chain still verifies
+
+
+def test_merge_apply_ineligible_refuses_and_attests_nothing(tmp_path):
+    run_id = _collected_author_run(tmp_path)
+    gh = FakeMergeGh(rollup="FAILURE")  # checks not green → ineligible
+    with pytest.raises(MergeRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True)
+    assert not gh.did_put()  # never merged an ungated PR
+    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
+    assert [r["outcome"] for r in doc["records"] if r.get("outcome")] == ["pr_opened"]
+
+
+def test_merge_plan_ineligible_reports_would_not_merge(tmp_path):
+    run_id = _collected_author_run(tmp_path)
+    gh = FakeMergeGh(review="CHANGES_REQUESTED")
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=False)
+    assert result.would_merge is False and result.merged is False
+
+
+def test_merge_refuses_uncollected_run(tmp_path):
+    run_id = _seed_dispatch(tmp_path)  # spawned but NOT collected
+    with pytest.raises(ForgeJoinRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(), apply=False)
+
+
+def test_merge_refuses_when_chain_has_no_pr(tmp_path):
+    run_id = _seed_dispatch(tmp_path)
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text())
+    drec["collected_at"] = "2026-06-11T09:31:00Z"
+    (tmp_path / "dispatches" / run_id / "dispatch.yaml").write_text(yaml.safe_dump(drec))
+    # a no_change chain (no pr_opened with a pr_number)
+    body = {
+        "kind": _spine.RUN_OUTCOME_RECORD_KIND, "record_type": _spine.RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1", "policy_sha": "e" * 64, "run_id": run_id,
+        "recorded_at": "2026-06-11T09:30:00+00:00", "outcome": "no_change",
+        "change_set": {"branch": run_id, "base": "main", "manifest_paths": [], "head_sha": run_id},
+    }
+    sink = _evidence_sink.file_evidence_sink(tmp_path / "runs")
+    sink(CollectedEvidence(handle_ref=run_id, records=(_spine.append([], body),), note="x"))
+    with pytest.raises(ForgeJoinRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(), apply=True)
+
+
+def test_merge_uses_distinct_identity_no_token_minted(tmp_path, monkeypatch):
+    # merge_for_run mints NO per-run token — the merge rides the injected (distinct) runner only.
+    import creator_engine_validator.v3_forge_join as mod
+    monkeypatch.setattr(mod, "mint_scoped_token",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("merge minted a token!")))
+    run_id = _collected_author_run(tmp_path)
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(), apply=True)
+    assert result.merged is True
+
+
+def test_ambient_gh_runner_injects_no_token(tmp_path):
+    # the ambient runner authenticates AS the Operator's gh login — no GH_TOKEN injection.
+    captured = {}
+
+    def fake_spawn(argv, **kw):
+        captured["argv"] = list(argv)
+        return _CP(argv, 0, stdout="{}")
+
+    runner = ambient_gh_runner(spawn=fake_spawn)
+    runner(["gh", "api", "-X", "GET", "x"])
+    assert captured["argv"][:2] == ["gh", "api"]

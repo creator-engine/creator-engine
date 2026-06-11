@@ -524,6 +524,37 @@ def _collected_run_evidence(root: Path, scope_id: str) -> Path | None:
     return chain if chain.is_file() else None
 
 
+def _forge_surface_for_scope(root: Path, scope_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The newest author ``change`` block + the newest live reviewer dispatch for a Scope (G2c).
+
+    Returns ``(change_block, review_dispatch)`` — either may be ``None``. The author change block is
+    the value-free PR pointer a ``cev3 pr --apply`` stamped; the review dispatch is a ``role:
+    reviewer`` dispatch that was spawned and not failure-stamped (a LIVE venue).
+    """
+    ddir = root / DISPATCHES_SUBDIR
+    if not ddir.is_dir():
+        return None, None
+    authors: list[dict[str, Any]] = []
+    reviews: list[dict[str, Any]] = []
+    for child in sorted(ddir.iterdir()):
+        drec = child / "dispatch.yaml"
+        if not drec.is_file():
+            continue
+        data = yaml.safe_load(drec.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("scope_id") != scope_id:
+            continue
+        if data.get("role") == "reviewer":
+            if data.get("spawned_at") and not data.get("spawn_failed_at"):
+                reviews.append(data)
+        elif data.get("change"):
+            authors.append(data)
+    change_block = (
+        sorted(authors, key=lambda d: str(d.get("run_id")))[-1].get("change") if authors else None
+    )
+    review = sorted(reviews, key=lambda d: str(d.get("run_id")))[-1] if reviews else None
+    return change_block, review
+
+
 def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | None, str | None]:
     """Resolve (evidence-path, run_id) for report/artifacts.
 
@@ -1158,6 +1189,72 @@ def _cmd_review(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_merge(args: argparse.Namespace) -> int:
+    """Gate-read (or apply) a squash-merge of the run's opened PR through the v3 forge (G2c).
+
+    Plan-by-default surfaces the gate snapshot (would_merge / review / checks / mergeable) and
+    mutates nothing. ``--apply`` is the Operator's explicit gated act (human-gate RATIFY+MERGE
+    conserved — the merge MECHANISM goes through v3, the DECISION stays human; server-side branch
+    protection + CODEOWNERS still rule), driven under the Operator's ambient ``gh`` as the DISTINCT
+    merge identity (never the per-run token). A non-merged result attests NOTHING.
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · merge refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · merge refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    merge_runner = v3_forge_join.ambient_gh_runner()
+    try:
+        result = v3_forge_join.merge_for_run(
+            root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · merge refused: {exc}"],
+            {"action": "merge_refused", "run_id": run_id, "detail": str(exc)},
+        )
+    snapshot = {
+        "pr_number": result.pr_number, "eligible": result.eligible,
+        "would_merge": result.would_merge, "merged": result.merged,
+        "merge_commit_sha": result.merge_commit_sha,
+        "review_decision": result.review_decision, "rollup_state": result.rollup_state,
+        "merge_state_status": result.merge_state_status, "mergeable": result.mergeable,
+    }
+    if args.apply and result.merged:
+        lines = [
+            f"{_BRAND} · MERGED PR #{result.pr_number} for Scope {args.scope_id!r} (run {run_id})",
+            f"    squash commit: {result.merge_commit_sha}",
+            f"    next: {CE_CMD} report {args.scope_id} --run {run_id}",
+        ]
+        return _emit(args, 0, lines, {"action": "merged", "scope_id": args.scope_id,
+                                      "run_id": run_id, **snapshot})
+    if args.apply:
+        # eligible gate but the server reported merged=false (rare) — attests nothing.
+        lines = [f"{_BRAND} · merge NOT completed for PR #{result.pr_number} "
+                 f"(merged={result.merged}); nothing attested"]
+        return _emit(args, 1, lines, {"action": "merge_not_completed", "scope_id": args.scope_id,
+                                      "run_id": run_id, **snapshot})
+    verdict = "WOULD merge" if result.would_merge else "would NOT merge (gate not satisfied)"
+    lines = [
+        f"{_BRAND} · MERGE PLAN for PR #{result.pr_number} (Scope {args.scope_id!r}, run {run_id})",
+        f"    {verdict}: review={result.review_decision} · checks={result.rollup_state} · "
+        f"mergeable={result.mergeable}",
+        f"{_BRAND} · (plan-only — pass --apply for the Operator's gated merge)",
+    ]
+    return _emit(args, 0, lines, {"action": "merge_planned", "scope_id": args.scope_id,
+                                  "run_id": run_id, **snapshot})
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     """List Scopes with their projected stage (the canon skin over the machine)."""
     root = Path(args.root)
@@ -1167,12 +1264,21 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"{_BRAND} · {len(scopes)} Scope(s) · "
         + " · ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
     ]
+    scope_payloads: list[dict[str, Any]] = []
     for s in sorted(scopes, key=lambda x: str(x.get("scope_id"))):
-        lines.append("  " + _card_line(s, root))
+        # v3.1-G2c: surface the opened PR + a live reviewer venue on the Scope line.
+        change_block, review = _forge_surface_for_scope(root, str(s.get("scope_id")))
+        pr_number = change_block.get("pr_number") if change_block else None
+        review_run_id = review.get("run_id") if review else None
+        badge = (f"  · PR #{pr_number}" if pr_number else "") + ("  · ⊙ review" if review else "")
+        lines.append("  " + _card_line(s, root) + badge)
+        scope_payloads.append(
+            {"scope_id": s.get("scope_id"), "projection": _projection(s, root),
+             "pr": pr_number, "review_run_id": review_run_id}
+        )
     return _emit(
         args, 0, lines,
-        {"action": "status", "count": len(scopes), "phase_counts": counts,
-         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s, root)} for s in scopes]},
+        {"action": "status", "count": len(scopes), "phase_counts": counts, "scopes": scope_payloads},
     )
 
 
@@ -1195,11 +1301,23 @@ def _cmd_show(args: argparse.Namespace) -> int:
         f"    Ready: {'yes' if ready else 'no — ' + '; '.join(reasons)}"
         f" · bet placed: {'yes' if coordination.is_ratified(scope) else 'no'}",
     ]
+    # v3.1-G2c: surface the forge state — the opened PR + a live reviewer venue, if any.
+    change_block, review = _forge_surface_for_scope(root, str(scope.get("scope_id")))
+    pr_number = change_block.get("pr_number") if change_block else None
+    review_run_id = review.get("run_id") if review else None
+    if change_block:
+        lines.append(
+            f"    PR: #{pr_number} ({change_block.get('branch')} → {change_block.get('base')})"
+        )
+    if review:
+        rv = review.get("review_of") or {}
+        lines.append(f"    Review venue: {review_run_id} (PR #{rv.get('pr_number')})")
     return _emit(
         args, 0, lines,
         {"action": "show", "scope_id": scope.get("scope_id"), "scope": scope,
          "projection": proj, "ready": ready, "reasons": reasons,
-         "ratified": coordination.is_ratified(scope)},
+         "ratified": coordination.is_ratified(scope),
+         "pr": pr_number, "review_run_id": review_run_id},
     )
 
 
@@ -1766,6 +1884,16 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="controller id for the venue lane (default: cev3-review)")
     _add_root(p_review)
 
+    p_merge = sub.add_parser(
+        "merge", help="gate-read (or apply) a squash-merge of a run's opened PR "
+                      "(plan-by-default; --apply is the Operator's gated act)")
+    p_merge.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_merge.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                         help="the run whose collected chain carries the opened PR")
+    p_merge.add_argument("--apply", action="store_true",
+                         help="perform the gated squash-merge (default: plan-only — read the gate)")
+    _add_root(p_merge)
+
     p_escalation = sub.add_parser(
         "escalation",
         help="manage local AWAITING-OPERATOR escalation records",
@@ -1926,6 +2054,7 @@ _DISPATCH = {
     "collect": _cmd_collect,
     "pr": _cmd_pr,
     "review": _cmd_review,
+    "merge": _cmd_merge,
     "escalation": _cmd_escalation,
     "status": _cmd_status,
     "show": _cmd_show,

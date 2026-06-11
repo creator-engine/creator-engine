@@ -1333,3 +1333,204 @@ def test_review_spawn_fail_closed(tmp_path, capsys, monkeypatch):
         tmp_path, run_id, spawn=True, venue_root=str(tmp_path / "v"), ledger_root=str(tmp_path / "l")))
     assert code == 1
     assert json.loads(capsys.readouterr().out)["action"] == "spawn_refused"
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2c — cev3 merge (gated squash; plan-by-default; --apply is the gated act)
+# ---------------------------------------------------------------------------
+def _merge_result(*, merged=False, would_merge=True, commit=None):
+    from creator_engine_validator.forge.merge import MergeResult
+    return MergeResult(
+        pr_number=7, head_sha="d" * 40, eligible=would_merge, would_merge=would_merge,
+        merged=merged, merge_commit_sha=commit, review_decision="APPROVED",
+        rollup_state="SUCCESS", merge_state_status="CLEAN", mergeable="MERGEABLE",
+        applied=merged,
+    )
+
+
+@pytest.fixture()
+def _fake_merge(monkeypatch):
+    calls = {}
+
+    def fake_merge_for_run(root, run_id, *, merge_gh_runner, apply=False, **kw):
+        calls["apply"] = apply
+        calls["run_id"] = run_id
+        if calls.get("raise"):
+            raise v3_cli.v3_forge_join.ForgeJoinRefused(calls["raise"])
+        return _merge_result(merged=apply, would_merge=True,
+                             commit=("f" * 40 if apply else None))
+
+    monkeypatch.setattr(v3_cli.v3_forge_join, "merge_for_run", fake_merge_for_run)
+    monkeypatch.setattr(v3_cli.v3_forge_join, "ambient_gh_runner", lambda **k: (lambda *a, **kw: None))
+    return calls
+
+
+def test_merge_plan_reports_gate_snapshot(tmp_path, capsys, monkeypatch, _fake_merge):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "merge_planned" and payload["would_merge"] is True
+    assert payload["merged"] is False and _fake_merge["apply"] is False
+
+
+def test_merge_apply_reports_merged(tmp_path, capsys, monkeypatch, _fake_merge):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--apply",
+                        "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "merged" and payload["merge_commit_sha"] == "f" * 40
+    assert _fake_merge["apply"] is True
+
+
+def test_merge_refuses_scope_mismatch(tmp_path, capsys, monkeypatch, _fake_merge):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "other-scope", "--run", run_id, "--root", str(tmp_path), "--json"])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "scope_mismatch"
+    assert "run_id" not in _fake_merge  # merge_for_run never reached
+
+
+def test_merge_surfaces_forge_refusal(tmp_path, capsys, monkeypatch, _fake_merge):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _fake_merge["raise"] = "not collected"
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--apply",
+                        "--root", str(tmp_path), "--json"])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["action"] == "merge_refused"
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2c — read-model: show/status surface the PR + a live reviewer venue
+# ---------------------------------------------------------------------------
+def _seed_review_dispatch(tmp_path, author_run_id, *, pr_number=7):
+    author = yaml.safe_load((tmp_path / "dispatches" / author_run_id / "dispatch.yaml").read_text())
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor="ubuntuaws745-cmyk", pr_number=pr_number, head_sha="d" * 40)
+    rec.data["terminal"] = {"kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": "%7"}
+    rec.data["spawned_at"] = "20260611T093500Z"
+    v3_seat_bridge._write_record(rec)
+    return rec.run_id
+
+
+def test_show_surfaces_pr_and_review_venue(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+    review_run_id = _seed_review_dispatch(tmp_path, run_id, pr_number=7)
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "PR: #7" in out and "Review venue:" in out and review_run_id in out
+
+
+def test_status_surfaces_pr_in_payload(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+    capsys.readouterr()
+    v3_cli.main(["status", "--root", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    scope = next(s for s in payload["scopes"] if s["scope_id"] == "rate-limit-login")
+    assert scope["pr"] == 7
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2 keystone — end-to-end faked drive: scope→pr→review→collect→merge→report
+# ---------------------------------------------------------------------------
+class _E2EMergeGh:
+    """Routes the gated-merge gh calls for the e2e (review/checks/conflict reads + squash PUT)."""
+
+    def __call__(self, argv, input_text=None):
+        argv = list(argv)
+        joined = " ".join(argv)
+        if "-X" in argv and "PUT" in argv:
+            return _cp(argv, json.dumps({"merged": True, "sha": "f" * 40}))
+        if "reviewDecision" in joined:
+            return _cp(argv, json.dumps({"data": {"repository": {"pullRequest": {"reviewDecision": "APPROVED"}}}}))
+        if "statusCheckRollup" in joined:
+            return _cp(argv, json.dumps({"data": {"repository": {"pullRequest": {
+                "headRefOid": "d" * 40,
+                "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}}}}))
+        if "mergeStateStatus" in joined:
+            return _cp(argv, json.dumps({"data": {"repository": {"pullRequest": {
+                "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE"}}}}))
+        raise AssertionError(joined)  # pragma: no cover
+
+
+def _cp(argv, stdout):
+    import subprocess
+    return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+
+def test_e2e_scope_to_pr_to_review_to_merge_to_report(tmp_path, capsys, monkeypatch):
+    # 1) scope → ratify → drive --spawn (faked seat bridge) with a rates policy for the spend fold.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+
+    # 2) cev3 pr --apply (faked forge join: stamps the change block like the real open does).
+    from creator_engine_validator.forge.change import ChangeRef
+
+    def fake_open(root, rid, *, app_config, branch, manifest_paths, base="main",
+                  source_dir=".", apply=False, **kw):
+        if apply:
+            dpath = Path(root) / "dispatches" / rid / "dispatch.yaml"
+            drec = yaml.safe_load(dpath.read_text())
+            drec["change"] = {"branch": branch, "base": base, "pr_number": 7, "head_sha": "d" * 40,
+                              "manifest_paths": list(manifest_paths), "opened_at": "2026-06-11T09:30:00Z"}
+            dpath.write_text(yaml.safe_dump(drec))
+        return ChangeRef(repo=app_config.repo, branch=branch, base=base,
+                         pr_number=(7 if apply else None), head_sha=("d" * 40 if apply else None),
+                         manifest_paths=tuple(manifest_paths), plan_ref="e" * 64,
+                         changed=True, applied=apply, verified=apply)
+
+    monkeypatch.setattr(v3_cli.v3_forge_join, "load_app_config",
+                        lambda p: v3_cli.v3_forge_join.AppConfig("x", 1, "/k.pem", _G2_REPO, ()))
+    monkeypatch.setattr(v3_cli.v3_forge_join, "open_change_for_run", fake_open)
+    assert v3_cli.main([
+        "pr", "rate-limit-login", "--run", run_id, "--branch", "v31-g2-forge-join",
+        "--manifest-path", "validators/x.py", "--app-config", str(tmp_path / "app.json"),
+        "--apply", "--root", str(tmp_path), "--json"]) == 0
+
+    # 3) cev3 review --spawn (faked venue launch).
+    monkeypatch.setattr(v3_cli.v3_seat_bridge, "spawn_review_venue",
+                        lambda rec, **kw: v3_seat_bridge.SpawnResult(
+                            run_id=rec.run_id,
+                            terminal={"kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": "%7"}))
+    capsys.readouterr()
+    assert v3_cli.main([
+        "review", "rate-limit-login", "--run", run_id, "--reviewer-actor", "ubuntuaws745-cmyk",
+        "--spawn", "--venue-root", str(tmp_path / "venues"), "--ledger-root", str(tmp_path / "ledger"),
+        "--root", str(tmp_path), "--json"]) == 0
+    review_run_id = json.loads(capsys.readouterr().out)["review_run_id"]
+
+    # 4) cev3 collect the REVIEW venue run (its own run, its own chain).
+    rtx = _transcript(tmp_path / "review.jsonl")
+    assert v3_cli.main([
+        "collect", "rate-limit-login", "--run", review_run_id, "--transcript", str(rtx),
+        "--outcome", "review_submitted", "--pr", "7", "--root", str(tmp_path)]) == 0
+
+    # 5) cev3 collect the AUTHOR run — derives change_set + pr_opened FROM the stamped change block.
+    atx = _transcript(tmp_path / "author.jsonl")
+    assert v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(atx),
+        "--root", str(tmp_path)]) == 0
+
+    # 6) cev3 merge --apply (REAL merge_for_run; ambient gh faked) → appends pr_merged.
+    monkeypatch.setattr(v3_cli.v3_forge_join, "ambient_gh_runner", lambda **k: _E2EMergeGh())
+    capsys.readouterr()
+    assert v3_cli.main([
+        "merge", "rate-limit-login", "--run", run_id, "--apply", "--root", str(tmp_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "merged"
+
+    # 7) cev3 report the AUTHOR run → ◆ renders outcome pr_merged + PR #7 + the spend fold.
+    capsys.readouterr()
+    chain = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
+    assert v3_cli.main([
+        "report", "rate-limit-login", "--evidence", str(chain), "--run-id", run_id,
+        "--cap", "5", "--root", str(tmp_path), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["outcome"] == "pr_merged"
+    assert report["action"] == "report"

@@ -17,8 +17,11 @@ state meets the forge:
   spawned, is not spawn-failure-stamped, carries no prior ``change`` block) BEFORE any forge call,
   then mint→push→open under a JIT, least-privilege, time-boxed token revoked in a ``finally`` (the
   ``run_assembly`` discipline). It stamps a value-free ``change`` block onto ``dispatch.yaml``.
-* :func:`merge_for_run` (G2c) is the gated-merge leg, reusing ``run_assembly.make_merge_driver`` /
-  ``orchestrator.merge_change``.
+* :func:`merge_for_run` (G2c) is the gated-merge leg — it mirrors
+  ``run_assembly.make_merge_driver``'s composition (reconstruct the ChangeRef from the
+  ``pr_opened`` change_set → gated ``forge.merge`` under a DISTINCT identity →
+  ``orchestrator.merge_change`` persist) while ALSO surfacing the ``MergeResult`` gate snapshot the
+  plan-mode CLI needs (the driver returns only ``CollectedEvidence``).
 
 **The v1⊥v3 boundary.** This module imports ``forge.*`` / ``run_assembly`` / ``orchestrator`` —
 all v3 — and imports **NO v1 module** (``test_v3_forge_join`` asserts this off the AST). The join
@@ -49,17 +52,22 @@ from typing import Any
 
 import yaml
 
+from .evidence_sink import file_evidence_sink
 from .forge.app_jwt_runner import Signer, app_jwt_gh_runner
 from .forge.change import ChangeRef, open_change
 from .forge.change_push import push_change
 from .forge.credential_runner import authenticated_gh_runner
 from .forge.github_repo_config import ForgeConfigError, GhRunner
+from .forge.merge import MergeResult, merge
 from .forge.scoped_token import (
     ScopedToken,
     TokenRequest,
     mint_scoped_token,
     revoke_scoped_token,
 )
+from .orchestrator import merge_change
+from .runner.backend import CollectedEvidence, RunChangeSet
+from .runtime_evidence_spine import RUN_OUTCOME_RECORD_TYPE
 
 #: The verified live host App-config convention (instance-local, outside the repo). The
 #: ``--app-config`` flag is REQUIRED on ``cev3 pr`` (host filenames differ); this is documentation
@@ -73,6 +81,8 @@ DEFAULT_REPO = "creator-engine/creator-engine"
 #: The dispatch-state subdir under the v3 local-state ``root`` (mirrors ``v3_seat_bridge`` /
 #: ``v3_cli``; replicated locally to avoid coupling to either module).
 DISPATCHES_SUBDIR = "dispatches"
+#: The run-evidence subdir under the v3 local-state ``root`` (the persisted chains).
+RUNS_SUBDIR = "runs"
 
 #: The EXACT least-privilege permission set a PR-open per-run credential requests — never broader.
 PR_TOKEN_PERMISSIONS: dict[str, str] = {"contents": "write", "pull_requests": "write"}
@@ -368,3 +378,115 @@ def open_change_for_run(
                 run_id,
                 token.token_ref,
             )
+
+
+# ---------------------------------------------------------------------------
+# G2c — the gated-merge leg (the DISTINCT merge identity; never the per-run token)
+# ---------------------------------------------------------------------------
+def ambient_gh_runner(*, spawn: Any = subprocess.run) -> GhRunner:
+    """A :data:`GhRunner` authenticating AS the Operator's ambient ``gh`` login — the DISTINCT
+    merge identity (fork §6.4).
+
+    The per-run token AUTHORED the PR, so it must NEVER merge it (self-merge collision; the merge
+    gate + branch protection assume an independent merger). The merge therefore rides the Operator's
+    ambient ``gh auth`` login — no token is injected into the child env, and this module mints NO
+    per-run token on the merge path. CI injects a fake ``spawn``.
+    """
+    def runner(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
+        return spawn(
+            list(argv), check=False, capture_output=True, text=True, input=input_text, timeout=60
+        )
+
+    return runner
+
+
+def _pr_opened_change_set(records: list[dict[str, Any]]) -> tuple[dict[str, Any], str] | None:
+    """Return the (change_set pointer, policy_sha) from the chain's ``pr_opened`` outcome, or None."""
+    for r in records:
+        if (isinstance(r, dict) and r.get("record_type") == RUN_OUTCOME_RECORD_TYPE
+                and r.get("outcome") == "pr_opened"):
+            cs = r.get("change_set") or {}
+            if cs.get("pr_number"):
+                return cs, str(r.get("policy_sha") or "")
+    return None
+
+
+def merge_for_run(
+    root: Path | str,
+    run_id: str,
+    *,
+    merge_gh_runner: GhRunner,
+    apply: bool = False,
+    repo: str = DEFAULT_REPO,
+) -> MergeResult:
+    """Gate-read (or apply) a squash-merge of the run's opened PR; attest ``pr_merged`` on a real merge.
+
+    Preconditions: the dispatch is collected (``collected_at`` set), the persisted chain exists, and
+    its ``pr_opened`` record carries a ``change_set`` with a ``pr_number``. Reconstructs the
+    value-free :class:`~.runner.backend.CollectedEvidence` + the merge-target :class:`ChangeRef` from
+    that pointer, then drives the gated merge under the DISTINCT ``merge_gh_runner`` (NEVER the
+    per-run token — this leg mints none).
+
+    This mirrors ``run_assembly.make_merge_driver``'s composition (reconstruct → gated merge →
+    :func:`~.orchestrator.merge_change` persist) but ALSO returns the :class:`MergeResult` gate
+    snapshot the plan-mode CLI surfaces (the driver returns only ``CollectedEvidence``). Exactly ONE
+    ``forge.merge`` call runs: with ``apply=False`` it is a non-mutating gate read (``would_merge`` +
+    the snapshot); with ``apply=True`` it refuses an ineligible PR (``MergeRefused``) and otherwise
+    issues one head-pinned squash, and ``pr_merged`` is appended onto the SAME chain + re-persisted
+    only on an ACTUAL merge. A plan-mode / ineligible result attests NOTHING.
+    """
+    root = Path(root)
+    dispatch = _load_dispatch(root, run_id)
+    if not dispatch.get("collected_at"):
+        raise ForgeJoinRefused(
+            f"run {run_id!r} is not collected (no collected_at); refusing to merge before its "
+            "evidence chain is folded"
+        )
+    chain_path = root / RUNS_SUBDIR / f"{run_id}.runtime-evidence.yaml"
+    if not chain_path.is_file():
+        raise ForgeJoinRefused(f"run {run_id!r} has no persisted evidence chain at {chain_path}")
+    doc = yaml.safe_load(chain_path.read_text(encoding="utf-8"))
+    records = list((doc or {}).get("records") or [])
+    found = _pr_opened_change_set(records)
+    if found is None:
+        raise ForgeJoinRefused(
+            f"run {run_id!r} chain carries no pr_opened change_set with a pr_number; nothing to merge"
+        )
+    cs, plan_ref = found
+    pr_number = int(cs["pr_number"])
+    head_sha = cs.get("head_sha")
+
+    change = ChangeRef(
+        repo=repo,
+        branch=str(cs.get("branch") or ""),
+        base=str(cs.get("base") or "main"),
+        pr_number=pr_number,
+        head_sha=head_sha,
+        manifest_paths=tuple(cs.get("manifest_paths") or []),
+        plan_ref=plan_ref,
+        changed=True,
+        applied=True,
+        verified=True,
+    )
+    # ONE gated merge under the distinct identity (read in plan mode, head-pinned squash on apply).
+    result = merge(change, apply=apply, gh_runner=merge_gh_runner)
+    if result.merged:
+        # Attest pr_merged onto the SAME chain via the conserved merge_change primitive (the sink
+        # re-verifies the whole chain + re-persists <run_id>.runtime-evidence.yaml). change_merger
+        # returns the already-computed result so NO second merge call is made.
+        prior = CollectedEvidence(
+            handle_ref=run_id,
+            records=tuple(records),
+            note=str((doc or {}).get("note") or ""),
+            change_set=RunChangeSet(
+                branch=change.branch, base=change.base,
+                manifest_paths=tuple(cs.get("manifest_paths") or []),
+                head_sha=str(head_sha or ""),
+            ),
+        )
+        sink = file_evidence_sink(chain_path.parent)
+        merge_change(
+            prior, run_id=run_id, policy_sha=plan_ref,
+            change_merger=lambda: result, evidence_sink=sink,
+        )
+    return result
