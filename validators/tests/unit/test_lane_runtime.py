@@ -777,6 +777,28 @@ def test_lane_launch_refuses_nonfile_mcp_target_before_side_effects(tmp_path, mo
     assert not (ledger / "panes" / "hermes-primary" / "gate3-lane.yaml").exists()
 
 
+def test_ensure_lane_mcp_config_public_name_and_deprecation_alias():
+    """v3.1-G1 promoted the helper to public; the private alias must still resolve.
+
+    ``launch_runtime`` reuses ``ensure_lane_mcp_config`` to fix the plain-launch
+    MCP-provisioning defect; the legacy ``_ensure_lane_mcp_config`` name stays as a
+    deprecation alias to the identical callable.
+    """
+    assert callable(lane_runtime.ensure_lane_mcp_config)
+    assert lane_runtime._ensure_lane_mcp_config is lane_runtime.ensure_lane_mcp_config
+
+
+def test_ensure_lane_mcp_config_writes_default_payload(tmp_path):
+    """The public helper writes the byte-exact default payload when nothing is there."""
+    target = tmp_path / "nested" / "ce-mcp.json"
+    lane_runtime.ensure_lane_mcp_config(target)
+    assert target.is_file()
+    assert (
+        target.read_text(encoding="utf-8")
+        == json.dumps({"mcpServers": {}}, indent=2, sort_keys=True) + "\n"
+    )
+
+
 def test_lane_launch_non_claude_command_does_not_provision_mcp(tmp_path):
     """Non-Claude lanes never get an MCP config written (the branch is Claude-only)."""
     ledger = _ledger_root(tmp_path)

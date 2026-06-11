@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
-from creator_engine_validator import v3_cli
+from creator_engine_validator import v3_cli, v3_seat_bridge
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,9 @@ def test_drive_assembles_run_inputs_with_appetite_cap(tmp_path, capsys):
     # the G-5 join: the appetite became a run-scope spend envelope, fed unchanged
     envs = payload["runtime_policy"]["spend_envelopes"]
     assert {"scope": "run", "amount": 7, "unit": "$", "window": "per_run"} in envs
-    assert payload["live_spawn"] == "deferred"
+    # default drive stays assemble-only (additive --spawn opt-in; no behavior change)
+    assert payload["live_spawn"] == "available_via_--spawn"
+    assert payload["action"] == "dispatch_assembled"
 
 
 def test_drive_refuses_missing_policy_file(tmp_path, capsys):
@@ -168,6 +170,311 @@ def test_drive_merges_envelope_additively_into_operator_policy(tmp_path, capsys)
     envs = payload["runtime_policy"]["spend_envelopes"]
     scopes = sorted(e["scope"] for e in envs)
     assert scopes == ["global", "run"]  # operator global retained + run cap added
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G1 — drive --spawn: assemble → REAL governed seat (subprocess seams faked)
+# ---------------------------------------------------------------------------
+def _fake_bridge(monkeypatch):
+    """Replace the bridge's subprocess legs with in-memory fakes; record calls."""
+    calls: dict[str, list] = {"spawn": [], "seed": []}
+
+    def fake_spawn(record):
+        record.data["terminal"] = {
+            "kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%9",
+        }
+        record.data["resource_bound"] = {"unit": "ce-seat-x"}
+        record.data["spawned_at"] = "20260611T000000Z"
+        v3_seat_bridge._write_record(record)
+        calls["spawn"].append(record.run_id)
+        return v3_seat_bridge.SpawnResult(
+            run_id=record.run_id,
+            terminal=dict(record.data["terminal"]),
+            resource_bound={"unit": "ce-seat-x"},
+        )
+
+    def fake_seed(record):
+        calls["seed"].append(record.run_id)
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", fake_spawn)
+    monkeypatch.setattr(v3_seat_bridge, "seed_brief", fake_seed)
+    return calls
+
+
+def test_drive_spawn_refuses_unratified_without_touching_disk(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)  # filed, NOT ratified → front gate must hold
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path)])
+    assert code == 1
+    assert "front gate held" in capsys.readouterr().out
+    assert calls["spawn"] == [] and calls["seed"] == []
+    assert not (tmp_path / "dispatches").exists()  # no dispatch materialized
+
+
+def test_drive_spawn_materializes_and_spawns_governed_seat(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "spawned"
+    assert payload["pane_id"] == "%9"
+    assert payload["unattended"] is True  # default
+    run_id = payload["run_id"]
+    assert calls["spawn"] == [run_id] and calls["seed"] == [run_id]
+    # the dispatch record + brief landed on disk, terminal stamped
+    ddir = tmp_path / "dispatches" / run_id
+    assert (ddir / "dispatch.yaml").is_file() and (ddir / "brief.md").is_file()
+    data = yaml.safe_load((ddir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["terminal"]["pane_id"] == "%9"
+
+
+def test_drive_spawn_refuses_non_claude_harness(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(
+        ["drive", "rate-limit-login", "--spawn", "--harness", "codex", "--root", str(tmp_path)]
+    )
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "G1-codex" in out and "not bridged" in out
+    assert calls["spawn"] == []  # never reached the spawn leg
+
+
+def test_drive_spawn_no_unattended_omits_skip_perms(tmp_path, capsys, monkeypatch):
+    _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(
+        ["drive", "rate-limit-login", "--spawn", "--no-unattended", "--root", str(tmp_path), "--json"]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["unattended"] is False
+    run_id = payload["run_id"]
+    data = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["unattended"] is False
+
+
+def test_drive_spawn_surfaces_launch_refusal(tmp_path, capsys, monkeypatch):
+    def boom(record):
+        raise v3_seat_bridge.SpawnRefused("CC-D-6 refused: unconfirmed hook-pack")
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", boom)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path)])
+    assert code == 1
+    assert "CC-D-6 refused" in capsys.readouterr().out
+
+
+def test_drive_spawn_refusal_is_not_projected_as_live_build(tmp_path, capsys, monkeypatch):
+    # FIX-1 (PR #198 review repro): a refused spawn must NOT leave a dispatch the
+    # read-model reports as a live Build/RUN run. The record is failure-stamped and
+    # never shaped like a pending/live run.
+    def boom(record):
+        raise v3_seat_bridge.SpawnRefused("CC-D-6 refused: unconfirmed hook-pack")
+
+    monkeypatch.setattr(v3_seat_bridge, "spawn_seat", boom)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "spawn_refused"
+    run_id = payload["run_id"]
+    # the dispatch is failure-stamped (conserved), terminal/spawned_at unset
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    assert "CC-D-6" in drec["spawn_failure_reason"]
+    assert drec["terminal"] is None and drec["spawned_at"] is None
+    # the read-model does NOT project Build/RUN for the refused spawn
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj = json.loads(capsys.readouterr().out)["projection"]
+    assert proj["state"] != "in_progress"
+    assert proj["phase"] != "Build"
+    assert proj["board"] != "RUN"
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G1b — cev3 collect: run → conserved evidence chain (read-model sees it)
+# ---------------------------------------------------------------------------
+_RATES_POLICY = {"model_rates": [{"model": "claude-opus-4-8", "input_per_mtok": 15, "output_per_mtok": 75}]}
+
+
+def _transcript(path: Path, *, n_turns: int = 2) -> Path:
+    lines = []
+    for i in range(n_turns):
+        lines.append(json.dumps({
+            "type": "assistant",
+            "sessionId": "seat-1",
+            "timestamp": f"2026-06-11T09:3{i}:00Z",
+            "message": {"model": "claude-opus-4-8",
+                        "usage": {"input_tokens": 1000, "output_tokens": 200}},
+        }))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _dispatch_a_run(tmp_path, monkeypatch, *, policy: dict | None = None) -> str:
+    """file → ratify → drive --spawn (faked) → return the run_id with a dispatch on disk."""
+    _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    argv = ["drive", "rate-limit-login", "--spawn", "--root", str(tmp_path), "--json"]
+    if policy is not None:
+        ppath = tmp_path / "op-policy.yaml"
+        ppath.write_text(yaml.safe_dump(policy), encoding="utf-8")
+        argv += ["--policy", str(ppath)]
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        v3_cli.main(argv)
+    return json.loads(buf.getvalue())["run_id"]
+
+
+def test_collect_folds_transcript_and_outcome_into_chain(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "--outcome", "research_delivered", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "collected"
+    assert payload["outcome"] == "research_delivered"
+    assert payload["spend_leaves"] == 2
+    # the conserved chain persisted under the neutral runs root + verifies clean
+    chain_path = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
+    assert chain_path.is_file()
+    doc = yaml.safe_load(chain_path.read_text(encoding="utf-8"))
+    from creator_engine_validator import runtime_evidence_spine as spine
+    assert spine.verify_chain(doc["records"]) == []
+    # the dispatch is marked collected (drives the read-model back off Build)
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["collected_at"]
+
+
+def test_collect_report_renders_outcome_and_spend(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "--outcome", "research_delivered", "--root", str(tmp_path),
+    ])
+    capsys.readouterr()
+    chain_path = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
+    code = v3_cli.main([
+        "report", "rate-limit-login", "--evidence", str(chain_path), "--run-id", run_id,
+        "--cap", "5", "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "research_delivered"
+    # spend folded off the persisted chain (2 turns * (1000*15 + 200*75)/1e6 = 0.06)
+    assert "Research delivered" in payload["outcome_label"]
+
+
+def test_collect_refuses_double_collect(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    args = ["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+            "--outcome", "no_change", "--root", str(tmp_path)]
+    assert v3_cli.main(args) == 0
+    capsys.readouterr()
+    assert v3_cli.main(args) == 2  # second collect refuses (append-only)
+    assert "already collected" in capsys.readouterr().out
+
+
+def test_collect_refuses_unknown_run(tmp_path, capsys):
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", "run-ghost-x", "--outcome", "no_change",
+        "--root", str(tmp_path),
+    ])
+    assert code == 2
+    assert "no dispatch record" in capsys.readouterr().out
+
+
+def test_collect_refuses_scope_mismatch(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "other-scope", "--run", run_id, "--outcome", "no_change", "--root", str(tmp_path),
+    ])
+    assert code == 2
+    assert "not" in capsys.readouterr().out
+
+
+def test_uncollected_dispatch_projects_scope_to_build(tmp_path, capsys, monkeypatch):
+    # A live (spawned, uncollected) run makes the read-model show Build/in_progress.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj = json.loads(capsys.readouterr().out)["projection"]
+    assert proj["state"] == "in_progress" and proj["phase"] == "Build"
+    # …and once collected, the Scope projects off its own state again (not Build).
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                 "--outcome", "no_change", "--root", str(tmp_path)])
+    capsys.readouterr()
+    v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    proj2 = json.loads(capsys.readouterr().out)["projection"]
+    assert proj2["state"] != "in_progress"
+
+
+def test_report_defaults_evidence_from_collected_dispatch(tmp_path, capsys, monkeypatch):
+    # With a collected dispatch, `report` needs no --evidence — it finds the chain.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl")
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                 "--outcome", "research_delivered", "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "research_delivered"
+    assert payload["run_id"] == run_id  # defaulted from the collected dispatch
+
+
+def test_e2e_scope_to_spawn_to_collect_to_report(tmp_path, capsys, monkeypatch):
+    # The named keystone: scope → ratify → drive --spawn → collect → report,
+    # all subprocess seams faked. Proves the spine end to end.
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    tpath = _transcript(tmp_path / "seat.jsonl", n_turns=3)
+    capsys.readouterr()
+    assert v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+                        "--outcome", "research_delivered", "--root", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert v3_cli.main(["artifacts", "rate-limit-login", "--cap", "5", "--root", str(tmp_path), "--json"]) == 0
+    arts = {a["kind"] for a in json.loads(capsys.readouterr().out)["artifacts"]}
+    assert {"scope", "evidence", "spend"} <= arts  # run artifacts surfaced sans --evidence
+    assert v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path)]) == 0
+    block = capsys.readouterr().out
+    assert "Research delivered" in block
+
+
+def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["spend_leaves"] == 0
+    assert payload["outcome"] == "no_change"
 
 
 # ---------------------------------------------------------------------------

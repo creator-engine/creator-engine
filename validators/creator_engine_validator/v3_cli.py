@@ -55,13 +55,25 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
 
-from . import coordination, v3_installer, v3_report, v3_session, v3_shaping
+from . import (
+    coordination,
+    evidence_sink,
+    runtime_evidence_spine,
+    v3_installer,
+    v3_report,
+    v3_seat_bridge,
+    v3_session,
+    v3_shaping,
+)
 from ._versions import V3_LOCAL_STATE_ROOT
+from .runner import usage_tap
+from .runner.backend import CollectedEvidence
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
 SCOPES_SUBDIR = "scopes"
@@ -191,14 +203,25 @@ def _content_sha(scope: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Rendering — surface the canon skin (Scope card + stage phase)
 # ---------------------------------------------------------------------------
-def _projection(scope: dict[str, Any]) -> dict[str, str]:
-    """The {state, phase, board} projection over the conserved spec-lifecycle."""
-    return coordination.project_scope_state(scope)
+def _projection(scope: dict[str, Any], root: Path | None = None) -> dict[str, str]:
+    """The {state, phase, board} projection over the conserved spec-lifecycle.
+
+    v3.1-G1b: when ``root`` is given and an UNcollected dispatch record exists for
+    the Scope, the projection feeds ``dispatched=True`` so a live run is visible
+    (→ in_progress / Build / RUN) — the read-model sees the spawned seat. A
+    collected dispatch no longer drives the signal (the run has folded its
+    evidence; the Scope projects off its own committed state again).
+    """
+    dispatched = False
+    scope_id = scope.get("scope_id")
+    if root is not None and scope_id:
+        dispatched = _has_uncollected_dispatch(root, str(scope_id))
+    return coordination.project_scope_state(scope, dispatched=dispatched)
 
 
-def _card_line(scope: dict[str, Any]) -> str:
+def _card_line(scope: dict[str, Any], root: Path | None = None) -> str:
     """One-line Scope card in the canon vocabulary (the skin over the fields)."""
-    proj = _projection(scope)
+    proj = _projection(scope, root)
     ready, _ = coordination.scope_is_ready(scope)
     ac = scope.get("acceptance_criteria") or []
     appetite = scope.get("appetite") or {}
@@ -216,10 +239,10 @@ def _card_line(scope: dict[str, Any]) -> str:
     )
 
 
-def _phase_counts(scopes: list[dict[str, Any]]) -> dict[str, int]:
+def _phase_counts(scopes: list[dict[str, Any]], root: Path | None = None) -> dict[str, int]:
     counts = {phase: 0 for phase in coordination.COGNITIVE_PHASES}
     for s in scopes:
-        counts[_projection(s)["phase"]] += 1
+        counts[_projection(s, root)["phase"]] += 1
     return counts
 
 
@@ -353,47 +376,338 @@ def _cmd_drive(args: argparse.Namespace) -> int:
             {"action": "refused", "reason": result.reason, "detail": list(result.detail)},
         )
     envelopes = result.runtime_policy.get("spend_envelopes", [])
+    if getattr(args, "spawn", False):
+        return _drive_spawn(args, root, result, envelopes)
     lines = [
         f"{_BRAND} · BUILD dispatch assembled for Scope {result.scope_id!r} "
         f"(class {result.mutation_class})",
         f"    spend_envelopes: {json.dumps(envelopes, sort_keys=True)}",
-        f"{_BRAND} · (live run spawn is the deferred seam — inputs produced, not executed)",
+        f"{_BRAND} · (assemble-only — pass --spawn to launch the governed seat)",
     ]
     return _emit(
         args, 0, lines,
         {"action": "dispatch_assembled", "scope_id": result.scope_id,
          "mutation_class": result.mutation_class, "runtime_policy": result.runtime_policy,
-         "live_spawn": "deferred"},
+         "live_spawn": "available_via_--spawn"},
+    )
+
+
+def _drive_spawn(
+    args: argparse.Namespace,
+    root: Path,
+    plan: coordination.DispatchPlan,
+    envelopes: list[Any],
+) -> int:
+    """`--spawn`: materialize the dispatch → spawn the governed seat → seed the brief.
+
+    The front gate already held (caller has a DispatchPlan). Scoped to the
+    ``claude`` harness (defect-c declared OUT; codex is the G1-codex follow-up).
+    The subprocess seams live in ``v3_seat_bridge`` (faked in CI).
+    """
+    if args.harness != v3_seat_bridge.BRIDGE_HARNESS:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · drive --spawn refused: harness {args.harness!r} is not bridged "
+             f"(only {v3_seat_bridge.BRIDGE_HARNESS!r}); codex drive-spawn is the G1-codex follow-up"],
+            {"action": "spawn_refused", "reason": "harness_not_supported",
+             "harness": args.harness, "followup": "G1-codex"},
+        )
+    unattended = not args.no_unattended
+    record = v3_seat_bridge.materialize_dispatch(plan, root, unattended=unattended)
+    try:
+        spawn = v3_seat_bridge.spawn_seat(record)
+        v3_seat_bridge.seed_brief(record)
+    except v3_seat_bridge.SeatBridgeError as exc:
+        # Fail-closed: the dispatch was materialized before the v1 launch leg, so a
+        # refused spawn would otherwise sit on disk with terminal/spawned_at unset —
+        # which the read-model would have mistaken for a live Build/RUN run. Stamp
+        # the failure (value-free) so it projects as neither pending nor live; the
+        # attempt is conserved, not deleted.
+        v3_seat_bridge.mark_spawn_failed(record, exc)
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · drive --spawn refused: {exc}"],
+            {"action": "spawn_refused", "reason": "launch_refused",
+             "run_id": record.run_id, "detail": str(exc),
+             "dispatch_path": str(record.dispatch_path)},
+        )
+    pane = spawn.terminal.get("pane_id")
+    lines = [
+        f"{_BRAND} · SPAWNED governed seat for Scope {plan.scope_id!r} "
+        f"(class {plan.mutation_class}, run {record.run_id})",
+        f"    spend_envelopes: {json.dumps(envelopes, sort_keys=True)}",
+        f"    dispatch: {record.dispatch_path}",
+        f"    pane: {pane}"
+        + ("  [unattended]" if unattended else "  [interactive]"),
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "spawned", "scope_id": plan.scope_id, "run_id": record.run_id,
+         "mutation_class": plan.mutation_class, "unattended": unattended,
+         "dispatch_path": str(record.dispatch_path), "pane_id": pane,
+         "terminal": spawn.terminal, "resource_bound": spawn.resource_bound},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dispatch-record storage seam + run evidence (G1b — .ce/state/dispatches, runs)
+# ---------------------------------------------------------------------------
+DISPATCHES_SUBDIR = "dispatches"
+RUNS_SUBDIR = "runs"
+
+
+def _dispatch_path(root: Path, run_id: str) -> Path:
+    return root / DISPATCHES_SUBDIR / run_id / "dispatch.yaml"
+
+
+def _run_evidence_path(root: Path, run_id: str) -> Path:
+    return root / RUNS_SUBDIR / f"{run_id}.runtime-evidence.yaml"
+
+
+def _load_dispatch(root: Path, run_id: str) -> dict[str, Any]:
+    path = _dispatch_path(root, run_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"no dispatch record for run {run_id!r} under {root / DISPATCHES_SUBDIR}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"malformed dispatch record at {path}")
+    return data
+
+
+def _find_dispatch_for_scope(root: Path, scope_id: str) -> dict[str, Any] | None:
+    """The newest dispatch record for ``scope_id`` (run_id sorts lexically by utcstamp), or None."""
+    ddir = root / DISPATCHES_SUBDIR
+    if not ddir.is_dir():
+        return None
+    found: list[dict[str, Any]] = []
+    for child in sorted(ddir.iterdir()):
+        drec = child / "dispatch.yaml"
+        if not drec.is_file():
+            continue
+        data = yaml.safe_load(drec.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("scope_id") == scope_id:
+            found.append(data)
+    if not found:
+        return None
+    return sorted(found, key=lambda d: str(d.get("run_id")))[-1]
+
+
+def _has_uncollected_dispatch(root: Path, scope_id: str) -> bool:
+    """True iff a LIVE dispatched run exists for ``scope_id`` (drives Build/RUN).
+
+    A dispatch projects Build/RUN ONLY when it was ACTUALLY spawned (``spawned_at``
+    / ``terminal`` stamped) and is neither collected nor spawn-failure-stamped. A
+    materialized-but-refused/half spawn (terminal/spawned_at unset, or
+    ``spawn_failed_at`` set) is NOT a live run — fail-closed, so a stale dispatch is
+    never mistaken for an active one.
+    """
+    drec = _find_dispatch_for_scope(root, scope_id)
+    if not drec:
+        return False
+    spawned = bool(drec.get("spawned_at") or drec.get("terminal"))
+    return bool(spawned and not drec.get("collected_at") and not drec.get("spawn_failed_at"))
+
+
+def _collected_run_evidence(root: Path, scope_id: str) -> Path | None:
+    """The evidence chain path of ``scope_id``'s newest COLLECTED dispatch, if any."""
+    drec = _find_dispatch_for_scope(root, scope_id)
+    if not drec or not drec.get("collected_at"):
+        return None
+    chain = _run_evidence_path(root, str(drec.get("run_id")))
+    return chain if chain.is_file() else None
+
+
+def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | None, str | None]:
+    """Resolve (evidence-path, run_id) for report/artifacts.
+
+    An explicit ``--evidence`` always wins; otherwise, when the Scope has a
+    COLLECTED dispatch, default to its persisted chain
+    (``<root>/runs/<run_id>.runtime-evidence.yaml``) so the read-model surfaces a
+    finished run with zero extra flags.
+    """
+    evidence = getattr(args, "evidence", None)
+    run_id = getattr(args, "run_id", None)
+    if not evidence:
+        drec = _find_dispatch_for_scope(root, args.scope_id)
+        if drec and drec.get("collected_at"):
+            chain = _run_evidence_path(root, str(drec.get("run_id")))
+            if chain.is_file():
+                evidence = str(chain)
+                run_id = run_id or str(drec.get("run_id"))
+    return evidence, run_id
+
+
+def _policy_sha(policy: dict[str, Any]) -> str:
+    """The 64-hex policy binding for the run's records.
+
+    Uses the policy's own ``policy_sha`` when it is a valid 64-hex digest, else
+    derives a deterministic SHA256 over the canonical policy body (the chain check
+    enforces ``^[0-9a-f]{64}$`` on every record's ``policy_sha``).
+    """
+    existing = policy.get("policy_sha")
+    if isinstance(existing, str) and _HEX64_RE.match(existing):
+        return existing
+    body = {k: v for k, v in policy.items() if k != "policy_sha"}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cmd_collect(args: argparse.Namespace) -> int:
+    """Fold a finished seat run into a conserved evidence chain (G1b run→evidence).
+
+    Reads the dispatch record, folds the harness transcript into
+    ``runtime_spend_ledger`` leaves (the live per-turn tap stays the declared
+    deferred seam — this is post-hoc metering), appends the typed terminal
+    ``runtime_run_outcome``, hash-chains them, and persists
+    ``<root>/runs/<run_id>.runtime-evidence.yaml`` (refusing to overwrite an
+    existing chain). Marks the dispatch ``collected_at``.
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · collect refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    chain_path = _run_evidence_path(root, run_id)
+    if chain_path.exists():
+        # Conserved evidence is append-only; never silently re-fold a collected run.
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: run {run_id!r} already collected at {chain_path}"],
+            {"error": "already_collected", "run_id": run_id, "evidence": str(chain_path)},
+        )
+
+    # The merged runtime policy the seat ran under — read AS DATA for the rates + binding.
+    policy: dict[str, Any] = {}
+    policy_ref = dispatch.get("runtime_policy_ref")
+    if policy_ref and Path(policy_ref).is_file():
+        loaded = yaml.safe_load(Path(policy_ref).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            policy = loaded
+    policy_sha = _policy_sha(policy)
+    model_rates = policy.get("model_rates") or []
+
+    # 1) Spend ledger leaves — fold the transcript by REUSING the usage tap
+    #    (compute_cost + meter_record_body); unpriced turns are surfaced, never $0.
+    ledger_bodies: list[dict[str, Any]] = []
+    unpriced = 0
+    if args.transcript:
+        tpath = Path(args.transcript)
+        if not tpath.is_file():
+            return _emit(
+                args, 2,
+                [f"{_BRAND} · collect refused: transcript not found: {tpath}"],
+                {"error": "transcript_not_found", "transcript": str(tpath)},
+            )
+        turns = usage_tap.tap_transcript_file(tpath)
+        ledger_bodies, unpriced_turns = usage_tap.usage_turns_to_ledger(
+            turns, model_rates=model_rates, fleet_id=run_id,
+            policy_sha=policy_sha, run_id_of=lambda _t: run_id,
+        )
+        unpriced = len(unpriced_turns)
+
+    # 2) The typed terminal outcome + its value-free change_set pointer.
+    change_set: dict[str, Any] = {
+        "branch": args.branch or run_id,
+        "base": args.base,
+        "manifest_paths": list(args.manifest_paths or []),
+        "head_sha": args.head_sha or run_id,
+    }
+    if args.pr is not None:
+        change_set["pr_number"] = args.pr
+    outcome_body = {
+        "kind": runtime_evidence_spine.RUN_OUTCOME_RECORD_KIND,
+        "record_type": runtime_evidence_spine.RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1",
+        "policy_sha": policy_sha,
+        "run_id": run_id,
+        "recorded_at": _utc_now_iso(),
+        "outcome": args.outcome,
+        "change_set": change_set,
+    }
+
+    # 3) Hash-chain the leaves then the terminal outcome; persist via the existing
+    #    sink (refuses empty / non-uniform run_id / hash-broken / schema-invalid).
+    chain: list[dict[str, Any]] = []
+    for body in [*ledger_bodies, outcome_body]:
+        chain.append(runtime_evidence_spine.append(chain, body))
+    sink = evidence_sink.file_evidence_sink(_run_evidence_path(root, run_id).parent)
+    try:
+        receipt = sink(CollectedEvidence(
+            handle_ref=run_id,
+            records=tuple(chain),
+            note=f"v3.1-G1 collect: run {run_id} folded {len(ledger_bodies)} spend leaf(s) "
+                 f"+ outcome {args.outcome}",
+        ))
+    except evidence_sink.EvidencePersistRefused as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · collect refused: {exc}"],
+            {"error": "persist_refused", "detail": str(exc), "run_id": run_id},
+        )
+
+    # 4) Mark the dispatch collected (an uncollected dispatch projects Build/RUN).
+    dispatch["collected_at"] = _utc_now_iso()
+    _dispatch_path(root, run_id).write_text(
+        yaml.safe_dump(dispatch, sort_keys=True, default_flow_style=False), encoding="utf-8"
+    )
+
+    lines = [
+        f"{_BRAND} · COLLECTED run {run_id!r} for Scope {args.scope_id!r} "
+        f"(outcome {args.outcome}, {len(ledger_bodies)} spend leaf(s)"
+        + (f", {unpriced} unpriced" if unpriced else "") + ")",
+        f"    evidence: {receipt.path}",
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "collected", "scope_id": args.scope_id, "run_id": run_id,
+         "outcome": args.outcome, "pr": args.pr, "evidence": str(receipt.path),
+         "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
+         "record_count": receipt.record_count},
     )
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
     """List Scopes with their projected stage (the canon skin over the machine)."""
-    scopes = _iter_scopes(Path(args.root))
-    counts = _phase_counts(scopes)
+    root = Path(args.root)
+    scopes = _iter_scopes(root)
+    counts = _phase_counts(scopes, root)
     lines = [
         f"{_BRAND} · {len(scopes)} Scope(s) · "
         + " · ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
     ]
     for s in sorted(scopes, key=lambda x: str(x.get("scope_id"))):
-        lines.append("  " + _card_line(s))
+        lines.append("  " + _card_line(s, root))
     return _emit(
         args, 0, lines,
         {"action": "status", "count": len(scopes), "phase_counts": counts,
-         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s)} for s in scopes]},
+         "scopes": [{"scope_id": s.get("scope_id"), "projection": _projection(s, root)} for s in scopes]},
     )
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
     """Show one Scope: the canon-labelled fields + its projection + readiness."""
+    root = Path(args.root)
     try:
-        scope = _load_scope(Path(args.root), args.scope_id)
+        scope = _load_scope(root, args.scope_id)
     except (FileNotFoundError, ValueError) as exc:
         return _emit(args, 2, [f"{_BRAND} · {exc}"], {"error": str(exc)})
-    proj = _projection(scope)
+    proj = _projection(scope, root)
     ready, reasons = coordination.scope_is_ready(scope)
     lines = [
-        _card_line(scope),
+        _card_line(scope, root),
         f"    Goal (intent):        {scope.get('intent')}",
         f"    Done-when (criteria): {scope.get('acceptance_criteria') or '—'}",
         f"    Budget (appetite):    {scope.get('appetite') or '—'}",
@@ -422,20 +736,22 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
         )
     artifacts = [{"kind": "scope", "path": str(path), "label": f"Scope {args.scope_id}",
                   "inspect": f"{CE_CMD} show {args.scope_id}"}]
-    # G-7.3: with a run evidence chain, also enumerate the run artifacts (PR /
+    # G-7.3 / G1b: with a run evidence chain, also enumerate the run artifacts (PR /
     # evidence-chain / spend) via the ◆ Completion-Report artifact-awareness fold.
-    if getattr(args, "evidence", None):
-        records = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+    # The chain defaults to a collected dispatch's chain (explicit --evidence wins).
+    evidence, run_id = _resolve_run_evidence(args, root)
+    if evidence:
+        records = yaml.safe_load(Path(evidence).read_text(encoding="utf-8"))
         if isinstance(records, dict):
             records = records.get("records") or records.get("leaves") or []
         summary = v3_report.summary_from_evidence(
-            records or [], scope_id=args.scope_id, run_id=getattr(args, "run_id", None),
+            records or [], scope_id=args.scope_id, run_id=run_id,
             budget=getattr(args, "cap", None),
         )
         artifacts += [a for a in v3_report.enumerate_artifacts(summary) if a["kind"] != "scope"]
     lines = [f"{_BRAND} · artifacts for Scope {args.scope_id!r}:"]
     lines += [f"    {a['kind']:>10}  {a.get('path', a['label'])}   ({a['inspect']})" for a in artifacts]
-    if not getattr(args, "evidence", None):
+    if not evidence:
         lines.append(f"{_BRAND} · (pass --evidence <chain> to enumerate run artifacts: PR / evidence / spend)")
     return _emit(args, 0, lines, {"action": "artifacts", "scope_id": args.scope_id, "artifacts": artifacts})
 
@@ -447,9 +763,11 @@ def _cmd_report(args: argparse.Namespace) -> int:
     (``--evidence``); the grading synthesis (Done-when / CI / in-scope) is injected
     via flags (its live assembly is the deferred seam).
     """
+    root = Path(getattr(args, "root", V3_LOCAL_STATE_ROOT))
+    evidence, run_id = _resolve_run_evidence(args, root)
     records: list[Any] = []
-    if args.evidence:
-        loaded = yaml.safe_load(Path(args.evidence).read_text(encoding="utf-8"))
+    if evidence:
+        loaded = yaml.safe_load(Path(evidence).read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             loaded = loaded.get("records") or loaded.get("leaves") or []
         records = loaded or []
@@ -466,7 +784,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
     if args.budget_size:
         grading["budget_size"] = args.budget_size
     summary = v3_report.summary_from_evidence(
-        records, scope_id=args.scope_id, run_id=args.run_id, budget=args.cap, unit=args.unit, **grading,
+        records, scope_id=args.scope_id, run_id=run_id, budget=args.cap, unit=args.unit, **grading,
     )
     if args.pr is not None:
         summary["pr"] = args.pr
@@ -530,7 +848,7 @@ def _cmd_session(args: argparse.Namespace) -> int:
     meter folds the REAL G-5 ``project_spend`` projection over an evidence spine
     (``--spine``) against the run cap (``--cap``); absent those it is unmetered.
     """
-    counts = _phase_counts(_iter_scopes(Path(args.root)))
+    counts = _phase_counts(_iter_scopes(Path(args.root)), Path(args.root))
     context = v3_session.context_meter(args.context_pct)
     if args.spine and args.cap is not None:
         records = yaml.safe_load(Path(args.spine).read_text(encoding="utf-8"))
@@ -901,10 +1219,31 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="value-free 64-hex opaque ratifier digest (never a raw account)")
     _add_root(p_ratify)
 
-    p_drive = sub.add_parser("drive", help="assemble the governed dispatch (front gate; live spawn deferred)")
+    p_drive = sub.add_parser("drive", help="assemble the governed dispatch (front gate); --spawn launches the seat")
     p_drive.add_argument("scope_id", metavar="ID", help="the Scope to drive")
     p_drive.add_argument("--policy", default=None, help="optional runtime-policy YAML to merge the run envelope into")
+    p_drive.add_argument("--spawn", action="store_true",
+                         help="materialize the dispatch and spawn a real governed seat (v3.1-G1)")
+    p_drive.add_argument("--harness", default="claude",
+                         help="seat harness (only 'claude' is bridged; codex is the G1-codex follow-up)")
+    p_drive.add_argument("--no-unattended", action="store_true",
+                         help="opt the spawned seat back into interactive approval modals")
     _add_root(p_drive)
+
+    p_collect = sub.add_parser("collect", help="fold a finished seat run's transcript + outcome into evidence")
+    p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
+    p_collect.add_argument("--transcript", default=None, help="the seat harness .jsonl transcript to meter")
+    p_collect.add_argument("--outcome", required=True, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
+                           help="the conserved terminal outcome")
+    p_collect.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
+    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id)")
+    p_collect.add_argument("--base", default="main", help="value-free change base ref (default: main)")
+    p_collect.add_argument("--head-sha", default=None, dest="head_sha",
+                           help="value-free change head sha (default: run id)")
+    p_collect.add_argument("--manifest-path", action="append", default=None, dest="manifest_paths",
+                           help="value-free change manifest path (repeatable)")
+    _add_root(p_collect)
 
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
@@ -937,6 +1276,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--cap", type=float, default=None, help="run spend cap (Budget) to meter spend against")
     p_report.add_argument("--unit", choices=["$", "%"], default="$", help="spend unit")
     p_report.add_argument("--budget-size", default=None, help="appetite size label (e.g. S) for 'of Budget S'")
+    p_report.add_argument(
+        "--root", default=V3_LOCAL_STATE_ROOT,
+        help=f"v3 local-state root (to default --evidence from a collected run; default: {V3_LOCAL_STATE_ROOT})",
+    )
     p_report.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_shape = sub.add_parser("shape", help="run the Frame→Shape grill-me on a partial draft (gaps + questions)")
@@ -1026,6 +1369,7 @@ _DISPATCH = {
     "shape": _cmd_shape,
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
+    "collect": _cmd_collect,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,

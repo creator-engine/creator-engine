@@ -76,7 +76,8 @@ def test_taxonomy_counts_and_disjoint():
     # (``runner.cockpit_demo_seed``, Fork F-b), and the L3 Textual view
     # (``v3_cockpit``): 28 -> 31. The v3.5-C α-precursor added the Projects-v2
     # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
-    assert len(ver.V3_RUNTIME) == 32
+    # v3.1-G1 added the live-spawn bridge (``v3_seat_bridge``): 32 -> 33.
+    assert len(ver.V3_RUNTIME) == 33
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

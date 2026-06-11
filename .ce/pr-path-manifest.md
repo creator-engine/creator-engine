@@ -1,88 +1,67 @@
-# PR path manifest - v3.5 suite-speed gate
+# PR path manifest - v3.1-G1 live-spawn gate
 
 CI passes this to `verify-path-manifest --base <PR base sha> --manifest .ce/pr-path-manifest.md`
 and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; the
 fidelity scan requires the declared count and SHA256 to match the fenced block.
 
 Ratified gate:
-`~/ce-launch/v35-suite-speed/v35-suite-speed-gate-RATIFIED-20260611.md`
-(sha256 `52a9dffbbe88c418c635d9b94430a8792d84fdc581313cb752304b9dc93e6aff`;
+`~/ce-launch/v31-g1-wave/v31-g1-live-spawn-gate-RATIFIED-20260611.md`
+(sha256 `c5439f4fa89c90e6cb30a4367ccdbb384d83d95e811d163c787e514eefae4a5c`;
 Operator-ratified 2026-06-11, Section 6 fork resolutions binding).
 
 Implementer mandate:
-`~/ce-launch/v35-suite-speed/SUITE_SPEED_IMPL_MANDATE.md`
-(sha256 `81500d34008eae1d3d73ce051944b22b6948468330c670b9c0629df25b86b43d`).
+`~/ce-launch/v31-g1-wave/G1_IMPL_MANDATE.md`.
 
-Per-file purpose (the closed 21-row manifest):
-- **`.github/workflows/validate.yml`** *(M)* - add `-n auto --dist loadgroup` to the single
-  pytest invocation line.
-- **`validators/requirements-dev.txt`** *(M)* - add test-only `pytest-xdist==3.8.0` and
-  `execnet==2.1.2`; runtime packaging checks do not read this file.
-- **`validators/wheelhouse-dev/pytest_xdist-3.8.0-py3-none-any.whl`** *(NEW)* - vendored xdist
-  wheel for offline CI dev installs.
-- **`validators/wheelhouse-dev/execnet-2.1.2-py3-none-any.whl`** *(NEW)* - vendored xdist
-  transitive dependency for offline CI dev installs.
-- **`validators/tests/conftest.py`** *(M)* - register `xdist_group` and add session-scoped
-  `check-examples` and version-boundary scan fixtures.
-- **`validators/tests/integration/test_lane_launch_tmux.py`** *(M)* - group the real tmux test as
-  `real-tmux`.
-- **`validators/tests/integration/test_resource_bound_systemd.py`** *(M)* - group the live
-  user-systemd file as `user-systemd`.
-- **`validators/tests/unit/test_version_boundary.py`** *(M)* - consume session-scoped real-package
-  scan fixtures.
-- **`validators/tests/unit/test_ce_check_cli.py`** *(M)* - retarget the default-dot-path equality
-  test to a small temporary governed tree.
-- **`validators/tests/unit/test_cli.py`** *(M)* - consume the shared `check_examples_result` fixture
-  and group the test as `check-examples-sweep`.
-- **`validators/tests/integration/test_architect_evidence_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_ce_runtime_evidence_examples.py`** *(M)* - shared
-  `check-examples` fixture consumers.
-- **`validators/tests/integration/test_ce_runtime_policy_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_completion_report_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_container_instance_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_handoff_examples.py`** *(M)* - shared `check-examples`
-  fixture consumer.
-- **`validators/tests/integration/test_implementer_evidence_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_review_evidence_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_worker_container_policy_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
-- **`validators/tests/integration/test_worktree_lease_examples.py`** *(M)* - shared
-  `check-examples` fixture consumer.
+Per-file purpose (the closed 15-row manifest — two serial gates, one branch):
+- **`validators/creator_engine_validator/v3_seat_bridge.py`** *(NEW)* - G1a: the assemble→spawn
+  bridge (`materialize_dispatch` / `spawn_seat` / `seed_brief`); crosses to the v1 launcher as
+  subprocess + DATA only, importing NO v1 module.
+- **`validators/creator_engine_validator/v3_cli.py`** *(M)* - G1a `drive --spawn` (additive opt-in
+  + `--no-unattended` + non-claude refusal) + G1b `collect` evidence fold + status/report/artifacts
+  read-model wiring.
+- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - G1a defect-a: provision the
+  strict MCP config before the tmux spawn (reusing the lane helper; exception → `LaunchRefused`).
+- **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - G1a: promote
+  `_ensure_lane_mcp_config` to public `ensure_lane_mcp_config` (deprecation alias kept).
+- **`validators/creator_engine_validator/_versions.py`** *(M)* - G1a `V3_RUNTIME` += `v3_seat_bridge`
+  (32→33) + G1b `V3_SCHEMAS` += `dispatch-record.schema.yaml` (4→5).
+- **`schemas/dispatch-record.schema.yaml`** *(NEW)* - G1b: the value-free dispatch-record shape.
+- **`validators/tests/unit/test_v3_seat_bridge.py`** *(NEW)* - G1a+G1b: the bridge unit suite,
+  including the AST no-v1-import invariant + the schema-conformance test.
+- **`validators/tests/unit/test_v3_cli.py`** *(M)* - G1a+G1b: `drive --spawn` / `collect` / read-model
+  + the end-to-end faked-seam keystone test.
+- **`validators/tests/unit/test_launch_runtime.py`** *(M)* - G1a: defect-a MCP provisioning + defect-b
+  CC-D-6 unattended-flag tests.
+- **`validators/tests/unit/test_lane_runtime.py`** *(M)* - G1a: the helper rename + alias tests.
+- **`validators/tests/unit/test_version_boundary.py`** *(M)* - G1a: `len(V3_RUNTIME)` 32→33 (ships in
+  the same commit as the `_versions.py` baseline edit).
+- **`validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl`** *(M)* - landing: app
+  wheel rebuilt ONCE from the combined branch source.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - landing: re-pinned for the rebuilt app wheel.
+- **`docs/v3-roadmap.md`** *(M)* - landing: the v3.1-G1 row in the gate-status table.
 - **`.ce/pr-path-manifest.md`** *(M)* - this carrier.
 
-- **base:** `7b03d62349d115d42fc1d50fb5b863262d98c46a` (origin/main post-#196, per mandate).
+- **base:** `c3dcae0a3dc8793a9ebf601fe1d5539af9aa0141` (origin/main post-#197, per mandate).
 - **canonicalization:** `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=21
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=c2e1c6a9bc72df2630a836b4449f48face2730cc86701aefb6c736f1091c85a7
+AUTHORIZED_PATHS_SHA256=a7b2ed86bef96ff21f3cce58f41649bcb3b57bbf5748b1f9b0f85a4c01165e15
 
 ```text
 .ce/pr-path-manifest.md
-.github/workflows/validate.yml
-validators/requirements-dev.txt
-validators/tests/conftest.py
-validators/tests/integration/test_architect_evidence_examples.py
-validators/tests/integration/test_ce_runtime_evidence_examples.py
-validators/tests/integration/test_ce_runtime_policy_examples.py
-validators/tests/integration/test_completion_report_examples.py
-validators/tests/integration/test_container_instance_examples.py
-validators/tests/integration/test_handoff_examples.py
-validators/tests/integration/test_implementer_evidence_examples.py
-validators/tests/integration/test_lane_launch_tmux.py
-validators/tests/integration/test_resource_bound_systemd.py
-validators/tests/integration/test_review_evidence_examples.py
-validators/tests/integration/test_worker_container_policy_examples.py
-validators/tests/integration/test_worktree_lease_examples.py
-validators/tests/unit/test_ce_check_cli.py
-validators/tests/unit/test_cli.py
+docs/v3-roadmap.md
+schemas/dispatch-record.schema.yaml
+validators/creator_engine_validator/_versions.py
+validators/creator_engine_validator/lane_runtime.py
+validators/creator_engine_validator/launch_runtime.py
+validators/creator_engine_validator/v3_cli.py
+validators/creator_engine_validator/v3_seat_bridge.py
+validators/tests/unit/test_lane_runtime.py
+validators/tests/unit/test_launch_runtime.py
+validators/tests/unit/test_v3_cli.py
+validators/tests/unit/test_v3_seat_bridge.py
 validators/tests/unit/test_version_boundary.py
-validators/wheelhouse-dev/execnet-2.1.2-py3-none-any.whl
-validators/wheelhouse-dev/pytest_xdist-3.8.0-py3-none-any.whl
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl
 ```
