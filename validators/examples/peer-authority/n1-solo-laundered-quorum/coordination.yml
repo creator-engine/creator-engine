@@ -1,0 +1,24 @@
+# N=1 carve-out fixture (LAUNDERED QUORUM): a ONE-human policy whose sole human
+# holds TWO account labels. The co-located ADR-0203 spreads its authoring stamp
+# and its ratifier across those two accounts to MIMIC an independent two-party
+# approval, and omits `quorum: n1_solo`. Accounts do not sum to humans: distinct
+# humans = 1, never the privileged floor of 2 — `peer_authority` fails it with
+# VAL-PA-N1-SOLO-REQUIRED (the string-distinct accounts dodge the
+# decision_record self-ratification check, so the human-level guard catches it).
+kind: coordination-policy
+schema_version: "1"
+mutation_class: governance
+ratification_authority:
+  defer_to_codeowners: false
+  area_owners:
+    "*.md": [solo-human]
+  quorum_by_tier:
+    non_privileged: 1
+    privileged: 2
+  no_self_approval: true
+identity_map:
+  humans:
+    - human_id: solo-human
+      github_logins: [account-a, account-b]   # two ACCOUNTS, one HUMAN
+      seats: []
+      app_installations: []

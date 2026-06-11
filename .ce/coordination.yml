@@ -30,10 +30,15 @@ ratification_authority:
 # separation alone is NOT sufficient (CE's own rule), so both logins map to
 # the same human_id and can never sum to a privileged quorum of 2. This is
 # §A.5's N=1 special case (constrained-BDFL): privileged ratification is the
-# Operator's, recorded as such. The second `humans` slot is filled when a
-# REAL second peer joins (the VPS team-mode trial); until then any record
-# claiming two-peer quorum through these two accounts FAILS the check —
-# exactly the dishonesty it exists to catch.
+# Operator's, recorded HONESTLY as `quorum: n1_solo` on the ratification record
+# (the new N1-CARVEOUT recording mode) — NEVER as a quorum of 2, and never by
+# laundering the two accounts into two ratifiers. `quorum_by_tier.privileged`
+# stays 2 (the team-mode bar is unchanged): `n1_solo` is a mode on the record,
+# not a policy downgrade, and it AUTO-EXPIRES the instant a second human
+# resolves. The second `humans` slot is filled when a REAL second peer joins
+# (the VPS team-mode trial); until then any record claiming two-peer quorum
+# through these two accounts — or any privileged solo record omitting
+# `quorum: n1_solo` — FAILS the check (the dishonesty it exists to catch).
 identity_map:
   humans:
     - human_id: peer-operator

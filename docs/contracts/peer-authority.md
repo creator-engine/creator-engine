@@ -58,6 +58,41 @@ verbatim) and does not duplicate or replace the matrix.
 | `VAL-PA-SELF-APPROVAL` | the author's (or running seat's) human never counts as a ratifier. |
 | `VAL-PA-AREA-OWNER-MISSING` | every declared area a change touches has one of its owners among the ratifiers — except an area the author's human owns, which authorship itself covers (you are the constrained-BDFL of your own area; independence comes from the quorum rule). |
 | `VAL-PA-IDENTITY-UNRESOLVED` | an actor that does not resolve through `identity_map` **fails closed** — surfaced, never silently counted. |
+| `VAL-PA-N1-SOLO-EXPIRED` | a record marked `quorum: n1_solo` is rejected once the `identity_map` resolves **≥ 2 distinct humans** — automatic expiry at the second human, not a manual migration. |
+| `VAL-PA-N1-SOLO-REQUIRED` | a privileged ratification leaning on the **sole resolved human** (a one-human map) must record the honest `quorum: n1_solo`; omitting it is laundered quorum (two accounts of one human are ONE human and never satisfy `privileged: 2`). |
+
+## N=1 native mode — the honest `quorum: n1_solo` carve-out (N1-CARVEOUT)
+
+**N=1 solo-dev is CE's native out-of-the-box mode.** CE's own development is an
+N=1 case, not an edge case: a single human owns every area and ratifies their
+own privileged decisions. The privileged tier still pins `privileged: 2`
+(`quorum_by_tier` is unchanged), so an honest record cannot *claim* a two-human
+quorum that does not exist. Instead the cardinality is recorded truthfully on
+the ratification record:
+
+- In a **one-human map**, a privileged ratification by the sole human is lawful
+  **only** when the record explicitly carries `quorum: n1_solo` (on a
+  `.ce/coordination.yml` `ratifications[]` entry, or a Decision Record's
+  `ratification.quorum`). Omitting it on a privileged record that leans on the
+  sole human fails `VAL-PA-N1-SOLO-REQUIRED`.
+- **The instant the map resolves two or more humans, every `n1_solo` record
+  fails** (`VAL-PA-N1-SOLO-EXPIRED`). This is automatic expiry — the carve-out
+  cannot outlive the condition that justified it. From that point privileged
+  decisions need the real two-human quorum.
+- **`n1_solo` is not quorum 2, not two-account laundering, and not a no-self
+  bypass.** Fail-closed identity resolution and `no_self_approval` are applied
+  *before* the solo mode can pass: an unresolved or missing ratifier never
+  counts as solo authority, and a ratifier resolving to the author's/seat's (or
+  a Decision Record `decision_makers`') human is still self-approval.
+
+The map-sensitive grading (auto-expiry, laundered-quorum) lives here in
+`peer_authority`, which holds the current `identity_map`; it also cross-checks
+governed Decision Records' `ratification.quorum` against that same map. The
+`decision_record` check owns only the local shape rule (`VAL-DR-N1-SOLO-MISUSED`:
+the marker is meaningful only on an accepted privileged record). A Decision
+Record is graded against a policy only when its path falls inside that policy's
+declared `area_owners` decision surface — so unrelated example records with no
+governing policy are never graded against this repo's one-human map.
 
 ## Identity resolution — declared limits (the §11.5 gap, shipped honestly)
 
