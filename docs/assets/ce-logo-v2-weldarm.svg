@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512">
+  <!-- CE mark v2 "weld arm" (2026-06-11, shipped with site v7 "The Choice"; trail ce-ops#10).
+       The CE hexagon badge kept as the basis; inside, a six-axis robotic arm in the classic
+       arched welding pose — trapezoid foot, two straight 7-unit limb segments bent at punched
+       joints (shoulder / elbow / wrist), down-pointing torch, workpiece line, warm weld spark.
+       Choice-state colors (violet hexagon / bone arm / warm spark). The truth-state variant
+       (see docs/index.html t-brand) swaps #A06BFF hexagon, #B7BCD6 arm, #9BE34F spark. -->
+  <rect width="64" height="64" rx="14" fill="#000000"/>
+  <path d="M32 6 54 19v26L32 58 10 45V19L32 6Z" fill="none" stroke="#5B3FB8" stroke-width="3.2"/>
+  <path d="M19 49h16l-3.3-7h-9.4Z" fill="#B3AB9B"/>
+  <path d="M27 42.5 29 24 44 26.5" fill="none" stroke="#B3AB9B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M45 29 46.3 36" stroke="#B3AB9B" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="27.3" cy="40" r="2.1" fill="#000"/>
+  <circle cx="29" cy="24" r="2.1" fill="#000"/>
+  <circle cx="44" cy="26.5" r="2.1" fill="#000"/>
+  <path d="M39 46.5h11" stroke="#807866" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="46.5" cy="40" r="1.9" fill="#E0604F"/>
+  <path d="M43.7 41.6l-2.2 1.5M49.3 41.5l2.2 1.4M46.5 42.9v2.3" stroke="#E0604F" stroke-width="2" stroke-linecap="round"/>
+</svg>

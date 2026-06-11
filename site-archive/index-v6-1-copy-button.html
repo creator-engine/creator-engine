@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Creator Engine — turn your home computer into a software factory</title>
+<meta name="description" content="Creator Engine is the open-source governance layer that turns your own computer into a professional software factory — anyone can build real apps with AI, taken from A to Z with automation you can trust: agents propose, you ratify, an external grader checks the result. Built to run secured by NVIDIA OpenShell isolation." />
+<link rel="canonical" href="https://creator-engine.dev/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Creator Engine" />
+<meta property="og:title" content="Creator Engine — turn your home computer into a software factory" />
+<meta property="og:description" content="Open-source governance for AI builders: turn ideas into real apps safely — agents propose, you ratify, the grader lives outside the agent, every change on the record. Built for security with NVIDIA OpenShell." />
+<meta property="og:url" content="https://creator-engine.dev/" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Creator Engine — turn your home computer into a software factory" />
+<meta name="twitter:description" content="Turn your computer into a professional software factory, with automation you can trust. Open source. Built for security with NVIDIA OpenShell." />
+<!--
+  Creator Engine — one-page brand site (v5 round 2: "NVIDIA-ready" consumer reframe).
+  Self-contained: no external fonts, scripts, images, or network calls. Inline CSS/SVG only.
+  Design system "Control-Room Violet → Creator": off-black base; NEON LIME (#9BE34F) =
+  create / safe / go / verified (consumer altitude, NVIDIA-adjacent); NEON VIOLET (#A06BFF)
+  = governance / CE signature (mechanism altitude); CRIMSON reserved for the one human gate.
+  Vocabulary canon (KEEP): Frame → Shape → Build → Review → Ship; the Scope card; the
+  ◆ CE Completion Report; the grader lives outside the agent; agents propose, one gate ratifies.
+  Honesty discipline: NVIDIA OpenShell = the open-source isolation/security layer CE's boxed
+  agents are built to run sandboxed on (accurate security architecture). RTX-Spark / native
+  consumer-laptop availability = announced fall 2026, NOT shipped; today CE runs on Linux/macOS.
+  "Pre-installed Creator app" = vision, not fact. v3.1 pilot-ready; 0.1.0 repo-checkout pre-release.
+  All motion gated behind prefers-reduced-motion. Apache-2.0.
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2308090f'/%3E%3Cpath%20d='M32%206%2054%2019v26L32%2058%2010%2045V19L32%206Z'%20fill='none'%20stroke='%23a06bff'%20stroke-width='4'/%3E%3Cpath%20d='M27%2032%2031%2036%2039%2027'%20fill='none'%20stroke='%239be34f'%20stroke-width='4'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --ink-900:#08090F; --ink-850:#0B0D15; --ink-800:#0F1220; --ink-700:#161A2B;
+    --line:#23263A; --line-soft:#181B2B;
+    --fg:#E9EAF5; --fg-dim:#B7BCD6; --fg-faint:#878DAD;
+    --spark:#9BE34F; --spark-bright:#B6F06F; --spark-deep:#5FA82C; --spark-glow:rgba(155,227,79,0.16);
+    --violet:#A06BFF; --violet-bright:#B98CFF; --violet-deep:#6E3CD6; --violet-glow:rgba(160,107,255,0.16);
+    --gate:#FF4D6D; --gate-soft:rgba(255,77,109,0.13); --gate-glow:rgba(255,77,109,0.20);
+    --amber:#F4B740; --amber-soft:rgba(244,183,64,0.13);
+    --radius:14px; --radius-sm:10px; --maxw:1160px;
+    --mono:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; font-family:var(--sans); color:var(--fg); background:var(--ink-900); line-height:1.6; overflow-x:hidden; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  a { color:inherit; text-decoration:none; }
+  a:focus-visible, button:focus-visible { outline:2px solid var(--spark); outline-offset:3px; border-radius:8px; }
+  h1,h2,h3 { line-height:1.1; letter-spacing:0; margin:0; font-weight:700; }
+  p { margin:0; }
+  code { font-family:var(--mono); }
+  ::selection { background:var(--spark-glow); color:#fff; }
+  .wrap { max-width:var(--maxw); margin:0 auto; padding:0 24px; }
+  .eyebrow { font-family:var(--mono); font-size:12px; letter-spacing:0.16em; text-transform:uppercase; margin:0 0 14px; display:inline-flex; align-items:center; gap:9px; color:var(--violet); }
+  .eyebrow::before { content:""; width:18px; height:1px; background:currentColor; box-shadow:0 0 8px currentColor; display:inline-block; }
+  .eyebrow.lime { color:var(--spark); }
+  .muted { color:var(--fg-dim); } .faint { color:var(--fg-faint); }
+  .hl-lime { color:var(--spark); } .hl-violet { color:var(--violet); } .hl-gate { color:var(--gate); }
+
+  .btn { display:inline-flex; align-items:center; gap:9px; font-weight:620; font-size:15px; padding:12px 21px; border-radius:999px; border:1px solid transparent; cursor:pointer; transition:transform .12s, background .15s, border-color .15s, box-shadow .15s; }
+  .btn:hover { transform:translateY(-1px); }
+  .btn-spark { background:var(--spark); color:#0a1a05; box-shadow:0 0 0 1px var(--spark-deep), 0 14px 44px -14px var(--spark-glow), 0 0 22px -4px var(--spark-glow); }
+  .btn-spark:hover { background:var(--spark-bright); }
+  .btn-ghost { background:rgba(255,255,255,0.03); color:var(--fg); border-color:var(--line); }
+  .btn-ghost:hover { border-color:var(--violet-deep); box-shadow:0 0 22px -10px var(--violet-glow); }
+  .btn svg { width:16px; height:16px; }
+
+  /* Nav */
+  header.nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(12px); background:color-mix(in srgb, var(--ink-900) 84%, transparent); border-bottom:1px solid var(--line-soft); }
+  .nav-inner { display:flex; align-items:center; justify-content:space-between; height:64px; gap:16px; }
+  .brand { display:flex; align-items:center; gap:11px; font-weight:700; font-size:16px; }
+  .brand .mark { width:27px; height:27px; filter:drop-shadow(0 0 6px var(--violet-glow)); }
+  .nav-links { display:flex; align-items:center; gap:23px; }
+  .nav-links a { font-size:14.5px; color:var(--fg-dim); transition:color .15s; }
+  .nav-links a:hover { color:var(--fg); }
+  .nav-cta { display:flex; align-items:center; gap:12px; }
+  .oss-pill { font-family:var(--mono); font-size:11px; letter-spacing:0.06em; color:var(--spark); border:1px solid var(--spark-deep); background:var(--spark-glow); padding:3px 10px; border-radius:999px; }
+  @media (max-width:940px){ .nav-links{display:none;} }
+  @media (max-width:540px){ .oss-pill{display:none;} .nav-cta .btn{padding:10px 14px;} }
+
+  /* Hero */
+  .hero { position:relative; overflow:hidden; padding:58px 0 24px; }
+  .hero::before { content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background:radial-gradient(900px 480px at 14% -6%, rgba(155,227,79,0.12), transparent 60%), radial-gradient(780px 460px at 94% 6%, rgba(160,107,255,0.11), transparent 58%); }
+  .hero::after { content:""; position:absolute; inset:0; z-index:0; opacity:.4;
+    background-image:linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size:54px 54px;
+    mask-image:radial-gradient(760px 480px at 28% 14%, #000 0%, transparent 72%); -webkit-mask-image:radial-gradient(760px 480px at 28% 14%, #000 0%, transparent 72%); }
+  .hero-minimal { border-bottom:0; }
+  .hero-stack { position:relative; z-index:1; max-width:820px; }
+  .hero-eyebrow { margin:0 0 14px; font-family:var(--mono); font-size:12px; color:var(--spark); letter-spacing:0.06em; }
+  .hero h1 { max-width:760px; font-size:56px; margin-bottom:18px; letter-spacing:0; }
+  .hero h1 .make { color:var(--spark); text-shadow:0 0 26px var(--spark-glow); }
+  .hero h1 .trust { color:var(--violet); }
+  .hero-sub { font-size:18px; color:var(--fg-dim); max-width:76ch; margin-bottom:0; }
+  .hero-sub strong { color:var(--fg); }
+  .openshell-badge { position:absolute; z-index:2; top:22px; right:24px; font-family:var(--mono); font-size:12px; color:var(--spark); border:1px solid var(--spark-deep); background:rgba(155,227,79,0.08); border-radius:999px; padding:8px 12px; }
+  .openshell-badge:hover { color:var(--spark-bright); border-color:var(--spark); }
+  .secband { display:flex; align-items:center; gap:11px; padding:11px 14px; border:1px solid var(--spark-deep); background:linear-gradient(90deg, var(--spark-glow), transparent); border-radius:12px; margin-bottom:18px; max-width:46ch; }
+  .secband .shield { flex:0 0 auto; width:22px; height:22px; color:var(--spark); }
+  .secband p { font-size:13.5px; color:var(--fg-dim); } .secband b { color:var(--spark); }
+  .hero-actions { display:flex; gap:13px; flex-wrap:wrap; align-items:center; }
+  .install-box { margin-top:18px; max-width:62ch; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:linear-gradient(180deg, var(--ink-800), var(--ink-850)); }
+  .install-box .ib-label { display:flex; align-items:center; gap:9px; padding:7px 14px; font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--spark); border-bottom:1px solid var(--line-soft); }
+  .install-box .ib-label i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; }
+  .install-box .ib-cmd { display:block; padding:13px 14px; font-family:var(--mono); font-size:13.5px; color:var(--fg); white-space:nowrap; overflow-x:auto; user-select:all; -webkit-user-select:all; }
+  .install-box .ib-cmd .p { color:var(--spark); user-select:none; -webkit-user-select:none; }
+  .install-box .ib-row { display:flex; align-items:center; gap:8px; padding-right:10px; }
+  .install-box .ib-row .ib-cmd { flex:1 1 auto; min-width:0; }
+  .install-box .ib-copy { flex:0 0 auto; font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--violet-bright); background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, color .15s ease; }
+  .install-box .ib-copy:hover { border-color:var(--violet-deep); box-shadow:0 0 18px -10px var(--violet-glow); }
+  .install-box .ib-copy.ok { color:var(--spark); border-color:var(--spark); }
+  .install-box .ib-agent { padding:9px 14px; font-size:13px; color:var(--fg-dim); border-top:1px solid var(--line-soft); }
+  .install-box .ib-agent code { font-size:12.5px; color:var(--violet-bright); }
+  .quick-start { position:relative; z-index:1; padding:0 0 22px; overflow:hidden; }
+  .quick-start .install-box { margin-top:0; max-width:760px; }
+  .cockpit-showcase { padding:0 0 34px; overflow:hidden; }
+  .cockpit-frame { margin:0; border:1px solid var(--line); border-radius:12px; background:linear-gradient(180deg, var(--ink-800), var(--ink-850)); overflow:hidden; box-shadow:0 30px 90px -56px rgba(0,0,0,.9), 0 20px 66px -46px var(--violet-glow); }
+  .cockpit-frame img { display:block; width:100%; height:auto; }
+  .bridge-line { margin:18px 0 0; text-align:center; font-size:18px; color:var(--fg); }
+  .hero-meta { margin-top:16px; font-family:var(--mono); font-size:12px; color:var(--fg-faint); display:flex; gap:14px; flex-wrap:wrap; }
+  .hero-meta span { display:inline-flex; align-items:center; gap:7px; }
+  .hero-meta i { width:6px; height:6px; border-radius:50%; background:var(--spark); display:inline-block; } .hero-meta i.v{background:var(--violet);} .hero-meta i.g{background:var(--gate);}
+  @media (max-width:960px){ .hero-sub,.secband,.install-box{max-width:none;} .hero h1{font-size:44px;} .openshell-badge{position:relative; top:auto; right:auto; display:inline-flex; margin-bottom:22px;} }
+  @media (max-width:560px){ .hero{padding-top:38px;} .hero h1{font-size:34px;} .hero-sub,.bridge-line{font-size:16px;} .quick-start .install-box{max-width:none;} }
+
+  /* ---------- Creator Console (the hero product surface) ---------- */
+  .console { position:relative; border:1px solid var(--line); border-radius:16px; overflow:hidden;
+    background:linear-gradient(180deg, var(--ink-800), var(--ink-850));
+    box-shadow:0 50px 110px -55px rgba(0,0,0,.92), inset 0 1px 0 rgba(255,255,255,.025), 0 0 0 1px rgba(155,227,79,0.05), 0 26px 70px -34px var(--spark-glow); }
+  .console-bar { display:flex; align-items:center; gap:9px; padding:12px 15px; border-bottom:1px solid var(--line-soft); background:rgba(255,255,255,0.015); }
+  .console-bar .dots { display:flex; gap:7px; } .console-bar .dots i { width:11px; height:11px; border-radius:50%; background:#2a2740; display:inline-block; }
+  .console-bar .dots i:nth-child(3){ background:#2c3a22; box-shadow:0 0 7px var(--spark-glow); }
+  .console-bar .ctitle { margin-left:6px; font-family:var(--mono); font-size:12.5px; color:var(--fg-dim); }
+  .console-bar .cbadge { margin-left:auto; font-family:var(--mono); font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--amber); border:1px solid var(--amber); background:var(--amber-soft); padding:2px 9px; border-radius:999px; }
+  .stage-rail { display:flex; gap:6px; padding:11px 15px; border-bottom:1px solid var(--line-soft); background:var(--ink-850); overflow-x:auto; }
+  .stage-rail span { font-family:var(--mono); font-size:11.5px; color:var(--fg-faint); padding:4px 11px; border-radius:999px; border:1px solid transparent; white-space:nowrap; }
+  .stage-rail span.done { color:var(--spark); } .stage-rail span.done::before { content:"✓ "; }
+  .stage-rail span.on { color:var(--violet); border-color:var(--violet-deep); background:var(--violet-glow); }
+  .console-body { padding:17px 17px 19px; display:grid; gap:12px; background:radial-gradient(600px 300px at 80% 0%, rgba(160,107,255,0.05), transparent 60%); }
+  .umsg { justify-self:end; max-width:80%; background:var(--spark-glow); border:1px solid var(--spark-deep); color:var(--fg); font-size:13.5px; padding:9px 13px; border-radius:13px 13px 4px 13px; }
+  .umsg .who { display:block; font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--spark); margin-bottom:3px; }
+  .pcard { border:1px solid var(--line-soft); border-radius:12px; background:var(--ink-850); overflow:hidden; }
+  .pcard.scope { border-color:rgba(160,107,255,0.28); box-shadow:0 0 34px -22px var(--violet-glow); }
+  .pcard.report { border-color:rgba(155,227,79,0.26); }
+  .pcard-h { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 13px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:11.5px; }
+  .pcard-h .ce { color:var(--violet); } .pcard.report .pcard-h .ce { color:var(--spark); }
+  .pcard-h .tagr { color:var(--fg-faint); } .pcard-h .ready { color:var(--spark); }
+  .pcard-title { font-size:15px; font-weight:680; padding:13px 14px 6px; color:var(--fg); }
+  .frow { display:grid; grid-template-columns:96px 1fr; gap:12px; padding:8px 14px; font-size:12.5px; }
+  .frow + .frow { border-top:1px solid var(--line-soft); } .frow:last-child { padding-bottom:13px; }
+  .frow b { font-family:var(--mono); font-size:11px; color:var(--violet); font-weight:600; }
+  .frow span { color:var(--fg-dim); } .frow .ok { color:var(--spark); }
+  .gate-prompt { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:11px 13px; border:1px solid rgba(255,77,109,0.4); background:var(--gate-soft); border-radius:12px; box-shadow:0 0 30px -12px var(--gate-glow); animation:gp 3.2s ease-in-out infinite; }
+  @keyframes gp { 0%,100%{ box-shadow:0 0 24px -12px var(--gate-glow);} 50%{ box-shadow:0 0 34px -6px var(--gate-glow);} }
+  .gate-prompt .q { font-family:var(--mono); font-size:13px; color:var(--gate); }
+  .gate-prompt .q::before { content:"⟂ "; }
+  .gbtns { display:flex; gap:8px; }
+  .gbtns .gy { font-family:var(--sans); font-size:12.5px; font-weight:680; color:#0a1a05; background:var(--spark); padding:6px 14px; border-radius:999px; }
+  .gbtns .gn { font-family:var(--sans); font-size:12.5px; font-weight:600; color:var(--fg-dim); border:1px solid var(--line); padding:6px 13px; border-radius:999px; }
+  .build-chip { display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:12px; color:var(--fg-dim); padding:2px 2px; }
+  .build-chip .d { width:8px; height:8px; border-radius:50%; background:var(--spark); box-shadow:0 0 8px var(--spark); }
+  .build-chip .bar { flex:1; height:5px; border-radius:999px; background:var(--ink-700); overflow:hidden; }
+  .build-chip .bar > span { display:block; height:100%; width:18%; background:linear-gradient(90deg, var(--spark), var(--violet)); }
+  .rrow { display:grid; grid-template-columns:78px 1fr; gap:12px; padding:8px 14px; font-family:var(--mono); font-size:12.5px; }
+  .rrow + .rrow { border-top:1px solid var(--line-soft); }
+  .rrow b { color:var(--spark); font-weight:600; } .rrow span { color:var(--fg-dim); } .rrow .ok { color:var(--spark); }
+  .viewpr { display:inline-flex; align-items:center; gap:7px; margin:11px 14px 14px; font-family:var(--sans); font-size:12.5px; font-weight:680; color:#0a1a05; background:var(--spark); padding:7px 14px; border-radius:999px; }
+  .console-note { font-family:var(--mono); font-size:11.5px; color:var(--fg-faint); border-top:1px solid var(--line-soft); padding:9px 15px; } .console-note a { color:var(--violet); }
+
+  /* Refrain */
+  .refrain { border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); background:linear-gradient(180deg, rgba(155,227,79,0.04), transparent); }
+  .refrain .wrap { display:flex; align-items:center; justify-content:center; gap:22px; padding:22px 24px; flex-wrap:wrap; }
+  .refrain b { font-family:var(--mono); font-size:clamp(15px,2.1vw,21px); letter-spacing:0.03em; font-weight:700; }
+  .refrain .sep { color:var(--violet); }
+  .refrain .tail { color:var(--fg-faint); font-size:13px; font-family:var(--mono); }
+
+  /* Sections */
+  section { position:relative; }
+  .band { padding:78px 0; border-top:1px solid var(--line-soft); }
+  .band.surface { background:linear-gradient(180deg, var(--ink-850), var(--ink-800)); border-top:1px solid var(--line); }
+  .band.surface::before { content:""; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, var(--violet-glow) 30%, var(--violet) 50%, var(--violet-glow) 70%, transparent); opacity:.6; }
+  .band.surface.lime::before { background:linear-gradient(90deg, transparent, var(--spark-glow) 30%, var(--spark) 50%, var(--spark-glow) 70%, transparent); }
+  .section-head { max-width:62ch; margin-bottom:40px; }
+  .section-head h2 { font-size:clamp(27px,3.5vw,38px); margin-bottom:14px; }
+  .section-head h3 { font-size:clamp(20px,2.4vw,26px); margin-bottom:14px; }
+  .section-head p { font-size:17px; color:var(--fg-dim); }
+
+  /* Persona strip */
+  .personas { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; background:var(--ink-850); }
+  .persona { padding:22px; border-right:1px solid var(--line-soft); }
+  .persona:last-child { border-right:0; }
+  .persona .n { font-family:var(--mono); font-size:12px; color:var(--spark); margin-bottom:16px; }
+  .persona h3 { font-size:17px; margin-bottom:8px; } .persona p { font-size:13.5px; color:var(--fg-dim); }
+  @media (max-width:820px){ .personas{ grid-template-columns:repeat(2,1fr);} .persona:nth-child(2){border-right:0;} .persona:nth-child(1),.persona:nth-child(2){border-bottom:1px solid var(--line-soft);} }
+  @media (max-width:460px){ .personas{grid-template-columns:1fr;} .persona{border-right:0; border-bottom:1px solid var(--line-soft);} .persona:last-child{border-bottom:0;} }
+
+  /* OpenShell complementarity */
+  .compl { display:grid; grid-template-columns:1fr auto 1fr; gap:20px; align-items:stretch; }
+  .compl .plate { border:1px solid var(--line-soft); border-radius:var(--radius); padding:24px; background:var(--ink-850); }
+  .compl .plate.os { border-color:rgba(155,227,79,0.28); }
+  .compl .plate.ce { border-color:var(--violet-deep); box-shadow:0 0 40px -24px var(--violet-glow); }
+  .compl .plate .k { font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--fg-faint); }
+  .compl .plate.os .k { color:var(--spark); } .compl .plate.ce .k { color:var(--violet); }
+  .compl .plate h3 { font-size:19px; margin:9px 0 8px; } .compl .plate p { font-size:14px; color:var(--fg-dim); }
+  .compl .plus { align-self:center; font-size:26px; color:var(--fg-faint); }
+  @media (max-width:820px){ .compl{grid-template-columns:1fr;} .compl .plus{transform:rotate(90deg);} }
+  .honest { margin-top:18px; font-family:var(--mono); font-size:13px; color:var(--fg-faint); border-left:2px solid var(--amber); padding-left:14px; }
+
+  /* Phases */
+  .steps { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; }
+  .step { background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:20px; transition:border-color .18s, box-shadow .18s; }
+  .step:hover { border-color:var(--violet-deep); box-shadow:0 0 30px -14px var(--violet-glow); }
+  .step .num { font-family:var(--mono); font-size:12px; color:var(--violet); border:1px solid var(--line); border-radius:8px; padding:3px 9px; display:inline-block; margin-bottom:12px; }
+  .step h3 { font-size:16px; margin-bottom:7px; } .step p { font-size:13px; color:var(--fg-dim); }
+  @media (max-width:1000px){ .steps{grid-template-columns:repeat(3,1fr);} }
+  @media (max-width:680px){ .steps{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:460px){ .steps{grid-template-columns:1fr;} }
+
+  /* Scope section (Codex base) */
+  .scope-grid { display:grid; grid-template-columns:0.95fr 1.05fr; gap:20px; align-items:start; }
+  @media (max-width:880px){ .scope-grid{grid-template-columns:1fr;} }
+  .scard { border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--ink-850); overflow:hidden; }
+  .scard.scope { border-color:rgba(160,107,255,0.26); }
+  .scard.report { border-color:rgba(155,227,79,0.24); }
+  .scard-h { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12px; color:var(--fg-faint); }
+  .scard-h .ce { color:var(--violet); } .scard.report .scard-h .ce { color:var(--spark); } .scard-h .ok { color:var(--spark); }
+  .scard-body { padding:20px; }
+  .scard-title { font-size:19px; font-weight:700; margin-bottom:16px; }
+  .sfield { display:grid; grid-template-columns:120px 1fr; gap:14px; padding:11px 0; border-top:1px solid var(--line-soft); }
+  .sfield:first-of-type { border-top:0; }
+  .sfield b { font-family:var(--mono); font-size:12px; color:var(--violet); } .sfield span { font-size:14px; color:var(--fg-dim); } .sfield .ok { color:var(--spark); }
+  .reportrows { display:grid; gap:10px; font-family:var(--mono); font-size:13px; }
+  .reportrows .row { display:grid; grid-template-columns:84px 1fr; gap:12px; padding:11px; border:1px solid var(--line-soft); border-radius:10px; background:rgba(0,0,0,.16); }
+  .reportrows .row b { color:var(--spark); } .reportrows .row span { color:var(--fg-dim); } .reportrows .row .ok { color:var(--spark); }
+  .reportrows code { color:var(--violet); font-size:12px; }
+
+  /* Governed flow */
+  .flowrow { display:flex; align-items:stretch; gap:0; }
+  .fnode { flex:1 1 0; min-width:0; background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:18px; transition:border-color .18s, box-shadow .18s; }
+  .fnode:hover { border-color:var(--violet-deep); box-shadow:0 0 28px -16px var(--violet-glow); }
+  .fnode.gate { border-color:rgba(255,77,109,0.5); background:linear-gradient(180deg, var(--gate-soft), transparent); box-shadow:0 0 34px -16px var(--gate-glow); }
+  .fnode .fk { font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--violet); }
+  .fnode.gate .fk { color:var(--gate); }
+  .fnode h3 { font-size:15px; margin:9px 0 6px; } .fnode p { font-size:12.5px; color:var(--fg-dim); }
+  .fnode .b { margin-top:9px; font-family:var(--mono); font-size:10.5px; color:var(--spark); } .fnode.gate .b { color:var(--gate); }
+  .farrow { align-self:center; color:var(--violet); flex:0 0 auto; padding:0 8px; font-size:20px; }
+  @media (max-width:860px){ .flowrow{flex-direction:column;} .farrow{transform:rotate(90deg); padding:6px 0;} }
+  .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line-soft); border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; margin-top:26px; }
+  .metric { position:relative; background:var(--ink-850); padding:24px 20px; }
+  .metric::before { content:""; position:absolute; top:0; left:0; width:100%; height:2px; background:linear-gradient(90deg, var(--violet), transparent); opacity:.55; }
+  .metric .n { font-family:var(--mono); font-size:28px; font-weight:700; letter-spacing:-0.03em; } .metric .n .u { color:var(--violet); text-shadow:0 0 14px var(--violet-glow); } .metric .n.g .u { color:var(--gate); text-shadow:0 0 14px var(--gate-glow); }
+  .metric .l { font-size:13.5px; color:var(--fg-dim); margin-top:4px; }
+  @media (max-width:760px){ .metrics{grid-template-columns:repeat(2,1fr);} }
+  .by { font-family:var(--mono); font-size:12px; color:var(--spark); border:1px solid var(--spark-deep); background:var(--spark-glow); padding:4px 10px; border-radius:999px; }
+
+  /* Why governance: benefit (without/with) + fear map */
+  .ben { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:26px; }
+  @media (max-width:760px){ .ben{grid-template-columns:1fr;} }
+  .bencard { border:1px solid var(--line-soft); border-radius:var(--radius); padding:24px; }
+  .bencard.bad { border-color:rgba(255,77,109,0.25); background:linear-gradient(180deg, var(--gate-soft), transparent); }
+  .bencard.good { border-color:var(--spark-deep); background:linear-gradient(180deg, var(--spark-glow), transparent); box-shadow:0 0 40px -24px var(--spark-glow); }
+  .bencard h3 { font-size:18px; margin-bottom:14px; display:flex; gap:10px; align-items:center; }
+  .bencard ul { list-style:none; padding:0; margin:0; display:grid; gap:11px; }
+  .bencard li { display:flex; gap:11px; font-size:14.5px; color:var(--fg-dim); }
+  .bencard.bad li .m { color:var(--gate); flex:0 0 auto; } .bencard.good li .m { color:var(--spark); flex:0 0 auto; }
+  .safe { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:820px){ .safe{grid-template-columns:1fr;} }
+  .srow { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; background:var(--ink-850); }
+  .srow .fear { padding:15px 17px; border-right:1px solid var(--line-soft); }
+  .srow .mech { padding:15px 17px; background:rgba(160,107,255,0.04); }
+  .srow .lab { font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px; }
+  .srow .fear .lab { color:var(--gate); } .srow .mech .lab { color:var(--violet); }
+  .srow .fear p { font-size:14px; color:var(--fg); } .srow .mech p { font-size:13px; color:var(--fg-dim); } .srow .mech code { color:var(--spark); font-size:12.5px; }
+  @media (max-width:460px){ .srow{grid-template-columns:1fr;} .srow .fear{border-right:0; border-bottom:1px solid var(--line-soft);} }
+
+  /* Capabilities */
+  .caps { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .cap { background:var(--ink-850); border:1px solid var(--line-soft); border-radius:var(--radius); padding:22px; transition:border-color .18s, box-shadow .18s; }
+  .cap:hover { border-color:var(--violet-deep); box-shadow:0 0 30px -16px var(--violet-glow); }
+  .cap .icon { width:36px; height:36px; border-radius:9px; display:grid; place-items:center; background:var(--violet-glow); border:1px solid var(--line); margin-bottom:14px; }
+  .cap .icon svg { width:18px; height:18px; stroke:var(--violet); }
+  .cap h3 { font-size:16px; margin-bottom:7px; } .cap p { font-size:13.5px; color:var(--fg-dim); } .cap code { color:var(--spark); font-size:12.5px; }
+  @media (max-width:880px){ .caps{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:560px){ .caps{grid-template-columns:1fr;} }
+
+  /* OSS */
+  .oss { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .ocard { border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--ink-850); overflow:hidden; }
+  .ocard-h { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12px; color:var(--fg-faint); }
+  .ocard-b { padding:20px; } .ocard h3 { font-size:18px; margin-bottom:9px; } .ocard p { font-size:13.5px; color:var(--fg-dim); }
+  @media (max-width:820px){ .oss{grid-template-columns:1fr;} }
+
+  /* Roadmap */
+  .road { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  .stage-c { border:1px solid var(--line-soft); border-radius:var(--radius); padding:20px; background:var(--ink-850); }
+  .stage-c .s-tag { font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; padding:4px 10px; border-radius:999px; display:inline-flex; align-items:center; gap:7px; margin-bottom:12px; }
+  .stage-c .s-tag .lamp { width:7px; height:7px; border-radius:50%; }
+  .stage-c.proven .s-tag { color:var(--spark); background:var(--spark-glow); } .stage-c.proven .lamp { background:var(--spark); box-shadow:0 0 8px var(--spark); animation:live 2.4s ease-in-out infinite; }
+  @keyframes live { 0%,100%{box-shadow:0 0 5px var(--spark);} 50%{box-shadow:0 0 12px var(--spark);} }
+  .stage-c.now .s-tag { color:var(--violet); background:var(--violet-glow); } .stage-c.now .lamp { background:var(--violet); box-shadow:0 0 8px var(--violet); }
+  .stage-c.pre .s-tag { color:var(--amber); background:var(--amber-soft); } .stage-c.pre .lamp { background:var(--amber); }
+  .stage-c.vision .s-tag { color:var(--fg-faint); background:rgba(255,255,255,0.03); } .stage-c.vision .lamp { background:var(--fg-faint); }
+  .stage-c h3 { font-size:15px; margin-bottom:7px; } .stage-c p { font-size:13px; color:var(--fg-dim); }
+  @media (max-width:900px){ .road{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:480px){ .road{grid-template-columns:1fr;} }
+
+  /* CTA + footer */
+  .cta-band { position:relative; overflow:hidden; padding:86px 0; text-align:center; border-top:1px solid var(--line-soft); }
+  .cta-band::before { content:""; position:absolute; inset:0; background:radial-gradient(620px 320px at 34% 0%, var(--spark-glow), transparent 70%), radial-gradient(560px 300px at 72% 14%, var(--violet-glow), transparent 70%); }
+  .cta-band .inner { position:relative; z-index:1; max-width:62ch; margin:0 auto; }
+  .cta-band h2 { font-size:clamp(30px,4.4vw,46px); margin-bottom:16px; } .cta-band h2 .make { color:var(--spark); }
+  .cta-band p { font-size:17px; color:var(--fg-dim); margin-bottom:30px; }
+  .cta-actions { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+  footer { border-top:1px solid var(--line-soft); padding:46px 0 60px; background:linear-gradient(180deg, transparent, rgba(0,0,0,0.25)); }
+  .foot-grid { display:flex; justify-content:space-between; gap:30px; flex-wrap:wrap; }
+  .foot-brand { max-width:40ch; } .foot-brand p { font-size:13.5px; color:var(--fg-faint); margin-top:12px; }
+  .foot-cols { display:flex; gap:52px; flex-wrap:wrap; }
+  .foot-col h4 { font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--fg-faint); margin-bottom:14px; font-weight:600; }
+  .foot-col a { display:block; font-size:14px; color:var(--fg-dim); margin-bottom:9px; } .foot-col a:hover { color:var(--fg); }
+  .foot-base { margin-top:38px; padding-top:22px; border-top:1px solid var(--line-soft); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--fg-faint); }
+  .note { font-family:var(--mono); font-size:13px; color:var(--fg-faint); border-left:2px solid var(--violet); padding-left:14px; }
+
+  @media (prefers-reduced-motion: reduce){ *,*::before,*::after{ animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+</style>
+</head>
+<body>
+
+<!-- ===================== NAV ===================== -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Creator Engine home">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
+        <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
+        <path d="M13 16 L15.5 18.5 L20 13" stroke="#9BE34F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Creator&nbsp;Engine
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#creator">Every Creator</a>
+      <a href="#openshell">OpenShell</a>
+      <a href="#how">How it works</a>
+      <a href="#scope">The Scope card</a>
+      <a href="#roadmap">Roadmap</a>
+    </nav>
+    <div class="nav-cta">
+      <span class="oss-pill">Open source · Apache-2.0</span>
+      <a class="btn btn-ghost" href="https://github.com/creator-engine/creator-engine" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<!-- ===================== HERO ===================== -->
+<section class="hero hero-minimal">
+  <a class="openshell-badge" href="#openshell">Built for security with NVIDIA OpenShell</a>
+  <div class="wrap">
+    <div class="hero-stack">
+      <p class="hero-eyebrow">Build from home</p>
+      <h1>Turn your home computer into a software factory.</h1>
+      <p class="hero-sub">Turn your ideas into real, working apps — today, right from home. Agents propose, you ratify, and an external grader checks every result before anything ships.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== QUICK-START ===================== -->
+<section class="quick-start" id="install">
+  <div class="wrap">
+    <div class="install-box">
+      <div class="ib-label"><i></i> Install Creator Engine</div>
+      <div class="ib-row">
+        <code class="ib-cmd"><span class="p">$ </span>curl -fsSL https://creator-engine.dev/install.sh | bash</code>
+        <button class="ib-copy" type="button" aria-label="Copy the install command" onclick="ceCopyInstall(this)">Copy</button>
+      </div>
+      <p class="ib-agent">or point your coding agent at <code>https://creator-engine.dev/llms-install.md</code></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== COCKPIT VISUAL ===================== -->
+<section class="cockpit-showcase" aria-label="Creator Engine demo cockpit">
+  <div class="wrap">
+    <figure class="cockpit-frame">
+      <img src="assets/cockpit-demo-v6.svg" alt="SVG screenshot of CE_DEMO=1 ce cockpit showing the demo watermark, stage board, and governance authority panel." />
+    </figure>
+    <p class="bridge-line">From beginner solo devs to elite engineering teams — end-to-end SDLC automation you can trust.</p>
+  </div>
+</section>
+
+<!-- ===================== REFRAIN ===================== -->
+<section class="refrain">
+  <div class="wrap">
+    <b><span class="hl-lime">Propose</span><span class="sep"> · </span><span class="hl-violet">Ratify</span><span class="sep"> · </span>Ship</b>
+    <span class="tail">the agent drafts it · you open the gate · the record proves it shipped</span>
+  </div>
+</section>
+
+<!-- ===================== EVERY PERSON, A CREATOR ===================== -->
+<section class="band" id="creator">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow lime">Every person, a Creator</span>
+      <h2>Now, anyone can turn an idea into software. The hard part won't be building it — it'll be trusting it.</h2>
+      <p>The audience is no longer only developers who run agents. A <strong>Creator</strong> is anyone who turns an idea into working software with AI. The promise has to be legible to a consumer and credible to the operator who must trust the trail.</p>
+    </div>
+    <div class="personas">
+      <div class="persona"><div class="n">01</div><h3>Founder</h3><p>Shape a product idea into a ratified Scope instead of a vague chat thread.</p></div>
+      <div class="persona"><div class="n">02</div><h3>Student</h3><p>Build a real app without giving an agent unlimited authority over your machine.</p></div>
+      <div class="persona"><div class="n">03</div><h3>Team lead</h3><p>Let agents move faster while every change still binds to evidence and a ratifier.</p></div>
+      <div class="persona"><div class="n">04</div><h3>Operator</h3><p>Keep the privileged floor human: deploys, identity, security, governance, and merge authority.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== OPENSHELL ALIGNMENT ===================== -->
+<section class="band surface lime" id="openshell">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow lime">Built for security with NVIDIA OpenShell</span>
+      <h2>OpenShell isolates the runtime. Creator Engine governs the work.</h2>
+      <p>Personal AI agents are heading to consumer machines. Runtime isolation keeps an agent contained — but isolation doesn't decide <em>whether the work was right, what it cost, or whether a human approved it.</em> That's a different layer, and it's the one we build. CE's boxed agents are built to run sandboxed on OpenShell, the open isolation layer — so consumer power never means free rein.</p>
+    </div>
+    <div class="compl">
+      <div class="plate os">
+        <div class="k">The runtime — OpenShell</div>
+        <h3>Isolates &amp; runs</h3>
+        <p>An open, sandboxed place for a personal agent to execute, with local model routing. Contains the blast radius of a single run.</p>
+      </div>
+      <div class="plus">+</div>
+      <div class="plate ce">
+        <div class="k">The work — Creator Engine</div>
+        <h3>Governs &amp; proves</h3>
+        <p>Bounds the task, caps the spend, routes risk to a human gate, grades the result from outside the agent, and lands a repo-visible record. The missing safety layer.</p>
+      </div>
+    </div>
+    <p class="honest">Honesty check: NVIDIA OpenShell is real open-source software, and CE's sandbox layer is built to target it. Native Windows / RTX-Spark consumer-agent <em>hardware</em> is <strong>announced for fall 2026, not shipped</strong>; today CE runs on Linux and macOS, open-source and independent. Alignment is the forward story — the governance is real now.</p>
+  </div>
+</section>
+
+<!-- ===================== HOW IT WORKS — phases ===================== -->
+<section class="band" id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">HOW IT WORKS</span>
+      <h2>How CE turns ideas into governed software</h2>
+      <p>Five governed phases, one repo-visible trail. The same five words name every piece of work, from a one-line idea to a full feature — <strong>Frame → Shape → Build → Review → Ship</strong> — riding over a conserved governed state machine. Each phase lands a ratifiable artifact anyone can replay from the repository alone.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><span class="num">01</span><h3>Frame</h3><p>Understand the idea, the risk, and what done should mean before the agent acts.</p></div>
+      <div class="step"><span class="num">02</span><h3>Shape</h3><p>Turn the idea into a Scope: Goal, Done-when, Budget, Change type, Ready.</p></div>
+      <div class="step"><span class="num">03</span><h3>Build</h3><p>Run the agent inside the ratified envelope, with bounded authority and captured side effects.</p></div>
+      <div class="step"><span class="num">04</span><h3>Review</h3><p>The grader lives outside the agent and checks evidence against the Done-when criteria.</p></div>
+      <div class="step"><span class="num">05</span><h3>Ship</h3><p>Land a merged PR, delivered research, or ratified no-change with the trail intact.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCOPE CARD — consumer promise w/ technical floor ===================== -->
+<section class="band surface" id="scope">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">The consumer promise with a technical floor</span>
+      <h2>The Scope card is where safety becomes concrete.</h2>
+      <p>CE does not ask users to trust agent confidence. It asks them to ratify a bounded bet before work starts, then judge the result through a completion report after external grading.</p>
+    </div>
+    <div class="scope-grid">
+      <div class="scard scope">
+        <div class="scard-h"><span class="ce">◆ CE · Shape</span><span class="ok">Ready ✓</span></div>
+        <div class="scard-body">
+          <div class="scard-title">"Make a booking app for my workshop"</div>
+          <div class="sfield"><b>Goal</b><span>Working local app with a booking form, admin list, and saved reservations.</span></div>
+          <div class="sfield"><b>Done when</b><span>Form submits, validation works, tests pass, data persists locally.</span></div>
+          <div class="sfield"><b>Budget</b><span>S — a fixed appetite cap, not an agent estimate.</span></div>
+          <div class="sfield"><b>Change type</b><span>code — can build app files, cannot deploy or touch secrets.</span></div>
+          <div class="sfield"><b>Ready</b><span><span class="ok">✓</span> The bet can be ratified and dispatched.</span></div>
+        </div>
+      </div>
+      <div class="scard report">
+        <div class="scard-h"><span class="ce">◆ CE Completion Report</span><span>external grade</span></div>
+        <div class="scard-body">
+          <div class="reportrows">
+            <div class="row"><b>Outcome</b><span>PR opened → #42</span></div>
+            <div class="row"><b>Verdict</b><span class="ok">Done-when 4/4 met · tests green · in scope ✓ · 18% of Budget S</span></div>
+            <div class="row"><b>Next</b><span>Review PR #42. A deploy request would require a higher Change-type and explicit ratification.</span></div>
+            <div class="row"><b>Inspect</b><span><code>ce fanin show</code> · <code>ce ledger verify</code> · <code>ce check</code></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== WHO DECIDES — governed flow ===================== -->
+<section class="band" id="gate">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Who decides</span>
+      <h2>Agents propose. One gate ratifies. The grader lives outside the agent.</h2>
+      <p>Governance is the product. CI, review, and fan-in inform the decision — they never become the decision. Every privileged change walks through the gate by construction, and the evidence that earned it stays in the repo.</p>
+    </div>
+    <div class="flowrow">
+      <div class="fnode"><div class="fk">01 · Propose</div><h3>Agent proposes</h3><p>Bounded by a Scope — identity, Change-type, and permitted actions fixed before any work begins.</p><div class="b">▸ identity-signed</div></div>
+      <div class="farrow">→</div>
+      <div class="fnode"><div class="fk">02 · Evidence</div><h3>Evidence assembles</h3><p>Spec, tests, side-effects, and validator output become a read-only packet on a hash-chained ledger.</p><div class="b">▸ graded outside the agent</div></div>
+      <div class="farrow">→</div>
+      <div class="fnode gate"><div class="fk">03 · Ratify</div><h3>A human opens the gate</h3><p>You ratify the privileged gate. The agent's own "done" never counts.</p><div class="b">⟂ human-ratified</div></div>
+      <div class="farrow">→</div>
+      <div class="fnode"><div class="fk">04 · Ship</div><h3>Record survives</h3><p>The change lands bound to its identity, evidence, and named ratifier — replayable from <code>git clone</code>.</p><div class="b">▸ audited</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== WHY GOVERNANCE — benefit + fear map ===================== -->
+<section class="band surface" id="why">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow lime">Why consumer agents need governance</span>
+      <h2>The safety gap is not theoretical.</h2>
+      <p>If personal agents ship broadly without a governance layer, every laptop becomes a place where cost, files, secrets, and deploy authority blur into a chat permission. Creator Engine makes the boundaries explicit and replayable — and the difference is legible to anyone.</p>
+    </div>
+    <div class="ben">
+      <div class="bencard bad">
+        <h3><span class="hl-gate">●</span> Without governance — exposure</h3>
+        <ul>
+          <li><span class="m">✕</span> "Go ahead" becomes unlimited authority.</li>
+          <li><span class="m">✕</span> Runaway spend is discovered after the fact.</li>
+          <li><span class="m">✕</span> File and secret boundaries are implicit.</li>
+          <li><span class="m">✕</span> "Done" is whatever the agent claims in chat.</li>
+          <li><span class="m">✕</span> No durable trail joins intent, diff, evidence, and ratifier.</li>
+        </ul>
+      </div>
+      <div class="bencard good">
+        <h3><span class="hl-lime">●</span> With Creator Engine — governed</h3>
+        <ul>
+          <li><span class="m">✓</span> Budget is a fixed cap placed before Build.</li>
+          <li><span class="m">✓</span> Change-type decides how high the gate is.</li>
+          <li><span class="m">✓</span> External grading checks evidence, not transcripts.</li>
+          <li><span class="m">✓</span> Privileged changes require named human ratification.</li>
+          <li><span class="m">✓</span> The repo holds the trail: Scope, evidence, ledger, verdict.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="section-head" style="margin-top:30px;margin-bottom:18px;">
+        <h3>Every consumer fear maps to a mechanism you can read in the repo.</h3>
+        <p class="muted" style="font-size:15px;">A non-technical Creator should feel safe; a technical operator should believe the mechanism. Same safety, two altitudes.</p>
+      </div>
+    <div class="safe">
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll spend a fortune looping."</p></div><div class="mech"><div class="lab">The mechanism</div><p>A fixed <strong>Budget</strong> per Scope caps the run — <code>can't outspend the cap</code>.</p></div></div>
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll change something dangerous."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Risk-tiered <strong>Change-type</strong> escalates deploy/secrets to <code>the human gate</code>.</p></div></div>
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll leak my code or secrets."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Boxed isolation + a credential broker + a redaction gate — <code>nothing leaks by default</code>.</p></div></div>
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"How do I know it actually worked?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>An external grader checks <strong>Done-when</strong> — <code>evidence, not the agent's say-so</code>.</p></div></div>
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"What did it change, exactly?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>Every effect on a tamper-evident ledger — <code>replayable from git clone</code>.</p></div></div>
+      <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"Who said it could ship?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>A named ratifier binds to the change — <code>the privileged floor stays human</code>.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== TECHNICAL CREDIBILITY ===================== -->
+<section class="band" id="credibility">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Technical credibility</span>
+      <h2>Open-source primitives, not a trust-us cloud.</h2>
+      <p>CE is independent, repo-native, and inspectable. It can align with OpenShell-native machines without becoming a closed runtime or hiding governance behind a hosted service.</p>
+    </div>
+    <div class="caps">
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h16"/></svg></div><h3>Spec-driven by default</h3><p>Work traces through spec, plan, tasks, Scope, and acceptance evidence.</p></div>
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg></div><h3>Identity-aware authority</h3><p>Each run binds identity, permissions, Change-type, and a ratifier taxonomy.</p></div>
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 3v18M18 3v18M6 8h12M6 16h12"/></svg></div><h3>Change-type governed</h3><p>docs, code, schema, deploy, governance, identity, security, attestation, redaction — plus a privileged floor. <span class="faint">(The conserved <code>mutation_class</code>.)</span></p></div>
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div><h3>Evidence-verified</h3><p>The grader lives outside the agent. Done is a verdict, not a self-claim.</p></div>
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="4" y="4" width="16" height="14" rx="2"/><path d="M8 9l3 3-3 3M13 15h3"/></svg></div><h3>Your agent, under CE</h3><p>CE wraps your own coding agent instead of replacing the tool you already like.</p></div>
+      <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div><h3>Repo-visible trail</h3><p>Ledger, fan-in, validator output, and the report are replayable from a clone.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== INDEPENDENT / OSS ===================== -->
+<section class="band surface">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow lime">Independent by design</span>
+      <h2>Best on local agent hardware. Not locked to it.</h2>
+      <p>The strongest posture is partner-and-stay-independent: open-source governance that rides the local OpenShell stack when it arrives, while still running anywhere the repo and runtime are supported.</p>
+    </div>
+    <div class="oss">
+      <div class="ocard"><div class="ocard-h"><span>Open source</span><span>Apache-2.0</span></div><div class="ocard-b"><h3>Governance you can inspect</h3><p>The safety story is strongest when the mechanism is visible: schemas, ledgers, validators, and docs in the repository.</p></div></div>
+      <div class="ocard"><div class="ocard-h"><span>Local-first</span><span>no daemon</span></div><div class="ocard-b"><h3>Runs on demand</h3><p>The current runtime is repo-checkout based. It operates over local <code>.ce/</code> state and exits when finished.</p></div></div>
+      <div class="ocard"><div class="ocard-h"><span>Future alignment</span><span>fall 2026</span></div><div class="ocard-b"><h3>OpenShell-native vision</h3><p>If the partnership lands, CE could become the built-in "turn ideas into software" governance app on OpenShell-native laptops. Vision, not shipped.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== ROADMAP ===================== -->
+<section class="band" id="roadmap">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Honest about where the build is</span>
+      <h2>Real today. Independent always. Aligned with what's coming.</h2>
+      <p>We name stages plainly. The governance is real and running now; the consumer and NVIDIA-native chapters are the forward story — labeled as such.</p>
+    </div>
+    <div class="road">
+      <div class="stage-c proven"><span class="s-tag"><span class="lamp"></span> Proven · now</span><h3>Governed loop, live</h3><p>A real change opened, externally reviewed, and squash-merged by a distinct identity — schema-valid evidence on the hash chain.</p></div>
+      <div class="stage-c now"><span class="s-tag"><span class="lamp"></span> In progress · v3.1</span><h3>Pilot-ready</h3><p>The <code>ce session</code> in your own agent: the Scope card, the gate, the ◆ Completion Report. Runs on Linux/macOS.</p></div>
+      <div class="stage-c pre"><span class="s-tag"><span class="lamp"></span> Pre-release · 0.1.0</span><h3>Repository-checkout</h3><p>Install from the repo's checked-in wheelhouse — open-source, no hosted service, no daemon.</p></div>
+      <div class="stage-c vision"><span class="s-tag"><span class="lamp"></span> Forward story</span><h3>Creator, for everyone</h3><p>As OpenShell-native machines arrive (announced fall 2026), CE aims to be the built-in safe-building layer. Vision, not shipped.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CTA ===================== -->
+<section class="cta-band">
+  <div class="wrap inner">
+    <span class="eyebrow lime" style="justify-content:center;display:inline-flex;">Be a Creator. Safely.</span>
+    <h2>Turn your ideas into real software — and keep the <span class="make">gate</span>.</h2>
+    <p>Clone the open-source project, inspect the governance model, and build toward a world where every person can be a Creator — without handing unlimited authority to an agent. Open source, independent, runs anywhere; built for security with OpenShell.</p>
+    <div class="cta-actions">
+      <a class="btn btn-spark" href="https://github.com/creator-engine/creator-engine" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.7.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C18.3 4.6 19.3 5 19.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        Start on GitHub
+      </a>
+      <a class="btn btn-ghost" href="#scope">Inspect the Scope loop</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FOOTER ===================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#top">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="29" height="29" rx="7" stroke="#A06BFF" stroke-width="1.6"/>
+            <path d="M16 6 L25 11 V21 L16 26 L7 21 V11 Z" stroke="#A06BFF" stroke-width="1.4" fill="rgba(160,107,255,0.08)"/>
+            <path d="M13 16 L15.5 18.5 L20 13" stroke="#9BE34F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Creator&nbsp;Engine
+        </a>
+        <p>The open governance layer that makes it safe to turn every person into a Creator. Agents propose; humans ratify; the grader lives outside the agent. Apache License 2.0.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="#how">How it works</a>
+          <a href="#scope">The Scope card</a>
+          <a href="#gate">The gate</a>
+          <a href="#roadmap">Roadmap</a>
+        </div>
+        <div class="foot-col">
+          <h4>Aligned</h4>
+          <a href="#openshell">OpenShell / NVIDIA</a>
+          <a href="#creator">Every person a Creator</a>
+          <a href="#gate">Grader outside the agent</a>
+        </div>
+        <div class="foot-col">
+          <h4>Project</h4>
+          <a href="https://github.com/creator-engine/creator-engine" rel="noopener">GitHub</a>
+          <a href="https://github.com/creator-engine/creator-engine/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
+          <a href="https://github.com/creator-engine/creator-engine/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a>
+          <a href="https://github.com/creator-engine/creator-engine/blob/main/LICENSE" rel="noopener">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-base">
+      <span>© 2026 Creator Engine. Open source under Apache-2.0. Independent.</span>
+      <span>Today: Linux/macOS repo-checkout pre-release · Forward story: OpenShell / RTX alignment, fall 2026.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  /* The only script on this page: clipboard for the install one-liner. No network, no tracking. */
+  function ceCopyInstall(btn){
+    var cmd = 'curl -fsSL https://creator-engine.dev/install.sh | bash';
+    navigator.clipboard.writeText(cmd).then(function(){
+      btn.classList.add('ok'); btn.textContent = 'Copied';
+      setTimeout(function(){ btn.classList.remove('ok'); btn.textContent = 'Copy'; }, 1600);
+    });
+  }
+</script>
+</body>
+</html>

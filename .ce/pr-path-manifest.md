@@ -1,69 +1,45 @@
-# PR path manifest - v3.5-B2 Cockpit live-feeds gate
+# PR path manifest - site v7 "The Choice" (Operator-approved v7.8)
 
 CI passes this to `verify-path-manifest --base <PR base sha> --manifest .ce/pr-path-manifest.md`
 and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; the
 fidelity scan requires the declared count and SHA256 to match the fenced block.
 
-Ratified gate:
-`~/ce-launch/v35b-livefeeds-wave/v35b-cockpit-livefeeds-gate-RATIFIED-20260611.md`
-(sha256 `b7fc78ff027e93bdbbd45e1282d24b82b25d993cf94c01582e117152f59e5c0b`;
-Operator-ratified 2026-06-11, §7 fork resolutions binding).
+Ratification: interactive Operator session 2026-06-11 — v7 concept ratified-with-changes,
+then 8 directed revision rounds to v7.8 "draft approved, let's move to a governed live PR";
+full round-by-round trail = ce-ops#10 comments of 2026-06-11. Approved draft source:
+`~/Documents/ce-website-v7-draft-index.html` (CE-DEV-1).
 
-Implementer mandate:
-`~/ce-launch/v35b-livefeeds-wave/B2_IMPL_MANDATE.md`.
+Base: `1fb22f654527088fe4ce4a1348a30fa33d0f3fb9` (origin/main, post-#199).
 
-Base:
-`86ca1d31f034b6b841fa266e6cbf0f47f8a9c01f` (origin/main post-G1).
-
-Per-file purpose (the closed §2 manifest — 14 paths, as ratified):
-- **`schemas/escalation-record.schema.yaml`** *(A)* - Feed 1 value-free
-  AWAITING-OPERATOR local record schema with required recommendation.
-- **`validators/creator_engine_validator/_versions.py`** *(M)* - `V3_SCHEMAS`
-  += `schemas/escalation-record.schema.yaml` only; runtime counters stay flat.
-- **`validators/creator_engine_validator/runner/cockpit_readmodel.py`** *(M)* -
-  `SNAPSHOT_VERSION` 2, escalation/dispatch loaders, pure feed folds,
-  availability keys, watch paths, and dispatch-derived board signals.
-- **`validators/creator_engine_validator/runner/cockpit_demo_seed.py`** *(M)* -
-  CE_DEMO parity for two escalation records and two schema-true dispatch records.
-- **`validators/creator_engine_validator/v3_cockpit.py`** *(M)* - render-only
-  left/right rail additions for dispatches and AWAITING-OPERATOR items.
-- **`validators/creator_engine_validator/v3_cli.py`** *(M)* - `ce escalation
-  open|resolve|sync`; sync is a fail-closed `gh issue list` edge with no fold call.
-- **`validators/tests/unit/test_cockpit_readmodel.py`** *(M)* - feed fold,
-  loader, purity, failed-dispatch, board-signal, and demo parity tests.
-- **`validators/tests/unit/test_v3_cockpit.py`** *(M)* - rail-render tests plus
-  `CE_DEMO=1 ce cockpit --json` feed assertions.
-- **`validators/tests/unit/test_v3_cli.py`** *(M)* - escalation CLI tests with
-  faked runner and zero-write refusal proofs.
-- **`docs/architecture/cockpit.md`** *(M)* - live-feed architecture, local
-  escalation layout, sync posture, and snapshot-shape bump.
-- **`validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl`** *(M)* -
-  landing: app wheel rebuilt once from final branch source.
-- **`validators/wheelhouse/SHA256SUMS`** *(M)* - landing: re-pinned for the
-  rebuilt app wheel.
-- **`docs/v3-roadmap.md`** *(M)* - landing: G1 merged at `86ca1d3`; B2 row added.
+Per-file purpose (7 paths):
+- **`docs/index.html`** *(M)* - the v7 "The Choice" site (approved v7.8), adapted for live:
+  hero art src -> `assets/the-choice-agent.webp`, favicon -> tracked `assets/ce-favicon-v2.svg`,
+  header comment promoted draft->live. Content otherwise byte-identical to the approved draft, plus the 5 cockpit-serve theme-contract alias tokens required by test_v3_cockpit_serve.SITE_HEX (same values, zero visual change).
+- **`docs/assets/the-choice-agent.webp`** *(A)* - Operator-provided hero art, webp q86
+  (55KB; source PNG 1.6MB stays outside the repo).
+- **`docs/assets/ce-logo-v2-weldarm.svg`** *(A)* - the new CE mark v2 "weld arm", tracked +
+  versioned (512px presentational).
+- **`docs/assets/ce-favicon-v2.svg`** *(A)* - the favicon artifact (same mark on a night tile);
+  referenced by the page instead of an inline data URI.
+- **`site-archive/index-v6-1-copy-button.html`** *(A)* - byte-exact snapshot of the outgoing
+  v6.1 live page (sha256 `1a3f2645...` verified against the ledger row).
+- **`site-archive/README.md`** *(M)* - ledger: v6.1 row pinned to its snapshot + live commit
+  `6118a1c` (#194); v7 row added as current-live with the new content SHA256.
 - **`.ce/pr-path-manifest.md`** *(M)* - this carrier.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=14
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=c2c29e112597df9f482fed641ce934b266326af60fe643f1cdaf6e5b581b6cd5
+AUTHORIZED_PATHS_SHA256=4d7eb9a60ce8040dad3628fb493f4cd8c1908ab2d05e3ac6de381c06361dbddb
 
 ```text
 .ce/pr-path-manifest.md
-docs/architecture/cockpit.md
-docs/v3-roadmap.md
-schemas/escalation-record.schema.yaml
-validators/creator_engine_validator/_versions.py
-validators/creator_engine_validator/runner/cockpit_demo_seed.py
-validators/creator_engine_validator/runner/cockpit_readmodel.py
-validators/creator_engine_validator/v3_cli.py
-validators/creator_engine_validator/v3_cockpit.py
-validators/tests/unit/test_cockpit_readmodel.py
-validators/tests/unit/test_v3_cli.py
-validators/tests/unit/test_v3_cockpit.py
-validators/wheelhouse/SHA256SUMS
-validators/wheelhouse/creator_engine_validator-0.1.0-py3-none-any.whl
+docs/assets/ce-favicon-v2.svg
+docs/assets/ce-logo-v2-weldarm.svg
+docs/assets/the-choice-agent.webp
+docs/index.html
+site-archive/README.md
+site-archive/index-v6-1-copy-button.html
 ```
