@@ -1238,3 +1238,98 @@ def test_collect_no_pr_fallback_is_byte_conserved(tmp_path, capsys, monkeypatch)
     assert code == 0
     cs = _outcome_change_set(tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml")
     assert cs["head_sha"] == run_id and cs["base"] == "main"
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2b — cev3 review (dispatch a distinct CE-governed reviewer venue)
+# ---------------------------------------------------------------------------
+def _review_argv(tmp_path, author_run_id, *, spawn=False, scope="rate-limit-login", **extra):
+    argv = [
+        "review", scope, "--run", author_run_id,
+        "--reviewer-actor", "ubuntuaws745-cmyk", "--root", str(tmp_path), "--json",
+    ]
+    if spawn:
+        argv.append("--spawn")
+    for k, v in extra.items():
+        argv += ["--" + k.replace("_", "-"), str(v)]
+    return argv
+
+
+def test_review_refuses_without_stamped_pr(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)  # no change block → no PR
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id))
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "no_pr"
+
+
+def test_review_refuses_scope_mismatch(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id, scope="other-scope"))
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "scope_mismatch"
+
+
+def test_review_assemble_only_materializes_envelope_and_dispatch(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id))
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "review_assembled" and payload["pr_number"] == 7
+    review_run_id = payload["review_run_id"]
+    assert (tmp_path / "dispatches" / review_run_id / "dispatch.yaml").is_file()
+    assert Path(payload["envelope_ref"]).is_file()
+
+
+def test_review_spawn_requires_venue_root_and_ledger(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id, spawn=True))  # no --venue-root/--ledger-root
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "spawn_inputs_missing"
+
+
+def test_review_spawn_launches_venue(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+
+    seen = {}
+
+    def fake_spawn(rec, *, controller_id, venue_root, ledger_root):
+        seen["controller_id"] = controller_id
+        seen["venue_root"] = venue_root
+        return v3_seat_bridge.SpawnResult(
+            run_id=rec.run_id,
+            terminal={"kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": "%7"},
+        )
+
+    monkeypatch.setattr(v3_cli.v3_seat_bridge, "spawn_review_venue", fake_spawn)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(
+        tmp_path, run_id, spawn=True, venue_root=str(tmp_path / "venues"),
+        ledger_root=str(tmp_path / "ledger"), controller_id="ctrl-x"))
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "spawned_review" and payload["pane_id"] == "%7"
+    assert seen["controller_id"] == "ctrl-x"
+
+
+def test_review_spawn_fail_closed(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id)
+
+    def boom(rec, **kw):
+        raise v3_seat_bridge.SpawnRefused("pco-allocate refused")
+
+    monkeypatch.setattr(v3_cli.v3_seat_bridge, "spawn_review_venue", boom)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(
+        tmp_path, run_id, spawn=True, venue_root=str(tmp_path / "v"), ledger_root=str(tmp_path / "l")))
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["action"] == "spawn_refused"

@@ -1060,6 +1060,104 @@ def _cmd_pr(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Dispatch a distinct CE-governed reviewer venue for a run's opened PR (G2b).
+
+    Preconditions: the author dispatch exists, belongs to the named Scope, and carries a
+    forge-stamped ``change`` block with a real ``pr_number``/``head_sha`` (no PR ⇒ refuse with a
+    pointer to ``cev3 pr``). Materializes the reviewer-authority envelope + a ``role: reviewer``
+    dispatch; with ``--spawn`` it provisions + launches the venue (pco-allocate → ``ce lane launch
+    --json`` → seed). The review SUBMISSION (``gh pr review``) stays the venue's OWN governed act
+    under the live Ring-1 hook + envelope; v3 RECORDS the venue and later folds its outcome via the
+    unchanged ``cev3 collect ... --outcome review_submitted``.
+    """
+    root = Path(args.root)
+    author_run_id = args.run_id
+    try:
+        author = _load_dispatch(root, author_run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · review refused: {exc}"], {"error": str(exc)})
+    if author.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review refused: run {author_run_id!r} belongs to Scope "
+             f"{author.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": author_run_id,
+             "dispatch_scope_id": author.get("scope_id")},
+        )
+    change = author.get("change") or {}
+    pr_number = change.get("pr_number")
+    head_sha = change.get("head_sha")
+    if not pr_number or not head_sha:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review refused: run {author_run_id!r} has no opened PR to review",
+             f"{_BRAND} · open it first: {CE_CMD} pr {args.scope_id} --run {author_run_id} "
+             f"--branch <branch> --manifest-path <path> --app-config <cfg> --apply"],
+            {"error": "no_pr", "run_id": author_run_id},
+        )
+    if args.spawn and (not args.venue_root or not args.ledger_root):
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review --spawn refused: --venue-root and --ledger-root are required "
+             "to provision the out-of-repo reviewer venue"],
+            {"error": "spawn_inputs_missing", "run_id": author_run_id},
+        )
+
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, root, reviewer_actor=args.reviewer_actor,
+        pr_number=int(pr_number), head_sha=str(head_sha),
+    )
+    if not args.spawn:
+        lines = [
+            f"{_BRAND} · REVIEW dispatch assembled for Scope {args.scope_id!r} "
+            f"(PR #{pr_number}, review run {rec.run_id})",
+            f"    envelope: {rec.data['review_of']['envelope_ref']}",
+            f"    dispatch: {rec.dispatch_path}",
+            f"{_BRAND} · (assemble-only — pass --spawn to launch the governed reviewer venue)",
+        ]
+        return _emit(
+            args, 0, lines,
+            {"action": "review_assembled", "scope_id": args.scope_id,
+             "author_run_id": author_run_id, "review_run_id": rec.run_id,
+             "pr_number": int(pr_number),
+             "envelope_ref": rec.data["review_of"]["envelope_ref"],
+             "dispatch_path": str(rec.dispatch_path)},
+        )
+    try:
+        spawn = v3_seat_bridge.spawn_review_venue(
+            rec, controller_id=args.controller_id,
+            venue_root=args.venue_root, ledger_root=args.ledger_root,
+        )
+    except v3_seat_bridge.SeatBridgeError as exc:
+        # spawn_review_venue stamps mark_spawn_failed on any leg's refusal (conserved, not deleted).
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · review --spawn refused: {exc}"],
+            {"action": "spawn_refused", "reason": "venue_launch_refused",
+             "review_run_id": rec.run_id, "detail": str(exc),
+             "dispatch_path": str(rec.dispatch_path)},
+        )
+    pane = spawn.terminal.get("pane_id")
+    lines = [
+        f"{_BRAND} · SPAWNED reviewer venue for Scope {args.scope_id!r} "
+        f"(PR #{pr_number}, review run {rec.run_id})",
+        f"    envelope: {rec.data['review_of']['envelope_ref']}",
+        f"    dispatch: {rec.dispatch_path}",
+        f"    pane: {pane}  [reviewer]",
+        f"    next: {CE_CMD} collect {args.scope_id} --run {rec.run_id} "
+        f"--outcome review_submitted --pr {pr_number}",
+    ]
+    return _emit(
+        args, 0, lines,
+        {"action": "spawned_review", "scope_id": args.scope_id,
+         "author_run_id": author_run_id, "review_run_id": rec.run_id,
+         "pr_number": int(pr_number), "pane_id": pane, "terminal": spawn.terminal,
+         "envelope_ref": rec.data["review_of"]["envelope_ref"],
+         "dispatch_path": str(rec.dispatch_path)},
+    )
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     """List Scopes with their projected stage (the canon skin over the machine)."""
     root = Path(args.root)
@@ -1648,6 +1746,26 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="push + open the PR for real (default: plan-only — mutates nothing)")
     _add_root(p_pr)
 
+    p_review = sub.add_parser(
+        "review", help="dispatch a distinct CE-governed reviewer venue for a run's opened PR "
+                       "(assemble-only; --spawn launches the venue)")
+    p_review.add_argument("scope_id", metavar="ID", help="the Scope the author run delivered")
+    p_review.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                          help="the AUTHOR run id whose opened PR is reviewed")
+    p_review.add_argument("--reviewer-actor", required=True, dest="reviewer_actor",
+                          help="the host-bound reviewer LOGIN (DATA — a login, never a token; e.g. "
+                               "ubuntuaws745-cmyk on the laptop, cedev1vps-cmd on CE-DEV-1)")
+    p_review.add_argument("--spawn", action="store_true",
+                          help="provision + launch the governed reviewer venue (default: assemble-only)")
+    p_review.add_argument("--venue-root", default=None, dest="venue_root",
+                          help="out-of-repo zone the venue worktree is provisioned under "
+                               "(required with --spawn; execution-zones directive)")
+    p_review.add_argument("--ledger-root", default=None, dest="ledger_root",
+                          help="Active-Work ledger root for the venue claim (required with --spawn)")
+    p_review.add_argument("--controller-id", default="cev3-review", dest="controller_id",
+                          help="controller id for the venue lane (default: cev3-review)")
+    _add_root(p_review)
+
     p_escalation = sub.add_parser(
         "escalation",
         help="manage local AWAITING-OPERATOR escalation records",
@@ -1807,6 +1925,7 @@ _DISPATCH = {
     "drive": _cmd_drive,
     "collect": _cmd_collect,
     "pr": _cmd_pr,
+    "review": _cmd_review,
     "escalation": _cmd_escalation,
     "status": _cmd_status,
     "show": _cmd_show,
