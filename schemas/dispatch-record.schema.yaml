@@ -1,0 +1,178 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/dispatch-record.schema.yaml"
+title: "Creator Engine Dispatch Record"
+description: |
+  Machine-readable schema for a single dispatch record — the on-disk handoff a
+  `cev3 drive --spawn` materializes from a ratified Scope's assembled
+  `coordination.DispatchPlan` (v3.1-G1 live-spawn keystone). One record lives
+  per run under `<v3-local-state>/dispatches/<run_id>/dispatch.yaml`, alongside
+  the run's `runtime-policy.yaml` (read AS DATA by the v1 launch leg) and
+  `brief.md` (the seat mandate).
+
+  Boundary statement: the bridge (`creator_engine_validator/v3_seat_bridge.py`)
+  crosses to the proven v1 spawn mechanics as SUBPROCESS + DATA only
+  (`ce launch --json` → files + argv + JSON), importing NO v1 module — so the
+  v1⊥v3 HARD invariant + the ratchet stay untouched. This schema defines the
+  record SHAPE only; the bridge mints it and stamps the value-free launch
+  evidence after the spawn, and `cev3 collect` marks `collected_at`.
+
+  Value-free: a dispatch record carries the scope/run ids, the mutation class,
+  opaque ratification digests, the launch SHAPE (terminal pane ids, the resource
+  bound stamp), and shape-only refs — NEVER a credential, secret value, raw
+  account, host, or installation id.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - scope_id
+  - run_id
+  - mutation_class
+  - harness
+  - unattended
+  - session
+  - window
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: dispatch-record
+    description: |
+      Discriminator constant. Records that do not carry this exact value are not
+      governed dispatch records.
+  record_type:
+    type: string
+    const: dispatch
+  schema_version:
+    type: string
+    enum: ["1"]
+  scope_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+    description: |
+      The ratified Scope this run was dispatched from (same slug pattern as the
+      Scope record).
+  run_id:
+    type: string
+    minLength: 1
+    description: |
+      The minted run identity (`run-<scope_id>-<utcstamp>`). Stable key for the
+      dispatch dir and the run's evidence chain
+      (`<v3-local-state>/runs/<run_id>.runtime-evidence.yaml`).
+  mutation_class:
+    type: string
+    enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+    description: |
+      The blast-radius/severity tier conserved from the Scope — drives the back
+      gate (mutation_class-tiered human ratification).
+  scope_ratification:
+    $ref: "#/$defs/scope_ratification"
+    description: |
+      The value-free opaque digests carried through from the assembled plan
+      (the front-gate bet). NEVER a raw account.
+  harness:
+    type: string
+    const: claude
+    description: |
+      The seat harness. v3.1-G1 bridges the `claude` harness ONLY; codex
+      drive-spawn (a codex launch-spec + bounded wrap + bypass-mode spec field)
+      is the named follow-up gate (G1-codex).
+  unattended:
+    type: boolean
+    description: |
+      Whether the seat is spawned unattended (default true). When true the
+      bridge appends `--claude-arg=--dangerously-skip-permissions`; CC-D-6 stays
+      the gate on the v1 side (an unconfirmed hook-pack is a fail-closed refusal),
+      because for a governed seat the Ring-1 hook-pack — not the harness approval
+      modal — is the enforced boundary.
+  session:
+    type: string
+    minLength: 1
+    description: |
+      The tmux session the v1 leg spawns the seat into.
+  window:
+    type: string
+    minLength: 1
+    description: |
+      The tmux window the seat occupies.
+  runtime_policy_ref:
+    type: string
+    minLength: 1
+    description: |
+      Shape-only ref to the run's `runtime-policy.yaml` (the merged policy with
+      the appetite→cap run envelope) — read AS DATA by the v1 launch leg via
+      `--runtime-policy`. A path ref, never the policy body.
+  brief_ref:
+    type: string
+    minLength: 1
+    description: |
+      Shape-only ref to the seat mandate `brief.md` (the pointer target the tmux
+      seed line names). A path ref, never the brief body.
+  terminal:
+    oneOf:
+      - type: "null"
+      - $ref: "#/$defs/terminal"
+    description: |
+      The value-free launch evidence stamped after the spawn: the tmux
+      session/window/pane ids the v1 `LaunchResult` returned. Null before spawn.
+  resource_bound:
+    oneOf:
+      - type: "null"
+      - type: string
+      - type: object
+    description: |
+      The v3.5-F resource-bound stamp from the v1 launch plan (the applied
+      systemd scope/unit + fleet cap, or a `none (<enforcement>)` opt-down
+      string). Null when the seat was launched unbounded with no stamp.
+  spawned_at:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      UTC stamp the seat was spawned (`%Y%m%dT%H%M%SZ`). Null before spawn.
+  collected_at:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      UTC stamp `cev3 collect` folded the run's evidence chain. Null until the
+      run is collected (an uncollected dispatch projects the Scope to Build/RUN).
+$defs:
+  scope_ratification:
+    type: object
+    required: [approver_ref, ratified_scope_sha]
+    unevaluatedProperties: false
+    properties:
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          An OPAQUE digest standing in for the ratifying actor. NEVER a raw
+          account/login.
+      ratified_scope_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The SHA256 digest of the ratified Scope content the bet is pinned to.
+  terminal:
+    type: object
+    required: [session_id, window_id, pane_id]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        description: The terminal kind (e.g. `tmux`).
+      session_id:
+        type: string
+        minLength: 1
+        description: The tmux session id (an opaque handle, e.g. `$1`).
+      window_id:
+        type: string
+        minLength: 1
+        description: The tmux window id (an opaque handle, e.g. `@2`).
+      pane_id:
+        type: string
+        minLength: 1
+        description: The tmux pane id (an opaque handle, e.g. `%3`).

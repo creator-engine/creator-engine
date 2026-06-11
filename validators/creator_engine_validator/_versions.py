@@ -163,6 +163,10 @@ V3_SCHEMAS: frozenset[str] = frozenset(
         # surface's input inventory — single source of truth for the
         # `install_answers` check + the `v3_installer` engine).
         "schemas/install-answers.schema.yaml",
+        # v3.1-G1: the dispatch record — the on-disk handoff a `cev3 drive
+        # --spawn` materializes (`v3_seat_bridge`) and `cev3 collect` folds.
+        # Value-free: digests + shape refs only.
+        "schemas/dispatch-record.schema.yaml",
     }
 )
 

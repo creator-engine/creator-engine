@@ -138,6 +138,21 @@ def test_materialize_record_is_value_free(tmp_path):
     assert rec.data["scope_ratification"]["approver_ref"] == "a" * 64
 
 
+def test_materialized_record_conforms_to_schema(tmp_path):
+    import jsonschema  # vendored dev dep
+
+    schema = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "dispatch-record.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    # pre-spawn: terminal/resource_bound/spawned_at are null — must validate
+    jsonschema.validate(rec.data, schema)
+    # post-spawn: stamped terminal + resource_bound — must still validate
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce", now=_FIXED_NOW)
+    jsonschema.validate(rec.data, schema)
+
+
 def test_materialize_unattended_flag_recorded(tmp_path):
     rec = v3_seat_bridge.materialize_dispatch(
         _plan(), tmp_path, unattended=False, now=_FIXED_NOW
