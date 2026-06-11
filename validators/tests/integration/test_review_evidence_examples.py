@@ -1,3 +1,5 @@
+import pytest
+
 from creator_engine_validator.cli import main
 
 
@@ -39,9 +41,10 @@ def test_review_evidence_template_passes(capsys):
     assert "PASS review_evidence_schema" in out
 
 
-def test_check_examples_includes_review_evidence(capsys):
-    assert main(["check-examples"]) == 0
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_review_evidence(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/review-evidence/missing-verdict.yml" in out
     assert "examples/malformed/review-evidence/invalid-verdict-value.yml" in out
     assert "examples/malformed/review-evidence/missing-non-ratification-statement.yml" in out
+    assert exit_code == 0

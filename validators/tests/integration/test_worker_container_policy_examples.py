@@ -82,7 +82,7 @@ def test_list_checks_includes_worker_container_policy(capsys):
     assert "worker_container_policy: PCO-040, PCO-045" in out
 
 
-def test_check_examples_succeeds(capsys):
-    exit_code = main(["check-examples"])
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_succeeds(check_examples_result):
+    exit_code, out = check_examples_result
     assert exit_code == 0, f"check-examples failed:\n{out}"

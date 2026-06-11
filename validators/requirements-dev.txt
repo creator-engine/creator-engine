@@ -32,3 +32,7 @@ frozenlist==1.8.0
 multidict==6.7.1
 propcache==0.5.2
 yarl==1.24.2
+# v3.5 suite-speed gate: pytest-xdist parallel test runner. Test-only;
+# RED-G-6 does not read requirements-dev.txt or wheelhouse-dev/.
+pytest-xdist==3.8.0
+execnet==2.1.2

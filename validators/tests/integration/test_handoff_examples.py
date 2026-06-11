@@ -56,9 +56,9 @@ def test_count_mismatch_fixture_triggers_count_error(capsys):
     assert "path_manifest_count_mismatch" in out
 
 
-def test_check_examples_includes_handoff_fixtures(capsys):
-    exit_code = main(["check-examples"])
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_handoff_fixtures(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/handoffs/init-py-corruption.md" in out
     assert "examples/malformed/handoffs/hash-mismatch.md" in out
     assert "examples/malformed/handoffs/count-mismatch.md" in out

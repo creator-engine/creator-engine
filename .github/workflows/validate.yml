@@ -43,7 +43,7 @@ jobs:
       - name: Creator Engine validator — pytest suite (offline)
         run: |
           PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
-            python -m pytest -p no:cacheprovider validators/tests/ -q
+            python -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
 
       - name: YAML parse check — workflow files
         run: |
