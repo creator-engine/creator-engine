@@ -1,3 +1,5 @@
+import pytest
+
 from creator_engine_validator.cli import main
 
 
@@ -34,9 +36,10 @@ def test_check_well_formed_identity_returns_zero(capsys):
     assert "PASS identity" in capsys.readouterr().out
 
 
-def test_check_examples_returns_zero_when_example_expectations_hold(capsys):
-    assert main(["check-examples"]) == 0
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_returns_zero_when_example_expectations_hold(check_examples_result):
+    exit_code, out = check_examples_result
+    assert exit_code == 0
     assert "examples/well-formed" in out
     assert "examples/malformed/identity-record.missing-fields.yml" in out
     assert "examples/malformed/spec.creator-engine.missing-acceptance.yml" in out

@@ -39,10 +39,25 @@ def test_ce_check_matches_validator_exit_code_on_malformed(repo_root: Path, caps
     assert ce_ret == validator_ret != 0
 
 
-def test_ce_check_defaults_to_dot_path(monkeypatch, repo_root: Path, capsys):
+def test_ce_check_defaults_to_dot_path(monkeypatch, repo_root: Path, tmp_path: Path, capsys):
     # Omitting paths must default to ".": `ce check` and `ce check .` must
     # produce the same exit code (faithful wrap, not a reimplementation).
-    monkeypatch.chdir(repo_root)
+    mini_repo = tmp_path / "mini-repo"
+    mini_repo.mkdir()
+    (mini_repo / "schemas").symlink_to(repo_root / "schemas", target_is_directory=True)
+    (mini_repo / "docs").symlink_to(repo_root / "docs", target_is_directory=True)
+    example_dir = mini_repo / "examples" / "well-formed"
+    example_dir.mkdir(parents=True)
+    for storage_dir in ("attestations", "ratifications", "redactions"):
+        (example_dir / storage_dir).mkdir()
+    (example_dir / "identity-record.yml").write_text(
+        (repo_root / "examples" / "well-formed" / "identity-record.yml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(mini_repo)
     default_ret = ce_cli.main(["check", "--json"])
     capsys.readouterr()
     explicit_ret = ce_cli.main(["check", ".", "--json"])

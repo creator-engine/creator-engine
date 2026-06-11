@@ -1,3 +1,5 @@
+import pytest
+
 from creator_engine_validator.cli import main
 
 
@@ -46,9 +48,10 @@ def test_scan_runtime_policy_malformed_dir_fails(capsys):
     assert "runtime_policy_secret_names_only_violation" in out
 
 
-def test_check_examples_includes_runtime_policy(capsys):
-    assert main(["check-examples"]) == 0
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_runtime_policy(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/runtime-policy/unpinned-image.yml" in out
     assert "examples/malformed/runtime-policy/forbidden-mount.yml" in out
     assert "examples/malformed/runtime-policy/controller-key-secret.yml" in out
+    assert exit_code == 0

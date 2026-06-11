@@ -35,10 +35,13 @@ def _bounding_available() -> tuple[bool, str]:
 
 _AVAILABLE, _REASON = _bounding_available()
 
-pytestmark = pytest.mark.skipif(
-    not _AVAILABLE,
-    reason=f"no user-level cgroup delegation on this host/runner: {_REASON}",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _AVAILABLE,
+        reason=f"no user-level cgroup delegation on this host/runner: {_REASON}",
+    ),
+    pytest.mark.xdist_group("user-systemd"),
+]
 
 
 def _unique_unit(tag: str) -> str:

@@ -92,6 +92,7 @@ def test_launch_record_passes_live_pane_registry_check(tmp_path):
     assert result.ok, [e.format() for e in result.errors]
 
 
+@pytest.mark.xdist_group("real-tmux")
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
 def test_launch_spawns_real_tmux_session(tmp_path):
     ledger = _ledger(tmp_path)

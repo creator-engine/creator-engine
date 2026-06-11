@@ -111,9 +111,9 @@ def test_missing_section_header_fixture_warns_cr_003(capsys):
     assert "WARN" in out and "CR-003" in out
 
 
-def test_check_examples_includes_completion_report_fixtures(capsys):
-    exit_code = main(["check-examples"])
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_completion_report_fixtures(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/completion-reports/missing-envelope-sha256.yaml" in out
     assert "examples/malformed/completion-reports/mismatched-sha.yaml" in out
     assert "examples/malformed/completion-reports/blocked-without-blocker.yaml" in out

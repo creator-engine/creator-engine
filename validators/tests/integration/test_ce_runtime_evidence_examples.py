@@ -1,3 +1,5 @@
+import pytest
+
 from creator_engine_validator.cli import main
 
 
@@ -31,12 +33,13 @@ def test_runtime_evidence_unbound_policy_sha_example_fails(capsys):
     assert "docs/contracts/runtime-evidence.md" in out
 
 
-def test_check_examples_includes_runtime_evidence(capsys):
-    assert main(["check-examples"]) == 0
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_runtime_evidence(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/runtime-evidence/broken-chain-link.yml" in out
     assert "examples/malformed/runtime-evidence/mutated-content-hash.yml" in out
     assert "examples/malformed/runtime-evidence/unbound-policy-sha.yml" in out
+    assert exit_code == 0
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +63,8 @@ def test_runtime_evidence_agent_action_bad_op_example_fails(capsys):
     assert "docs/contracts/runtime-evidence.md" in out
 
 
-def test_check_examples_includes_agent_action(capsys):
-    assert main(["check-examples"]) == 0
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_agent_action(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/runtime-evidence/agent-action-bad-op.yml" in out
+    assert exit_code == 0

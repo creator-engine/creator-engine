@@ -171,9 +171,9 @@ def test_signed_lease_unknown_key_triggers_pco024(capsys):
     assert "PCO-024" in out
 
 
-def test_check_examples_includes_worktree_lease_fixtures(capsys):
-    exit_code = main(["check-examples"])
-    out = capsys.readouterr().out
+@pytest.mark.xdist_group("check-examples-sweep")
+def test_check_examples_includes_worktree_lease_fixtures(check_examples_result):
+    exit_code, out = check_examples_result
     assert "examples/malformed/worktree-leases/missing-required-fields.yaml" in out
     assert "examples/malformed/worktree-leases/bad-controller-id-pattern.yaml" in out
     assert "examples/malformed/worktree-leases/unknown-top-level-field.yaml" in out

@@ -10,17 +10,11 @@ from creator_engine_validator.checks.version_boundary import (
     CODE_MISSING,
     CODE_OVERLAP,
     CODE_UNALLOWED,
-    _package_dir,
     _resolve_from,
     build_edges,
     discover_modules,
     evaluate,
-    run,
 )
-
-
-def _mods():
-    return discover_modules(_package_dir())
 
 
 # --- registration + green on the real package -------------------------------
@@ -37,15 +31,15 @@ def test_registered_in_check_surface():
     assert len(reg) == 52
 
 
-def test_green_on_real_package():
-    result = run([])
+def test_green_on_real_package(version_boundary_real_run):
+    result = version_boundary_real_run
     assert result.ok, [e.format() for e in result.errors]
     assert result.errors == ()
     assert result.warnings == ()
 
 
-def test_hard_invariant_zero_v1_v3_crossings():
-    errors, _ = evaluate(_mods())
+def test_hard_invariant_zero_v1_v3_crossings(version_boundary_modules):
+    errors, _ = evaluate(version_boundary_modules)
     assert [e for e in errors if e.code == CODE_CROSS] == []
 
 
@@ -61,9 +55,9 @@ def test_allowlist_is_the_three_baselined_edges():
     )
 
 
-def test_allowlist_has_no_stale_entries_on_main():
+def test_allowlist_has_no_stale_entries_on_main(version_boundary_modules):
     # Every allowlisted edge must still exist -> no CODE_STALE warnings on main.
-    _, warnings = evaluate(_mods())
+    _, warnings = evaluate(version_boundary_modules)
     assert warnings == []
 
 
@@ -88,31 +82,31 @@ def test_taxonomy_counts_and_disjoint():
 
 # --- teeth: each guard fires on a synthetic violation -----------------------
 
-def test_cross_fires_when_v1_module_moved_to_v3(monkeypatch):
+def test_cross_fires_when_v1_module_moved_to_v3(monkeypatch, version_boundary_modules):
     # tmux_adapter (v1) is imported by lane_runtime/ce_cli (v1); moving it to v3
     # makes those edges v1->v3 crossings.
     monkeypatch.setattr(ver, "V1_RUNTIME", ver.V1_RUNTIME - {"tmux_adapter"})
     monkeypatch.setattr(ver, "V3_RUNTIME", ver.V3_RUNTIME | {"tmux_adapter"})
-    errors, _ = evaluate(_mods())
+    errors, _ = evaluate(version_boundary_modules)
     assert [e for e in errors if e.code == CODE_CROSS]
 
 
-def test_unallowed_fires_when_allowlist_emptied(monkeypatch):
+def test_unallowed_fires_when_allowlist_emptied(monkeypatch, version_boundary_modules):
     monkeypatch.setattr(ver, "BASELINE_SHARED_TO_VERSION_ALLOWLIST", frozenset())
-    errors, _ = evaluate(_mods())
+    errors, _ = evaluate(version_boundary_modules)
     unallowed = [e for e in errors if e.code == CODE_UNALLOWED]
     assert len(unallowed) == 3
 
 
-def test_missing_fires_for_ghost_runtime_module(monkeypatch):
+def test_missing_fires_for_ghost_runtime_module(monkeypatch, version_boundary_modules):
     monkeypatch.setattr(ver, "V1_RUNTIME", ver.V1_RUNTIME | {"ghost_module"})
-    errors, _ = evaluate(_mods())
+    errors, _ = evaluate(version_boundary_modules)
     assert [e for e in errors if e.code == CODE_MISSING]
 
 
-def test_overlap_fires_for_module_in_both_surfaces(monkeypatch):
+def test_overlap_fires_for_module_in_both_surfaces(monkeypatch, version_boundary_modules):
     monkeypatch.setattr(ver, "V3_RUNTIME", ver.V3_RUNTIME | {"tmux_adapter"})
-    errors, _ = evaluate(_mods())
+    errors, _ = evaluate(version_boundary_modules)
     assert [e for e in errors if e.code == CODE_OVERLAP]
 
 
