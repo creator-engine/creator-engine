@@ -27,6 +27,7 @@ gate G1-codex; ``cev3 drive --spawn`` refuses ``harness != claude``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -415,3 +416,316 @@ def seed_brief(
     line = _seed_line(record)
     runner(["tmux", "send-keys", "-t", pane, "-l", line], capture_output=True, text=True)
     runner(["tmux", "send-keys", "-t", pane, "Enter"], capture_output=True, text=True)
+
+
+# ===========================================================================
+# v3.1-G2b — the reviewer-venue leg (v3→v1 subprocess + DATA, the G1 pattern)
+# ===========================================================================
+# A distinct CE-governed reviewer venue is provisioned the SAME way the author
+# seat is — by re-entering the v1/shared PRODUCT CONTRACTS as subprocesses
+# (`creator-engine-validator pco-allocate`, `ce lane launch --json`), never as a
+# module edge (the bridge still imports NO v1 module). The venue's authority is a
+# `reviewer_authority_envelope` file (one `pr_review` mechanic on one PR), and the
+# review SUBMISSION (`gh pr review`) stays the venue's OWN governed act under the
+# live Ring-1 hook — v3 only RECORDS the venue (this dispatch) and later folds its
+# outcome via the unchanged `cev3 collect ... --outcome review_submitted`.
+
+#: The tmux window the reviewer venue occupies.
+REVIEW_WINDOW = "review"
+
+
+def _resolve_validator_exe(validator_exe: str | None) -> str:
+    """Resolve the shared ``creator-engine-validator`` console_script; refuse if absent."""
+    if validator_exe:
+        return validator_exe
+    candidate = Path(sys.executable).parent / "creator-engine-validator"
+    if candidate.exists():
+        return str(candidate)
+    found = shutil.which("creator-engine-validator")
+    if found:
+        return found
+    raise SpawnRefused(
+        "cannot resolve the `creator-engine-validator` entry point (not next to the "
+        "interpreter, not on PATH); refusing to provision a reviewer venue"
+    )
+
+
+def compose_reviewer_envelope(
+    dispatch_dir: Path | str,
+    *,
+    scope_id: str,
+    pr_number: int,
+    head_sha: str,
+    actor: str,
+    ratified_prompt_sha: str,
+    emitting_role: str = "controller",
+    operating_mode: str = "strict",
+    now: datetime | None = None,
+) -> str:
+    """Write a schema-valid ``reviewer_authority_envelope`` YAML under the review-dispatch dir.
+
+    The envelope authorizes EXACTLY one ``pr_review`` mechanic on EXACTLY one PR. ``actor`` is the
+    host-bound reviewer LOGIN passed in AS DATA (a login by schema design — never a token);
+    ``ratified_prompt_sha`` binds the grant to the SAME ratified Scope the author ran under (the
+    author dispatch's ``scope_ratification.ratified_scope_sha``). The envelope FILE carries the
+    login (its schema requires it; the Ring-1 hook records it); the dispatch RECORD carries only the
+    envelope path ref. Returns the envelope file path.
+    """
+    stamp = _utcstamp(now or datetime.now(timezone.utc))
+    envelope_id = f"rva-rev-{scope_id}-{stamp.lower()}"
+    recorded_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    envelope = {
+        "reviewer_authority_envelope": {
+            "envelope_id": envelope_id,
+            "mechanic": "pr_review",
+            "pr_number": int(pr_number),
+            "head_sha": str(head_sha),
+            "actor": str(actor),
+            "ratified_prompt_sha": str(ratified_prompt_sha),
+            "emitting_role": emitting_role,
+            "operating_mode": operating_mode,
+            "recorded_at": recorded_at,
+        }
+    }
+    path = Path(dispatch_dir) / "reviewer-authority-envelope.yaml"
+    path.write_text(_yaml_bytes(envelope), encoding="utf-8")
+    return str(path)
+
+
+def _render_reviewer_brief(
+    *,
+    review_run_id: str,
+    scope_id: str,
+    author_run_id: str,
+    pr_number: int,
+    head_sha: str,
+    envelope_ref: str,
+    root: Path,
+) -> str:
+    """The reviewer-venue mandate brief: the PR pointer, Done-when grading, the mechanic, handoff."""
+    scope_ref = root / "scopes" / f"{scope_id}.scope.yaml"
+    review_evidence_ref = root / "runs" / f"{review_run_id}.runtime-evidence.yaml"
+    return (
+        f"# ◆ CE reviewer-venue mandate — run {review_run_id}\n\n"
+        f"You are a distinct, governed CE reviewer venue. You review PR #{pr_number} "
+        f"(head `{head_sha}`) authored by run `{author_run_id}` for Scope `{scope_id}`. "
+        f"The Ring-1 hook-pack + your reviewer-authority envelope are your enforced boundary.\n\n"
+        f"## What to grade\n"
+        f"- **Done-when** — read the ratified Scope artifact `{scope_ref}` and grade the PR "
+        f"against its acceptance criteria, with evidence (the diff, the CI, the manifest), not vibes.\n\n"
+        f"## Your authority (one mechanic, one PR)\n"
+        f"- Envelope: `{envelope_ref}` — it authorizes EXACTLY `pr_review` on PR #{pr_number}.\n"
+        f"- Submit your review with `gh pr review {pr_number}` (the Ring-1 hook honors the envelope "
+        f"by mechanic + PR number). You CANNOT push or merge — a governed venue is push-denied.\n\n"
+        f"## Evidence handoff (for `cev3 collect`)\n"
+        f"When you finish, your venue run is folded by:\n"
+        f"`cev3 collect {scope_id} --run {review_run_id} --transcript <your harness .jsonl> "
+        f"--outcome review_submitted --pr {pr_number}`\n"
+        f"The conserved evidence chain lands at `{review_evidence_ref}`.\n"
+    )
+
+
+def materialize_review_dispatch(
+    author_dispatch: dict[str, Any],
+    root: Path | str,
+    *,
+    reviewer_actor: str,
+    pr_number: int,
+    head_sha: str,
+    emitting_role: str = "controller",
+    now: datetime | None = None,
+) -> DispatchRecord:
+    """Materialize a ``role: reviewer`` dispatch (envelope + brief + ``review_of`` block).
+
+    Reads the AUTHOR dispatch (scope_id, the author run_id, the value-free ratification + mutation
+    class) AS DATA, mints a review run_id ``run-review-<scope_id>-<utcstamp>``, composes a
+    schema-valid reviewer-authority envelope (bound to the author's ``ratified_scope_sha``), writes
+    the reviewer mandate brief, and persists the review ``dispatch.yaml`` with ``role: reviewer`` +
+    a value-free ``review_of`` block (author run_id, PR number, envelope path ref). No spawn happens
+    here; :func:`spawn_review_venue` stamps the launch evidence.
+    """
+    root_path = Path(root)
+    scope_id = str(author_dispatch["scope_id"])
+    author_run_id = str(author_dispatch["run_id"])
+    stamp = _utcstamp(now or datetime.now(timezone.utc))
+    review_run_id = f"run-review-{scope_id}-{stamp}"
+    dispatch_dir = root_path / DISPATCHES_SUBDIR / review_run_id
+    dispatch_dir.mkdir(parents=True, exist_ok=True)
+
+    ratified_scope_sha = str(
+        (author_dispatch.get("scope_ratification") or {}).get("ratified_scope_sha") or ""
+    )
+    envelope_ref = compose_reviewer_envelope(
+        dispatch_dir,
+        scope_id=scope_id,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        actor=reviewer_actor,
+        ratified_prompt_sha=ratified_scope_sha,
+        emitting_role=emitting_role,
+        now=now,
+    )
+    brief_ref = str(dispatch_dir / "brief.md")
+    (dispatch_dir / "brief.md").write_text(
+        _render_reviewer_brief(
+            review_run_id=review_run_id,
+            scope_id=scope_id,
+            author_run_id=author_run_id,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            envelope_ref=envelope_ref,
+            root=root_path,
+        ),
+        encoding="utf-8",
+    )
+
+    record: dict[str, Any] = {
+        "kind": _KIND,
+        "record_type": _RECORD_TYPE,
+        "schema_version": _SCHEMA_VERSION,
+        "scope_id": scope_id,
+        "run_id": review_run_id,
+        "mutation_class": str(author_dispatch.get("mutation_class", "none")),
+        "scope_ratification": dict(author_dispatch.get("scope_ratification") or {}),
+        "harness": BRIDGE_HARNESS,
+        "unattended": True,
+        "session": review_run_id,
+        "window": REVIEW_WINDOW,
+        "brief_ref": brief_ref,
+        # v3.1-G2b additive fields — value-free.
+        "role": "reviewer",
+        "review_of": {
+            "author_run_id": author_run_id,
+            "pr_number": int(pr_number),
+            "envelope_ref": envelope_ref,
+        },
+        # launch evidence — populated post-spawn (value-free shape).
+        "terminal": None,
+        "resource_bound": None,
+        "spawned_at": None,
+    }
+    rec = DispatchRecord(
+        run_id=review_run_id,
+        scope_id=scope_id,
+        dispatch_dir=dispatch_dir,
+        data=record,
+        runtime_policy_ref="",
+        mcp_config_ref="",
+        brief_ref=brief_ref,
+    )
+    _write_record(rec)
+    return rec
+
+
+def spawn_review_venue(
+    record: DispatchRecord,
+    *,
+    controller_id: str,
+    venue_root: Path | str,
+    ledger_root: Path | str,
+    runner: Callable[..., Any] = subprocess.run,
+    validator_exe: str | None = None,
+    ce_exe: str | None = None,
+    now: datetime | None = None,
+) -> SpawnResult:
+    """Provision + launch the reviewer venue via the v1/shared product contracts (subprocess + DATA).
+
+    The fail-closed chain, each leg surfacing stderr and stamping :func:`mark_spawn_failed` on ANY
+    refusal (never a half-venue projecting live):
+
+    1. ``creator-engine-validator pco-allocate`` (cwd = the out-of-root venue zone — pco refuses
+       from the repo root) provisions the worktree + Active-Work claim, with NO tracked-file write
+       authority (``--envelope-ref none --no-write-authority``); the venue's authority is the
+       reviewer-authority envelope, not a pco write envelope.
+    2. ``ce lane launch --role reviewer --lane-kind review --reviewer-authority-ref <envelope>
+       --json`` validates + injects the envelope on a DISTINCT reviewer venue and returns the Pane
+       Registry record (the G2b ``--json`` seam); its ``terminal`` is stamped into the dispatch.
+    3. :func:`seed_brief` — the EXISTING seed seam (so the ce-ops#16 readiness-poll/PATH fix lands
+       in exactly one place), pointer-only line. The reviewer token env is NOT seeded as text — the
+       venue inherits it from the launching shell having sourced the host reviewer env file.
+    """
+    review_of = record.data.get("review_of") or {}
+    envelope_ref = str(review_of.get("envelope_ref") or "")
+    if not envelope_ref:
+        raise SpawnRefused(
+            f"review dispatch {record.run_id!r} carries no envelope_ref; refusing to launch"
+        )
+    venue_root_path = Path(venue_root)
+    worktree_path = venue_root_path / record.run_id
+    brief_sha = hashlib.sha256(Path(record.brief_ref).read_bytes()).hexdigest()
+
+    # 1) pco-allocate — provision the worktree + claim (cwd outside the repo).
+    validator = _resolve_validator_exe(validator_exe)
+    pco_argv = [
+        validator, "pco-allocate",
+        "--lane-id", record.run_id,
+        "--worktree-path", str(worktree_path),
+        "--branch", f"review/{record.run_id}",
+        "--envelope-ref", "none",
+        "--no-write-authority",
+        "--controller-id", controller_id,
+        "--ledger-root", str(ledger_root),
+        "--pane-label", "reviewer",
+    ]
+    pco = runner(pco_argv, capture_output=True, text=True, cwd=str(venue_root_path))
+    if getattr(pco, "returncode", 1) != 0:
+        reason = (getattr(pco, "stderr", "") or "").strip() or "(no stderr)"
+        mark_spawn_failed(record, f"pco-allocate refused: {reason}", now=now)
+        raise SpawnRefused(
+            f"reviewer-venue pco-allocate refused for run {record.run_id!r}: {reason}"
+        )
+
+    # 2) ce lane launch --role reviewer --json — bind the envelope, capture the pane record.
+    exe = ce_exe or _resolve_ce_exe(None)
+    launch_argv = [
+        exe, "lane", "launch",
+        "--controller-id", controller_id,
+        "--lane-id", record.run_id,
+        "--role", "reviewer",
+        "--lane-kind", "review",
+        "--reviewer-authority-ref", envelope_ref,
+        "--prompt", record.brief_ref,
+        "--prompt-sha", brief_sha,
+        "--repo-root", str(worktree_path),
+        "--ledger-root", str(ledger_root),
+        "--command", "claude",
+        "--json",
+    ]
+    launch = runner(launch_argv, capture_output=True, text=True)
+    if getattr(launch, "returncode", 1) != 0:
+        reason = (getattr(launch, "stderr", "") or "").strip() or "(no stderr)"
+        mark_spawn_failed(record, f"ce lane launch refused: {reason}", now=now)
+        raise SpawnRefused(
+            f"reviewer-venue ce lane launch refused for run {record.run_id!r}: {reason}"
+        )
+    try:
+        launch_result = json.loads(getattr(launch, "stdout", "") or "")
+        terminal = (launch_result.get("record") or {}).get("terminal") or {}
+    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+        mark_spawn_failed(record, f"ce lane launch --json unparsable: {exc}", now=now)
+        raise SpawnRefused(
+            f"reviewer-venue ce lane launch --json produced unparsable output for run "
+            f"{record.run_id!r}: {exc}"
+        ) from exc
+    if not terminal.get("pane_id"):
+        mark_spawn_failed(record, "ce lane launch returned no terminal pane", now=now)
+        raise SpawnRefused(
+            f"reviewer-venue ce lane launch returned no terminal pane for run "
+            f"{record.run_id!r}; refusing a half-venue"
+        )
+
+    record.data["terminal"] = dict(terminal)
+    record.data["spawned_at"] = _utcstamp(now or datetime.now(timezone.utc))
+    _write_record(record)
+
+    # 3) seed the venue brief through the SAME seam (ce-ops#16 fix lands once).
+    seed_brief(record, runner=runner)
+
+    return SpawnResult(
+        run_id=record.run_id,
+        terminal=dict(terminal),
+        resource_bound=None,
+        launch_result=launch_result,
+    )

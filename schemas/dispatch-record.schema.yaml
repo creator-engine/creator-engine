@@ -170,6 +170,21 @@ properties:
       until a PR is opened (a run may end at research_delivered / no_change with
       no `change` block); `cev3 collect` derives the `change_set` + `pr_opened`
       outcome from it when present.
+  role:
+    type: string
+    enum: [implementer, reviewer]
+    description: |
+      v3.1-G2b: the seat role. ABSENT = the G1 implementer dispatch (an authoring
+      seat). `reviewer` marks a distinct CE-governed reviewer venue (provisioned
+      by `v3_seat_bridge.materialize_review_dispatch` + `spawn_review_venue`),
+      whose authority is the reviewer-authority envelope referenced in `review_of`.
+  review_of:
+    $ref: "#/$defs/review_of"
+    description: |
+      v3.1-G2b: present ONLY on a `role: reviewer` dispatch. The value-free pointer
+      back to the author run + the PR under review + the reviewer-authority envelope
+      path — NEVER a credential, token, or reviewer login (the login lives in the
+      envelope FILE, which the Ring-1 hook records; the record carries only the ref).
 $defs:
   change:
     type: object
@@ -206,6 +221,26 @@ $defs:
         type: string
         minLength: 1
         description: UTC stamp the PR was opened (`%Y-%m-%dT%H:%M:%SZ`).
+  review_of:
+    type: object
+    required: [author_run_id, pr_number, envelope_ref]
+    unevaluatedProperties: false
+    properties:
+      author_run_id:
+        type: string
+        minLength: 1
+        description: The authoring run whose PR this venue reviews.
+      pr_number:
+        type: integer
+        minimum: 1
+        description: The PR the venue is authorized to review.
+      envelope_ref:
+        type: string
+        minLength: 1
+        description: |
+          Shape-only path ref to the reviewer-authority envelope file (one
+          `pr_review` mechanic on this one PR). A path ref, never the envelope body
+          and never the reviewer login it carries.
   scope_ratification:
     type: object
     required: [approver_ref, ratified_scope_sha]
