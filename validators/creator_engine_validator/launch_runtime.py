@@ -247,6 +247,10 @@ def launch(
         extra_args=extra_args,
     )
 
+    # The CE-owned strict MCP config path for the claude harness, resolved in the
+    # Ring-0 branch below and provisioned just before the tmux spawn (defect-a).
+    resolved_mcp: str | None = None
+
     # CC-G-D Ring 0: refuse prohibited Claude surfaces and pin the governed
     # command BEFORE any side effect (hidden/dry-run/tmux branches below).
     if harness == "claude":
@@ -390,6 +394,22 @@ def launch(
             command=resource_bound_spec.build_bounded_command(plan.command, bound),
             resource_bound=_resource_stamp(bound, resource_policy),
         )
+
+    # Defect-a fix (v3.1-G1): plain `ce launch` pins claude at the strict MCP
+    # config but never created it, so the seat exits 1 silently. Provision it
+    # idempotently — reusing the lane helper (v1->v1) — into the seat's cwd
+    # (repo_root) just before the spawn, the last fail-closed point before any
+    # side effect. A relative path resolves against repo_root, mirroring the lane.
+    if resolved_mcp is not None:
+        from . import lane_runtime
+
+        mcp_target = Path(resolved_mcp)
+        if not mcp_target.is_absolute():
+            mcp_target = Path(repo_root or ".") / mcp_target
+        try:
+            lane_runtime.ensure_lane_mcp_config(mcp_target)
+        except lane_runtime.ClaudeLaunchRefused as exc:
+            raise LaunchRefused(str(exc)) from exc
 
     pane = tmux_adapter.ensure_pane(session=session, window=window, command=plan.command)
     terminal = {

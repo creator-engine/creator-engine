@@ -8,6 +8,8 @@ live provider login.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from creator_engine_validator import launch_runtime
@@ -222,6 +224,121 @@ def test_claude_launch_refuses_uncontrolled_mcp_config_flag(monkeypatch):
         )
     assert "CC-D-7" in str(exc.value)
     assert adapter.spawned == []
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G1 defect-a — plain `ce launch` must provision the strict MCP config
+# (claude was pinned at a path that was never created -> silent exit 1).
+# ---------------------------------------------------------------------------
+
+
+class _McpProbingAdapter(FakeAdapter):
+    """FakeAdapter that records whether ``mcp_path`` existed at spawn time."""
+
+    def __init__(self, mcp_path, **kw):
+        super().__init__(**kw)
+        self._mcp_path = mcp_path
+        self.mcp_existed_at_spawn: bool | None = None
+
+    def ensure_pane(self, *, session, window, command):
+        self.mcp_existed_at_spawn = self._mcp_path.is_file()
+        return super().ensure_pane(session=session, window=window, command=command)
+
+
+def test_claude_launch_provisions_mcp_config_before_spawn(tmp_path, monkeypatch):
+    # defect-a: a non-dry-run claude launch writes the strict MCP config into the
+    # seat cwd (repo_root) BEFORE ensure_pane, so the governed seat can bind.
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    mcp_rel = ".hermes/launch/ce-controller/mcp/ce-mcp.json"
+    mcp_abs = tmp_path / mcp_rel
+    adapter = _McpProbingAdapter(mcp_abs)
+    assert not mcp_abs.exists()
+    launch_runtime.launch(
+        harness="claude",
+        session="ce-controller",
+        tmux_adapter=adapter,
+        repo_root=str(tmp_path),
+    )
+    assert adapter.spawned, "the governed seat must spawn"
+    assert adapter.mcp_existed_at_spawn is True, "MCP config must exist before ensure_pane"
+    assert mcp_abs.read_text(encoding="utf-8") == (
+        json.dumps({"mcpServers": {}}, indent=2, sort_keys=True) + "\n"
+    )
+
+
+def test_claude_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypatch):
+    # An Operator/launcher-supplied MCP config is never clobbered by provisioning.
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    mcp_rel = ".hermes/launch/s/mcp/ce-mcp.json"
+    mcp_abs = tmp_path / mcp_rel
+    mcp_abs.parent.mkdir(parents=True)
+    preexisting = '{"mcpServers": {"keep": {"command": "x"}}}\n'
+    mcp_abs.write_text(preexisting, encoding="utf-8")
+    launch_runtime.launch(
+        harness="claude",
+        session="s",
+        tmux_adapter=FakeAdapter(),
+        mcp_config_path=mcp_rel,
+        repo_root=str(tmp_path),
+    )
+    assert mcp_abs.read_text(encoding="utf-8") == preexisting
+
+
+def test_claude_launch_refuses_nonfile_mcp_target_before_spawn(tmp_path, monkeypatch):
+    # A non-regular-file at the MCP target is a fail-closed LaunchRefused (no spawn).
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    mcp_rel = ".hermes/launch/s/mcp/ce-mcp.json"
+    (tmp_path / mcp_rel).mkdir(parents=True)  # a DIRECTORY where the file must go
+    adapter = FakeAdapter()
+    with pytest.raises(launch_runtime.LaunchRefused):
+        launch_runtime.launch(
+            harness="claude",
+            session="s",
+            tmux_adapter=adapter,
+            mcp_config_path=mcp_rel,
+            repo_root=str(tmp_path),
+        )
+    assert adapter.spawned == []
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G1 defect-b — CC-D-6 gates the bridge's unattended skip-permissions flag.
+# The bridge passes `--claude-arg=--dangerously-skip-permissions`; the governance
+# already exists (CC-D-6), so launch_runtime is the enforced boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_unattended_skip_perms_refuses_when_hook_pack_unconfirmed(tmp_path, monkeypatch):
+    # CC-D-6 fail-closed: an unattended (skip-perms) seat with an unconfirmed
+    # hook-pack is refused before any side effect.
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: False)
+    adapter = FakeAdapter()
+    with pytest.raises(launch_runtime.LaunchRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            session="drive-seat",
+            extra_args=["--dangerously-skip-permissions"],
+            tmux_adapter=adapter,
+            repo_root=str(tmp_path),
+        )
+    assert "CC-D-6" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_unattended_skip_perms_carries_flag_when_hook_pack_confirmed(tmp_path, monkeypatch):
+    # CC-D-6 confirmed: the governed argv carries --dangerously-skip-permissions.
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+    adapter = FakeAdapter()
+    launch_runtime.launch(
+        harness="claude",
+        session="drive-seat",
+        extra_args=["--dangerously-skip-permissions"],
+        tmux_adapter=adapter,
+        repo_root=str(tmp_path),
+    )
+    (_sess, _win, cmd) = adapter.spawned[-1]
+    assert "--dangerously-skip-permissions" in cmd
+    assert "--setting-sources" in cmd and "project" in cmd
 
 
 def test_claude_dry_run_does_not_confirm_pack_when_no_skip_perms(monkeypatch):
