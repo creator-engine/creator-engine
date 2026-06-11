@@ -1049,3 +1049,192 @@ def test_onboard_inventory_help_names_the_loop():
     parser = v3_cli._build_parser()
     help_text = parser.format_help()
     assert "onboard" in help_text
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2a — cev3 pr (push + open through the v3 forge; plan-by-default)
+# ---------------------------------------------------------------------------
+_G2_REPO = "creator-engine/creator-engine"
+
+
+@pytest.fixture()
+def _fake_forge_join(monkeypatch):
+    """Stub the forge-join seam so the CLI wiring is tested with zero live git/gh/openssl.
+
+    The real mint→push→open→stamp behavior is covered by test_v3_forge_join; here we record the
+    kwargs the CLI forwards and shape the ChangeRef by the apply flag.
+    """
+    from creator_engine_validator import v3_forge_join as fj
+    from creator_engine_validator.forge.change import ChangeRef
+
+    calls: dict = {}
+
+    def fake_load(path):
+        calls["app_config_path"] = path
+        return fj.AppConfig(client_id="x", installation_id=1, pem_path="/k.pem",
+                            repo=_G2_REPO, permissions=())
+
+    def fake_open(root, run_id, *, app_config, branch, manifest_paths, base="main",
+                  source_dir=".", apply=False, **kw):
+        calls["open"] = {
+            "run_id": run_id, "branch": branch, "manifest_paths": list(manifest_paths),
+            "base": base, "source_dir": source_dir, "apply": apply, "repo": app_config.repo,
+        }
+        if calls.get("raise"):
+            raise fj.ForgeJoinRefused(calls["raise"])
+        pr = 7 if apply else None
+        return ChangeRef(
+            repo=app_config.repo, branch=branch, base=base, pr_number=pr,
+            head_sha=("d" * 40 if apply else None), manifest_paths=tuple(manifest_paths),
+            plan_ref="e" * 64, changed=True, applied=apply, verified=apply,
+        )
+
+    monkeypatch.setattr(v3_cli.v3_forge_join, "load_app_config", fake_load)
+    monkeypatch.setattr(v3_cli.v3_forge_join, "open_change_for_run", fake_open)
+    return calls
+
+
+def _pr_argv(tmp_path, run_id, *, apply=False, scope="rate-limit-login"):
+    argv = [
+        "pr", scope, "--run", run_id, "--branch", "v31-g2-forge-join",
+        "--manifest-path", "validators/x.py", "--manifest-path", "validators/y.py",
+        "--app-config", str(tmp_path / "app.json"), "--root", str(tmp_path), "--json",
+    ]
+    if apply:
+        argv.append("--apply")
+    return argv
+
+
+def test_pr_plan_by_default_mutates_nothing(tmp_path, capsys, monkeypatch, _fake_forge_join):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(_pr_argv(tmp_path, run_id))
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "pr_planned"
+    assert payload["pr_number"] is None and payload["apply"] is False
+    assert _fake_forge_join["open"]["apply"] is False
+
+
+def test_pr_apply_opens_and_reports_pr(tmp_path, capsys, monkeypatch, _fake_forge_join):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(_pr_argv(tmp_path, run_id, apply=True))
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "pr_opened" and payload["pr_number"] == 7
+    assert payload["repo"] == _G2_REPO
+
+
+def test_pr_forwards_app_config_manifest_and_base(tmp_path, capsys, monkeypatch, _fake_forge_join):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    v3_cli.main(_pr_argv(tmp_path, run_id, apply=True))
+    opened = _fake_forge_join["open"]
+    assert _fake_forge_join["app_config_path"] == str(tmp_path / "app.json")
+    assert opened["manifest_paths"] == ["validators/x.py", "validators/y.py"]
+    assert opened["base"] == "main" and opened["run_id"] == run_id
+
+
+def test_pr_refuses_scope_mismatch_before_forge(tmp_path, capsys, monkeypatch, _fake_forge_join):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main(_pr_argv(tmp_path, run_id, scope="other-scope"))
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "scope_mismatch"
+    assert "open" not in _fake_forge_join  # the forge was never reached
+
+
+def test_pr_refuses_unknown_run(tmp_path, capsys, _fake_forge_join):
+    capsys.readouterr()
+    code = v3_cli.main(_pr_argv(tmp_path, "run-ghost-x"))
+    assert code == 2
+    assert "open" not in _fake_forge_join
+
+
+def test_pr_surfaces_forge_refusal(tmp_path, capsys, monkeypatch, _fake_forge_join):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _fake_forge_join["raise"] = "App config not found"
+    capsys.readouterr()
+    code = v3_cli.main(_pr_argv(tmp_path, run_id, apply=True))
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "pr_refused"
+
+
+def test_pr_app_config_is_required():
+    # The Operator amendment: --app-config has NO default — argparse refuses without it.
+    with pytest.raises(SystemExit):
+        v3_cli.main(["pr", "s", "--run", "r", "--branch", "b", "--manifest-path", "x"])
+
+
+# ---------------------------------------------------------------------------
+# v3.1-G2a — collect derives change_set from the stamped change block
+# ---------------------------------------------------------------------------
+def _stamp_change_block(tmp_path, run_id, *, pr_number=7, head_sha="d" * 40):
+    path = tmp_path / "dispatches" / run_id / "dispatch.yaml"
+    drec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    drec["change"] = {
+        "branch": "v31-g2-forge-join", "base": "main", "pr_number": pr_number,
+        "head_sha": head_sha, "manifest_paths": ["validators/x.py"],
+        "opened_at": "2026-06-11T09:30:00Z",
+    }
+    path.write_text(yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
+
+
+def _outcome_change_set(chain_path: Path) -> dict:
+    from creator_engine_validator import runtime_evidence_spine as spine
+    doc = yaml.safe_load(chain_path.read_text(encoding="utf-8"))
+    for r in doc["records"]:
+        if r.get("record_type") == spine.RUN_OUTCOME_RECORD_TYPE:
+            return r["change_set"]
+    raise AssertionError("no run-outcome record")  # pragma: no cover
+
+
+def test_collect_derives_change_set_and_pr_opened_from_block(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    _stamp_change_block(tmp_path, run_id, pr_number=7, head_sha="d" * 40)
+    capsys.readouterr()
+    # no --outcome, no --branch/--head-sha: all derived from the stamped change block
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "pr_opened" and payload["pr"] == 7
+    cs = _outcome_change_set(tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml")
+    assert cs["pr_number"] == 7 and cs["head_sha"] == "d" * 40  # NOT the run id (honesty gap closed)
+    assert cs["branch"] == "v31-g2-forge-join"
+
+
+def test_collect_explicit_outcome_wins_over_block(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["outcome"] == "no_change"
+
+
+def test_collect_refuses_missing_outcome_without_block(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)  # no change block stamped
+    capsys.readouterr()
+    code = v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--root", str(tmp_path), "--json"])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "outcome_required"
+
+
+def test_collect_no_pr_fallback_is_byte_conserved(tmp_path, capsys, monkeypatch):
+    # the operator-typed path for a run that opened no PR: head_sha defaults to the run id (G1).
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "research_delivered",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    cs = _outcome_change_set(tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml")
+    assert cs["head_sha"] == run_id and cs["base"] == "main"

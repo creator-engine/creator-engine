@@ -66,6 +66,7 @@ from . import (
     coordination,
     evidence_sink,
     runtime_evidence_spine,
+    v3_forge_join,
     v3_installer,
     v3_report,
     v3_seat_bridge,
@@ -73,6 +74,7 @@ from . import (
     v3_shaping,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
+from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
 from .schema import validate_with_schema
@@ -545,16 +547,11 @@ def _resolve_run_evidence(args: argparse.Namespace, root: Path) -> tuple[str | N
 def _policy_sha(policy: dict[str, Any]) -> str:
     """The 64-hex policy binding for the run's records.
 
-    Uses the policy's own ``policy_sha`` when it is a valid 64-hex digest, else
-    derives a deterministic SHA256 over the canonical policy body (the chain check
-    enforces ``^[0-9a-f]{64}$`` on every record's ``policy_sha``).
+    Delegates to the canonical derivation (``v3_forge_join.policy_sha``) so the ``cev3 collect``
+    fold and the ``cev3 pr`` forge-join bind a run's records under the SAME policy digest — the
+    derivation lives in exactly one place (extracted, not duplicated).
     """
-    existing = policy.get("policy_sha")
-    if isinstance(existing, str) and _HEX64_RE.match(existing):
-        return existing
-    body = {k: v for k, v in policy.items() if k != "policy_sha"}
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return v3_forge_join.policy_sha(policy)
 
 
 def _utc_now_iso() -> str:
@@ -927,14 +924,28 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         unpriced = len(unpriced_turns)
 
     # 2) The typed terminal outcome + its value-free change_set pointer.
+    #    v3.1-G2a: when the dispatch carries a forge-stamped `change` block (a `cev3 pr --apply`
+    #    opened a real PR), derive the change_set FROM IT — closing G1's "head_sha defaults to the
+    #    run id" honesty gap with a forge-derived fact — and default --outcome to pr_opened. Explicit
+    #    flags still win; the operator-typed fallback is byte-conserved for runs that opened no PR.
+    change_block = dispatch.get("change") or {}
+    outcome = args.outcome or ("pr_opened" if change_block else None)
+    if outcome is None:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · collect refused: --outcome is required "
+             f"(run {run_id!r} carries no stamped change block to derive it from)"],
+            {"error": "outcome_required", "run_id": run_id},
+        )
     change_set: dict[str, Any] = {
-        "branch": args.branch or run_id,
-        "base": args.base,
-        "manifest_paths": list(args.manifest_paths or []),
-        "head_sha": args.head_sha or run_id,
+        "branch": args.branch or change_block.get("branch") or run_id,
+        "base": args.base or change_block.get("base") or "main",
+        "manifest_paths": list(args.manifest_paths or change_block.get("manifest_paths") or []),
+        "head_sha": args.head_sha or change_block.get("head_sha") or run_id,
     }
-    if args.pr is not None:
-        change_set["pr_number"] = args.pr
+    pr_number = args.pr if args.pr is not None else change_block.get("pr_number")
+    if pr_number is not None:
+        change_set["pr_number"] = pr_number
     outcome_body = {
         "kind": runtime_evidence_spine.RUN_OUTCOME_RECORD_KIND,
         "record_type": runtime_evidence_spine.RUN_OUTCOME_RECORD_TYPE,
@@ -942,7 +953,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         "policy_sha": policy_sha,
         "run_id": run_id,
         "recorded_at": _utc_now_iso(),
-        "outcome": args.outcome,
+        "outcome": outcome,
         "change_set": change_set,
     }
 
@@ -957,7 +968,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
             handle_ref=run_id,
             records=tuple(chain),
             note=f"v3.1-G1 collect: run {run_id} folded {len(ledger_bodies)} spend leaf(s) "
-                 f"+ outcome {args.outcome}",
+                 f"+ outcome {outcome}",
         ))
     except evidence_sink.EvidencePersistRefused as exc:
         return _emit(
@@ -974,16 +985,78 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     lines = [
         f"{_BRAND} · COLLECTED run {run_id!r} for Scope {args.scope_id!r} "
-        f"(outcome {args.outcome}, {len(ledger_bodies)} spend leaf(s)"
+        f"(outcome {outcome}, {len(ledger_bodies)} spend leaf(s)"
         + (f", {unpriced} unpriced" if unpriced else "") + ")",
         f"    evidence: {receipt.path}",
     ]
     return _emit(
         args, 0, lines,
         {"action": "collected", "scope_id": args.scope_id, "run_id": run_id,
-         "outcome": args.outcome, "pr": args.pr, "evidence": str(receipt.path),
+         "outcome": outcome, "pr": pr_number, "evidence": str(receipt.path),
          "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
          "record_count": receipt.record_count},
+    )
+
+
+def _cmd_pr(args: argparse.Namespace) -> int:
+    """Push the seat's authored branch + open its PR through the v3 forge (G2a, plan-by-default).
+
+    Plan-by-default: without ``--apply`` it prints the would-push/would-open plan and mutates
+    nothing. With ``--apply`` it drives ``v3_forge_join.open_change_for_run``
+    (mint→push→open under a JIT least-privilege token, revoked in a finally) and stamps the
+    value-free ``change`` block onto the dispatch. The ORCHESTRATOR/Operator session invokes this —
+    a §7-governed seat is hook-denied the underlying push anyway (the authority model is conserved,
+    now with the mechanical push automated v3-side).
+    """
+    root = Path(args.root)
+    run_id = args.run_id
+    # Precondition: the run must belong to the named Scope (the collect discipline).
+    try:
+        dispatch = _load_dispatch(root, run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · pr refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · pr refused: run {run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    try:
+        app_config = v3_forge_join.load_app_config(args.app_config)
+        ref = v3_forge_join.open_change_for_run(
+            root, run_id, app_config=app_config, branch=args.branch,
+            manifest_paths=args.manifest_paths, base=args.base,
+            source_dir=args.source_dir, apply=args.apply,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · pr refused: {exc}"],
+            {"action": "pr_refused", "run_id": run_id, "detail": str(exc)},
+        )
+    opened = bool(args.apply) and ref.pr_number is not None
+    if opened:
+        lines = [
+            f"{_BRAND} · OPENED PR #{ref.pr_number} for Scope {args.scope_id!r} (run {run_id})",
+            f"    branch {ref.branch} → {ref.base} · head {ref.head_sha}",
+            f"    dispatch: {_dispatch_path(root, run_id)}",
+            f"    next: {CE_CMD} review {args.scope_id} --run {run_id} --spawn",
+        ]
+    else:
+        lines = [
+            f"{_BRAND} · PR PLAN for Scope {args.scope_id!r} (run {run_id}) — nothing mutated",
+            f"    would push branch {ref.branch} → {ref.base} on {ref.repo}",
+            f"{_BRAND} · (plan-only — pass --apply to push + open the PR)",
+        ]
+    return _emit(
+        args, 0, lines,
+        {"action": "pr_opened" if opened else "pr_planned",
+         "scope_id": args.scope_id, "run_id": run_id, "apply": bool(args.apply),
+         "pr_number": ref.pr_number, "branch": ref.branch, "base": ref.base,
+         "head_sha": ref.head_sha, "repo": ref.repo,
+         "dispatch_path": str(_dispatch_path(root, run_id))},
     )
 
 
@@ -1542,16 +1615,38 @@ def _build_parser() -> argparse.ArgumentParser:
     p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
     p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
     p_collect.add_argument("--transcript", default=None, help="the seat harness .jsonl transcript to meter")
-    p_collect.add_argument("--outcome", required=True, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
-                           help="the conserved terminal outcome")
+    p_collect.add_argument("--outcome", default=None, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
+                           help="the conserved terminal outcome (defaults to pr_opened when the "
+                                "dispatch carries a forge-stamped change block; otherwise required)")
     p_collect.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
-    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id)")
-    p_collect.add_argument("--base", default="main", help="value-free change base ref (default: main)")
+    p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id / change block)")
+    p_collect.add_argument("--base", default=None, help="value-free change base ref (default: main / change block)")
     p_collect.add_argument("--head-sha", default=None, dest="head_sha",
                            help="value-free change head sha (default: run id)")
     p_collect.add_argument("--manifest-path", action="append", default=None, dest="manifest_paths",
                            help="value-free change manifest path (repeatable)")
     _add_root(p_collect)
+
+    p_pr = sub.add_parser(
+        "pr", help="push the seat's authored branch + open its PR through the v3 forge "
+                   "(plan-by-default; --apply pushes + opens)")
+    p_pr.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_pr.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
+    p_pr.add_argument("--branch", required=True, help="the seat's authored head branch to push + open")
+    p_pr.add_argument("--manifest-path", action="append", required=True, dest="manifest_paths",
+                      metavar="PATH", help="an authorized change manifest path (repeatable, required)")
+    p_pr.add_argument("--base", default="main", help="the PR base branch (default: main)")
+    p_pr.add_argument(
+        "--app-config", required=True, dest="app_config",
+        help="REQUIRED path to the host GitHub-App config JSON — NO default (host filenames "
+             "differ: laptop ~/.ce-keys/ce-forge-app.json, CE-DEV-1 ~/.ce-keys/ce-forge-dev1.json; "
+             "a default would silently miss on one host)",
+    )
+    p_pr.add_argument("--source-dir", default=".", dest="source_dir",
+                      help="local checkout holding the authored branch (default: cwd)")
+    p_pr.add_argument("--apply", action="store_true",
+                      help="push + open the PR for real (default: plan-only — mutates nothing)")
+    _add_root(p_pr)
 
     p_escalation = sub.add_parser(
         "escalation",
@@ -1711,6 +1806,7 @@ _DISPATCH = {
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
     "collect": _cmd_collect,
+    "pr": _cmd_pr,
     "escalation": _cmd_escalation,
     "status": _cmd_status,
     "show": _cmd_show,
