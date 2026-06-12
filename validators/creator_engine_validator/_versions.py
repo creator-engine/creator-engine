@@ -112,6 +112,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # v3.5-B.1 Cockpit: the L2 read-model (= the harness-paper F1
         # Deep-Telemetry projection; pure JSON-serializable fold, principle 6)
         "runner.cockpit_readmodel",
+        # v3.1-B.8 Operator-notify feed: pure edge-detection fold over escalations
+        # + a notifier-private delivery ledger + desktop/exec sinks (pure core + I/O
+        # edges; reuses cockpit_readmodel.load_escalations, imports no textual/v1).
+        "runner.notify_feed",
         # v3.5-B.1 Cockpit: the CE_DEMO seed (Fork F-b: its own module — the
         # independently-reviewable pitch artifact)
         "runner.cockpit_demo_seed",

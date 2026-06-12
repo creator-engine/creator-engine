@@ -78,8 +78,9 @@ def test_taxonomy_counts_and_disjoint():
     # backlog adapter + forge-projected claim (``forge.backlog``): 31 -> 32.
     # v3.1-G1 added the live-spawn bridge (``v3_seat_bridge``): 32 -> 33.
     # v3.1-G2a added the branch-push primitive (``forge.change_push``): 33 -> 34,
-    # and the forge-leg composition root (``v3_forge_join``): 34 -> 35.
-    assert len(ver.V3_RUNTIME) == 35
+    # and the forge-leg composition root (``v3_forge_join``): 34 -> 35. v3.1-B.8
+    # added the Operator-notify feed (``runner.notify_feed``): 35 -> 36.
+    assert len(ver.V3_RUNTIME) == 36
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

@@ -96,6 +96,81 @@ all-or-nothing. A non-zero `gh` exit, unparsable JSON, or malformed issue body
 refuses with zero partial writes. The Cockpit fold never calls `gh`, polls a
 forge, or performs network I/O.
 
+## Operator alerting (v3.1-B.8 — the notify feed)
+
+The Cockpit makes the AWAITING-OPERATOR queue *visible*; the **notify feed**
+(`runner.notify_feed`) makes it *announce itself*, so the queue no longer depends
+on someone watching a screen. It is a delivery layer over the same escalation
+records — not a queue, not a cockpit-UI change, not a Ring-1/governance-authority
+change.
+
+**The ledger-as-memory adjudication.** Entry/exit are file-state transitions
+(`escalations/*.yaml` appears; `resolved_at` appears) that no component observes
+as *events* — open-ness is recomputed statelessly per fold, and the L2 fold is
+pure by hard law. The edge-detection memory therefore lives in a **durable,
+append-only, notifier-private delivery ledger**, `<root>/notifications/ledger.ndjson`,
+owned by the `cev3 notify` composition root. Detection itself stays a **pure fold
+of two L1-shaped inputs** — `fold_notify_feed(escalations, ledger_records, config)`
+— with delivery identity `(escalation_id, event_kind, sink_id)`, so it is
+idempotent across restarts and re-folds by construction (no clock cursor, no
+consecutive-snapshot diffing). An entry is pending iff the escalation is open and
+no successful entry delivery is recorded; an exit is pending iff it is resolved,
+an entry *was* delivered, and no exit delivery is recorded (resolved-before-ever-
+notified pings nothing). This is not a purity violation: the ledger is *delivery*
+state, not *governance* state — the notifier appends only to its own
+`notifications/` subdir, REUSES `cockpit_readmodel.load_escalations`, and never
+touches `escalations/`, `scopes/`, chains, or the pane registry. Clearing falls
+out of the same mechanism: resolution IS the clear (the exit event), and the
+delivered-entry record permanently blocks re-alerting — no separate ack store, no
+stale alerts.
+
+**Config** (`<root>/notify.yaml`, instance-local beside `scopes/`/`escalations/`).
+Absent ⇒ working defaults (one `desktop` sink, both classes `immediate`).
+Malformed-but-present ⇒ a LOUD refusal (exit 2) with the reasons — never a silent
+fallback, because a half-applied alerting config is a missed alert wearing a green
+light. Per-class dial is `immediate | off`; `digest` is a reserved enum the
+validator refuses loudly (it ships with the #28-M2/email rung).
+
+```yaml
+kind: notify-config
+schema_version: "1"
+classes:
+  ratify-needed: immediate   # immediate|off ("digest" refused until shipped)
+  clear: immediate
+sinks:
+  - id: desktop
+    kind: desktop
+    payload: full            # local D-Bus transport — content stays on host
+  - id: ntfy-tailnet
+    kind: exec
+    argv: ["curl", "-fsS", "-d", "@-", "http://ntfy.tailnet:8080/ce-operator"]
+    payload: pointer         # confidential-by-default off-host
+```
+
+**Sink contract.** `desktop` shells `notify-send` (`critical` urgency for
+`ratify-needed`, `normal` for `clear`). `exec` invokes a user-supplied **argv
+list** (never a shell string — no injection surface) with the event JSON on the
+child's stdin; it covers ntfy/email/Telegram/tailnet-webhooks without CE shipping
+or vouching for any one integration. Delivery is **at-least-once,
+deliver-then-record**: a duplicate ping is benign, a lost AWAITING-OPERATOR alert
+is the exact failure this layer exists to prevent. A failed sink is recorded
+`ok: false` and stays pending (retried next tick); it never crashes the loop.
+
+**Payload modes** (`payload: pointer | full`). `pointer` carries only
+`event`/`class`/`escalation_id`/`created_at`/`source_ref`/`open_count` — no
+title, decision text, recommendation, or hostname (the value-free off-host shape).
+`full` adds the prose fields. Defaults: `desktop = full` (local transport, content
+never leaves the host), `exec = pointer` (CE cannot see where the command forwards
+— confidential-by-default).
+
+**Surface.** `cev3 notify once` is a single fold→dispatch→record pass (the
+cron-able, testable primitive); `cev3 notify watch [--interval 30]` is the poll
+loop; `cev3 notify status [--json]` is pure-fold counts with no dispatch. Both
+`once` and `watch` accept `--sync-repo <owner/repo> [--sync-label awaiting-operator]`
+to mirror forge escalations (REUSING the existing `escalation sync` legs) before
+folding — the cross-host fan-in — with sync failure tolerated so forge downtime
+never blocks local alerting.
+
 ## `CE_DEMO=1` (the seeded demo board)
 
 One flag swaps the data source for a seeded, schema-true, hash-chain-verified

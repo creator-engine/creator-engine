@@ -892,6 +892,148 @@ def _cmd_escalation(args: argparse.Namespace) -> int:
     return 2
 
 
+# ---------------------------------------------------------------------------
+# notify — the v3.1-B.8 Operator-notify feed (once | watch | status)
+# ---------------------------------------------------------------------------
+def _notify_sync_tick(
+    root: Path, repo: str, label: str, *, runner: Any | None = None
+) -> dict[str, Any]:
+    """Mirror forge awaiting-operator issues into local records BEFORE the fold (reuse).
+
+    Cross-host fan-in (Fork 4): the existing ``_load_gh_issues`` + pure
+    ``project_escalation_sync`` legs, run each poll tick. **Tolerant** — forge
+    downtime must never block local alerting, so a refusal is returned (logged by the
+    caller) and the fold over local records proceeds.
+    """
+    try:
+        payload = _load_gh_issues(repo, label, runner=runner)
+        planned = project_escalation_sync(payload, _iter_escalations(root))
+    except EscalationSyncRefused as exc:
+        return {"ok": False, "error": str(exc), "written": 0}
+    written = 0
+    for record in planned:
+        errs = _escalation_schema_errors(record, _escalation_path(root, str(record["escalation_id"])))
+        if errs:
+            continue
+        _write_escalation(root, record)
+        written += 1
+    return {"ok": True, "written": written}
+
+
+def _cmd_notify_once(args: argparse.Namespace, *, runner: Any | None = None) -> int:
+    from .runner import notify_feed
+
+    root = Path(args.root)
+    sync_note: dict[str, Any] | None = None
+    if getattr(args, "sync_repo", None):
+        sync_note = _notify_sync_tick(root, args.sync_repo, args.sync_label, runner=runner)
+    try:
+        summary = notify_feed.run_once(root, runner=runner)
+    except notify_feed.NotifyConfigError as exc:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · notify once REFUSED: malformed notify config — {exc}"],
+            {"error": "notify_config_invalid", "detail": str(exc)},
+        )
+    lines = [
+        f"{_BRAND} · notify once — dispatched {summary['dispatched']} "
+        f"({summary['ok']} ok · {summary['failed']} failed) over sinks "
+        f"{', '.join(summary['sinks']) or '—'}"
+    ]
+    payload: dict[str, Any] = {"action": "notify_once", **summary}
+    if sync_note is not None:
+        state = "ok" if sync_note["ok"] else f"FAILED (tolerated): {sync_note.get('error')}"
+        lines.append(f"    sync · {args.sync_repo} {state} ({sync_note.get('written', 0)} mirrored)")
+        payload["sync"] = sync_note
+    return _emit(args, 0, lines, payload)
+
+
+def _cmd_notify_status(args: argparse.Namespace) -> int:
+    from .runner import notify_feed
+
+    root = Path(args.root)
+    try:
+        config = notify_feed.load_config(root)
+    except notify_feed.NotifyConfigError as exc:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · notify status REFUSED: malformed notify config — {exc}"],
+            {"error": "notify_config_invalid", "detail": str(exc)},
+        )
+    escalations = notify_feed.load_escalations(root) or []
+    ledger = notify_feed.load_ledger(root)
+    fold = notify_feed.fold_notify_feed(escalations, ledger, config)
+    counts = fold["counts"]
+    lines = [
+        f"{_BRAND} · notify status — open {counts['open_count']} · resolved "
+        f"{counts['resolved_count']} · pending entry {counts['pending_entry']} / exit "
+        f"{counts['pending_exit']} · delivered {counts['delivered']} · failed {counts['failed']}",
+        f"    sinks · {', '.join(fold['sinks']) or '—'}",
+    ]
+    return _emit(args, 0, lines, {"action": "notify_status", "counts": counts, "sinks": fold["sinks"]})
+
+
+def _cmd_notify_watch(args: argparse.Namespace, *, runner: Any | None = None) -> int:
+    import time
+
+    from .runner import notify_feed
+
+    root = Path(args.root)
+    interval = max(1, int(args.interval))
+    # Validate the config LOUDLY up front (exit 2) before entering the loop.
+    try:
+        notify_feed.load_config(root)
+    except notify_feed.NotifyConfigError as exc:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · notify watch REFUSED: malformed notify config — {exc}"],
+            {"error": "notify_config_invalid", "detail": str(exc)},
+        )
+    print(
+        f"{_BRAND} · notify watch — root {root} · interval {interval}s · "
+        f"sync {args.sync_repo or 'off'} (Ctrl-C to stop)",
+        flush=True,
+    )
+    try:
+        while True:
+            if getattr(args, "sync_repo", None):
+                note = _notify_sync_tick(root, args.sync_repo, args.sync_label, runner=runner)
+                if not note["ok"]:
+                    print(
+                        f"{_BRAND} · notify watch — forge sync FAILED (tolerated, "
+                        f"local fold proceeds): {note.get('error')}",
+                        flush=True,
+                    )
+            try:
+                summary = notify_feed.run_once(root, runner=runner)
+                if summary["dispatched"]:
+                    print(
+                        f"{_BRAND} · notify watch — dispatched {summary['dispatched']} "
+                        f"({summary['failed']} failed)",
+                        flush=True,
+                    )
+            except notify_feed.NotifyConfigError as exc:
+                # The daemon must not die on a mid-flight bad edit; surface it loudly.
+                print(
+                    f"{_BRAND} · notify watch — config became invalid (alerting PAUSED "
+                    f"until fixed): {exc}",
+                    flush=True,
+                )
+            time.sleep(interval)
+    except KeyboardInterrupt:  # pragma: no cover - interactive stop
+        return 0
+
+
+def _cmd_notify(args: argparse.Namespace) -> int:
+    if args.notify_command == "once":
+        return _cmd_notify_once(args)
+    if args.notify_command == "watch":
+        return _cmd_notify_watch(args)
+    if args.notify_command == "status":
+        return _cmd_notify_status(args)
+    return 2
+
+
 def _claude_config_dir(args: argparse.Namespace) -> Path:
     """Resolve the harness config dir for stamped-id transcript lookup (D6/F9).
 
@@ -2044,6 +2186,42 @@ def _build_parser() -> argparse.ArgumentParser:
     p_escalation_sync.add_argument("--label", default="awaiting-operator", help="issue label to mirror")
     _add_root(p_escalation_sync)
 
+    p_notify = sub.add_parser(
+        "notify",
+        help="Operator-notify feed — alert on AWAITING-OPERATOR entry/exit "
+             "(once | watch | status; pluggable desktop/exec sinks)",
+    )
+    notify_sub = p_notify.add_subparsers(dest="notify_command", required=True)
+
+    p_notify_once = notify_sub.add_parser(
+        "once",
+        help="a single fold→dispatch→record pass (the cron-able / testable primitive)",
+    )
+    p_notify_once.add_argument("--sync-repo", default=None, dest="sync_repo",
+                               help="optional GitHub repo (owner/name) to mirror forge "
+                                    "awaiting-operator issues from BEFORE the fold (cross-host fan-in)")
+    p_notify_once.add_argument("--sync-label", default="awaiting-operator", dest="sync_label",
+                               help="issue label to mirror (default: awaiting-operator)")
+    _add_root(p_notify_once)
+
+    p_notify_watch = notify_sub.add_parser(
+        "watch",
+        help="poll loop: (optional sync) → fold → dispatch → record → sleep",
+    )
+    p_notify_watch.add_argument("--interval", type=int, default=30,
+                                help="poll interval in seconds (default: 30)")
+    p_notify_watch.add_argument("--sync-repo", default=None, dest="sync_repo",
+                                help="optional GitHub repo (owner/name) for cross-host fan-in each tick")
+    p_notify_watch.add_argument("--sync-label", default="awaiting-operator", dest="sync_label",
+                                help="issue label to mirror (default: awaiting-operator)")
+    _add_root(p_notify_watch)
+
+    p_notify_status = notify_sub.add_parser(
+        "status",
+        help="pure-fold counts (open / pending / delivered / failed) — no dispatch",
+    )
+    _add_root(p_notify_status)
+
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
 
@@ -2173,6 +2351,7 @@ _DISPATCH = {
     "review": _cmd_review,
     "merge": _cmd_merge,
     "escalation": _cmd_escalation,
+    "notify": _cmd_notify,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
