@@ -262,8 +262,12 @@ def test_live_launch_resolves_unit_collision_with_suffix(tmp_path):
     assert result.plan.resource_bound["unit"] == "ce-seat-v35f-seat-2"
 
 
-def test_wrap_applies_to_every_harness_identically(tmp_path):
-    # codex has no Ring-0 spec of its own today — it is bounded the same day.
+def test_wrap_applies_to_every_harness_identically(tmp_path, monkeypatch):
+    # Codex now has its own CDX-D Ring-0 builder. Resource bounding still wraps
+    # the output of that builder, not its input.
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
     result = launch_runtime.launch(
         harness="codex",
         session="codex-seat",
@@ -274,4 +278,7 @@ def test_wrap_applies_to_every_harness_identically(tmp_path):
     wrapped = result.plan.command
     assert wrapped[:6] == WRAP_PREFIX_HEAD
     sep = wrapped.index("--")
-    assert wrapped[sep + 1:] == ["codex"]
+    inner = wrapped[sep + 1:]
+    assert inner[:2] == ["env", "-u"]
+    assert "GH_TOKEN" in inner
+    assert inner[-1:] == ["codex"]

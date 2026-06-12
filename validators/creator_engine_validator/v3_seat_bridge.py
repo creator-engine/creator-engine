@@ -20,9 +20,10 @@ Every subprocess edge — ``ce launch``, ``tmux send-keys`` — is an **injected
 (``runner=``), so CI drives fakes and there is **zero live tmux/claude/systemd**
 in the test envelope (the same discipline as ``run_assembly``).
 
-Scope (v3.1-G1): the **claude** harness only. A codex drive-spawn (codex
-launch-spec + bounded wrap + bypass-mode as a spec field) is the named follow-up
-gate G1-codex; ``cev3 drive --spawn`` refuses ``harness != claude``.
+Scope (G1-codex): the default **claude** path is conserved and remains the
+stronger Ring-1-hook-pack path. The **codex** path is explicitly selected,
+guarded to low-risk classes unless separately ratified, and externally
+gate-governed: no Ring-1 parity is claimed.
 """
 
 from __future__ import annotations
@@ -44,9 +45,39 @@ import yaml
 
 from . import coordination
 
-#: The harness this gate bridges. Non-claude drive-spawn is the named follow-up
-#: (G1-codex); the bridge refuses anything else (defect-c declared out).
-BRIDGE_HARNESS = "claude"
+DEFAULT_BRIDGE_HARNESS = "claude"
+CODEX_BRIDGE_HARNESS = "codex"
+
+
+@dataclass(frozen=True)
+class HarnessBridge:
+    harness: str
+    v1_harness: str
+    unattended_args: tuple[str, ...]
+    requires_transcript_locator: bool
+    in_band_boundary: str
+
+
+HARNESS_BRIDGES: dict[str, HarnessBridge] = {
+    "claude": HarnessBridge(
+        harness="claude",
+        v1_harness="claude",
+        unattended_args=("--claude-arg=--dangerously-skip-permissions",),
+        requires_transcript_locator=False,
+        in_band_boundary="claude_ring1_hookpack",
+    ),
+    "codex": HarnessBridge(
+        harness="codex",
+        v1_harness="codex",
+        unattended_args=(),
+        requires_transcript_locator=True,
+        in_band_boundary="codex_external_gate",
+    ),
+}
+
+# Backward-compatible alias for existing tests/callers; not a claim that only
+# Claude is bridged.
+BRIDGE_HARNESS = DEFAULT_BRIDGE_HARNESS
 
 #: Where dispatch records live, relative to the v3 local-state ``root``.
 DISPATCHES_SUBDIR = "dispatches"
@@ -71,7 +102,7 @@ OUTCOME_VOCABULARY = (
 #: harness binary is the seat. A miss is a fail-closed ``SpawnRefused`` (the common
 #: live failure — it bit 2026-06-11 — is the BRIDGE env, caught here; a pane whose
 #: tmux-server PATH diverges is caught by the readiness poll, not the preflight).
-SPAWN_PREFLIGHT_BINARIES = ("tmux", BRIDGE_HARNESS)
+SPAWN_PREFLIGHT_BASE_BINARIES = ("tmux",)
 
 #: Seed readiness poll (G1-followup): the pointer line must not be typed before the
 #: harness REPL owns the pane foreground, else it is swallowed by the still-init shell
@@ -113,7 +144,17 @@ class SpawnRefused(SeatBridgeError):
 
 
 class HarnessNotSupported(SeatBridgeError):
-    """A non-claude harness was requested — G1-codex follow-up (defect-c)."""
+    """An unknown bridge harness was requested."""
+
+
+def get_harness_bridge(harness: str) -> HarnessBridge:
+    """Return the bridge registry entry or fail closed."""
+    try:
+        return HARNESS_BRIDGES[harness]
+    except KeyError as exc:
+        raise HarnessNotSupported(
+            f"harness {harness!r} is not bridged (available: {', '.join(sorted(HARNESS_BRIDGES))})"
+        ) from exc
 
 
 def _utcstamp(now: datetime) -> str:
@@ -187,6 +228,7 @@ def _render_brief(
     run_id: str,
     scope_id: str,
     mutation_class: str,
+    harness: str,
     runtime_policy: dict[str, Any],
     root: Path,
     dispatch_dir: Path,
@@ -202,11 +244,18 @@ def _render_brief(
     scope_ref = root / "scopes" / f"{scope_id}.scope.yaml"
     evidence_ref = root / "runs" / f"{run_id}.runtime-evidence.yaml"
     vocab = " | ".join(OUTCOME_VOCABULARY)
+    if harness == CODEX_BRIDGE_HARNESS:
+        boundary = (
+            "Your in-band boundary is weaker than Claude: Codex has no live Ring-1 "
+            "hook-pack equivalent in this repo. The credential-scrubbed launch and "
+            "external `cev3 pr`, `cev3 review`, and `cev3 merge` gates are load-bearing."
+        )
+    else:
+        boundary = "The Ring-1 hook-pack is your enforced boundary."
     return (
         f"# ◆ CE seat mandate — run {run_id}\n\n"
         f"You are a governed, OS-bounded CE seat spawned from a ratified Scope by "
-        f"`cev3 drive --spawn`. Execute the Scope below; the Ring-1 hook-pack is your "
-        f"enforced boundary.\n\n"
+        f"`cev3 drive --spawn`. Execute the Scope below. {boundary}\n\n"
         f"## Scope card\n"
         f"- **Goal** — read the ratified Scope artifact: `{scope_ref}`\n"
         f"- **Done-when** — the acceptance criteria in that artifact (you are graded against them)\n"
@@ -232,11 +281,13 @@ def materialize_dispatch(
     plan: coordination.DispatchPlan,
     root: Path | str,
     *,
+    harness: str = DEFAULT_BRIDGE_HARNESS,
     unattended: bool = True,
     now: datetime | None = None,
     session: str | None = None,
     window: str = "drive",
     harness_session_id: str | None = None,
+    codex_risk_override: str | None = None,
 ) -> DispatchRecord:
     """Persist a :class:`coordination.DispatchPlan` as the on-disk seat handoff.
 
@@ -256,6 +307,7 @@ def materialize_dispatch(
     # (dispatch_dir, brief_ref, the brief's scope/evidence pointers, the seeded line)
     # is absolute and survives the worktree boundary — the in-venue Ring-1 hook and the
     # launch-time validator both resolve an absolute ref from ANY cwd.
+    bridge = get_harness_bridge(harness)
     root_path = Path(root).resolve()
     stamp = _utcstamp(now or datetime.now(timezone.utc))
     run_id = f"run-{plan.scope_id}-{stamp}"
@@ -263,10 +315,14 @@ def materialize_dispatch(
     dispatch_dir.mkdir(parents=True, exist_ok=True)
 
     seat_session = session or run_id
-    # D6 (F9): mint the harness session id at MATERIALIZE time (pre-spawn, so even a
-    # refused spawn carries it — autopsy-friendly). Value-free random UUIDv4; stamped
-    # onto the seat's --session-id at spawn so collect resolves the transcript by key.
-    seat_harness_session_id = harness_session_id or str(uuid.uuid4())
+    # Claude keeps the F9 pre-minted UUID key. Codex stamps its real session id after
+    # the session_meta transcript appears, because the live CLI has no equivalent
+    # --session-id launch arg.
+    seat_harness_session_id = (
+        (harness_session_id or str(uuid.uuid4()))
+        if bridge.harness == DEFAULT_BRIDGE_HARNESS
+        else harness_session_id
+    )
     runtime_policy_ref = str(dispatch_dir / "runtime-policy.yaml")
     mcp_config_ref = str(dispatch_dir / "mcp" / "ce-mcp.json")
     brief_ref = str(dispatch_dir / "brief.md")
@@ -281,6 +337,7 @@ def materialize_dispatch(
             run_id=run_id,
             scope_id=plan.scope_id,
             mutation_class=plan.mutation_class,
+            harness=bridge.harness,
             runtime_policy=plan.runtime_policy,
             root=root_path,
             dispatch_dir=dispatch_dir,
@@ -297,8 +354,8 @@ def materialize_dispatch(
         "mutation_class": plan.mutation_class,
         # value-free opaque 64-hex digests (approver_ref / ratified_scope_sha)
         "scope_ratification": dict(plan.scope_ratification),
-        "harness": BRIDGE_HARNESS,
-        "harness_session_id": seat_harness_session_id,
+        "harness": bridge.harness,
+        "harness_boundary": bridge.in_band_boundary,
         "unattended": bool(unattended),
         "session": seat_session,
         "window": window,
@@ -309,6 +366,10 @@ def materialize_dispatch(
         "resource_bound": None,
         "spawned_at": None,
     }
+    if seat_harness_session_id:
+        record["harness_session_id"] = seat_harness_session_id
+    if bridge.harness == CODEX_BRIDGE_HARNESS and codex_risk_override:
+        record["codex_risk_override"] = codex_risk_override
     rec = DispatchRecord(
         run_id=run_id,
         scope_id=plan.scope_id,
@@ -365,7 +426,7 @@ def _resolve_ce_exe(ce_exe: str | None) -> str:
 
 def _preflight_spawn_binaries(
     record: DispatchRecord,
-    binaries: tuple[str, ...] = SPAWN_PREFLIGHT_BINARIES,
+    binaries: tuple[str, ...] | None = None,
     *,
     now: datetime | None = None,
 ) -> None:
@@ -375,7 +436,9 @@ def _preflight_spawn_binaries(
     conserve the autopsy) and raised :class:`SpawnRefused`. This catches the common
     live failure (the bridge env missing ``tmux``/the harness — it bit 2026-06-11).
     """
-    missing = [name for name in binaries if shutil.which(name) is None]
+    bridge = get_harness_bridge(str(record.data.get("harness") or DEFAULT_BRIDGE_HARNESS))
+    required = binaries or (*SPAWN_PREFLIGHT_BASE_BINARIES, bridge.v1_harness)
+    missing = [name for name in required if shutil.which(name) is None]
     if missing:
         reason = (
             f"spawn preflight failed: required binaries not on PATH: "
@@ -406,42 +469,42 @@ def spawn_seat(
     """
     _preflight_spawn_binaries(record, now=now)
     exe = _resolve_ce_exe(ce_exe)
-    # D3 (CC-D-7): the dispatch RECORD keeps ``mcp_config_ref`` ABSOLUTE (D3 conserved —
-    # a reader ref that survives the worktree boundary), but Ring-0 CC-D-7
-    # (``claude_launch_spec._is_ce_owned_mcp_path``) REQUIRES the launched ``--mcp-config``
-    # ARGUMENT to be a CE-owned RELATIVE path (no leading ``/``, no ``..`` component) —
-    # #207's absolute argv made every author seat refuse at ``ce launch``. Compose the argv
-    # value RELATIVE to this launch process cwd (the cwd the spawned seat inherits) and fail
-    # closed if it escapes (a ``..`` prefix is exactly what CC-D-7 also rejects), since a seat
-    # that would refuse at ``ce launch`` must never be left half-spawned.
-    mcp_config_arg = os.path.relpath(record.mcp_config_ref, Path.cwd())
-    if mcp_config_arg.startswith(".."):
-        reason = (
-            "mcp_config_ref does not compose a CE-owned relative --mcp-config from the "
-            "launch cwd (relpath escapes with '..'); CC-D-7 would refuse the seat"
-        )
-        mark_spawn_failed(record, reason, now=now)
-        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+    bridge = get_harness_bridge(str(record.data.get("harness") or DEFAULT_BRIDGE_HARNESS))
     argv = [
         exe,
         "launch",
+    ]
+    if bridge.harness != DEFAULT_BRIDGE_HARNESS:
+        argv.extend(["--harness", bridge.v1_harness])
+    argv.extend([
         "--session",
         record.session,
         "--window",
         record.window,
         "--json",
-        "--mcp-config",
-        mcp_config_arg,
         "--runtime-policy",
         record.runtime_policy_ref,
-    ]
+    ])
+    if bridge.harness == DEFAULT_BRIDGE_HARNESS:
+        # D3 (CC-D-7): the dispatch RECORD keeps ``mcp_config_ref`` ABSOLUTE (D3
+        # conserved), but Ring-0 CC-D-7 requires launched ``--mcp-config`` to be a
+        # CE-owned RELATIVE path.
+        mcp_config_arg = os.path.relpath(record.mcp_config_ref, Path.cwd())
+        if mcp_config_arg.startswith(".."):
+            reason = (
+                "mcp_config_ref does not compose a CE-owned relative --mcp-config from the "
+                "launch cwd (relpath escapes with '..'); CC-D-7 would refuse the seat"
+            )
+            mark_spawn_failed(record, reason, now=now)
+            raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+        argv.extend(["--mcp-config", mcp_config_arg])
     if record.unattended:
         # The governance for this already exists (CC-D-6): the flag is honored
         # ONLY when the committed hook-pack is confirmed — the v1 leg fails closed
         # otherwise. For a governed seat the Ring-1 hook-pack is the boundary;
         # approval modals are not load-bearing and hang unattended seats.
-        argv.append("--claude-arg=--dangerously-skip-permissions")
-    if record.harness_session_id:
+        argv.extend(bridge.unattended_args)
+    if bridge.harness == DEFAULT_BRIDGE_HARNESS and record.harness_session_id:
         # D6 (F9): pin the harness transcript to a KNOWN key so `cev3 collect`
         # resolves it by exact id — never by an mtime guess (the #14/#21 mis-fold).
         # Ring 0 passes `--session-id=<uuid>` unmodified (the lenient parser; not a
@@ -485,6 +548,10 @@ def spawn_seat(
     events_ref = launch_result.get("events_ref")
     if isinstance(events_ref, str) and events_ref:
         record.data["events_ref"] = events_ref
+    if bridge.harness == CODEX_BRIDGE_HARNESS:
+        codex_bypass_mode = (launch_result.get("plan") or {}).get("codex_bypass_mode")
+        if isinstance(codex_bypass_mode, str) and codex_bypass_mode:
+            record.data["codex_bypass_mode"] = codex_bypass_mode
     _write_record(record)
 
     return SpawnResult(
@@ -689,6 +756,121 @@ def seed_brief(
         )
         mark_spawn_failed(record, msg, now=now)
         raise SpawnRefused(f"{msg} (for run {record.run_id!r})")
+
+
+def _codex_sessions_root(sessions_root: Path | str | None = None) -> Path:
+    if sessions_root is not None:
+        return Path(sessions_root)
+    return Path.home() / ".codex" / "sessions"
+
+
+def snapshot_codex_transcripts(sessions_root: Path | str | None = None) -> set[Path]:
+    """Snapshot existing Codex JSONL transcripts before spawn."""
+    root = _codex_sessions_root(sessions_root)
+    return {p.resolve() for p in root.glob("**/*.jsonl") if p.is_file()}
+
+
+def _read_codex_session_meta(path: Path) -> dict[str, Any] | None:
+    try:
+        first = path.read_text(encoding="utf-8").splitlines()[0]
+        record = json.loads(first)
+    except (OSError, IndexError, json.JSONDecodeError):
+        return None
+    if record.get("type") != "session_meta":
+        return None
+    payload = record.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
+def _same_cwd(left: Any, right: Path) -> bool:
+    if not left:
+        return False
+    try:
+        return Path(str(left)).expanduser().resolve() == right.resolve()
+    except OSError:
+        return str(left) == str(right)
+
+
+def _find_codex_transcripts(
+    *,
+    sessions_root: Path | str | None = None,
+    session_id: str | None = None,
+    cwd: Path | str | None = None,
+    exclude: set[Path] | None = None,
+) -> list[tuple[Path, dict[str, Any]]]:
+    root = _codex_sessions_root(sessions_root)
+    excluded = {p.resolve() for p in (exclude or set())}
+    cwd_path = Path(cwd).resolve() if cwd is not None else None
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(root.glob("**/*.jsonl")):
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        if resolved in excluded:
+            continue
+        meta = _read_codex_session_meta(path)
+        if not meta:
+            continue
+        if session_id and str(meta.get("id") or "") != session_id:
+            continue
+        if cwd_path is not None and not _same_cwd(meta.get("cwd"), cwd_path):
+            continue
+        matches.append((resolved, meta))
+    return matches
+
+
+def stamp_codex_transcript_locator(
+    record: DispatchRecord,
+    *,
+    before: set[Path],
+    launched_cwd: Path | str,
+    sessions_root: Path | str | None = None,
+    timeout_s: float = DEFAULT_READINESS_TIMEOUT_S,
+    poll_interval_s: float = READINESS_POLL_INTERVAL_S,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    now: datetime | None = None,
+) -> DispatchRecord:
+    """Stamp the Codex session id + transcript path after the pointer seed.
+
+    The lookup is exact and bounded: new JSONL files only, first record must be
+    ``session_meta``, and ``payload.cwd`` must equal the launched worktree cwd.
+    Zero or ambiguous matches are a failed spawn, not a live dispatch.
+    """
+    if record.data.get("harness") != CODEX_BRIDGE_HARNESS:
+        return record
+    deadline = clock() + timeout_s
+    while True:
+        hits = _find_codex_transcripts(
+            sessions_root=sessions_root,
+            cwd=Path(launched_cwd),
+            exclude=before,
+        )
+        if len(hits) == 1:
+            path, meta = hits[0]
+            session_id = str(meta.get("id") or "")
+            if not session_id:
+                break
+            record.data["harness_session_id"] = session_id
+            record.data["transcript_ref"] = str(path)
+            _write_record(record)
+            return record
+        if len(hits) > 1:
+            reason = (
+                f"Codex transcript locator ambiguous: {len(hits)} new session_meta JSONL "
+                f"files matched cwd {Path(launched_cwd).resolve()}"
+            )
+            mark_spawn_failed(record, reason, now=now)
+            raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+        if clock() >= deadline:
+            break
+        sleep(poll_interval_s)
+    reason = (
+        f"Codex transcript locator missing after {timeout_s:.0f}s: no new session_meta "
+        f"JSONL matched cwd {Path(launched_cwd).resolve()}"
+    )
+    mark_spawn_failed(record, reason, now=now)
+    raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
 
 
 # ===========================================================================

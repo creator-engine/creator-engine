@@ -39,3 +39,18 @@ def test_resume_missing_session_is_refused(capsys):
     # A session name that does not exist must refuse rather than spawn hidden.
     ret = ce_cli.main(["launch", "--resume", "--session", "ce-controller-nonexistent-xyz", "--json"])
     assert ret != 0
+
+
+def test_codex_dry_run_is_pure_and_governed(monkeypatch, capsys):
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    ret = ce_cli.main([
+        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
+        "--dry-run", "--json",
+    ])
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["spawned"] is False
+    assert payload["plan"]["command"][-3:] == ["codex", "--model", "gpt-5"]
+    assert payload["plan"]["codex_bypass_mode"] == "config"

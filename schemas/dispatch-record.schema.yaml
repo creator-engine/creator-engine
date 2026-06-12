@@ -72,11 +72,18 @@ properties:
       (the front-gate bet). NEVER a raw account.
   harness:
     type: string
-    const: claude
+    enum: [claude, codex]
     description: |
-      The seat harness. v3.1-G1 bridges the `claude` harness ONLY; codex
-      drive-spawn (a codex launch-spec + bounded wrap + bypass-mode spec field)
-      is the named follow-up gate (G1-codex).
+      The seat harness. `claude` remains the default stronger Ring-1-hook-pack
+      path. `codex` is explicit, low-risk guarded, and externally-gate-governed;
+      this schema does not claim Codex Ring-1 parity.
+  harness_boundary:
+    type: string
+    enum: [claude_ring1_hookpack, codex_external_gate]
+    description: |
+      Governance boundary label for the selected harness. `codex_external_gate`
+      means credential scrub + external forge/review/merge gates are load-bearing;
+      it is not a Ring-1-equivalent claim.
   unattended:
     type: boolean
     description: |
@@ -187,7 +194,7 @@ properties:
       envelope FILE, which the Ring-1 hook records; the record carries only the ref).
   harness_session_id:
     type: string
-    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    minLength: 1
     description: |
       v3.1-G2f (F9): the harness session id minted at MATERIALIZE time (a random
       UUIDv4 — value-free, no credential/host/account) and stamped onto the seat's
@@ -195,7 +202,30 @@ properties:
       key (`<claude-config-dir>/projects/*/<harness_session_id>.jsonl`). `cev3
       collect` resolves the transcript by this exact key — never by mtime guess —
       machine-blocking the #14/#21 orchestrator-transcript mis-fold. OPTIONAL:
-      pre-G2f records carry no id and collect conserves its prior behavior.
+      pre-G2f records carry no id and collect conserves its prior behavior. For
+      Codex records this is the `session_meta.payload.id` stamped after the Codex
+      transcript appears.
+  transcript_ref:
+    type: string
+    minLength: 1
+    description: |
+      G1-codex: spawn-stamped shape-only path ref to the Codex JSONL transcript.
+      `cev3 collect` uses this as the primary Codex transcript locator, then falls
+      back to an exact `session_meta.payload.id` lookup under `~/.codex/sessions/`.
+  codex_bypass_mode:
+    type: string
+    enum: [config, argv]
+    description: |
+      G1-codex: records how CDX-D-6 was accounted for: verified live
+      `~/.codex/config.toml` posture (`config`) or explicit live Codex bypass flag
+      on argv (`argv`). It does not assert Ring-1 parity.
+  codex_risk_override:
+    type: string
+    pattern: "^[0-9a-fA-F]{64}$"
+    description: |
+      Optional value-free ratification digest recording that the Operator accepted
+      the weaker Codex in-band boundary for a high-risk mutation class. Never a raw
+      account, token, host, or installation id.
   transcript_source:
     type: string
     enum: [stamped, operator_override, unstamped]

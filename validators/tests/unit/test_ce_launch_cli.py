@@ -161,3 +161,34 @@ def test_cli_launch_dry_run_still_pure(use_fake_tmux):
     use_fake_tmux(adapter)
     assert ce_cli.main(["launch", "--harness", "claude", "--dry-run", "--json"]) == 0
     assert adapter.spawned == []
+
+
+def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, monkeypatch, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    ret = ce_cli.main([
+        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
+        "--claude-arg=--bare", "--dry-run", "--json",
+    ])
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    command = payload["plan"]["command"]
+    assert command[:2] == ["env", "-u"]
+    assert command[-3:] == ["codex", "--model", "gpt-5"]
+    assert "--bare" not in command
+    assert payload["plan"]["codex_bypass_mode"] == "config"
+
+
+def test_cli_codex_refuses_non_allowlisted_arg(use_fake_tmux, monkeypatch, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    ret = ce_cli.main(["launch", "--harness", "codex", "--codex-arg=--foo"])
+    assert ret != 0
+    assert adapter.spawned == []
+    assert "CDX-D-7" in capsys.readouterr().err

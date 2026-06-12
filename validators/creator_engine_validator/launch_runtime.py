@@ -27,7 +27,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import claude_launch_spec, hermes_launch_spec, resource_bound_spec, seat_sentinel
+from . import claude_launch_spec, codex_launch_spec, hermes_launch_spec, resource_bound_spec, seat_sentinel
 from .loader import LoaderError, load_yaml
 
 DEFAULT_HARNESS = "claude"
@@ -61,6 +61,12 @@ class LaunchRefused(LaunchError):
     """CC-G-D Ring 0: a governed Claude launch surface is refused before side effects."""
 
     code = "G6-LAUNCH-CLAUDE-REFUSED"
+
+
+class CodexLaunchRefused(LaunchRefused):
+    """CDX-D Ring 0: a governed Codex launch surface is refused before side effects."""
+
+    code = "G6-LAUNCH-CODEX-REFUSED"
 
 
 class HermesLaunchRefused(LaunchRefused):
@@ -113,6 +119,7 @@ class LaunchPlan:
     # the literal string "none (advisory)" / "none (off)" on an explicit
     # ratified opt-down; None when the policy declares no resource governance.
     resource_bound: dict | str | None = None
+    codex_bypass_mode: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -127,6 +134,7 @@ class LaunchPlan:
             "dry_run": self.dry_run,
             "resume": self.resume,
             "resource_bound": self.resource_bound,
+            "codex_bypass_mode": self.codex_bypass_mode,
         }
 
 
@@ -319,6 +327,33 @@ def launch(
                 f"refusing governed Claude launch: {clause} — {exc}"
             ) from exc
         plan = replace(plan, command=governed)
+
+    # CDX-D Ring 0: Codex has no live Ring-1 hook-pack in this repo. This branch
+    # refuses unsafe Codex launch surfaces and wraps the command with an ambient
+    # repo-write credential scrub before any tmux/resource-bound side effect.
+    elif harness == "codex":
+        requested = list(extra_args) if extra_args else []
+        spec = codex_launch_spec.parse_codex_argv(requested)
+        config_bypass = (
+            None if spec.explicit_bypass else codex_launch_spec.detect_config_bypass_mode()
+        )
+        spec_result = codex_launch_spec.evaluate_codex_launch(
+            spec,
+            allowed_root=Path(repo_root or "."),
+            config_bypass_mode=config_bypass,
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        plan = replace(
+            plan,
+            command=codex_launch_spec.build_governed_codex_command(base_argv=requested),
+            codex_bypass_mode=spec_result.bypass_mode,
+        )
 
     # CE Ring 0 Hermes governance: pin the creator-engine profile and refuse
     # prohibited Hermes surfaces BEFORE any side effect. (Hermes has no
