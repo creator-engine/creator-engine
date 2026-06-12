@@ -56,7 +56,7 @@ import yaml
 
 from .. import coordination, v3_session
 from ..runtime_evidence_spine import verify_chain
-from .spend_gate import fleet_spend_meter
+from .spend_gate import fleet_spend_meter, project_spend
 from .usage_tap import UsageTurn, fleet_token_rate
 
 #: Snapshot shape version (bumped additively; consumers tolerate additions).
@@ -142,6 +142,17 @@ _SECRET_RULE_RE = re.compile(r"matched rule:\s*([^)]+)")
 MEASURED = "MEASURED"
 ESTIMATED = "ESTIMATED"
 BADGE_UNAVAILABLE = "UNAVAILABLE"
+
+#: v3.1-B.7 — the per-scope cost-tier enum for the fleet cost meter. MEASURED =
+#: the run carries ≥1 priced ``runtime_spend_ledger`` leaf ($-metered, e.g. an
+#: API/fleet seat); UNPRICED = the run has work evidence (a
+#: ``runtime_agent_action`` or a ``runtime_run_outcome``) but ZERO priced leaves
+#: — a subscription/OAuth seat whose cost is REAL but managed by limits/headroom,
+#: never $-metered (so it is NEVER rendered as $0); UNAVAILABLE = an empty/absent
+#: chain. The tier is derived PURELY from the chain.
+COST_MEASURED = MEASURED
+COST_UNPRICED = "UNPRICED"
+COST_UNAVAILABLE = BADGE_UNAVAILABLE
 
 #: Fork 5 (ratified): the subscription-headroom slot ships as a LABELLED
 #: placeholder — never a fabricated estimate. The real estimator lands
@@ -695,7 +706,145 @@ def _fold_meters(
             "value": None,
             "placeholder": SUBSCRIPTION_PLACEHOLDER,
         },
+        # v3.1-B.7 — the per-scope fleet cost meter (MEASURED $ + UNPRICED
+        # subscription honesty tiers). Folded from the SAME chains; the
+        # ``chains is None`` UNAVAILABLE discipline lives inside the fold.
+        "cost": fold_cost_meter(chains),
         "banners": banners,
+    }
+
+
+def _priced_leaves(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The run's ``$``-unit ``runtime_spend_ledger`` leaves (the MEASURED evidence)."""
+    return [
+        record
+        for record in chain
+        if isinstance(record, Mapping)
+        and record.get("record_type") == "runtime_spend_ledger"
+        and record.get("unit") == "$"
+    ]
+
+
+def fold_cost_meter(
+    chains: Mapping[str, list[dict[str, Any]]] | None,
+) -> dict[str, Any]:
+    """Fold the fleet COST meter (v3.1-B.7) — per-scope $ + fleet total. PURE.
+
+    A READ-ONLY projection over the ``runtime_spend_ledger`` leaves of every
+    collected run (``run_id == scope_id`` join). REUSE, never re-implement (the
+    no-parallel-math law): per-scope $ rides ``spend_gate.project_spend`` and the
+    fleet rollup rides ``spend_gate.fleet_spend_meter`` — this module computes no
+    $ math of its own. A demo surface, NOT the G-5/v3.5-G tokenomics engine; it
+    adds nothing to the admission/breaker semantics, it only makes the fleet's
+    cost legible and HONEST: what we MEASURED in $, and what ran on a subscription
+    (UNPRICED — managed by limits/headroom, never rendered as $0).
+
+    Honesty tiers (derived purely from each chain): a row is **MEASURED** with
+    ≥1 priced leaf, **UNPRICED** when it has work evidence (an action or an
+    outcome) but zero priced leaves, **UNAVAILABLE** on an empty chain. The
+    measured fleet total is an explicit FLOOR on true cost — the headroom note
+    states how many runs are unpriced. ``chains is None`` ⇒ the whole section is
+    UNAVAILABLE (the honesty-tier discipline, mirroring ``_fold_meters``).
+    """
+    if chains is None:
+        return {
+            "badge": BADGE_UNAVAILABLE,
+            "unit": "$",
+            "scopes": [],
+            "fleet": {
+                "badge": BADGE_UNAVAILABLE,
+                "unit": "$",
+                "measured_spend": None,
+                "measured_run_count": None,
+                "unpriced_run_count": None,
+                "total_run_count": None,
+                "span_hours": None,
+                "spend_per_hour": None,
+            },
+            "headroom_note": None,
+        }
+
+    flat_records: list[dict[str, Any]] = [
+        record for chain in chains.values() for record in chain
+    ]
+    fleet = fleet_spend_meter(flat_records, unit="$")
+
+    rows: list[dict[str, Any]] = []
+    measured_run_count = 0
+    unpriced_run_count = 0
+    for run_id, chain in chains.items():
+        priced = _priced_leaves(chain)
+        actions = [
+            r
+            for r in chain
+            if isinstance(r, Mapping) and r.get("record_type") == "runtime_agent_action"
+        ]
+        has_outcome = any(
+            isinstance(r, Mapping) and r.get("record_type") == "runtime_run_outcome"
+            for r in chain
+        )
+        if priced:
+            tier = COST_MEASURED
+            measured_run_count += 1
+            # REUSE project_spend for the per-run $ (never a parallel sum).
+            spend: float | None = _float_or_none(
+                project_spend(chain, "run", run_id=str(run_id), unit="$")
+            )
+        elif actions or has_outcome:
+            tier = COST_UNPRICED
+            unpriced_run_count += 1
+            # NEVER a $ figure for an unpriced run (the silent-$0 lie this whole
+            # honesty tier exists to prevent) — its cost is real but not metered.
+            spend = None
+        else:
+            tier = COST_UNAVAILABLE
+            spend = None
+        models = sorted({str(r.get("model")) for r in priced if r.get("model")})
+        row: dict[str, Any] = {
+            "scope_id": str(run_id),
+            "tier": tier,
+            "spend": spend,
+            "leaf_count": len(priced),
+            "models": models,
+        }
+        if tier == COST_UNPRICED:
+            # The chain-visible proxy for "turns of unpriced work" (the exact
+            # collect-time `unpriced` count is dropped off the chain today; the
+            # faithful version is a later hardening — Fork A-3).
+            row["unpriced_turns"] = len(actions)
+        rows.append(row)
+    rows.sort(key=lambda r: str(r.get("scope_id")))
+
+    total_run_count = len(chains)
+    if total_run_count == 0:
+        headroom_note = "no collected runs yet — the fleet cost meter is empty"
+    elif unpriced_run_count:
+        headroom_note = (
+            f"measured $ is a FLOOR on true fleet cost: {unpriced_run_count} of "
+            f"{total_run_count} runs are unpriced (subscription — managed by "
+            f"LIMITS/HEADROOM, not $)"
+        )
+    else:
+        headroom_note = (
+            f"all {total_run_count} runs are $-measured; measured $ is the full "
+            f"metered fleet cost"
+        )
+
+    return {
+        "badge": MEASURED,
+        "unit": "$",
+        "scopes": rows,
+        "fleet": {
+            "badge": MEASURED,
+            "unit": fleet.unit,
+            "measured_spend": _float_or_none(fleet.spend),
+            "measured_run_count": measured_run_count,
+            "unpriced_run_count": unpriced_run_count,
+            "total_run_count": total_run_count,
+            "span_hours": _float_or_none(fleet.span_hours),
+            "spend_per_hour": _float_or_none(fleet.spend_per_hour),
+        },
+        "headroom_note": headroom_note,
     }
 
 

@@ -16,9 +16,13 @@ import json
 
 from creator_engine_validator import v3_session
 from creator_engine_validator.runner import cockpit_demo_seed, cockpit_readmodel
-from creator_engine_validator.runner.spend_gate import breach_record_body, fleet_spend_meter
+from creator_engine_validator.runner.spend_gate import (
+    breach_record_body,
+    fleet_spend_meter,
+    project_spend,
+)
 from creator_engine_validator.runner.usage_tap import UsageTurn, fleet_token_rate
-from creator_engine_validator.runtime_evidence_spine import append
+from creator_engine_validator.runtime_evidence_spine import append, verify_chain
 
 
 def _demo_snapshot() -> dict:
@@ -171,3 +175,131 @@ def test_meters_json_round_trip():
     snapshot = _demo_snapshot()
     assert json.loads(json.dumps(snapshot, sort_keys=True)) == snapshot
     assert "meters" in snapshot
+
+
+# --- v3.1-B.7: the fleet COST meter (per-scope $ + UNPRICED honesty tiers) -----
+
+def _ledger(run_id: str, amount: float, model: str = "claude-opus-4-8") -> dict:
+    return {
+        "record_type": "runtime_spend_ledger",
+        "run_id": run_id,
+        "unit": "$",
+        "amount": amount,
+        "model": model,
+    }
+
+
+def _act(run_id: str) -> dict:
+    return {"record_type": "runtime_agent_action", "run_id": run_id, "op": "write"}
+
+
+def _outcome(run_id: str) -> dict:
+    return {"record_type": "runtime_run_outcome", "run_id": run_id, "outcome": "pr_opened"}
+
+
+def _mixed_chains() -> dict:
+    return {
+        "measured-run": [_ledger("measured-run", 2.0), _ledger("measured-run", 1.0, "claude-fable-5")],
+        "unpriced-run": [_act("unpriced-run"), _act("unpriced-run")],
+        "outcome-only": [_outcome("outcome-only")],
+        "empty-run": [],
+    }
+
+
+def test_fold_cost_meter_per_scope_spend_reuses_project_spend():
+    chains = _mixed_chains()
+    cost = cockpit_readmodel.fold_cost_meter(chains)
+    rows = {r["scope_id"]: r for r in cost["scopes"]}
+    measured = rows["measured-run"]
+    assert measured["tier"] == "MEASURED"
+    # No parallel math: the per-scope $ equals project_spend EXACTLY.
+    assert measured["spend"] == float(
+        project_spend(chains["measured-run"], "run", run_id="measured-run", unit="$")
+    )
+    assert measured["spend"] == 3.0
+    assert measured["leaf_count"] == 2
+    assert measured["models"] == ["claude-fable-5", "claude-opus-4-8"]
+    assert "unpriced_turns" not in measured
+
+
+def test_fold_cost_meter_tier_classification():
+    cost = cockpit_readmodel.fold_cost_meter(_mixed_chains())
+    rows = {r["scope_id"]: r for r in cost["scopes"]}
+    assert rows["measured-run"]["tier"] == "MEASURED"
+    # UNPRICED with actions only — and NEVER a $ figure (no silent $0 lie).
+    assert rows["unpriced-run"]["tier"] == "UNPRICED"
+    assert rows["unpriced-run"]["spend"] is None
+    assert rows["unpriced-run"]["unpriced_turns"] == 2
+    assert rows["unpriced-run"]["leaf_count"] == 0
+    # UNPRICED via a terminal outcome with zero actions -> zero turns.
+    assert rows["outcome-only"]["tier"] == "UNPRICED"
+    assert rows["outcome-only"]["unpriced_turns"] == 0
+    # UNAVAILABLE on an empty chain.
+    assert rows["empty-run"]["tier"] == "UNAVAILABLE"
+    assert rows["empty-run"]["spend"] is None
+
+
+def test_fold_cost_meter_fleet_rollup_reuses_fleet_spend_meter():
+    chains = _mixed_chains()
+    cost = cockpit_readmodel.fold_cost_meter(chains)
+    fleet = cost["fleet"]
+    flat = [r for c in chains.values() for r in c]
+    expected = fleet_spend_meter(flat, unit="$")
+    assert fleet["measured_spend"] == float(expected.spend) == 3.0
+    assert fleet["measured_run_count"] == 1
+    assert fleet["unpriced_run_count"] == 2
+    assert fleet["total_run_count"] == 4
+    assert fleet["badge"] == "MEASURED"
+    assert cost["badge"] == "MEASURED"
+    # The headroom heart: the measured $ is declared a FLOOR, not the whole cost.
+    assert "FLOOR" in cost["headroom_note"]
+    assert "2 of 4 runs are unpriced" in cost["headroom_note"]
+
+
+def test_fold_cost_meter_none_chains_is_unavailable():
+    cost = cockpit_readmodel.fold_cost_meter(None)
+    assert cost["badge"] == "UNAVAILABLE"
+    assert cost["scopes"] == []
+    assert cost["fleet"]["measured_spend"] is None
+    assert cost["fleet"]["badge"] == "UNAVAILABLE"
+    assert cost["headroom_note"] is None
+
+
+def test_fold_cost_meter_is_pure_and_json_serializable():
+    chains = _mixed_chains()
+    first = cockpit_readmodel.fold_cost_meter(chains)
+    second = cockpit_readmodel.fold_cost_meter(chains)
+    # Deterministic (no hidden state / clock / rng) and input-preserving.
+    assert first == second
+    assert json.loads(json.dumps(first, sort_keys=True)) == first
+    assert chains == _mixed_chains()
+
+
+def test_cost_section_is_wired_into_meters():
+    snapshot = cockpit_readmodel.fold_snapshot(chains=_mixed_chains())
+    assert "cost" in snapshot["meters"]
+    assert snapshot["meters"]["cost"]["fleet"]["measured_spend"] == 3.0
+
+
+def test_cost_meter_unavailable_when_chains_absent():
+    snapshot = cockpit_readmodel.fold_snapshot()
+    assert snapshot["meters"]["cost"]["badge"] == "UNAVAILABLE"
+
+
+def test_demo_cost_meter_shows_both_tiers_and_chains_verify():
+    seed = cockpit_demo_seed.seed()
+    snapshot = cockpit_readmodel.fold_snapshot(demo=True, **seed)
+    cost = snapshot["meters"]["cost"]
+    # The existing MEASURED pair sums to $13.30 (gate-uploads $3.30 + breach $10).
+    assert cost["fleet"]["measured_spend"] == 13.30
+    measured = [r for r in cost["scopes"] if r["tier"] == "MEASURED"]
+    unpriced = [r for r in cost["scopes"] if r["tier"] == "UNPRICED"]
+    assert len(measured) >= 2
+    # The EXPLICIT subscription (unpriced) run is on the board, both tiers shown.
+    assert any(r["scope_id"] == "subscription-seat" for r in unpriced)
+    # NEVER a $0 lie: an unpriced run carries no $ figure.
+    for row in unpriced:
+        assert row["spend"] is None
+    # The seed's tamper-evidence is REAL — every seed chain verifies clean.
+    for run_id, chain in seed["chains"].items():
+        assert verify_chain(chain) == [], f"seed chain {run_id!r} must verify clean"

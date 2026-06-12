@@ -154,6 +154,66 @@ def test_rails_render_unavailable_new_feeds_honestly():
     assert "escalation source unavailable" in v3_cockpit._right_rail_text(snapshot)
 
 
+# --- v3.1-B.7: the L3 cost rail render (render-only; computation stays in L2) -
+
+@pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")
+def test_meter_strip_renders_cost_rail_with_both_tiers():
+    from creator_engine_validator import v3_cockpit
+    from creator_engine_validator.runner import cockpit_demo_seed, cockpit_readmodel
+
+    snapshot = cockpit_readmodel.fold_snapshot(demo=True, **cockpit_demo_seed.seed())
+    text = v3_cockpit._meter_strip_text(snapshot)
+    # The fleet cost line: measured $ MEASURED + the unpriced (subscription) count.
+    assert "cost $13.30 MEASURED" in text
+    assert "unpriced (subscription)" in text
+    # A MEASURED scope shows its $ and model; the explicit subscription run shows
+    # NO $ at all — never the silent-$0 lie the honesty tier exists to prevent.
+    assert "spend-hard-breach $10.00" in text
+    assert "subscription-seat unpriced (subscription)" in text
+    assert "subscription-seat $0" not in text
+    # The headroom FLOOR note rides the rail.
+    assert "FLOOR on true fleet cost" in text
+
+
+@pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")
+def test_meter_strip_declares_cost_truncation_never_silent():
+    from creator_engine_validator import v3_cockpit
+
+    # 8 measured scopes -> top 6 by $ shown, the remaining 2 DECLARED truncated.
+    scopes = [
+        {
+            "scope_id": f"run-{i:02d}",
+            "tier": "MEASURED",
+            "spend": float(i),
+            "leaf_count": 1,
+            "models": ["claude-opus-4-8"],
+        }
+        for i in range(1, 9)
+    ]
+    snapshot = {
+        "meters": {
+            "spend": {},
+            "token_rate": {},
+            "context": {},
+            "subscription_headroom": {},
+            "banners": [],
+            "cost": {
+                "badge": "MEASURED",
+                "unit": "$",
+                "scopes": scopes,
+                "fleet": {"measured_spend": 36.0, "unpriced_run_count": 0},
+                "headroom_note": "all 8 runs are $-measured",
+            },
+        }
+    }
+    text = v3_cockpit._meter_strip_text(snapshot)
+    assert "more scopes truncated" in text
+    assert "top 6 by $ shown" in text
+    # The cheapest scopes are the ones dropped (highest $ retained).
+    assert "run-08 $8.00" in text
+    assert "run-01 $1.00" not in text
+
+
 # --- L3 smoke (CI-exercised; skipif-absent for minimal local envs only) ------
 
 @pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")

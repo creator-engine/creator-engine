@@ -107,6 +107,10 @@ _BOARD_COLUMNS = (
 #: The crabfleet filter triad — keys bind to the L2-precomputed id lists.
 _FILTER_KEYS = ("all", "mine", "live")
 
+#: v3.1-B.7 — the cost rail shows the top-N per-scope rows by measured $; the
+#: remainder is SUMMARIZED on a declared truncation line (never a silent cap).
+_COST_TOP_N = 6
+
 SnapshotLoader = Callable[[], dict[str, Any]]
 
 
@@ -286,6 +290,68 @@ def _outcome_text(detail: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _cost_scope_line(row: dict[str, Any]) -> str:
+    """Format ONE per-scope cost row — render-only, NEVER a $0 for an unpriced run."""
+    scope_id = str(row.get("scope_id", "—"))
+    tier = str(row.get("tier", "—"))
+    if tier == "MEASURED":
+        spend = row.get("spend")
+        spend_text = f"${spend:.2f}" if spend is not None else "—"
+        models = row.get("models") or []
+        model_text = f" [{', '.join(models)}]" if models else ""
+        badge = f"[{BADGE_HEX['MEASURED']}]MEASURED[/]"
+        return f"  {scope_id} {spend_text} {badge}{model_text}"
+    if tier == "UNPRICED":
+        turns = row.get("unpriced_turns")
+        turn_text = f" · {turns} turns" if turns is not None else ""
+        badge = f"[{SEMANTIC_HEX['amber']}]UNPRICED[/]"
+        # The honesty heart: an unpriced (subscription) run is NEVER shown as $0.
+        return f"  {scope_id} unpriced (subscription){turn_text} {badge}"
+    badge = f"[{BADGE_HEX['UNAVAILABLE']}]UNAVAILABLE[/]"
+    return f"  {scope_id} — (no chain) {badge}"
+
+
+def _cost_rail_lines(cost: dict[str, Any]) -> list[str]:
+    """Format the B.7 cost rail: the fleet line + a top-N per-scope list (render-only)."""
+    fleet = cost.get("fleet") or {}
+    badge_name = str(cost.get("badge", "—"))
+    badge_hex = BADGE_HEX.get(badge_name)
+    badge = f"[{badge_hex}]{badge_name}[/]" if badge_hex else badge_name
+    measured = fleet.get("measured_spend")
+    measured_text = f"${measured:.2f}" if measured is not None else "—"
+    unpriced_n = fleet.get("unpriced_run_count") or 0
+    lines = [
+        f"cost {measured_text} MEASURED · {unpriced_n} unpriced (subscription)  {badge}"
+    ]
+    note = cost.get("headroom_note")
+    if note:
+        lines.append(f"  [{SEMANTIC_HEX['amber']}]{note}[/]")
+
+    rows = list(cost.get("scopes") or [])
+    # Rank: highest measured $ first, then unpriced, then unavailable — so the
+    # most expensive scopes are never the ones dropped by the top-N truncation.
+    _tier_rank = {"MEASURED": 0, "UNPRICED": 1, "UNAVAILABLE": 2}
+    rows.sort(
+        key=lambda r: (
+            _tier_rank.get(str(r.get("tier")), 9),
+            -(r.get("spend") or 0.0),
+            str(r.get("scope_id")),
+        )
+    )
+    for row in rows[:_COST_TOP_N]:
+        lines.append(_cost_scope_line(row))
+    if len(rows) > _COST_TOP_N:
+        dropped = rows[_COST_TOP_N:]
+        dropped_measured = sum(r.get("spend") or 0.0 for r in dropped if r.get("tier") == "MEASURED")
+        dropped_unpriced = len([r for r in dropped if r.get("tier") == "UNPRICED"])
+        # Declare the truncation — never a silent cap (B.7 §A.3).
+        lines.append(
+            f"  … +{len(dropped)} more scopes truncated (top {_COST_TOP_N} by $ shown; "
+            f"${dropped_measured:.2f} measured + {dropped_unpriced} unpriced hidden)"
+        )
+    return lines
+
+
 def _meter_strip_text(snapshot: dict[str, Any]) -> str:
     """Format the unified meter strip — every tile shows its honesty badge (B.4)."""
     meters = snapshot.get("meters", {})
@@ -313,6 +379,10 @@ def _meter_strip_text(snapshot: dict[str, Any]) -> str:
         f"headroom {headroom.get('placeholder', '—')} {_badge(headroom)}",
     ]
     lines = ["  │  ".join(segments)]
+    # v3.1-B.7 — the per-scope fleet cost rail under the strip (render-only).
+    cost = meters.get("cost")
+    if cost:
+        lines.extend(_cost_rail_lines(cost))
     banner_hex = {"soft": SEMANTIC_HEX["amber"], "hard": SEMANTIC_HEX["gate"]}
     for banner in meters.get("banners", []):
         tier = str(banner.get("tier", "—"))
