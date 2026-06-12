@@ -540,7 +540,9 @@ def materialize_review_dispatch(
     """Materialize a ``role: reviewer`` dispatch (envelope + brief + ``review_of`` block).
 
     Reads the AUTHOR dispatch (scope_id, the author run_id, the value-free ratification + mutation
-    class) AS DATA, mints a review run_id ``run-review-<scope_id>-<utcstamp>``, composes a
+    class) AS DATA, mints a review run_id ``rev-<scope_id>-<lowercased utcstamp>`` (lowercased so
+    the id satisfies the active-work-ledger lane pattern and the derived lease id stays within the
+    worktree-lease length bound when fed to ``pco-allocate``), composes a
     schema-valid reviewer-authority envelope (bound to the author's ``ratified_scope_sha``), writes
     the reviewer mandate brief, and persists the review ``dispatch.yaml`` with ``role: reviewer`` +
     a value-free ``review_of`` block (author run_id, PR number, envelope path ref). No spawn happens
@@ -550,7 +552,7 @@ def materialize_review_dispatch(
     scope_id = str(author_dispatch["scope_id"])
     author_run_id = str(author_dispatch["run_id"])
     stamp = _utcstamp(now or datetime.now(timezone.utc))
-    review_run_id = f"run-review-{scope_id}-{stamp}"
+    review_run_id = f"rev-{scope_id}-{stamp.lower()}"
     dispatch_dir = root_path / DISPATCHES_SUBDIR / review_run_id
     dispatch_dir.mkdir(parents=True, exist_ok=True)
 
@@ -689,6 +691,10 @@ def spawn_review_venue(
         "--prompt", record.brief_ref,
         "--prompt-sha", brief_sha,
         "--repo-root", str(worktree_path),
+        # cwd the venue pane IN its allocated worktree — lane_runtime sets cwd only from
+        # --worktree-path; without it the relative --mcp-config fails under --strict-mcp-config
+        # and the venue claude dies at birth while launch reports success.
+        "--worktree-path", str(worktree_path),
         "--ledger-root", str(ledger_root),
         "--command", "claude",
         "--json",

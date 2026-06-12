@@ -402,6 +402,31 @@ def test_materialize_review_dispatch_role_and_review_of(tmp_path):
     jsonschema.validate(rec.data, _dispatch_schema())
 
 
+def test_review_run_id_satisfies_ledger_lane_and_lease_patterns(tmp_path):
+    """Regression for the L7 live-drive HALT (esc-14-l7-venue-id-defect): the minted review
+    run_id is fed to ``pco-allocate`` as the ledger lane id, and the derived lease id is
+    ``lease-<lane>-<14-digit stamp>``. Both patterns are READ FROM the schemas (not hardcoded)
+    so this guards the exact contract that fail-closed refused twice in the live drive."""
+    import re
+
+    schemas_dir = Path(__file__).resolve().parents[3] / "schemas"
+    ledger = yaml.safe_load((schemas_dir / "active-work-ledger.schema.yaml").read_text(encoding="utf-8"))
+    lane_pattern = ledger["properties"]["lane_id"]["pattern"]
+    lease = yaml.safe_load((schemas_dir / "worktree-lease.schema.yaml").read_text(encoding="utf-8"))
+    lease_pattern = lease["properties"]["lease_id"]["pattern"]
+
+    # a representatively long scope id — the shape that overflowed the lease length bound before
+    author = _author_dispatch(tmp_path, scope_id="b7-fleet-cost-meter")
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    run_id = rec.run_id
+    assert re.match(lane_pattern, run_id), f"{run_id!r} violates lane pattern {lane_pattern!r}"
+    lease_id = f"lease-{run_id}-{'0' * 14}"
+    assert re.match(lease_pattern, lease_id), f"{lease_id!r} violates lease pattern {lease_pattern!r}"
+
+
 def test_review_dispatch_record_is_value_free(tmp_path):
     author = _author_dispatch(tmp_path)
     rec = v3_seat_bridge.materialize_review_dispatch(
@@ -451,6 +476,11 @@ def test_spawn_review_venue_runs_pco_then_lane_launch_then_seed(tmp_path):
     assert "--role" in launch and launch[launch.index("--role") + 1] == "reviewer"
     assert "--lane-kind" in launch and launch[launch.index("--lane-kind") + 1] == "review"
     assert "--reviewer-authority-ref" in launch and "--json" in launch
+    # the venue pane is cwd'd IN its allocated worktree — without --worktree-path the relative
+    # --mcp-config fails under --strict-mcp-config and the venue claude dies at birth (L7 cwd defect)
+    venue_worktree = str(venue_root / rec.run_id)
+    assert "--repo-root" in launch and launch[launch.index("--repo-root") + 1] == venue_worktree
+    assert "--worktree-path" in launch and launch[launch.index("--worktree-path") + 1] == venue_worktree
     # the terminal got stamped + the brief got seeded
     drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
     assert drec["terminal"]["pane_id"] == "%7" and drec["spawned_at"]
