@@ -75,9 +75,29 @@ def test_hook_commands_are_command_type_and_reference_existing_scripts():
 def test_hook_scripts_are_executable_posix_sh():
     scripts = sorted(HOOKS_DIR.glob("*.sh"))
     assert scripts, "expected hook scripts under .claude/hooks"
+    # The durable, umask-independent property the executable contract really means
+    # is the *git index* mode: every hook script is committed as ``100755``. The
+    # on-disk mode is checkout-umask-dependent (0o755 under umask 022, 0o775 under
+    # umask 002, ...), so asserting equality with 0o755 makes "green" host-relative.
+    # Assert the index mode for the contract and only sanity-check owner-exec on
+    # disk (catches a genuinely broken local checkout without asserting umask).
+    rel_paths = [str(p.relative_to(REPO_ROOT)) for p in scripts]
+    proc = subprocess.run(
+        ["git", "ls-files", "-s", "--", *rel_paths],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, (proc.returncode, proc.stderr)
+    index_modes = {
+        parts[3]: parts[0]
+        for parts in (line.split() for line in proc.stdout.splitlines() if line.strip())
+    }
     for script in scripts:
+        rel = str(script.relative_to(REPO_ROOT))
+        assert index_modes.get(rel) == "100755", (rel, index_modes.get(rel))
         mode = stat.S_IMODE(script.stat().st_mode)
-        assert mode == 0o755, (str(script), oct(mode))
+        assert mode & stat.S_IXUSR, (str(script), oct(mode))
         first_line = script.read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env sh", (str(script), first_line)
 

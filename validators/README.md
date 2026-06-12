@@ -54,6 +54,30 @@ PYTHONPATH=validators .venv-test/bin/python -m pytest validators/tests -q
 
 `validators/requirements-dev.txt` and `validators/wheelhouse-dev/` are for developer/test tooling only. Keep `validators/requirements.txt` and `validators/wheelhouse/` runtime-only.
 
+### Sanctioned test invocations
+
+Parallelism is opt-in per invocation (there is no `addopts`), so choose the lane
+that matches what you are doing. `PYTHONPATH=validators` is required for every form.
+
+```bash
+# 1. Full suite, serial — minimal environment, no xdist needed.
+PYTHONPATH=validators python -m pytest validators/tests -q
+
+# 2. Full suite, parallel — THE merge-green gate (CI-identical invocation).
+PYTHONPATH=validators python -m pytest validators/tests -q -n auto --dist loadgroup
+
+# 3. Fast lane — inner loop only: deselects the memoized `check-examples` sweep
+#    (its consumers carry the auto-applied `sweep` marker), cutting the wall-time
+#    floor. Use while iterating on an unrelated unit.
+PYTHONPATH=validators python -m pytest validators/tests -q -n auto --dist loadgroup -m "not sweep"
+```
+
+The `sweep` marker is derived automatically at collection time from every test that
+requests the session-scoped `check_examples_result` fixture — there is no
+hand-maintained list to drift. **The fast lane (`-m "not sweep"`) is NEVER valid
+green-gate evidence**: it skips the example-sweep coverage on purpose. Only the
+full-suite parallel run (form 2) is a green-gate result; CI runs exactly that.
+
 ## Invocation
 
 ```bash
