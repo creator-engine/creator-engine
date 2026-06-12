@@ -180,3 +180,91 @@ def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):
     result = pkg.verify_packaging_contract(tmp_path)
     assert not result.ok
     assert result.violations
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#25: generated _version.py parity (semver + baked SHA)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_generated_version_is_clean_on_repo(repo_root: Path):
+    violations = pkg.verify_generated_version(repo_root)
+    assert violations == [], f"generated _version.py parity violations: {violations}"
+
+
+def _synthetic_source_tree(tmp_path: Path, *, semver: str, build_sha: str) -> Path:
+    validators_dir = tmp_path / "validators"
+    source_dir = validators_dir / "creator_engine_validator"
+    source_dir.mkdir(parents=True)
+    (validators_dir / "pyproject.toml").write_text(
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    (source_dir / "_version.py").write_text(
+        f'SEMVER = "{semver}"\nBUILD_GIT_SHA = "{build_sha}"\n', encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_verify_generated_version_flags_semver_drift(tmp_path: Path):
+    root = _synthetic_source_tree(tmp_path, semver="9.9.9", build_sha="0" * 40)
+    violations = pkg.verify_generated_version(root)
+    assert any("SEMVER" in v and "differs from pyproject" in v for v in violations)
+
+
+def test_verify_generated_version_flags_malformed_baked_sha(tmp_path: Path):
+    root = _synthetic_source_tree(tmp_path, semver="0.1.0", build_sha="not-a-real-sha")
+    violations = pkg.verify_generated_version(root)
+    assert any("BUILD_GIT_SHA" in v and "40-hex" in v for v in violations)
+
+
+def test_verify_generated_version_flags_missing_file(tmp_path: Path):
+    validators_dir = tmp_path / "validators"
+    source_dir = validators_dir / "creator_engine_validator"
+    source_dir.mkdir(parents=True)
+    (validators_dir / "pyproject.toml").write_text(
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    violations = pkg.verify_generated_version(tmp_path)
+    assert any("missing generated build-identity file" in v for v in violations)
+
+
+def test_verify_generated_version_noop_without_source_tree(tmp_path: Path):
+    # an installed/wheel-only context (no source checkout) must not fabricate drift
+    assert pkg.verify_generated_version(tmp_path) == []
+
+
+def _fake_git_runner(*, shallow: bool, cat_file_ok: bool):
+    """A ``_git`` seam stand-in shaped like a depth-1 (or full) clone."""
+    import subprocess
+
+    def runner(repo_root, *args):
+        sub = args[0]
+        if sub == "rev-parse" and "--verify" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="deadbeef\n", stderr="")
+        if sub == "cat-file":
+            return subprocess.CompletedProcess(args, 0 if cat_file_ok else 1, stdout="", stderr="")
+        if sub == "rev-parse" and "--is-shallow-repository" in args:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=("true" if shallow else "false") + "\n", stderr=""
+            )
+        if sub == "merge-base":  # --is-ancestor: success
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    return runner
+
+
+def test_baked_sha_probe_skips_on_shallow_clone_with_absent_object(monkeypatch, tmp_path: Path):
+    # depth-1 CI checkout: the baked merge-parent base is truncated away, not
+    # missing — the probe must SKIP (regression: PR #214 review CHANGES_REQUESTED).
+    monkeypatch.setattr(pkg, "_git", _fake_git_runner(shallow=True, cat_file_ok=False))
+    assert pkg._baked_sha_git_problem(tmp_path, "a" * 40) is None
+
+
+def test_baked_sha_probe_flags_absent_object_on_full_clone(monkeypatch, tmp_path: Path):
+    # a FULL clone CAN distinguish a genuine missing/foreign sha -> still a violation
+    monkeypatch.setattr(pkg, "_git", _fake_git_runner(shallow=False, cat_file_ok=False))
+    problem = pkg._baked_sha_git_problem(tmp_path, "a" * 40)
+    assert problem and "not a commit in this repository" in problem

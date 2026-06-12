@@ -72,6 +72,7 @@ from . import (
     v3_seat_bridge,
     v3_session,
     v3_shaping,
+    version,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .forge.github_repo_config import ForgeConfigError
@@ -1715,13 +1716,16 @@ def _cmd_session(args: argparse.Namespace) -> int:
         )
     else:
         spend = v3_session.spend_meter(None, None, args.unit)
+    ce_ver = version.ce_version()
     lines = v3_session.render_session(
         counts, context=context, spend=spend, at_boundary=not args.mid_output,
         repo=args.repo, transport=args.transport, backend=args.backend, root=args.root,
+        version=ce_ver,
     )
     return _emit(
         args, 0, lines,
         {"action": "session", "root": args.root, "phase_counts": counts,
+         "ce_version": ce_ver,
          "context": {"pct": context.pct, "state": context.state},
          "spend": {"state": spend.state, "ratio": spend.ratio,
                    "spent": v3_session.fmt_amount(spend.spent) if spend.spent is not None else None,
@@ -1995,19 +1999,23 @@ def _cmd_cockpit(args: argparse.Namespace) -> int:
 
     from .runner import cockpit_readmodel as _readmodel  # L2 — textual-free
 
+    # ce-ops#25: resolve the CE version token ONCE here (Open-Q1) and pass it as
+    # DATA into demo + live snapshot construction — the L2 fold and the watch
+    # loop never run git. Demo and live therefore expose the SAME token.
+    ce_ver = version.ce_version()
     demo = os.environ.get(_readmodel.DEMO_ENV) == "1"
     root = Path(args.root)
     if demo:
         from .runner import cockpit_demo_seed as _seed
 
         def _load() -> dict[str, Any]:
-            return _readmodel.fold_snapshot(demo=True, **_seed.seed())
+            return _readmodel.fold_snapshot(demo=True, ce_version=ce_ver, **_seed.seed())
 
         watch: list[str] = []
     else:
 
         def _load() -> dict[str, Any]:
-            return _readmodel.snapshot_from_roots(root)
+            return _readmodel.snapshot_from_roots(root, ce_version=ce_ver)
 
         watch = _readmodel.watch_paths(root)
     snapshot = _load()
@@ -2052,6 +2060,10 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Creator Engine v3 — file, ratify, and drive work as a governed Scope "
         "(Frame → Shape → Build → Review → Ship).",
     )
+    # ce-ops#25: top-level ``cev3 --version`` prints the derived CE token and
+    # exits BEFORE the default ``session`` dispatch (the action exits in
+    # parse_args, ahead of ``args.command`` resolution in ``main``).
+    version.add_version_flag(parser)
     sub = parser.add_subparsers(dest="command")
 
     p_scope = sub.add_parser("scope", help="file a Scope (Goal/Done-when/Budget/Change-type)")

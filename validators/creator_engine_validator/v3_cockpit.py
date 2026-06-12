@@ -526,6 +526,12 @@ class CockpitApp(App[None]):
         watch_paths: Sequence[str] = (),
     ) -> None:
         super().__init__()
+        # ce-ops#25: render the CE version token in the L3 header — title from
+        # ``snapshot["source"]["ce_version"]`` with ``APP_TITLE`` as the
+        # prefix/fallback (the token is data the L2 fold already carries).
+        ce_ver = (snapshot.get("source") or {}).get("ce_version")
+        if ce_ver:
+            self.title = f"{APP_TITLE} · {ce_ver}"
         self._snapshot = snapshot
         self._reload = reload
         self._watch_paths = list(watch_paths)

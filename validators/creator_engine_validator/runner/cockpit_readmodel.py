@@ -1030,6 +1030,7 @@ def fold_snapshot(
     controller_id: str | None = None,
     demo: bool = False,
     roots: Mapping[str, str | None] | None = None,
+    ce_version: str | None = None,
 ) -> dict[str, Any]:
     """Fold L1-shaped values into the ONE JSON-serializable Cockpit snapshot (PURE).
 
@@ -1176,6 +1177,10 @@ def fold_snapshot(
             "mode": "demo" if demo else "live",
             "demo": bool(demo),
             "watermark": DEMO_WATERMARK if demo else None,
+            # ce-ops#25: the derived CE version token, resolved ONCE by the
+            # caller (``v3_cli._cmd_cockpit``) and folded in as data — additive
+            # field, no ``SNAPSHOT_VERSION`` bump (Open-Q4).
+            "ce_version": ce_version,
             "roots": dict(roots or {}),
         },
         "availability": {
@@ -1460,6 +1465,7 @@ def snapshot_from_roots(
     observations_dir: Path | str | None = None,
     demo: bool = False,
     environ: Mapping[str, str] | None = None,
+    ce_version: str | None = None,
 ) -> dict[str, Any]:
     """Compose the load seams over the LIVE roots and fold the snapshot (the I/O edge).
 
@@ -1488,6 +1494,7 @@ def snapshot_from_roots(
         envelopes=load_envelopes(panes),
         harnesses=load_harnesses(ledger) if ledger else None,
         demo=demo,
+        ce_version=ce_version,
         roots={
             "state_root": str(state),
             "ledger_root": str(ledger) if ledger else None,

@@ -24,6 +24,7 @@ from . import environment_guard as guard
 from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
 from .tmux_adapter import TmuxAdapter
+from .version import ce_version
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,9 @@ def run_doctor(
     )
     payload = result.to_dict()
     payload["repo_root"] = str(Path(repo_root))
+    # ce-ops#25: surface the derived CE version identity beside the packaging
+    # health line (local preflight telemetry, Open-Q3 — never attestation).
+    payload["ce_version"] = ce_version(repo_root)
     payload["prerequisites"] = {
         "python_interpreter": ".".join(str(x) for x in facts.version_info),
         "python_in_contract": interpreter_in_contract(facts.version_info),
@@ -186,7 +190,10 @@ def run_doctor(
 
 
 def render_human(report: DoctorReport) -> str:
-    lines = [f"ce doctor: {'PASS' if report.ok else 'FAIL'} (repo_root={report.payload['repo_root']})"]
+    lines = [
+        f"ce doctor: {'PASS' if report.ok else 'FAIL'} "
+        f"(repo_root={report.payload['repo_root']}, version={report.payload['ce_version']})"
+    ]
     for check in report.payload["checks"]:
         if not check["applicable"]:
             mark = "skip"
