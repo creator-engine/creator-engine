@@ -69,6 +69,7 @@ from . import (
     side_effect_ledger_runtime,
     transcript_archive,
     version,
+    work_claims,
     worker_runtime,
 )
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
@@ -205,6 +206,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "contract (e.g. a reviewer token). The file PATH transits argv; the secret VALUE "
         "never enters argv, the tmux server, or any record. Refused if missing or "
         "group/world-accessible",
+    )
+    launch.add_argument(
+        "--claim-ticket",
+        dest="claim_ticket",
+        default=None,
+        help="ce-ops#38: acquire + verify a work-claim lock on this ticket "
+        "(owner/name#N / issue URL / N inside the slug) BEFORE any lane side "
+        "effect; a foreign active claim refuses the launch",
     )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
@@ -603,6 +612,40 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--repo-root", default=".", help="repo root to initialize (default: cwd)")
     init.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    # ce claim acquire|release|status — the ce-ops#38 work-claim-lock MVP. The
+    # authoritative claim is a structured GitHub issue comment; this surface is a
+    # thin CLI over the shared `work_claims` runtime (forge-native, advisory).
+    claim = groups.add_parser(
+        "claim", help="work-claim locks: hub-visible per-ticket compose/dispatch claims (ce-ops#38)"
+    )
+    claim_sub = claim.add_subparsers(dest="claim_cmd")
+
+    def _add_ticket_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("ticket", help="owner/name#N, a GitHub issue URL, or N (with --repo)")
+        p.add_argument("--repo", default=None, help="owner/name context for a bare issue number")
+        p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    ca = claim_sub.add_parser("acquire", help="acquire + verify a work claim (atomic dispatch posture)")
+    _add_ticket_args(ca)
+    ca.add_argument("--reason", default="manual", choices=list(work_claims.VALID_REASONS))
+    ca.add_argument("--holder", default=None, help="claim holder id (default: env/controller/hostname)")
+    ca.add_argument("--host", default=None, help="claim host (default: hostname)")
+    ca.add_argument("--stale-after-seconds", type=int, default=work_claims.DEFAULT_STALE_AFTER_SECONDS,
+                    dest="stale_after_seconds", help="staleness fence (status/takeover threshold; never auto-release)")
+    ca.add_argument("--takeover", action="store_true", help="seize a STALE foreign (or legacy) claim explicitly")
+    ca.add_argument("--takeover-reason", default=None, dest="takeover_reason")
+
+    cr = claim_sub.add_parser("release", help="release a held claim (structured release comment)")
+    _add_ticket_args(cr)
+    cr.add_argument("--claim-id", default=None, dest="claim_id", help="claim id to release (default: your active claim)")
+    cr.add_argument("--reason", default="deliverable-posted", help="release_reason text")
+    cr.add_argument("--deliverable-url", default=None, dest="deliverable_url")
+
+    cst = claim_sub.add_parser("status", help="read the live claim state (no mutation)")
+    _add_ticket_args(cst)
+    cst.add_argument("--write-cache", default=None, dest="write_cache",
+                     metavar="ROOT", help="write the view-only Cockpit cache under <ROOT>/claims/claims.json")
+
     # ce launch / ce hud — deterministic visible Controller-seat launcher
     # (DP-2 = B, RV1-063). ce hud is an alias/seam label for the same launcher.
     def _add_launch_args(p: argparse.ArgumentParser) -> None:
@@ -658,6 +701,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "bound this seat (systemd-run --user wrap); --dry-run renders the "
             "resource_bound block offline",
         )
+        p.add_argument(
+            "--claim-ticket",
+            dest="claim_ticket",
+            default=None,
+            help="ce-ops#38: acquire + verify a work-claim lock on this ticket "
+            "(owner/name#N, an issue URL, or N inside the slug) BEFORE any launch "
+            "side effect; a foreign active claim refuses the launch",
+        )
         p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     launch = groups.add_parser(
@@ -671,6 +722,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _lane_launch(args) -> int:
+    # ce-ops#38: acquire + verify the work claim BEFORE any lane side effect.
+    claim_code, claim_ctx = _acquire_launch_claim(args, "lane launch")
+    if claim_code != 0:
+        return claim_code
     command = args.command.split() if args.command else None
     claude_arg = getattr(args, "claude_arg", None)
     if command is not None and claude_arg:
@@ -710,6 +765,13 @@ def _lane_launch(args) -> int:
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:
+        if claim_ctx is not None:  # release the claim we acquired before this refused leg
+            key, runner, claim_id = claim_ctx
+            work_claims.best_effort_release(
+                key, runner, claim_id,
+                holder=work_claims.resolve_holder(), host=work_claims.resolve_host(),
+                reason="launch-refused-before-side-effect",
+            )
         print(f"ERROR: ce lane launch refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json_output", False):
@@ -1488,6 +1550,10 @@ def _init(args) -> int:
 
 
 def _launch(args, invoked_as: str = "launch") -> int:
+    # ce-ops#38: acquire + verify the work claim BEFORE any launch side effect.
+    claim_code, claim_ctx = _acquire_launch_claim(args, invoked_as)
+    if claim_code != 0:
+        return claim_code
     harness_args = None
     if args.harness == "claude":
         harness_args = getattr(args, "claude_arg", None)
@@ -1510,6 +1576,13 @@ def _launch(args, invoked_as: str = "launch") -> int:
             tmux_adapter=_make_tmux_adapter(),
         )
     except launch_runtime.LaunchError as exc:
+        if claim_ctx is not None:  # release the claim we acquired before this refused leg
+            key, runner, claim_id = claim_ctx
+            work_claims.best_effort_release(
+                key, runner, claim_id,
+                holder=work_claims.resolve_holder(), host=work_claims.resolve_host(),
+                reason="launch-refused-before-side-effect",
+            )
         print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json_output", False):
@@ -1544,6 +1617,113 @@ def _doctor(args) -> int:
     else:
         print(doctor_runtime.render_human(report))
     return 0 if report.ok else 1
+
+
+def _make_gh_runner():
+    """Factory for the work-claim gh runner (monkeypatchable in tests)."""
+    return work_claims.default_gh_runner
+
+
+def _claim_acquire(args) -> int:
+    try:
+        key = work_claims.parse_ticket(args.ticket, getattr(args, "repo", None))
+        result = work_claims.acquire(
+            key, _make_gh_runner(),
+            reason=args.reason, holder=args.holder, host=args.host,
+            stale_after_seconds=args.stale_after_seconds,
+            takeover=args.takeover, takeover_reason=args.takeover_reason,
+        )
+    except work_claims.WorkClaimError as exc:
+        return _emit_claim(args, 2, f"ce claim acquire refused (input): {exc}", None)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        print(f"ce claim acquire: OK ({result.note}) — claim {result.claim_id} on {result.work_key}")
+    else:
+        print(f"ERROR: ce claim acquire refused [{result.refusal_reason}]: {result.note}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _claim_release(args) -> int:
+    try:
+        key = work_claims.parse_ticket(args.ticket, getattr(args, "repo", None))
+        result = work_claims.release(
+            key, _make_gh_runner(),
+            claim_id=args.claim_id, reason=args.reason,
+            deliverable_url=args.deliverable_url,
+        )
+    except work_claims.WorkClaimError as exc:
+        return _emit_claim(args, 2, f"ce claim release refused (input): {exc}", None)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        print(f"ce claim release: OK — released {result.claim_id} on {result.work_key}")
+    else:
+        print(f"ERROR: ce claim release refused [{result.refusal_reason}]: {result.note}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _claim_status(args) -> int:
+    try:
+        key = work_claims.parse_ticket(args.ticket, getattr(args, "repo", None))
+        result = work_claims.status(key, _make_gh_runner())
+    except work_claims.WorkClaimError as exc:
+        return _emit_claim(args, 2, f"ce claim status refused (input): {exc}", None)
+    if getattr(args, "write_cache", None):
+        cache = work_claims.build_cache(result, key.repo_slug, work_claims.utc_now_iso())
+        work_claims.write_cache(args.write_cache, cache)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        active = result.state.active
+        if active is None:
+            print(f"ce claim status: {result.work_key} — UNCLAIMED ({len(result.state.comment_ids)} comments seen)")
+        else:
+            flag = " [STALE]" if active.stale else ""
+            print(
+                f"ce claim status: {result.work_key} — held by {active.holder}@{active.host} "
+                f"(claim {active.claim_id}, {active.kind}){flag}"
+            )
+        if result.state.invalid_count:
+            print(f"  ⚠ {result.state.invalid_count} invalid_marker comment(s)", file=sys.stderr)
+    # status itself never refuses on a foreign claim — it reports. Exit 1 only if
+    # an invalid marker pollutes the view (the operator must repair it).
+    return 1 if result.state.invalid_count else 0
+
+
+def _emit_claim(args, code: int, message: str, payload) -> int:
+    if getattr(args, "json_output", False):
+        print(json.dumps({"ok": code == 0, "error": message, **(payload or {})}, indent=2, sort_keys=True))
+    else:
+        print(f"ERROR: {message}", file=sys.stderr)
+    return code
+
+
+def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:
+    """Acquire + verify the v1 launch work claim (ce-ops#38), refuse-before-side-effect.
+
+    Returns ``(exit_code, None)`` on refusal/bad-input (the caller returns it) or
+    ``(0, claim_context)`` when the claim is held — ``claim_context`` is the
+    ``(key, runner, claim_id)`` tuple the caller uses to best-effort-release if
+    the subsequent launch leg refuses. ``(0, None)`` means no ``--claim-ticket``.
+    """
+    ticket = getattr(args, "claim_ticket", None)
+    if not ticket:
+        return 0, None
+    try:
+        key = work_claims.parse_ticket(ticket)
+        runner = _make_gh_runner()
+        result = work_claims.acquire(key, runner, reason="manual")
+    except work_claims.WorkClaimError as exc:
+        print(f"ERROR: ce {invoked_as} refused: --claim-ticket {exc}", file=sys.stderr)
+        return 2, None
+    if not result.ok:
+        print(
+            f"ERROR: ce {invoked_as} refused [claim:{result.refusal_reason}]: {result.note}",
+            file=sys.stderr,
+        )
+        return 1, None
+    return 0, (key, runner, result.claim_id)
 
 
 _LANE_DISPATCH = {
@@ -1597,6 +1777,12 @@ _CONNECTOR_DISPATCH = {
     "fetch": _connector_fetch,
     "write-plan": _connector_write_plan,
     "submit": _connector_submit,
+}
+
+_CLAIM_DISPATCH = {
+    "acquire": _claim_acquire,
+    "release": _claim_release,
+    "status": _claim_status,
 }
 
 
@@ -1658,6 +1844,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _CONNECTOR_DISPATCH.get(connector_cmd)
         if handler is None:
             parser.parse_args(["connector", "--help"])  # prints connector help, exits
+            return 2
+        return handler(args)
+    if args.group == "claim":
+        claim_cmd = getattr(args, "claim_cmd", None)
+        handler = _CLAIM_DISPATCH.get(claim_cmd)
+        if handler is None:
+            parser.parse_args(["claim", "--help"])  # prints claim help, exits
             return 2
         return handler(args)
     if args.group == "check":

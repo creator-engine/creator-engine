@@ -73,6 +73,7 @@ from . import (
     v3_session,
     v3_shaping,
     version,
+    work_claims,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .forge.github_repo_config import ForgeConfigError
@@ -262,6 +263,48 @@ def _emit(args: argparse.Namespace, code: int, lines: list[str], payload: dict[s
         for ln in lines:
             print(ln)
     return code
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#38 work-claim hook (shared runtime; forge-native; advisory)
+# ---------------------------------------------------------------------------
+def _make_gh_runner():
+    """Factory for the work-claim gh runner (monkeypatchable in tests)."""
+    return work_claims.default_gh_runner
+
+
+def _acquire_dispatch_claim(ticket: str, reason: str):
+    """Acquire + verify the work claim for a v3 spawn. Returns ``(ok, ctx_or_payload)``.
+
+    ``ok`` True → ``ctx`` is ``(key, runner, claim_id)`` for best-effort release on a
+    later refusal. ``ok`` False → the second element is ``(exit_code, lines, payload)``
+    ready for :func:`_emit`.
+    """
+    try:
+        key = work_claims.parse_ticket(ticket)
+        runner = _make_gh_runner()
+        result = work_claims.acquire(key, runner, reason=reason)
+    except work_claims.WorkClaimError as exc:
+        return False, (2, [f"{_BRAND} · spawn refused: --ticket {exc}"],
+                       {"action": "spawn_refused", "reason": "claim_input", "detail": str(exc)})
+    if not result.ok:
+        return False, (1, [f"{_BRAND} · spawn refused: work claim {result.refusal_reason} — {result.note}"],
+                       {"action": "spawn_refused", "reason": f"claim_{result.refusal_reason}",
+                        "work_key": result.work_key, "active_claim":
+                        result.state.active.to_dict() if result.state.active else None})
+    return True, (key, runner, result.claim_id)
+
+
+def _release_dispatch_claim(ctx, reason: str) -> None:
+    """Best-effort structured release of a claim acquired before a refused spawn leg."""
+    if ctx is None:
+        return
+    key, runner, claim_id = ctx
+    work_claims.best_effort_release(
+        key, runner, claim_id,
+        holder=work_claims.resolve_holder(), host=work_claims.resolve_host(),
+        reason=reason,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +498,22 @@ def _drive_spawn(
             {"action": "spawn_refused", "reason": "codex_risk_override_wrong_harness",
              "harness": args.harness},
         )
+    # ce-ops#38: when a --ticket is supplied, acquire + verify the work claim
+    # BEFORE any dispatch side effect (no dispatch.yaml / runtime-policy / brief /
+    # pane until the claim is held). --ticket is OPTIONAL on the spawn path: the
+    # spec ratified it as REQUIRED, but the closed 15-path manifest excludes
+    # test_v3_cli.py, whose existing --spawn tests (and the pr/review/merge/e2e
+    # fixtures built on them) call --spawn without a ticket. Honoring both
+    # acceptance criteria (zero out-of-manifest diff + full suite green) forces
+    # the optional posture here, mirroring the v1 `--claim-ticket` mitigation and
+    # the spec's own "manual-dispatch gap" language. DECLARED deviation.
+    claim_ctx = None
+    if getattr(args, "ticket", None):
+        ok, claim = _acquire_dispatch_claim(args.ticket, reason="implement")
+        if not ok:
+            code, lines, payload = claim
+            return _emit(args, code, lines, payload)
+        claim_ctx = claim
     unattended = not args.no_unattended
     record = v3_seat_bridge.materialize_dispatch(
         plan,
@@ -483,6 +542,8 @@ def _drive_spawn(
         # the failure (value-free) so it projects as neither pending nor live; the
         # attempt is conserved, not deleted.
         v3_seat_bridge.mark_spawn_failed(record, exc)
+        # The seat never materialized — release the work claim we just acquired.
+        _release_dispatch_claim(claim_ctx, "spawn-refused-before-side-effect")
         return _emit(
             args, 1,
             [f"{_BRAND} · drive --spawn refused: {exc}"],
@@ -1502,6 +1563,18 @@ def _cmd_review(args: argparse.Namespace) -> int:
             {"error": "spawn_inputs_missing", "run_id": author_run_id},
         )
 
+    # ce-ops#38: when a --ticket is supplied, acquire + verify the work claim
+    # BEFORE any venue side effect (no reviewer envelope / dispatch /
+    # pco-allocate / pane until the claim holds). --ticket is OPTIONAL on the
+    # spawn path for the same closed-manifest reason declared in `_drive_spawn`.
+    claim_ctx = None
+    if args.spawn and getattr(args, "ticket", None):
+        ok, claim = _acquire_dispatch_claim(args.ticket, reason="review")
+        if not ok:
+            code, lines, payload = claim
+            return _emit(args, code, lines, {**payload, "run_id": author_run_id})
+        claim_ctx = claim
+
     unattended = not getattr(args, "no_unattended", False)
     rec = v3_seat_bridge.materialize_review_dispatch(
         author, root, reviewer_actor=args.reviewer_actor,
@@ -1532,6 +1605,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
         )
     except v3_seat_bridge.SeatBridgeError as exc:
         # spawn_review_venue stamps mark_spawn_failed on any leg's refusal (conserved, not deleted).
+        # The venue never materialized — release the work claim we acquired.
+        _release_dispatch_claim(claim_ctx, "spawn-refused-before-side-effect")
         return _emit(
             args, 1,
             [f"{_BRAND} · review --spawn refused: {exc}"],
@@ -2224,6 +2299,10 @@ def _build_parser() -> argparse.ArgumentParser:
                               "boundary for a high-risk Scope")
     p_drive.add_argument("--no-unattended", action="store_true",
                          help="opt the spawned seat back into interactive approval modals")
+    p_drive.add_argument("--ticket", default=None,
+                         help="ce-ops#38 work item (owner/name#N / issue URL); when given with "
+                              "--spawn the claim lock is acquired+verified before any dispatch "
+                              "side effect (a foreign active claim refuses the spawn)")
     _add_root(p_drive)
 
     p_collect = sub.add_parser("collect", help="fold a finished seat run's transcript + outcome into evidence")
@@ -2301,6 +2380,10 @@ def _build_parser() -> argparse.ArgumentParser:
                                "PATH transits argv, the secret VALUE never does")
     p_review.add_argument("--harness", default="claude", choices=["claude", "codex"],
                           help="reviewer venue harness (codex is deferred and refused in G1-codex)")
+    p_review.add_argument("--ticket", default=None,
+                          help="ce-ops#38 work item (owner/name#N / issue URL); when given with "
+                               "--spawn the claim lock is acquired+verified before any venue "
+                               "side effect (a foreign active claim refuses the spawn)")
     _add_root(p_review)
 
     p_merge = sub.add_parser(

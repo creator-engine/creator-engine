@@ -17,6 +17,15 @@ Design invariants (deliberate, load-bearing):
   ``GhRunner`` (``gh api`` subprocess by default) that callers inject — so
   tests run with a fake runner and perform **zero** live network calls, and
   importing the module performs no I/O.
+
+  *Exception (ce-ops#38):* live forge access is no longer **exclusively** under
+  ``forge/``. The shared work-claim runtime ``creator_engine_validator.work_claims``
+  also talks to a live forge (the per-ticket work-claim issue comment), because it
+  is consumed by BOTH ``ce_cli`` (v1) and ``v3_cli`` (v3) and so MUST NOT import
+  ``forge.*`` (a v3 surface) under the version boundary. It deliberately mirrors
+  this package's ``GhRunner`` / ``gh api`` seam with its own private copy rather
+  than importing it; the same injectable-runner, zero-network-in-tests posture
+  applies there.
 * **Plan-by-default.** Both operations default to ``apply=False`` (read +
   diff + return the plan). A live mutation happens only when a caller passes
   ``apply=True`` with a real runner. This batch (G-iii code PR) never does.

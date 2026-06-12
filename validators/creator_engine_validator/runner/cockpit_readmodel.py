@@ -87,6 +87,11 @@ ESCALATIONS_SUBDIR = "escalations"
 DISPATCHES_SUBDIR = "dispatches"
 PANES_SUBDIR = "panes"
 OBSERVATIONS_FILENAME = "observations.ndjson"
+# ce-ops#38: the work-claim view-only cache (written by ``ce claim status
+# --write-cache``). L1-shaped INPUT to the pure fold — never enforcement
+# authority (dispatch always reads the live forge comments, never this file).
+CLAIMS_SUBDIR = "claims"
+CLAIMS_CACHE_FILENAME = "claims.json"
 
 #: Source-availability states (honesty tiers for the snapshot itself).
 AVAILABLE = "ok"
@@ -970,6 +975,48 @@ def _fold_dispatches(
     )
 
 
+def _fold_claims(
+    claims: Mapping[str, Any] | None,
+    controller_id: str | None,
+) -> dict[str, Any]:
+    """Fold the ce-ops#38 work-claim view-only cache into the ops-board section (PURE).
+
+    ``None`` means the cache is unreachable (degrades honestly to ``unavailable``);
+    a dict is the parsed ``claims.json``. Counts are recomputed from the entries
+    (never trusted blindly from the cache) so the surface is honest; ``foreign``
+    is an active claim NOT held by this controller. This is observation only — the
+    cache MUST NOT (and does not) authorize any dispatch.
+    """
+    if claims is None or not isinstance(claims, Mapping):
+        return {
+            "entries": [], "active_count": 0, "stale_count": 0, "foreign_count": 0,
+            "invalid_count": 0, "availability": UNAVAILABLE, "cache_fetched_at": None,
+            "repo": None, "work_key": None,
+        }
+    raw_entries = claims.get("entries")
+    entries = [dict(e) for e in raw_entries if isinstance(e, Mapping)] if isinstance(raw_entries, list) else []
+    active = [e for e in entries if e.get("status") == "active"]
+    stale = [e for e in active if e.get("stale")]
+    foreign = [
+        e for e in active
+        if controller_id is None or e.get("holder") != controller_id
+    ]
+    invalid_count = claims.get("invalid_count")
+    if not isinstance(invalid_count, int):
+        invalid_count = len([e for e in entries if e.get("status") == "invalid"])
+    return {
+        "entries": entries,
+        "active_count": len(active),
+        "stale_count": len(stale),
+        "foreign_count": len(foreign),
+        "invalid_count": invalid_count,
+        "availability": AVAILABLE,
+        "cache_fetched_at": claims.get("fetched_at"),
+        "repo": claims.get("repo"),
+        "work_key": claims.get("work_key"),
+    }
+
+
 def _seat_event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Project one seat's append-only event stream to a flat, JSON-safe summary (PURE)."""
     launched = next((e for e in events if e.get("event") == "launched"), None)
@@ -1023,6 +1070,7 @@ def fold_snapshot(
     escalations: list[dict[str, Any]] | None = None,
     dispatches: list[dict[str, Any]] | None = None,
     seat_events: Mapping[str, list[dict[str, Any]]] | None = None,
+    claims: Mapping[str, Any] | None = None,
     envelopes: Mapping[str, Any] | None = None,
     usage_turns: list[dict[str, Any]] | None = None,
     context_pct: Any = None,
@@ -1065,6 +1113,7 @@ def fold_snapshot(
     models = _models_from_chains(chain_map)
     meters = _fold_meters(chains, usage_turns, context_pct)
     escalation_section = _fold_escalations(escalations)
+    claims_section = _fold_claims(claims, controller_id)
 
     seats = [
         _seat_card(p, chain_map, models, harness_map)
@@ -1190,6 +1239,7 @@ def fold_snapshot(
             "escalations": AVAILABLE if escalations is not None else UNAVAILABLE,
             "dispatches": AVAILABLE if dispatches is not None else UNAVAILABLE,
             "seat_events": AVAILABLE if seat_events is not None else UNAVAILABLE,
+            "claims": AVAILABLE if claims is not None else UNAVAILABLE,
             "refusals": (
                 AVAILABLE
                 if (refusal_chain is not None or observations is not None)
@@ -1215,6 +1265,7 @@ def fold_snapshot(
         "escalations": escalation_section,
         "dispatches": dispatch_section,
         "seat_events": seat_events_section,
+        "claims": claims_section,
         "governance": governance,
         "meters": meters,
         "evidence": evidence,
@@ -1320,6 +1371,24 @@ def load_dispatches(state_root: Path) -> list[dict[str, Any]] | None:
             spend_envelope = _run_spend_envelope(policy)
         out.append({"dispatch": doc, "spend_envelope": spend_envelope})
     return out
+
+
+def load_claims(state_root: Path) -> dict[str, Any] | None:
+    """Read the ce-ops#38 work-claim view-only cache under ``<state_root>/claims/claims.json``.
+
+    ``None`` when the cache is unreachable/malformed (degrades honestly to
+    ``unavailable`` in the fold — never guessed data). This is the ONLY claim
+    read the Cockpit performs; it is display data and is NEVER consulted by
+    dispatch enforcement (that always reads the live forge comments).
+    """
+    path = Path(state_root) / CLAIMS_SUBDIR / CLAIMS_CACHE_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
 
 
 def load_seat_events(state_root: Path) -> dict[str, list[dict[str, Any]]] | None:
@@ -1491,6 +1560,7 @@ def snapshot_from_roots(
         escalations=load_escalations(state) if state.is_dir() else None,
         dispatches=load_dispatches(state) if state.is_dir() else None,
         seat_events=load_seat_events(state) if state.is_dir() else None,
+        claims=load_claims(state) if state.is_dir() else None,
         envelopes=load_envelopes(panes),
         harnesses=load_harnesses(ledger) if ledger else None,
         demo=demo,
@@ -1521,6 +1591,7 @@ def watch_paths(
         state,
         state / ESCALATIONS_SUBDIR,
         state / DISPATCHES_SUBDIR,
+        state / CLAIMS_SUBDIR,
         _resolve(ledger_root, env, LEDGER_ROOT_ENV),
         _resolve(observations_dir, env, OBSERVATIONS_DIR_ENV),
     ]
