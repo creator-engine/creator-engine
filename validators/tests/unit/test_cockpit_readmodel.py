@@ -320,6 +320,71 @@ def test_snapshot_reads_chains_from_runs_subdir(tmp_path):
     assert "run-stray" not in snapshot["evidence"]
 
 
+def _write_dispatch(state_root, run_id, *, spawned=True):
+    d = state_root / "dispatches" / run_id
+    d.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "kind": "dispatch-record",
+        "record_type": "dispatch",
+        "schema_version": "1",
+        "scope_id": "scope-x",
+        "run_id": run_id,
+        "mutation_class": "code",
+        "harness": "claude",
+        "unattended": True,
+        "session": "s",
+        "window": "w",
+    }
+    if spawned:
+        rec["spawned_at"] = "20260612T090000Z"
+    (d / "dispatch.yaml").write_text(yaml.safe_dump(rec, sort_keys=True), encoding="utf-8")
+    return d
+
+
+def test_seat_events_fold_and_dispatch_join(tmp_path):
+    """ce-ops#26: events.jsonl folds into the snapshot and joins its dispatch by run_id."""
+    state_root = tmp_path / "state"
+    run_id = "run-z"
+    dispatch_dir = _write_dispatch(state_root, run_id)
+    (dispatch_dir / "events.jsonl").write_text(
+        '{"v":1,"event":"launched","ts":"2026-06-12T08:00:00Z","seat_id":"run-z","run_id":"run-z","writer":"launcher_wrapper","pid":99,"command_sha256":"'
+        + "0" * 64
+        + '"}\n'
+        "\ngarbage-line-skipped\n"
+        '{"v":1,"event":"exited","ts":"2026-06-12T08:30:00Z","seat_id":"run-z","run_id":"run-z","writer":"launcher_wrapper","exit_code":137}\n'
+    )
+    snapshot = cockpit_readmodel.snapshot_from_roots(state_root, environ={})
+    # the section is AVAILABLE and folds the seat
+    assert snapshot["availability"]["seat_events"] == "ok"
+    section = snapshot["seat_events"]
+    assert section["count"] == 1 and section["exited_count"] == 1
+    seat = section["seats"]["run-z"]
+    assert seat["terminal_state"] == "exited" and seat["exit_code"] == 137
+    # the dispatch entry is joined to its sentinel by run_id
+    entry = snapshot["dispatches"]["entries"][0]
+    assert entry["run_id"] == run_id
+    assert entry["sentinel"]["exit_code"] == 137
+    # the whole snapshot stays JSON round-trippable (L2 is a pure JSON read-model)
+    assert json.loads(json.dumps(snapshot, sort_keys=True)) == snapshot
+
+
+def test_seat_events_unavailable_when_no_dispatches_dir(tmp_path):
+    snapshot = cockpit_readmodel.snapshot_from_roots(tmp_path / "empty", environ={})
+    assert snapshot["availability"]["seat_events"] == "unavailable"
+    assert snapshot["seat_events"]["count"] == 0
+
+
+def test_watch_paths_unchanged_by_seat_events(tmp_path):
+    """ce-ops#26: events.jsonl lives inside the already-watched dispatches subtree —
+    watch_paths gains NOTHING (the live tail fires on it for free)."""
+    state_root = tmp_path / "state"
+    (state_root / "dispatches").mkdir(parents=True)
+    paths = cockpit_readmodel.watch_paths(state_root, environ={})
+    assert str(state_root / "dispatches") in paths
+    # no per-seat or events.jsonl entry was added
+    assert not any(p.endswith("events.jsonl") for p in paths)
+
+
 def test_ledger_root_resolves_from_environment(tmp_path):
     state_root, ledger_root, _obs = _write_live_fixtures(tmp_path)
     snapshot = cockpit_readmodel.snapshot_from_roots(

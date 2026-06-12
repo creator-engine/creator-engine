@@ -145,7 +145,15 @@ def test_cli_launch_pins_governed_command(use_fake_tmux, monkeypatch):
     )
     assert ret == 0
     (_sess, _win, cmd) = adapter.spawned[-1]
-    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
+    # ce-ops#26: the pane runs the sentinel wrapper; the governed argv is INSIDE it.
+    import shlex
+    from pathlib import Path
+
+    assert cmd[0] == "/bin/sh"
+    lines = Path(cmd[1]).read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    inner = shlex.split(lines[idx - 1])
+    assert "--setting-sources" in inner and "project" in inner and "--strict-mcp-config" in inner
 
 
 def test_cli_launch_dry_run_still_pure(use_fake_tmux):

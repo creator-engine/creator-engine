@@ -54,7 +54,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from .. import coordination, v3_session
+from .. import coordination, seat_sentinel, v3_session
 from ..runtime_evidence_spine import verify_chain
 from .spend_gate import fleet_spend_meter, project_spend
 from .usage_tap import UsageTurn, fleet_token_rate
@@ -970,6 +970,48 @@ def _fold_dispatches(
     )
 
 
+def _seat_event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Project one seat's append-only event stream to a flat, JSON-safe summary (PURE)."""
+    launched = next((e for e in events if e.get("event") == "launched"), None)
+    exited = next((e for e in reversed(events) if e.get("event") == "exited"), None)
+    outcome_ev = next(
+        (e for e in reversed(events) if e.get("event") == "outcome_resolved"), None
+    )
+    if exited is not None:
+        terminal_state = "exited"
+    elif launched is not None:
+        terminal_state = "live"  # launched, no exit observed — UNKNOWN-TERMINAL, not success
+    else:
+        terminal_state = "unknown"
+    return {
+        "count": len(events),
+        "terminal_state": terminal_state,
+        "pid": launched.get("pid") if isinstance(launched, dict) else None,
+        "exit_code": exited.get("exit_code") if isinstance(exited, dict) else None,
+        "outcome": outcome_ev.get("outcome") if isinstance(outcome_ev, dict) else None,
+        "outcome_source": (
+            outcome_ev.get("outcome_source") if isinstance(outcome_ev, dict) else None
+        ),
+        "last_ts": events[-1].get("ts") if events else None,
+    }
+
+
+def _fold_seat_events(
+    seat_events: Mapping[str, list[dict[str, Any]]] | None,
+) -> dict[str, Any]:
+    """Fold ce-ops#26 seat lifecycle events into the cockpit section (PURE)."""
+    seats = {
+        str(seat_id): _seat_event_summary(list(events or []))
+        for seat_id, events in (seat_events or {}).items()
+    }
+    return {
+        "seats": seats,
+        "count": len(seats),
+        "live_count": len([s for s in seats.values() if s["terminal_state"] == "live"]),
+        "exited_count": len([s for s in seats.values() if s["terminal_state"] == "exited"]),
+    }
+
+
 def fold_snapshot(
     *,
     panes: list[dict[str, Any]] | None = None,
@@ -980,6 +1022,7 @@ def fold_snapshot(
     refusal_chain: list[dict[str, Any]] | None = None,
     escalations: list[dict[str, Any]] | None = None,
     dispatches: list[dict[str, Any]] | None = None,
+    seat_events: Mapping[str, list[dict[str, Any]]] | None = None,
     envelopes: Mapping[str, Any] | None = None,
     usage_turns: list[dict[str, Any]] | None = None,
     context_pct: Any = None,
@@ -1005,6 +1048,13 @@ def fold_snapshot(
     snapshots carry them as ``None`` (UNAVAILABLE) until those land.
     """
     dispatch_section, dispatch_signal_scope_ids = _fold_dispatches(dispatches)
+    # ce-ops#26: fold the one seat-events contract and join each dispatch entry to
+    # its events by seat_id == run_id (the directory IS the join — no new pointer).
+    seat_events_section = _fold_seat_events(seat_events)
+    for entry in dispatch_section["entries"]:
+        summary = seat_events_section["seats"].get(str(entry.get("run_id")))
+        if summary is not None:
+            entry["sentinel"] = summary
     signals = {str(k): dict(v) for k, v in (scope_signals or {}).items()}
     for scope_id in dispatch_signal_scope_ids:
         signals.setdefault(scope_id, {}).setdefault("dispatched", True)
@@ -1134,6 +1184,7 @@ def fold_snapshot(
             "evidence": AVAILABLE if chains is not None else UNAVAILABLE,
             "escalations": AVAILABLE if escalations is not None else UNAVAILABLE,
             "dispatches": AVAILABLE if dispatches is not None else UNAVAILABLE,
+            "seat_events": AVAILABLE if seat_events is not None else UNAVAILABLE,
             "refusals": (
                 AVAILABLE
                 if (refusal_chain is not None or observations is not None)
@@ -1158,6 +1209,7 @@ def fold_snapshot(
         },
         "escalations": escalation_section,
         "dispatches": dispatch_section,
+        "seat_events": seat_events_section,
         "governance": governance,
         "meters": meters,
         "evidence": evidence,
@@ -1263,6 +1315,18 @@ def load_dispatches(state_root: Path) -> list[dict[str, Any]] | None:
             spend_envelope = _run_spend_envelope(policy)
         out.append({"dispatch": doc, "spend_envelope": spend_envelope})
     return out
+
+
+def load_seat_events(state_root: Path) -> dict[str, list[dict[str, Any]]] | None:
+    """Read the per-seat lifecycle events under ``<state_root>/dispatches/*/events.jsonl``.
+
+    Delegates to the **shared** ``seat_sentinel`` parser (ce-ops#26) — tolerant:
+    malformed lines are skipped, never raised (read-only observability must not
+    crash the view). ``None`` when the dispatches directory is unreachable. The
+    file lives inside the subtree ``watch_paths`` already names, so no new watch
+    root is needed (the cockpit's live tail fires on it for free).
+    """
+    return seat_sentinel.load_seat_events(state_root)
 
 
 def load_panes(ledger_root: Path) -> list[dict[str, Any]] | None:
@@ -1420,6 +1484,7 @@ def snapshot_from_roots(
         refusal_chain=load_refusal_chain(observations) if observations else None,
         escalations=load_escalations(state) if state.is_dir() else None,
         dispatches=load_dispatches(state) if state.is_dir() else None,
+        seat_events=load_seat_events(state) if state.is_dir() else None,
         envelopes=load_envelopes(panes),
         harnesses=load_harnesses(ledger) if ledger else None,
         demo=demo,

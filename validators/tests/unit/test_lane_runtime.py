@@ -97,6 +97,22 @@ def _write_claim(
     return path
 
 
+def _wrapper_inner_argv(result):
+    """Recover the EXACT step-6c output argv embedded in the seat-sentinel wrapper.
+
+    ce-ops#26: the pane command is now ``["/bin/sh", <wrapper>]``; the governed +
+    bounded argv runs FOREGROUND inside the wrapper (the line just before
+    ``code=$?``), shlex-quoted — these are the ordering teeth.
+    """
+    import shlex
+    from pathlib import Path
+
+    wrapper = Path(result.events_ref).parent / "sentinel-wrapper.sh"
+    lines = wrapper.read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    return shlex.split(lines[idx - 1])
+
+
 def _launch(tmp_path, **overrides):
     prompt, sha = overrides.pop("prompt_and_sha", _write_prompt(tmp_path))
     ledger = overrides.pop("ledger_root", _ledger_root(tmp_path))
@@ -463,9 +479,12 @@ def test_lane_launch_pins_governed_command_for_claude(tmp_path, monkeypatch):
         tmux_adapter=adapter,
     )
     (_sess, _win, cmd) = adapter.spawned[-1]
-    assert cmd[0] == "claude"
-    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
-    assert "--model" in cmd and "claude-opus-4-7" in cmd
+    # ce-ops#26: the pane runs the sentinel wrapper; the governed argv is INSIDE it.
+    assert cmd == ["/bin/sh", str(Path(result.events_ref).parent / "sentinel-wrapper.sh")]
+    inner = _wrapper_inner_argv(result)
+    assert inner[0] == "claude"
+    assert "--setting-sources" in inner and "project" in inner and "--strict-mcp-config" in inner
+    assert "--model" in inner and "claude-opus-4-7" in inner
     # The written pane record stays schema-clean (no extra CC-G-D fields).
     assert validate_pane_registry_record(result.record, result.pane_path) == []
 
@@ -474,14 +493,40 @@ def test_lane_launch_non_claude_command_unchanged(tmp_path):
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
     adapter = FakeAdapter()
-    _launch(
+    result = _launch(
         tmp_path,
         ledger_root=ledger,
         command=["sh", "-c", "echo hi"],
         tmux_adapter=adapter,
     )
     (_sess, _win, cmd) = adapter.spawned[-1]
-    assert cmd == ["sh", "-c", "echo hi"]
+    # ce-ops#26: non-claude commands pass through byte-identical INSIDE the wrapper.
+    assert cmd == ["/bin/sh", str(Path(result.events_ref).parent / "sentinel-wrapper.sh")]
+    assert _wrapper_inner_argv(result) == ["sh", "-c", "echo hi"]
+
+
+def test_lane_launch_stamps_events_ref_into_sidecar(tmp_path):
+    # ce-ops#26: the events surface is recorded in the ignored governance sidecar
+    # (never the schema-locked pane record) and on the LaunchResult.
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(
+        tmp_path, ledger_root=ledger, command=["sh", "-c", "echo hi"], tmux_adapter=FakeAdapter()
+    )
+    expected = str(tmp_path / ".ce" / "state" / "dispatches" / "gate3-lane" / "events.jsonl")
+    assert result.events_ref == expected
+    sidecar = lane_runtime._governance_sidecar_path(ledger, "hermes-primary", "gate3-lane")
+    assert json.loads(sidecar.read_text())["events_ref"] == expected
+    # the pane record itself stays schema-clean (events_ref rides the sidecar only)
+    assert "events_ref" not in result.record
+
+
+def test_lane_launch_refusal_precedes_any_sentinel_side_effect(tmp_path):
+    # A refusal (missing claim) must raise BEFORE any wrapper/events write — no
+    # dispatches dir is created for the would-be seat.
+    with pytest.raises(lane_runtime.ClaimMissing):
+        _launch(tmp_path, command=["claude"], tmux_adapter=FakeAdapter())
+    assert not (tmp_path / ".ce" / "state" / "dispatches").exists()
 
 
 # ---------------------------------------------------------------------------

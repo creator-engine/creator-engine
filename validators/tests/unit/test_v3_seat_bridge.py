@@ -83,7 +83,7 @@ class _FakeCompleted:
         self.stderr = stderr
 
 
-def _launch_json(*, spawned=True, pane="%3", resource_bound=None):
+def _launch_json(*, spawned=True, pane="%3", resource_bound=None, events_ref=None):
     return json.dumps(
         {
             "plan": {"session": "s", "window": "drive", "resource_bound": resource_bound},
@@ -95,6 +95,7 @@ def _launch_json(*, spawned=True, pane="%3", resource_bound=None):
                 else None
             ),
             "resource_confirm": None,
+            "events_ref": events_ref,
         }
     )
 
@@ -275,6 +276,33 @@ def test_spawn_seat_stamps_terminal_and_resource_bound(tmp_path):
     assert data["terminal"]["pane_id"] == "%7"
     assert data["resource_bound"] == {"unit": "ce-seat-x"}
     assert data["spawned_at"] == "20260611T093000Z"
+
+
+def test_spawn_seat_stamps_events_ref(tmp_path):
+    # ce-ops#26: the bridge stamps the seat's lifecycle events surface (a value-free
+    # path ref) from the v1 LaunchResult into dispatch.yaml; absent ⇒ key omitted.
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    ev = str(rec.dispatch_dir / "events.jsonl")
+    runner = _RecordingRunner(_FakeCompleted(stdout=_launch_json(events_ref=ev)))
+    v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce", now=_FIXED_NOW)
+    data = yaml.safe_load((rec.dispatch_dir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["events_ref"] == ev
+    # and the record still conforms to the (additive-optional) dispatch schema
+    import jsonschema
+
+    schema = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "dispatch-record.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+    jsonschema.validate(data, schema)
+
+
+def test_spawn_seat_omits_events_ref_when_absent(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    runner = _RecordingRunner(_FakeCompleted(stdout=_launch_json(events_ref=None)))
+    v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce", now=_FIXED_NOW)
+    data = yaml.safe_load((rec.dispatch_dir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert "events_ref" not in data
 
 
 def test_spawn_seat_invokes_ce_launch_json_with_policy(tmp_path):

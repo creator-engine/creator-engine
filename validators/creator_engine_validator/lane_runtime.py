@@ -32,7 +32,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import claude_launch_spec, resource_bound_spec
+from . import claude_launch_spec, resource_bound_spec, seat_sentinel
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -261,6 +261,10 @@ class LaunchResult:
     # "none (advisory)" / "none (off)" on a ratified opt-down; None when the
     # policy declares no resource governance.
     resource_bound: dict[str, Any] | str | None = None
+    # ce-ops#26: the absolute path to this seat's append-only lifecycle events
+    # surface (`<state_root>/dispatches/<lane_id>/events.jsonl`), also recorded in
+    # the ignored sidecar. None only if sentinel materialization was skipped.
+    events_ref: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +585,7 @@ def launch(
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
     cgroupfs_root: Path | str = "/sys/fs/cgroup",
+    state_root: Path | str | None = None,
 ) -> LaunchResult:
     """Launch a governed visible lane and write its Pane Registry record.
 
@@ -839,11 +844,28 @@ def launch(
     pane_env: dict[str, str] = {CE_LEDGER_ROOT_ENV: str(ledger_root.resolve())}
     if reviewer_authority_ref:
         pane_env[CE_REVIEWER_AUTHORITY_ENV] = reviewer_authority_ref
+
+    # ce-ops#26 seat sentinels: wrap the OUTERMOST launch_command (the OUTPUT of
+    # the step-6c bounding wrap) in the launcher-generated POSIX-sh supervisor so
+    # every lifecycle event — including an OOM group-kill of the seat scope, which
+    # the wrapper OUTSIDE that scope survives to record — is machine-watchable. The
+    # seat's model never writes the file (silence≠success). seat_id = lane_id; the
+    # events surface lives under the controller's state root the cockpit watches.
+    resolved_state_root = (
+        Path(state_root) if state_root is not None else Path(repo_root) / ".ce" / "state"
+    )
+    sentinel = seat_sentinel.prepare_seat_sentinel(
+        seat_dir=seat_sentinel.seat_dir_for(resolved_state_root, lane_id),
+        inner_argv=launch_command,
+        seat_id=lane_id,
+        run_id=None,
+    )
+
     try:
         pane = adapter.ensure_pane(
             session=session_name,
             window=window_name,
-            command=launch_command,
+            command=sentinel.pane_command,
             cwd=worktree_path or None,
             env=pane_env,
         )
@@ -928,6 +950,8 @@ def launch(
     sidecar_payload: dict[str, Any] = dict(claude_governance) if claude_governance else {}
     if resource_bound_stamp is not None:
         sidecar_payload["resource_bound"] = resource_bound_stamp
+    # ce-ops#26: the value-free pointer to this seat's lifecycle events surface.
+    sidecar_payload["events_ref"] = str(sentinel.events_path)
     if reviewer_authority_ref or is_distinct_reviewer_venue(
         role=role, lane_kind=mode_resolution.lane_kind
     ):
@@ -956,6 +980,7 @@ def launch(
         lane_kind=mode_resolution.lane_kind,
         reviewer_authority_ref=reviewer_authority_ref,
         resource_bound=resource_bound_stamp,
+        events_ref=str(sentinel.events_path),
     )
 
 

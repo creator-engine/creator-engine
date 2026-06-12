@@ -115,6 +115,20 @@ CID = "ce-claude-g20073-engineer"
 LID = "rev-lane"
 
 
+def _inner_argv(result):
+    """Recover the EXACT step-6c output argv embedded in the seat-sentinel wrapper.
+
+    ce-ops#26: the pane command is now ``["/bin/sh", <wrapper>]``; the governed +
+    bounded argv runs FOREGROUND inside the wrapper (the line before ``code=$?``).
+    """
+    import shlex
+
+    wrapper = Path(result.events_ref).parent / "sentinel-wrapper.sh"
+    lines = wrapper.read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    return shlex.split(lines[idx - 1])
+
+
 def _launch_reviewer(tmp_path, *, adapter=None, **overrides):
     prompt, sha = _prompt(tmp_path)
     ledger = _ledger(tmp_path)
@@ -241,20 +255,24 @@ def _ok_probe(runner=None, **_):
 def test_seat_env_file_wraps_command_without_secret_in_argv(tmp_path):
     env_file = _owner_only_env(tmp_path / "reviewer.env")
     adapter = RecordingAdapter()
-    _launch_reviewer(
+    result = _launch_reviewer(
         tmp_path, adapter=adapter, command=["claude"],
         mcp_config_path=".hermes/rev-lane/mcp/ce-mcp.json",
         seat_env_file=env_file,
     )
     (_, _, command), = adapter.spawned
+    # ce-ops#26: the pane runs the sentinel wrapper; the seat-env wrap is INSIDE it.
+    assert command == ["/bin/sh", str(Path(result.events_ref).parent / "sentinel-wrapper.sh")]
+    inner = _inner_argv(result)
     # the wrap prefix sources the file by PATH, then execs the governed command
-    assert command[:5] == [
+    assert inner[:5] == [
         "sh", "-c", lane_runtime._SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(env_file.resolve()),
     ]
     # the governed claude tokens survive byte-identically AFTER the wrap prefix
-    assert "claude" in command[5:]
-    # the SECRET VALUE never appears in any argv token, nor in the pane env
-    assert not any(_SECRET in tok for tok in command), "secret leaked into argv"
+    assert "claude" in inner[5:]
+    # the SECRET VALUE never appears in any argv token, the wrapper text, nor the env
+    assert not any(_SECRET in tok for tok in inner), "secret leaked into argv"
+    assert _SECRET not in (Path(result.events_ref).parent / "sentinel-wrapper.sh").read_text()
     assert not any(_SECRET in v for v in (adapter.last_env or {}).values())
 
 
@@ -288,7 +306,7 @@ def test_seat_env_wrap_sits_inside_resource_bound_wrap(tmp_path):
         ],
         "resource_enforcement": "enforce",
     }, sort_keys=True), encoding="utf-8")
-    _launch_reviewer(
+    result = _launch_reviewer(
         tmp_path, adapter=adapter, command=["claude"],
         mcp_config_path=".hermes/rev-lane/mcp/ce-mcp.json",
         seat_env_file=env_file,
@@ -298,10 +316,14 @@ def test_seat_env_wrap_sits_inside_resource_bound_wrap(tmp_path):
         cgroupfs_root=tmp_path,
     )
     (_, _, command), = adapter.spawned
-    assert command[0] == "systemd-run"  # the resource wrap is outermost
-    sh_idx = command.index("sh")
+    # ce-ops#26: the sentinel wrapper is OUTERMOST (the pane command); the bounded
+    # command — systemd-run wrap with the seat-env wrap inside it — runs within it.
+    assert command == ["/bin/sh", str(Path(result.events_ref).parent / "sentinel-wrapper.sh")]
+    inner = _inner_argv(result)
+    assert inner[0] == "systemd-run"  # the resource wrap is outermost INSIDE the wrapper
+    sh_idx = inner.index("sh")
     # the seat-env wrap sits INSIDE the systemd-run wrap
-    assert command[sh_idx:sh_idx + 5] == [
+    assert inner[sh_idx:sh_idx + 5] == [
         "sh", "-c", lane_runtime._SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(env_file.resolve()),
     ]
-    assert not any(_SECRET in tok for tok in command)
+    assert not any(_SECRET in tok for tok in inner)

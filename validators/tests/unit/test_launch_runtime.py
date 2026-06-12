@@ -9,11 +9,25 @@ live provider login.
 from __future__ import annotations
 
 import json
+import shlex
+from pathlib import Path
 
 import pytest
 
 from creator_engine_validator import launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
+
+
+def _inner_argv(result):
+    """Recover the EXACT governed/bounded argv embedded in the ce-ops#26 wrapper.
+
+    The pane command is now ``["/bin/sh", <wrapper>]``; the seat command runs
+    FOREGROUND inside the wrapper (the line just before ``code=$?``).
+    """
+    wrapper = Path(result.events_ref).parent / "sentinel-wrapper.sh"
+    lines = wrapper.read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    return shlex.split(lines[idx - 1])
 
 
 class FakeAdapter:
@@ -176,38 +190,62 @@ def test_claude_launch_refuses_skip_perms_without_confirmed_pack(monkeypatch):
 def test_claude_launch_pins_setting_sources_and_strict_mcp(monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
-    launch_runtime.launch(
+    result = launch_runtime.launch(
         harness="claude",
         session="s",
         tmux_adapter=adapter,
         mcp_config_path=".hermes/s/mcp/ce-mcp.json",
     )
     (_sess, _win, cmd) = adapter.spawned[-1]
-    assert cmd[0] == "claude"
-    assert "--setting-sources" in cmd and "project" in cmd and "--strict-mcp-config" in cmd
+    # ce-ops#26: the pane runs the sentinel wrapper; the governed argv is INSIDE it.
+    assert cmd == ["/bin/sh", str(Path(result.events_ref).parent / "sentinel-wrapper.sh")]
+    inner = _inner_argv(result)
+    assert inner[0] == "claude"
+    assert "--setting-sources" in inner and "project" in inner and "--strict-mcp-config" in inner
 
 
 def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
-    launch_runtime.launch(
+    result = launch_runtime.launch(
         harness="claude",
         session="s",
         extra_args=["--dangerously-skip-permissions"],
         tmux_adapter=adapter,
         mcp_config_path=".hermes/s/mcp/ce-mcp.json",
     )
-    (_sess, _win, cmd) = adapter.spawned[-1]
-    assert "--dangerously-skip-permissions" in cmd
-    assert "--setting-sources" in cmd and "project" in cmd
+    inner = _inner_argv(result)
+    assert "--dangerously-skip-permissions" in inner
+    assert "--setting-sources" in inner and "project" in inner
 
 
 def test_non_claude_harness_command_unchanged(monkeypatch):
     # A non-Claude harness must not get the governed Claude command injected.
     adapter = FakeAdapter()
-    launch_runtime.launch(harness="codex", session="s", extra_args=["--foo"], tmux_adapter=adapter)
-    (_sess, _win, cmd) = adapter.spawned[-1]
-    assert cmd == ["codex", "--foo"]
+    result = launch_runtime.launch(harness="codex", session="s", extra_args=["--foo"], tmux_adapter=adapter)
+    # ce-ops#26: non-claude commands pass through byte-identical INSIDE the wrapper.
+    assert _inner_argv(result) == ["codex", "--foo"]
+
+
+def test_seat_surface_dispatch_driven_seat_id_is_run_id(tmp_path):
+    # ce-ops#26: --runtime-policy <state>/dispatches/<run_id>/runtime-policy.yaml ⇒
+    # seat_id = run_id and events land NEXT TO dispatch.yaml.
+    dispatch_dir = tmp_path / ".ce" / "state" / "dispatches" / "run-x-1"
+    dispatch_dir.mkdir(parents=True)
+    seat_dir, seat_id, run_id = launch_runtime._resolve_seat_surface(
+        repo_root=tmp_path, session="s", window="w",
+        runtime_policy=dispatch_dir / "runtime-policy.yaml",
+    )
+    assert (seat_dir, seat_id, run_id) == (dispatch_dir, "run-x-1", "run-x-1")
+
+
+def test_seat_surface_bare_seat_id_is_session_window_slug(tmp_path):
+    seat_dir, seat_id, run_id = launch_runtime._resolve_seat_surface(
+        repo_root=tmp_path, session="Ctrl Seat", window="main", runtime_policy=None,
+    )
+    assert seat_id == "ctrl-seat--main"
+    assert run_id is None
+    assert seat_dir == tmp_path / ".ce" / "state" / "dispatches" / "ctrl-seat--main"
 
 
 def test_claude_launch_refuses_uncontrolled_mcp_config_flag(monkeypatch):
@@ -329,16 +367,16 @@ def test_unattended_skip_perms_carries_flag_when_hook_pack_confirmed(tmp_path, m
     # CC-D-6 confirmed: the governed argv carries --dangerously-skip-permissions.
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
     adapter = FakeAdapter()
-    launch_runtime.launch(
+    result = launch_runtime.launch(
         harness="claude",
         session="drive-seat",
         extra_args=["--dangerously-skip-permissions"],
         tmux_adapter=adapter,
         repo_root=str(tmp_path),
     )
-    (_sess, _win, cmd) = adapter.spawned[-1]
-    assert "--dangerously-skip-permissions" in cmd
-    assert "--setting-sources" in cmd and "project" in cmd
+    inner = _inner_argv(result)
+    assert "--dangerously-skip-permissions" in inner
+    assert "--setting-sources" in inner and "project" in inner
 
 
 def test_claude_dry_run_does_not_confirm_pack_when_no_skip_perms(monkeypatch):
