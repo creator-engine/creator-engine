@@ -1,0 +1,145 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/seat-event.schema.yaml"
+title: "Creator Engine Seat Lifecycle Event"
+description: |
+  Machine-readable schema for ONE seat lifecycle sentinel event — a single JSON
+  object on a single line of an append-only `events.jsonl` (ce-ops#26). Every
+  `ce launch`-ed governed seat owns one such file at
+  `<v3-local-state>/dispatches/<seat_id>/events.jsonl`; the **writer is the
+  launcher-generated POSIX-sh supervisor** (`sentinel-wrapper.sh`,
+  `creator_engine_validator.seat_sentinel`), NEVER the seat's model — so a
+  silently-dying seat still produces its `exited` event (the silence≠success
+  guarantee).
+
+  This schema defines the line SHAPE only. The file is append-only (one
+  `write(2)` per line under `O_APPEND`; lines ≪ 4 KiB ⇒ atomic on POSIX); never
+  rewritten or renamed, so `tail -f`/inotify semantics hold. It is observability,
+  NOT evidence-of-record: the conserved run-OUTCOME chain
+  (`runtime-evidence.schema.yaml`) remains authoritative; an `outcome_resolved`
+  event is a best-effort convenience projection of that chain with its source
+  declared.
+
+  Value-free: an event carries the seat/run ids, the wrapper pid, opaque digests,
+  and a mechanical exit code — NEVER the seat command TEXT (only its sha256
+  digest; the ps-leak lesson), a credential, secret, raw account, or host.
+type: object
+required:
+  - v
+  - event
+  - ts
+  - seat_id
+  - run_id
+  - writer
+unevaluatedProperties: false
+properties:
+  v:
+    type: integer
+    const: 1
+    description: |
+      Integer schema version, REQUIRED from day one. Bumped only on a
+      breaking line-shape change; readers MUST tolerate-skip an unknown major.
+  event:
+    type: string
+    enum: [launched, exited, outcome_resolved]
+    description: |
+      Closed enum v1. `launched` is appended before the seat child starts;
+      `exited` on ANY termination (the blocking watcher's completion trigger);
+      `outcome_resolved` is the OPTIONAL best-effort follow-up (§3.4).
+      `progress`/`heartbeat` are RESERVED enum space, NOT emitted in v1.
+  ts:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    description: |
+      UTC RFC3339 stamp (`date -u +%Y-%m-%dT%H:%M:%SZ`), wrapper-observed.
+  seat_id:
+    type: string
+    minLength: 1
+    description: |
+      The seat identity (§3.1): the dispatch `run_id` for a dispatch-driven
+      seat, else the `lane_id`, else a `<session>--<window>` slug for a bare
+      Controller seat. Joins the event stream to its dispatch directory.
+  run_id:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      The dispatch `run_id` when the seat is dispatch-driven (the key the
+      run's evidence chain is filed under), else `null` for a v1-only launch.
+  writer:
+    type: string
+    const: launcher_wrapper
+    description: |
+      Closed enum v1 — the writer-role rule made data. The launcher's
+      supervisor wrote this line; the seat's model never writes the file.
+  pid:
+    type: integer
+    minimum: 0
+    description: |
+      `event: launched` only — the wrapper's pid (the seat process-tree root),
+      for reader-side liveness/staleness (§3.9).
+  command_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      `event: launched` only — sha256 digest of the inner argv. NEVER the
+      command text (value-free; the ps-leak lesson).
+  exit_code:
+    type: integer
+    minimum: 0
+    maximum: 255
+    description: |
+      `event: exited` only — the mechanical exit code the wrapper observed.
+      A signal-killed child yields `128 + signum` (137 = OOM-group SIGKILL).
+  signal:
+    oneOf:
+      - type: "null"
+      - type: integer
+        minimum: 1
+        maximum: 64
+    description: |
+      `event: exited` only, OPTIONAL — readers MAY derive (`exit_code > 128 ⇒
+      exit_code - 128`); the wrapper does not compute it (keeps the shell
+      minimal). Absent in wrapper-written lines.
+  outcome:
+    oneOf:
+      - type: "null"
+      - type: string
+        enum: [pr_opened, pr_merged, review_submitted, research_delivered, no_change]
+    description: |
+      `event: outcome_resolved` only — THE conserved run-OUTCOME enum, identical
+      to `runtime-evidence.schema.yaml`'s `outcome` (a unit test pins the two so
+      they cannot drift). `null` when the chain was absent/unreadable.
+  outcome_source:
+    type: string
+    enum: [runtime_evidence, unresolved]
+    description: |
+      `event: outcome_resolved` only — honest-tiering: `runtime_evidence` when
+      the chain was read; `unresolved` when absent/unreadable (outcome null).
+  evidence_ref:
+    oneOf:
+      - type: "null"
+      - type: string
+        minLength: 1
+    description: |
+      `event: outcome_resolved` only — shape-only path ref to the chain document
+      consulted; `null` when no chain was found.
+allOf:
+  - if:
+      properties:
+        event:
+          const: launched
+    then:
+      required: [pid, command_sha256]
+  - if:
+      properties:
+        event:
+          const: exited
+    then:
+      required: [exit_code]
+  - if:
+      properties:
+        event:
+          const: outcome_resolved
+    then:
+      required: [outcome, outcome_source]

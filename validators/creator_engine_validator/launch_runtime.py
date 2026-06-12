@@ -22,11 +22,12 @@ adapter; no secrets or environment values are printed.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import claude_launch_spec, hermes_launch_spec, resource_bound_spec
+from . import claude_launch_spec, hermes_launch_spec, resource_bound_spec, seat_sentinel
 from .loader import LoaderError, load_yaml
 
 DEFAULT_HARNESS = "claude"
@@ -138,6 +139,10 @@ class LaunchResult:
     # v3.5-F: live launch-confirm facts (memory.oom.group write + fleet cap),
     # None for dry-run / unbounded launches.
     resource_confirm: dict | None = None
+    # ce-ops#26: the absolute path to this seat's append-only lifecycle events
+    # surface; None on dry-run (no side effect). The v3 bridge stamps it onto the
+    # dispatch record so the cockpit/Monitor join events ↔ run by run_id.
+    events_ref: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -146,6 +151,7 @@ class LaunchResult:
             "attached": self.attached,
             "terminal": self.terminal,
             "resource_confirm": self.resource_confirm,
+            "events_ref": self.events_ref,
         }
 
 
@@ -200,6 +206,32 @@ def _session_exists(adapter: Any, session: str) -> bool:
     if callable(private):
         return bool(private(session))
     return False
+
+
+def _seat_slug(session: str, window: str) -> str:
+    """Slugify ``<session>--<window>`` into a seat_id for a bare Controller seat."""
+    slug = re.sub(r"[^a-z0-9-]+", "-", f"{session}--{window}".lower()).strip("-")
+    return slug or "seat"
+
+
+def _resolve_seat_surface(
+    *, repo_root: Path | str | None, session: str, window: str, runtime_policy: Path | str | None
+) -> tuple[Path, str, str | None]:
+    """Resolve (seat_dir, seat_id, run_id) for the ce-ops#26 events surface.
+
+    Dispatch-driven (the ``v3_seat_bridge.spawn_seat`` path passes
+    ``--runtime-policy <state_root>/dispatches/<run_id>/runtime-policy.yaml``):
+    seat_id = run_id = the dispatch dir name; events land NEXT TO ``dispatch.yaml``.
+    Otherwise a bare/lane-less Controller seat: seat_id = ``<session>--<window>``
+    slug under ``<repo_root>/.ce/state/dispatches/``; run_id = None.
+    """
+    if runtime_policy is not None:
+        dispatch_dir = Path(runtime_policy).parent
+        if dispatch_dir.parent.name == seat_sentinel.DISPATCHES_SUBDIR:
+            return dispatch_dir, dispatch_dir.name, dispatch_dir.name
+    state_root = Path(repo_root or ".") / ".ce" / "state"
+    seat_id = _seat_slug(session, window)
+    return seat_sentinel.seat_dir_for(state_root, seat_id), seat_id, None
 
 
 def launch(
@@ -411,7 +443,24 @@ def launch(
         except lane_runtime.ClaudeLaunchRefused as exc:
             raise LaunchRefused(str(exc)) from exc
 
-    pane = tmux_adapter.ensure_pane(session=session, window=window, command=plan.command)
+    # ce-ops#26 seat sentinels: wrap the OUTERMOST plan.command (the OUTPUT of the
+    # Ring-0 + bounding builders) in the launcher-generated supervisor so every
+    # lifecycle event — including an OOM group-kill the wrapper OUTSIDE the seat
+    # scope survives to record — is machine-watchable; the seat's model never
+    # writes the file (silence≠success).
+    seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
+        repo_root=repo_root, session=session, window=window, runtime_policy=runtime_policy
+    )
+    sentinel = seat_sentinel.prepare_seat_sentinel(
+        seat_dir=seat_dir,
+        inner_argv=plan.command,
+        seat_id=seat_id,
+        run_id=seat_run_id,
+    )
+
+    pane = tmux_adapter.ensure_pane(
+        session=session, window=window, command=sentinel.pane_command
+    )
     terminal = {
         "kind": "tmux",
         "session_id": pane.session_id,
@@ -451,4 +500,5 @@ def launch(
         attached=resume,
         terminal=terminal,
         resource_confirm=resource_confirm,
+        events_ref=str(sentinel.events_path),
     )

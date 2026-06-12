@@ -133,18 +133,34 @@ def _launch(tmp_path: Path, **overrides):
     return lane_runtime.launch(**kwargs)
 
 
+def _inner_argv(result):
+    """Recover the EXACT step-6c output argv embedded in the ce-ops#26 wrapper.
+
+    The pane command is now ``["/bin/sh", <wrapper>]``; the bounded command runs
+    FOREGROUND inside the wrapper (the line before ``code=$?``). These bounding
+    assertions hold on that inner argv — the wrapper is strictly OUTSIDE it.
+    """
+    import shlex
+    from pathlib import Path as _P
+
+    wrapper = _P(result.events_ref).parent / "sentinel-wrapper.sh"
+    lines = wrapper.read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    return shlex.split(lines[idx - 1])
+
+
 def test_lane_wrap_rides_the_governed_claude_command(tmp_path):
     adapter = FakeAdapter()
     systemctl = FakeSystemctl(cgroupfs_root=tmp_path)
     # Baseline: the same governed lane WITHOUT a resource policy.
     baseline_adapter = FakeAdapter()
-    _launch(
+    baseline_result = _launch(
         tmp_path,
         command=["claude"],
         mcp_config_path=".hermes/gate3-lane/mcp/ce-mcp.json",
         tmux_adapter=baseline_adapter,
     )
-    (_, _, governed), = baseline_adapter.spawned
+    governed = _inner_argv(baseline_result)
 
     result = _launch(
         tmp_path,
@@ -156,7 +172,7 @@ def test_lane_wrap_rides_the_governed_claude_command(tmp_path):
         support_probe=_ok_probe,
         cgroupfs_root=tmp_path,
     )
-    (_, _, wrapped), = adapter.spawned
+    wrapped = _inner_argv(result)
     assert wrapped[:6] == WRAP_PREFIX_HEAD
     assert wrapped[6] == "ce-seat-gate3-lane"  # unit keyed by lane_id
     sep = wrapped.index("--")
@@ -190,7 +206,7 @@ def test_lane_wrap_bounds_the_inert_placeholder_too(tmp_path):
         support_probe=_ok_probe,
         cgroupfs_root=tmp_path,
     )
-    (_, _, wrapped), = adapter.spawned
+    wrapped = _inner_argv(result)
     sep = wrapped.index("--")
     assert wrapped[sep + 1:] == lane_runtime.INERT_PLACEHOLDER_COMMAND
     assert result.resource_bound is not None
@@ -205,8 +221,7 @@ def test_lane_advisory_optdown_stamps_none_and_skips_the_wrap(tmp_path):
             tmp_path, resource_enforcement="advisory", resource_optout=dict(OPTOUT)
         ),
     )
-    (_, _, spawned), = adapter.spawned
-    assert spawned == lane_runtime.INERT_PLACEHOLDER_COMMAND
+    assert _inner_argv(result) == list(lane_runtime.INERT_PLACEHOLDER_COMMAND)
     assert result.resource_bound == "none (advisory)"
     sidecar = json.loads(
         (result.pane_path.parent / "gate3-lane.claude-governance.json").read_text(
@@ -244,6 +259,5 @@ def test_lane_enforce_refuses_loudly_on_unsupported_host(tmp_path):
 def test_lane_without_policy_is_unchanged(tmp_path):
     adapter = FakeAdapter()
     result = _launch(tmp_path, tmux_adapter=adapter)
-    (_, _, spawned), = adapter.spawned
-    assert spawned == lane_runtime.INERT_PLACEHOLDER_COMMAND
+    assert _inner_argv(result) == list(lane_runtime.INERT_PLACEHOLDER_COMMAND)
     assert result.resource_bound is None

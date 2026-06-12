@@ -28,7 +28,7 @@ def test_registered_in_check_surface():
     # peer_authority check: 49 -> 50. v3.5-C A-C4 added the forge_claim_dedup
     # check: 50 -> 51. v3.5-E.3 E3-G1 added the install_answers check
     # (declared in-gate): 51 -> 52.
-    assert len(reg) == 52
+    assert len(reg) == 53
 
 
 def test_green_on_real_package(version_boundary_real_run):

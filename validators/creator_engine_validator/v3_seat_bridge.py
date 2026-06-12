@@ -480,6 +480,11 @@ def spawn_seat(
     record.data["terminal"] = dict(terminal)
     record.data["resource_bound"] = resource_bound
     record.data["spawned_at"] = _utcstamp(now or datetime.now(timezone.utc))
+    # ce-ops#26: stamp the seat's lifecycle events surface (additive, value-free
+    # path ref) so the cockpit/Monitor join the events.jsonl to this run by run_id.
+    events_ref = launch_result.get("events_ref")
+    if isinstance(events_ref, str) and events_ref:
+        record.data["events_ref"] = events_ref
     _write_record(record)
 
     return SpawnResult(

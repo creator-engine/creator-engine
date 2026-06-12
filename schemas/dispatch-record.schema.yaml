@@ -215,6 +215,16 @@ properties:
       never enters argv, the tmux server, the Pane Registry, or this record (the
       value-free discipline; only the file path is recorded). Absent when no
       seat-env file was used.
+  events_ref:
+    type: string
+    minLength: 1
+    description: |
+      ce-ops#26: shape-only PATH ref to this seat's append-only lifecycle events
+      surface (`<v3-local-state>/dispatches/<run_id>/events.jsonl`), stamped by the
+      bridge from the v1 `LaunchResult` after the spawn. A path ref ONLY — the
+      launcher's supervisor (not the seat's model) writes the file, so a silently
+      dying seat still records its `exited` event. OPTIONAL: pre-#26 records carry
+      no ref, and a reader unions its absence harmlessly.
 $defs:
   change:
     type: object

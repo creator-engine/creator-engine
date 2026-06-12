@@ -46,6 +46,21 @@ class FakeAdapter:
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3", pane_pid=999)
 
 
+def _inner_argv(result):
+    """Recover the bounded argv embedded in the ce-ops#26 seat-sentinel wrapper.
+
+    The pane command is now ``["/bin/sh", <wrapper>]``; the systemd-run-bounded
+    command runs FOREGROUND inside the wrapper (the line before ``code=$?``).
+    """
+    import shlex
+    from pathlib import Path as _P
+
+    wrapper = _P(result.events_ref).parent / "sentinel-wrapper.sh"
+    lines = wrapper.read_text().splitlines()
+    idx = next(i for i, line in enumerate(lines) if line == "code=$?")
+    return shlex.split(lines[idx - 1])
+
+
 class FakeSystemctl:
     """Scripted systemctl runner: unit-name probe + ControlGroup + set-property."""
 
@@ -159,8 +174,7 @@ def test_advisory_optdown_launches_unbounded_with_the_stamp(tmp_path):
     )
     assert result.plan.resource_bound == "none (advisory)"
     assert result.resource_confirm is None
-    (_, _, spawned_command), = adapter.spawned
-    assert spawned_command[0] == "claude"  # unwrapped
+    assert _inner_argv(result)[0] == "claude"  # unwrapped (inside the sentinel wrapper)
 
 
 def test_advisory_without_optout_refuses_before_any_side_effect(tmp_path):
@@ -211,7 +225,7 @@ def test_live_launch_wraps_confirms_oom_group_and_fleet_cap(tmp_path):
         support_probe=_ok_probe,
         cgroupfs_root=tmp_path,
     )
-    (_, _, spawned_command), = adapter.spawned
+    spawned_command = _inner_argv(result)
     assert spawned_command[:6] == WRAP_PREFIX_HEAD
     assert spawned_command[6] == "ce-seat-v35f-seat"
     sep = spawned_command.index("--")

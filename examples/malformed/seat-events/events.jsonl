@@ -1,0 +1,11 @@
+{"v":1,"event":"launched","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper"}
+{"v":1,"event":"exited","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper"}
+{"v":1,"event":"crashed","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","exit_code":0}
+{"v":2,"event":"launched","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","pid":1,"command_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"v":1,"event":"exited","ts":"not-a-timestamp","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","exit_code":0}
+{"v":1,"event":"exited","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","exit_code":999}
+{"v":1,"event":"launched","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"the-seat-model","pid":1,"command_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"v":1,"event":"outcome_resolved","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","outcome":"merged","outcome_source":"runtime_evidence"}
+{"v":1,"event":"launched","ts":"2026-06-12T08:38:01Z","seat_id":"seat-a","run_id":null,"writer":"launcher_wrapper","pid":1,"command_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","cmd":"claude --dangerously"}
+["not","an","object"]
+this is not json at all
