@@ -261,6 +261,50 @@ $defs:
         type: string
         minLength: 1
         description: UTC stamp the PR was opened (`%Y-%m-%dT%H:%M:%SZ`).
+      base_sha:
+        oneOf:
+          - type: "null"
+          - type: string
+            pattern: "^[0-9a-f]{7,40}$"
+        description: |
+          F6 Phase-0 (OPTIONAL, additive): the base-branch commit SHA observed
+          when the change identity was stamped. The base-only re-stamp proof
+          recomputes the old change identity from (`base_sha`, `head_sha`); a
+          change block without it is `legacy unprovable` and is refused (NEVER
+          silently overridden). `cev3 collect` propagates it into the chain's
+          `pr_opened` change_set. Pre-F6 records carry no `base_sha`.
+      head_tree_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: |
+          F6 Phase-0 (OPTIONAL): the git tree SHA of `head_sha` at stamp time
+          (a content-address for the post-merge tree audit).
+      content_diff_id:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          F6 Phase-0 (OPTIONAL): SHA256 over the normalized non-mechanical diff
+          across the authorized paths — the content identity proved unchanged on
+          a base-only re-stamp.
+      patch_id_stable:
+        type: string
+        pattern: "^[0-9a-f]{7,64}$"
+        description: |
+          F6 Phase-0 (OPTIONAL): git stable patch-id over the same normalized
+          diff (order-independent of base motion) — proved unchanged on a
+          base-only re-stamp.
+      manifest_paths_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          F6 Phase-0 (OPTIONAL): the normalized path-set hash (the carrier
+          canonicalization rule) — proved unchanged on a base-only re-stamp.
+      proof_inputs_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          F6 Phase-0 (OPTIONAL): a digest over the exact inputs the identity
+          was computed from, so the re-stamp decision is reproducible.
   review_of:
     type: object
     required: [author_run_id, pr_number, envelope_ref]

@@ -359,6 +359,92 @@ def extract_manifest_paths_from_file(path: Path) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Structured carrier identity (F6 Phase-0) — reuse, never loose string-match
+# --------------------------------------------------------------------------
+#
+# The F6 base-only re-stamp must prove the carrier's PATH-SET + content pins
+# are unchanged across base motion while ALLOWING mechanical base/head/restamp
+# prose to differ (`ce-base-only-refresh-microauth`). Raw carrier byte equality
+# is therefore too strict. This exposes the SAME fenced-manifest parsing
+# `scan_document`/`extract_manifest_paths` already use as a structured identity
+# so the re-stamp proof and the post-hoc fidelity check never disagree about
+# which path lines (and which normalized hash) the carrier authorizes.
+
+
+@dataclass(frozen=True)
+class CarrierIdentity:
+    """The structured, value-free identity of a per-PR carrier's path-set.
+
+    ``declared_count`` / ``declared_sha256`` are the carrier's own
+    ``*_PATHS_COUNT`` / ``*_PATHS_SHA256`` declarations; ``paths`` is the
+    normalized (stripped, unique, sorted) fenced path-set; ``normalized_sha256``
+    is recomputed over that set by the canonical rule
+    (``sha256("\\n".join(sorted(unique)) + "\\n")``); ``consistent`` is True iff
+    the declared count/hash match the recomputed normalization (a self-honest
+    carrier). Carries only paths + hashes — never a secret.
+    """
+
+    name: str
+    declared_count: int
+    declared_sha256: str
+    paths: tuple[str, ...]
+    normalized_sha256: str
+    consistent: bool
+
+
+def parse_carrier(text: str) -> CarrierIdentity | None:
+    """Return the structured :class:`CarrierIdentity` for a carrier document, or None.
+
+    Reuses ``COUNT_PATTERN`` / ``HASH_PATTERN`` and the fenced-block locator the
+    fidelity check uses, then recomputes the normalized path-set hash with
+    ``_normalize_manifest`` — so a base-only re-stamp can compare carrier
+    path-set identity (count + normalized hash) WITHOUT depending on byte
+    equality of the mechanical base/head prose. Returns None when the document
+    declares no ``*_PATHS_COUNT`` block.
+    """
+    declarations = list(COUNT_PATTERN.finditer(text))
+    hashes = {h.group("name"): h for h in HASH_PATTERN.finditer(text)}
+    for count_match in declarations:
+        name = count_match.group("name")
+        hash_match = hashes.get(name)
+        if hash_match is None:
+            continue
+        try:
+            declared_count = int(count_match.group("value"))
+        except ValueError:
+            continue
+        declared_hash = hash_match.group("value")
+        search_from = max(count_match.end(), hash_match.end())
+        fence = _find_first_fence_after(text, search_from)
+        if fence is None:
+            continue
+        body = text[fence[0] : fence[1]]
+        if body.endswith("\n"):
+            body = body[:-1]
+        path_lines = [line.strip() for line in body.split("\n") if line.strip()]
+        actual_count, actual_hash, _ = _normalize_manifest(path_lines)
+        unique_sorted = tuple(sorted(set(path_lines)))
+        return CarrierIdentity(
+            name=name,
+            declared_count=declared_count,
+            declared_sha256=declared_hash,
+            paths=unique_sorted,
+            normalized_sha256=actual_hash,
+            consistent=(actual_count == declared_count and actual_hash == declared_hash),
+        )
+    return None
+
+
+def parse_carrier_file(path: str | Path) -> CarrierIdentity | None:
+    """Read ``path`` and return its structured :class:`CarrierIdentity` (or None)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return parse_carrier(text)
+
+
+# --------------------------------------------------------------------------
 # PR-diff gate (verify-path-manifest --base) — G-ii
 # --------------------------------------------------------------------------
 #

@@ -160,3 +160,48 @@ already in `open_change_for_run`'s hands; the mint module accepts the scope unch
 It is sequenced behind an ops act — verifying the live `workflows: write` grant on both
 per-dev Apps — and is tracked as a named follow-up micro-gate (ce-ops#16 §3.2). Until it
 lands, use the declared pre-push above.
+
+## g. Concurrent-merge throughput (F6 Phase-0: two-tier change-block re-stamp)
+
+Strict up-to-date protection (§c) means **every merge moves `main`**, leaving other
+open PRs behind base. A rebase/branch-update then changes a PR's head after its run
+opened, so the locally-pinned `pr_opened.head_sha` goes stale and a head-pinned squash
+of that SHA is correctly rejected by the server. Per-PR carriers removed the file-carrier
+conflict; they do **not** address this stale head-pin.
+
+F6 Phase-0 resolves it WITHOUT a queue and WITHOUT a head-override, conserving the
+invariant **what-was-TESTED == what-MERGES**. The authority question is not "who may
+override a stale pin?" — **override authority is rejected as a category** (there is no
+`--head-override` and no override parameter on `forge.merge` / `merge_for_run`). The pin
+is redefined as a ratified **change-block identity** plus a machine proof the integrated
+state was tested. Two tiers:
+
+| Tier | Trigger | CE action |
+| --- | --- | --- |
+| **Content change** | any changed diff identity / path-set / content pin / re-targeted branch-base, or an unprovable chain | **REFUSE** before any merge PUT (`content_drift_requires_reratification` / `restamp_legacy_unprovable`); route through the existing fresh ratification / adopt path — never a silent accept |
+| **Base-only motion** | only the base moved; CE machine-proves unchanged branch/base/PR identity + unchanged carrier path-set + unchanged normalized non-mechanical diff identity + unchanged stable patch-id, with the live head green + review-satisfied | **auto re-stamp**: append `runtime_change_restamp` (`authority: machine_rebase_equivalence`), then squash-merge the NEW head |
+
+`cev3 merge` (plan-by-default) reports `head_status` as `unchanged`,
+`base_only_restamp_available`, `content_drift_refused`, or `legacy_unprovable`, and the
+old/new SHAs; `--apply` re-stamps (if proven) and merges, then appends `pr_merged` + a
+`runtime_merge_audit`. The audit makes squash honest: with squash-only the merged commit
+is not the reviewed head, so CE records the conserved **tree-equivalence** invariant
+(tested head tree == merged tree); a mismatch is an operator-visible alarm
+(`merge_audit_tree_mismatch`), never a silent pass. The change-identity anchor (`base_sha`
++ content/patch identity) is stamped at PR-open onto the dispatch `change` block and
+propagated into the chain's `pr_opened.change_set` by `cev3 collect`; a pre-F6 chain that
+lacks `base_sha` is **legacy-unprovable** and is refused, never overridden. The merge still
+mints **no** per-run token and rides the Operator's ambient `gh` identity (§e).
+
+### Phase-1 trigger (recorded, not yet built): GitHub native merge queue
+
+Enable the GitHub native **merge queue** when CE sees **3 or more concurrent ratified PRs
+more than once per week**, or a **third authoring host** is onboarded. At that volume the
+queue's tested-`gh-readonly-queue/{base}` integrator earns its integration cost; below it,
+serial direct merge under the Phase-0 re-stamp is cheaper. Phase-1 does not change the
+authority semantics — it only changes the trusted integrator (the queue owns final
+integration; CE verifies the queued result is patch/tree-equivalent to the ratified
+change-block). It adds `merge_group` to required CI triggers, switches `cev3 merge --apply`
+from direct squash PUT to enqueue (supplying the current ratified/re-stamped head), and
+appends `pr_enqueued` then `pr_merged` only after GitHub reports the queue merge. Required
+review / dismiss-stale / code-owner / `enforce_admins` / conversation-resolution all stay.

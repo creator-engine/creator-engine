@@ -1449,13 +1449,17 @@ def test_review_spawn_fail_closed(tmp_path, capsys, monkeypatch):
 # ---------------------------------------------------------------------------
 # v3.1-G2c — cev3 merge (gated squash; plan-by-default; --apply is the gated act)
 # ---------------------------------------------------------------------------
-def _merge_result(*, merged=False, would_merge=True, commit=None):
-    from creator_engine_validator.forge.merge import MergeResult
-    return MergeResult(
-        pr_number=7, head_sha="d" * 40, eligible=would_merge, would_merge=would_merge,
+def _merge_result(*, merged=False, would_merge=True, commit=None, head_status="unchanged",
+                  restamp_recorded=False, audit_tree_equivalence=None,
+                  old_head="d" * 40, new_head=None):
+    from creator_engine_validator.v3_forge_join import RestampMergeResult
+    return RestampMergeResult(
+        pr_number=7, head_status=head_status, old_head_sha=old_head, new_head_sha=new_head,
+        old_base_sha="a" * 40, new_base_sha=None, eligible=would_merge, would_merge=would_merge,
         merged=merged, merge_commit_sha=commit, review_decision="APPROVED",
         rollup_state="SUCCESS", merge_state_status="CLEAN", mergeable="MERGEABLE",
-        applied=merged,
+        applied=merged, restamp_recorded=restamp_recorded,
+        audit_tree_equivalence=audit_tree_equivalence,
     )
 
 
@@ -1516,6 +1520,49 @@ def test_merge_surfaces_forge_refusal(tmp_path, capsys, monkeypatch, _fake_merge
     assert json.loads(capsys.readouterr().out)["action"] == "merge_refused"
 
 
+def _patch_merge(monkeypatch, result):
+    monkeypatch.setattr(v3_cli.v3_forge_join, "merge_for_run",
+                        lambda *a, **k: result)
+    monkeypatch.setattr(v3_cli.v3_forge_join, "ambient_gh_runner", lambda **k: (lambda *a, **kw: None))
+
+
+def test_merge_plan_surfaces_base_only_restamp_available(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _patch_merge(monkeypatch, _merge_result(
+        head_status="base_only_restamp_available", new_head="c" * 40))
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["head_status"] == "base_only_restamp_available"
+    assert payload["new_head_sha"] == "c" * 40
+
+
+def test_merge_apply_reports_restamped_and_audit(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _patch_merge(monkeypatch, _merge_result(
+        merged=True, commit="f" * 40, head_status="base_only_restamped",
+        restamp_recorded=True, audit_tree_equivalence=True, new_head="c" * 40))
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--apply",
+                        "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "merged" and payload["restamp_recorded"] is True
+    assert payload["head_status"] == "base_only_restamped"
+
+
+def test_merge_apply_audit_tree_mismatch_is_loud_nonzero(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _patch_merge(monkeypatch, _merge_result(
+        merged=True, commit="f" * 40, head_status="unchanged", audit_tree_equivalence=False))
+    capsys.readouterr()
+    code = v3_cli.main(["merge", "rate-limit-login", "--run", run_id, "--apply",
+                        "--root", str(tmp_path), "--json"])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["action"] == "merge_audit_tree_mismatch"
+
+
 # ---------------------------------------------------------------------------
 # v3.1-G2c — read-model: show/status surface the PR + a live reviewer venue
 # ---------------------------------------------------------------------------
@@ -1560,6 +1607,12 @@ class _E2EMergeGh:
         joined = " ".join(argv)
         if "-X" in argv and "PUT" in argv:
             return _cp(argv, json.dumps({"merged": True, "sha": "f" * 40}))
+        if "headRefName" in joined:  # F6 combined pr_state read (unchanged head "d"*40)
+            return _cp(argv, json.dumps({"data": {"repository": {"pullRequest": {
+                "number": 7, "headRefName": "v31-g2-forge-join", "baseRefName": "main",
+                "headRefOid": "d" * 40, "baseRefOid": "a" * 40, "reviewDecision": "APPROVED",
+                "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE",
+                "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}}}}))
         if "reviewDecision" in joined:
             return _cp(argv, json.dumps({"data": {"repository": {"pullRequest": {"reviewDecision": "APPROVED"}}}}))
         if "statusCheckRollup" in joined:

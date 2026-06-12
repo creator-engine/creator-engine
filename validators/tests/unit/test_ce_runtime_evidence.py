@@ -152,6 +152,115 @@ def test_chain_with_pr_merged_outcome_validates_clean():
 
 
 # ---------------------------------------------------------------------------
+# F6 Phase-0 — typed change-restamp + merge-audit records (additive; orthogonal)
+# ---------------------------------------------------------------------------
+def _restamp_body(policy: str = _POLICY, **over) -> dict:
+    body = {
+        "kind": "runtime-change-restamp",
+        "record_type": "runtime_change_restamp",
+        "schema_version": "1",
+        "policy_sha": policy,
+        "run_id": "run-implementer-0001",
+        "recorded_at": "t7",
+        "restamp_type": "base_only",
+        "authority": "machine_rebase_equivalence",
+        "pr_number": 123,
+        "branch": "ce/run-implementer-0001",
+        "base": "main",
+        "old_base_sha": "a" * 40,
+        "old_head_sha": "d" * 40,
+        "new_base_sha": "b" * 40,
+        "new_head_sha": "c" * 40,
+        "manifest_paths_sha256": "1" * 64,
+        "old_content_diff_id": "2" * 64,
+        "new_content_diff_id": "2" * 64,
+        "old_patch_id": "e" * 40,
+        "new_patch_id": "e" * 40,
+        "proof_inputs_sha256": "3" * 64,
+    }
+    body.update(over)
+    return body
+
+
+def _audit_body(policy: str = _POLICY, **over) -> dict:
+    body = {
+        "kind": "runtime-merge-audit",
+        "record_type": "runtime_merge_audit",
+        "schema_version": "1",
+        "policy_sha": policy,
+        "run_id": "run-implementer-0001",
+        "recorded_at": "t8",
+        "pr_number": 123,
+        "tested_head_sha": "c" * 40,
+        "tested_tree_sha": "a" * 40,
+        "merge_method": "squash",
+        "merge_commit_sha": "f" * 40,
+        "merged_tree_sha": "a" * 40,
+        "tree_equivalence": True,
+    }
+    body.update(over)
+    return body
+
+
+def _chain_with_restamp_and_audit() -> dict:
+    chain: list[dict] = []
+    for phase in ("provision", "run", "collect"):
+        chain.append(append(chain, _body(phase=phase)))
+    chain.append(append(chain, _outcome_body(outcome="pr_opened")))
+    chain.append(append(chain, _restamp_body()))
+    chain.append(append(chain, _outcome_body(outcome="pr_merged")))
+    chain.append(append(chain, _audit_body()))
+    return _chain_file(chain)
+
+
+def test_chain_with_restamp_and_audit_validates_clean():
+    """The full F6 base-only re-stamp chain (pr_opened → restamp → pr_merged → audit) is clean."""
+    doc = _chain_with_restamp_and_audit()
+    errors = validate_runtime_evidence_chain(doc, Path("restamp-chain.yml"))
+    assert errors == []
+    assert verify_chain(doc["records"]) == []
+    restamp = next(r for r in doc["records"] if r["record_type"] == "runtime_change_restamp")
+    audit = next(r for r in doc["records"] if r["record_type"] == "runtime_merge_audit")
+    assert "lifecycle_phase" not in restamp and "lifecycle_phase" not in audit
+    assert restamp["authority"] == "machine_rebase_equivalence"
+    assert audit["tree_equivalence"] is True
+
+
+def test_restamp_bad_restamp_type_is_schema_violation():
+    chain = [append([], _restamp_body(restamp_type="content_amendment"))]
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(_chain_file(chain), Path("b.yml")))
+
+
+def test_restamp_bad_authority_is_schema_violation():
+    chain = [append([], _restamp_body(authority="operator_override"))]
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(_chain_file(chain), Path("b.yml")))
+
+
+def test_restamp_missing_proof_field_is_schema_violation():
+    body = _restamp_body()
+    del body["proof_inputs_sha256"]
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(_chain_file([append([], body)]), Path("b.yml")))
+
+
+def test_merge_audit_non_squash_method_is_schema_violation():
+    chain = [append([], _audit_body(merge_method="merge"))]
+    assert CODE_SCHEMA in _codes(validate_runtime_evidence_chain(_chain_file(chain), Path("b.yml")))
+
+
+def test_merge_audit_tree_mismatch_validates_but_records_false():
+    # A false tree_equivalence is a valid (alarm) record — the schema admits it; semantics flag it.
+    doc = _chain_file([append([], _audit_body(tree_equivalence=False, merged_tree_sha="b" * 40))])
+    assert validate_runtime_evidence_chain(doc, Path("mismatch.yml")) == []
+    assert doc["records"][0]["tree_equivalence"] is False
+
+
+def test_restamp_tamper_breaks_content_address():
+    chain = _chain_with_restamp_and_audit()["records"]
+    chain[4]["new_head_sha"] = "9" * 40  # mutate the persisted restamp record after hashing
+    assert any(f.kind == "content_address" for f in verify_chain(chain))
+
+
+# ---------------------------------------------------------------------------
 # G-3.7.2a — typed ratification record (value-free; NEVER a lifecycle_phase)
 # ---------------------------------------------------------------------------
 def _ratification_body(

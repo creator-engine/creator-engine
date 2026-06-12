@@ -387,6 +387,44 @@ def test_apply_stamped_dispatch_conforms_to_schema(tmp_path):
     jsonschema.validate(drec, schema)  # the stamped change block validates
 
 
+def test_apply_with_git_identity_stamps_f6_restamp_anchor(tmp_path):
+    # F6: when the git identity seam is supplied, open stamps base_sha + the change identity.
+    import jsonschema
+    from creator_engine_validator.v3_forge_join import default_git_runner  # noqa: F401 (export check)
+    run_id = _seed_dispatch(tmp_path)
+
+    def git_identity(argv, input_text=None):
+        argv = list(argv)
+        if "patch-id" in argv:
+            return _CP(argv, 0, stdout="aa" * 20 + " " + "0" * 40 + "\n")
+        if "rev-parse" in argv:
+            ref = str(argv[-1])
+            if ref == "main":
+                return _CP(argv, 0, stdout="cc" * 20 + "\n")  # base_sha
+            return _CP(argv, 0, stdout="bb" * 20 + "\n")  # head tree
+        if "diff" in argv:
+            return _CP(argv, 0, stdout="SOME-DIFF\n")
+        raise AssertionError(f"unexpected git argv: {argv}")  # pragma: no cover
+
+    open_change_for_run(
+        tmp_path, run_id, app_config=_app_config(), branch=BRANCH,
+        manifest_paths=["validators/a.py"], apply=True, now=_FIXED_NOW,
+        mint_gh_runner=FakeMintRunner(), git_spawn=FakeGit(remote=None),
+        token_spawn=FakeGhSpawn(), git_identity_runner=git_identity,
+    )
+    drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text())
+    change = drec["change"]
+    assert change["base_sha"] == "cc" * 20
+    assert change["head_tree_sha"] == "bb" * 20
+    assert len(change["content_diff_id"]) == 64 and len(change["proof_inputs_sha256"]) == 64
+    assert len(change["manifest_paths_sha256"]) == 64
+    schema = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "schemas" / "dispatch-record.schema.yaml")
+        .read_text(encoding="utf-8")
+    )
+    jsonschema.validate(drec, schema)  # the richer change block still validates
+
+
 # ---------------------------------------------------------------------------
 # JIT token: EXACT least-privilege + revoke on success AND failure
 # ---------------------------------------------------------------------------
@@ -490,11 +528,37 @@ from creator_engine_validator.runner.backend import CollectedEvidence
 from creator_engine_validator.v3_forge_join import ambient_gh_runner, merge_for_run
 
 
+import hashlib as _hashlib
+
+from creator_engine_validator.forge.github_repo_config import ForgeConfigError as _ForgeConfigError
+
+OLD_HEAD = "d" * 40
+OLD_BASE = "a1" * 20
+NEW_HEAD = "c" * 40
+NEW_BASE = "b2" * 20
+CARRIER_PATH = ".ce/pr-manifests/f6-restamp-test.md"
+
+
+def _carrier_text(paths, *, note="x") -> str:
+    """A minimal but valid per-PR carrier (parse_carrier-readable): COUNT + SHA256 + fenced block.
+
+    ``note`` lets two carriers share a path-set (same normalized hash) while differing in
+    mechanical prose — the scenario-5 base-pin drift case.
+    """
+    uniq = sorted({p for p in paths if p})
+    norm = "\n".join(uniq) + "\n"
+    sha = _hashlib.sha256(norm.encode("utf-8")).hexdigest()
+    body = "\n".join(uniq)
+    return (f"# carrier — {note}\n\nAUTHORIZED_PATHS_COUNT={len(uniq)}\n\n"
+            f"AUTHORIZED_PATHS_SHA256={sha}\n\n```text\n{body}\n```\n")
+
+
 class FakeMergeGh:
-    """Routes the gated-merge gh calls (graphql review/checks/conflict reads + the squash PUT)."""
+    """Routes the gated-merge gh calls: the combined pr_state read, the 3 gate reads, + the PUT."""
 
     def __init__(self, *, review="APPROVED", rollup="SUCCESS", merge_state="CLEAN",
-                 mergeable="MERGEABLE", merged=True, commit="f" * 40):
+                 mergeable="MERGEABLE", merged=True, commit="f" * 40, put_rc=0, put_stderr="",
+                 live_head=OLD_HEAD, live_base=OLD_BASE, branch=BRANCH, base="main"):
         self.calls = []
         self.review = review
         self.rollup = rollup
@@ -502,19 +566,33 @@ class FakeMergeGh:
         self.mergeable = mergeable
         self.merged = merged
         self.commit = commit
+        self.put_rc = put_rc
+        self.put_stderr = put_stderr
+        self.live_head = live_head
+        self.live_base = live_base
+        self.branch = branch
+        self.base = base
 
     def __call__(self, argv, input_text=None):
         argv = list(argv)
         self.calls.append(argv)
         joined = " ".join(argv)
         if "-X" in argv and "PUT" in argv:
-            return _CP(argv, 0, stdout=json.dumps({"merged": self.merged, "sha": self.commit}))
+            out = json.dumps({"merged": self.merged, "sha": self.commit}) if self.put_rc == 0 else ""
+            return _CP(argv, self.put_rc, stdout=out, stderr=self.put_stderr)
+        if "headRefName" in joined:  # the F6 combined pr_state read (checked FIRST)
+            return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
+                "number": 7, "headRefName": self.branch, "baseRefName": self.base,
+                "headRefOid": self.live_head, "baseRefOid": self.live_base,
+                "reviewDecision": self.review, "mergeStateStatus": self.merge_state,
+                "mergeable": self.mergeable,
+                "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": self.rollup}}}]}}}}}))
         if "reviewDecision" in joined:
             return _CP(argv, 0, stdout=json.dumps(
                 {"data": {"repository": {"pullRequest": {"reviewDecision": self.review}}}}))
         if "statusCheckRollup" in joined:
             return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
-                "headRefOid": "d" * 40,
+                "headRefOid": self.live_head,
                 "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": self.rollup}}}]}}}}}))
         if "mergeStateStatus" in joined:
             return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
@@ -525,19 +603,77 @@ class FakeMergeGh:
         return any("-X" in c and "PUT" in c for c in self.calls)
 
 
-def _collected_author_run(tmp_path, *, pr_number=7, head_sha="d" * 40, policy_sha="e" * 64):
+class FakeGitRunner:
+    """The injected git seam for identity/tree/carrier reads (subprocess.run shape). Zero live git.
+
+    ``content_by_head`` maps a head SHA to its NON-mechanical diff signature (equal signatures →
+    equal ``content_diff_id`` + stable patch-id → base-only equivalence). ``carrier_by_head`` maps
+    a head SHA to its carrier text (path-set drift → different normalized hash). ``tree_by_ref``
+    maps a ref to its tree (the audit equivalence). ``unavailable`` refs raise (legacy-unprovable).
+    """
+
+    def __init__(self, *, content_by_head=None, carrier_by_head=None, tree_by_ref=None,
+                 resolve_by_ref=None, default_content="SRC-DIFF", default_tree="a" * 40,
+                 unavailable=()):
+        self.content_by_head = content_by_head or {}
+        self.carrier_by_head = carrier_by_head or {}
+        self.tree_by_ref = tree_by_ref or {}
+        self.resolve_by_ref = resolve_by_ref or {}
+        self.default_content = default_content
+        self.default_tree = default_tree
+        self.unavailable = set(unavailable)
+        self.calls = []
+
+    def __call__(self, argv, input_text=None):
+        argv = list(argv)
+        self.calls.append(argv)
+        if "patch-id" in argv:
+            pid = _hashlib.sha1((input_text or "").encode("utf-8")).hexdigest()
+            return _CP(argv, 0, stdout=f"{pid} {'0' * 40}\n")
+        if "rev-parse" in argv:
+            ref = str(argv[-1])
+            if ref.endswith("^{tree}"):
+                base = ref[: -len("^{tree}")]
+                if base in self.unavailable:
+                    return _CP(argv, 128, stderr="bad object")
+                return _CP(argv, 0, stdout=self.tree_by_ref.get(base, self.default_tree) + "\n")
+            if ref in self.unavailable:
+                return _CP(argv, 128, stderr="bad revision")
+            return _CP(argv, 0, stdout=self.resolve_by_ref.get(ref, ref) + "\n")
+        if "diff" in argv:
+            spec = next((a for a in argv if ".." in a), "")
+            base_ref, _, head = spec.partition("..")
+            if head in self.unavailable or base_ref in self.unavailable:
+                return _CP(argv, 128, stderr="bad revision")
+            return _CP(argv, 0, stdout=self.content_by_head.get(head, self.default_content))
+        if "show" in argv:
+            ref = str(argv[-1]).partition(":")[0]
+            if ref in self.unavailable:
+                return _CP(argv, 128, stderr="bad object")
+            text = self.carrier_by_head.get(ref)
+            if text is None:
+                return _CP(argv, 128, stderr="path does not exist")
+            return _CP(argv, 0, stdout=text)
+        raise AssertionError(f"unexpected git argv: {argv}")  # pragma: no cover
+
+
+def _collected_author_run(tmp_path, *, pr_number=7, head_sha=OLD_HEAD, policy_sha="e" * 64,
+                          base_sha=None, manifest_paths=("validators/x.py",)):
     """A spawned+collected author dispatch with a persisted pr_opened chain; returns run_id."""
     run_id = _seed_dispatch(tmp_path)  # spawned
     drec = yaml.safe_load((tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text())
     drec["collected_at"] = "2026-06-11T09:31:00Z"
     (tmp_path / "dispatches" / run_id / "dispatch.yaml").write_text(
         yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
+    change_set = {"branch": BRANCH, "base": "main", "manifest_paths": list(manifest_paths),
+                  "head_sha": head_sha, "pr_number": pr_number}
+    if base_sha:
+        change_set["base_sha"] = base_sha
     body = {
         "kind": _spine.RUN_OUTCOME_RECORD_KIND, "record_type": _spine.RUN_OUTCOME_RECORD_TYPE,
         "schema_version": "1", "policy_sha": policy_sha, "run_id": run_id,
         "recorded_at": "2026-06-11T09:30:00+00:00", "outcome": "pr_opened",
-        "change_set": {"branch": BRANCH, "base": "main", "manifest_paths": ["validators/x.py"],
-                       "head_sha": head_sha, "pr_number": pr_number},
+        "change_set": change_set,
     }
     chain = [_spine.append([], body)]
     sink = _evidence_sink.file_evidence_sink(tmp_path / "runs")
@@ -545,38 +681,177 @@ def _collected_author_run(tmp_path, *, pr_number=7, head_sha="d" * 40, policy_sh
     return run_id
 
 
+def _records(tmp_path, run_id):
+    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
+    return doc["records"]
+
+
 def test_merge_plan_reads_gate_and_attests_nothing(tmp_path):
     run_id = _collected_author_run(tmp_path)
     gh = FakeMergeGh()
     result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=False)
+    assert result.head_status == "unchanged"
     assert result.would_merge is True and result.merged is False and result.eligible is True
     assert not gh.did_put()  # plan mode never PUTs
-    # the chain is unchanged (no pr_merged appended)
-    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
-    outcomes = [r["outcome"] for r in doc["records"] if r.get("outcome")]
+    outcomes = [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")]
     assert outcomes == ["pr_opened"]
 
 
-def test_merge_apply_eligible_attests_pr_merged_and_repersists(tmp_path):
+def test_merge_apply_unchanged_head_attests_pr_merged_and_audit(tmp_path):
+    # Scenario 1: unchanged head merges with the attested head + appends a PASSING merge audit.
     run_id = _collected_author_run(tmp_path, pr_number=7)
-    gh = FakeMergeGh(merged=True, commit="f" * 40)
-    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True)
+    gh = FakeMergeGh(merged=True, commit="f" * 40, live_head=OLD_HEAD)
+    git = FakeGitRunner(tree_by_ref={OLD_HEAD: "a" * 40, "f" * 40: "a" * 40})  # tested == merged tree
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
     assert result.merged is True and result.merge_commit_sha == "f" * 40
+    assert result.head_status == "unchanged" and result.restamp_recorded is False
+    assert result.audit_tree_equivalence is True
     assert gh.did_put()
-    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
-    outcomes = [r["outcome"] for r in doc["records"] if r.get("outcome")]
-    assert outcomes == ["pr_opened", "pr_merged"]  # appended onto the SAME chain
-    assert _spine.verify_chain(doc["records"]) == []  # re-persisted chain still verifies
+    records = _records(tmp_path, run_id)
+    outcomes = [r["outcome"] for r in records if r.get("outcome")]
+    assert outcomes == ["pr_opened", "pr_merged"]
+    audits = [r for r in records if r.get("record_type") == "runtime_merge_audit"]
+    assert len(audits) == 1 and audits[0]["tree_equivalence"] is True
+    assert audits[0]["tested_head_sha"] == OLD_HEAD
+    assert _spine.verify_chain(records) == []
+
+
+def test_merge_apply_base_only_restamps_then_merges_new_head(tmp_path):
+    # Scenario 2: base-only drift — same content diff + patch-id → restamp + merge new head + audit.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(merged=True, commit="f" * 40, live_head=NEW_HEAD, live_base=NEW_BASE)
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME-DIFF", NEW_HEAD: "SAME-DIFF"},
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+        tree_by_ref={NEW_HEAD: "a" * 40, "f" * 40: "a" * 40},
+    )
+    # plan first: reports the availability, mutates nothing
+    plan = merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(
+        live_head=NEW_HEAD, live_base=NEW_BASE), apply=False, git_runner=git)
+    assert plan.head_status == "base_only_restamp_available"
+    assert plan.old_head_sha == OLD_HEAD and plan.new_head_sha == NEW_HEAD
+    assert [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")] == ["pr_opened"]
+    # apply: restamp + merge new head + audit
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert result.merged is True and result.head_status == "base_only_restamped"
+    assert result.restamp_recorded is True and result.audit_tree_equivalence is True
+    records = _records(tmp_path, run_id)
+    restamps = [r for r in records if r.get("record_type") == "runtime_change_restamp"]
+    assert len(restamps) == 1
+    rs = restamps[0]
+    assert rs["restamp_type"] == "base_only" and rs["authority"] == "machine_rebase_equivalence"
+    assert rs["old_head_sha"] == OLD_HEAD and rs["new_head_sha"] == NEW_HEAD
+    assert rs["old_content_diff_id"] == rs["new_content_diff_id"]
+    assert rs["old_patch_id"] == rs["new_patch_id"]
+    # pr_merged points at the NEW (restamped) head
+    merged = [r for r in records if r.get("outcome") == "pr_merged"][0]
+    assert merged["change_set"]["head_sha"] == NEW_HEAD
+    assert _spine.verify_chain(records) == []
+
+
+def test_merge_apply_content_drift_refuses_before_put(tmp_path):
+    # Scenario 3: changed non-mechanical diff identity refuses before any merge PUT.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(live_head=NEW_HEAD, live_base=NEW_BASE)
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "DIFF-A", NEW_HEAD: "DIFF-B"},  # content changed
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+    )
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert "content_drift_requires_reratification" in str(ei.value)
+    assert not gh.did_put()
+    assert [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")] == ["pr_opened"]
+
+
+def test_merge_apply_pathset_drift_refuses_before_put(tmp_path):
+    # Scenario 4: changed carrier path-set refuses before any merge PUT.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(live_head=NEW_HEAD, live_base=NEW_BASE)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME", NEW_HEAD: "SAME"},
+        carrier_by_head={OLD_HEAD: _carrier_text(paths),
+                         NEW_HEAD: _carrier_text(paths + ["validators/extra.py"])},  # path added
+    )
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert "content_drift_requires_reratification" in str(ei.value)
+    assert not gh.did_put()
+
+
+def test_merge_apply_mechanical_carrier_basepin_drift_accepted(tmp_path):
+    # Scenario 5: carrier base/head PROSE differs but path-set hash unchanged → base-only accepted.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(merged=True, live_head=NEW_HEAD, live_base=NEW_BASE)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME", NEW_HEAD: "SAME"},
+        carrier_by_head={OLD_HEAD: _carrier_text(paths, note="base-OLD"),
+                         NEW_HEAD: _carrier_text(paths, note="base-NEW")},  # same path-set, new prose
+        tree_by_ref={NEW_HEAD: "a" * 40, "f" * 40: "a" * 40},
+    )
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert result.merged is True and result.restamp_recorded is True
+
+
+def test_merge_apply_legacy_chain_refuses_before_put(tmp_path):
+    # Scenario 6: no base_sha (legacy) → refuse as restamp_legacy_unprovable, no PUT, no restamp.
+    run_id = _collected_author_run(tmp_path, base_sha=None)  # legacy: no anchor
+    gh = FakeMergeGh(live_head=NEW_HEAD, live_base=NEW_BASE)
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=FakeGitRunner())
+    assert "restamp_legacy_unprovable" in str(ei.value)
+    assert not gh.did_put()
+    records = _records(tmp_path, run_id)
+    assert not any(r.get("record_type") == "runtime_change_restamp" for r in records)
+
+
+def test_merge_apply_old_refs_unavailable_is_legacy_unprovable(tmp_path):
+    # Scenario 6b: base_sha present but old refs cannot be resolved → legacy-unprovable.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(live_head=NEW_HEAD, live_base=NEW_BASE)
+    git = FakeGitRunner(unavailable=(OLD_HEAD, OLD_BASE))  # old objects gone
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert "restamp_legacy_unprovable" in str(ei.value)
+    assert not gh.did_put()
+
+
+def test_merge_apply_head_race_refused_no_pr_merged(tmp_path):
+    # Scenario 7: server rejects the head-pinned merge (head moved post-read) → ForgeConfigError,
+    # no pr_merged appended.
+    run_id = _collected_author_run(tmp_path)
+    gh = FakeMergeGh(put_rc=1, put_stderr="409 head changed", live_head=OLD_HEAD)
+    git = FakeGitRunner(tree_by_ref={OLD_HEAD: "a" * 40})
+    with pytest.raises(_ForgeConfigError):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")] == ["pr_opened"]
+
+
+def test_merge_audit_tree_mismatch_records_alarm(tmp_path):
+    # Scenario 8: merged tree != tested tree → audit recorded with tree_equivalence False (alarm).
+    run_id = _collected_author_run(tmp_path)
+    gh = FakeMergeGh(merged=True, commit="f" * 40, live_head=OLD_HEAD)
+    git = FakeGitRunner(tree_by_ref={OLD_HEAD: "a" * 40, "f" * 40: "b" * 40})
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    assert result.merged is True and result.audit_tree_equivalence is False
+    audits = [r for r in _records(tmp_path, run_id) if r.get("record_type") == "runtime_merge_audit"]
+    assert len(audits) == 1 and audits[0]["tree_equivalence"] is False
 
 
 def test_merge_apply_ineligible_refuses_and_attests_nothing(tmp_path):
     run_id = _collected_author_run(tmp_path)
     gh = FakeMergeGh(rollup="FAILURE")  # checks not green → ineligible
     with pytest.raises(MergeRefused):
-        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True)
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=FakeGitRunner())
     assert not gh.did_put()  # never merged an ungated PR
-    doc = yaml.safe_load((tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml").read_text())
-    assert [r["outcome"] for r in doc["records"] if r.get("outcome")] == ["pr_opened"]
+    assert [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")] == ["pr_opened"]
 
 
 def test_merge_plan_ineligible_reports_would_not_merge(tmp_path):
@@ -584,6 +859,21 @@ def test_merge_plan_ineligible_reports_would_not_merge(tmp_path):
     gh = FakeMergeGh(review="CHANGES_REQUESTED")
     result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=False)
     assert result.would_merge is False and result.merged is False
+
+
+def test_merge_plan_content_drift_reports_status_no_mutation(tmp_path):
+    # Plan mode never raises for drift — it reports content_drift_refused and mutates nothing.
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(live_head=NEW_HEAD, live_base=NEW_BASE)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "A", NEW_HEAD: "B"},
+        carrier_by_head={OLD_HEAD: _carrier_text(paths), NEW_HEAD: _carrier_text(paths)},
+    )
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=False, git_runner=git)
+    assert result.head_status == "content_drift_refused" and result.would_merge is False
+    assert not gh.did_put()
+    assert [r["outcome"] for r in _records(tmp_path, run_id) if r.get("outcome")] == ["pr_opened"]
 
 
 def test_merge_refuses_uncollected_run(tmp_path):
@@ -611,13 +901,23 @@ def test_merge_refuses_when_chain_has_no_pr(tmp_path):
 
 
 def test_merge_uses_distinct_identity_no_token_minted(tmp_path, monkeypatch):
-    # merge_for_run mints NO per-run token — the merge rides the injected (distinct) runner only.
+    # Scenario 9: merge_for_run mints NO per-run token — the merge rides the injected runner only.
     import creator_engine_validator.v3_forge_join as mod
     monkeypatch.setattr(mod, "mint_scoped_token",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("merge minted a token!")))
     run_id = _collected_author_run(tmp_path)
-    result = merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(), apply=True)
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=FakeMergeGh(), apply=True,
+                           git_runner=FakeGitRunner())
     assert result.merged is True
+
+
+def test_merge_identity_drift_refuses(tmp_path):
+    # A re-targeted PR (branch/base changed) is content drift, never a re-stamp.
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE)
+    gh = FakeMergeGh(base="release-2.0", live_head=NEW_HEAD, live_base=NEW_BASE)  # base re-targeted
+    with pytest.raises(ForgeJoinRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=FakeGitRunner())
+    assert not gh.did_put()
 
 
 def test_ambient_gh_runner_injects_no_token(tmp_path):

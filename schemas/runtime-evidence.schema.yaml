@@ -72,6 +72,8 @@ properties:
         - $ref: "#/$defs/runtime_agent_action_record"
         - $ref: "#/$defs/runtime_spend_ledger_record"
         - $ref: "#/$defs/runtime_spend_breach_record"
+        - $ref: "#/$defs/runtime_change_restamp_record"
+        - $ref: "#/$defs/runtime_merge_audit_record"
     description: |
       The ordered, append-only record chain. Element 0 is the genesis record
       (`prev_hash` = the all-zero sentinel, `sequence` = 0); each subsequent
@@ -82,11 +84,15 @@ properties:
       orthogonal disposition axis), a `runtime_ratification_record` (the typed
       run-RATIFICATION attestation), a `runtime_agent_action_record` (the v3
       G-4 per-action attestation on its own orthogonal axis), a
-      `runtime_spend_ledger_record` (the v3 G-5 metered-spend leaf), OR a
-      `runtime_spend_breach_record` (the v3 G-5 circuit-breaker trip); the branches
-      are mutually exclusive (a record's `kind`/`record_type` consts + its
-      `lifecycle_phase`/`outcome`/`approver_ref`/`op`/`tier` discriminating fields
-      select exactly one branch).
+      `runtime_spend_ledger_record` (the v3 G-5 metered-spend leaf), a
+      `runtime_spend_breach_record` (the v3 G-5 circuit-breaker trip), a
+      `runtime_change_restamp_record` (the F6 Phase-0 machine base-only
+      re-stamp — the ONLY authority for base-only merge-head movement), OR a
+      `runtime_merge_audit_record` (the F6 Phase-0 squash tree-equivalence
+      audit binding what-was-TESTED to what-MERGED); the branches are mutually
+      exclusive (a record's `kind`/`record_type` consts + its
+      `lifecycle_phase`/`outcome`/`approver_ref`/`op`/`tier`/`restamp_type`
+      discriminating fields select exactly one branch).
   note:
     type: string
     maxLength: 1024
@@ -281,6 +287,17 @@ $defs:
           pr_number:
             type: integer
             minimum: 1
+          base_sha:
+            type: string
+            pattern: "^[0-9a-f]{7,40}$"
+            description: |
+              F6 Phase-0 (OPTIONAL, additive): the base-branch commit SHA
+              observed when the change identity was stamped. Propagated from the
+              dispatch `change.base_sha` by `cev3 collect`. The base-only
+              re-stamp proof recomputes the old change identity from
+              (`base_sha`, `head_sha`); a chain that lacks it is `legacy
+              unprovable` and is refused (NEVER silently overridden). Pre-F6
+              chains carry no `base_sha` and conserve their prior behavior.
   runtime_ratification_record:
     type: object
     description: |
@@ -688,3 +705,244 @@ $defs:
         description: |
           Optional: an OPAQUE, deterministic digest correlating a `hard`
           pause + escalate. NEVER a raw identifier.
+  runtime_change_restamp_record:
+    type: object
+    description: |
+      A typed F6 Phase-0 CHANGE-RE-STAMP record. It attests that the active
+      merge head for a run moved by BASE-ONLY motion and that CE
+      machine-proved rebase-equivalence — unchanged path-set, unchanged
+      content-pins, unchanged normalized non-mechanical diff identity, and an
+      unchanged stable patch-id — before re-stamping the change block to the
+      new head. It is the ONLY machine authority for base-only merge-head
+      movement: a live head that differs from the latest attested head is
+      EITHER re-stamped here after this proof OR refused as content drift
+      requiring full re-ratification — a raw head override is rejected as a
+      category (there is no `--head-override`). It is appended to the SAME
+      hash chain (content-addressed + chain-linked + policy-bound) so the
+      re-stamp is itself tamper-evident, and is its OWN record type on a
+      dimension ORTHOGONAL to the container `lifecycle_phase`, the run
+      `outcome`, the `ratification`, the agent `action`, and the spend axes —
+      NEVER a `lifecycle_phase` value. VALUE-FREE: it carries only git
+      content-addresses (base/head SHAs), normalized diff/patch identities,
+      and a path-set hash; NEVER a raw account / host / credential.
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - restamp_type
+      - authority
+      - pr_number
+      - branch
+      - base
+      - old_base_sha
+      - old_head_sha
+      - new_base_sha
+      - new_head_sha
+      - manifest_paths_sha256
+      - old_content_diff_id
+      - new_content_diff_id
+      - old_patch_id
+      - new_patch_id
+      - proof_inputs_sha256
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-change-restamp
+      record_type:
+        type: string
+        const: runtime_change_restamp
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests, identical to
+          the other records' binding (the check enforces `^[0-9a-f]{64}$` and
+          emits `runtime_evidence_policy_unbound` when absent or malformed).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      restamp_type:
+        type: string
+        enum: [base_only]
+        description: |
+          Phase 0 mechanizes exactly ONE re-stamp tier: `base_only`. Content
+          amendments are NOT re-stamped here — they route through the existing
+          fresh ratification / adopt path (a new change identity), never a
+          silent acceptance. The enum is the discriminator for this branch.
+      authority:
+        type: string
+        enum: [machine_rebase_equivalence]
+        description: |
+          The authority under which the head moved. The ONLY admissible value
+          is `machine_rebase_equivalence` — there is no human/operator
+          head-override authority in Phase 0.
+      pr_number:
+        type: integer
+        minimum: 1
+      branch:
+        type: string
+        minLength: 1
+      base:
+        type: string
+        minLength: 1
+      old_base_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The base SHA the prior attested change identity was over.
+      old_head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The prior attested head SHA (the stale pin).
+      new_base_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The current base SHA the live PR head is over.
+      new_head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The current live PR head SHA the merge will pin.
+      manifest_paths_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          The normalized path-set hash (the carrier canonicalization rule)
+          proved unchanged across the motion — a path-set drift refuses.
+      old_content_diff_id:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: SHA256 of the old normalized non-mechanical content diff.
+      new_content_diff_id:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          SHA256 of the new normalized non-mechanical content diff. MUST equal
+          `old_content_diff_id` for a base-only re-stamp (else content drift).
+      old_patch_id:
+        type: string
+        pattern: "^[0-9a-f]{7,64}$"
+        description: Git stable patch-id of the old diff.
+      new_patch_id:
+        type: string
+        pattern: "^[0-9a-f]{7,64}$"
+        description: |
+          Git stable patch-id of the new diff. MUST equal `old_patch_id` for a
+          base-only re-stamp.
+      proof_inputs_sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: |
+          A digest over the exact inputs used to compute the proof, so the
+          re-stamp decision is itself reproducible from the recorded facts.
+  runtime_merge_audit_record:
+    type: object
+    description: |
+      A typed F6 Phase-0 MERGE-AUDIT record. Squash-merge makes the merged
+      commit SHA neither the reviewed PR head nor a parent of it, so the
+      conserved invariant is tree/diff equivalence: the TESTED head tree MUST
+      equal the MERGED tree. This record binds what-was-TESTED to
+      what-MERGED, appended to the SAME hash chain after an ACTUAL merge so
+      the binding is tamper-evident. It is its OWN record type ORTHOGONAL to
+      every other axis and is NEVER a `lifecycle_phase` value. VALUE-FREE: it
+      carries only git content-addresses (head/tree/commit SHAs) and the
+      method enum; NEVER a raw account / host / credential. A `false`
+      `tree_equivalence` is an operator-visible integrity alarm
+      (`merge_audit_tree_mismatch`), never a silent pass.
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - policy_sha
+      - run_id
+      - sequence
+      - prev_hash
+      - content_hash
+      - recorded_at
+      - pr_number
+      - tested_head_sha
+      - tested_tree_sha
+      - merge_method
+      - merge_commit_sha
+      - merged_tree_sha
+      - tree_equivalence
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        const: runtime-merge-audit
+      record_type:
+        type: string
+        const: runtime_merge_audit
+      schema_version:
+        type: string
+        enum: ["1"]
+      policy_sha:
+        type: string
+        minLength: 1
+        description: |
+          The `policy_sha` of the runtime-policy the run attests, identical to
+          the other records' binding (the check enforces `^[0-9a-f]{64}$`).
+      run_id:
+        type: string
+        minLength: 1
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      content_hash:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      recorded_at:
+        type: string
+        minLength: 1
+      pr_number:
+        type: integer
+        minimum: 1
+      tested_head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The attested/re-stamped head SHA whose tree was tested green.
+      tested_tree_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The tree SHA of `tested_head_sha`.
+      merge_method:
+        type: string
+        enum: [squash]
+        description: Phase 0 merges direct squash; the audit makes squash honest.
+      merge_commit_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The resulting squash commit SHA reported by the forge.
+      merged_tree_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: The tree SHA of `merge_commit_sha`.
+      tree_equivalence:
+        type: boolean
+        description: |
+          `true` iff `tested_tree_sha == merged_tree_sha` — the conserved
+          what-was-TESTED == what-MERGES invariant. `false` is an alarm.

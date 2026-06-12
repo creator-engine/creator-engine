@@ -224,6 +224,102 @@ _CONFLICT_QUERY = (
 )
 
 
+@dataclass(frozen=True)
+class PullRequestState:
+    """The F6 Phase-0 COMBINED live PR-state observation — secret-free.
+
+    One GraphQL read of every fact the base-only re-stamp algorithm needs
+    before any side effect: the change identity (``branch`` / ``base`` /
+    ``head_sha`` / ``base_sha``) plus the three merge-gates folded inline
+    (``review_decision`` / ``rollup_state`` / ``merge_state_status`` +
+    ``mergeable``). ``eligible`` composes the gate exactly as
+    :func:`~.merge.merge` does (``approved and all_green and mergeable ==
+    "MERGEABLE"``). Carries only shape facts / content-addresses — NEVER a
+    credential, account, or registry identifier.
+    """
+
+    pr_number: int
+    branch: str
+    base: str
+    head_sha: str
+    base_sha: str
+    review_decision: str | None
+    approved: bool
+    rollup_state: str
+    all_green: bool
+    merge_state_status: str
+    mergeable: str | None
+    up_to_date: bool
+    eligible: bool
+
+    def to_dict(self) -> dict:
+        return {
+            "pr_number": self.pr_number,
+            "branch": self.branch,
+            "base": self.base,
+            "head_sha": self.head_sha,
+            "base_sha": self.base_sha,
+            "review_decision": self.review_decision,
+            "approved": self.approved,
+            "rollup_state": self.rollup_state,
+            "all_green": self.all_green,
+            "merge_state_status": self.merge_state_status,
+            "mergeable": self.mergeable,
+            "up_to_date": self.up_to_date,
+            "eligible": self.eligible,
+        }
+
+
+_PR_STATE_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!)"
+    "{repository(owner:$owner,name:$name){pullRequest(number:$number)"
+    "{number headRefName baseRefName headRefOid baseRefOid reviewDecision "
+    "mergeStateStatus mergeable "
+    "commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}"
+)
+
+
+def pr_state(change: ChangeRef, *, gh_runner: GhRunner | None = None) -> PullRequestState:
+    """Read the change's COMBINED live PR state in ONE GraphQL read (read-only).
+
+    The F6 Phase-0 base-only re-stamp reads the live head/base SHAs, the
+    branch/base identity, and the three merge-gates together so it can refuse
+    on identity mismatch and decide re-stamp-vs-content-drift BEFORE any merge
+    PUT. Refuses (``ChangeStatusRefused``) a malformed repo / a change with no
+    open PR before any forge call; a transport failure raises
+    ``ForgeConfigError``. A null status-check rollup is conservatively NOT green
+    (mirrors :func:`checks_state`).
+    """
+    _validate_change(change)
+    runner = gh_runner or _default_gh_runner
+    pr = _read_pr_node(runner, change, _PR_STATE_QUERY)
+    decision = pr.get("reviewDecision")
+    nodes = (pr.get("commits") or {}).get("nodes") or []
+    rollup = None
+    if nodes and isinstance(nodes[0], dict):
+        rollup = (nodes[0].get("commit") or {}).get("statusCheckRollup")
+    rollup_state = (rollup or {}).get("state") or "EXPECTED"
+    merge_state_status = pr.get("mergeStateStatus") or "UNKNOWN"
+    mergeable = pr.get("mergeable")
+    approved = decision == "APPROVED"
+    all_green = rollup_state == "SUCCESS"
+    return PullRequestState(
+        pr_number=change.pr_number,  # type: ignore[arg-type]
+        branch=pr.get("headRefName") or "",
+        base=pr.get("baseRefName") or "",
+        head_sha=pr.get("headRefOid") or "",
+        base_sha=pr.get("baseRefOid") or "",
+        review_decision=decision,
+        approved=approved,
+        rollup_state=rollup_state,
+        all_green=all_green,
+        merge_state_status=merge_state_status,
+        mergeable=mergeable,
+        up_to_date=(merge_state_status != "BEHIND"),
+        eligible=(approved and all_green and mergeable == "MERGEABLE"),
+    )
+
+
 def review_state(change: ChangeRef, *, gh_runner: GhRunner | None = None) -> ReviewState:
     """Read the change's review decision (read-only; refuses a change with no open PR)."""
     _validate_change(change)

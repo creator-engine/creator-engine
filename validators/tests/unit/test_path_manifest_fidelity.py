@@ -8,7 +8,10 @@ from creator_engine_validator.checks.path_manifest_fidelity import (
     MANIFEST_DIR,
     PEDAGOGICAL_SENTINEL,
     SLUG_PATTERN,
+    CarrierIdentity,
     branch_slug,
+    parse_carrier,
+    parse_carrier_file,
     run,
     run_with_base,
     scan_document,
@@ -41,6 +44,48 @@ def _build_doc(paths: list[str], declared_count: int | None = None, declared_sha
 def test_path_manifest_fidelity_registered():
     checks = registered_checks()
     assert CHECK_NAME in checks
+
+
+# ----------------------------------------------------------- F6 structured carrier identity
+def test_parse_carrier_returns_structured_identity():
+    paths = ["b/y.py", "a/x.py", ".ce/pr-manifests/c.md"]
+    ident = parse_carrier(_build_doc(paths, prefix="AUTHORIZED"))
+    assert isinstance(ident, CarrierIdentity)
+    assert ident.declared_count == 3
+    assert ident.paths == (".ce/pr-manifests/c.md", "a/x.py", "b/y.py")  # sorted-unique
+    assert ident.consistent is True
+    # normalized hash is the carrier canonicalization rule
+    count, sha = _normalized_hash(paths)
+    assert ident.normalized_sha256 == sha
+
+
+def test_parse_carrier_path_set_hash_stable_across_mechanical_prose():
+    # two carriers with the SAME path-set but different prose share the normalized hash.
+    paths = ["a/x.py", "a/y.py"]
+    doc_a = "# base OLD\n\n" + _build_doc(paths, prefix="AUTHORIZED")
+    doc_b = "# base NEW (re-pinned)\n\n" + _build_doc(paths, prefix="AUTHORIZED")
+    ia, ib = parse_carrier(doc_a), parse_carrier(doc_b)
+    assert ia.normalized_sha256 == ib.normalized_sha256
+    # a real path-set change DOES move the hash
+    ic = parse_carrier(_build_doc(paths + ["a/z.py"], prefix="AUTHORIZED"))
+    assert ic.normalized_sha256 != ia.normalized_sha256
+
+
+def test_parse_carrier_flags_inconsistent_declaration():
+    ident = parse_carrier(_build_doc(["a/x.py", "a/y.py"], declared_count=99, prefix="AUTHORIZED"))
+    assert ident is not None and ident.consistent is False
+
+
+def test_parse_carrier_none_without_manifest_block():
+    assert parse_carrier("# just prose, no manifest\n") is None
+
+
+def test_parse_carrier_file_roundtrip(tmp_path):
+    p = tmp_path / "carrier.md"
+    p.write_text(_build_doc(["a/x.py"], prefix="AUTHORIZED"), encoding="utf-8")
+    ident = parse_carrier_file(p)
+    assert ident is not None and ident.paths == ("a/x.py",)
+    assert parse_carrier_file(tmp_path / "absent.md") is None
 
 
 def test_scan_document_passes_on_well_formed_manifest():
