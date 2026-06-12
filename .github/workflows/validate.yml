@@ -103,18 +103,19 @@ jobs:
           # Fetch the PR base so `<base>..HEAD` resolves; actions/checkout is a
           # shallow single-commit checkout by default.
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # The PR head branch resolves this PR's own carrier slug (ce-ops#21).
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git fetch --no-tags --depth=1 origin "${PR_BASE_SHA}" || true
-          # Convention: a PR carries its ratified closed manifest as a fenced
-          # path-manifest document at `.ce/pr-path-manifest.md`. When that file
-          # is present, enforce the diff against it; otherwise the gate is
-          # NEUTRAL (transition-safe — non-manifest PRs are not failed).
-          MANIFEST_ARG=""
-          if [ -f .ce/pr-path-manifest.md ]; then
-            MANIFEST_ARG="--manifest .ce/pr-path-manifest.md"
-          fi
+          # Per-PR carrier convention (ce-ops#21): each gate PR carries its ratified
+          # closed manifest as its OWN file `.ce/pr-manifests/<branch-slug>.md`. The
+          # validator discovers this PR's carrier from the diff (exactly one, ADDED,
+          # slug == branch_slug(head)) and enforces diff == its path-set; a PR with no
+          # carrier under that directory is NEUTRAL (transition-safe). Discovery lives
+          # in the validator (pytest-tested), so this step is one unconditional call.
           PYTHONPATH=validators python -m creator_engine_validator \
-            verify-path-manifest --base "${PR_BASE_SHA}" ${MANIFEST_ARG}
+            verify-path-manifest --base "${PR_BASE_SHA}" \
+            --manifest-dir .ce/pr-manifests --head-ref "${GITHUB_HEAD_REF}"
 
       - name: Workflow permissions audit (no write permissions present)
         run: |

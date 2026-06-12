@@ -47,7 +47,7 @@ The classic branch-protection CE applies to its own `main`:
 
 | Field | Value | Why |
 | --- | --- | --- |
-| required status check | `Validate governance artifacts` (strict / up-to-date) | the one required job runs **both** the pytest suite and the `verify-path-manifest` diff-gate, so scope-containment is enforced when a PR carries `.ce/pr-path-manifest.md` |
+| required status check | `Validate governance artifacts` (strict / up-to-date) | the one required job runs **both** the pytest suite and the `verify-path-manifest` diff-gate, so scope-containment is enforced when a PR carries its per-PR carrier `.ce/pr-manifests/<branch-slug>.md` |
 | required approving reviews | `1`, last-push-approval on, dismiss-stale on | an independent, current approval is always required |
 | **require Code Owner review** | **on** | pins the required non-author approval to the CE-managed reviewer identity in `.github/CODEOWNERS` |
 | linear history | on | squash + linear keeps history auditable |
@@ -103,13 +103,14 @@ future refinement.
 
 ## g. Carrier convention (the enforcement that makes plane B real)
 
-Every gate PR carries its ratified closed manifest at `.ce/pr-path-manifest.md`
-(see `PATH_MANIFEST_FIDELITY_PROTOCOL.md`). Because the diff-gate runs inside the
-required `Validate governance artifacts` check, a gate PR whose `base..HEAD`
-diff drifts from its carried manifest **cannot merge**. This converts
-scope-containment from post-hoc verification by the Controller into a machine
-gate. This PR dogfoods it: it carries its own 7-path manifest, so its CI
-diff-gate runs active.
+Every gate PR carries its ratified closed manifest as its own per-PR carrier
+`.ce/pr-manifests/<branch-slug>.md` (see `PATH_MANIFEST_FIDELITY_PROTOCOL.md`).
+Because the diff-gate runs inside the required `Validate governance artifacts`
+check, a gate PR whose `base..HEAD` diff drifts from its carried manifest
+**cannot merge**. This converts scope-containment from post-hoc verification by
+the Controller into a machine gate. Because each PR's carrier has a distinct
+path, two concurrently-open gate PRs never conflict on the carrier file (the
+ce-ops#21 migration from the single shared `.ce/pr-path-manifest.md`).
 
 ## h. How the orchestrator uses this
 

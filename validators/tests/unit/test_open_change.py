@@ -25,7 +25,9 @@ from creator_engine_validator.forge.change import (
 _PLAN_REF = "a" * 64  # 64-hex policy/plan digest
 _REPO = "creator-engine/creator-engine"
 _MANIFEST = (
-    ".ce/pr-path-manifest.md",
+    # Per-PR carrier convention (ce-ops#21): the carrier filename stem is
+    # ``branch_slug("ce/run-abc") == "ce-run-abc"``.
+    ".ce/pr-manifests/ce-run-abc.md",
     "validators/creator_engine_validator/forge/change.py",
 )
 
