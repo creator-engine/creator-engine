@@ -79,6 +79,19 @@ def test_wheelhouse_validator_wheel_exposes_fanin_and_queue(validator_wheel: Pat
     )
 
 
+def test_wheelhouse_validator_wheel_exposes_claim_surface(validator_wheel: Path):
+    """ce-ops#38: the built `ce` wheel must register `claim acquire|release|status`."""
+    bundled = _bundled_ce_cli(validator_wheel)
+    assert 'add_parser(\n        "claim"' in bundled or 'add_parser("claim"' in bundled, (
+        "built wheel does not register the `ce claim` group (ce-ops#38 work-claim "
+        "surface missing — rebuild the wheel from branch source)"
+    )
+    for sub in ("acquire", "release", "status"):
+        assert f'add_parser("{sub}"' in bundled, (
+            f"built wheel's `ce claim` group does not register the {sub!r} subcommand"
+        )
+
+
 def test_wheelhouse_validator_wheel_does_not_register_dev(validator_wheel: Path):
     bundled = _bundled_ce_cli(validator_wheel)
     assert 'add_parser("dev"' not in bundled and "add_parser('dev'" not in bundled, (

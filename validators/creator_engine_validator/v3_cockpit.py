@@ -448,7 +448,43 @@ def _right_rail_text(snapshot: dict[str, Any]) -> str:
         lines.append(f"  hard: {hard}")
     for advisory in posture.get("advisory", []):
         lines.append(f"  advisory: {advisory}")
+    lines.append("")
+
+    # ce-ops#38 work-claim locks — the ops-board "locks" band (render-only; binds
+    # the precomputed L2 ``snapshot["claims"]`` — no governance computation here).
+    lines += _claims_band_lines(snapshot)
     return "\n".join(lines)
+
+
+def _claims_band_lines(snapshot: dict[str, Any]) -> list[str]:
+    """The work-claim locks band — bound from the precomputed ``snapshot["claims"]``."""
+    claims = snapshot.get("claims", {})
+    availability = (snapshot.get("availability", {}) or {}).get("claims", "—")
+    active = claims.get("active_count", 0)
+    heading_hex = SEMANTIC_HEX["gate"] if claims.get("foreign_count") else SEMANTIC_HEX["violet"]
+    lines = [f"[{heading_hex}]🔒 WORK CLAIMS ({active} active)[/]"]
+    if availability == "unavailable":
+        lines.append(f"[{SEMANTIC_HEX['amber']}]  claim cache unavailable[/]")
+        return lines
+    stale = claims.get("stale_count", 0)
+    invalid = claims.get("invalid_count", 0)
+    fetched = claims.get("cache_fetched_at") or "—"
+    lines.append(f"  fetched {fetched} · stale {stale} · invalid {invalid}")
+    for entry in claims.get("entries", []):
+        if entry.get("status") not in ("active", "conflict"):
+            continue
+        flag = ""
+        if entry.get("stale"):
+            flag += f" [{SEMANTIC_HEX['amber']}]STALE[/]"
+        if entry.get("status") == "conflict":
+            flag += f" [{SEMANTIC_HEX['gate']}]CONFLICT[/]"
+        lines.append(
+            f"  • {entry.get('holder', '—')}@{entry.get('host', '—')} "
+            f"({entry.get('claim_id', '—')}){flag}"
+        )
+    if not any(e.get("status") in ("active", "conflict") for e in claims.get("entries", [])):
+        lines.append("  —")
+    return lines
 
 
 class CockpitApp(App[None]):
