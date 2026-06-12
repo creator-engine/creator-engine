@@ -219,12 +219,44 @@ def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
     assert "--setting-sources" in inner and "project" in inner
 
 
-def test_non_claude_harness_command_unchanged(monkeypatch):
-    # A non-Claude harness must not get the governed Claude command injected.
+def test_codex_launch_builds_governed_env_scrubbed_command(monkeypatch):
+    # Codex does not get the Claude MCP command, but it is no longer raw pass-through:
+    # CDX-D Ring 0 wraps it with an ambient GitHub credential scrub.
     adapter = FakeAdapter()
-    result = launch_runtime.launch(harness="codex", session="s", extra_args=["--foo"], tmux_adapter=adapter)
-    # ce-ops#26: non-claude commands pass through byte-identical INSIDE the wrapper.
-    assert _inner_argv(result) == ["codex", "--foo"]
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    result = launch_runtime.launch(
+        harness="codex",
+        session="s",
+        extra_args=["--model", "gpt-5"],
+        tmux_adapter=adapter,
+    )
+    inner = _inner_argv(result)
+    assert inner[:2] == ["env", "-u"]
+    assert "GH_TOKEN" in inner and "GITHUB_TOKEN" in inner
+    assert inner[-3:] == ["codex", "--model", "gpt-5"]
+    assert result.plan.codex_bypass_mode == "config"
+
+
+def test_codex_launch_refuses_unsafe_surface_before_side_effects(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    with pytest.raises(launch_runtime.CodexLaunchRefused) as exc:
+        launch_runtime.launch(harness="codex", extra_args=["exec"], tmux_adapter=adapter)
+    assert "CDX-D-1" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_claude_args_do_not_affect_codex_cli_route(monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    result = launch_runtime.launch(harness="codex", session="s", tmux_adapter=adapter)
+    assert "--dangerously-skip-permissions" not in _inner_argv(result)
 
 
 def test_seat_surface_dispatch_driven_seat_id_is_run_id(tmp_path):

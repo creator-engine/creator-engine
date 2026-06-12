@@ -626,6 +626,13 @@ def _build_parser() -> argparse.ArgumentParser:
             help="repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values)",
         )
         p.add_argument(
+            "--codex-arg",
+            action="append",
+            dest="codex_arg",
+            default=None,
+            help="repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values)",
+        )
+        p.add_argument(
             "--mcp-config",
             dest="mcp_config",
             default=None,
@@ -1481,6 +1488,11 @@ def _init(args) -> int:
 
 
 def _launch(args, invoked_as: str = "launch") -> int:
+    harness_args = None
+    if args.harness == "claude":
+        harness_args = getattr(args, "claude_arg", None)
+    elif args.harness == "codex":
+        harness_args = getattr(args, "codex_arg", None)
     try:
         result = launch_runtime.launch(
             harness=args.harness,
@@ -1490,7 +1502,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             resume=args.resume,
             dry_run=args.dry_run,
             visible=not args.no_tmux,
-            extra_args=getattr(args, "claude_arg", None),
+            extra_args=harness_args,
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),

@@ -218,6 +218,18 @@ def _fake_bridge(monkeypatch):
     return calls
 
 
+def _fake_codex_transcript_locator(monkeypatch):
+    monkeypatch.setattr(v3_seat_bridge, "snapshot_codex_transcripts", lambda: set())
+
+    def fake_stamp(record, **_kw):
+        record.data["harness_session_id"] = "codex-session-1"
+        record.data["transcript_ref"] = str(record.dispatch_dir / "codex.jsonl")
+        v3_seat_bridge._write_record(record)
+        return record
+
+    monkeypatch.setattr(v3_seat_bridge, "stamp_codex_transcript_locator", fake_stamp)
+
+
 def test_drive_spawn_refuses_unratified_without_touching_disk(tmp_path, capsys, monkeypatch):
     calls = _fake_bridge(monkeypatch)
     _file_ready(tmp_path)  # filed, NOT ratified → front gate must hold
@@ -249,18 +261,56 @@ def test_drive_spawn_materializes_and_spawns_governed_seat(tmp_path, capsys, mon
     assert data["terminal"]["pane_id"] == "%9"
 
 
-def test_drive_spawn_refuses_non_claude_harness(tmp_path, capsys, monkeypatch):
+def test_drive_spawn_allows_low_risk_codex_harness(tmp_path, capsys, monkeypatch):
     calls = _fake_bridge(monkeypatch)
+    _fake_codex_transcript_locator(monkeypatch)
     _file_ready(tmp_path)
     v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
     capsys.readouterr()
     code = v3_cli.main(
-        ["drive", "rate-limit-login", "--spawn", "--harness", "codex", "--root", str(tmp_path)]
+        ["drive", "rate-limit-login", "--spawn", "--harness", "codex", "--root", str(tmp_path), "--json"]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["harness"] == "codex"
+    assert calls["spawn"] == [payload["run_id"]]
+    data = yaml.safe_load((tmp_path / "dispatches" / payload["run_id"] / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["harness"] == "codex"
+    assert data["harness_boundary"] == "codex_external_gate"
+    assert data["transcript_ref"].endswith("codex.jsonl")
+
+
+def test_drive_spawn_refuses_high_risk_codex_without_override(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path, change_type="schema")
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+    code = v3_cli.main(
+        ["drive", "rate-limit-login", "--spawn", "--harness", "codex", "--root", str(tmp_path), "--json"]
     )
     assert code == 2
-    out = capsys.readouterr().out
-    assert "G1-codex" in out and "not bridged" in out
-    assert calls["spawn"] == []  # never reached the spawn leg
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["reason"] == "codex_risk_refused"
+    assert calls["spawn"] == []
+    assert not (tmp_path / "dispatches").exists()
+
+
+def test_drive_spawn_high_risk_codex_override_recorded(tmp_path, capsys, monkeypatch):
+    calls = _fake_bridge(monkeypatch)
+    _fake_codex_transcript_locator(monkeypatch)
+    _file_ready(tmp_path, change_type="schema")
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    override = "c" * 64
+    capsys.readouterr()
+    code = v3_cli.main([
+        "drive", "rate-limit-login", "--spawn", "--harness", "codex",
+        "--codex-risk-override", override, "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert calls["spawn"] == [payload["run_id"]]
+    data = yaml.safe_load((tmp_path / "dispatches" / payload["run_id"] / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["codex_risk_override"] == override
 
 
 def test_drive_spawn_no_unattended_omits_skip_perms(tmp_path, capsys, monkeypatch):
@@ -339,6 +389,23 @@ def _transcript(path: Path, *, n_turns: int = 2) -> Path:
                         "usage": {"input_tokens": 1000, "output_tokens": 200}},
         }))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _codex_transcript(path: Path, *, session_id: str, cwd: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": str(cwd.resolve()),
+                "timestamp": "2026-06-12T12:00:00Z",
+                "cli_version": "0.0.0",
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -579,6 +646,52 @@ def test_collect_unstamped_record_conserves_zero_spend(tmp_path, capsys, monkeyp
     assert payload["spend_leaves"] == 0
     assert payload["outcome"] == "no_change"
     assert payload["transcript_source"] == "unstamped"
+
+
+def test_collect_codex_uses_spawn_stamped_transcript_ref(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    sid = "codex-session-1"
+    tpath = _codex_transcript(tmp_path / "codex" / "session.jsonl", session_id=sid, cwd=tmp_path)
+    dpath = tmp_path / "dispatches" / run_id / "dispatch.yaml"
+    drec = yaml.safe_load(dpath.read_text(encoding="utf-8"))
+    drec["harness"] = "codex"
+    drec["harness_session_id"] = sid
+    drec["transcript_ref"] = str(tpath)
+    dpath.write_text(yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["transcript_source"] == "stamped"
+    assert payload["spend_leaves"] == 0
+
+
+def test_collect_codex_falls_back_to_sessions_exact_key(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    sid = "codex-session-2"
+    home = tmp_path / "home"
+    _codex_transcript(
+        home / ".codex" / "sessions" / "2026" / "06" / "12" / "session.jsonl",
+        session_id=sid,
+        cwd=tmp_path,
+    )
+    monkeypatch.setenv("HOME", str(home))
+    dpath = tmp_path / "dispatches" / run_id / "dispatch.yaml"
+    drec = yaml.safe_load(dpath.read_text(encoding="utf-8"))
+    drec["harness"] = "codex"
+    drec["harness_session_id"] = sid
+    drec.pop("transcript_ref", None)
+    dpath.write_text(yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["transcript_source"] == "stamped"
 
 
 # ---------------------------------------------------------------------------
@@ -1361,6 +1474,16 @@ def test_review_refuses_scope_mismatch(tmp_path, capsys, monkeypatch):
     code = v3_cli.main(_review_argv(tmp_path, run_id, scope="other-scope"))
     assert code == 2
     assert json.loads(capsys.readouterr().out)["error"] == "scope_mismatch"
+
+
+def test_review_codex_harness_is_deferred(tmp_path, capsys, monkeypatch):
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id, harness="codex", spawn=True))
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "codex_review_deferred"
 
 
 def test_review_assemble_only_materializes_envelope_and_dispatch(tmp_path, capsys, monkeypatch):

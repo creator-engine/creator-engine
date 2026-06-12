@@ -400,6 +400,13 @@ def _cmd_drive(args: argparse.Namespace) -> int:
     )
 
 
+CODEX_LOW_RISK_CLASSES = frozenset({"none", "docs", "code"})
+
+
+def _valid_hex64(value: str | None) -> bool:
+    return bool(value and re.fullmatch(r"[0-9a-fA-F]{64}", value))
+
+
 def _drive_spawn(
     args: argparse.Namespace,
     root: Path,
@@ -408,23 +415,67 @@ def _drive_spawn(
 ) -> int:
     """`--spawn`: materialize the dispatch → spawn the governed seat → seed the brief.
 
-    The front gate already held (caller has a DispatchPlan). Scoped to the
-    ``claude`` harness (defect-c declared OUT; codex is the G1-codex follow-up).
-    The subprocess seams live in ``v3_seat_bridge`` (faked in CI).
+    The front gate already held (caller has a DispatchPlan). Harness selection is
+    explicit: Claude is the default stronger Ring-1 path; Codex is accepted only
+    under the G1-codex low-risk guard or a value-free override digest.
     """
-    if args.harness != v3_seat_bridge.BRIDGE_HARNESS:
+    if args.harness not in v3_seat_bridge.HARNESS_BRIDGES:
         return _emit(
             args, 2,
             [f"{_BRAND} · drive --spawn refused: harness {args.harness!r} is not bridged "
-             f"(only {v3_seat_bridge.BRIDGE_HARNESS!r}); codex drive-spawn is the G1-codex follow-up"],
+             f"(available: {', '.join(sorted(v3_seat_bridge.HARNESS_BRIDGES))})"],
             {"action": "spawn_refused", "reason": "harness_not_supported",
-             "harness": args.harness, "followup": "G1-codex"},
+             "harness": args.harness},
+        )
+    codex_risk_override = getattr(args, "codex_risk_override", None)
+    if args.harness == v3_seat_bridge.CODEX_BRIDGE_HARNESS:
+        if plan.mutation_class not in CODEX_LOW_RISK_CLASSES:
+            if not _valid_hex64(codex_risk_override):
+                return _emit(
+                    args, 2,
+                    [f"{_BRAND} · drive --spawn refused: Codex is externally-gate-governed "
+                     f"and may not drive mutation class {plan.mutation_class!r} without "
+                     "--codex-risk-override <HEX64>"],
+                    {"action": "spawn_refused", "reason": "codex_risk_refused",
+                     "harness": args.harness, "mutation_class": plan.mutation_class},
+                )
+        elif codex_risk_override and not _valid_hex64(codex_risk_override):
+            return _emit(
+                args, 2,
+                [f"{_BRAND} · drive --spawn refused: --codex-risk-override must be a "
+                 "value-free 64-hex digest"],
+                {"action": "spawn_refused", "reason": "codex_risk_override_malformed",
+                 "harness": args.harness},
+            )
+    elif codex_risk_override:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · drive --spawn refused: --codex-risk-override applies only to "
+             "the codex harness"],
+            {"action": "spawn_refused", "reason": "codex_risk_override_wrong_harness",
+             "harness": args.harness},
         )
     unattended = not args.no_unattended
-    record = v3_seat_bridge.materialize_dispatch(plan, root, unattended=unattended)
+    record = v3_seat_bridge.materialize_dispatch(
+        plan,
+        root,
+        harness=args.harness,
+        unattended=unattended,
+        codex_risk_override=codex_risk_override if args.harness == v3_seat_bridge.CODEX_BRIDGE_HARNESS else None,
+    )
+    codex_before: set[Path] | None = None
+    launched_cwd = Path.cwd().resolve()
+    if args.harness == v3_seat_bridge.CODEX_BRIDGE_HARNESS:
+        codex_before = v3_seat_bridge.snapshot_codex_transcripts()
     try:
         spawn = v3_seat_bridge.spawn_seat(record)
         v3_seat_bridge.seed_brief(record)
+        if args.harness == v3_seat_bridge.CODEX_BRIDGE_HARNESS:
+            v3_seat_bridge.stamp_codex_transcript_locator(
+                record,
+                before=codex_before or set(),
+                launched_cwd=launched_cwd,
+            )
     except v3_seat_bridge.SeatBridgeError as exc:
         # Fail-closed: the dispatch was materialized before the v1 launch leg, so a
         # refused spawn would otherwise sit on disk with terminal/spawned_at unset —
@@ -442,7 +493,7 @@ def _drive_spawn(
     pane = spawn.terminal.get("pane_id")
     lines = [
         f"{_BRAND} · SPAWNED governed seat for Scope {plan.scope_id!r} "
-        f"(class {plan.mutation_class}, run {record.run_id})",
+        f"(class {plan.mutation_class}, harness {args.harness}, run {record.run_id})",
         f"    spend_envelopes: {json.dumps(envelopes, sort_keys=True)}",
         f"    dispatch: {record.dispatch_path}",
         f"    pane: {pane}"
@@ -451,7 +502,8 @@ def _drive_spawn(
     return _emit(
         args, 0, lines,
         {"action": "spawned", "scope_id": plan.scope_id, "run_id": record.run_id,
-         "mutation_class": plan.mutation_class, "unattended": unattended,
+         "mutation_class": plan.mutation_class, "harness": args.harness,
+         "unattended": unattended,
          "dispatch_path": str(record.dispatch_path), "pane_id": pane,
          "terminal": spawn.terminal, "resource_bound": spawn.resource_bound},
     )
@@ -1048,7 +1100,7 @@ def _claude_config_dir(args: argparse.Namespace) -> Path:
 
 
 def _resolve_collect_transcript(
-    args: argparse.Namespace, session_id: Any, run_id: str
+    args: argparse.Namespace, dispatch: dict[str, Any], run_id: str
 ) -> tuple[Path | None, str, tuple[int, list[str], dict[str, Any]] | None]:
     """D6/F9 transcript resolution: the dispatch NAMES its transcript, collect never guesses.
 
@@ -1066,6 +1118,8 @@ def _resolve_collect_transcript(
     """
     override = getattr(args, "transcript_override", None)
     explicit = getattr(args, "transcript", None)
+    harness = str(dispatch.get("harness") or v3_seat_bridge.DEFAULT_BRIDGE_HARNESS)
+    session_id = dispatch.get("harness_session_id")
     sid = str(session_id) if session_id else ""
 
     def _not_found(path: Path, kind: str) -> tuple[int, list[str], dict[str, Any]]:
@@ -1080,6 +1134,68 @@ def _resolve_collect_transcript(
         if not tp.is_file():
             return None, "", _not_found(tp, "transcript-override")
         return tp, "operator_override", None
+
+    if harness == v3_seat_bridge.CODEX_BRIDGE_HARNESS:
+        transcript_ref = str(dispatch.get("transcript_ref") or "")
+
+        def _codex_meta_id(path: Path) -> str:
+            meta = v3_seat_bridge._read_codex_session_meta(path)
+            return str((meta or {}).get("id") or "")
+
+        if explicit:
+            tp = Path(explicit)
+            if not tp.is_file():
+                return None, "", _not_found(tp, "transcript")
+            if sid and _codex_meta_id(tp) != sid:
+                return None, "", (
+                    2,
+                    [f"{_BRAND} · collect refused: --transcript {tp.name!r} does not match the "
+                     f"Codex run's stamped session id {sid!r} — refusing the mis-fold "
+                     f"(pass --transcript-override to fold a salvaged transcript anyway)"],
+                    {"error": "transcript_id_mismatch", "run_id": run_id,
+                     "stamped_session_id": sid, "given_session_id": _codex_meta_id(tp)},
+                )
+            return tp, "stamped", None
+
+        if transcript_ref:
+            tp = Path(transcript_ref)
+            if tp.is_file() and (not sid or _codex_meta_id(tp) == sid):
+                return tp, "stamped", None
+            if tp.is_file() and sid:
+                return None, "", (
+                    2,
+                    [f"{_BRAND} · collect refused: stamped Codex transcript_ref {tp} no longer "
+                     f"matches session id {sid!r}"],
+                    {"error": "transcript_id_mismatch", "run_id": run_id,
+                     "stamped_session_id": sid, "transcript_ref": str(tp)},
+                )
+        if sid:
+            hits = v3_seat_bridge._find_codex_transcripts(session_id=sid)
+            if not hits:
+                return None, "", (
+                    2,
+                    [f"{_BRAND} · collect refused: no Codex transcript for stamped session id "
+                     f"{sid!r} under {Path.home() / '.codex' / 'sessions'} — a spawned Codex "
+                     "seat must have a transcript (pass --transcript-override to fold a salvaged one)"],
+                    {"error": "stamped_transcript_missing", "run_id": run_id,
+                     "harness_session_id": sid,
+                     "sessions_dir": str(Path.home() / ".codex" / "sessions")},
+                )
+            if len(hits) > 1:
+                return None, "", (
+                    2,
+                    [f"{_BRAND} · collect refused: {len(hits)} Codex transcripts match stamped "
+                     f"session id {sid!r} — refusing an ambiguous fold"],
+                    {"error": "stamped_transcript_ambiguous", "run_id": run_id,
+                     "harness_session_id": sid, "matches": [str(path) for path, _meta in hits]},
+                )
+            return hits[0][0], "stamped", None
+        return None, "", (
+            2,
+            [f"{_BRAND} · collect refused: Codex dispatch has no stamped transcript_ref or "
+             "harness_session_id (pass --transcript-override only for salvage)"],
+            {"error": "stamped_transcript_missing", "run_id": run_id},
+        )
 
     if sid:
         if explicit:
@@ -1187,8 +1303,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     # 2) Resolve the harness transcript by the stamped session id — never by guess (D6/F9).
     #    The mis-fold that metered the orchestrator on the #14/#21 chains is machine-blocked.
-    session_id = dispatch.get("harness_session_id")
-    tpath, transcript_source, refusal = _resolve_collect_transcript(args, session_id, run_id)
+    tpath, transcript_source, refusal = _resolve_collect_transcript(args, dispatch, run_id)
     if refusal is not None:
         code, lines, payload = refusal
         return _emit(args, code, lines, payload)
@@ -1346,6 +1461,14 @@ def _cmd_review(args: argparse.Namespace) -> int:
     under the live Ring-1 hook + envelope; v3 RECORDS the venue and later folds its outcome via the
     unchanged ``cev3 collect ... --outcome review_submitted``.
     """
+    if getattr(args, "harness", "claude") == v3_seat_bridge.CODEX_BRIDGE_HARNESS:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · review --spawn refused: Codex reviewer venues are deferred; "
+             "reviewer authority currently depends on the live Ring-1 hook + envelope."],
+            {"error": "codex_review_deferred", "harness": args.harness},
+        )
     root = Path(args.root)
     author_run_id = args.run_id
     try:
@@ -2093,7 +2216,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_drive.add_argument("--spawn", action="store_true",
                          help="materialize the dispatch and spawn a real governed seat (v3.1-G1)")
     p_drive.add_argument("--harness", default="claude",
-                         help="seat harness (only 'claude' is bridged; codex is the G1-codex follow-up)")
+                         choices=sorted(v3_seat_bridge.HARNESS_BRIDGES),
+                         help="seat harness ('claude' default; 'codex' is explicit and risk-guarded)")
+    p_drive.add_argument("--codex-risk-override", default=None, dest="codex_risk_override",
+                         metavar="HEX64",
+                         help="value-free ratification digest accepting the weaker Codex in-band "
+                              "boundary for a high-risk Scope")
     p_drive.add_argument("--no-unattended", action="store_true",
                          help="opt the spawned seat back into interactive approval modals")
     _add_root(p_drive)
@@ -2171,6 +2299,8 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="path to an owner-only (0600-class) env file sourced into the "
                                "venue claude (the reviewer credential contract — D2/F4); the file "
                                "PATH transits argv, the secret VALUE never does")
+    p_review.add_argument("--harness", default="claude", choices=["claude", "codex"],
+                          help="reviewer venue harness (codex is deferred and refused in G1-codex)")
     _add_root(p_review)
 
     p_merge = sub.add_parser(

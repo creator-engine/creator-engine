@@ -318,6 +318,102 @@ def test_spawn_seat_invokes_ce_launch_json_with_policy(tmp_path):
     assert "--mcp-config" in argv
 
 
+def test_materialize_codex_dispatch_records_external_gate_boundary(tmp_path):
+    import jsonschema
+
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    assert rec.data["harness"] == "codex"
+    assert rec.data["harness_boundary"] == "codex_external_gate"
+    assert "harness_session_id" not in rec.data
+    jsonschema.validate(rec.data, _dispatch_schema())
+
+
+def test_spawn_seat_codex_argv_omits_claude_only_args_and_stamps_bypass(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    launch = json.dumps({
+        "plan": {"session": "s", "window": "drive", "resource_bound": None, "codex_bypass_mode": "config"},
+        "spawned": True,
+        "attached": False,
+        "terminal": {"kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3"},
+    })
+    runner = _RecordingRunner(_FakeCompleted(stdout=launch))
+    v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce", now=_FIXED_NOW)
+    argv = runner.calls[0]
+    assert argv[:4] == ["/fake/ce", "launch", "--harness", "codex"]
+    assert "--mcp-config" not in argv
+    assert not any(arg.startswith("--claude-arg") for arg in argv)
+    data = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert data["codex_bypass_mode"] == "config"
+
+
+def _codex_meta(path: Path, *, session_id: str, cwd: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": str(cwd.resolve()),
+                "timestamp": "2026-06-12T12:00:00Z",
+                "cli_version": "0.0.0",
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_codex_transcript_locator_stamps_session_id_and_ref(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    sessions = tmp_path / "codex-sessions"
+    before = v3_seat_bridge.snapshot_codex_transcripts(sessions)
+    path = _codex_meta(
+        sessions / "2026" / "06" / "12" / "session.jsonl",
+        session_id="codex-session-1",
+        cwd=tmp_path,
+    )
+    v3_seat_bridge.stamp_codex_transcript_locator(
+        rec,
+        before=before,
+        launched_cwd=tmp_path,
+        sessions_root=sessions,
+        clock=lambda: 0.0,
+        sleep=lambda *_: None,
+        now=_FIXED_NOW,
+    )
+    data = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert data["harness_session_id"] == "codex-session-1"
+    assert data["transcript_ref"] == str(path.resolve())
+
+
+def test_codex_transcript_locator_missing_fail_closes(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    clk = _StubClock()
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.stamp_codex_transcript_locator(
+            rec,
+            before=set(),
+            launched_cwd=tmp_path,
+            sessions_root=tmp_path / "empty-sessions",
+            timeout_s=1.0,
+            poll_interval_s=0.5,
+            clock=clk.now,
+            sleep=clk.sleep,
+            now=_FIXED_NOW,
+        )
+    data = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert data["spawn_failed_at"]
+    assert data["terminal"] is None and data["spawned_at"] is None
+
+
 def test_spawn_argv_mcp_config_is_relative_record_stays_absolute(tmp_path):
     """D3-fix (CC-D-7): in the drive posture (cwd is an ancestor of the dispatch dir),
     the spawn argv's ``--mcp-config`` value is a CE-owned RELATIVE path, while the

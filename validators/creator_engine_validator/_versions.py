@@ -45,6 +45,7 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "lane_runtime",
         "launch_runtime",
         "claude_launch_spec",
+        "codex_launch_spec",
         "hermes_launch_spec",
         # v3.5-F Q1: the per-seat OS resource-bounding wrap (pure builder +
         # systemd I/O edges) — launch mechanics, sibling of claude_launch_spec.
