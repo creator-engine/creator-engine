@@ -16,6 +16,26 @@ def pytest_configure(config):
         "markers",
         "xdist_group(name): keep shared-state or session-memoized tests on one xdist worker",
     )
+    config.addinivalue_line(
+        "markers",
+        "sweep: requests the memoized ``check-examples`` sweep (the wall-time floor); "
+        "auto-applied to every consumer of the ``check_examples_result`` fixture so the "
+        "inner-loop fast lane is ``-m 'not sweep'``. NEVER use the fast lane as green-gate "
+        "evidence (see validators/README.md).",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Derive the ``sweep`` mark from fixture requests, not a hand-kept list.
+
+    Any test that requests the session-scoped ``check_examples_result`` fixture pays
+    the one ~60-90s ``check-examples`` sweep; that is the *semantic* definition of a
+    sweep consumer, so we mark it mechanically at collection time. A future consumer
+    inherits the mark by construction — no 12-file list to drift out of date.
+    """
+    for item in items:
+        if "check_examples_result" in getattr(item, "fixturenames", ()):
+            item.add_marker("sweep")
 
 
 @pytest.fixture(scope="session")

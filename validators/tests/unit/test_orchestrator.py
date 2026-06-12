@@ -204,11 +204,31 @@ def test_openshell_isolation_backend_resolves_then_refuses_unwired():
         run_plan(valid_policy("openshell"), "run-1", ("echo", "hi"), approved())
 
 
-def test_gvisor_backend_unavailable_raises_backend_unavailable():
-    # ``gvisor-proxy`` is registered but availability-gated; with no runsc in this
-    # environment the backend refuses at provision (no live subprocess spawned).
+def test_gvisor_backend_unavailable_raises_backend_unavailable(monkeypatch):
+    # ``gvisor-proxy`` is registered but availability-gated. Monkeypatch the runsc
+    # discovery probe to deterministic absence so the refusal CONTRACT is asserted
+    # on EVERY host (runsc installed or not) — no per-host tolerated failure, and
+    # still no live subprocess spawned.
+    from creator_engine_validator.runner import gvisor_proxy_backend
+
+    monkeypatch.setattr(gvisor_proxy_backend.shutil, "which", lambda _binary: None)
     with pytest.raises(BackendUnavailable):
         run_plan(valid_policy("gvisor-proxy"), "run-1", ("echo", "hi"), approved())
+
+
+def test_gvisor_subprocess_runner_available_when_binary_present(tmp_path):
+    # Hermetic positive branch of the same discovery seam: a stub executable at the
+    # injected ``binary=`` path makes ``available()`` True with zero live runsc —
+    # covers the probe both ways without provisioning a real sandbox.
+    from creator_engine_validator.runner.gvisor_proxy_backend import (
+        SubprocessContainerRunner,
+    )
+
+    stub = tmp_path / "runsc"
+    stub.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    runner = SubprocessContainerRunner(binary=str(stub))
+    assert runner.available() is True
 
 
 # ---------------------------------------------------------------------------
