@@ -29,8 +29,8 @@ Defensive invariants (deliberate, load-bearing):
   argv). App installation tokens are ~520-char ``ghs_`` JWTs — we make no length/format
   assumption.
 * **Thin carrier.** ``open_change`` carries already-ratified data; the diff-vs-manifest
-  fidelity check is the CI carrier-gate's job (it parses the committed
-  ``.ce/pr-path-manifest.md`` in the PR diff, NOT this PR body), and the
+  fidelity check is the CI carrier-gate's job (it parses the PR's own per-PR carrier
+  ``.ce/pr-manifests/<branch-slug>.md`` in the diff, NOT this PR body), and the
   no-self-merge / required-review guarantees are GitHub-ruleset facts. Any manifest block
   this module emits in the PR body is an optional human/audit mirror only.
 
@@ -157,16 +157,17 @@ def _render_pr_body(branch: str, base: str, plan_ref: str, manifest_paths: tuple
 
     Embeds the ``plan_ref`` as a ``ce-policy-sha`` marker (parseable by the merged
     ``plan_approval`` marker convention and the downstream review-state op) and the
-    ``manifest_paths`` as a fenced audit list. The committed ``.ce/pr-path-manifest.md`` in
-    the diff — never this text — is what the ``path_manifest_fidelity`` gate parses.
+    ``manifest_paths`` as a fenced audit list. The PR's own per-PR carrier
+    ``.ce/pr-manifests/<branch-slug>.md`` in the diff — never this text — is what the
+    ``path_manifest_fidelity`` gate parses.
     """
     paths_block = "\n".join(sorted(set(manifest_paths)))
     return (
         f"ce-policy-sha: {plan_ref}\n\n"
         f"Opens/updates a single PR for branch `{branch}` targeting `{base}` "
         f"(push = claim: exactly one open PR per branch).\n\n"
-        f"Authorized path manifest (audit mirror — the CI gate parses "
-        f"`.ce/pr-path-manifest.md` in the diff, NOT this body):\n\n"
+        f"Authorized path manifest (audit mirror — the CI gate parses this PR's "
+        f"`.ce/pr-manifests/<branch-slug>.md` carrier in the diff, NOT this body):\n\n"
         f"```text\n{paths_block}\n```\n"
     )
 

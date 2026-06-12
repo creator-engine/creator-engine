@@ -375,6 +375,55 @@ def extract_manifest_paths_from_file(path: Path) -> list[str]:
 
 DIFF_GATE_CONTRACT = CONTRACT
 
+# Per-PR carrier migration (ce-ops#21). Every gate PR carries its ratified closed
+# manifest as its OWN file ``<MANIFEST_DIR>/<branch_slug(branch)>.md`` (self-inclusive),
+# replacing the single shared ``LEGACY_CARRIER_PATH`` that every PR used to rewrite. The
+# directory admits ONLY carriers — no README/index — so discovery needs no exclusion list.
+MANIFEST_DIR = ".ce/pr-manifests"
+LEGACY_CARRIER_PATH = ".ce/pr-path-manifest.md"
+
+# The repo's canonical id shape — the literal pattern at ``schemas/scope.schema.yaml:58``
+# (and ``schemas/completion-report.schema.yaml``, ``schemas/dispatch-record.schema.yaml``):
+# a lowercase slug, leading ``[a-z]``, total length 3..64. ``branch_slug`` outputs into
+# this exact shape so a carrier stem can later be embedded in a schema-constrained id
+# without a shape defect.
+SLUG_PATTERN = re.compile(r"[a-z][a-z0-9-]{2,63}")
+
+
+def branch_slug(branch: str) -> str:
+    """Map a git branch name to its per-PR carrier filename stem.
+
+    The output is constrained to the canonical id shape ``^[a-z][a-z0-9-]{2,63}$``
+    (``schemas/scope.schema.yaml:58``). Steps, in order:
+
+    1. lowercase-normalize FIRST (esc-14-L7: an uppercase UTC stamp violated the pattern);
+    2. collapse every run of non-``[a-z0-9]`` (``/``, ``_``, ``.``, unicode, …) to one ``-``
+       and strip leading/trailing ``-``;
+    3. guarantee a leading ``[a-z]`` (prefix ``br-`` when the head is a digit or empty);
+    4. derive an 8-hex disambiguator from the ORIGINAL branch bytes;
+    5. fit the 64-char ceiling (esc-14-L7: a derived id overflowed 64) by truncating to
+       55 chars + ``-`` + the hash;
+    6. fit the 3-char floor by appending the hash;
+    7. fail-closed if any case escapes the canonical shape.
+    """
+    s = branch.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    if not s or not ("a" <= s[0] <= "z"):
+        s = ("br-" + s).rstrip("-")
+    h = hashlib.sha256(branch.encode("utf-8")).hexdigest()[:8]
+    if len(s) > 64:
+        s = s[:55].rstrip("-") + "-" + h
+    if len(s) < 3:
+        s = (s + "-" if s else "br-") + h
+    assert SLUG_PATTERN.fullmatch(s), f"branch_slug produced non-canonical id {s!r}"
+    return s
+
+
+def _carrier_stem(carrier_path: str) -> str:
+    """Filename stem of a carrier path (the trailing ``.md`` removed, if present)."""
+    name = Path(carrier_path).name
+    return name[:-3] if name.endswith(".md") else name
+
 
 def _run_git(args: Sequence[str], cwd: Path) -> tuple[int, str, str]:
     """Run a git command, returning (returncode, stdout, stderr). Never raises."""
@@ -396,14 +445,23 @@ def _repo_root_for(path: Path) -> Path:
 
 
 def run_with_base(
-    paths: Iterable[Path], base: str, manifest: str | Path | None = None
+    paths: Iterable[Path],
+    base: str,
+    manifest: str | Path | None = None,
+    *,
+    manifest_dir: str | None = None,
+    head_ref: str | None = None,
 ) -> CheckResult:
-    """``verify-path-manifest --base <commit> [--manifest <doc>]`` mode.
+    """``verify-path-manifest --base <commit>`` PR-diff gate — two modes.
 
-    Compute the changed-path set ``git diff --name-only <base>..HEAD`` and
-    compare it to the ratified manifest path-set loaded from ``manifest`` (a
-    PR-committed handoff/envelope doc carrying a fenced ``*_PATHS`` manifest,
-    parsed by ``extract_manifest_paths_from_file``).
+    **Per-PR carrier mode** (``manifest_dir`` supplied, ce-ops#21): discover the
+    PR's own carrier ``<manifest_dir>/<branch_slug(head_ref)>.md`` from the diff
+    and enforce diff == that carrier's path-set. See :func:`_run_with_base_per_pr`.
+
+    **Single-manifest mode** (``manifest`` supplied) / **neutral** (neither
+    supplied): compute ``git diff --name-only <base>..HEAD`` and compare it to the
+    ratified manifest path-set loaded from ``manifest`` (a PR-committed doc carrying
+    a fenced ``*_PATHS`` manifest, parsed by ``extract_manifest_paths_from_file``):
 
     * ``diff∖manifest`` → ``path_manifest_diff_outside_manifest`` (a changed
       path the ratified manifest does not authorize) — the scope-containment
@@ -412,13 +470,15 @@ def run_with_base(
       manifest path the diff never touched) — flagged so an under-delivered
       closed manifest is visible.
 
-    NEUTRAL (a passing ``CheckResult`` with no errors) when ``manifest`` is
-    ``None`` — the transition-safe default; this is not yet a hard-required
-    check.
+    NEUTRAL (a passing ``CheckResult`` with no errors) when neither ``manifest``
+    nor ``manifest_dir`` is supplied — the transition-safe default.
     """
     raw_paths = [Path(p) for p in paths] or [Path(".")]
     repo_root = _repo_root_for(raw_paths[0])
     errors: list[ValidationError] = []
+
+    if manifest_dir is not None:
+        return _run_with_base_per_pr(repo_root, base, manifest_dir, head_ref)
 
     if manifest is None:
         # Transition-safe neutral: no PR-carried manifest → nothing to enforce.
@@ -482,6 +542,192 @@ def run_with_base(
             )
         )
 
+    return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+
+def _run_with_base_per_pr(
+    repo_root: Path, base: str, manifest_dir: str, head_ref: str | None
+) -> CheckResult:
+    """Per-PR carrier mode (ce-ops#21): exactly one ADDED carrier per PR.
+
+    Classify the ``git diff --name-status <base>..HEAD`` paths under ``manifest_dir``:
+
+    * **zero** carriers → NEUTRAL pass (transition-safe for docs-only / non-gate PRs);
+    * **two or more** → ``path_manifest_multiple_carriers`` (each carrier reported);
+    * **one**, stem ≠ ``branch_slug(head_ref)`` → ``path_manifest_carrier_slug_mismatch``;
+    * **one**, status M/D on the matching slug → ``path_manifest_carrier_not_added``
+      (a merged carrier is an immutable ledger entry; in-flight re-pins keep status A
+      because the file does not exist on base until merge);
+    * **one**, status A, slug matches → ACTIVE: enforce diff == the carrier's declared
+      path-set (the existing ``diff∖manifest`` / ``manifest∖diff`` error classes).
+
+    Independently, the retired shared carrier ``LEGACY_CARRIER_PATH`` may only be
+    DELETED (status D — this is what lets the #21 migration PR pass); status A or M →
+    ``path_manifest_legacy_carrier_path`` (resurrection denied forever).
+    """
+    errors: list[ValidationError] = []
+
+    if not (head_ref or "").strip():
+        errors.append(
+            make_error(
+                "path_manifest_carrier_head_ref_required",
+                manifest_dir,
+                "",
+                "per-PR carrier mode requires --head-ref to resolve the expected carrier slug",
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    returncode, stdout, stderr = _run_git(
+        ["diff", "--name-status", "--no-renames", f"{base}..HEAD"], repo_root
+    )
+    if returncode != 0:
+        errors.append(
+            make_error(
+                "path_manifest_diff_git_failed",
+                str(repo_root),
+                "",
+                f"git diff --name-status {base}..HEAD failed: {stderr.strip() or 'unknown error'}",
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    status_by_path: dict[str, str] = {}
+    changed: set[str] = set()
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0].strip()[:1].upper()
+        path = parts[-1].strip()
+        status_by_path[path] = status
+        changed.add(path)
+
+    # Legacy shared carrier: deletion is the migration; re-add/modify is denied forever.
+    legacy_status = status_by_path.get(LEGACY_CARRIER_PATH)
+    if legacy_status is not None and legacy_status != "D":
+        errors.append(
+            make_error(
+                "path_manifest_legacy_carrier_path",
+                LEGACY_CARRIER_PATH,
+                "",
+                (
+                    f"the retired shared carrier '{LEGACY_CARRIER_PATH}' may only be DELETED "
+                    f"(status D), never added or modified (status {legacy_status}); per-PR "
+                    f"carriers live under '{manifest_dir}/'"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+
+    prefix = manifest_dir.rstrip("/") + "/"
+    carrier_paths = sorted(p for p in changed if p.startswith(prefix))
+
+    if not carrier_paths:
+        # No per-PR carrier in the diff → NEUTRAL, unless the legacy rule flagged a
+        # resurrection (a PR that re-adds/edits the old shared path but carries none).
+        if errors:
+            return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+        return CheckResult(name=CHECK_NAME, warnings=())
+
+    if len(carrier_paths) > 1:
+        joined = ", ".join(carrier_paths)
+        for cp in carrier_paths:
+            errors.append(
+                make_error(
+                    "path_manifest_multiple_carriers",
+                    cp,
+                    "",
+                    (
+                        f"more than one per-PR carrier in the diff under '{manifest_dir}/' "
+                        f"({joined}); exactly one carrier per PR"
+                    ),
+                    DIFF_GATE_CONTRACT,
+                )
+            )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    carrier = carrier_paths[0]
+    expected_stem = branch_slug(head_ref)
+    actual_stem = _carrier_stem(carrier)
+    if actual_stem != expected_stem:
+        errors.append(
+            make_error(
+                "path_manifest_carrier_slug_mismatch",
+                carrier,
+                "",
+                (
+                    f"carrier filename stem '{actual_stem}' does not match the head ref's "
+                    f"slug '{expected_stem}' (branch_slug({head_ref!r}))"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    carrier_status = status_by_path.get(carrier, "")
+    if carrier_status != "A":
+        errors.append(
+            make_error(
+                "path_manifest_carrier_not_added",
+                carrier,
+                "",
+                (
+                    f"per-PR carrier '{carrier}' must be ADDED by this PR (status A); got "
+                    f"status {carrier_status or '?'} — merged carriers are immutable ledger entries"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    # ACTIVE: enforce diff == the carrier's own declared path-set (it self-lists).
+    manifest_paths = set(extract_manifest_paths_from_file(repo_root / carrier))
+    if not manifest_paths:
+        errors.append(
+            make_error(
+                "path_manifest_diff_no_manifest_paths",
+                carrier,
+                "",
+                (
+                    "the per-PR carrier declares no fenced path manifest "
+                    "(no *_PATHS_COUNT/*_PATHS_SHA256 + ```text block)"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+        return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+    for path in sorted(changed - manifest_paths):
+        errors.append(
+            make_error(
+                "path_manifest_diff_outside_manifest",
+                path,
+                "",
+                (
+                    f"changed file '{path}' is not present in the per-PR carrier '{carrier}'; "
+                    "the PR diff exceeds its closed manifest"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+    for path in sorted(manifest_paths - changed):
+        errors.append(
+            make_error(
+                "path_manifest_unfulfilled_manifest_path",
+                path,
+                "",
+                (
+                    f"manifest path '{path}' in '{carrier}' was not changed in {base}..HEAD; "
+                    "the PR under-delivers its closed manifest"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
 

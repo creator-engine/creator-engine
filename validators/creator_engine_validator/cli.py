@@ -125,13 +125,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
     verify_path_manifest = sub.add_parser(
         "verify-path-manifest",
-        help="path_manifest_fidelity PR-diff gate (compares <base>..HEAD against a PR-carried fenced path manifest; neutral when --manifest is omitted)",
+        help="path_manifest_fidelity PR-diff gate (compares <base>..HEAD against a PR-carried fenced path manifest; neutral when neither --manifest nor --manifest-dir is given)",
     )
     verify_path_manifest.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
     verify_path_manifest.add_argument(
         "--manifest",
         default=None,
-        help="PR-committed handoff/envelope doc carrying the fenced ratified path manifest; omit for a neutral pass",
+        help="single PR-committed doc carrying the fenced ratified path manifest (ad-hoc / local); omit for a neutral pass. Mutually exclusive with --manifest-dir",
+    )
+    verify_path_manifest.add_argument(
+        "--manifest-dir",
+        default=None,
+        help="per-PR carrier directory (ce-ops#21, e.g. .ce/pr-manifests): discover this PR's own carrier <dir>/<branch_slug(head)>.md from the diff and enforce diff == its path-set. Requires --head-ref; mutually exclusive with --manifest",
+    )
+    verify_path_manifest.add_argument(
+        "--head-ref",
+        default=None,
+        help="the PR head branch name (e.g. $GITHUB_HEAD_REF); resolves the expected carrier slug in --manifest-dir mode",
     )
     verify_path_manifest.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
@@ -451,8 +461,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = _run_attribution([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
     if subcommand == "verify-path-manifest":
+        if args.manifest and args.manifest_dir:
+            print(
+                "ERROR: verify-path-manifest: --manifest and --manifest-dir are mutually exclusive",
+                file=sys.stderr,
+            )
+            return 2
+        if args.manifest_dir and not args.head_ref:
+            print(
+                "ERROR: verify-path-manifest: --manifest-dir requires --head-ref",
+                file=sys.stderr,
+            )
+            return 2
         from .checks.path_manifest_fidelity import run_with_base as _run_path_manifest
-        result = _run_path_manifest([Path(p) for p in args.paths], args.base, args.manifest)
+        result = _run_path_manifest(
+            [Path(p) for p in args.paths],
+            args.base,
+            args.manifest,
+            manifest_dir=args.manifest_dir,
+            head_ref=args.head_ref,
+        )
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
         return _hook_check(args)

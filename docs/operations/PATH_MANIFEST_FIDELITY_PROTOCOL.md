@@ -189,11 +189,41 @@ changed between `<base>..HEAD` (`git diff --name-only`) to the ratified
 manifest path-set loaded from a **PR-carried manifest document**:
 
 ```bash
+# Per-PR carrier mode (the standard for gate PRs, ce-ops#21):
+PYTHONPATH=validators python -m creator_engine_validator \
+  verify-path-manifest --base <PR base sha> \
+  --manifest-dir .ce/pr-manifests --head-ref <PR head branch>
+
+# Single-doc mode (ad-hoc / local verification of one carrier):
 PYTHONPATH=validators python -m creator_engine_validator \
   verify-path-manifest --base <PR base sha> [--manifest <path-manifest doc>]
 ```
 
-- **`--manifest` supplied** → the gate is active. It flags:
+`--manifest` and `--manifest-dir` are **mutually exclusive**, and
+`--manifest-dir` **requires** `--head-ref`.
+
+- **`--manifest-dir` supplied** (per-PR mode) → the gate discovers this PR's
+  own carrier from the diff and enforces it:
+  - **zero** carrier files under the directory → **NEUTRAL** (a passing
+    `CheckResult`; transition-safe — docs-only / non-gate PRs are not failed);
+  - **exactly one**, status **A** (added), filename stem ==
+    `branch_slug(<head ref>)` → **active**: the carrier's path-set is enforced
+    against the diff with the same `path_manifest_diff_outside_manifest` /
+    `path_manifest_unfulfilled_manifest_path` / `path_manifest_diff_no_manifest_paths`
+    classes below;
+  - **two or more** carrier files in the diff → `path_manifest_multiple_carriers`
+    (one PR carries exactly one carrier; every foreign path is reported — this is
+    what catches a PR editing a *merged* carrier alongside its own);
+  - **slug mismatch** (the single carrier's stem ≠ `branch_slug(<head ref>)`) →
+    `path_manifest_carrier_slug_mismatch`;
+  - **status M or D** on the PR's own slug (a merged ledger entry being reused
+    or tampered) → `path_manifest_carrier_not_added` (merged carriers are
+    immutable; a legitimate in-flight re-pin stays status **A** because the file
+    does not exist on base until merge);
+  - the **retired** shared carrier `.ce/pr-path-manifest.md` may only be
+    **deleted** (status D); adding or modifying it → `path_manifest_legacy_carrier_path`.
+- **`--manifest` supplied** (single-doc mode) → the gate is active against that
+  one document. It flags:
   - `path_manifest_diff_outside_manifest` for each `diff ∖ manifest`
     path (a changed file the closed manifest does not authorize — the
     scope overrun this gate exists to catch); and
@@ -202,30 +232,38 @@ PYTHONPATH=validators python -m creator_engine_validator \
     closed manifest).
   - `path_manifest_diff_no_manifest_paths` when the supplied document
     declares no fenced manifest at all.
-- **`--manifest` omitted** → the gate is **NEUTRAL** (a passing
-  `CheckResult` with no errors). This is the transition-safe default:
-  non-manifest PRs (e.g. docs-only changes) are not failed. The gate runs
-  as a step of the **required** `Validate governance artifacts` status check
-  (which runs both the pytest suite and this diff-gate), so a *gate* PR that
-  carries its manifest cannot merge with a diff that drifts from it. Wiring
-  that required check + the reviewer policy that pins the non-author approver
-  is the work of **G-iii** — see `GITHUB_NATIVE_COORDINATION_PROTOCOL.md`.
+- **neither supplied** → the gate is **NEUTRAL** (a passing `CheckResult` with
+  no errors). The gate runs as a step of the **required** `Validate governance
+  artifacts` status check (which runs both the pytest suite and this diff-gate),
+  so a *gate* PR that carries its per-PR carrier cannot merge with a diff that
+  drifts from it. Wiring that required check + the reviewer policy that pins the
+  non-author approver is the work of **G-iii** — see
+  `GITHUB_NATIVE_COORDINATION_PROTOCOL.md`.
 
-### PR-carried-manifest convention (the standard for gate PRs)
+### Per-PR-carrier convention (the standard for gate PRs)
 
-**Every gate PR carries its ratified closed manifest** as a fenced
-path-manifest document committed at **`.ce/pr-path-manifest.md`** (the §c
-shape — `AUTHORIZED_PATHS_COUNT=` / `AUTHORIZED_PATHS_SHA256=` + a
-```` ```text ```` block listing the authorized paths; the carrier lists
-itself). The CI workflow (`.github/workflows/validate.yml`) runs the gate
-on `pull_request` events against `github.event.pull_request.base.sha`,
-passing `--manifest .ce/pr-path-manifest.md` when that file is present and
-running neutral otherwise (so docs-only / non-gate PRs are not failed). This
-supersedes the `.hermes/handoffs/`-based author-time enforcement: the
-ratified manifest now travels *with the PR*, and the gate that enforces it
-runs *on the diff*, where it cannot deadlock the author. Carrying the
-manifest in the PR is what turns the diff-gate from *post-hoc-by-the-
-Controller* verification into a *machine-enforced* merge gate (G-iii).
+**Every gate PR carries its ratified closed manifest** as its **own** fenced
+path-manifest file committed at **`.ce/pr-manifests/<branch-slug>.md`**, where
+`<branch-slug>` is `branch_slug(<head branch>)` — a lowercase id of shape
+`^[a-z][a-z0-9-]{2,63}$` (`schemas/scope.schema.yaml:58`). The file uses the §c
+shape — `AUTHORIZED_PATHS_COUNT=` / `AUTHORIZED_PATHS_SHA256=` + a ```` ```text ````
+block listing the authorized paths; **the carrier lists itself**. The CI workflow
+(`.github/workflows/validate.yml`) runs the gate on `pull_request` events against
+`github.event.pull_request.base.sha` with
+`--manifest-dir .ce/pr-manifests --head-ref <head ref>`; a PR with no carrier
+under that directory runs neutral. This **supersedes the single shared
+`.ce/pr-path-manifest.md`**: because every PR's carrier has a distinct path, two
+concurrently-open PRs never conflict on the carrier file regardless of real
+overlap, and merged carriers accumulate as a per-PR scope-audit ledger. The
+retired shared path may never reappear (`path_manifest_legacy_carrier_path`).
+
+**Directory rule:** `.ce/pr-manifests/` admits **only** carrier files — no
+`README`/index — so discovery never needs an exclusion list. **Branch reuse:** a
+merged carrier is an immutable ledger entry; if a new branch normalizes to an
+existing carrier's slug, the author renames the branch (the collision is blocked
+loudly by the added-not-modified rule, not silently disambiguated). Carrying the
+manifest in the PR is what turns the diff-gate from *post-hoc-by-the-Controller*
+verification into a *machine-enforced* merge gate (G-iii).
 
 ## i. Acceptance posture
 
