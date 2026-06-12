@@ -324,6 +324,12 @@ def seed() -> dict[str, Any]:
         # Spend hard-breach seat (paused at 100% of its run envelope).
         _pane("ce-demo-spender", "spend-hard-breach", role="implementer", status="blocked", minute=13, pane_n=7),
         _pane("ce-demo-shipper", "ship-pr-294", role="implementer", status="closed", minute=15, pane_n=8, closed=True),
+        # v3.1-B.7 — the EXPLICIT subscription (UNPRICED) seat: it did real work
+        # (agent actions + a terminal outcome) but produced ZERO priced ledger
+        # leaves, so its cost is managed by limits/headroom, not $. The fleet
+        # cost rail shows it UNPRICED beside the MEASURED pair (both tiers on
+        # camera) — never a $0 lie.
+        _pane("ce-demo-subscriber", "subscription-seat", role="implementer", status="active", minute=9, pane_n=9),
     ]
 
     # Scope ids equal their seats' lane_ids (the documented board join rule —
@@ -358,6 +364,10 @@ def seed() -> dict[str, Any]:
             "ship-pr-294", "ship the docs refresh (PR 294)",
             mutation_class="docs", done_when=["PR 294 merged head-pinned"], budget=4.0, ratified=True,
         ),
+        _scope(
+            "subscription-seat", "draft the changelog on a subscription seat",
+            mutation_class="docs", done_when=["changelog drafted"], budget=4.0, ratified=True,
+        ),
     ]
 
     # Committed-signal projections (state-as-projection; the seed states the
@@ -369,6 +379,7 @@ def seed() -> dict[str, Any]:
         "spend-hard-breach": {"dispatched": True},
         "pr-300-review": {"reviewed": True},
         "ship-pr-294": {"merged": True},
+        "subscription-seat": {"dispatched": True},
     }
 
     chains = {
@@ -467,6 +478,28 @@ def seed() -> dict[str, Any]:
                 ),
                 "escalation_id": HARD_BREACH_ESCALATION_ID,
             },
+        ]),
+        # v3.1-B.7 — the subscription (UNPRICED) run: two in-manifest writes and
+        # a terminal pr_opened outcome, but ZERO ``runtime_spend_ledger`` leaves.
+        # Real work, no $ meter — the fleet cost rail must render it UNPRICED
+        # (subscription · 2 turns), NEVER $0.
+        "subscription-seat": _chain([
+            _action(
+                "subscription-seat", 6,
+                op="write", mutation_class="docs",
+                target="docs/CHANGELOG.md", tool="Edit",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="permitted under active manifest / mechanics / secret policy",
+            ),
+            _action(
+                "subscription-seat", 8,
+                op="write", mutation_class="docs",
+                target="docs/CHANGELOG.md", tool="Edit",
+                classification="allowed", decision_mode="allowlist",
+                decision_reason="permitted under active manifest / mechanics / secret policy",
+            ),
+            _outcome("subscription-seat", 9, outcome="pr_opened",
+                     branch="ce/demo/subscription-seat", pr_number=312),
         ]),
     }
 
@@ -595,5 +628,6 @@ def seed() -> dict[str, Any]:
             "envelope-scope-denial": "codex",
             "spend-hard-breach": "claude",
             "ship-pr-294": "claude",
+            "subscription-seat": "claude",
         },
     }
