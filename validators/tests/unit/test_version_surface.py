@@ -110,13 +110,13 @@ def test_fail_closed_when_no_git_and_no_baked(monkeypatch):
 
 
 def test_render_build_file_is_constants_only():
-    body = ver.render_build_file("0.1.0", "a" * 40)
-    assert 'SEMVER = "0.1.0"' in body
+    body = ver.render_build_file("0.2.0", "a" * 40)
+    assert 'SEMVER = "0.2.0"' in body
     assert f'BUILD_GIT_SHA = "{"a" * 40}"' in body
     # the generated module is import-clean (no executable logic / imports)
     ns: dict = {}
     exec(compile(body, "<gen>", "exec"), ns)
-    assert ns["SEMVER"] == "0.1.0" and ns["BUILD_GIT_SHA"] == "a" * 40
+    assert ns["SEMVER"] == "0.2.0" and ns["BUILD_GIT_SHA"] == "a" * 40
 
 
 def test_generator_writes_to_out_path(tmp_path: Path):
@@ -124,13 +124,13 @@ def test_generator_writes_to_out_path(tmp_path: Path):
     short = _init_git_repo(repo)
     (repo / "validators").mkdir()
     (repo / "validators" / "pyproject.toml").write_text(
-        '[project]\nname = "creator-engine-validator"\nversion = "0.1.0"\n', encoding="utf-8"
+        '[project]\nname = "creator-engine-validator"\nversion = "0.2.0"\n', encoding="utf-8"
     )
     out = tmp_path / "out_version.py"
     written = ver.write_build_file(repo, allow_dirty=True, out_path=out)
     assert written == out
     text = out.read_text(encoding="utf-8")
-    assert 'SEMVER = "0.1.0"' in text
+    assert 'SEMVER = "0.2.0"' in text
     # baked full sha starts with the live short sha of the repo
     assert short in text
 
@@ -147,7 +147,7 @@ def test_generator_refuses_dirty_tree(tmp_path: Path):
     _init_git_repo(repo)
     (repo / "validators").mkdir()
     (repo / "validators" / "pyproject.toml").write_text(
-        '[project]\nname = "creator-engine-validator"\nversion = "0.1.0"\n', encoding="utf-8"
+        '[project]\nname = "creator-engine-validator"\nversion = "0.2.0"\n', encoding="utf-8"
     )
     # the new untracked pyproject makes the tree dirty
     with pytest.raises(ver.VersionDerivationError):

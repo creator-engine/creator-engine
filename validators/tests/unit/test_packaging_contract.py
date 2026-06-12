@@ -158,17 +158,17 @@ def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
     source_dir.mkdir(parents=True)
     wheelhouse.mkdir()
     (validators_dir / "pyproject.toml").write_text(
-        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.2.0\"\n",
         encoding="utf-8",
     )
     (source_dir / "__init__.py").write_text("", encoding="utf-8")
-    (source_dir / "version.py").write_text("__version__ = \"0.1.0\"\n", encoding="utf-8")
+    (source_dir / "version.py").write_text("__version__ = \"0.2.0\"\n", encoding="utf-8")
     (source_dir / "drift.py").write_text("VALUE = 'source'\n", encoding="utf-8")
 
-    wheel = wheelhouse / "creator_engine_validator-0.1.0-py3-none-any.whl"
+    wheel = wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         zf.writestr("creator_engine_validator/__init__.py", "")
-        zf.writestr("creator_engine_validator/version.py", "__version__ = \"0.1.0\"\n")
+        zf.writestr("creator_engine_validator/version.py", "__version__ = \"0.2.0\"\n")
         zf.writestr("creator_engine_validator/drift.py", "VALUE = 'wheel'\n")
 
     violations = pkg.verify_wheel_matches_source(tmp_path)
@@ -197,7 +197,7 @@ def _synthetic_source_tree(tmp_path: Path, *, semver: str, build_sha: str) -> Pa
     source_dir = validators_dir / "creator_engine_validator"
     source_dir.mkdir(parents=True)
     (validators_dir / "pyproject.toml").write_text(
-        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.2.0\"\n",
         encoding="utf-8",
     )
     (source_dir / "_version.py").write_text(
@@ -213,7 +213,7 @@ def test_verify_generated_version_flags_semver_drift(tmp_path: Path):
 
 
 def test_verify_generated_version_flags_malformed_baked_sha(tmp_path: Path):
-    root = _synthetic_source_tree(tmp_path, semver="0.1.0", build_sha="not-a-real-sha")
+    root = _synthetic_source_tree(tmp_path, semver="0.2.0", build_sha="not-a-real-sha")
     violations = pkg.verify_generated_version(root)
     assert any("BUILD_GIT_SHA" in v and "40-hex" in v for v in violations)
 
@@ -223,7 +223,7 @@ def test_verify_generated_version_flags_missing_file(tmp_path: Path):
     source_dir = validators_dir / "creator_engine_validator"
     source_dir.mkdir(parents=True)
     (validators_dir / "pyproject.toml").write_text(
-        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.1.0\"\n",
+        "[project]\nname = \"creator-engine-validator\"\nversion = \"0.2.0\"\n",
         encoding="utf-8",
     )
     violations = pkg.verify_generated_version(tmp_path)
