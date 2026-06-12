@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import tomllib
 import zipfile
 from dataclasses import dataclass, field
@@ -326,6 +327,117 @@ def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
     return v
 
 
+def _module_str_constant(path: Path | str, name: str) -> str | None:
+    """Read a top-level ``<name> = "<literal>"`` string constant via AST (read-only)."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            return node.value.value
+    return None
+
+
+def _is_full_sha(value: str | None) -> bool:
+    return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess | None:
+    """Run ``git -C <repo_root> <args>`` (read-only); ``None`` if git is absent.
+
+    The single git seam for the freshness probe — monkeypatchable in tests so a
+    shallow-clone shape can be exercised without a real shallow checkout.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            check=False, capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+
+
+def _is_shallow_repo(repo_root: Path) -> bool:
+    proc = _git(repo_root, "rev-parse", "--is-shallow-repository")
+    return proc is not None and proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def _baked_sha_git_problem(repo_root: Path, baked: str) -> str | None:
+    """Freshness check for the baked SHA, lenient when git can't prove drift.
+
+    When ``repo_root`` is a live git checkout, the baked ``BUILD_GIT_SHA`` must
+    be a real commit that is an ancestor of (or equal to) HEAD — this catches a
+    placeholder/garbage/foreign SHA without rotting as history grows past the
+    gate (exact merge-parent equality is the gate's one-time step-6 check, not a
+    perpetual CI assertion). Two contexts are skipped because git cannot prove
+    drift there: (1) git absent / not a checkout (a no-git/wheel-install context);
+    (2) the baked object is ABSENT on a **shallow** clone — ``actions/checkout``
+    is depth-1, so the merge-parent base commit is legitimately not an object in
+    the repo during the pytest step. Only a FULL clone can distinguish a genuine
+    missing/foreign sha from a shallow-truncated history, so the absent-object
+    violation fires only there.
+    """
+    head = _git(repo_root, "rev-parse", "--verify", "HEAD")
+    if head is None or head.returncode != 0:
+        return None  # not a checkout / git unavailable -> skip, do not fabricate drift
+    exists = _git(repo_root, "cat-file", "-e", f"{baked}^{{commit}}")
+    if exists is None:
+        return None
+    if exists.returncode != 0:
+        if _is_shallow_repo(repo_root):
+            return None  # shallow clone: the base commit is truncated away, not missing
+        return f"generated _version.py BUILD_GIT_SHA {baked} is not a commit in this repository"
+    ancestor = _git(repo_root, "merge-base", "--is-ancestor", baked, "HEAD")
+    if ancestor is None:
+        return None
+    if ancestor.returncode != 0:
+        return f"generated _version.py BUILD_GIT_SHA {baked} is not an ancestor of HEAD (stale baked sha)"
+    return None
+
+
+def verify_generated_version(repo_root: Path | str) -> list[str]:
+    """Assert the generated ``_version.py`` parity (ce-ops#25 packaging extension).
+
+    No-op unless the source tree is present (mirrors :func:`verify_wheel_matches_source`
+    — an installed wheel-only context has no source checkout to compare). When
+    present, asserts: ``_version.py`` exists; ``SEMVER`` equals the pyproject
+    version; ``BUILD_GIT_SHA`` is a 40-hex commit sha; and (in a git checkout)
+    the baked SHA is a real ancestor of HEAD.
+    """
+    root = Path(repo_root)
+    validators = root / "validators"
+    source_root = validators / "creator_engine_validator"
+    if not source_root.is_dir():
+        return []
+    v: list[str] = []
+    version_file = source_root / "_version.py"
+    if not version_file.is_file():
+        return [f"missing generated build-identity file {version_file}"]
+    semver = _module_str_constant(version_file, "SEMVER")
+    baked = _module_str_constant(version_file, "BUILD_GIT_SHA")
+    pyproject_version = _pyproject_version(validators / "pyproject.toml")
+    if semver is None:
+        v.append(f"generated _version.py is missing a SEMVER string constant")
+    elif pyproject_version and semver != pyproject_version:
+        v.append(
+            f"generated _version.py SEMVER {semver!r} differs from pyproject "
+            f"version {pyproject_version!r}"
+        )
+    if not _is_full_sha(baked):
+        v.append(f"generated _version.py BUILD_GIT_SHA {baked!r} is not a 40-hex commit sha")
+    else:
+        problem = _baked_sha_git_problem(root, baked)
+        if problem:
+            v.append(problem)
+    return v
+
+
 def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     """Aggregate the Option B packaging contract for the guard (RED-G-6)."""
     root = Path(repo_root)
@@ -335,6 +447,7 @@ def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     violations += wheelhouse_violations(validators / "wheelhouse")
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
     violations += verify_wheel_matches_source(root)
+    violations += verify_generated_version(root)
     details = {
         "requires_python": REQUIRES_PYTHON,
         "runtime_pins": dict(RUNTIME_PINS),

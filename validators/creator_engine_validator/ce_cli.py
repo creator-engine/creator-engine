@@ -68,6 +68,7 @@ from . import (
     pcl_runtime,
     side_effect_ledger_runtime,
     transcript_archive,
+    version,
     worker_runtime,
 )
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
@@ -93,6 +94,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ce", description="Creator Engine kernel (v1.0 Gate 3 lane-launch surface)"
     )
+    # ce-ops#25: top-level ``ce --version`` prints the derived CE token
+    # (``<semver>+<short-sha>``) to stdout and exits (lazy — git resolves only
+    # when the flag is passed, never on every command).
+    version.add_version_flag(parser)
     groups = parser.add_subparsers(dest="group")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")

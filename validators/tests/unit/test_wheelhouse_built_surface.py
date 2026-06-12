@@ -95,3 +95,41 @@ def test_wheelhouse_validator_wheel_keeps_both_console_scripts_without_dev(
         scripts.get("creator-engine-validator") == "creator_engine_validator.cli:main"
     )
     assert "dev" not in scripts, f"unexpected `dev` console script: {scripts}"
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#25: the wheel must ship the cev3 console script + the generated
+# build-identity module, and bake the merge-parent SHA.
+# ---------------------------------------------------------------------------
+
+
+def test_wheelhouse_validator_wheel_exposes_cev3_console_script(validator_wheel: Path):
+    scripts = _entry_points(validator_wheel)
+    assert scripts.get("cev3") == "creator_engine_validator.v3_cli:main", (
+        "built wheel does not ship the `cev3` console script (G-7 v3 entry point)"
+    )
+
+
+def test_wheelhouse_validator_wheel_bundles_generated_version(
+    validator_wheel: Path, repo_root: Path
+):
+    """The wheel must bundle the generated _version.py byte-identical to source."""
+    rel = f"{DISTRIBUTION}/_version.py"
+    with zipfile.ZipFile(validator_wheel) as zf:
+        assert rel in zf.namelist(), f"wheel does not bundle {rel}"
+        bundled = zf.read(rel).decode("utf-8")
+    source = (repo_root / "validators" / DISTRIBUTION / "_version.py").read_text(encoding="utf-8")
+    assert bundled == source, "bundled _version.py is stale relative to source; rebuild the wheel"
+    assert 'BUILD_GIT_SHA = "' in bundled, "bundled _version.py carries no baked BUILD_GIT_SHA"
+
+
+def test_wheelhouse_bundled_version_surface_matches_source(
+    validator_wheel: Path, repo_root: Path
+):
+    """version.py (the ce_version API) must be wheel-bundled byte-for-byte from source."""
+    rel = f"{DISTRIBUTION}/version.py"
+    with zipfile.ZipFile(validator_wheel) as zf:
+        bundled = zf.read(rel).decode("utf-8")
+    source = (repo_root / "validators" / DISTRIBUTION / "version.py").read_text(encoding="utf-8")
+    assert bundled == source
+    assert "def ce_version" in bundled, "built wheel's version.py lacks the ce_version API"

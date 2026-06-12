@@ -128,10 +128,24 @@ def fmt_amount(amount: Decimal | None) -> str:
     return f"{d:f}"
 
 
-def render_banner(*, repo: str = "—", transport: str = "—", backend: str = "—", root: str = ".ce/state") -> str:
-    """The ``cev3 session`` launch banner — always-on "your agent, under CE"."""
+def render_banner(
+    *,
+    repo: str = "—",
+    transport: str = "—",
+    backend: str = "—",
+    root: str = ".ce/state",
+    version: str | None = None,
+) -> str:
+    """The ``cev3 session`` launch banner — always-on "your agent, under CE".
+
+    ce-ops#25: when a CE version token is supplied it leads the banner as the
+    honest build identity (``◆ Creator Engine <token> · …``); absent it the
+    banner is unchanged. The token is resolved by the caller — this stays pure
+    render code.
+    """
+    head = f"◆ Creator Engine {version}" if version else "◆ Creator Engine"
     return (
-        f"◆ Creator Engine · governed session · repo {repo} · "
+        f"{head} · governed session · repo {repo} · "
         f"transport {transport} · backend {backend} · state {root}"
     )
 
@@ -186,12 +200,15 @@ def render_session(
     transport: str = "—",
     backend: str = "—",
     root: str = ".ce/state",
+    version: str | None = None,
 ) -> list[str]:
     """Assemble the full frame: banner + the unified status line + any nudges."""
     context = context or ContextMeter(None, "unknown")
     spend = spend or SpendMeter(None, None, "$", None, "unmetered")
     return [
-        render_banner(repo=repo, transport=transport, backend=backend, root=root),
+        render_banner(
+            repo=repo, transport=transport, backend=backend, root=root, version=version
+        ),
         render_status_line(phase_counts, context, spend),
         *nudges(context, spend, at_boundary=at_boundary),
     ]
