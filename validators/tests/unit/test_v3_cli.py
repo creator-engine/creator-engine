@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
-from creator_engine_validator import v3_cli, v3_seat_bridge
+from creator_engine_validator import onboard_apply, v3_cli, v3_installer, v3_seat_bridge
 from creator_engine_validator.schema import validate_with_schema
 
 
@@ -1098,6 +1098,28 @@ def _spec(tmp_path):
     return spec
 
 
+def _signed_spec(tmp_path):
+    canonical = """\
+kind: ce-install-spec
+signature:
+  key_id: ce-root-v1
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: <published-with-this-spec>
+  content_sha256: <published-with-this-spec>
+"""
+    digest = v3_installer.content_digest(v3_installer.canonical_spec_bytes(canonical))
+    spec = tmp_path / "signed-install.md"
+    spec.write_text(
+        canonical.replace("  value: <published-with-this-spec>", "  value: c2ln").replace(
+            "  content_sha256: <published-with-this-spec>",
+            f"  content_sha256: {digest}",
+        ),
+        encoding="utf-8",
+    )
+    return spec
+
+
 def _answers_file(tmp_path, content=_GOOD_ANSWERS_YAML):
     path = tmp_path / "ce-install.answers.yaml"
     path.write_text(content, encoding="utf-8")
@@ -1213,6 +1235,106 @@ def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
     assert leg["human_approves"] == []
     # unprobed live facts stay fail-closed in the dry run (the E.4 drive probes them)
     assert leg["bootstrap_token_scopes"]["probed"] is False
+
+
+def test_onboard_apply_rejects_read_only_modes(tmp_path, capsys):
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--apply", "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "invalid_onboard_mode"
+
+
+def test_onboard_inventory_and_plan_do_not_create_apply_state(tmp_path, capsys):
+    root = tmp_path / "state"
+    assert v3_cli.main([
+        "onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--root", str(root), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert v3_cli.main([
+        "onboard", "--spec", str(_spec(tmp_path)), "--answers", str(_answers_file(tmp_path)),
+        "--plan", "--root", str(root), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert not (root / "onboard" / "ledger.ndjson").exists()
+    assert not (root / "onboard" / "apply.lock").exists()
+
+
+def test_onboard_apply_refuses_self_attested_signature(tmp_path, capsys):
+    spec = _spec(tmp_path)
+    digest = v3_installer.content_digest(spec.read_bytes())
+    code = v3_cli.main([
+        "onboard", "--spec", str(spec), "--apply", "--sig-algo", v3_installer.CONTENT_ALGO,
+        "--sig-value", digest, "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "ssh-ed25519" in payload["detail"]
+
+
+def test_onboard_apply_requires_complete_answers_before_executor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("apply_onboard must not run with missing answers")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    code = v3_cli.main(["onboard", "--spec", str(_signed_spec(tmp_path)), "--apply", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "github.mode" in {item["key"] for item in payload["missing"]}
+
+
+def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"),
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    captured: dict[str, object] = {}
+
+    def fake_apply(request, *, verifier):
+        captured["request"] = request
+        captured["verifier"] = verifier
+        return {
+            "action": "onboard_apply",
+            "root": str(request.state_root),
+            "mode": request.mode,
+            "verified": {"ok": True, "key_id": "ce-root-v1", "algo": v3_installer.SSH_ED25519_ALGO},
+            "target_repo": request.answers["github"]["repo"],
+            "greenfield_repos_created": 0,
+            "repos_already_satisfied": 1,
+            "brownfield_deferred": 0,
+            "legs_total": 12,
+            "applied": 1,
+            "already_satisfied": 11,
+            "verified_count": 12,
+            "skipped": 0,
+            "refused": 0,
+            "failed": 0,
+            "rolled_back": 0,
+            "manual_rollback_required": 0,
+            "legs": [],
+        }
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+    root = tmp_path / "state"
+    code = v3_cli.main([
+        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(_answers_file(tmp_path)),
+        "--apply", "--root", str(root), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_apply"
+    request = captured["request"]
+    assert isinstance(request, onboard_apply.ApplyRequest)
+    assert request.state_root == root
+    assert request.explicit_signature is None
+    assert request.answers["github"]["repo"] == "chmod735/creator-engine-canonical"
+    assert captured["verifier"] is not None
 
 
 def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsys, monkeypatch):

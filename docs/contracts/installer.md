@@ -1,4 +1,4 @@
-# Contract: Two-mode installer + the cost opt-out (G-7.4 · E.3)
+# Contract: Two-mode installer + onboard apply (G-7.4 · E.2/E.3)
 
 **Status:** Canonical. The CI-pure decision substrate is
 `creator_engine_validator/v3_installer.py`; the served artifacts are
@@ -118,6 +118,39 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
 document plus one probe dict; `converged: true` is the terraform
 empty-plan analog.
 
+## Onboard apply (E2 live-drive seam)
+
+`creator_engine_validator/onboard_apply.py` is the side-effecting v3 runtime
+module for `ce onboard --apply`. `v3_installer.py` remains pure; `v3_cli.py`
+loads files, performs read-only probes, verifies the signed spec, and delegates
+the bounded apply pass.
+
+Apply is explicit. `--inventory` and `--plan` remain non-mutating, and
+`--plan --apply` is invalid. Apply refuses content-digest self-attestation and
+accepts only the real SSHSIG path over canonical bytes (`ssh-ed25519`,
+`ce-root-v1`, namespace `ce-spec-v1`, matching `content_sha256`).
+
+The apply executor acquires `<state_root>/onboard/apply.lock`, appends
+non-secret leg evidence to `<state_root>/onboard/ledger.ndjson`, and runs the 12
+ratified E2 legs in order: signed-spec verify, answers merge, host dependencies,
+runtime posture, CLI exposure, bootstrap-token probe, greenfield repo create,
+App install, workflow install, branch protection, workspace checkout, and
+first-project smoke. All environment-specific work is behind injectable
+runners/transports so tests use fakes and live rehearsals can supply concrete
+host/GitHub drivers.
+
+E2 is greenfield-only. A repo created by an earlier E2 pass can be reused only
+when ledger provenance and live verification match. An arbitrary existing repo
+is refused as `brownfield_deferred`; E3 owns brownfield adoption. SecretRefs
+resolve only at the moment of use, and summaries/ledger entries carry refs or
+redacted facts, never secret values.
+
+The first-project smoke uses the existing v3 Scope front gate: file a
+deterministic Scope, ratify it with a value-free local test approver digest, and
+run `drive` to assemble governed dispatch inputs. Optional spawn smoke records
+either spawn metadata or an explicit conserved refusal; E2 does not claim a PR
+delivery proof.
+
 ## Verify-before-execute (the load-bearing gate)
 
 The agent-native spec is **signed**; the installer **refuses to execute an
@@ -218,23 +251,21 @@ internal `cev3` console_script, or a v3-only distribution whose script is named
 avoid the v1 collision in the coexistence repo and is never shown. A
 version-stamped user command (`cev3`/`cev4`) is the anti-pattern this avoids.
 
-## Boundary (CI-pure; deferred live seams)
+## Boundary (pure planner; live executor seam)
 
 CI-pure: verify-before-execute · the dependency planner · the profile/opt-out ·
 the answers/inventory engine (validation, precedence merge, missing list,
 sudo-grant diff) · the decomposed GitHub-leg planners · the `ce` exposure plan ·
-`cev3 onboard` dry-run. **Deferred live seams:** the actual `curl|bash` /
-privileged execution · the runtime backend provisioning (gVisor + egress proxy) ·
-the **interactive GitHub-App authorization click** (first run only — re-runs
-detect the installation) · the live forge API mutations (repo create · App
-install · protection PUT · workflow commit — the HTTPS-Bearer App-JWT mint leg) ·
-the live transport probe. The read-only *detection* (dependency probe; the
-GitHub probes injected into the planners) is live; the privileged *fix* is
-deferred.
+`ce onboard` dry-run. The E2 live executor is the composition seam: it drives
+host/runtime/GitHub/workspace actions only through injected drivers and verifies
+each leg before proceeding. The read-only *detection* (dependency probe; GitHub
+facts injected into planners) remains live; the privileged *fix* is explicit
+`--apply`.
 
 ## Standing requirements honored
 
-- **G-4.1 naming hygiene:** `v3_installer` is v3-classified + residue-clean; pure;
+- **G-4.1 naming hygiene:** `v3_installer` and `onboard_apply` are v3-classified;
+  `v3_installer` is residue-clean and pure;
   no `.hermes/`/`.claude/` state. **v1↔v3 coexistence:** additive; **v1 deleted =
   ∅** (the internal `cev3` console_script from G-7.0 is unchanged). **version
   boundary:** `v3_installer` imports stdlib plus (lazily, answers-validation
@@ -253,4 +284,12 @@ deferred.
 
 See also: `docs/architecture/pilot-deployment-transport.md`,
 `docs/contracts/spend-envelope.md`, `docs/llms-install.md`,
-`docs/install.sh`, `schemas/install-answers.schema.yaml`.
+`docs/install.sh`, `docs/operations/ONBOARD_APPLY_PROTOCOL.md`,
+`schemas/install-answers.schema.yaml`.
+
+## E2 carrier baseline
+
+For the per-gate E2 commit on `v35e-prime-wave`, wheel/source parity is a named
+intra-branch baseline: the ratified night mandate rebuilds the source/wheel pair
+once at branch end under the E1 manifest leg. The union branch must clear this
+baseline before merge.

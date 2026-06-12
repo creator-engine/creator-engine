@@ -64,5 +64,6 @@ else
   say "tip: prepare answers upfront — 'ce onboard --spec <spec> --inventory' lists every input"
 fi
 say "next: review the dry-run plan, then approve sudo + the GitHub-App click"
-say "  cev3 onboard --spec <verified-spec>${ANSWERS_ARG}   # or, once exposed:  ce onboard --spec <spec>${ANSWERS_ARG}"
+say "  ce onboard --spec <verified-spec>${ANSWERS_ARG} --plan"
+say "  ce onboard --spec <verified-spec>${ANSWERS_ARG} --apply"
 say "install bootstrap complete — no privileged action was taken without your approval"

@@ -56,6 +56,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -65,6 +66,7 @@ import yaml
 from . import (
     coordination,
     evidence_sink,
+    onboard_apply,
     runtime_evidence_spine,
     v3_forge_join,
     v3_installer,
@@ -1933,7 +1935,7 @@ def _cmd_session(args: argparse.Namespace) -> int:
 
 
 def _cmd_onboard(args: argparse.Namespace) -> int:
-    """Two-mode install — verify the signed spec, then DRY-RUN the install plan.
+    """Two-mode install — verify the signed spec, then plan or apply.
 
     v3.5-E.3 (one engine, two modes): the same verified journey, with answers
     coming from ``interactive > answers-file > detected > default``.
@@ -1950,26 +1952,75 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     FIRST — the answers file configures the VERIFIED procedure; nothing in it
     (and no flag here) can substitute for the signature gate. The CLI is the
     I/O edge (it reads the spec, the schema document, and the answers file,
-    and runs the live read-only probes); the engine in ``v3_installer`` stays
-    pure. The deeper GitHub probes (origin remote, token scopes, installation)
-    are the E.4 live-drive seam — unprobed planners stay fail-closed.
+    and runs the live read-only probes). ``--apply`` crosses into the E2
+    live-drive seam in ``onboard_apply``; dry-run planning remains pure.
     """
+    if getattr(args, "apply", False) and (args.inventory or args.show_plan):
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · onboard refused: --apply cannot be combined with --inventory or --plan"],
+            {"error": "invalid_onboard_mode"},
+        )
     spec_path = Path(args.spec)
     if not spec_path.is_file():
         return _emit(args, 2, [f"{_BRAND} · onboard refused: spec not found: {spec_path}"],
                      {"error": "spec_not_found"})
     spec_bytes = spec_path.read_bytes()
-    self_attested = args.sig_value is None
-    signature = {"key_id": args.key_id, "algo": v3_installer.CONTENT_ALGO,
-                 "value": args.sig_value or v3_installer.content_digest(spec_bytes)}
-    # 1. verify FIRST — unbypassed; --inventory/--plan ride the same gate.
-    try:
-        verified = v3_installer.require_verified(
-            spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS
+    apply_mode = bool(getattr(args, "apply", False))
+    apply_verifier = None
+    apply_signature: dict[str, Any] | None = None
+    spec_for_plan = spec_bytes
+    self_attested = args.sig_value is None and not apply_mode
+    if apply_mode or args.sig_algo == v3_installer.SSH_ED25519_ALGO:
+        apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
+        if args.sig_value is not None:
+            apply_signature = {
+                "key_id": args.key_id,
+                "algo": args.sig_algo or v3_installer.SSH_ED25519_ALGO,
+                "namespace": v3_installer.SSH_SIG_NAMESPACE,
+                "value": args.sig_value,
+            }
+            if args.content_sha256:
+                apply_signature["content_sha256"] = args.content_sha256
+        try:
+            signed = onboard_apply.parse_signed_spec(spec_bytes, apply_signature)
+            signature = {k: v for k, v in signed.signature.items() if k != "namespace"}
+            spec_for_plan = v3_installer.canonical_spec_bytes(spec_bytes)
+            verified = v3_installer.require_verified(
+                spec_for_plan,
+                signature,
+                pinned_keys=v3_installer.PINNED_KEYS,
+                verifier=apply_verifier,
+            )
+        except (onboard_apply.ApplyRefused, v3_installer.InstallRefused) as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard REFUSED: {exc}"],
+                {"error": "refused", "detail": str(exc)},
+            )
+        self_attested = False
+    elif args.sig_algo not in (None, v3_installer.CONTENT_ALGO):
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · onboard refused: unsupported --sig-algo {args.sig_algo!r}"],
+            {"error": "unsupported_sig_algo"},
         )
-    except v3_installer.InstallRefused as exc:
-        return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"],
-                     {"error": "refused", "detail": str(exc)})
+    else:
+        signature = {"key_id": args.key_id, "algo": v3_installer.CONTENT_ALGO,
+                     "value": args.sig_value or v3_installer.content_digest(spec_bytes)}
+        verified = None
+    # 1. verify FIRST — unbypassed; --inventory/--plan ride the same gate.
+    if verified is None:
+        try:
+            verified = v3_installer.require_verified(
+                spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS
+            )
+        except v3_installer.InstallRefused as exc:
+            return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"],
+                         {"error": "refused", "detail": str(exc)})
     # 2. the answers schema + the answers file (the CLI is the I/O edge; the
     #    engine is pure — the schema document is injected as a dict).
     schema_path = Path(args.answers_schema)
@@ -2058,6 +2109,18 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 "missing": [{"key": m.key, "step": m.step, "reason": m.reason} for m in missing],
                 "sudo_uncovered": list(grant_diff.uncovered),
             })
+    if apply_mode and (missing or grant_diff.uncovered):
+        detail = (
+            "apply requires complete answers"
+            if missing
+            else "planned privileged installs outside the sudo grant"
+        )
+        return _emit(args, 1, [f"{_BRAND} · onboard apply REFUSED: {detail}"], {
+            "error": "refused",
+            "detail": detail,
+            "missing": [{"key": m.key, "step": m.step, "reason": m.reason} for m in missing],
+            "sudo_uncovered": list(grant_diff.uncovered),
+        })
     # 7. the cost profile — CLI flags are the interactive override (precedence);
     #    otherwise a custom answers profile supplies the (stripped) binding.
     opt_out = args.opt_out
@@ -2075,11 +2138,70 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             opt_out, optout_ratification = True, binding
     try:
         plan = v3_installer.build_install_plan(
-            spec_bytes, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
+            spec_for_plan, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
             mode=args.mode, opt_out=opt_out, optout_ratification=optout_ratification,
+            verifier=apply_verifier,
         )
     except v3_installer.InstallRefused as exc:
         return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
+    if apply_mode:
+        request = onboard_apply.ApplyRequest(
+            spec_bytes=spec_bytes,
+            schema=schema,
+            answers=answers,
+            answers_sha256=answers_sha,
+            state_root=Path(args.root),
+            mode=args.mode,
+            detected=detected,
+            dependency_probe=probe,
+            non_interactive=bool(args.non_interactive),
+            opt_out=opt_out,
+            optout_ratification=optout_ratification,
+            explicit_signature=apply_signature,
+            first_scope_id=args.first_scope_id,
+            lock_timeout_seconds=args.lock_timeout,
+            spawn_smoke=bool(args.spawn_smoke),
+        )
+        try:
+            summary = onboard_apply.apply_onboard(request, verifier=apply_verifier)
+        except onboard_apply.ApplyRefused as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard apply REFUSED ({exc.code}): {exc.detail}"],
+                {"error": "refused", "code": exc.code, "detail": exc.detail},
+            )
+        except onboard_apply.ApplyFailed as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard apply FAILED ({exc.code}): {exc.detail}"],
+                {"error": "failed", "code": exc.code, "detail": exc.detail},
+            )
+        outcome_code = 0 if summary["refused"] == 0 and summary["failed"] == 0 else 1
+        lines = [
+            f"{_BRAND} · onboard apply ({summary['mode']}) — "
+            f"{summary['verified_count']}/{summary['legs_total']} legs verified",
+            f"    repo · {summary['target_repo']} · created {summary['greenfield_repos_created']} "
+            f"· already {summary['repos_already_satisfied']} · brownfield deferred {summary['brownfield_deferred']}",
+            f"    outcomes · applied {summary['applied']} · already {summary['already_satisfied']} "
+            f"· refused {summary['refused']} · failed {summary['failed']} · skipped {summary['skipped']}",
+        ]
+        if summary["manual_rollback_required"]:
+            lines.append(
+                f"    rollback · {summary['manual_rollback_required']} leg(s) require manual verification/cleanup"
+            )
+        if outcome_code:
+            terminal = next(
+                (leg for leg in summary["legs"] if leg["status"] in {"refused", "failed"}),
+                None,
+            )
+            if terminal:
+                lines.append(
+                    f"{_BRAND} · stopped at {terminal['id']}: "
+                    f"{terminal.get('detail') or terminal['action']}"
+                )
+        return _emit(args, outcome_code, lines, summary)
     # 8. --plan: compose the decomposed GitHub leg (pure planners; the CLI-level
     #    probe carries only what it can read today — unprobed = fail-closed).
     github_leg = None
@@ -2118,7 +2240,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 + "; ".join(f"step {m.step}: {m.key} ({m.reason})" for m in missing)
             )
         else:
-            lines.append("    remaining asks · none — apply-ready (the live drive is deferred)")
+            lines.append(f"    remaining asks · none — apply-ready (run `{CE_CMD} onboard --apply`)")
     if github_leg is not None:
         click = "click required (first run)" if github_leg["app"]["click_required"] \
             else f"click skipped (installation {github_leg['app']['installation_id']} detected/declared)"
@@ -2130,7 +2252,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     lines += [
         f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",
         f"{_BRAND} · you approve only: {', '.join(plan['human_approves'])}",
-        f"{_BRAND} · deferred live: {'; '.join(plan['deferred_live_seams'])}",
+        f"{_BRAND} · apply handles: {'; '.join(plan['deferred_live_seams'])}",
     ]
     if self_attested:
         # honesty: with no published --sig-value the content floor only self-attests
@@ -2239,6 +2361,45 @@ def _which(tool: str) -> bool:
     if tool == "python":
         return bool(shutil.which("python") or shutil.which("python3"))
     return bool(shutil.which(tool))
+
+
+def _ssh_keygen_verify_runner(
+    *,
+    message: bytes,
+    signature: bytes,
+    allowed_signers: str,
+    identity: str,
+    namespace: str,
+) -> bool:
+    """Verify an OpenSSH SSHSIG with stock ``ssh-keygen``."""
+    if not shutil.which("ssh-keygen"):
+        return False
+    with tempfile.TemporaryDirectory(prefix="ce-sshsig-") as tmp:
+        root = Path(tmp)
+        allowed_path = root / "allowed_signers"
+        sig_path = root / "spec.sig"
+        allowed_path.write_text(allowed_signers + "\n", encoding="utf-8")
+        sig_path.write_bytes(signature)
+        proc = subprocess.run(
+            [
+                "ssh-keygen",
+                "-Y",
+                "verify",
+                "-f",
+                str(allowed_path),
+                "-I",
+                identity,
+                "-n",
+                namespace,
+                "-s",
+                str(sig_path),
+            ],
+            input=message,
+            check=False,
+            capture_output=True,
+            timeout=20,
+        )
+    return proc.returncode == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2517,13 +2678,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_onboard = sub.add_parser(
         "onboard",
-        help="two-mode install: verify the signed spec + dry-run the plan "
-             "(agent loop: --inventory → prepare answers → --plan → apply)",
+        help="two-mode install: verify the signed spec, plan, and explicitly apply "
+             "(agent loop: --inventory → prepare answers → --plan → --apply)",
     )
     p_onboard.add_argument("--spec", required=True, help="path to the served install spec to verify")
     p_onboard.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
     p_onboard.add_argument("--sig-value", default=None,
                            help="the published signature value (default: the spec's own content digest)")
+    p_onboard.add_argument("--sig-algo", default=None,
+                           choices=[v3_installer.CONTENT_ALGO, v3_installer.SSH_ED25519_ALGO],
+                           help="signature algorithm (apply requires ssh-ed25519)")
+    p_onboard.add_argument("--content-sha256", default=None,
+                           help="canonical signed-spec digest when --sig-value is supplied out of band")
     p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
                            help="install mode")
     p_onboard.add_argument("--answers", default=None,
@@ -2536,12 +2702,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p_onboard.add_argument("--plan", action="store_true", dest="show_plan",
                            help="terraform-plan analog: the full plan incl. the exact remaining asks "
                                 "+ the decomposed GitHub leg (no execution)")
+    p_onboard.add_argument("--apply", action="store_true",
+                           help="execute the verified E2 onboard apply drive (side-effecting)")
     p_onboard.add_argument("--non-interactive", action="store_true",
                            help="fail-closed: refuse with the exact missing list instead of ever asking")
     p_onboard.add_argument("--opt-out", action="store_true",
                            help="opt out of spend CAPS (ratified-human-only; detection net stays on)")
     p_onboard.add_argument("--ratified-prompt-sha", default=None, help="64-hex opt-out ratification digest")
     p_onboard.add_argument("--approver-ref", default=None, help="64-hex opt-out approver digest")
+    p_onboard.add_argument("--first-scope-id", default=onboard_apply.DEFAULT_FIRST_SCOPE_ID,
+                           help="scope id for the first governed smoke Scope")
+    p_onboard.add_argument("--spawn-smoke", action="store_true",
+                           help="include the optional spawn preflight in the first-project smoke leg")
+    p_onboard.add_argument("--lock-timeout", type=float, default=None,
+                           help="seconds to wait for another onboard apply lock before refusing")
+    p_onboard.add_argument("--root", default=V3_LOCAL_STATE_ROOT,
+                           help=f"v3 local-state root for apply ledger/lock (default: {V3_LOCAL_STATE_ROOT})")
     p_onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_guide = sub.add_parser("guide", help="print the in-product CE guide (what CE is + the five stages)")

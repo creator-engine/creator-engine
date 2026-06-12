@@ -26,11 +26,11 @@ verify → answers → probe → plan → apply.
 This module is the **CI-pure decision substrate** — the verify-before-execute
 gate, the detect-don't-assume dependency planner, the Default-vs-Custom installer
 profile (with the cost opt-out), and the ``ce`` CLI-exposure plan. **The live
-drive is the deferred seam:** the actual ``curl|bash`` execution, the runtime
-backend provisioning (gVisor / egress proxy), the interactive GitHub-App click,
-and the live transport probe are NOT here — exactly the G-4/G-5/G-6 cut. The
-read-only dependency *detection* (which/probe) is injected (the CLI does it live;
-the planner stays pure).
+drive is the E2 composition seam in ``onboard_apply``:** the actual ``curl|bash``
+execution, runtime backend provisioning (gVisor / egress proxy), interactive
+GitHub-App click, and live transport probe are NOT here. The read-only dependency
+*detection* (which/probe) is injected (the CLI does it live; the planner stays
+pure).
 
 Signing model: this repo ships no asymmetric-crypto dependency, so the in-tree
 floor is a **content-address integrity** binding (sha256), with the real
