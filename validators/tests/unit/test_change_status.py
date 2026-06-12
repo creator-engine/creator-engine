@@ -27,6 +27,9 @@ from creator_engine_validator.forge import (
     checks_state,
     review_state,
 )
+# F6: pr_state / PullRequestState are imported from the module directly — the forge package
+# __init__ is outside this gate's closed path manifest (no re-export edit here).
+from creator_engine_validator.forge.change_status import PullRequestState, pr_state
 
 _REPO = "creator-engine/creator-engine"
 
@@ -128,6 +131,59 @@ def test_change_conflicts_behind_is_not_up_to_date():
     )
     assert state.merge_state_status == "BEHIND"
     assert state.up_to_date is False
+
+
+# ------------------------------------------------------------------ F6 combined pr_state read
+def _full_pr_payload(**over) -> dict:
+    pr = {
+        "number": 126, "headRefName": "ce/run-1", "baseRefName": "main",
+        "headRefOid": "c" * 40, "baseRefOid": "b" * 40, "reviewDecision": "APPROVED",
+        "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE",
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+    }
+    pr.update(over)
+    return {"data": {"repository": {"pullRequest": pr}}}
+
+
+def test_pr_state_reads_combined_identity_and_gate_in_one_call():
+    r = _runner(_full_pr_payload())
+    st = pr_state(_change(), gh_runner=r)
+    assert isinstance(st, PullRequestState)
+    assert st.head_sha == "c" * 40 and st.base_sha == "b" * 40
+    assert st.branch == "ce/run-1" and st.base == "main"
+    assert st.review_decision == "APPROVED" and st.approved is True
+    assert st.rollup_state == "SUCCESS" and st.all_green is True
+    assert st.merge_state_status == "CLEAN" and st.mergeable == "MERGEABLE"
+    assert st.up_to_date is True and st.eligible is True
+    assert len(r.calls) == 1 and "graphql" in r.calls[0]  # ONE combined read
+
+
+def test_pr_state_composes_eligibility_like_merge():
+    # any leg failing makes eligible False (review/checks/mergeable composed as in merge())
+    assert pr_state(_change(), gh_runner=_runner(_full_pr_payload(reviewDecision="REVIEW_REQUIRED"))).eligible is False
+    assert pr_state(_change(), gh_runner=_runner(_full_pr_payload(
+        commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]}))).eligible is False
+    assert pr_state(_change(), gh_runner=_runner(_full_pr_payload(mergeable="CONFLICTING"))).eligible is False
+
+
+def test_pr_state_null_rollup_is_not_green():
+    st = pr_state(_change(), gh_runner=_runner(_full_pr_payload(
+        commits={"nodes": [{"commit": {"statusCheckRollup": None}}]})))
+    assert st.all_green is False and st.eligible is False
+
+
+def test_pr_state_refuses_no_open_pr_and_malformed_repo():
+    r = _runner(_full_pr_payload())
+    with pytest.raises(ChangeStatusRefused):
+        pr_state(_change(pr_number=None), gh_runner=r)
+    with pytest.raises(ChangeStatusRefused):
+        pr_state(_change(repo="not-a-repo"), gh_runner=r)
+    assert r.calls == []  # refused BEFORE any forge call
+
+
+def test_pr_state_transport_failure_raises_forge_config_error():
+    with pytest.raises(ForgeConfigError):
+        pr_state(_change(), gh_runner=_runner(None, rc=1, stderr="boom"))
 
 
 # ------------------------------------------------------------------ refuse-before-side-effect

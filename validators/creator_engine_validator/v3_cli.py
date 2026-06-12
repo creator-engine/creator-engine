@@ -1212,6 +1212,11 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     pr_number = args.pr if args.pr is not None else change_block.get("pr_number")
     if pr_number is not None:
         change_set["pr_number"] = pr_number
+    # F6: propagate the value-free base-only re-stamp anchor so `cev3 merge` can machine-prove a
+    # later base-only motion. A chain without `base_sha` is legacy-unprovable, never overridden.
+    base_sha = change_block.get("base_sha")
+    if base_sha:
+        change_set["base_sha"] = base_sha
     outcome_body = {
         "kind": runtime_evidence_spine.RUN_OUTCOME_RECORD_KIND,
         "record_type": runtime_evidence_spine.RUN_OUTCOME_RECORD_TYPE,
@@ -1464,19 +1469,31 @@ def _cmd_merge(args: argparse.Namespace) -> int:
             [f"{_BRAND} · merge refused: {exc}"],
             {"action": "merge_refused", "run_id": run_id, "detail": str(exc)},
         )
-    snapshot = {
-        "pr_number": result.pr_number, "eligible": result.eligible,
-        "would_merge": result.would_merge, "merged": result.merged,
-        "merge_commit_sha": result.merge_commit_sha,
-        "review_decision": result.review_decision, "rollup_state": result.rollup_state,
-        "merge_state_status": result.merge_state_status, "mergeable": result.mergeable,
-    }
+    snapshot = result.to_dict()
+    # F6: a head that moved is reported as an automatic base-only re-stamp or a refusal — never an
+    # override. The status line names which tier acted.
+    restamp_note = ""
+    if result.head_status == v3_forge_join.HEAD_BASE_ONLY_RESTAMPED:
+        restamp_note = (f" · base-only RE-STAMPED {result.old_head_sha}→{result.new_head_sha} "
+                        "(machine_rebase_equivalence)")
+    elif result.head_status == v3_forge_join.HEAD_BASE_ONLY_RESTAMP:
+        restamp_note = f" · base-only re-stamp AVAILABLE {result.old_head_sha}→{result.new_head_sha}"
     if args.apply and result.merged:
         lines = [
-            f"{_BRAND} · MERGED PR #{result.pr_number} for Scope {args.scope_id!r} (run {run_id})",
+            f"{_BRAND} · MERGED PR #{result.pr_number} for Scope {args.scope_id!r} (run {run_id})"
+            + restamp_note,
             f"    squash commit: {result.merge_commit_sha}",
-            f"    next: {CE_CMD} report {args.scope_id} --run {run_id}",
         ]
+        if result.restamp_recorded:
+            lines.append("    runtime_change_restamp recorded (base-only machine equivalence)")
+        # The squash tree-equivalence audit is the what-was-TESTED == what-MERGES proof; a false
+        # verdict is an operator-visible integrity alarm, never a silent pass.
+        if result.audit_tree_equivalence is False:
+            lines.append(f"{_BRAND} · ⚠ MERGE-AUDIT TREE MISMATCH — tested tree != merged tree; "
+                         "operator review required (merge_audit_tree_mismatch)")
+            return _emit(args, 1, lines, {"action": "merge_audit_tree_mismatch",
+                                          "scope_id": args.scope_id, "run_id": run_id, **snapshot})
+        lines.append(f"    next: {CE_CMD} report {args.scope_id} --run {run_id}")
         return _emit(args, 0, lines, {"action": "merged", "scope_id": args.scope_id,
                                       "run_id": run_id, **snapshot})
     if args.apply:
@@ -1487,9 +1504,10 @@ def _cmd_merge(args: argparse.Namespace) -> int:
                                       "run_id": run_id, **snapshot})
     verdict = "WOULD merge" if result.would_merge else "would NOT merge (gate not satisfied)"
     lines = [
-        f"{_BRAND} · MERGE PLAN for PR #{result.pr_number} (Scope {args.scope_id!r}, run {run_id})",
-        f"    {verdict}: review={result.review_decision} · checks={result.rollup_state} · "
-        f"mergeable={result.mergeable}",
+        f"{_BRAND} · MERGE PLAN for PR #{result.pr_number} (Scope {args.scope_id!r}, run {run_id})"
+        + restamp_note,
+        f"    head_status={result.head_status} · {verdict}: review={result.review_decision} · "
+        f"checks={result.rollup_state} · mergeable={result.mergeable}",
         f"{_BRAND} · (plan-only — pass --apply for the Operator's gated merge)",
     ]
     return _emit(args, 0, lines, {"action": "merge_planned", "scope_id": args.scope_id,

@@ -52,10 +52,12 @@ from typing import Any
 
 import yaml
 
+from .checks import path_manifest_fidelity
 from .evidence_sink import file_evidence_sink
 from .forge.app_jwt_runner import Signer, app_jwt_gh_runner
 from .forge.change import ChangeRef, open_change
 from .forge.change_push import push_change
+from .forge.change_status import pr_state
 from .forge.credential_runner import authenticated_gh_runner
 from .forge.github_repo_config import ForgeConfigError, GhRunner
 from .forge.merge import MergeResult, merge
@@ -65,9 +67,8 @@ from .forge.scoped_token import (
     mint_scoped_token,
     revoke_scoped_token,
 )
-from .orchestrator import merge_change
-from .runner.backend import CollectedEvidence, RunChangeSet
-from .runtime_evidence_spine import RUN_OUTCOME_RECORD_TYPE
+from .runner.backend import CollectedEvidence
+from .runtime_evidence_spine import RUN_OUTCOME_RECORD_TYPE, append as _spine_append
 
 #: The verified live host App-config convention (instance-local, outside the repo). The
 #: ``--app-config`` flag is REQUIRED on ``cev3 pr`` (host filenames differ); this is documentation
@@ -93,6 +94,37 @@ PR_SECRET_NAME = "forge_pr_open"
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# ---------------------------------------------------------------------------
+# F6 Phase-0 two-tier change-block re-stamp — record kinds/types + carrier dir
+# ---------------------------------------------------------------------------
+#: The F6 base-only re-stamp record (the ONLY machine authority for base-only
+#: merge-head movement) and the F6 squash tree-equivalence merge-audit record.
+#: Defined HERE (not in the record-agnostic spine — the closed manifest excludes
+#: the spine): the schema validates the shape and ``verify_chain`` is record-type
+#: agnostic (content-address + chain-link + sequence + policy-binding apply
+#: uniformly), so no spine/check logic changes.
+CHANGE_RESTAMP_RECORD_KIND = "runtime-change-restamp"
+CHANGE_RESTAMP_RECORD_TYPE = "runtime_change_restamp"
+MERGE_AUDIT_RECORD_KIND = "runtime-merge-audit"
+MERGE_AUDIT_RECORD_TYPE = "runtime_merge_audit"
+
+#: The per-PR carrier directory (mirror of ``path_manifest_fidelity.MANIFEST_DIR``).
+#: A carrier path is MECHANICAL metadata (it records base/head/restamp prose), so
+#: it is EXCLUDED from the content-diff identity; its PATH-SET is proved unchanged
+#: structurally via ``path_manifest_fidelity.parse_carrier`` instead.
+CARRIER_DIR = path_manifest_fidelity.MANIFEST_DIR
+
+#: The F6 ``head_status`` vocabulary surfaced by ``merge_for_run`` (plan + apply).
+HEAD_UNCHANGED = "unchanged"
+HEAD_BASE_ONLY_RESTAMP = "base_only_restamp_available"
+HEAD_BASE_ONLY_RESTAMPED = "base_only_restamped"
+HEAD_CONTENT_DRIFT = "content_drift_refused"
+HEAD_LEGACY_UNPROVABLE = "legacy_unprovable"
+
+#: The F6 refusal-reason codes (the value-free refusal taxonomy; never an override).
+RESTAMP_CONTENT_DRIFT_CODE = "content_drift_requires_reratification"
+RESTAMP_LEGACY_UNPROVABLE_CODE = "restamp_legacy_unprovable"
 
 
 class ForgeJoinRefused(Exception):
@@ -309,6 +341,7 @@ def open_change_for_run(
     mint_gh_runner: GhRunner | None = None,
     git_spawn: Any = None,
     token_spawn: Any = None,
+    git_identity_runner: GitRunner | None = None,
     now: datetime | None = None,
 ) -> ChangeRef:
     """Mint→push→open one PR for a governed seat's authored branch (plan-by-default).
@@ -322,6 +355,13 @@ def open_change_for_run(
     (``branch``/``base``/``pr_number``/``head_sha``/``manifest_paths``/``opened_at`` — shape refs
     only) is stamped onto ``dispatch.yaml``; plan mode (``apply=False``) reads state and mutates
     nothing. Every network/crypto seam is injectable; CI drives fakes with zero live I/O.
+
+    F6 Phase-0: when a ``git_identity_runner`` is supplied (production wires the local-checkout git
+    seam), the stamped change block ALSO carries the value-free re-stamp anchor — ``base_sha`` plus
+    the change identity (``head_tree_sha`` / ``content_diff_id`` / ``patch_id_stable`` /
+    ``manifest_paths_sha256`` / ``proof_inputs_sha256``) — so a later base-only motion can be
+    machine-proved instead of re-adopted. Without the seam the block conserves its pre-F6 shape (a
+    chain that lacks ``base_sha`` is treated as legacy-unprovable at merge, NEVER overridden).
     """
     root = Path(root)
     dispatch = _load_dispatch(root, run_id)
@@ -355,7 +395,7 @@ def open_change_for_run(
         ref = open_change(repo, branch, base, paths, plan_ref, apply=apply, gh_runner=authed)
         # 3) on a REAL apply (a PR exists), stamp the value-free change block; plan mode mutates nothing.
         if apply and getattr(ref, "pr_number", None) is not None:
-            dispatch["change"] = {
+            change_block: dict[str, Any] = {
                 "branch": branch,
                 "base": base,
                 "pr_number": ref.pr_number,
@@ -363,6 +403,11 @@ def open_change_for_run(
                 "manifest_paths": list(paths),
                 "opened_at": _utcstamp_iso(now),
             }
+            # F6: stamp the value-free re-stamp anchor (base_sha + change identity) when the git
+            # seam is available. Best-effort — an unresolved ref leaves the pre-F6 shape intact.
+            if git_identity_runner is not None:
+                change_block.update(_open_identity_fields(git_identity_runner, base, ref.head_sha, paths))
+            dispatch["change"] = change_block
             _write_dispatch(root, run_id, dispatch)
         return ref
     finally:
@@ -411,6 +456,172 @@ def _pr_opened_change_set(records: list[dict[str, Any]]) -> tuple[dict[str, Any]
     return None
 
 
+# ---------------------------------------------------------------------------
+# F6 Phase-0 — change-block identity (git seam) + the base-only re-stamp proof
+# ---------------------------------------------------------------------------
+#: An injectable git seam: ``(argv, input_text=None) -> CompletedProcess`` (the
+#: ``subprocess.run`` shape). CI injects a fake → zero live git.
+GitRunner = Callable[..., Any]
+
+
+class _GitUnavailable(Exception):
+    """A required git ref/object is unavailable — the chain cannot be proven (legacy)."""
+
+
+def default_git_runner(source_dir: str | Path = ".") -> GitRunner:  # pragma: no cover - live git
+    """The production git seam: runs ``git`` in ``source_dir``, captured, never raising itself."""
+
+    def run(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            list(argv), cwd=str(source_dir), check=False, capture_output=True,
+            text=True, input=input_text, timeout=60,
+        )
+
+    return run
+
+
+def _git_out(git_runner: GitRunner, argv: Sequence[str], input_text: str | None = None) -> str:
+    """Run a git command through the seam; raise :class:`_GitUnavailable` on a non-zero exit."""
+    proc = git_runner(list(argv), input_text)
+    if getattr(proc, "returncode", 1) != 0:
+        raise _GitUnavailable(f"git {' '.join(str(a) for a in argv[1:3])} unavailable")
+    return getattr(proc, "stdout", "") or ""
+
+
+def _is_carrier_path(path: str) -> bool:
+    """True when ``path`` is a per-PR carrier (mechanical base/head/restamp metadata)."""
+    return path.startswith(CARRIER_DIR.rstrip("/") + "/")
+
+
+def _normalized_pathset_sha256(paths: Sequence[str]) -> str:
+    """The carrier canonicalization: ``sha256("\\n".join(sorted(unique)) + "\\n")``."""
+    uniq = sorted({p.strip() for p in paths if p and p.strip()})
+    return hashlib.sha256(("\n".join(uniq) + "\n").encode("utf-8")).hexdigest()
+
+
+def _change_identity(
+    git_runner: GitRunner, base_ref: str, head_ref: str, paths: Sequence[str]
+) -> dict[str, str]:
+    """Compute the value-free change-block identity over the authorized NON-mechanical paths.
+
+    ``content_diff_id`` = SHA256 of the normalized ``git diff base..head -- <non-carrier paths>``;
+    ``patch_id_stable`` = git stable patch-id over that same diff (invariant under base-only
+    motion — the pre-image of our files is unchanged when base did not touch them). Raises
+    :class:`_GitUnavailable` if any ref/object is missing (→ legacy-unprovable).
+    """
+    non_mech = sorted({p for p in paths if p and not _is_carrier_path(p)})
+    head_tree = _git_out(git_runner, ["git", "rev-parse", f"{head_ref}^{{tree}}"]).strip()
+    diff = _git_out(
+        git_runner, ["git", "diff", "--no-color", f"{base_ref}..{head_ref}", "--", *non_mech]
+    )
+    content_diff_id = hashlib.sha256(diff.encode("utf-8")).hexdigest()
+    pid_out = _git_out(git_runner, ["git", "patch-id", "--stable"], diff).split()
+    patch_id = pid_out[0] if pid_out else content_diff_id
+    return {
+        "head_tree_sha": head_tree,
+        "content_diff_id": content_diff_id,
+        "patch_id_stable": patch_id,
+        "manifest_paths_sha256": _normalized_pathset_sha256(paths),
+    }
+
+
+def _carrier_path(paths: Sequence[str]) -> str | None:
+    """The single per-PR carrier in the authorized path-set (or None)."""
+    carriers = [p for p in paths if _is_carrier_path(p)]
+    return carriers[0] if len(carriers) == 1 else None
+
+
+def _carrier_pathset_sha256(git_runner: GitRunner, ref: str, carrier: str | None) -> str | None:
+    """The carrier's STRUCTURED path-set hash at ``ref`` (mechanical base/head prose ignored)."""
+    if not carrier:
+        return None
+    text = _git_out(git_runner, ["git", "show", f"{ref}:{carrier}"])
+    ident = path_manifest_fidelity.parse_carrier(text)
+    return ident.normalized_sha256 if ident else None
+
+
+def _open_identity_fields(
+    git_runner: GitRunner, base_ref: str, head_sha: str | None, paths: Sequence[str]
+) -> dict[str, str]:
+    """The F6 re-stamp anchor fields stamped at open (base_sha + change identity). Best-effort.
+
+    Returns ``{}`` (the pre-F6 change-block shape) when any required ref is unresolvable — a chain
+    without ``base_sha`` is later treated as legacy-unprovable, never overridden.
+    """
+    try:
+        base_sha = _git_out(git_runner, ["git", "rev-parse", base_ref]).strip()
+        ident = _change_identity(git_runner, base_ref, head_sha or "HEAD", paths)
+    except _GitUnavailable:
+        return {}
+    if not base_sha:
+        return {}
+    proof_inputs = hashlib.sha256(json.dumps({
+        "base_sha": base_sha, "head_sha": head_sha,
+        "content_diff_id": ident["content_diff_id"], "patch_id": ident["patch_id_stable"],
+        "manifest_paths_sha256": ident["manifest_paths_sha256"],
+    }, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "base_sha": base_sha,
+        "head_tree_sha": ident["head_tree_sha"],
+        "content_diff_id": ident["content_diff_id"],
+        "patch_id_stable": ident["patch_id_stable"],
+        "manifest_paths_sha256": ident["manifest_paths_sha256"],
+        "proof_inputs_sha256": proof_inputs,
+    }
+
+
+@dataclass(frozen=True)
+class RestampMergeResult:
+    """The F6 plan/apply result: the merge gate snapshot + the head-status disposition.
+
+    Exposes every :class:`~.forge.merge.MergeResult` field the CLI / G2c tests read
+    (``pr_number`` / ``eligible`` / ``would_merge`` / ``merged`` / ``merge_commit_sha`` /
+    review / checks / mergeable) PLUS the F6 ``head_status`` (``unchanged`` /
+    ``base_only_restamp_available`` / ``base_only_restamped``), the old/new base+head SHAs,
+    whether a ``runtime_change_restamp`` was recorded, and the squash tree-equivalence audit
+    verdict. Value-free. NEVER carries a token (the merge path mints none).
+    """
+
+    pr_number: int
+    head_status: str
+    old_head_sha: str | None
+    new_head_sha: str | None
+    old_base_sha: str | None
+    new_base_sha: str | None
+    eligible: bool
+    would_merge: bool
+    merged: bool
+    merge_commit_sha: str | None
+    review_decision: str | None
+    rollup_state: str
+    merge_state_status: str
+    mergeable: str | None
+    applied: bool
+    restamp_recorded: bool
+    audit_tree_equivalence: bool | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pr_number": self.pr_number,
+            "head_status": self.head_status,
+            "old_head_sha": self.old_head_sha,
+            "new_head_sha": self.new_head_sha,
+            "old_base_sha": self.old_base_sha,
+            "new_base_sha": self.new_base_sha,
+            "eligible": self.eligible,
+            "would_merge": self.would_merge,
+            "merged": self.merged,
+            "merge_commit_sha": self.merge_commit_sha,
+            "review_decision": self.review_decision,
+            "rollup_state": self.rollup_state,
+            "merge_state_status": self.merge_state_status,
+            "mergeable": self.mergeable,
+            "applied": self.applied,
+            "restamp_recorded": self.restamp_recorded,
+            "audit_tree_equivalence": self.audit_tree_equivalence,
+        }
+
+
 def merge_for_run(
     root: Path | str,
     run_id: str,
@@ -418,22 +629,33 @@ def merge_for_run(
     merge_gh_runner: GhRunner,
     apply: bool = False,
     repo: str = DEFAULT_REPO,
-) -> MergeResult:
-    """Gate-read (or apply) a squash-merge of the run's opened PR; attest ``pr_merged`` on a real merge.
+    git_runner: GitRunner | None = None,
+) -> RestampMergeResult:
+    """Gate-read (or apply) a squash-merge of the run's opened PR under the F6 two-tier re-stamp.
 
     Preconditions: the dispatch is collected (``collected_at`` set), the persisted chain exists, and
-    its ``pr_opened`` record carries a ``change_set`` with a ``pr_number``. Reconstructs the
-    value-free :class:`~.runner.backend.CollectedEvidence` + the merge-target :class:`ChangeRef` from
-    that pointer, then drives the gated merge under the DISTINCT ``merge_gh_runner`` (NEVER the
-    per-run token — this leg mints none).
+    its ``pr_opened`` record carries a ``change_set`` with a ``pr_number``. The ACTIVE merge head is
+    the LATEST attested change-block head — the original ``pr_opened`` head if no later re-stamp, or a
+    ``runtime_change_restamp`` head. CE reads the LIVE PR state (one combined read through the
+    DISTINCT ``merge_gh_runner`` — NEVER the per-run token; this leg mints none) and compares the live
+    head to the attested head:
 
-    This mirrors ``run_assembly.make_merge_driver``'s composition (reconstruct → gated merge →
-    :func:`~.orchestrator.merge_change` persist) but ALSO returns the :class:`MergeResult` gate
-    snapshot the plan-mode CLI surfaces (the driver returns only ``CollectedEvidence``). Exactly ONE
-    ``forge.merge`` call runs: with ``apply=False`` it is a non-mutating gate read (``would_merge`` +
-    the snapshot); with ``apply=True`` it refuses an ineligible PR (``MergeRefused``) and otherwise
-    issues one head-pinned squash, and ``pr_merged`` is appended onto the SAME chain + re-persisted
-    only on an ACTUAL merge. A plan-mode / ineligible result attests NOTHING.
+    * **unchanged** — merge with the attested head, exactly as before.
+    * **base-only motion** — when the live head moved but CE machine-proves rebase-equivalence
+      (unchanged branch/base/PR identity + unchanged carrier path-set + unchanged normalized content
+      diff identity + unchanged stable patch-id), re-stamp the change block to the new head: append
+      a ``runtime_change_restamp`` (``authority: machine_rebase_equivalence``), then merge with the
+      NEW head.
+    * **content drift** — any changed content/path/pin identity REFUSES
+      (``content_drift_requires_reratification``) before any merge PUT; a fresh ratification, never an
+      override, is the path forward.
+    * **legacy unprovable** — a chain lacking ``base_sha`` (or whose old refs cannot be resolved)
+      REFUSES (``restamp_legacy_unprovable``) before any merge PUT; a raw head SHA is NEVER accepted.
+
+    Plan mode (``apply=False``) reports ``head_status`` + the old/new SHAs and mutates nothing. Apply
+    mode issues exactly one head-pinned squash on the active head, then appends ``runtime_change_restamp``
+    (if re-stamped) + ``pr_merged`` + a ``runtime_merge_audit`` (the squash tree-equivalence proof:
+    what-was-TESTED == what-MERGES) onto the SAME chain and re-persists — only on an ACTUAL merge.
     """
     root = Path(root)
     dispatch = _load_dispatch(root, run_id)
@@ -454,39 +676,237 @@ def merge_for_run(
         )
     cs, plan_ref = found
     pr_number = int(cs["pr_number"])
-    head_sha = cs.get("head_sha")
+    git = git_runner if git_runner is not None else default_git_runner(".")
 
-    change = ChangeRef(
-        repo=repo,
-        branch=str(cs.get("branch") or ""),
-        base=str(cs.get("base") or "main"),
-        pr_number=pr_number,
-        head_sha=head_sha,
-        manifest_paths=tuple(cs.get("manifest_paths") or []),
-        plan_ref=plan_ref,
-        changed=True,
-        applied=True,
-        verified=True,
+    # The latest ATTESTED change-block head (a prior runtime_change_restamp wins over pr_opened).
+    attested_head, attested_base = _latest_attested_head(records, cs)
+    branch = str(cs.get("branch") or "")
+    base = str(cs.get("base") or "main")
+    manifest_paths = tuple(cs.get("manifest_paths") or [])
+    carrier = _carrier_path(manifest_paths)
+
+    # 1) Read live PR state once (combined). Refuse on PR-identity drift BEFORE any side effect.
+    read_change = ChangeRef(
+        repo=repo, branch=branch, base=base, pr_number=pr_number, head_sha=attested_head,
+        manifest_paths=manifest_paths, plan_ref=plan_ref, changed=True, applied=True, verified=True,
     )
-    # ONE gated merge under the distinct identity (read in plan mode, head-pinned squash on apply).
-    result = merge(change, apply=apply, gh_runner=merge_gh_runner)
+    live = pr_state(read_change, gh_runner=merge_gh_runner)
+    if (live.branch and live.branch != branch) or (live.base and live.base != base):
+        raise ForgeJoinRefused(
+            f"run {run_id!r} PR #{pr_number} identity drifted "
+            f"(branch {live.branch!r}!={branch!r} or base {live.base!r}!={base!r}); refusing — "
+            "a re-targeted PR is content drift requiring full re-ratification, never a re-stamp"
+        )
+    new_head = live.head_sha or attested_head
+    new_base = live.base_sha or attested_base or ""
+
+    # 2) Classify the head motion.
+    restamp_record_body: dict[str, Any] | None = None
+    if new_head == attested_head:
+        head_status = HEAD_UNCHANGED
+        active_head = attested_head
+    else:
+        head_status, restamp_record_body = _classify_head_motion(
+            git, run_id, pr_number, branch, base, carrier, manifest_paths, plan_ref,
+            old_base_sha=attested_base, old_head_sha=attested_head,
+            new_base_sha=new_base, new_head_sha=new_head,
+        )
+        active_head = new_head
+
+    proven_restamp = head_status == HEAD_BASE_ONLY_RESTAMP
+
+    # 3) PLAN mode mutates nothing — surface the disposition + the live gate.
+    if not apply:
+        would = live.eligible if head_status in (HEAD_UNCHANGED, HEAD_BASE_ONLY_RESTAMP) else False
+        return RestampMergeResult(
+            pr_number=pr_number, head_status=head_status,
+            old_head_sha=attested_head, new_head_sha=(new_head if new_head != attested_head else None),
+            old_base_sha=attested_base, new_base_sha=(new_base if new_head != attested_head else None),
+            eligible=live.eligible, would_merge=would, merged=False, merge_commit_sha=None,
+            review_decision=live.review_decision, rollup_state=live.rollup_state,
+            merge_state_status=live.merge_state_status, mergeable=live.mergeable, applied=False,
+            restamp_recorded=False, audit_tree_equivalence=None,
+        )
+
+    # 4) APPLY mode — refuse drift/legacy BEFORE any merge PUT (no override, ever).
+    if head_status == HEAD_LEGACY_UNPROVABLE:
+        raise ForgeJoinRefused(
+            f"{RESTAMP_LEGACY_UNPROVABLE_CODE}: run {run_id!r} PR #{pr_number} head moved to "
+            f"{new_head} but the chain cannot prove base-only equivalence (no base_sha or old "
+            "refs unavailable); re-adopt a fresh chain — a raw head SHA is never accepted"
+        )
+    if head_status == HEAD_CONTENT_DRIFT:
+        raise ForgeJoinRefused(
+            f"{RESTAMP_CONTENT_DRIFT_CODE}: run {run_id!r} PR #{pr_number} head {new_head} changed "
+            "content/path-set/pins vs the attested change block; refusing — content movement "
+            "requires full re-ratification, never a machine re-stamp"
+        )
+
+    # 5) Gated head-pinned squash on the ACTIVE head (the attested or the proven-restamp head).
+    merge_change_ref = ChangeRef(
+        repo=repo, branch=branch, base=base, pr_number=pr_number, head_sha=active_head,
+        manifest_paths=manifest_paths, plan_ref=plan_ref, changed=True, applied=True, verified=True,
+    )
+    result = merge(merge_change_ref, apply=True, gh_runner=merge_gh_runner)
+
+    restamp_recorded = False
+    audit_equiv: bool | None = None
     if result.merged:
-        # Attest pr_merged onto the SAME chain via the conserved merge_change primitive (the sink
-        # re-verifies the whole chain + re-persists <run_id>.runtime-evidence.yaml). change_merger
-        # returns the already-computed result so NO second merge call is made.
-        prior = CollectedEvidence(
-            handle_ref=run_id,
-            records=tuple(records),
-            note=str((doc or {}).get("note") or ""),
-            change_set=RunChangeSet(
-                branch=change.branch, base=change.base,
-                manifest_paths=tuple(cs.get("manifest_paths") or []),
-                head_sha=str(head_sha or ""),
-            ),
+        chain = list(records)
+        if proven_restamp and restamp_record_body is not None:
+            chain = chain + [_spine_append(chain, restamp_record_body)]
+            restamp_recorded = True
+        # pr_merged onto the SAME chain (value-free change_set pointer, carrying the active head).
+        chain = chain + [_spine_append(chain, _pr_merged_body(
+            run_id, plan_ref, branch, base, manifest_paths, active_head, pr_number,
+            base_sha=new_base if proven_restamp else attested_base,
+        ))]
+        # The squash tree-equivalence audit (what-was-TESTED == what-MERGES). Best-effort: a git
+        # ref we cannot resolve skips the audit (the merge already happened) with a warning.
+        audit_body, audit_equiv = _merge_audit_body(
+            git, run_id, plan_ref, pr_number, active_head, result.merge_commit_sha,
         )
+        if audit_body is not None:
+            chain = chain + [_spine_append(chain, audit_body)]
         sink = file_evidence_sink(chain_path.parent)
-        merge_change(
-            prior, run_id=run_id, policy_sha=plan_ref,
-            change_merger=lambda: result, evidence_sink=sink,
+        sink(CollectedEvidence(
+            handle_ref=run_id, records=tuple(chain),
+            note=(str((doc or {}).get("note") or "") + "; run-outcome: pr_merged").lstrip("; "),
+        ))
+
+    return RestampMergeResult(
+        pr_number=pr_number,
+        head_status=(HEAD_BASE_ONLY_RESTAMPED if (proven_restamp and result.merged) else head_status),
+        old_head_sha=attested_head, new_head_sha=(new_head if new_head != attested_head else None),
+        old_base_sha=attested_base, new_base_sha=(new_base if new_head != attested_head else None),
+        eligible=result.eligible, would_merge=result.would_merge, merged=result.merged,
+        merge_commit_sha=result.merge_commit_sha, review_decision=result.review_decision,
+        rollup_state=result.rollup_state, merge_state_status=result.merge_state_status,
+        mergeable=result.mergeable, applied=True,
+        restamp_recorded=restamp_recorded, audit_tree_equivalence=audit_equiv,
+    )
+
+
+def _latest_attested_head(records: list[dict[str, Any]], cs: dict[str, Any]) -> tuple[str, str | None]:
+    """Return the (head_sha, base_sha) of the LATEST attested change block.
+
+    A later ``runtime_change_restamp`` re-stamp wins over the original ``pr_opened`` head (the F6
+    authority rule); otherwise the ``pr_opened`` change_set's head + optional ``base_sha``.
+    """
+    head = str(cs.get("head_sha") or "")
+    base = cs.get("base_sha")
+    for r in records:
+        if isinstance(r, dict) and r.get("record_type") == CHANGE_RESTAMP_RECORD_TYPE:
+            head = str(r.get("new_head_sha") or head)
+            base = r.get("new_base_sha") or base
+    return head, (str(base) if base else None)
+
+
+def _classify_head_motion(
+    git: GitRunner, run_id: str, pr_number: int, branch: str, base: str,
+    carrier: str | None, manifest_paths: Sequence[str], plan_ref: str, *,
+    old_base_sha: str | None, old_head_sha: str, new_base_sha: str, new_head_sha: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """Classify a moved head as base-only-provable, content-drift, or legacy-unprovable.
+
+    Returns ``(head_status, restamp_record_body|None)``. The body is built only when base-only
+    equivalence is machine-proven (it is the ``runtime_change_restamp`` to append on apply).
+    """
+    if not old_base_sha or not new_base_sha:
+        return HEAD_LEGACY_UNPROVABLE, None
+    try:
+        old_id = _change_identity(git, old_base_sha, old_head_sha, manifest_paths)
+        new_id = _change_identity(git, new_base_sha, new_head_sha, manifest_paths)
+        old_carrier = _carrier_pathset_sha256(git, old_head_sha, carrier)
+        new_carrier = _carrier_pathset_sha256(git, new_head_sha, carrier)
+    except _GitUnavailable:
+        return HEAD_LEGACY_UNPROVABLE, None
+
+    pathset_unchanged = (carrier is None) or (
+        old_carrier is not None and old_carrier == new_carrier
+    )
+    content_unchanged = (
+        old_id["content_diff_id"] == new_id["content_diff_id"]
+        and old_id["patch_id_stable"] == new_id["patch_id_stable"]
+    )
+    if not (pathset_unchanged and content_unchanged):
+        return HEAD_CONTENT_DRIFT, None
+
+    proof_inputs = hashlib.sha256(json.dumps({
+        "pr_number": pr_number, "branch": branch, "base": base,
+        "old_base": old_base_sha, "old_head": old_head_sha,
+        "new_base": new_base_sha, "new_head": new_head_sha,
+        "manifest_paths_sha256": new_id["manifest_paths_sha256"],
+        "content_diff_id": new_id["content_diff_id"], "patch_id": new_id["patch_id_stable"],
+        "carrier": new_carrier,
+    }, sort_keys=True).encode("utf-8")).hexdigest()
+    body = {
+        "kind": CHANGE_RESTAMP_RECORD_KIND, "record_type": CHANGE_RESTAMP_RECORD_TYPE,
+        "schema_version": "1", "policy_sha": plan_ref, "run_id": run_id,
+        "recorded_at": _utcstamp_iso(None), "restamp_type": "base_only",
+        "authority": "machine_rebase_equivalence", "pr_number": pr_number,
+        "branch": branch, "base": base,
+        "old_base_sha": old_base_sha, "old_head_sha": old_head_sha,
+        "new_base_sha": new_base_sha, "new_head_sha": new_head_sha,
+        "manifest_paths_sha256": new_id["manifest_paths_sha256"],
+        "old_content_diff_id": old_id["content_diff_id"],
+        "new_content_diff_id": new_id["content_diff_id"],
+        "old_patch_id": old_id["patch_id_stable"], "new_patch_id": new_id["patch_id_stable"],
+        "proof_inputs_sha256": proof_inputs,
+    }
+    return HEAD_BASE_ONLY_RESTAMP, body
+
+
+def _pr_merged_body(
+    run_id: str, plan_ref: str, branch: str, base: str, manifest_paths: Sequence[str],
+    head_sha: str, pr_number: int, *, base_sha: str | None,
+) -> dict[str, Any]:
+    """The value-free ``pr_merged`` run-outcome body pointing at the merged (active) head."""
+    change_set: dict[str, Any] = {
+        "branch": branch, "base": base, "manifest_paths": list(manifest_paths),
+        "head_sha": head_sha, "pr_number": pr_number,
+    }
+    if base_sha:
+        change_set["base_sha"] = base_sha
+    return {
+        "kind": "runtime-run-outcome", "record_type": RUN_OUTCOME_RECORD_TYPE,
+        "schema_version": "1", "policy_sha": plan_ref, "run_id": run_id,
+        "recorded_at": _utcstamp_iso(None), "outcome": "pr_merged", "change_set": change_set,
+    }
+
+
+def _merge_audit_body(
+    git: GitRunner, run_id: str, plan_ref: str, pr_number: int,
+    tested_head: str, merge_commit_sha: str | None,
+) -> tuple[dict[str, Any] | None, bool | None]:
+    """Build the squash tree-equivalence audit body (best-effort), returning (body, tree_equivalence).
+
+    The conserved invariant: the TESTED head tree must equal the MERGED tree. A git ref we cannot
+    resolve (e.g. the squash commit not yet fetched) skips the audit — the merge already happened —
+    returning ``(None, None)`` with a warning rather than failing post-merge.
+    """
+    if not (merge_commit_sha or "").strip():
+        return None, None
+    try:
+        tested_tree = _git_out(git, ["git", "rev-parse", f"{tested_head}^{{tree}}"]).strip()
+        merged_tree = _git_out(git, ["git", "rev-parse", f"{merge_commit_sha}^{{tree}}"]).strip()
+    except _GitUnavailable:
+        logging.getLogger(__name__).warning(
+            "run %s merge-audit skipped: merged-commit tree unresolved (the merge stands)", run_id
         )
-    return result
+        return None, None
+    equiv = bool(tested_tree) and tested_tree == merged_tree
+    body = {
+        "kind": MERGE_AUDIT_RECORD_KIND, "record_type": MERGE_AUDIT_RECORD_TYPE,
+        "schema_version": "1", "policy_sha": plan_ref, "run_id": run_id,
+        "recorded_at": _utcstamp_iso(None), "pr_number": pr_number,
+        "tested_head_sha": tested_head, "tested_tree_sha": tested_tree,
+        "merge_method": "squash", "merge_commit_sha": merge_commit_sha,
+        "merged_tree_sha": merged_tree, "tree_equivalence": equiv,
+    }
+    if not equiv:
+        logging.getLogger(__name__).error(
+            "run %s MERGE-AUDIT TREE MISMATCH: tested %s != merged %s (operator alert)",
+            run_id, tested_tree, merged_tree,
+        )
+    return body, equiv

@@ -21,6 +21,16 @@ Like the rest of ``forge/`` it talks to a live forge ONLY through the injectable
   (``PUT /repos/{owner}/{repo}/pulls/{n}/merge`` with ``{"merge_method":"squash","sha":<head>}``),
   then returns the resulting squash commit. A gate-ineligible PR is REFUSED before the merge.
 
+**F6 Phase-0 head-pin authority (load-bearing).** The squash ``sha`` is taken *only* from the
+caller-supplied :class:`~.change.ChangeRef.head_sha` — there is **no ``--head-override`` and no
+override parameter anywhere on this surface**. The caller (``v3_forge_join.merge_for_run``) must
+pass the *latest attested/re-stamped* head: the original ``pr_opened`` head when the live head is
+unchanged, or the ``runtime_change_restamp`` head after CE machine-proved base-only equivalence.
+A raw head override is rejected as a category. The ``sha`` doubles as GitHub's
+``--match-head-commit`` guard: if the head moved server-side after our final read, GitHub answers
+``409`` and we surface a transport :class:`~.github_repo_config.ForgeConfigError` (the race-refusal
+leg) — CE never re-pins around it.
+
 Defensive invariants (deliberate, load-bearing):
 
 * **Refuse a malformed / ungated request BEFORE any forge call** (refuse-before-side-effect):
@@ -208,6 +218,8 @@ def merge(
             f"mergeable={conflict.mergeable!r}); refusing to merge an ungated PR"
         )
 
+    # F6 head-pin: `sha` is the latest attested/re-stamped head AND the server-side
+    # --match-head-commit guard. It is sourced ONLY from the ChangeRef — never an override.
     code, parsed, stderr = _gh_api_method(
         runner,
         "PUT",

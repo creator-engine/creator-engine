@@ -224,6 +224,33 @@ def test_merge_put_error_message_redacts_leaked_token():
     assert "<redacted>" in msg
 
 
+# ------------------------------------------------------------ F6 head-pin authority / no override
+def test_merge_has_no_head_override_parameter():
+    # F6: the merge surface exposes NO override — the head comes ONLY from the ChangeRef.
+    import inspect
+
+    params = set(inspect.signature(merge).parameters)
+    assert params == {"change", "apply", "gh_runner"}
+    assert not any("override" in p for p in params)
+
+
+def test_merge_head_pin_is_the_supplied_change_head():
+    # A different attested/re-stamped head pins a different squash sha — caller-supplied, never raw.
+    restamped_head = "c" * 40
+    r = _runner()
+    merge(_change(head_sha=restamped_head), apply=True, gh_runner=r)
+    put = _put_calls(r)[0]
+    put_idx = r.calls.index(put)
+    assert json.loads(r.inputs[put_idx]) == {"merge_method": "squash", "sha": restamped_head}
+
+
+def test_merge_head_race_409_raises_and_does_not_fabricate_merge():
+    # server rejects the head-pinned merge because the head moved after our read (race) → raise.
+    r = _runner(put_rc=1, stderr="422 Head branch was modified. Review and try the merge again.")
+    with pytest.raises(ForgeConfigError):
+        merge(_change(), apply=True, gh_runner=r)
+
+
 # --------------------------------------------------------------------------- value-free
 def test_result_carries_no_secret():
     from dataclasses import fields
