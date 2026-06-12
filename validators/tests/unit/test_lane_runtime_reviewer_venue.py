@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,14 @@ import yaml
 
 from creator_engine_validator import lane_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
+
+_SECRET = "ghp_supersecret_reviewer_token_value"
+
+
+def _owner_only_env(path: Path, *, mode: int = 0o600) -> Path:
+    path.write_text(f"GITHUB_REVIEWR_TOKEN={_SECRET}\n", encoding="utf-8")
+    os.chmod(path, mode)
+    return path
 
 
 class RecordingAdapter:
@@ -200,3 +210,98 @@ def test_no_reviewer_authority_ref_leaves_env_clean(tmp_path):
     adapter = RecordingAdapter()
     _launch_reviewer(tmp_path, adapter=adapter)
     assert not (adapter.last_env or {}).get("CE_REVIEWER_AUTHORITY_REF")
+
+
+# --- v3.1-G2f (F4/D2) seat-env-file exec-wrap ---
+
+
+class _FakeSystemctl:
+    """Minimal systemctl seam for the resource-bound composition test."""
+
+    def __init__(self, *, cgroupfs_root: Path):
+        self.calls: list[list[str]] = []
+        self._root = cgroupfs_root
+
+    def __call__(self, argv, check=False):
+        self.calls.append(list(argv))
+        if argv[2] == "show" and "ActiveState" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="inactive\n", stderr="")
+        if argv[2] == "show" and "ControlGroup" in argv:
+            unit = argv[-1].removesuffix(".scope")
+            cg = f"/ce.slice/ce-fleet.slice/{unit}.scope"
+            (self._root / cg.lstrip("/")).mkdir(parents=True, exist_ok=True)
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{cg}\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+
+def _ok_probe(runner=None, **_):
+    return True, "fake host supports bounding"
+
+
+def test_seat_env_file_wraps_command_without_secret_in_argv(tmp_path):
+    env_file = _owner_only_env(tmp_path / "reviewer.env")
+    adapter = RecordingAdapter()
+    _launch_reviewer(
+        tmp_path, adapter=adapter, command=["claude"],
+        mcp_config_path=".hermes/rev-lane/mcp/ce-mcp.json",
+        seat_env_file=env_file,
+    )
+    (_, _, command), = adapter.spawned
+    # the wrap prefix sources the file by PATH, then execs the governed command
+    assert command[:5] == [
+        "sh", "-c", lane_runtime._SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(env_file.resolve()),
+    ]
+    # the governed claude tokens survive byte-identically AFTER the wrap prefix
+    assert "claude" in command[5:]
+    # the SECRET VALUE never appears in any argv token, nor in the pane env
+    assert not any(_SECRET in tok for tok in command), "secret leaked into argv"
+    assert not any(_SECRET in v for v in (adapter.last_env or {}).values())
+
+
+def test_seat_env_file_refuses_missing_or_world_readable(tmp_path):
+    # missing file → refused before any side effect (no pane spawn)
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.SeatEnvFileInvalid):
+        _launch_reviewer(tmp_path, adapter=adapter, command=["claude"],
+                         seat_env_file=tmp_path / "absent.env")
+    assert adapter.spawned == []
+    # group/world-readable file → refused before any side effect
+    world = _owner_only_env(tmp_path / "loose.env", mode=0o644)
+    adapter2 = RecordingAdapter()
+    with pytest.raises(lane_runtime.SeatEnvFileInvalid):
+        _launch_reviewer(tmp_path, adapter=adapter2, command=["claude"],
+                         seat_env_file=world)
+    assert adapter2.spawned == []
+
+
+def test_seat_env_wrap_sits_inside_resource_bound_wrap(tmp_path):
+    """The resource-bound wrap is OUTERMOST (systemd-run …); the seat-env wrap sits
+    inside it so the sourced env lives within the bounded unit."""
+    env_file = _owner_only_env(tmp_path / "reviewer.env")
+    adapter = RecordingAdapter()
+    policy = tmp_path / "runtime-policy.yaml"
+    policy.write_text(yaml.safe_dump({
+        "resource_envelopes": [
+            {"scope": "seat", "memory_high": "3500M", "memory_max": "4G",
+             "memory_swap_max": "256M", "tasks_max": 512},
+            {"scope": "fleet", "memory_max": "9G"},
+        ],
+        "resource_enforcement": "enforce",
+    }, sort_keys=True), encoding="utf-8")
+    _launch_reviewer(
+        tmp_path, adapter=adapter, command=["claude"],
+        mcp_config_path=".hermes/rev-lane/mcp/ce-mcp.json",
+        seat_env_file=env_file,
+        runtime_policy=policy,
+        systemctl_runner=_FakeSystemctl(cgroupfs_root=tmp_path),
+        support_probe=_ok_probe,
+        cgroupfs_root=tmp_path,
+    )
+    (_, _, command), = adapter.spawned
+    assert command[0] == "systemd-run"  # the resource wrap is outermost
+    sh_idx = command.index("sh")
+    # the seat-env wrap sits INSIDE the systemd-run wrap
+    assert command[sh_idx:sh_idx + 5] == [
+        "sh", "-c", lane_runtime._SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(env_file.resolve()),
+    ]
+    assert not any(_SECRET in tok for tok in command)

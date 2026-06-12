@@ -32,6 +32,8 @@ import json
 import shutil
 import subprocess
 import sys
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +64,43 @@ OUTCOME_VOCABULARY = (
     "research_delivered",
     "no_change",
 )
+
+#: Seat-spawn PATH preflight (G1-followup): the bridge process must resolve these
+#: before ANY side effect. ``tmux`` carries the seed/readiness choreography; the
+#: harness binary is the seat. A miss is a fail-closed ``SpawnRefused`` (the common
+#: live failure — it bit 2026-06-11 — is the BRIDGE env, caught here; a pane whose
+#: tmux-server PATH diverges is caught by the readiness poll, not the preflight).
+SPAWN_PREFLIGHT_BINARIES = ("tmux", BRIDGE_HARNESS)
+
+#: Seed readiness poll (G1-followup): the pointer line must not be typed before the
+#: harness REPL owns the pane foreground, else it is swallowed by the still-init shell
+#: and silently lost. Bounded; on timeout the spawn is fail-closed (pane CONSERVED for
+#: autopsy — a failure is evidence).
+DEFAULT_READINESS_TIMEOUT_S = 30.0
+READINESS_POLL_INTERVAL_S = 0.5
+
+#: Foreground commands that mean the harness REPL has NOT yet taken the pane (the
+#: still-initializing login/launch shell). Readiness = the foreground command has
+#: LEFT this set (claude may itself exec as ``node``, so we test shell-departure, not
+#: an exact harness-name match — robust to the live exec shape, and the fake runner's
+#: ``shell -> claude`` transition satisfies it).
+_READINESS_SHELL_COMMANDS = frozenset(
+    {"bash", "sh", "zsh", "fish", "dash", "ksh", "tcsh", "csh",
+     "-bash", "-sh", "-zsh", "-fish", "login"}
+)
+
+#: Seed SUBMIT guard (S8 live-dogfood defect). The literal seed line is DELIVERED
+#: (``send-keys`` rc 0) but the harness input box can SWALLOW the Enter sent on its
+#: heels — the key arrives, the submit is lost, and the rc check passes because tmux
+#: itself succeeded. So after Enter we POLL that the line has LEFT the input box (it is
+#: no longer sitting at the prompt tail); while it is still pending we re-send Enter,
+#: bounded, then fail closed (pane CONSERVED for autopsy). A ``>=1s`` settle between the
+#: literal send and the FIRST Enter mirrors the proven manual cadence.
+SEED_SUBMIT_SETTLE_S = 1.0
+SEED_SUBMIT_MAX_ATTEMPTS = 3
+#: How many bottom pane lines constitute the input-box "prompt tail" scanned for the
+#: still-pending (unsubmitted) seed line.
+_SEED_PROMPT_TAIL_LINES = 8
 
 
 class SeatBridgeError(Exception):
@@ -114,6 +153,11 @@ class DispatchRecord:
     @property
     def unattended(self) -> bool:
         return bool(self.data["unattended"])
+
+    @property
+    def harness_session_id(self) -> str | None:
+        sid = self.data.get("harness_session_id")
+        return str(sid) if sid else None
 
     @property
     def pane_id(self) -> str | None:
@@ -173,8 +217,10 @@ def _render_brief(
         f"- dispatch record: `{dispatch_dir / 'dispatch.yaml'}`\n\n"
         f"## Evidence handoff (for `cev3 collect`)\n"
         f"When you finish, the run is folded by:\n"
-        f"`cev3 collect {scope_id} --run {run_id} --transcript <your harness .jsonl> "
-        f"--outcome <outcome> [--pr <n>]`\n"
+        f"`cev3 collect {scope_id} --run {run_id} --outcome <outcome> [--pr <n>]`\n"
+        f"Your harness transcript is resolved automatically from the session id stamped "
+        f"at spawn — do NOT pass `--transcript` (the salvage-only `--transcript-override` "
+        f"is documented for a crashed/relocated transcript).\n"
         f"The conserved evidence chain lands at `{evidence_ref}`.\n\n"
         f"## Terminal outcome vocabulary (closed)\n"
         f"{vocab}\n"
@@ -189,6 +235,7 @@ def materialize_dispatch(
     now: datetime | None = None,
     session: str | None = None,
     window: str = "drive",
+    harness_session_id: str | None = None,
 ) -> DispatchRecord:
     """Persist a :class:`coordination.DispatchPlan` as the on-disk seat handoff.
 
@@ -204,13 +251,21 @@ def materialize_dispatch(
     The run_id is minted ``run-<scope_id>-<utcstamp>``. No spawn happens here; the
     launch evidence is stamped by :func:`spawn_seat`.
     """
-    root_path = Path(root)
+    # D3 (F5): absolutize the state root at materialize time so every derived ref
+    # (dispatch_dir, brief_ref, the brief's scope/evidence pointers, the seeded line)
+    # is absolute and survives the worktree boundary — the in-venue Ring-1 hook and the
+    # launch-time validator both resolve an absolute ref from ANY cwd.
+    root_path = Path(root).resolve()
     stamp = _utcstamp(now or datetime.now(timezone.utc))
     run_id = f"run-{plan.scope_id}-{stamp}"
     dispatch_dir = root_path / DISPATCHES_SUBDIR / run_id
     dispatch_dir.mkdir(parents=True, exist_ok=True)
 
     seat_session = session or run_id
+    # D6 (F9): mint the harness session id at MATERIALIZE time (pre-spawn, so even a
+    # refused spawn carries it — autopsy-friendly). Value-free random UUIDv4; stamped
+    # onto the seat's --session-id at spawn so collect resolves the transcript by key.
+    seat_harness_session_id = harness_session_id or str(uuid.uuid4())
     runtime_policy_ref = str(dispatch_dir / "runtime-policy.yaml")
     mcp_config_ref = str(dispatch_dir / "mcp" / "ce-mcp.json")
     brief_ref = str(dispatch_dir / "brief.md")
@@ -242,6 +297,7 @@ def materialize_dispatch(
         # value-free opaque 64-hex digests (approver_ref / ratified_scope_sha)
         "scope_ratification": dict(plan.scope_ratification),
         "harness": BRIDGE_HARNESS,
+        "harness_session_id": seat_harness_session_id,
         "unattended": bool(unattended),
         "session": seat_session,
         "window": window,
@@ -306,6 +362,28 @@ def _resolve_ce_exe(ce_exe: str | None) -> str:
     )
 
 
+def _preflight_spawn_binaries(
+    record: DispatchRecord,
+    binaries: tuple[str, ...] = SPAWN_PREFLIGHT_BINARIES,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Resolve the spawn-critical binaries on the BRIDGE PATH before any side effect.
+
+    A miss is stamped :func:`mark_spawn_failed` (the record is already materialized —
+    conserve the autopsy) and raised :class:`SpawnRefused`. This catches the common
+    live failure (the bridge env missing ``tmux``/the harness — it bit 2026-06-11).
+    """
+    missing = [name for name in binaries if shutil.which(name) is None]
+    if missing:
+        reason = (
+            f"spawn preflight failed: required binaries not on PATH: "
+            f"{', '.join(missing)}"
+        )
+        mark_spawn_failed(record, reason, now=now)
+        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+
+
 def spawn_seat(
     record: DispatchRecord,
     *,
@@ -325,6 +403,7 @@ def spawn_seat(
     Non-zero exit / unparsable JSON / un-spawned result ⇒ :class:`SpawnRefused`
     with the v1 stderr surfaced (never a silent half-spawn).
     """
+    _preflight_spawn_binaries(record, now=now)
     exe = _resolve_ce_exe(ce_exe)
     argv = [
         exe,
@@ -345,6 +424,12 @@ def spawn_seat(
         # otherwise. For a governed seat the Ring-1 hook-pack is the boundary;
         # approval modals are not load-bearing and hang unattended seats.
         argv.append("--claude-arg=--dangerously-skip-permissions")
+    if record.harness_session_id:
+        # D6 (F9): pin the harness transcript to a KNOWN key so `cev3 collect`
+        # resolves it by exact id — never by an mtime guess (the #14/#21 mis-fold).
+        # Ring 0 passes `--session-id=<uuid>` unmodified (the lenient parser; not a
+        # CC-D clause), so this is zero governance churn.
+        argv.append(f"--claude-arg=--session-id={record.harness_session_id}")
 
     completed = runner(argv, capture_output=True, text=True)
     returncode = getattr(completed, "returncode", 1)
@@ -395,17 +480,90 @@ def _seed_line(record: DispatchRecord) -> str:
     return f"Read {record.brief_ref} and execute under it."
 
 
+def _pane_foreground_command(
+    pane: str, runner: Callable[..., Any]
+) -> str:
+    """Read the pane's foreground command via ``tmux display-message`` (subprocess seam)."""
+    res = runner(
+        ["tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}"],
+        capture_output=True,
+        text=True,
+    )
+    return (getattr(res, "stdout", "") or "").strip()
+
+
+def _await_pane_ready(
+    pane: str,
+    *,
+    runner: Callable[..., Any],
+    timeout_s: float,
+    interval_s: float,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> bool:
+    """Poll the pane foreground until the harness REPL owns it (left the shell), bounded.
+
+    Returns ``True`` when ready, ``False`` on timeout. The pane is never killed — a
+    timeout is conserved for autopsy by the caller.
+    """
+    deadline = clock() + timeout_s
+    while True:
+        cmd = _pane_foreground_command(pane, runner)
+        if cmd and cmd not in _READINESS_SHELL_COMMANDS:
+            return True
+        if clock() >= deadline:
+            return False
+        sleep(interval_s)
+
+
+def _seed_line_pending(
+    pane: str, line: str, runner: Callable[..., Any]
+) -> bool:
+    """Report whether the seed LINE is still sitting unsubmitted in the input-box prompt tail.
+
+    Captures the pane (``tmux capture-pane -p``) and scans its bottom region (the input box
+    lives at the prompt tail): if the literal line is still there, the Enter was swallowed
+    (the S8 submit-lost signature); a submitted line clears the box and falls out of the tail.
+    """
+    res = runner(
+        ["tmux", "capture-pane", "-p", "-t", pane], capture_output=True, text=True
+    )
+    content = getattr(res, "stdout", "") or ""
+    needle = line.strip()
+    if not needle:
+        return False
+    tail = content.splitlines()[-_SEED_PROMPT_TAIL_LINES:]
+    return any(needle in row for row in tail)
+
+
 def seed_brief(
     record: DispatchRecord,
     *,
     runner: Callable[..., Any] = subprocess.run,
+    readiness_timeout_s: float = DEFAULT_READINESS_TIMEOUT_S,
+    poll_interval_s: float = READINESS_POLL_INTERVAL_S,
+    submit_settle_s: float = SEED_SUBMIT_SETTLE_S,
+    submit_max_attempts: int = SEED_SUBMIT_MAX_ATTEMPTS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    now: datetime | None = None,
 ) -> None:
     """Seed the spawned pane with the pointer-only mandate line.
 
-    Uses ``tmux send-keys -t <pane_id> -l <line>`` then ``send-keys … Enter`` (the
-    proven controller tmux-seed method). ``tmux`` is reached as a **subprocess** —
-    no ``tmux_adapter`` import (the v1 boundary). Refuses if the record carries no
-    pane (spawn must precede seed).
+    First POLLS the pane until the harness REPL owns the foreground (G1-followup):
+    the pointer line typed before the REPL is up is swallowed by the still-init shell
+    and silently lost. On readiness timeout the spawn is fail-closed
+    (:func:`mark_spawn_failed` + :class:`SpawnRefused`) with the pane CONSERVED for
+    autopsy. Then ``tmux send-keys -t <pane_id> -l <line>`` (the proven controller
+    tmux-seed method), CHECKING the rc and failing closed on non-zero.
+
+    The Enter is GUARDED (S8 live-dogfood defect): a ``>=1s`` settle precedes the first
+    Enter (the proven manual cadence), and after each Enter we POLL that the line LEFT the
+    input box — because the harness can swallow an Enter (the rc is 0; tmux delivered the
+    key but the submit was lost). While the line is still pending we re-send Enter, bounded
+    (:data:`SEED_SUBMIT_MAX_ATTEMPTS`), then fail closed (pane CONSERVED). ``tmux`` is
+    reached as a **subprocess** — no ``tmux_adapter`` import (the v1 boundary). Refuses if
+    the record carries no pane (spawn must precede seed).
     """
     pane = record.pane_id
     if not pane:
@@ -413,9 +571,57 @@ def seed_brief(
             f"cannot seed brief for run {record.run_id!r}: no pane_id "
             "(spawn_seat must run first)"
         )
+    if not _await_pane_ready(
+        pane,
+        runner=runner,
+        timeout_s=readiness_timeout_s,
+        interval_s=poll_interval_s,
+        clock=clock,
+        sleep=sleep,
+    ):
+        reason = (
+            f"seed readiness poll timed out after {readiness_timeout_s:.0f}s: pane "
+            f"{pane} foreground never left the shell (harness REPL not up)"
+        )
+        mark_spawn_failed(record, reason, now=now)
+        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+
     line = _seed_line(record)
-    runner(["tmux", "send-keys", "-t", pane, "-l", line], capture_output=True, text=True)
-    runner(["tmux", "send-keys", "-t", pane, "Enter"], capture_output=True, text=True)
+    literal = runner(
+        ["tmux", "send-keys", "-t", pane, "-l", line], capture_output=True, text=True
+    )
+    if getattr(literal, "returncode", 1) != 0:
+        reason = (getattr(literal, "stderr", "") or "").strip() or "(no stderr)"
+        msg = f"tmux send-keys (literal seed line) failed: {reason}"
+        mark_spawn_failed(record, msg, now=now)
+        raise SpawnRefused(f"{msg} (for run {record.run_id!r})")
+
+    # Settle before the FIRST Enter — the proven manual cadence: an Enter sent on the
+    # heels of the literal line is swallowed by the harness input box (S8 defect).
+    sleep(submit_settle_s)
+    submitted = False
+    for _attempt in range(submit_max_attempts):
+        enter = runner(
+            ["tmux", "send-keys", "-t", pane, "Enter"], capture_output=True, text=True
+        )
+        if getattr(enter, "returncode", 1) != 0:
+            reason = (getattr(enter, "stderr", "") or "").strip() or "(no stderr)"
+            msg = f"tmux send-keys (Enter) failed: {reason}"
+            mark_spawn_failed(record, msg, now=now)
+            raise SpawnRefused(f"{msg} (for run {record.run_id!r})")
+        # Give the submit a moment to register, then confirm the line LEFT the input box.
+        sleep(poll_interval_s)
+        if not _seed_line_pending(pane, line, runner):
+            submitted = True
+            break
+    if not submitted:
+        msg = (
+            f"seed line never left the input box after {submit_max_attempts} Enter "
+            f"attempt(s) on pane {pane}: tmux delivered the key (rc 0) but the harness "
+            "swallowed the submit"
+        )
+        mark_spawn_failed(record, msg, now=now)
+        raise SpawnRefused(f"{msg} (for run {record.run_id!r})")
 
 
 # ===========================================================================
@@ -521,8 +727,10 @@ def _render_reviewer_brief(
         f"by mechanic + PR number). You CANNOT push or merge — a governed venue is push-denied.\n\n"
         f"## Evidence handoff (for `cev3 collect`)\n"
         f"When you finish, your venue run is folded by:\n"
-        f"`cev3 collect {scope_id} --run {review_run_id} --transcript <your harness .jsonl> "
+        f"`cev3 collect {scope_id} --run {review_run_id} "
         f"--outcome review_submitted --pr {pr_number}`\n"
+        f"Your harness transcript is resolved automatically from the session id stamped "
+        f"at spawn — do NOT pass `--transcript`.\n"
         f"The conserved evidence chain lands at `{review_evidence_ref}`.\n"
     )
 
@@ -535,7 +743,9 @@ def materialize_review_dispatch(
     pr_number: int,
     head_sha: str,
     emitting_role: str = "controller",
+    unattended: bool = True,
     now: datetime | None = None,
+    harness_session_id: str | None = None,
 ) -> DispatchRecord:
     """Materialize a ``role: reviewer`` dispatch (envelope + brief + ``review_of`` block).
 
@@ -548,13 +758,18 @@ def materialize_review_dispatch(
     a value-free ``review_of`` block (author run_id, PR number, envelope path ref). No spawn happens
     here; :func:`spawn_review_venue` stamps the launch evidence.
     """
-    root_path = Path(root)
+    # D3 (F5): absolutize the state root so the envelope_ref + brief_ref + seeded line
+    # resolve from the venue worktree cwd (the in-venue Ring-1 hook denied the relative
+    # ref correctly, leaving the venue stillborn — G2.007.2).
+    root_path = Path(root).resolve()
     scope_id = str(author_dispatch["scope_id"])
     author_run_id = str(author_dispatch["run_id"])
     stamp = _utcstamp(now or datetime.now(timezone.utc))
     review_run_id = f"rev-{scope_id}-{stamp.lower()}"
     dispatch_dir = root_path / DISPATCHES_SUBDIR / review_run_id
     dispatch_dir.mkdir(parents=True, exist_ok=True)
+    # D6 (F9): mint the harness session id at materialize (pre-spawn) for the venue too.
+    seat_harness_session_id = harness_session_id or str(uuid.uuid4())
 
     ratified_scope_sha = str(
         (author_dispatch.get("scope_ratification") or {}).get("ratified_scope_sha") or ""
@@ -592,7 +807,8 @@ def materialize_review_dispatch(
         "mutation_class": str(author_dispatch.get("mutation_class", "none")),
         "scope_ratification": dict(author_dispatch.get("scope_ratification") or {}),
         "harness": BRIDGE_HARNESS,
-        "unattended": True,
+        "harness_session_id": seat_harness_session_id,
+        "unattended": bool(unattended),
         "session": review_run_id,
         "window": REVIEW_WINDOW,
         "brief_ref": brief_ref,
@@ -627,9 +843,12 @@ def spawn_review_venue(
     controller_id: str,
     venue_root: Path | str,
     ledger_root: Path | str,
+    seat_env_file: Path | str | None = None,
     runner: Callable[..., Any] = subprocess.run,
     validator_exe: str | None = None,
     ce_exe: str | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
     now: datetime | None = None,
 ) -> SpawnResult:
     """Provision + launch the reviewer venue via the v1/shared product contracts (subprocess + DATA).
@@ -637,6 +856,8 @@ def spawn_review_venue(
     The fail-closed chain, each leg surfacing stderr and stamping :func:`mark_spawn_failed` on ANY
     refusal (never a half-venue projecting live):
 
+    0. PATH preflight (G1-followup): ``tmux`` + the harness binary must resolve on the bridge PATH
+       before any side effect — a miss is a fail-closed refusal.
     1. ``creator-engine-validator pco-allocate`` (cwd = the out-of-root venue zone — pco refuses
        from the repo root) provisions the worktree + Active-Work claim, with NO tracked-file write
        authority (``--envelope-ref none --no-write-authority``); the venue's authority is the
@@ -644,9 +865,16 @@ def spawn_review_venue(
     2. ``ce lane launch --role reviewer --lane-kind review --reviewer-authority-ref <envelope>
        --json`` validates + injects the envelope on a DISTINCT reviewer venue and returns the Pane
        Registry record (the G2b ``--json`` seam); its ``terminal`` is stamped into the dispatch.
+       When the seat is unattended (D1) the launch carries
+       ``--claude-arg=--dangerously-skip-permissions`` (mirror of the author seat — CC-D-6 on the
+       venue worktree's committed hook-pack stays the gate, zero new authority); when a
+       ``seat_env_file`` is given (D2/F4) the launch carries ``--seat-env-file <path>`` so the
+       reviewer credential is sourced into the venue claude's process via an explicit exec-wrap —
+       the SECRET never transits argv/tmux/the records, only the path ref is recorded.
     3. :func:`seed_brief` — the EXISTING seed seam (so the ce-ops#16 readiness-poll/PATH fix lands
-       in exactly one place), pointer-only line. The reviewer token env is NOT seeded as text — the
-       venue inherits it from the launching shell having sourced the host reviewer env file.
+       in exactly one place), pointer-only line. The reviewer credential is NOT seeded as text and
+       is NOT inherited as ambient tmux-server env (the live refutation, F4) — it arrives ONLY via
+       the D2 ``--seat-env-file`` exec-wrap above.
     """
     review_of = record.data.get("review_of") or {}
     envelope_ref = str(review_of.get("envelope_ref") or "")
@@ -654,6 +882,7 @@ def spawn_review_venue(
         raise SpawnRefused(
             f"review dispatch {record.run_id!r} carries no envelope_ref; refusing to launch"
         )
+    _preflight_spawn_binaries(record, now=now)
     venue_root_path = Path(venue_root)
     worktree_path = venue_root_path / record.run_id
     brief_sha = hashlib.sha256(Path(record.brief_ref).read_bytes()).hexdigest()
@@ -699,6 +928,17 @@ def spawn_review_venue(
         "--command", "claude",
         "--json",
     ]
+    if seat_env_file is not None:
+        # D2 (F4): the reviewer credential is sourced into the venue claude's process
+        # via the lane-runtime exec-wrap — the file PATH transits argv, never the value.
+        launch_argv.extend(["--seat-env-file", str(seat_env_file)])
+    if record.unattended:
+        # D1 (F3): mirror the author-seat mechanism (spawn_seat) — CC-D-6 on the venue
+        # worktree's committed hook-pack stays the gate; zero new authority.
+        launch_argv.append("--claude-arg=--dangerously-skip-permissions")
+    if record.harness_session_id:
+        # D6 (F9): pin the venue transcript to a known key for collect.
+        launch_argv.append(f"--claude-arg=--session-id={record.harness_session_id}")
     launch = runner(launch_argv, capture_output=True, text=True)
     if getattr(launch, "returncode", 1) != 0:
         reason = (getattr(launch, "stderr", "") or "").strip() or "(no stderr)"
@@ -723,11 +963,14 @@ def spawn_review_venue(
         )
 
     record.data["terminal"] = dict(terminal)
+    if seat_env_file is not None:
+        # value-free: the PATH ref only (the credential value never lands here).
+        record.data["seat_env_file_ref"] = str(seat_env_file)
     record.data["spawned_at"] = _utcstamp(now or datetime.now(timezone.utc))
     _write_record(record)
 
     # 3) seed the venue brief through the SAME seam (ce-ops#16 fix lands once).
-    seed_brief(record, runner=runner)
+    seed_brief(record, runner=runner, clock=clock, sleep=sleep, now=now)
 
     return SpawnResult(
         run_id=record.run_id,

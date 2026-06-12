@@ -175,6 +175,15 @@ class ResourceBoundRefused(LaneLaunchError):
     code = "G3-RESOURCE-REFUSED"
 
 
+class SeatEnvFileInvalid(LaneLaunchError):
+    """v3.1-G2f (F4/D2): a ``--seat-env-file`` was supplied that is missing, not a
+    regular file, or group/world-readable. Fail-closed before any side effect — a
+    credential file must be owner-only (0600-class), and the wrap never runs against
+    a file the seat does not exclusively control."""
+
+    code = "G3-SEAT-ENV-FILE-INVALID"
+
+
 # G2.002.1 operating-mode runtime-carrier refusals. Each is raised before any
 # side effect (no tmux spawn, no Pane Registry write, no ledger write), mirroring
 # the G3-* ordering. They preserve — never relax — the Operator-only floor.
@@ -388,6 +397,50 @@ def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Pat
     return reviewer_authority_ref
 
 
+#: The argv prefix that sources a seat env file into the seat process, then execs the
+#: governed command. The SECRET never transits argv — only the file PATH does (``$1``);
+#: ``set -a``/``set +a`` exports the sourced vars to the exec'd child only.
+_SEAT_ENV_WRAP_SCRIPT = 'set -a; . "$1"; set +a; shift; exec "$@"'
+
+
+def _validate_seat_env_file(seat_env_file: Path | str) -> Path:
+    """Validate a ``--seat-env-file`` fail-closed BEFORE any side effect (D2/F4).
+
+    Must be an existing regular file owned owner-only (no group/world read or write
+    bits — the 0600-class house posture for a credential file). Returns the resolved
+    absolute path. Raises :class:`SeatEnvFileInvalid` otherwise.
+    """
+    path = Path(seat_env_file)
+    if not path.is_file():
+        raise SeatEnvFileInvalid(
+            f"seat_env_file {str(seat_env_file)!r} is not an existing regular file; "
+            "refusing lane launch before any side effect"
+        )
+    mode = path.stat().st_mode
+    # Refuse ANY group/other permission bit (0o077) — a credential file must be
+    # owner-only. The house style is fail-closed refusal, not a warning.
+    if mode & 0o077:
+        raise SeatEnvFileInvalid(
+            f"seat_env_file {str(seat_env_file)!r} is group/world-accessible "
+            f"(mode {oct(mode & 0o777)}); a credential file must be owner-only "
+            "(0600-class); refusing before any side effect"
+        )
+    return path.resolve()
+
+
+def _wrap_with_seat_env(command: Sequence[str], seat_env_file: Path) -> list[str]:
+    """Wrap ``command`` so it execs with the seat env file sourced (D2/F4).
+
+    Applied to the OUTPUT of the Ring-0 governed-command build (the governed tokens
+    stay byte-identical) and BEFORE the resource-bound wrap, so the sourced env lives
+    inside the bounded unit. The credential VALUE never enters argv — only the path.
+    """
+    return [
+        "sh", "-c", _SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(seat_env_file),
+        *command,
+    ]
+
+
 @dataclass(frozen=True)
 class OperatingModeResolution:
     operating_mode: str
@@ -523,6 +576,7 @@ def launch(
     tenant_policy: Path | str | None = None,
     ratification_evidence_ref: str | None = None,
     reviewer_authority_ref: str | None = None,
+    seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
@@ -569,6 +623,13 @@ def launch(
         reviewer_authority_ref = _validate_reviewer_authority_ref(
             reviewer_authority_ref, repo_root
         )
+
+    # 0b.2 v3.1-G2f (F4/D2): validate the seat env file fail-closed BEFORE any side
+    #      effect. The credential VALUE never enters argv/the tmux server/the records;
+    #      only the validated path is wrapped (step 6.5 below).
+    seat_env_path: Path | None = None
+    if seat_env_file is not None:
+        seat_env_path = _validate_seat_env_file(seat_env_file)
 
     # 0c. v3.5-F resource policy. Read the resource fragment (pure, fail-closed)
     #     BEFORE any side effect, through the existing policy-read seam
@@ -719,6 +780,13 @@ def launch(
             "closeout_ref": closeout_file,
             "completion_report_ref": completion_report_ref,
         }
+
+    # 6b.5 v3.1-G2f (F4/D2) seat-env exec-wrap — applied to the OUTPUT of the step-6
+    #      Ring-0 build (the governed tokens stay byte-identical) and BEFORE the
+    #      resource-bound wrap, so the sourced env lives inside the bounded unit. The
+    #      credential VALUE never transits argv — only the validated file path does.
+    if seat_env_path is not None:
+        launch_command = _wrap_with_seat_env(launch_command, seat_env_path)
 
     # 6c. v3.5-F bounding wrap — applied to the OUTPUT of the step-6 Ring-0
     #     build (never its input; the governed tokens stay byte-identical) and
