@@ -514,6 +514,46 @@ def _pane_foreground_command(
     return (getattr(res, "stdout", "") or "").strip()
 
 
+def _pane_pid(pane: str, runner: Callable[..., Any]) -> str:
+    """Read the pane's root process pid via ``tmux display-message`` (subprocess seam)."""
+    res = runner(
+        ["tmux", "display-message", "-p", "-t", pane, "#{pane_pid}"],
+        capture_output=True,
+        text=True,
+    )
+    return (getattr(res, "stdout", "") or "").strip()
+
+
+def _pane_has_nonshell_child(pane: str, runner: Callable[..., Any]) -> bool:
+    """Report whether the pane's root process has a non-shell child process.
+
+    The #211 seat-sentinel wrapper runs the harness as a CHILD of ``sh`` (so the wrapper
+    can write the ``exited`` event after the harness returns). With that shape the pane
+    FOREGROUND stays a shell forever even though the REPL is healthy exactly one level
+    down — ``_pane_foreground_command`` alone would poll to the readiness timeout. So when
+    the foreground is still a shell we additionally read the pane's pid and inspect its
+    direct children: the wrapper's harness child is non-shell (``claude`` / ``node``).
+
+    Reached through the SAME injectable ``runner`` seam (CI exercises a fake; zero live
+    subprocess). Fail-closed: an empty/failed ``ps`` yields no child → not-ready → the
+    caller keeps polling and ultimately conserves the pane on timeout.
+    """
+    pid = _pane_pid(pane, runner)
+    if not pid:
+        return False
+    res = runner(
+        ["ps", "-o", "comm=", "--ppid", pid],
+        capture_output=True,
+        text=True,
+    )
+    out = getattr(res, "stdout", "") or ""
+    for line in out.splitlines():
+        comm = line.strip()
+        if comm and comm not in _READINESS_SHELL_COMMANDS:
+            return True
+    return False
+
+
 def _await_pane_ready(
     pane: str,
     *,
@@ -523,7 +563,8 @@ def _await_pane_ready(
     clock: Callable[[], float],
     sleep: Callable[[float], None],
 ) -> bool:
-    """Poll the pane foreground until the harness REPL owns it (left the shell), bounded.
+    """Poll the pane until the harness REPL owns it (foreground left the shell, OR a
+    non-shell child is up under the seat-sentinel wrapper), bounded.
 
     Returns ``True`` when ready, ``False`` on timeout. The pane is never killed — a
     timeout is conserved for autopsy by the caller.
@@ -532,6 +573,10 @@ def _await_pane_ready(
     while True:
         cmd = _pane_foreground_command(pane, runner)
         if cmd and cmd not in _READINESS_SHELL_COMMANDS:
+            return True
+        # Foreground is still a shell: under the #211 wrapper the harness lives one level
+        # down as a non-shell child, so probe the pane pid's child tree before deciding.
+        if _pane_has_nonshell_child(pane, runner):
             return True
         if clock() >= deadline:
             return False
