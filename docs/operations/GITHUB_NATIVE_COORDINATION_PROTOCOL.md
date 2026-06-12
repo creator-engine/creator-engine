@@ -122,3 +122,41 @@ re-running install is safe. This module may later be extracted into a standalone
 until then it ships in the validator package so the existing CI pytest job
 covers it (it registers no validator check and leaves `--list-checks`
 unchanged).
+
+## i. Known limitation — the JIT App push leg cannot ship `.github/workflows/**`
+
+**The limitation.** The `cev3 pr --apply` ship leg pushes the seat's authored head
+under a JIT least-privilege installation token whose mint request is a FIXED,
+in-repo least-privilege set — `contents: write` + `pull_requests: write`
+(`v3_forge_join.PR_TOKEN_PERMISSIONS`, doc comment "never broader"). It carries
+**no `workflows` permission**. An installation token's effective permissions are the
+requested subset, so the minted token lacks `workflows` *regardless of the App's
+installed grant*. GitHub therefore **rejects** the App push for any diff that
+creates or updates a file under `.github/workflows/**`.
+
+**The signature.** The operator sees the remote-rejected line verbatim (it survives
+`forge/_redact.py` redaction — it carries no credential):
+
+> `refusing to allow a GitHub App to create or update workflow ... without `workflows` permission`
+
+The failure is LATE (post-mint, at push) but NOT opaque — it names the exact missing
+scope, so a CI-touching gate is diagnosable in-run (this is how PR #206 was diagnosed).
+
+**The procedure (the declared orchestrator pre-push).** For a gate whose manifest
+touches `.github/workflows/**`, the ORCHESTRATOR/Operator session pushes the authored
+head FIRST, with an ambient `workflow`-scoped identity (the same HTTPS identity used
+for other orchestrator pushes), and **DECLARES that pre-push on the gate's forge
+trail** (the #206 precedent wording). Then `cev3 pr --apply` runs unchanged: with the
+head already on the remote, the App push leg verifies an idempotent no-op
+(`up_to_date=True`, nothing pushed — `forge/change_push.py`) and the PR-open stays
+App-authored. This composes BY DESIGN; it is not a governance bypass — the binding
+gate (review + merge) is untouched.
+
+**The deferred durable fix.** The right fix is CONDITIONAL, not an unconditional
+broadening (which would violate the module's "never broader" doctrine for the
+overwhelming majority of PRs touching no workflow file): request `workflows: write`
+**iff** the run's manifest path-set touches `.github/workflows/**` (the path-set is
+already in `open_change_for_run`'s hands; the mint module accepts the scope unchanged).
+It is sequenced behind an ops act — verifying the live `workflows: write` grant on both
+per-dev Apps — and is tracked as a named follow-up micro-gate (ce-ops#16 §3.2). Until it
+lands, use the declared pre-push above.

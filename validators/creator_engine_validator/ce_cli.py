@@ -191,6 +191,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "(role=reviewer + --lane-kind review); validated then exported to the pane env "
         "as CE_REVIEWER_AUTHORITY_REF for the in-band hook",
     )
+    launch.add_argument(
+        "--seat-env-file",
+        dest="seat_env_file",
+        default=None,
+        help="v3.1-G2f (F4/D2): path to an owner-only (0600-class) env file sourced into "
+        "the seat process via an exec-wrap before launch — the per-seat credential "
+        "contract (e.g. a reviewer token). The file PATH transits argv; the secret VALUE "
+        "never enters argv, the tmux server, or any record. Refused if missing or "
+        "group/world-accessible",
+    )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
     launch.add_argument("--session", default=None, help="tmux session name")
@@ -683,6 +693,7 @@ def _lane_launch(args) -> int:
             tenant_policy=getattr(args, "tenant_policy", None),
             ratification_evidence_ref=getattr(args, "ratification_evidence_ref", None),
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
+            seat_env_file=getattr(args, "seat_env_file", None),
             runtime_policy=getattr(args, "runtime_policy", None),
             tmux_adapter=_make_tmux_adapter(),
         )

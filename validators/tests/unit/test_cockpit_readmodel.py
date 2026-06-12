@@ -246,7 +246,9 @@ def _write_live_fixtures(tmp_path: Path) -> tuple[Path, Path, Path]:
         "schema_version": "1",
         "records": seed["chains"]["gate-push-refusal"],
     }
-    (state_root / "gate-push-refusal.runtime-evidence.yaml").write_text(
+    runs_dir = state_root / cockpit_readmodel.RUNS_SUBDIR
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "gate-push-refusal.runtime-evidence.yaml").write_text(
         yaml.safe_dump(chain_doc, sort_keys=True), encoding="utf-8"
     )
     ledger_root = tmp_path / "ledger"
@@ -280,6 +282,42 @@ def test_snapshot_from_roots_loads_live_fixtures(tmp_path):
     assert len(snapshot["seats"]) == 1
     assert snapshot["evidence"]["gate-push-refusal"]["verified"] is True
     assert len(snapshot["refusals"]["entries"]) == 1
+
+
+def test_snapshot_reads_chains_from_runs_subdir(tmp_path):
+    """F7: live chains persist at ``<root>/runs/`` — surfaced there, NOT directly under root."""
+    chain_doc = {
+        "kind": "runtime-evidence-chain",
+        "record_type": "runtime_evidence_chain",
+        "schema_version": "1",
+        "records": [
+            {
+                "kind": "runtime-evidence",
+                "record_type": "outcome",
+                "schema_version": "1",
+                "run_id": "run-x",
+                "outcome": "pr_merged",
+            }
+        ],
+    }
+    state_root = tmp_path / "state"
+    runs_dir = state_root / cockpit_readmodel.RUNS_SUBDIR
+    runs_dir.mkdir(parents=True)
+
+    # A chain directly under <root> (the pre-F7 mis-layout) must NOT surface…
+    (state_root / "run-stray.runtime-evidence.yaml").write_text(
+        yaml.safe_dump(chain_doc, sort_keys=True), encoding="utf-8"
+    )
+    snapshot = cockpit_readmodel.snapshot_from_roots(state_root, environ={})
+    assert "run-stray" not in snapshot["evidence"]
+
+    # …a chain under <root>/runs/ does.
+    (runs_dir / "run-x.runtime-evidence.yaml").write_text(
+        yaml.safe_dump(chain_doc, sort_keys=True), encoding="utf-8"
+    )
+    snapshot = cockpit_readmodel.snapshot_from_roots(state_root, environ={})
+    assert "run-x" in snapshot["evidence"]
+    assert "run-stray" not in snapshot["evidence"]
 
 
 def test_ledger_root_resolves_from_environment(tmp_path):

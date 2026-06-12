@@ -342,6 +342,33 @@ def _transcript(path: Path, *, n_turns: int = 2) -> Path:
     return path
 
 
+def _owner_only_env(path: Path, content: str = "GITHUB_REVIEWR_TOKEN=ghp_x\n") -> Path:
+    """Write an owner-only (0600) env file for the D2 seat-env-file contract."""
+    import os
+    path.write_text(content, encoding="utf-8")
+    os.chmod(path, 0o600)
+    return path
+
+
+def _session_id(tmp_path, run_id: str) -> str:
+    drec = yaml.safe_load(
+        (tmp_path / "dispatches" / run_id / "dispatch.yaml").read_text(encoding="utf-8")
+    )
+    return drec["harness_session_id"]
+
+
+def _stage_transcript(tmp_path, run_id, monkeypatch, *, n_turns: int = 2) -> Path:
+    """D6/F9: stage the run's transcript at its stamped harness-session key under a tmp
+    CLAUDE_CONFIG_DIR so ``cev3 collect`` resolves it by id (no ``--transcript`` needed)."""
+    sid = _session_id(tmp_path, run_id)
+    cfg = tmp_path / ".claude-config"
+    proj = cfg / "projects" / "ce-proj"
+    proj.mkdir(parents=True, exist_ok=True)
+    _transcript(proj / f"{sid}.jsonl", n_turns=n_turns)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    return cfg
+
+
 def _dispatch_a_run(tmp_path, monkeypatch, *, policy: dict | None = None) -> str:
     """file → ratify → drive --spawn (faked) → return the run_id with a dispatch on disk."""
     _fake_bridge(monkeypatch)
@@ -361,10 +388,10 @@ def _dispatch_a_run(tmp_path, monkeypatch, *, policy: dict | None = None) -> str
 
 def test_collect_folds_transcript_and_outcome_into_chain(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
-    tpath = _transcript(tmp_path / "seat.jsonl")
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     capsys.readouterr()
     code = v3_cli.main([
-        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "collect", "rate-limit-login", "--run", run_id,
         "--outcome", "research_delivered", "--root", str(tmp_path), "--json",
     ])
     assert code == 0
@@ -372,6 +399,8 @@ def test_collect_folds_transcript_and_outcome_into_chain(tmp_path, capsys, monke
     assert payload["action"] == "collected"
     assert payload["outcome"] == "research_delivered"
     assert payload["spend_leaves"] == 2
+    # D6/F9: the transcript was resolved by the stamped session id, honesty-stamped
+    assert payload["transcript_source"] == "stamped"
     # the conserved chain persisted under the neutral runs root + verifies clean
     chain_path = tmp_path / "runs" / f"{run_id}.runtime-evidence.yaml"
     assert chain_path.is_file()
@@ -385,9 +414,9 @@ def test_collect_folds_transcript_and_outcome_into_chain(tmp_path, capsys, monke
 
 def test_collect_report_renders_outcome_and_spend(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
-    tpath = _transcript(tmp_path / "seat.jsonl")
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     v3_cli.main([
-        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+        "collect", "rate-limit-login", "--run", run_id,
         "--outcome", "research_delivered", "--root", str(tmp_path),
     ])
     capsys.readouterr()
@@ -405,8 +434,8 @@ def test_collect_report_renders_outcome_and_spend(tmp_path, capsys, monkeypatch)
 
 def test_collect_refuses_double_collect(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
-    tpath = _transcript(tmp_path / "seat.jsonl")
-    args = ["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+    _stage_transcript(tmp_path, run_id, monkeypatch)
+    args = ["collect", "rate-limit-login", "--run", run_id,
             "--outcome", "no_change", "--root", str(tmp_path)]
     assert v3_cli.main(args) == 0
     capsys.readouterr()
@@ -441,8 +470,8 @@ def test_uncollected_dispatch_projects_scope_to_build(tmp_path, capsys, monkeypa
     proj = json.loads(capsys.readouterr().out)["projection"]
     assert proj["state"] == "in_progress" and proj["phase"] == "Build"
     # …and once collected, the Scope projects off its own state again (not Build).
-    tpath = _transcript(tmp_path / "seat.jsonl")
-    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+    _stage_transcript(tmp_path, run_id, monkeypatch)
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id,
                  "--outcome", "no_change", "--root", str(tmp_path)])
     capsys.readouterr()
     v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path), "--json"])
@@ -453,8 +482,8 @@ def test_uncollected_dispatch_projects_scope_to_build(tmp_path, capsys, monkeypa
 def test_report_defaults_evidence_from_collected_dispatch(tmp_path, capsys, monkeypatch):
     # With a collected dispatch, `report` needs no --evidence — it finds the chain.
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
-    tpath = _transcript(tmp_path / "seat.jsonl")
-    v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+    _stage_transcript(tmp_path, run_id, monkeypatch)
+    v3_cli.main(["collect", "rate-limit-login", "--run", run_id,
                  "--outcome", "research_delivered", "--root", str(tmp_path)])
     capsys.readouterr()
     code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path), "--json"])
@@ -468,9 +497,9 @@ def test_e2e_scope_to_spawn_to_collect_to_report(tmp_path, capsys, monkeypatch):
     # The named keystone: scope → ratify → drive --spawn → collect → report,
     # all subprocess seams faked. Proves the spine end to end.
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
-    tpath = _transcript(tmp_path / "seat.jsonl", n_turns=3)
+    _stage_transcript(tmp_path, run_id, monkeypatch, n_turns=3)
     capsys.readouterr()
-    assert v3_cli.main(["collect", "rate-limit-login", "--run", run_id, "--transcript", str(tpath),
+    assert v3_cli.main(["collect", "rate-limit-login", "--run", run_id,
                         "--outcome", "research_delivered", "--root", str(tmp_path)]) == 0
     capsys.readouterr()
     assert v3_cli.main(["artifacts", "rate-limit-login", "--cap", "5", "--root", str(tmp_path), "--json"]) == 0
@@ -481,8 +510,65 @@ def test_e2e_scope_to_spawn_to_collect_to_report(tmp_path, capsys, monkeypatch):
     assert "Research delivered" in block
 
 
-def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monkeypatch):
+def test_collect_refuses_stamped_run_without_transcript(tmp_path, capsys, monkeypatch):
+    """D6/F9: a STAMPED seat that ran must have a transcript at its session key — collecting
+    with none present (and no override) is a hard refusal, never a silent zero-spend fold."""
     run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    # point the config dir at an empty dir so the stamped-key lookup finds nothing
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty-config"))
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
+        "--root", str(tmp_path), "--json",
+    ])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "stamped_transcript_missing"
+    assert payload["harness_session_id"] == _session_id(tmp_path, run_id)
+
+
+def test_collect_override_folds_and_stamps_operator_override(tmp_path, capsys, monkeypatch):
+    """D6/F9: the salvage hatch folds a relocated transcript despite no stamped-key hit and
+    loudly stamps transcript_source: operator_override."""
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    salvaged = _transcript(tmp_path / "salvaged-elsewhere.jsonl")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty-config"))
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--outcome", "research_delivered",
+        "--transcript-override", str(salvaged), "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["transcript_source"] == "operator_override"
+    assert payload["spend_leaves"] == 2
+
+
+def test_collect_refuses_mismatched_explicit_transcript(tmp_path, capsys, monkeypatch):
+    """D6/F9: an explicit --transcript whose stem ≠ the stamped id is the #14/#21 mis-fold,
+    machine-blocked (use --transcript-override to fold a salvaged one)."""
+    run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
+    wrong = _transcript(tmp_path / "orchestrator-by-mtime.jsonl")
+    capsys.readouterr()
+    code = v3_cli.main([
+        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(wrong),
+        "--outcome", "research_delivered", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "transcript_id_mismatch"
+    assert payload["stamped_session_id"] == _session_id(tmp_path, run_id)
+
+
+def test_collect_unstamped_record_conserves_zero_spend(tmp_path, capsys, monkeypatch):
+    """D6/F9 backward-compat: a pre-F9 dispatch (no harness_session_id) folds the outcome with
+    zero spend (today's behavior) + a transcript_source: unstamped honesty stamp."""
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    # strip the stamped id to simulate a pre-F9 record
+    dpath = tmp_path / "dispatches" / run_id / "dispatch.yaml"
+    drec = yaml.safe_load(dpath.read_text(encoding="utf-8"))
+    drec.pop("harness_session_id", None)
+    dpath.write_text(yaml.safe_dump(drec, sort_keys=True), encoding="utf-8")
     capsys.readouterr()
     code = v3_cli.main([
         "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
@@ -492,6 +578,7 @@ def test_collect_without_transcript_still_records_outcome(tmp_path, capsys, monk
     payload = json.loads(capsys.readouterr().out)
     assert payload["spend_leaves"] == 0
     assert payload["outcome"] == "no_change"
+    assert payload["transcript_source"] == "unstamped"
 
 
 # ---------------------------------------------------------------------------
@@ -1194,6 +1281,7 @@ def _outcome_change_set(chain_path: Path) -> dict:
 def test_collect_derives_change_set_and_pr_opened_from_block(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch, policy=_RATES_POLICY)
     _stamp_change_block(tmp_path, run_id, pr_number=7, head_sha="d" * 40)
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     capsys.readouterr()
     # no --outcome, no --branch/--head-sha: all derived from the stamped change block
     code = v3_cli.main([
@@ -1210,6 +1298,7 @@ def test_collect_derives_change_set_and_pr_opened_from_block(tmp_path, capsys, m
 def test_collect_explicit_outcome_wins_over_block(tmp_path, capsys, monkeypatch):
     run_id = _dispatch_a_run(tmp_path, monkeypatch)
     _stamp_change_block(tmp_path, run_id)
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     capsys.readouterr()
     code = v3_cli.main([
         "collect", "rate-limit-login", "--run", run_id, "--outcome", "no_change",
@@ -1230,6 +1319,7 @@ def test_collect_refuses_missing_outcome_without_block(tmp_path, capsys, monkeyp
 def test_collect_no_pr_fallback_is_byte_conserved(tmp_path, capsys, monkeypatch):
     # the operator-typed path for a run that opened no PR: head_sha defaults to the run id (G1).
     run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     capsys.readouterr()
     code = v3_cli.main([
         "collect", "rate-limit-login", "--run", run_id, "--outcome", "research_delivered",
@@ -1301,9 +1391,10 @@ def test_review_spawn_launches_venue(tmp_path, capsys, monkeypatch):
 
     seen = {}
 
-    def fake_spawn(rec, *, controller_id, venue_root, ledger_root):
+    def fake_spawn(rec, *, controller_id, venue_root, ledger_root, seat_env_file=None):
         seen["controller_id"] = controller_id
         seen["venue_root"] = venue_root
+        seen["seat_env_file"] = seat_env_file
         return v3_seat_bridge.SpawnResult(
             run_id=rec.run_id,
             terminal={"kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": "%7"},
@@ -1313,11 +1404,31 @@ def test_review_spawn_launches_venue(tmp_path, capsys, monkeypatch):
     capsys.readouterr()
     code = v3_cli.main(_review_argv(
         tmp_path, run_id, spawn=True, venue_root=str(tmp_path / "venues"),
-        ledger_root=str(tmp_path / "ledger"), controller_id="ctrl-x"))
+        ledger_root=str(tmp_path / "ledger"), controller_id="ctrl-x",
+        seat_env_file=str(_owner_only_env(tmp_path / "rev.env"))))
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "spawned_review" and payload["pane_id"] == "%7"
     assert seen["controller_id"] == "ctrl-x"
+    # D1: the review dispatch defaults UNATTENDED; D2: the seat-env-file is threaded through
+    review_run_id = payload["review_run_id"]
+    drec = yaml.safe_load(
+        (tmp_path / "dispatches" / review_run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["unattended"] is True
+    assert seen["seat_env_file"] == str(tmp_path / "rev.env")
+
+
+def test_review_no_unattended_recorded_on_dispatch(tmp_path, capsys, monkeypatch):
+    """D1/F3: --no-unattended threads through to the review dispatch record."""
+    run_id = _dispatch_a_run(tmp_path, monkeypatch)
+    _stamp_change_block(tmp_path, run_id, pr_number=7)
+    capsys.readouterr()
+    code = v3_cli.main(_review_argv(tmp_path, run_id) + ["--no-unattended"])
+    assert code == 0
+    review_run_id = json.loads(capsys.readouterr().out)["review_run_id"]
+    drec = yaml.safe_load(
+        (tmp_path / "dispatches" / review_run_id / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert drec["unattended"] is False
 
 
 def test_review_spawn_fail_closed(tmp_path, capsys, monkeypatch):
@@ -1506,16 +1617,17 @@ def test_e2e_scope_to_pr_to_review_to_merge_to_report(tmp_path, capsys, monkeypa
         "--root", str(tmp_path), "--json"]) == 0
     review_run_id = json.loads(capsys.readouterr().out)["review_run_id"]
 
-    # 4) cev3 collect the REVIEW venue run (its own run, its own chain).
-    rtx = _transcript(tmp_path / "review.jsonl")
+    # 4) cev3 collect the REVIEW venue run (its own run, its own chain) — D6/F9 resolves the
+    #    transcript by the venue's stamped harness session id (no --transcript guess).
+    _stage_transcript(tmp_path, review_run_id, monkeypatch)
     assert v3_cli.main([
-        "collect", "rate-limit-login", "--run", review_run_id, "--transcript", str(rtx),
+        "collect", "rate-limit-login", "--run", review_run_id,
         "--outcome", "review_submitted", "--pr", "7", "--root", str(tmp_path)]) == 0
 
     # 5) cev3 collect the AUTHOR run — derives change_set + pr_opened FROM the stamped change block.
-    atx = _transcript(tmp_path / "author.jsonl")
+    _stage_transcript(tmp_path, run_id, monkeypatch)
     assert v3_cli.main([
-        "collect", "rate-limit-login", "--run", run_id, "--transcript", str(atx),
+        "collect", "rate-limit-login", "--run", run_id,
         "--root", str(tmp_path)]) == 0
 
     # 6) cev3 merge --apply (REAL merge_for_run; ambient gh faked) → appends pr_merged.

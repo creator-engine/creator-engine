@@ -892,6 +892,97 @@ def _cmd_escalation(args: argparse.Namespace) -> int:
     return 2
 
 
+def _claude_config_dir(args: argparse.Namespace) -> Path:
+    """Resolve the harness config dir for stamped-id transcript lookup (D6/F9).
+
+    Precedence: ``--claude-config-dir`` → ``$CLAUDE_CONFIG_DIR`` → ``~/.claude``.
+    """
+    explicit = getattr(args, "claude_config_dir", None)
+    if explicit:
+        return Path(explicit)
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(env) if env else Path.home() / ".claude"
+
+
+def _resolve_collect_transcript(
+    args: argparse.Namespace, session_id: Any, run_id: str
+) -> tuple[Path | None, str, tuple[int, list[str], dict[str, Any]] | None]:
+    """D6/F9 transcript resolution: the dispatch NAMES its transcript, collect never guesses.
+
+    Returns ``(transcript_path | None, transcript_source, refusal | None)`` where ``refusal``
+    is an ``(exit_code, lines, payload)`` triple for :func:`_emit`. Resolution order:
+
+    * ``--transcript-override`` given → fold it, ``operator_override`` (the loud salvage hatch);
+    * a stamped ``harness_session_id`` present:
+        - explicit ``--transcript`` → fold ONLY if its stem equals the stamped id, else REFUSE
+          (the #14/#21 mis-fold, machine-blocked);
+        - no ``--transcript`` → resolve by EXACT KEY ``<config>/projects/*/<id>.jsonl``: one hit →
+          fold (``stamped``); zero or many → REFUSE;
+    * no stamped id (pre-F9 record) → today's behavior conserved (optional ``--transcript``),
+      ``unstamped``.
+    """
+    override = getattr(args, "transcript_override", None)
+    explicit = getattr(args, "transcript", None)
+    sid = str(session_id) if session_id else ""
+
+    def _not_found(path: Path, kind: str) -> tuple[int, list[str], dict[str, Any]]:
+        return (
+            2,
+            [f"{_BRAND} · collect refused: {kind} not found: {path}"],
+            {"error": "transcript_not_found", "transcript": str(path)},
+        )
+
+    if override:
+        tp = Path(override)
+        if not tp.is_file():
+            return None, "", _not_found(tp, "transcript-override")
+        return tp, "operator_override", None
+
+    if sid:
+        if explicit:
+            tp = Path(explicit)
+            if not tp.is_file():
+                return None, "", _not_found(tp, "transcript")
+            if tp.stem != sid:
+                return None, "", (
+                    2,
+                    [f"{_BRAND} · collect refused: --transcript {tp.name!r} does not match the "
+                     f"run's stamped harness session id {sid!r} — refusing the mis-fold "
+                     f"(pass --transcript-override to fold a salvaged transcript anyway)"],
+                    {"error": "transcript_id_mismatch", "run_id": run_id,
+                     "stamped_session_id": sid, "given_stem": tp.stem},
+                )
+            return tp, "stamped", None
+        cfg = _claude_config_dir(args)
+        hits = sorted((cfg / "projects").glob(f"*/{sid}.jsonl"))
+        if not hits:
+            return None, "", (
+                2,
+                [f"{_BRAND} · collect refused: no harness transcript for stamped session id "
+                 f"{sid!r} under {cfg / 'projects'}/*/ — a spawned seat must have a transcript "
+                 f"(pass --transcript-override to fold a salvaged one)"],
+                {"error": "stamped_transcript_missing", "run_id": run_id,
+                 "harness_session_id": sid, "config_dir": str(cfg)},
+            )
+        if len(hits) > 1:
+            return None, "", (
+                2,
+                [f"{_BRAND} · collect refused: {len(hits)} transcripts match stamped session id "
+                 f"{sid!r} — refusing an ambiguous fold (chain integrity over convenience)"],
+                {"error": "stamped_transcript_ambiguous", "run_id": run_id,
+                 "harness_session_id": sid, "matches": [str(h) for h in hits]},
+            )
+        return hits[0], "stamped", None
+
+    # pre-F9 record: no stamped id — conserve today's behavior.
+    if explicit:
+        tp = Path(explicit)
+        if not tp.is_file():
+            return None, "", _not_found(tp, "transcript")
+        return tp, "unstamped", None
+    return None, "unstamped", None
+
+
 def _cmd_collect(args: argparse.Namespace) -> int:
     """Fold a finished seat run into a conserved evidence chain (G1b run→evidence).
 
@@ -935,26 +1026,8 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     policy_sha = _policy_sha(policy)
     model_rates = policy.get("model_rates") or []
 
-    # 1) Spend ledger leaves — fold the transcript by REUSING the usage tap
-    #    (compute_cost + meter_record_body); unpriced turns are surfaced, never $0.
-    ledger_bodies: list[dict[str, Any]] = []
-    unpriced = 0
-    if args.transcript:
-        tpath = Path(args.transcript)
-        if not tpath.is_file():
-            return _emit(
-                args, 2,
-                [f"{_BRAND} · collect refused: transcript not found: {tpath}"],
-                {"error": "transcript_not_found", "transcript": str(tpath)},
-            )
-        turns = usage_tap.tap_transcript_file(tpath)
-        ledger_bodies, unpriced_turns = usage_tap.usage_turns_to_ledger(
-            turns, model_rates=model_rates, fleet_id=run_id,
-            policy_sha=policy_sha, run_id_of=lambda _t: run_id,
-        )
-        unpriced = len(unpriced_turns)
-
-    # 2) The typed terminal outcome + its value-free change_set pointer.
+    # 1) The typed terminal outcome + its value-free change_set pointer (determined FIRST so a
+    #    missing-outcome refusal is independent of transcript resolution).
     #    v3.1-G2a: when the dispatch carries a forge-stamped `change` block (a `cev3 pr --apply`
     #    opened a real PR), derive the change_set FROM IT — closing G1's "head_sha defaults to the
     #    run id" honesty gap with a forge-derived fact — and default --outcome to pr_opened. Explicit
@@ -968,6 +1041,26 @@ def _cmd_collect(args: argparse.Namespace) -> int:
              f"(run {run_id!r} carries no stamped change block to derive it from)"],
             {"error": "outcome_required", "run_id": run_id},
         )
+
+    # 2) Resolve the harness transcript by the stamped session id — never by guess (D6/F9).
+    #    The mis-fold that metered the orchestrator on the #14/#21 chains is machine-blocked.
+    session_id = dispatch.get("harness_session_id")
+    tpath, transcript_source, refusal = _resolve_collect_transcript(args, session_id, run_id)
+    if refusal is not None:
+        code, lines, payload = refusal
+        return _emit(args, code, lines, payload)
+
+    # 3) Spend ledger leaves — fold the RESOLVED transcript by REUSING the usage tap
+    #    (compute_cost + meter_record_body); unpriced turns are surfaced, never $0.
+    ledger_bodies: list[dict[str, Any]] = []
+    unpriced = 0
+    if tpath is not None:
+        turns = usage_tap.tap_transcript_file(tpath)
+        ledger_bodies, unpriced_turns = usage_tap.usage_turns_to_ledger(
+            turns, model_rates=model_rates, fleet_id=run_id,
+            policy_sha=policy_sha, run_id_of=lambda _t: run_id,
+        )
+        unpriced = len(unpriced_turns)
     change_set: dict[str, Any] = {
         "branch": args.branch or change_block.get("branch") or run_id,
         "base": args.base or change_block.get("base") or "main",
@@ -988,7 +1081,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         "change_set": change_set,
     }
 
-    # 3) Hash-chain the leaves then the terminal outcome; persist via the existing
+    # 4) Hash-chain the leaves then the terminal outcome; persist via the existing
     #    sink (refuses empty / non-uniform run_id / hash-broken / schema-invalid).
     chain: list[dict[str, Any]] = []
     for body in [*ledger_bodies, outcome_body]:
@@ -999,7 +1092,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
             handle_ref=run_id,
             records=tuple(chain),
             note=f"v3.1-G1 collect: run {run_id} folded {len(ledger_bodies)} spend leaf(s) "
-                 f"+ outcome {outcome}",
+                 f"+ outcome {outcome} (transcript_source: {transcript_source})",
         ))
     except evidence_sink.EvidencePersistRefused as exc:
         return _emit(
@@ -1008,8 +1101,10 @@ def _cmd_collect(args: argparse.Namespace) -> int:
             {"error": "persist_refused", "detail": str(exc), "run_id": run_id},
         )
 
-    # 4) Mark the dispatch collected (an uncollected dispatch projects Build/RUN).
+    # 4) Mark the dispatch collected (an uncollected dispatch projects Build/RUN) + stamp the
+    #    D6/F9 transcript-source honesty marker (the schema'd spend leaves stay untouched).
     dispatch["collected_at"] = _utc_now_iso()
+    dispatch["transcript_source"] = transcript_source
     _dispatch_path(root, run_id).write_text(
         yaml.safe_dump(dispatch, sort_keys=True, default_flow_style=False), encoding="utf-8"
     )
@@ -1025,6 +1120,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         {"action": "collected", "scope_id": args.scope_id, "run_id": run_id,
          "outcome": outcome, "pr": pr_number, "evidence": str(receipt.path),
          "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
+         "transcript_source": transcript_source,
          "record_count": receipt.record_count},
     )
 
@@ -1135,9 +1231,11 @@ def _cmd_review(args: argparse.Namespace) -> int:
             {"error": "spawn_inputs_missing", "run_id": author_run_id},
         )
 
+    unattended = not getattr(args, "no_unattended", False)
     rec = v3_seat_bridge.materialize_review_dispatch(
         author, root, reviewer_actor=args.reviewer_actor,
         pr_number=int(pr_number), head_sha=str(head_sha),
+        unattended=unattended,
     )
     if not args.spawn:
         lines = [
@@ -1159,6 +1257,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
         spawn = v3_seat_bridge.spawn_review_venue(
             rec, controller_id=args.controller_id,
             venue_root=args.venue_root, ledger_root=args.ledger_root,
+            seat_env_file=getattr(args, "seat_env_file", None),
         )
     except v3_seat_bridge.SeatBridgeError as exc:
         # spawn_review_venue stamps mark_spawn_failed on any leg's refusal (conserved, not deleted).
@@ -1830,7 +1929,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_collect = sub.add_parser("collect", help="fold a finished seat run's transcript + outcome into evidence")
     p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
     p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
-    p_collect.add_argument("--transcript", default=None, help="the seat harness .jsonl transcript to meter")
+    p_collect.add_argument("--transcript", default=None,
+                           help="OPTIONAL override path to the seat harness .jsonl transcript. Normally "
+                                "OMIT it: collect resolves the transcript by the harness session id "
+                                "stamped at spawn (D6/F9). When given, it is folded ONLY if its stem "
+                                "matches the stamped id — else refused (the #14/#21 mis-fold, blocked)")
+    p_collect.add_argument("--transcript-override", default=None, dest="transcript_override",
+                           help="SALVAGE hatch: fold this transcript despite no/mismatched stamped id "
+                                "(e.g. a crashed/relocated harness transcript). Loudly honesty-stamped "
+                                "transcript_source: operator_override")
+    p_collect.add_argument("--claude-config-dir", default=None, dest="claude_config_dir",
+                           help="override the harness config dir for stamped-id transcript resolution "
+                                "(default: $CLAUDE_CONFIG_DIR or ~/.claude)")
     p_collect.add_argument("--outcome", default=None, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
                            help="the conserved terminal outcome (defaults to pr_opened when the "
                                 "dispatch carries a forge-stamped change block; otherwise required)")
@@ -1882,6 +1992,13 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Active-Work ledger root for the venue claim (required with --spawn)")
     p_review.add_argument("--controller-id", default="cev3-review", dest="controller_id",
                           help="controller id for the venue lane (default: cev3-review)")
+    p_review.add_argument("--no-unattended", action="store_true", dest="no_unattended",
+                          help="opt the reviewer venue back into interactive approval modals "
+                               "(default: unattended, mirroring the author seat — D1/F3)")
+    p_review.add_argument("--seat-env-file", default=None, dest="seat_env_file",
+                          help="path to an owner-only (0600-class) env file sourced into the "
+                               "venue claude (the reviewer credential contract — D2/F4); the file "
+                               "PATH transits argv, the secret VALUE never does")
     _add_root(p_review)
 
     p_merge = sub.add_parser(

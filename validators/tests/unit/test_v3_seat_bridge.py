@@ -25,6 +25,35 @@ from creator_engine_validator import coordination, v3_seat_bridge
 
 _FIXED_NOW = datetime(2026, 6, 11, 9, 30, 0, tzinfo=timezone.utc)
 
+_FIXED_SESSION_ID = "00000000-0000-4000-8000-000000000000"
+
+
+@pytest.fixture(autouse=True)
+def _spawn_binaries_present(monkeypatch):
+    """Default: the spawn-preflight binaries (``tmux`` + the harness) resolve on PATH.
+
+    The G2f PATH preflight calls the real ``shutil.which``; in the CI envelope the
+    harness binary is absent, so without this the spawn-path tests would all trip the
+    preflight. Tests that exercise the refusal override ``which`` to return ``None``.
+    """
+    monkeypatch.setattr(
+        v3_seat_bridge.shutil, "which", lambda name: f"/usr/bin/{name}"
+    )
+
+
+class _StubClock:
+    """A monotonic clock + sleep stub: each ``sleep`` advances the clock deterministically."""
+
+    def __init__(self, *, step: float = 0.5):
+        self.t = 0.0
+        self.step = step
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds if seconds else self.step
+
 
 def _plan(scope_id: str = "demo-scope") -> coordination.DispatchPlan:
     return coordination.DispatchPlan(
@@ -59,15 +88,31 @@ def _launch_json(*, spawned=True, pane="%3", resource_bound=None):
 
 
 class _RecordingRunner:
-    """Captures argv; returns a scripted result (default: a clean spawn)."""
+    """Captures argv; returns a scripted result (default: a clean spawn).
 
-    def __init__(self, result: _FakeCompleted | None = None):
+    The seed readiness-poll (``tmux display-message``) is routed to a ready
+    foreground command (``pane_command``, default ``claude``) so seed tests don't
+    spin; everything else returns the scripted ``_result``.
+    """
+
+    def __init__(self, result: _FakeCompleted | None = None, *, pane_command: str = "claude"):
         self.calls: list[list[str]] = []
         self._result = result or _FakeCompleted(stdout=_launch_json())
+        self._pane_command = pane_command
 
     def __call__(self, argv, **kw):
-        self.calls.append(list(argv))
+        argv = list(argv)
+        self.calls.append(argv)
+        if "display-message" in argv:
+            return _FakeCompleted(stdout=self._pane_command)
+        if "capture-pane" in argv:
+            # input box empty → the seed line submitted on the first Enter
+            return _FakeCompleted(stdout="(harness ready)\n")
         return self._result
+
+    @property
+    def send_keys_calls(self) -> list[list[str]]:
+        return [c for c in self.calls if "send-keys" in c]
 
 
 # ---------------------------------------------------------------------------
@@ -290,9 +335,10 @@ def test_seed_brief_sends_pointer_line_then_enter(tmp_path):
     rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
     v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
     seed = _RecordingRunner()
-    v3_seat_bridge.seed_brief(rec, runner=seed)
-    assert len(seed.calls) == 2
-    literal, enter = seed.calls
+    v3_seat_bridge.seed_brief(rec, runner=seed, sleep=lambda *_: None, clock=lambda: 0.0)
+    sends = seed.send_keys_calls
+    assert len(sends) == 2
+    literal, enter = sends
     assert literal[:5] == ["tmux", "send-keys", "-t", rec.pane_id, "-l"]
     assert literal[5] == f"Read {rec.brief_ref} and execute under it."
     assert enter == ["tmux", "send-keys", "-t", rec.pane_id, "Enter"]
@@ -304,6 +350,195 @@ def test_seed_brief_refuses_without_pane(tmp_path):
     rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
     with pytest.raises(v3_seat_bridge.SpawnRefused):
         v3_seat_bridge.seed_brief(rec, runner=_RecordingRunner())
+
+
+# ---------------------------------------------------------------------------
+# D5 (G1-followups) — PATH preflight + Seed-Enter readiness poll + send-keys rc
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_refuses_when_tmux_or_claude_absent(tmp_path, monkeypatch):
+    """PATH preflight: a missing spawn-critical binary fail-closes BEFORE the launch
+    leg, and the refused attempt is conserved (mark_spawn_failed), never half-spawned."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    monkeypatch.setattr(
+        v3_seat_bridge.shutil, "which",
+        lambda name: None if name == "claude" else f"/usr/bin/{name}",
+    )
+    runner = _RecordingRunner()
+    with pytest.raises(v3_seat_bridge.SpawnRefused) as exc:
+        v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce", now=_FIXED_NOW)
+    assert "claude" in str(exc.value)
+    assert runner.calls == []  # never reached the launch leg
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"] and drec["terminal"] is None
+
+
+def test_seed_brief_polls_until_harness_ready(tmp_path):
+    """Readiness poll: the pointer line is held until the pane foreground leaves the
+    shell (the harness REPL is up) — a fake runner returns shell, then claude."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    foreground = iter(["bash", "bash", "claude"])
+
+    class _PollRunner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, argv, **kw):
+            argv = list(argv)
+            self.calls.append(argv)
+            if "display-message" in argv:
+                return _FakeCompleted(stdout=next(foreground))
+            return _FakeCompleted()
+
+    runner = _PollRunner()
+    clk = _StubClock()
+    v3_seat_bridge.seed_brief(
+        rec, runner=runner, clock=clk.now, sleep=clk.sleep, poll_interval_s=0.5,
+    )
+    polls = [c for c in runner.calls if "display-message" in c]
+    sends = [c for c in runner.calls if "send-keys" in c]
+    assert len(polls) == 3  # shell, shell, then ready
+    assert len(sends) == 2  # only seeded AFTER ready
+
+
+def test_seed_brief_fail_closed_on_readiness_timeout(tmp_path):
+    """Readiness timeout: never-ready pane → mark_spawn_failed, pane CONSERVED, no seed."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    class _StuckRunner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, argv, **kw):
+            argv = list(argv)
+            self.calls.append(argv)
+            if "display-message" in argv:
+                return _FakeCompleted(stdout="bash")  # never leaves the shell
+            return _FakeCompleted()
+
+    runner = _StuckRunner()
+    clk = _StubClock()
+    with pytest.raises(v3_seat_bridge.SpawnRefused) as exc:
+        v3_seat_bridge.seed_brief(
+            rec, runner=runner, clock=clk.now, sleep=clk.sleep,
+            readiness_timeout_s=2.0, poll_interval_s=0.5, now=_FIXED_NOW,
+        )
+    assert "readiness" in str(exc.value).lower()
+    assert not any("send-keys" in c for c in runner.calls)  # never seeded
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    # pane CONSERVED for autopsy (the terminal stamp is not cleared)
+    assert drec["terminal"]["pane_id"] == rec.pane_id
+
+
+def test_seed_brief_fail_closed_on_send_keys_failure(tmp_path):
+    """A non-zero send-keys rc (a dead pane that silently absorbs the seed) fail-closes."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    class _SendFailRunner:
+        def __call__(self, argv, **kw):
+            argv = list(argv)
+            if "display-message" in argv:
+                return _FakeCompleted(stdout="claude")
+            if "send-keys" in argv:
+                return _FakeCompleted(returncode=1, stderr="can't find pane")
+            return _FakeCompleted()
+
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.seed_brief(rec, runner=_SendFailRunner(), now=_FIXED_NOW)
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+
+
+class _SubmitRunner:
+    """display-message ready; ``capture-pane`` reports the seed line as still PENDING in the
+    input box for ``pending_captures`` captures, then CLEARED — the S8 submit-lost simulation."""
+
+    def __init__(self, line: str, *, pending_captures: int):
+        self.line = line
+        self.pending_captures = pending_captures
+        self.captures = 0
+        self.enters = 0
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **kw):
+        argv = list(argv)
+        self.calls.append(argv)
+        if "display-message" in argv:
+            return _FakeCompleted(stdout="claude")
+        if "capture-pane" in argv:
+            self.captures += 1
+            if self.captures <= self.pending_captures:
+                return _FakeCompleted(stdout=f"prompt> \n{self.line}\n")  # still in the box
+            return _FakeCompleted(stdout="prompt> \n(box cleared)\n")  # submitted
+        if "send-keys" in argv:
+            if "Enter" in argv:
+                self.enters += 1
+            return _FakeCompleted(returncode=0)
+        raise AssertionError(f"unexpected argv: {argv}")  # pragma: no cover
+
+
+def test_seed_brief_resends_enter_until_submitted(tmp_path):
+    """S8 submit-guard: the first Enter leaves the line pending (swallowed); a second Enter
+    clears the input box → submitted. A >=1s settle precedes the first Enter."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+    runner = _SubmitRunner(v3_seat_bridge._seed_line(rec), pending_captures=1)
+    sleeps: list[float] = []
+    v3_seat_bridge.seed_brief(
+        rec, runner=runner, clock=lambda: 0.0, sleep=sleeps.append,
+    )
+    assert runner.enters == 2  # first Enter swallowed, second submitted
+    # the proven manual cadence: a >=1s settle precedes the first Enter
+    assert sleeps and sleeps[0] >= 1.0
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert "spawn_failed_at" not in drec  # a clean submit, not a failure
+
+
+def test_seed_brief_fail_closed_when_submit_never_clears(tmp_path):
+    """S8 submit-guard: the line never leaves the input box → after bounded re-sends, fail
+    closed (mark_spawn_failed) with the pane CONSERVED for autopsy."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+    runner = _SubmitRunner(v3_seat_bridge._seed_line(rec), pending_captures=999)
+    with pytest.raises(v3_seat_bridge.SpawnRefused) as exc:
+        v3_seat_bridge.seed_brief(
+            rec, runner=runner, clock=lambda: 0.0, sleep=lambda *_: None, now=_FIXED_NOW,
+        )
+    assert "swallowed the submit" in str(exc.value)
+    assert runner.enters == v3_seat_bridge.SEED_SUBMIT_MAX_ATTEMPTS  # bounded re-sends
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    # pane CONSERVED for autopsy (the terminal stamp is not cleared)
+    assert drec["terminal"]["pane_id"] == rec.pane_id
+
+
+# ---------------------------------------------------------------------------
+# D6 (F9) — harness_session_id minted at materialize, stamped onto the spawn argv
+# ---------------------------------------------------------------------------
+
+
+def test_harness_session_id_minted_and_schema_valid(tmp_path):
+    import jsonschema
+
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    sid = rec.data["harness_session_id"]
+    assert sid and rec.harness_session_id == sid
+    jsonschema.validate(rec.data, _dispatch_schema())
+
+
+def test_spawn_seat_stamps_session_id_on_claude_arg(tmp_path):
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, now=_FIXED_NOW, harness_session_id=_FIXED_SESSION_ID
+    )
+    runner = _RecordingRunner()
+    v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce")
+    assert f"--claude-arg=--session-id={_FIXED_SESSION_ID}" in runner.calls[0]
 
 
 # ===========================================================================
@@ -348,6 +583,10 @@ class _ReviewRunner:
                     "kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": self.pane}},
             })
             return _FakeCompleted(returncode=0, stdout=stdout)
+        if "display-message" in argv:
+            return _FakeCompleted(returncode=0, stdout="claude")  # ready immediately
+        if "capture-pane" in argv:
+            return _FakeCompleted(returncode=0, stdout="(box empty)\n")  # submit cleared
         if "send-keys" in argv:
             return _FakeCompleted(returncode=0)
         raise AssertionError(f"unexpected argv: {argv}")  # pragma: no cover
@@ -464,6 +703,7 @@ def test_spawn_review_venue_runs_pco_then_lane_launch_then_seed(tmp_path):
     result = v3_seat_bridge.spawn_review_venue(
         rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "ledger",
         runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+        sleep=lambda *_: None, clock=lambda: 0.0,
     )
     assert result.terminal["pane_id"] == "%7"
     # pco-allocate ran with cwd OUTSIDE the repo (the venue zone)
@@ -529,3 +769,96 @@ def test_spawn_review_venue_fail_closed_on_no_pane(tmp_path):
             runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW)
     drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
     assert drec["spawn_failed_at"]
+
+
+# ---------------------------------------------------------------------------
+# D1 (F3) — unattended reviewer venues + D3 (F5) absolute refs + D6 + D2 pass-through
+# ---------------------------------------------------------------------------
+
+
+def _spawn_venue(tmp_path, *, unattended=True, seat_env_file=None, runner=None):
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"
+    venue_root.mkdir(exist_ok=True)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        unattended=unattended, now=_FIXED_NOW, harness_session_id=_FIXED_SESSION_ID,
+    )
+    runner = runner or _ReviewRunner(pane="%7")
+    v3_seat_bridge.spawn_review_venue(
+        rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "ledger",
+        seat_env_file=seat_env_file, runner=runner,
+        validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+        sleep=lambda *_: None, clock=lambda: 0.0,
+    )
+    return rec, runner
+
+
+def test_unattended_venue_appends_skip_permissions(tmp_path):
+    rec, runner = _spawn_venue(tmp_path, unattended=True)
+    assert rec.data["unattended"] is True
+    launch = runner.argv_for("launch")
+    assert "--claude-arg=--dangerously-skip-permissions" in launch
+
+
+def test_attended_venue_omits_skip_permissions(tmp_path):
+    rec, runner = _spawn_venue(tmp_path, unattended=False)
+    assert rec.data["unattended"] is False
+    launch = runner.argv_for("launch")
+    assert "--claude-arg=--dangerously-skip-permissions" not in launch
+
+
+def test_venue_spawn_stamps_session_id_on_claude_arg(tmp_path):
+    _rec, runner = _spawn_venue(tmp_path)
+    launch = runner.argv_for("launch")
+    assert f"--claude-arg=--session-id={_FIXED_SESSION_ID}" in launch
+
+
+def test_review_refs_are_absolute_from_relative_root(tmp_path, monkeypatch):
+    """D3: a RELATIVE --root yields ABSOLUTE envelope_ref / brief_ref / seeded line, so
+    the in-venue Ring-1 hook (resolving from the venue worktree cwd) can find them."""
+    monkeypatch.chdir(tmp_path)
+    author = _author_dispatch(Path("state"))
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, "state", reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    envelope_ref = rec.data["review_of"]["envelope_ref"]
+    assert Path(envelope_ref).is_absolute(), envelope_ref
+    assert Path(rec.brief_ref).is_absolute(), rec.brief_ref
+    # the seeded pointer line names the absolute brief path
+    assert v3_seat_bridge._seed_line(rec).endswith("and execute under it.")
+    assert str(Path(rec.brief_ref)) in v3_seat_bridge._seed_line(rec)
+
+
+def test_author_refs_are_absolute_from_relative_root(tmp_path, monkeypatch):
+    """D3 author-side symmetry: the same absolutization protects any author seat whose
+    pane cwd is not the orchestrator's."""
+    monkeypatch.chdir(tmp_path)
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), "state", now=_FIXED_NOW)
+    assert Path(rec.brief_ref).is_absolute()
+    assert Path(rec.runtime_policy_ref).is_absolute()
+    brief = Path(rec.brief_ref).read_text(encoding="utf-8")
+    # the brief's scope/evidence pointers are absolute too
+    assert str(tmp_path.resolve()) in brief
+
+
+def test_venue_seat_env_file_threaded_and_recorded(tmp_path):
+    """D2 bridge pass-through: --seat-env-file rides the launch argv; the dispatch records
+    only the PATH ref (value-free), never the credential value."""
+    env_file = tmp_path / "reviewer.env"
+    env_file.write_text("GITHUB_REVIEWR_TOKEN=ghp_secret\n", encoding="utf-8")
+    rec, runner = _spawn_venue(tmp_path, seat_env_file=env_file)
+    launch = runner.argv_for("launch")
+    assert "--seat-env-file" in launch
+    assert launch[launch.index("--seat-env-file") + 1] == str(env_file)
+    # the dispatch record carries the PATH ref, never the secret value
+    record_bytes = rec.dispatch_path.read_text(encoding="utf-8")
+    assert rec.data["seat_env_file_ref"] == str(env_file)
+    assert "ghp_secret" not in record_bytes
+
+
+def test_venue_without_seat_env_file_omits_flag(tmp_path):
+    _rec, runner = _spawn_venue(tmp_path, seat_env_file=None)
+    launch = runner.argv_for("launch")
+    assert "--seat-env-file" not in launch

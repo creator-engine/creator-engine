@@ -80,6 +80,7 @@ DEMO_WATERMARK = "DEMO — seeded data, not a live fleet"
 #: L1 layout constants (the ``evidence_sink`` / ``v3_cli`` storage seams,
 #: re-declared here because v3_cli is not an allowed import for this module).
 CHAIN_SUFFIX = ".runtime-evidence.yaml"
+RUNS_SUBDIR = "runs"
 SCOPES_SUBDIR = "scopes"
 SCOPE_SUFFIX = ".scope.yaml"
 ESCALATIONS_SUBDIR = "escalations"
@@ -1167,11 +1168,13 @@ def fold_snapshot(
 # The narrow, injectable load seams (the ONLY file reads in this module)
 # ---------------------------------------------------------------------------
 def load_chains(state_root: Path) -> dict[str, list[dict[str, Any]]]:
-    """Read every ``*.runtime-evidence.yaml`` chain document under ``state_root``.
+    """Read every ``*.runtime-evidence.yaml`` chain document directly under ``state_root``.
 
-    Returns ``run_id -> records`` (the ``evidence_sink`` persisted layout:
-    ``<root>/<run_id>.runtime-evidence.yaml``). Tolerant: a malformed document
-    is skipped, never raised (read-only observability must not crash the view).
+    Returns ``run_id -> records``. Chains persist at ``<root>/runs/<run_id>.runtime-evidence.yaml``
+    (the ``evidence_sink`` / ``RUNS_SUBDIR`` layout shared with ``v3_forge_join``), so callers must
+    pass ``<root>/runs`` — :func:`snapshot_from_roots` does (the F7 fix). This loader globs the
+    directory it is GIVEN, never assuming a subdir. Tolerant: a malformed document is skipped, never
+    raised (read-only observability must not crash the view).
     """
     chains: dict[str, list[dict[str, Any]]] = {}
     root = Path(state_root)
@@ -1407,7 +1410,7 @@ def snapshot_from_roots(
     ledger = _resolve(ledger_root, env, LEDGER_ROOT_ENV)
     observations = _resolve(observations_dir, env, OBSERVATIONS_DIR_ENV)
 
-    chains = load_chains(state) if state.is_dir() else None
+    chains = load_chains(state / RUNS_SUBDIR) if state.is_dir() else None
     panes = load_panes(ledger) if ledger else None
     return fold_snapshot(
         panes=panes,

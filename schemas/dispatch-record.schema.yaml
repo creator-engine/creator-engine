@@ -185,6 +185,36 @@ properties:
       back to the author run + the PR under review + the reviewer-authority envelope
       path — NEVER a credential, token, or reviewer login (the login lives in the
       envelope FILE, which the Ring-1 hook records; the record carries only the ref).
+  harness_session_id:
+    type: string
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    description: |
+      v3.1-G2f (F9): the harness session id minted at MATERIALIZE time (a random
+      UUIDv4 — value-free, no credential/host/account) and stamped onto the seat's
+      `--claude-arg=--session-id`, so the harness writes its transcript at a KNOWN
+      key (`<claude-config-dir>/projects/*/<harness_session_id>.jsonl`). `cev3
+      collect` resolves the transcript by this exact key — never by mtime guess —
+      machine-blocking the #14/#21 orchestrator-transcript mis-fold. OPTIONAL:
+      pre-G2f records carry no id and collect conserves its prior behavior.
+  transcript_source:
+    type: string
+    enum: [stamped, operator_override, unstamped]
+    description: |
+      v3.1-G2f (F9): the honesty marker `cev3 collect` stamps at fold time
+      recording HOW the folded transcript was located. `stamped` = resolved by the
+      `harness_session_id` exact key (or an explicit `--transcript` whose stem
+      matched it); `operator_override` = folded via `--transcript-override` despite
+      no/mismatched id (the loud salvage path); `unstamped` = a pre-G2f record with
+      no id (today's behavior conserved). OPTIONAL: absent until collect folds.
+  seat_env_file_ref:
+    type: string
+    minLength: 1
+    description: |
+      v3.1-G2f (F4/D2): shape-only PATH ref to the seat env file the venue sourced
+      via the `--seat-env-file` exec-wrap. A path ref ONLY — the credential VALUE
+      never enters argv, the tmux server, the Pane Registry, or this record (the
+      value-free discipline; only the file path is recorded). Absent when no
+      seat-env file was used.
 $defs:
   change:
     type: object
