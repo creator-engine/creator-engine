@@ -599,6 +599,152 @@ def test_seed_brief_fail_closed_when_submit_never_clears(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# esc-26 — seat-sentinel wrapper readiness: the #211 wrapper runs the harness as a
+# CHILD of `sh`, so the pane foreground stays a shell forever. Readiness must also
+# accept a non-shell child probed via `ps -o comm= --ppid <pane_pid>` (same runner seam).
+# ---------------------------------------------------------------------------
+
+
+class _WrapperReadyRunner:
+    """The #211 wrapper shape: pane FOREGROUND (``#{pane_current_command}``) stays ``sh``,
+    but the pane PID's (``#{pane_pid}``) child tree carries a non-shell harness child
+    (``ps`` reports ``claude``). The pane is therefore ready one level down. ``capture-pane``
+    reports an empty input box (the seed submits on the first Enter)."""
+
+    def __init__(self, *, child_comm: str = "claude", pane_pid: str = "4242"):
+        self.calls: list[list[str]] = []
+        self._child_comm = child_comm
+        self._pane_pid = pane_pid
+
+    def __call__(self, argv, **kw):
+        argv = list(argv)
+        self.calls.append(argv)
+        if "display-message" in argv:
+            if "#{pane_pid}" in argv:
+                return _FakeCompleted(stdout=self._pane_pid)
+            return _FakeCompleted(stdout="sh")  # foreground never leaves the shell
+        if argv and argv[0] == "ps":
+            # the wrapper's harness child, exactly one level under the pane pid
+            return _FakeCompleted(stdout=f"{self._child_comm}\n")
+        if "capture-pane" in argv:
+            return _FakeCompleted(stdout="(harness ready)\n")
+        return _FakeCompleted()
+
+    @property
+    def ps_calls(self) -> list[list[str]]:
+        return [c for c in self.calls if c and c[0] == "ps"]
+
+
+def test_seed_brief_ready_when_wrapper_harness_child_present(tmp_path):
+    """Wrapper shape (esc-26): foreground stays ``sh`` but ``ps`` shows a non-shell child
+    (``claude``) under the pane pid → ready; the spawn proceeds (the seed is sent)."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    runner = _WrapperReadyRunner()
+    clk = _StubClock()
+    v3_seat_bridge.seed_brief(
+        rec, runner=runner, clock=clk.now, sleep=clk.sleep, poll_interval_s=0.5,
+    )
+    # the ps probe rode the injectable runner seam against the pane pid
+    assert runner.ps_calls, "wrapper readiness must probe the child tree via ps"
+    assert runner.ps_calls[0] == ["ps", "-o", "comm=", "--ppid", "4242"]
+    # ready was reached → the seed line was delivered (literal + Enter)
+    assert any("send-keys" in c for c in runner.calls)
+
+
+def test_seed_brief_bare_launch_ready_without_ps_probe(tmp_path):
+    """Bare-launch shape conserved (esc-26): when the foreground LEAVES the shell set the
+    pane is ready immediately — no ``ps`` child probe is needed or issued."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    class _BareLaunchRunner:
+        def __init__(self):
+            self.calls: list[list[str]] = []
+
+        def __call__(self, argv, **kw):
+            argv = list(argv)
+            self.calls.append(argv)
+            if "display-message" in argv:
+                return _FakeCompleted(stdout="claude")  # foreground already left the shell
+            if "capture-pane" in argv:
+                return _FakeCompleted(stdout="(harness ready)\n")
+            return _FakeCompleted()
+
+    runner = _BareLaunchRunner()
+    clk = _StubClock()
+    v3_seat_bridge.seed_brief(
+        rec, runner=runner, clock=clk.now, sleep=clk.sleep, poll_interval_s=0.5,
+    )
+    assert not any(c and c[0] == "ps" for c in runner.calls), (
+        "a non-shell foreground is ready on its own — the ps child probe must not fire"
+    )
+    # no pane-pid read either: the cheaper foreground check short-circuits readiness
+    assert not any("#{pane_pid}" in c for c in runner.calls)
+
+
+def test_seed_brief_timeout_when_only_shell_children(tmp_path):
+    """Foreground ``sh`` AND only shell / no children for the whole window → timeout →
+    refusal IDENTICAL to today (mark_spawn_failed by the caller; pane CONSERVED; no seed)."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    v3_seat_bridge.spawn_seat(rec, runner=_RecordingRunner(), ce_exe="/fake/ce")
+
+    class _ShellChildrenRunner:
+        def __init__(self):
+            self.calls: list[list[str]] = []
+
+        def __call__(self, argv, **kw):
+            argv = list(argv)
+            self.calls.append(argv)
+            if "display-message" in argv:
+                if "#{pane_pid}" in argv:
+                    return _FakeCompleted(stdout="4242")
+                return _FakeCompleted(stdout="sh")  # foreground never leaves the shell
+            if argv and argv[0] == "ps":
+                return _FakeCompleted(stdout="bash\nsh\n")  # children are ALL shells
+            return _FakeCompleted()
+
+    runner = _ShellChildrenRunner()
+    clk = _StubClock()
+    with pytest.raises(v3_seat_bridge.SpawnRefused) as exc:
+        v3_seat_bridge.seed_brief(
+            rec, runner=runner, clock=clk.now, sleep=clk.sleep,
+            readiness_timeout_s=2.0, poll_interval_s=0.5, now=_FIXED_NOW,
+        )
+    assert "readiness" in str(exc.value).lower()
+    assert any(c and c[0] == "ps" for c in runner.calls)  # the child tree was probed
+    assert not any("send-keys" in c for c in runner.calls)  # never seeded
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    # pane CONSERVED for autopsy (the terminal stamp is not cleared) — no spawn side effect
+    assert drec["terminal"]["pane_id"] == rec.pane_id
+
+
+def test_pane_has_nonshell_child_rides_runner_seam_no_live_subprocess(tmp_path):
+    """The child probe issues ``ps -o comm= --ppid <pane_pid>`` through the injectable
+    runner ONLY — CI exercises a fake, never a live subprocess; an empty pid short-circuits."""
+    calls: list[list[str]] = []
+
+    def runner(argv, **kw):
+        calls.append(list(argv))
+        if "display-message" in argv and "#{pane_pid}" in argv:
+            return _FakeCompleted(stdout="7777")
+        if list(argv)[:1] == ["ps"]:
+            return _FakeCompleted(stdout="node\n")
+        return _FakeCompleted()
+
+    assert v3_seat_bridge._pane_has_nonshell_child("%9", runner) is True
+    assert ["ps", "-o", "comm=", "--ppid", "7777"] in calls
+
+    # an empty pane pid never reaches ps (fail-closed, no spurious probe)
+    calls.clear()
+    assert v3_seat_bridge._pane_has_nonshell_child(
+        "%9", lambda argv, **kw: _FakeCompleted(stdout="")
+    ) is False
+
+
+# ---------------------------------------------------------------------------
 # D6 (F9) — harness_session_id minted at materialize, stamped onto the spawn argv
 # ---------------------------------------------------------------------------
 
