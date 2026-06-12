@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
+from creator_engine_validator import claude_launch_spec as v3_launch_spec
 from creator_engine_validator import coordination, v3_seat_bridge
 
 
@@ -26,6 +27,17 @@ from creator_engine_validator import coordination, v3_seat_bridge
 _FIXED_NOW = datetime(2026, 6, 11, 9, 30, 0, tzinfo=timezone.utc)
 
 _FIXED_SESSION_ID = "00000000-0000-4000-8000-000000000000"
+
+
+@pytest.fixture(autouse=True)
+def _drive_posture_cwd(tmp_path, monkeypatch):
+    """Default cwd = ``tmp_path`` (an ancestor of the dispatch dir) — the drive posture.
+
+    ``cev3 drive --spawn`` runs from the state-root's repo, an ancestor of the dispatch
+    dir, so ``spawn_seat`` composes a CE-owned RELATIVE ``--mcp-config`` (CC-D-7, D3-fix).
+    Tests that probe the escape refusal chdir elsewhere in their body (last write wins).
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -275,7 +287,47 @@ def test_spawn_seat_invokes_ce_launch_json_with_policy(tmp_path):
     assert "--session" in argv and rec.session in argv
     assert "--runtime-policy" in argv
     assert rec.runtime_policy_ref in argv
-    assert "--mcp-config" in argv and rec.mcp_config_ref in argv
+    assert "--mcp-config" in argv
+
+
+def test_spawn_argv_mcp_config_is_relative_record_stays_absolute(tmp_path):
+    """D3-fix (CC-D-7): in the drive posture (cwd is an ancestor of the dispatch dir),
+    the spawn argv's ``--mcp-config`` value is a CE-owned RELATIVE path, while the
+    dispatch RECORD keeps the ABSOLUTE ``mcp_config_ref`` (D3 conserved)."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    runner = _RecordingRunner()
+    v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce")
+    argv = runner.calls[0]
+    mcp_arg = argv[argv.index("--mcp-config") + 1]
+    # argv value is relative + does not escape — CC-D-7 (_is_ce_owned_mcp_path) accepts it
+    assert not Path(mcp_arg).is_absolute()
+    assert not mcp_arg.startswith("..")
+    assert v3_launch_spec._is_ce_owned_mcp_path(mcp_arg)
+    # the RECORD keeps the absolute ref (D3 conserved — the record is for readers)
+    assert Path(rec.mcp_config_ref).is_absolute()
+    assert rec.mcp_config_ref not in argv
+    # and they point at the same file
+    assert (Path.cwd() / mcp_arg).resolve() == Path(rec.mcp_config_ref).resolve()
+
+
+def test_spawn_seat_refuses_when_mcp_relpath_escapes_cwd(tmp_path, monkeypatch):
+    """D3-fix: if the launch cwd is NOT an ancestor of the dispatch dir, the relative
+    ``--mcp-config`` would escape with ``..`` (CC-D-7 would refuse) → fail-closed
+    SpawnRefused with NO spawn side effect (no ``ce launch`` invoked)."""
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path / "state", now=_FIXED_NOW)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # overrides the drive-posture fixture
+    runner = _RecordingRunner()
+    with pytest.raises(v3_seat_bridge.SpawnRefused) as exc:
+        v3_seat_bridge.spawn_seat(rec, runner=runner, ce_exe="/fake/ce", now=_FIXED_NOW)
+    assert "CC-D-7" in str(exc.value)
+    # fail-closed: no `ce launch` ran (refused before the spawn side effect)
+    assert runner.calls == []
+    # the refusal is stamped value-free; the record is NOT shaped like a live run
+    data = yaml.safe_load((rec.dispatch_dir / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert data["terminal"] is None and data["spawned_at"] is None
+    assert data["spawn_failed_at"] is not None
 
 
 def test_unattended_spawn_appends_skip_permissions(tmp_path):

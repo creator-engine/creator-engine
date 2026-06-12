@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -405,6 +406,22 @@ def spawn_seat(
     """
     _preflight_spawn_binaries(record, now=now)
     exe = _resolve_ce_exe(ce_exe)
+    # D3 (CC-D-7): the dispatch RECORD keeps ``mcp_config_ref`` ABSOLUTE (D3 conserved —
+    # a reader ref that survives the worktree boundary), but Ring-0 CC-D-7
+    # (``claude_launch_spec._is_ce_owned_mcp_path``) REQUIRES the launched ``--mcp-config``
+    # ARGUMENT to be a CE-owned RELATIVE path (no leading ``/``, no ``..`` component) —
+    # #207's absolute argv made every author seat refuse at ``ce launch``. Compose the argv
+    # value RELATIVE to this launch process cwd (the cwd the spawned seat inherits) and fail
+    # closed if it escapes (a ``..`` prefix is exactly what CC-D-7 also rejects), since a seat
+    # that would refuse at ``ce launch`` must never be left half-spawned.
+    mcp_config_arg = os.path.relpath(record.mcp_config_ref, Path.cwd())
+    if mcp_config_arg.startswith(".."):
+        reason = (
+            "mcp_config_ref does not compose a CE-owned relative --mcp-config from the "
+            "launch cwd (relpath escapes with '..'); CC-D-7 would refuse the seat"
+        )
+        mark_spawn_failed(record, reason, now=now)
+        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
     argv = [
         exe,
         "launch",
@@ -414,7 +431,7 @@ def spawn_seat(
         record.window,
         "--json",
         "--mcp-config",
-        record.mcp_config_ref,
+        mcp_config_arg,
         "--runtime-policy",
         record.runtime_policy_ref,
     ]
