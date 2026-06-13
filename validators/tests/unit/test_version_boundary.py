@@ -82,7 +82,8 @@ def test_taxonomy_counts_and_disjoint():
     # and the forge-leg composition root (``v3_forge_join``): 34 -> 35. v3.1-B.8
     # added the Operator-notify feed (``runner.notify_feed``): 35 -> 36.
     # v3.5-E.2 added the signed-spec onboard apply executor: 36 -> 37.
-    assert len(ver.V3_RUNTIME) == 37
+    # v3.5-E.4 added the greenfield first-project read model: 37 -> 38.
+    assert len(ver.V3_RUNTIME) == 38
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -120,6 +121,7 @@ def test_classify_lines():
     assert ver.classify("lane_runtime") == ver.V1
     assert ver.classify("orchestrator") == ver.V3
     assert ver.classify("onboard_apply") == ver.V3
+    assert ver.classify("v3_greenfield") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call

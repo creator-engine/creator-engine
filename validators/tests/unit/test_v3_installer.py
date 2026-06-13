@@ -631,8 +631,10 @@ def test_conditional_inputs_join_when_condition_holds():
     })
     missing = {m.key for m in inst.missing_answers(ANSWERS_SCHEMA, merged)}
     assert {"github.app.app_id", "github.app.client_id", "github.app.pem"} <= missing
+    assert "project.name" not in missing
     # new_repo fields with defaults resolve; only true gaps ask
     assert "github.new_repo.visibility" not in missing
+    assert "project.scaffold.kind" not in missing
 
 
 def test_complete_answers_resolve_everything():
@@ -704,6 +706,71 @@ def test_inventory_derives_from_schema_annotations_only():
     assert {1, 2, 3, 4, 5} <= steps
 
 
+def test_greenfield_rows_derived_from_schema():
+    items = inst.schema_inventory(ANSWERS_SCHEMA)
+    greenfield = {item.key: item for item in items if item.key.startswith("project.")}
+    assert set(greenfield) == {"project.name", "project.scaffold.kind"}
+    assert all(item.step == 5 for item in greenfield.values())
+    assert greenfield["project.name"].when == ("github.mode", "new")
+    assert greenfield["project.name"].optional is True
+    assert greenfield["project.scaffold.kind"].default == "minimal"
+    assert greenfield["project.scaffold.kind"].modes == ("F", "I")
+
+
+def test_greenfield_first_project_plan_extends_not_forks():
+    answers = _answers(**{
+        "github.mode": "new",
+        "github.new_repo": {"visibility": "private", "default_branch": "main"},
+        "project.name": "fresh-app",
+    })
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers=answers)
+    missing = inst.missing_answers(ANSWERS_SCHEMA, merged)
+    plan = inst.build_greenfield_first_project_plan(ANSWERS_SCHEMA, merged, missing)
+    assert plan["mode"] == "greenfield"
+    assert plan["project_root"] == "~/ce-workspaces/fresh-app"
+    assert plan["e2_plan_ref"] == "onboard.github_leg"
+    assert plan["e2_apply_required"] is True
+    assert plan["first_ship_not_yet_counted"] is True
+    assert "e2_convergence" not in plan
+    assert plan["counters"]["inventory_inputs"] == len(inst.schema_inventory(ANSWERS_SCHEMA))
+    assert plan["counters"]["missing_answers"] == len(missing)
+
+
+def test_greenfield_plan_folds_e2_result_read_through():
+    answers = _answers(**{
+        "github.mode": "new",
+        "github.new_repo": {"visibility": "private", "default_branch": "main"},
+        "project.name": "fresh-app",
+    })
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers=answers)
+    result = {
+        "legs_total": 12,
+        "verified_count": 12,
+        "applied": 4,
+        "already_satisfied": 8,
+        "failed": 0,
+        "refused": 0,
+        "greenfield_repos_created": 1,
+        "legs": [
+            {"id": "workspace_checkout", "status": "applied", "verification": {"ok": True}},
+            {"id": "github_repo_create", "status": "applied", "verification": {"ok": True}},
+            {"id": "github_app_install", "status": "already_satisfied", "verification": {"ok": True}},
+            {"id": "github_workflow_install", "status": "applied", "verification": {"ok": True}},
+            {"id": "github_branch_protection", "status": "applied", "verification": {"ok": True}},
+        ],
+    }
+    plan = inst.build_greenfield_first_project_plan(
+        ANSWERS_SCHEMA,
+        merged,
+        (),
+        e2_apply_result=result,
+        e2_apply_result_ref=".ce/state/onboard/ledger.ndjson",
+    )
+    assert plan["e2_apply_required"] is False
+    assert plan["e2_convergence"]["counts"]["verified_count"] == 12
+    assert plan["e2_convergence"]["legs"]["github_branch_protection"]["verified"] is True
+
+
 # ===========================================================================
 # ce-ops#53 E3 — brownfield adoption inventory + planning
 # ===========================================================================
@@ -754,7 +821,7 @@ def _brownfield_probe(**overrides):
 def test_brownfield_rows_derived_from_schema():
     items = inst.schema_inventory(ANSWERS_SCHEMA)
     brownfield = {item.key: item for item in items if item.key.startswith("brownfield.")}
-    assert len(items) == 38
+    assert len(items) == 40
     assert set(brownfield) == {
         "brownfield.enabled",
         "brownfield.project_root",

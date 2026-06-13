@@ -2333,6 +2333,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         rows = v3_installer.inventory_emission(
             schema, detected=detected, answers=answers or None
         )
+        inventory_merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
+        inventory_missing = v3_installer.missing_answers(schema, inventory_merged)
+        first_project = v3_installer.build_greenfield_first_project_plan(
+            schema, inventory_merged, inventory_missing
+        )
         brownfield = v3_installer.brownfield_inventory_summary(
             schema, answers=answers or None, probe=brownfield_probe
         )
@@ -2357,12 +2362,19 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"{len(brownfield['tests'])} test command(s), history {brownfield['history']['mode']}, "
             f"scrub {brownfield['secrets_preflight']['status']}"
         )
+        if first_project is not None:
+            lines.append(
+                f"{_BRAND} · first project — greenfield · scaffold "
+                f"{first_project['scaffold_input']['kind']} · "
+                f"E2 apply required {str(first_project['e2_apply_required']).lower()}"
+            )
         return _emit(args, 0, lines, {
             "action": "onboard_inventory",
             "verified": {"ok": True, "key_id": verified.key_id},
             "self_attested": self_attested,
             "inventory": [dict(row) for row in rows],
             "brownfield": brownfield,
+            "first_project": first_project,
         })
     # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
@@ -2425,6 +2437,9 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         answers or {"answers_version": 1},
         schema=schema,
         probe=brownfield_probe,
+    )
+    first_project_plan = v3_installer.build_greenfield_first_project_plan(
+        schema, merged, missing
     )
     if apply_mode:
         if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
@@ -2490,6 +2505,15 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 [f"{_BRAND} · onboard apply FAILED ({exc.code}): {exc.detail}"],
                 {"error": "failed", "code": exc.code, "detail": exc.detail},
             )
+        first_project_after_apply = v3_installer.build_greenfield_first_project_plan(
+            schema,
+            merged,
+            (),
+            e2_apply_result=summary,
+            e2_apply_result_ref=str(Path(args.root) / "onboard" / "ledger.ndjson"),
+        )
+        if first_project_after_apply is not None:
+            summary["first_project"] = first_project_after_apply
         outcome_code = 0 if summary["refused"] == 0 and summary["failed"] == 0 else 1
         lines = [
             f"{_BRAND} · onboard apply ({summary['mode']}) — "
@@ -2563,7 +2587,13 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         lines.append(
             f"    github leg · repo {github_leg['repo']['action']} · App {click} · "
             f"protection drift {len(github_leg['branch_protection']['drift'])} · "
-            f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to the E.4 drive)'}"
+            f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to onboard apply)'}"
+        )
+    if first_project_plan is not None:
+        lines.append(
+            f"    first project · greenfield · scaffold {first_project_plan['scaffold_input']['kind']} "
+            f"→ E2 {first_project_plan['scaffold_input']['supplied_to_e2_leg']} · "
+            f"first ship counted {str(not first_project_plan['first_ship_not_yet_counted']).lower()}"
         )
     if args.show_plan:
         counters = brownfield_plan["counters"]
@@ -2599,6 +2629,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                            "uncovered": list(grant_diff.uncovered)},
         } if args.answers else None),
         "github_leg": github_leg,
+        "first_project": first_project_plan,
         "brownfield_adoption": brownfield_plan if args.show_plan else None,
         "non_interactive": bool(args.non_interactive),
     }

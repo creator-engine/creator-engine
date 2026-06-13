@@ -1093,6 +1093,34 @@ github:
   reviewer: chmod735
 """
 
+_GREENFIELD_ANSWERS_YAML = """\
+answers_version: 1
+profile: solo-pilot
+host:
+  sudo_grant: [git, python, runsc, proxy]
+cost:
+  profile: default
+provider:
+  harness: claude-code
+  anthropic_api_key: env://ANTHROPIC_API_KEY
+github:
+  mode: new
+  repo: chmod735/greenfield-first
+  new_repo:
+    visibility: private
+    default_branch: main
+  bootstrap_token: prompt://github-bootstrap-token
+  app:
+    kind: shared
+    installation_id: 12345678
+  protections: reference
+  reviewer: chmod735
+project:
+  name: greenfield-first
+  scaffold:
+    kind: minimal
+"""
+
 
 def _spec(tmp_path):
     spec = tmp_path / "llms-install.md"
@@ -1215,6 +1243,19 @@ def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
     assert rows["cost.profile"]["status"] == "default:default"
 
 
+def test_onboard_inventory_derives_greenfield_inputs(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    rows = {row["key"]: row for row in payload["inventory"]}
+    assert rows["project.name"]["step"] == 5
+    assert rows["project.name"]["sensitivity"] == "plain"
+    assert rows["project.name"]["modes"] == ["F", "I"]
+    assert rows["project.name"]["status"] == "not-applicable"
+    assert rows["project.scaffold.kind"]["status"] == "not-applicable"
+
+
 def test_onboard_answers_file_resolves_the_asks(tmp_path, capsys, monkeypatch):
     # pin the live probe (host-independent): claude present, codex absent
     monkeypatch.setattr(
@@ -1317,6 +1358,28 @@ def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
     assert leg["human_approves"] == []
     # unprobed live facts stay fail-closed in the dry run (the E.4 drive probes them)
     assert leg["bootstrap_token_scopes"]["probed"] is False
+    assert payload["first_project"] is None
+
+
+def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(answers),
+        "--plan",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    first = payload["first_project"]
+    assert first["mode"] == "greenfield"
+    assert first["project_root"].endswith("/greenfield-first")
+    assert first["scaffold_input"]["supplied_to_e2_leg"] == "workspace_checkout"
+    assert first["e2_apply_required"] is True
+    assert first["frame_to_ship"]["first_scope_filed"] is False
+    assert first["first_ship_not_yet_counted"] is True
 
 
 def test_onboard_apply_rejects_read_only_modes(tmp_path, capsys):
@@ -1480,10 +1543,7 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
     root = tmp_path / "state"
-    greenfield_answers = _answers_file(
-        tmp_path,
-        _GOOD_ANSWERS_YAML.replace("mode: existing", "mode: new"),
-    )
+    greenfield_answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
     code = v3_cli.main([
         "onboard", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(greenfield_answers),
@@ -1492,11 +1552,13 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "onboard_apply"
+    assert payload["first_project"]["e2_apply_required"] is False
+    assert payload["first_project"]["e2_convergence"]["counts"]["verified_count"] == 12
     request = captured["request"]
     assert isinstance(request, onboard_apply.ApplyRequest)
     assert request.state_root == root
     assert request.explicit_signature is None
-    assert request.answers["github"]["repo"] == "chmod735/creator-engine-canonical"
+    assert request.answers["github"]["repo"] == "chmod735/greenfield-first"
     assert captured["verifier"] is not None
 
 

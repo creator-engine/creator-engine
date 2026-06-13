@@ -11,8 +11,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQmd1b0lnakRDRWxxVjI2aXJOdUVtcXAyZEUxN3FzUmdrRmFCU2JlemZpL1NzM3BJNnk0dHg3VW4KenQzRzZ5QUg4clYvckhheVZBRks2SzB4V3hxQzRMCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: a93c9c8977d3cb3c2d70727dbc1bfd50485e9f029590e0fe375d6ed0851470d6
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRFZ1MGJWTTZUK0ViVzBaUzA1cFhtalF4WUxsL0VPR1lNYnB2U3BuVzhTV2JlNGJRQWF3b1E2RFgKRkJQVjBUQzJsbjg3UXFQNXFrcStrZ2Qwd3NaaDBOCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 74a883fdc159d089112611272b2c418e2bd04fbc36c5b63629b6c4ac3863a9ce
 
 # `value` is the base64 of the detached SSHSIG (`.sig`) over the CANONICAL bytes;
 # `content_sha256` is the retained in-tree floor (sha256 of the SAME canonical
@@ -113,8 +113,10 @@ Work the loop:
    — the terraform-plan analog: validates the file (fail-closed on unknown
    keys), merges `interactive > answers > detected > default`, and prints the
    full plan including the EXACT remaining asks and the decomposed GitHub
-   leg. A file value contradicting a detected fact is a surfaced conflict —
-   resolve it with the operator, never silently.
+   leg. For `github.mode: new`, it also prints `first_project`: the project
+   root, minimal scaffold input supplied to E2's `workspace_checkout` leg, E2
+   apply dependency, and Frame→Ship flags. A file value contradicting a detected
+   fact is a surfaced conflict — resolve it with the operator, never silently.
 4. **Apply** (the steps below). Add `--non-interactive` for unattended runs:
    it refuses with the exact missing list instead of ever asking. The answers
    file configures this VERIFIED procedure — nothing in it bypasses step 0.
@@ -201,6 +203,15 @@ Values this leg needs (the `github.*` keys):
 - **`github.reviewer`** — the no-self-approval floor (solo: the human IS the
   reviewer; detected as the token's authenticated login).
 
+Greenfield first-project values:
+
+- **`project.name`** — optional local directory name under
+  `host.workspace_root`; absent means CE derives the repo basename.
+- **`project.scaffold.kind`** — `minimal` only. This supplies E2's
+  `workspace_checkout` input contract: neutral README, `.gitignore` for
+  CE/local transient state, configured default branch, and a bootstrap commit.
+  It does not create product code or count as the first ship.
+
 With the values resolved, configure the repo to CE's governed floor and show
 the operator the plan before applying it:
 
@@ -218,3 +229,10 @@ the operator the plan before applying it:
 configured to this floor; **detect and confirm** the settings above rather
 than re-applying them (the diff comes back empty — that is the converged,
 re-run-safe state).
+
+For a brand-new repo, the first governed ship starts only after onboarding:
+Frame chat becomes a confirmed Scope, the operator supplies Budget and runs
+`ce ratify`, Build runs through `ce drive --spawn`, the PR opens through the
+forge leg, review is recorded in a distinct venue or ratified waiver, and
+`ce merge --apply` performs the gated merge. The deterministic E2 smoke Scope
+and bootstrap README commit are onboarding evidence, not the first ship.

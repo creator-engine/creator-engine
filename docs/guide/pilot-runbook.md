@@ -97,6 +97,14 @@ The GitHub leg is fully decomposed and **re-run convergent**:
   enforce-admins · reviews ≥ 1 · squash-only): read current → diff → apply
   ONLY the drift, shown to you first. Same answers, second run → empty plan.
 
+For a brand-new project, set `github.mode: new`, `github.repo`,
+`project.name` (optional; defaults to the repo basename), and
+`project.scaffold.kind: minimal` in the answers file. `ce onboard --plan` then
+shows `first_project`: the project root under `host.workspace_root`, the minimal
+scaffold input supplied to E2's `workspace_checkout` leg, and the Frame→Ship
+flags that remain false until your first real Scope ships. The bootstrap README
+and initial branch are onboarding evidence only; they do not count as first ship.
+
 For an existing repo, `ce onboard --inventory` and `--plan` also report
 `brownfield` / `brownfield_adoption`: workflows and checks to preserve, detected
 test commands, Git history posture, branch/commit conventions, scrub preflight,
@@ -154,10 +162,18 @@ For the plain-language tour, run `ce guide`.
 
 ## 5. Greenfield-OSS quickstart
 
-For a fresh open-source repo: create the repo, run the installer pointed at it,
-authorize the App, then `ce session` → file your first Scope (e.g. "set up CI") →
-ratify → drive → review → merge. From there, every change is a governed,
-cost-safe, evidence-backed Scope.
+For a fresh open-source repo: prepare answers with `github.mode: new`, run
+`ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan`,
+then apply after the plan is clean:
+
+```
+ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
+```
+
+Authorize the App when prompted, then open `ce session`. Chat in Frame, confirm a
+real first Scope, set the Budget, ratify it, drive the Build, review the PR in a
+distinct venue, and merge through `ce merge --apply`. From there, every change is
+a governed, cost-safe, evidence-backed Scope.
 
 ## Deferred (the first live pilot exercises these)
 

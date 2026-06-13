@@ -118,6 +118,44 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
 document plus one probe dict; `converged: true` is the terraform
 empty-plan analog.
 
+## Greenfield first project (E4)
+
+New projects use the same onboard surface and the same answers inventory. When
+`github.mode: new`, the schema emits greenfield `project.*` rows:
+`project.name` (optional local directory name; absent means derive the repo
+basename) and `project.scaffold.kind` (default `minimal`). These rows are
+schema-derived and show up in `ce onboard --inventory`; there is no parallel
+greenfield prompt list.
+
+`ce onboard --plan` adds `first_project`, a pure E4 read model:
+
+- `mode: greenfield`
+- `project_root: <host.workspace_root>/<project name>`
+- `scaffold_input.kind: minimal`
+- `scaffold_input.supplied_to_e2_leg: workspace_checkout`
+- `e2_plan_ref: onboard.github_leg`
+- `e2_apply_required: true` until an E2 apply result is folded
+- E4-owned Frame->Ship flags for first Scope, ratification, Build, PR, Review,
+  and merge
+- `first_ship_not_yet_counted: true` until a governed post-scaffold PR merges
+
+This block does not restate E2's scaffold/repo/App/protection/Actions plan and
+does not recompute E2 convergence counters. After `ce onboard --apply`, the CLI
+folds the returned E2 summary into `first_project.e2_convergence` as a
+read-through of E2 counts and leg verification facts.
+
+The minimal scaffold is an input contract supplied to E2's
+`workspace_checkout` leg: project root, `.gitignore` for CE/local transient
+state, neutral `README.md`, configured default branch, and a bootstrap commit
+only to create the branch and install checks. That bootstrap is onboarding
+evidence, not first ship.
+
+The first ship is the first post-scaffold governed PR from a real human-shaped
+Scope: Frame chat -> Scope confirmation -> `ce ratify` -> `ce drive --spawn` ->
+forge PR -> distinct review venue or ratified waiver -> gated merge ->
+completion report. E2's deterministic `first_project_smoke` Scope remains
+separate and never satisfies E4's `first_scope_filed` counter.
+
 ## Brownfield adoption (E3)
 
 Existing projects use the same onboard surface and the same answers inventory.

@@ -57,7 +57,9 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
+
+from . import v3_greenfield
 
 #: The user-facing command the pilot install exposes (Operator-ratified directive).
 CE_CMD = "ce"
@@ -1007,6 +1009,40 @@ BROWNFIELD_APPLY_STEP_IDS = (
     "brownfield_verify_preserved_checks",
     "brownfield_record_apply_evidence",
 )
+
+
+def _resolved_values(merged: MergeResult) -> dict[str, Any]:
+    return {key: entry.value for key, entry in merged.resolved.items()}
+
+
+def build_greenfield_first_project_plan(
+    schema: dict[str, Any],
+    merged: MergeResult,
+    missing: Iterable[MissingAnswer],
+    *,
+    e2_apply_result: Mapping[str, Any] | None = None,
+    e2_apply_result_ref: str | None = None,
+) -> dict[str, Any] | None:
+    """Compose the E4 greenfield first-project read model.
+
+    This is an onboard projection only. It does not restate E2's GitHub/scaffold
+    plan, compute E2 convergence counters, or mutate anything.
+    """
+    missing_items = tuple(missing)
+    payload = v3_greenfield.build_first_project_plan(
+        _resolved_values(merged),
+        missing_keys=(item.key for item in missing_items),
+        e2_plan_ref="onboard.github_leg",
+        e2_apply_result=e2_apply_result,
+        e2_apply_result_ref=e2_apply_result_ref,
+    )
+    if payload is None:
+        return None
+    payload["counters"] = {
+        "inventory_inputs": len(schema_inventory(schema)),
+        "missing_answers": len(missing_items),
+    }
+    return payload
 
 
 def app_bot_identity(slug: str = SHARED_APP_SLUG) -> str:
