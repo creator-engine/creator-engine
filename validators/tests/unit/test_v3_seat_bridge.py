@@ -1184,3 +1184,36 @@ def test_venue_without_seat_env_file_omits_flag(tmp_path):
     _rec, runner = _spawn_venue(tmp_path, seat_env_file=None)
     launch = runner.argv_for("launch")
     assert "--seat-env-file" not in launch
+
+
+# ===========================================================================
+# ce-ops#43 — the conserved-evidence marker on the dispatch record (§3.2). The
+# reaper treats `conserve: true` as an absolute teardown stop; the additive
+# OPTIONAL fields must validate against the (closed) dispatch schema, and a
+# record WITHOUT them must still validate (old records unaffected).
+# ===========================================================================
+
+
+def test_conserve_marker_fields_validate_against_dispatch_schema(tmp_path):
+    import jsonschema
+
+    schema = _dispatch_schema()
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    # additive-optional: a record without the marker still validates (unchanged)
+    jsonschema.validate(rec.data, schema)
+    # with the conserved-evidence marker it also validates
+    rec.data["conserve"] = True
+    rec.data["conserve_reason"] = "refused dispatch — conserved as evidence"
+    rec.data["conserved_at"] = "2026-06-13T12:00:00Z"
+    jsonschema.validate(rec.data, schema)
+
+
+def test_conserve_marker_unknown_field_still_rejected(tmp_path):
+    import jsonschema
+
+    schema = _dispatch_schema()
+    rec = v3_seat_bridge.materialize_dispatch(_plan(), tmp_path, now=_FIXED_NOW)
+    rec.data["conserve"] = True
+    rec.data["conserve_typo_field"] = "x"  # the schema stays closed (unevaluatedProperties:false)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(rec.data, schema)

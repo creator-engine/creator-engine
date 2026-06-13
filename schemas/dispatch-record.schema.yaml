@@ -255,6 +255,28 @@ properties:
       launcher's supervisor (not the seat's model) writes the file, so a silently
       dying seat still records its `exited` event. OPTIONAL: pre-#26 records carry
       no ref, and a reader unions its absence harmlessly.
+  conserve:
+    type: boolean
+    description: |
+      ce-ops#43: the conserved-evidence marker. When `true`, the dispatch (and the
+      venue/worktree/transcript bound to it) is EVIDENCE and the seat/venue reaper
+      treats it as an ABSOLUTE stop — no teardown, no `pco-release`, no worktree
+      removal, no pane kill, and no archive mutation unless an explicit later
+      operator action requests it. Absence/`false` means the dispatch is not
+      conserved (the reaper may archive-then-retire per its classification).
+  conserve_reason:
+    type: string
+    minLength: 1
+    description: |
+      ce-ops#43: the value-free operator/policy reason a dispatch is conserved
+      (the same short text surfaced to the operator) — NEVER a credential, host,
+      account, or installation id. Present only alongside `conserve: true`.
+  conserved_at:
+    type: string
+    minLength: 1
+    description: |
+      ce-ops#43: RFC3339 UTC stamp the conserve marker was applied. Present only
+      alongside `conserve: true`. The reaper never mutates it.
 $defs:
   change:
     type: object

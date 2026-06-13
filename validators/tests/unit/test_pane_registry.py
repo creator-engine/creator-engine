@@ -292,3 +292,90 @@ def test_container_binding_claim_context_mismatch_fails_pco_052(tmp_path: Path):
 
     assert not result.ok
     assert any(error.code == CODE_CONTAINER_BINDING for error in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#43 — the reaper tmux executor's pane-registry close step (§6.3).
+# When a venue is torn down the executor marks the pane record closed/aborted
+# with close_reason + closed_at, preserving terminal identity + worktree path,
+# and the result must still validate against the pane-registry schema.
+# ---------------------------------------------------------------------------
+
+import json as _json
+from types import SimpleNamespace as _NS
+
+from creator_engine_validator import reaper_executors as _reaper_executors
+from creator_engine_validator import seat_reaper as _seat_reaper
+
+
+def _active_pane_record(controller_id="ctrl-x", lane_id="reap-lane", worktree="/tmp/wt"):
+    return {
+        "kind": "pane-registry-record", "record_type": "pane_identity", "schema_version": "1",
+        "controller_id": controller_id, "lane_id": lane_id,
+        "claim_ref": f"claims/{controller_id}/{lane_id}.yaml", "host_id": "ce-dev-1",
+        "pane_id": "venue-pane", "role": "reviewer", "status": "active",
+        "record_timestamp": "2026-06-13T11:55:00Z", "registered_at": "2026-06-13T11:55:00Z",
+        "last_seen_at": "2026-06-13T11:55:00Z", "visibility": "operator_visible",
+        "terminal": {"kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3"},
+        "worktree_path": worktree,
+    }
+
+
+def _pane_absent_runner(calls):
+    """A fake tmux runner: pane already absent (list-panes empty) so kill is a no-op."""
+    def runner(argv, **kw):
+        argv = list(argv)
+        calls.append(argv)
+        if "list-panes" in argv:
+            return _NS(returncode=0, stdout="", stderr="")  # no panes ⇒ absent
+        return _NS(returncode=0, stdout="", stderr="")
+    return runner
+
+
+def _close_plan(tmp_path, *, release_reason, pane_registry_path):
+    return _seat_reaper.RetirementPlan(
+        seat_id="run-x", run_id="run-x", classification=_seat_reaper.CLASS_ELIGIBLE,
+        release_reason=release_reason, state_root=tmp_path, dispatch={}, dispatch_path=tmp_path,
+        events_path=tmp_path, archive_root=tmp_path, batch_slug="run-x", role="reviewer",
+        terminal={"kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3"},
+        harness_session_id=None, transcript_ref=None, archive_expected=False, lane_id="reap-lane",
+        controller_id="ctrl-x", ledger_root=tmp_path, worktree_path=tmp_path / "wt",
+        pane_registry_path=pane_registry_path,
+    )
+
+
+def test_reaper_close_venue_marks_pane_closed_completed_schema_valid(tmp_path):
+    pane_path = tmp_path / "pane.yaml"
+    pane_path.write_text(yaml.safe_dump(_active_pane_record(worktree=str(tmp_path / "wt"))), encoding="utf-8")
+    calls = []
+    executor = _reaper_executors.TmuxExecutor(runner=_pane_absent_runner(calls))
+    result = executor.close_venue(_close_plan(tmp_path, release_reason="completed", pane_registry_path=pane_path))
+    assert result.status in (_seat_reaper.STEP_SUCCEEDED, _seat_reaper.STEP_ALREADY_SATISFIED)
+    rec = yaml.safe_load(pane_path.read_text())
+    assert rec["status"] == "closed" and rec["close_reason"] == "completed" and rec["closed_at"]
+    # terminal identity + worktree preserved
+    assert rec["terminal"]["pane_id"] == "%3" and rec["worktree_path"] == str(tmp_path / "wt")
+    # the transitioned record still validates against the pane-registry schema
+    assert validate_pane_registry_record(rec, pane_path) == []
+
+
+def test_reaper_close_venue_marks_pane_aborted_for_archive_then_retire(tmp_path):
+    pane_path = tmp_path / "pane.yaml"
+    pane_path.write_text(yaml.safe_dump(_active_pane_record()), encoding="utf-8")
+    executor = _reaper_executors.TmuxExecutor(runner=_pane_absent_runner([]))
+    result = executor.close_venue(_close_plan(tmp_path, release_reason="aborted", pane_registry_path=pane_path))
+    assert result.status in (_seat_reaper.STEP_SUCCEEDED, _seat_reaper.STEP_ALREADY_SATISFIED)
+    rec = yaml.safe_load(pane_path.read_text())
+    assert rec["status"] == "aborted" and rec["close_reason"] == "aborted"
+    assert validate_pane_registry_record(rec, pane_path) == []
+
+
+def test_reaper_close_venue_pane_registry_write_failure_is_flagged(tmp_path):
+    # a malformed (non-mapping) pane record → registry update fails → FAILED + flag,
+    # so the policy stops before worktree release (§6.3).
+    pane_path = tmp_path / "pane.yaml"
+    pane_path.write_text("- not a mapping\n", encoding="utf-8")
+    executor = _reaper_executors.TmuxExecutor(runner=_pane_absent_runner([]))
+    result = executor.close_venue(_close_plan(tmp_path, release_reason="completed", pane_registry_path=pane_path))
+    assert result.status == _seat_reaper.STEP_FAILED
+    assert result.data.get("pane_registry_failed") is True

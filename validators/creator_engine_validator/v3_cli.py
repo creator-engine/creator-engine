@@ -68,6 +68,7 @@ from . import (
     evidence_sink,
     onboard_apply,
     runtime_evidence_spine,
+    seat_reaper,
     v3_forge_join,
     v3_installer,
     v3_report,
@@ -1412,6 +1413,168 @@ def _cmd_notify(args: argparse.Namespace) -> int:
         return _cmd_notify_watch(args)
     if args.notify_command == "status":
         return _cmd_notify_status(args)
+    return 2
+
+
+# ---------------------------------------------------------------------------
+# reap — the ce-ops#43 seat/venue retirement reaper (once | watch | status)
+#
+# Mirrors the notify I/O-edge daemon house style: a pure fold over local state
+# first, a narrow I/O edge for irreversible work, a durable private ledger for
+# attempted actions; `once` = one fold + one bounded action pass, `watch` repeats
+# `once` at an interval, `status` is a no-mutation read model.
+# ---------------------------------------------------------------------------
+def _reaper_executor_for(args: argparse.Namespace):
+    """Build the substrate→executor factory the reaper delegates to (live wiring).
+
+    The tmux executor crosses to ``ce lane archive --json`` and
+    ``creator-engine-validator pco-release`` as subprocess+DATA; the transcript is
+    resolved by exact ``harness_session_id`` under the harness projects dir.
+    """
+    from . import reaper_executors
+
+    search_root = _claude_config_dir(args) / "projects"
+    ce_exe = getattr(args, "ce_exe", None) or "ce"
+    validator_exe = getattr(args, "validator_exe", None) or "creator-engine-validator"
+
+    def factory(terminal_kind: str | None):
+        base = reaper_executors.default_executor_for(terminal_kind)
+        if base is None:
+            return None
+        return reaper_executors.TmuxExecutor(
+            ce_exe=ce_exe,
+            validator_exe=validator_exe,
+            transcript_search_root=search_root,
+        )
+
+    return factory
+
+
+def _reaper_ledger_root(args: argparse.Namespace) -> Path | None:
+    """Resolve the active-work-ledger root from the flag or CE_LEDGER_ROOT (no baked literal)."""
+    explicit = getattr(args, "ledger_root", None)
+    if explicit:
+        return Path(explicit)
+    env = os.environ.get(seat_reaper.LEDGER_ROOT_ENV)
+    return Path(env) if env else None
+
+
+def _reaper_archive_root(args: argparse.Namespace) -> Path | None:
+    """Resolve the transcript-archive root from the flag or CE_TRANSCRIPT_ARCHIVE_ROOT."""
+    explicit = getattr(args, "archive_root", None)
+    if explicit:
+        return Path(explicit)
+    env = os.environ.get(seat_reaper.ARCHIVE_ROOT_ENV)
+    return Path(env) if env else None
+
+
+def _reaper_common_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "ledger_root": _reaper_ledger_root(args),
+        "archive_root": _reaper_archive_root(args),
+        "executor_for": _reaper_executor_for(args),
+        "grace_seconds": int(getattr(args, "grace_seconds", seat_reaper.DEFAULT_GRACE_SECONDS)),
+        "stale_seconds": int(getattr(args, "stale_seconds", seat_reaper.DEFAULT_STALE_SECONDS)),
+    }
+
+
+def _reaper_summary_line(action: str, payload: dict[str, Any]) -> str:
+    if action == "reap_status":
+        return (
+            f"{_BRAND} · reap status — observed {payload['observed_dispatches']} · "
+            f"eligible {payload['eligible']} · conserved {payload['conserved']} · "
+            f"would-escalate {payload['would_escalate']} · retired {payload['already_retired']} · "
+            f"active/unknown {payload['active_or_unknown']}"
+        )
+    return (
+        f"{_BRAND} · {action.replace('_', ' ')} — observed {payload['observed_dispatches']} · "
+        f"reaped {payload['reaped']} · conserved {payload['conserved']} · "
+        f"escalated {payload['escalated']} · skipped {payload['skipped_active_or_unknown']} · "
+        f"retired {payload['already_retired']} · failed {payload['failed']}"
+    )
+
+
+def _cmd_reap_status(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    payload = seat_reaper.reap_status(
+        root,
+        ledger_root=_reaper_ledger_root(args),
+        executor_for=_reaper_executor_for(args),
+        grace_seconds=int(getattr(args, "grace_seconds", seat_reaper.DEFAULT_GRACE_SECONDS)),
+        stale_seconds=int(getattr(args, "stale_seconds", seat_reaper.DEFAULT_STALE_SECONDS)),
+    )
+    return _emit(args, 0, [_reaper_summary_line("reap_status", payload)], payload)
+
+
+def _cmd_reap_once(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    repo_root = Path(getattr(args, "repo_root", None) or Path.cwd())
+    payload = seat_reaper.reap_once(root, repo_root=repo_root, **_reaper_common_kwargs(args))
+    return _emit(args, 0, [_reaper_summary_line("reap_once", payload)], payload)
+
+
+def _cmd_reap_watch(args: argparse.Namespace) -> int:
+    import signal
+    import time
+
+    root = Path(args.root)
+    repo_root = Path(getattr(args, "repo_root", None) or Path.cwd())
+    interval = int(args.interval)
+    if interval < 1:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · reap watch REFUSED: --interval must be >= 1 (got {interval})"],
+            {"error": "reap_invalid_interval", "interval": interval},
+        )
+
+    stop = {"flag": False}
+
+    def _on_signal(signum, _frame):  # pragma: no cover - signal delivery is environmental
+        stop["flag"] = True
+
+    # SIGINT/SIGTERM stop the loop CLEANLY after the current pass (exceeds the
+    # notify precedent, which handles only KeyboardInterrupt).
+    previous: dict[int, Any] = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous[sig] = signal.signal(sig, _on_signal)
+        except (ValueError, OSError):  # pragma: no cover - non-main-thread / unsupported
+            pass
+    print(
+        f"{_BRAND} · reap watch — root {root} · interval {interval}s (Ctrl-C / SIGTERM to stop)",
+        flush=True,
+    )
+    try:
+        while not stop["flag"]:
+            payload = seat_reaper.reap_once(
+                root, repo_root=repo_root, action="reap_watch_tick", **_reaper_common_kwargs(args)
+            )
+            print(_reaper_summary_line("reap_watch_tick", payload), flush=True)
+            if stop["flag"]:
+                break
+            # sleep in short slices so a signal stops promptly after the pass
+            slept = 0
+            while slept < interval and not stop["flag"]:
+                time.sleep(1)
+                slept += 1
+    except KeyboardInterrupt:  # pragma: no cover - interactive stop
+        pass
+    finally:
+        for sig, handler in previous.items():
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, OSError):  # pragma: no cover
+                pass
+    return 0
+
+
+def _cmd_reap(args: argparse.Namespace) -> int:
+    if args.reap_command == "once":
+        return _cmd_reap_once(args)
+    if args.reap_command == "watch":
+        return _cmd_reap_watch(args)
+    if args.reap_command == "status":
+        return _cmd_reap_status(args)
     return 2
 
 
@@ -3034,6 +3197,52 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_root(p_notify_status)
 
+    p_reap = sub.add_parser(
+        "reap",
+        help="seat/venue retirement reaper — archive→pane-kill→pco-release on terminal "
+             "sentinel events; fail-closed on unclean/stale/unknown (once | watch | status)",
+    )
+    reap_sub = p_reap.add_subparsers(dest="reap_command", required=True)
+
+    def _add_reap_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--repo-root", default=None, dest="repo_root",
+                       help="secondary-worktree repo root the reaper runs from (defaults to cwd)")
+        p.add_argument("--ledger-root", default=None, dest="ledger_root",
+                       help="path to the active-work-ledger root (or set CE_LEDGER_ROOT); "
+                            "absent ⇒ the worktree-release step is skipped (not applicable)")
+        p.add_argument("--archive-root", default=None, dest="archive_root",
+                       help="ignored transcript-archive root for `ce lane archive` "
+                            "(or set CE_TRANSCRIPT_ARCHIVE_ROOT)")
+        p.add_argument("--grace-seconds", type=int, default=seat_reaper.DEFAULT_GRACE_SECONDS,
+                       dest="grace_seconds",
+                       help=f"a clean-exited seat whose outcome stays unresolvable past this window "
+                            f"escalates (default: {seat_reaper.DEFAULT_GRACE_SECONDS})")
+        p.add_argument("--stale-seconds", type=int, default=seat_reaper.DEFAULT_STALE_SECONDS,
+                       dest="stale_seconds",
+                       help=f"a launched-no-exited seat with no new event past this window is a stale "
+                            f"dangling launched → escalation (default: {seat_reaper.DEFAULT_STALE_SECONDS})")
+        p.add_argument("--claude-config-dir", default=None, dest="claude_config_dir",
+                       help="harness config dir for stamped-id transcript lookup "
+                            "(default: $CLAUDE_CONFIG_DIR or ~/.claude)")
+        _add_root(p)
+
+    p_reap_once = reap_sub.add_parser(
+        "once", help="one fold + one bounded action pass (the cron-able / testable primitive)",
+    )
+    _add_reap_args(p_reap_once)
+
+    p_reap_watch = reap_sub.add_parser(
+        "watch", help="repeat `once` at an interval; SIGINT/SIGTERM stop cleanly after the current pass",
+    )
+    p_reap_watch.add_argument("--interval", type=int, default=60,
+                              help="poll interval in seconds (default: 60)")
+    _add_reap_args(p_reap_watch)
+
+    p_reap_status = reap_sub.add_parser(
+        "status", help="pure-fold classification + counts — writes nothing (no archive/kill/release)",
+    )
+    _add_reap_args(p_reap_status)
+
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
 
@@ -3183,6 +3392,7 @@ _DISPATCH = {
     "merge": _cmd_merge,
     "escalation": _cmd_escalation,
     "notify": _cmd_notify,
+    "reap": _cmd_reap,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,

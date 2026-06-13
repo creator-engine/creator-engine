@@ -973,3 +973,97 @@ def test_release_is_recoverable_when_worktree_already_removed(tmp_path: Path):
     assert not git_called, (
         "git worktree remove MUST NOT be called when worktree path does not exist on disk"
     )
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#43 — the reaper tmux executor reuses the pco-release leg (§6.4) via
+# subprocess+DATA: it composes the existing creator-engine-validator pco-release
+# argv with the classification-mapped release reason, never reimplementing
+# claim/lease mutation. Unit-level with a fake runner (the real CLI is exercised
+# in test_pco_allocator_cli.py::test_8_pco_release_leg_is_reused).
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace as _NS
+
+from creator_engine_validator import reaper_executors as _reaper_executors
+from creator_engine_validator import seat_reaper as _seat_reaper
+
+
+def _release_plan(tmp_path, *, release_reason, lane_id="reap-lane", controller_id="ctrl-x",
+                  ledger_root=None, worktree_path=None):
+    return _seat_reaper.RetirementPlan(
+        seat_id="run-x", run_id="run-x", classification=_seat_reaper.CLASS_ELIGIBLE,
+        release_reason=release_reason, state_root=tmp_path, dispatch={}, dispatch_path=tmp_path,
+        events_path=tmp_path, archive_root=tmp_path, batch_slug="run-x", role="implementer",
+        terminal=None, harness_session_id=None, transcript_ref=None, archive_expected=False,
+        lane_id=lane_id, controller_id=controller_id, ledger_root=ledger_root,
+        worktree_path=worktree_path, pane_registry_path=None,
+    )
+
+
+def test_reaper_release_composes_pco_release_argv_with_mapped_reason(tmp_path):
+    ledger = tmp_path / "ledger"
+    worktree = tmp_path / "wt"
+    worktree.mkdir(parents=True)
+    # post-release ledger facts the executor verifies (fake pco-release "succeeded")
+    claim = ledger / "claims" / "ctrl-x" / "reap-lane.yaml"
+    claim.parent.mkdir(parents=True)
+    claim.write_text(yaml.safe_dump({"released_at": "2026-06-13T12:00:00Z", "release_reason": "aborted"}), encoding="utf-8")
+    ev = ledger / "events" / "2026" / "06" / "13" / "claim-released.yaml"
+    ev.parent.mkdir(parents=True)
+    ev.write_text(yaml.safe_dump({"event_kind": "claim_released", "lane_id": "reap-lane", "controller_id": "ctrl-x"}), encoding="utf-8")
+
+    calls = []
+
+    def runner(argv, **kw):
+        argv = list(argv)
+        calls.append(argv)
+        # the fake "pco-release" removes the worktree dir (mirrors the real leg)
+        import shutil
+        shutil.rmtree(worktree, ignore_errors=True)
+        return _NS(returncode=0, stdout="released", stderr="")
+
+    executor = _reaper_executors.TmuxExecutor(runner=runner, validator_exe="creator-engine-validator")
+    result = executor.release_worktree(_release_plan(
+        tmp_path, release_reason="aborted", ledger_root=ledger, worktree_path=worktree))
+    assert result.status == _seat_reaper.STEP_SUCCEEDED
+    argv = calls[0]
+    assert argv[0] == "creator-engine-validator" and argv[1] == "pco-release"
+    assert "--lane-id" in argv and argv[argv.index("--lane-id") + 1] == "reap-lane"
+    assert "--controller-id" in argv and argv[argv.index("--controller-id") + 1] == "ctrl-x"
+    assert "--release-reason" in argv and argv[argv.index("--release-reason") + 1] == "aborted"
+    assert "--repo-root" in argv and argv[argv.index("--repo-root") + 1] == str(worktree)
+    assert "--ledger-root" in argv and argv[argv.index("--ledger-root") + 1] == str(ledger)
+
+
+def test_reaper_release_not_applicable_without_binding(tmp_path):
+    executor = _reaper_executors.TmuxExecutor(runner=lambda *a, **k: _NS(returncode=0, stdout="", stderr=""))
+    result = executor.release_worktree(_release_plan(tmp_path, release_reason="completed"))
+    assert result.status == _seat_reaper.STEP_NOT_APPLICABLE
+
+
+def test_reaper_release_already_satisfied_skips_pco_release(tmp_path):
+    # claim already released + lease gone + worktree gone → no second destructive pass (§12)
+    ledger = tmp_path / "ledger"
+    claim = ledger / "claims" / "ctrl-x" / "reap-lane.yaml"
+    claim.parent.mkdir(parents=True)
+    claim.write_text(yaml.safe_dump({"released_at": "2026-06-13T12:00:00Z", "release_reason": "completed"}), encoding="utf-8")
+    calls = []
+    executor = _reaper_executors.TmuxExecutor(
+        runner=lambda argv, **k: calls.append(list(argv)) or _NS(returncode=0, stdout="", stderr=""))
+    result = executor.release_worktree(_release_plan(
+        tmp_path, release_reason="completed", ledger_root=ledger, worktree_path=tmp_path / "gone-wt"))
+    assert result.status == _seat_reaper.STEP_ALREADY_SATISFIED
+    assert calls == []  # pco-release was NOT invoked a second time
+
+
+def test_reaper_release_root_checkout_refusal_flagged(tmp_path):
+    ledger = tmp_path / "ledger"
+    worktree = tmp_path / "wt"
+    worktree.mkdir(parents=True)
+    def runner(argv, **kw):
+        return _NS(returncode=1, stdout="", stderr="ERROR: pco-release refused — root checkout: ...")
+    executor = _reaper_executors.TmuxExecutor(runner=runner)
+    result = executor.release_worktree(_release_plan(
+        tmp_path, release_reason="completed", ledger_root=ledger, worktree_path=worktree))
+    assert result.status == _seat_reaper.STEP_FAILED and result.data.get("root_checkout_refused") is True

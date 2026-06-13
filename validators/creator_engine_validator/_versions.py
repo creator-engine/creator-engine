@@ -151,6 +151,15 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # v3.5-B.1 Cockpit: the L3 Textual view (binds to L2 snapshots ONLY;
         # a future GUI replaces this module alone — principle 6)
         "v3_cockpit",
+        # ce-ops#43 seat/venue retirement reaper: the substrate-neutral POLICY
+        # fold (discover/classify/orchestrate; re-implements the seat-sentinel
+        # outcome resolution READ-ONLY — never calls resolve_outcome). Reads
+        # ``seat_sentinel`` (shared) as DATA; imports NO v1 module.
+        "seat_reaper",
+        # ce-ops#43: the per-substrate retirement executors (tmux today). The two
+        # v1 crossings — ``ce lane archive --json`` + ``creator-engine-validator
+        # pco-release`` — are subprocess+DATA only; imports NO v1 module.
+        "reaper_executors",
     }
 )
 
