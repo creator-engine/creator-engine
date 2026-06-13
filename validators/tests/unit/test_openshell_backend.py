@@ -323,7 +323,7 @@ def test_importing_runner_registers_no_check():
 def test_openshell_registered_in_registry():
     assert OPENSHELL_BACKEND_KEY in available_backends()
     # The sorted 3-tuple — the ~10 registry-pinning tests A.1 deferred move to this.
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")
     backend = get_backend("openshell")
     assert isinstance(backend, OpenShellBackend)
     assert isinstance(backend, RunnerBackend)

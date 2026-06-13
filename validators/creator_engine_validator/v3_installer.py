@@ -94,6 +94,65 @@ REQUIRED_DEPENDENCIES = TIER_DEPS[DEFAULT_ISOLATION_TIER]
 #: selected and its ``runsc``/``proxy`` are not already present.
 _SUDO_TOOLS = frozenset({"runsc", "proxy"})
 
+#: Backend-KEYED dependency sets — the #71-CORE re-frame of the numeric
+#: :data:`TIER_DEPS` so deps follow the SELECTED RunnerBackend (the neutral
+#: ``isolation_backend`` keys of ``schemas/runtime-policy.schema.yaml``) rather
+#: than a tier number. The mapping is the same fail-closed shape as the tiers:
+#:   ``os-native``    — the unprivileged default DIRECTION; **no sudo** (its
+#:     sandbox primitives are PROBE-ONLY documented prerequisites, never planned
+#:     as auto-sudo dep steps — what keeps it zero-root). == TIER_DEPS[0/1].
+#:   ``gvisor-proxy`` — the heavy single-host opt-in; the only key that drags the
+#:     privileged ``runsc``/``proxy`` pairing into the plan. == TIER_DEPS[2].
+#:   ``openshell``    — the gateway tier delegates ENFORCEMENT to a container
+#:     engine (Docker/Podman/VM), provisioned out-of-band by the gateway, not by
+#:     this installer; the installer's own dep floor is the core no-sudo set.
+#: ``git``/``python``/``uv`` are user-level in every backend.
+BACKEND_DEPS: dict[str, tuple[str, ...]] = {
+    "os-native": ("git", "python", "uv"),
+    "gvisor-proxy": ("git", "python", "uv", "runsc", "proxy"),
+    "openshell": ("git", "python", "uv"),
+}
+#: The schema-level default backend (``schemas/runtime-policy.schema.yaml``
+#: ``isolation_backend.default``). It STAYS ``gvisor-proxy`` so records authored
+#: before #71 (omitting the field) keep today's backend — the GATE on the
+#: default-flip migration (ce-ops#71 req-4): the no-sudo default reaches a record
+#: only by an explicit ``isolation_backend`` or a profile that maps to it, never
+#: by a silent global flip that would break gVisor-pinned fixtures/answer-files.
+DEFAULT_ISOLATION_BACKEND = "gvisor-proxy"
+#: Per-profile default backend (the install-answers ``profile`` field →
+#: ``isolation_backend``). ``solo-pilot`` (governance-only) maps to the
+#: unprivileged ``os-native`` so it stops dragging the gVisor runtime (ce-ops#71
+#: Edit C / OQ-4 "solo-pilot → os-native is clear"). ``team`` stays at the
+#: conservative :data:`DEFAULT_ISOLATION_BACKEND` because the shared-host
+#: threat-model default is an OPEN Operator call (research §9 OQ-4) — NOT
+#: hardcoded to os-native here; ESCALATED.
+PROFILE_DEFAULT_BACKEND: dict[str, str] = {
+    "solo-pilot": "os-native",
+    "team": DEFAULT_ISOLATION_BACKEND,
+}
+
+
+def resolve_isolation_backend(*, profile: Any = None, explicit: Any = None) -> str:
+    """Resolve the selected ``isolation_backend`` (PURE, fail-closed).
+
+    Precedence: an **explicit** ``isolation_backend`` (from a record / answers /
+    a future ``--sandbox`` flag) wins; else the **profile** default
+    (:data:`PROFILE_DEFAULT_BACKEND`); else the schema-level
+    :data:`DEFAULT_ISOLATION_BACKEND` (``gvisor-proxy`` — the back-compat gate for
+    pre-#71 records). An explicit backend that is not a known
+    :data:`BACKEND_DEPS` key is REFUSED (fail-closed; never a silent fall-through).
+    """
+    if explicit is not None and explicit != "":
+        if explicit not in BACKEND_DEPS:
+            raise InstallRefused(
+                f"unknown isolation backend {explicit!r}: expected one of "
+                f"{sorted(BACKEND_DEPS)}"
+            )
+        return str(explicit)
+    if isinstance(profile, str) and profile in PROFILE_DEFAULT_BACKEND:
+        return PROFILE_DEFAULT_BACKEND[profile]
+    return DEFAULT_ISOLATION_BACKEND
+
 #: The educate-at-opt-out copy — VERBATIM from ``docs/contracts/spend-envelope.md``.
 EDUCATE_AT_OPTOUT = (
     "Turning this off won't speed up your runs; it only removes per-run / "
@@ -676,12 +735,16 @@ def plan_dependencies(
 ) -> InstallPlan:
     """Plan dependency resolution from an injected presence probe (PURE).
 
-    ``tier`` selects the dependency set: an isolation tier ``0|1|2`` resolves to
-    :data:`TIER_DEPS` (Tier 0/1 exclude the privileged ``runsc``/``proxy``
-    pairing; Tier 1's unprivileged sandbox primitives are PROBE-ONLY and are not
-    planned here — see :data:`TIER_DEPS`). For back-compatibility a caller may
-    instead pass an explicit iterable of dependency names (the pre-tier flat
-    call). Default is the heavy Tier 2, preserving today's behavior.
+    ``tier`` selects the dependency set, polymorphically:
+      * a **backend key** (``str`` — ``os-native`` / ``gvisor-proxy`` /
+        ``openshell``) resolves to :data:`BACKEND_DEPS`. This is the #71-CORE
+        surface: deps follow the SELECTED backend (unknown key ⇒ fail-closed).
+      * an **isolation tier** (``int`` ``0|1|2``) resolves to :data:`TIER_DEPS`
+        (the G71.2 numeric surface; Tier 0/1 exclude the privileged
+        ``runsc``/``proxy`` pairing).
+      * an explicit **iterable** of dependency names (the pre-tier flat call) —
+        for back-compatible callers.
+    Default is the heavy Tier 2, preserving today's behavior.
 
     ``probe`` maps a tool → present? (the live read-only ``which`` detection is
     done by the CLI and injected here). Present → skip; missing → a
@@ -689,12 +752,19 @@ def plan_dependencies(
     — and only ``runsc``/``proxy`` are in that set, so a plan needs sudo iff a
     Tier-2 plan is selected). Never fail-on-missing — it plans, the human approves.
     """
-    if isinstance(tier, int) and not isinstance(tier, bool):
+    if isinstance(tier, str):
+        if tier not in BACKEND_DEPS:
+            raise InstallRefused(
+                f"unknown isolation backend {tier!r}: expected one of "
+                f"{sorted(BACKEND_DEPS)}"
+            )
+        required: Iterable[str] = BACKEND_DEPS[tier]
+    elif isinstance(tier, int) and not isinstance(tier, bool):
         if tier not in TIER_DEPS:
             raise InstallRefused(
                 f"unknown isolation tier {tier!r}: expected one of {sorted(TIER_DEPS)}"
             )
-        required: Iterable[str] = TIER_DEPS[tier]
+        required = TIER_DEPS[tier]
     else:
         required = tier  # explicit dependency-name iterable (back-compat)
     probe = probe or {}

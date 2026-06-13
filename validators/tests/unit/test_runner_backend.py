@@ -12,11 +12,14 @@ import pytest
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.runner import (
     BackendAlreadyRegistered,
+    BackendUnavailable,
     CollectedEvidence,
     LOCAL_NOOP_BACKEND_KEY,
     LocalNoopBackend,
     OPENSHELL_BACKEND_KEY,
+    OS_NATIVE_BACKEND_KEY,
     OpenShellBackend,
+    OsNativeBackend,
     PolicyRejected,
     ProvisionRequest,
     ProvisionedHandle,
@@ -147,6 +150,49 @@ def test_openshell_registered():
     # A genuinely-unknown key still raises — the negative-path teeth stay live.
     with pytest.raises(UnknownBackend):
         get_backend("no-such-backend")
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#71 Tranche 1 — the os-native scaffold + the validate-at-provision
+# invariant promoted to the ABC (req-3).
+# ---------------------------------------------------------------------------
+def test_os_native_registered():
+    assert OS_NATIVE_BACKEND_KEY == "os-native"
+    assert "os-native" in available_backends()
+    backend = get_backend("os-native")
+    assert isinstance(backend, OsNativeBackend)
+    assert isinstance(backend, RunnerBackend)
+
+
+def test_os_native_is_fail_closed_on_a_clean_record():
+    # The deny surface passes (clean record), but the sandbox MECHANISM is HELD →
+    # the scaffold refuses to provision a live runtime rather than run unsandboxed.
+    backend = get_backend("os-native")
+    clean = valid_policy()
+    clean["isolation_backend"] = "os-native"
+    with pytest.raises(BackendUnavailable) as exc:
+        backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn"))
+    # fail-closed names the missing/required primitives (req-5 default)
+    assert "os-native" in str(exc.value)
+
+
+def test_every_registered_backend_rejects_a_dirty_record():
+    # The promoted invariant: because #71 ADDS a backend, "validate-at-provision"
+    # is enforced by RunnerBackend.provision for EVERY registered backend, not a
+    # per-backend discipline. A controller-key secret is the canonical dirty record.
+    dirty = valid_policy()
+    dirty["secret_allowlist"] = ["controller-private-key"]
+    for key in available_backends():
+        backend = get_backend(key)
+        with pytest.raises(PolicyRejected):
+            backend.provision(ProvisionRequest(runtime_policy=dirty, run_id=f"dirty-{key}"))
+
+
+def test_every_registered_backend_rejects_a_non_mapping_record():
+    for key in available_backends():
+        backend = get_backend(key)
+        with pytest.raises(PolicyRejected):
+            backend.provision(ProvisionRequest(runtime_policy=[], run_id=f"nonmap-{key}"))  # type: ignore[arg-type]
 
 
 def test_register_and_duplicate():

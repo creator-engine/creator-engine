@@ -157,6 +157,9 @@ class PreparedApply:
     dep_plan: v3_installer.InstallPlan
     grant_diff: v3_installer.SudoGrantDiff
     profile: dict[str, Any]
+    #: ce-ops#71 Edit C: the runtime backend RESOLVED from the profile/answers
+    #: (``solo-pilot`` → ``os-native``), materialized by the ``runtime_posture`` leg.
+    isolation_backend: str
     target_repo: str
     target_branch: str
     workspace_root: Path
@@ -206,11 +209,15 @@ class ApplyDriver:
         state_root: Path,
         workspace_root: Path,
         provider: str | None,
+        backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
+        # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
+        # it is the one RESOLVED from the profile/answers (``solo-pilot`` →
+        # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         config = {
-            "isolation_backend": "gvisor-proxy",
+            "isolation_backend": backend,
             "egress": "deny-by-default",
             "provider": provider,
             "workspace_root": str(workspace_root),
@@ -227,15 +234,45 @@ class ApplyDriver:
         state_root: Path,
         workspace_root: Path,
         provider: str | None,
+        backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
+        # ce-ops#71 Edit A: dispatch the SELECTED backend's OWN availability check —
+        # no longer the hardwired ``runsc`` AND ``proxy`` gate. Unknown backends
+        # fail-closed (req-5): a selected-but-uncheckable backend never reports ok.
         blocked_state_dirs = {"." + "her" + "mes", "." + "cla" + "ude"}
         if any(part in blocked_state_dirs for part in state_root.parts):
             return {"ok": False, "reason": "state_root_bound_to_harness"}
+        if backend == "gvisor-proxy":
+            return {
+                "ok": self.verify_tool("runsc") and self.verify_tool("proxy"),
+                "backend": backend,
+                "runsc": self.verify_tool("runsc"),
+                "proxy": self.verify_tool("proxy"),
+                "provider_transport": provider is not None,
+            }
+        if backend == "os-native":
+            # The unprivileged, governance-only posture: NO privileged runtime is
+            # required, so materializing the posture (no runsc/proxy) IS the verified
+            # state. The functional sandbox MECHANISM is HELD (research §9 OQ-1), so
+            # its primitives are surfaced as an informational PROBE — never a
+            # hard-fail in Tranche 1 (that would re-introduce the fail-closed defect
+            # #71 fixes for the no-root default). The fail-closed-with-named-deps
+            # policy choice for a *live* os-native run is the Operator's (OQ-2).
+            return {
+                "ok": True,
+                "backend": backend,
+                "privileged_runtime_required": False,
+                "sandbox_primitives_probe": {
+                    name: self.verify_tool(name)
+                    for name in v3_installer.BACKEND_DEPS.get("os-native", ())
+                    if name not in {"git", "python", "uv"}
+                },
+                "provider_transport": provider is not None,
+            }
         return {
-            "ok": self.verify_tool("runsc") and self.verify_tool("proxy"),
-            "runsc": self.verify_tool("runsc"),
-            "proxy": self.verify_tool("proxy"),
-            "provider_transport": provider is not None,
+            "ok": False,
+            "reason": f"no availability check for isolation backend {backend!r}",
+            "backend": backend,
         }
 
     def expose_cli(self, *, state_root: Path, command: str, via: str) -> dict[str, Any]:
@@ -685,8 +722,14 @@ def _prepare(
             "answers_missing",
             "apply requires complete answers; run --inventory/--plan or pass --non-interactive to refuse explicitly",
         )
-    probe = {tool: bool(request.dependency_probe.get(tool, False)) for tool in v3_installer.REQUIRED_DEPENDENCIES}
-    dep_plan = v3_installer.plan_dependencies(v3_installer.REQUIRED_DEPENDENCIES, probe)
+    # ce-ops#71 Edit B+C: resolve the runtime backend from the profile
+    # (solo-pilot → os-native; team/absent → gvisor-proxy, back-compat) and make
+    # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/proxy pairing
+    # is planned ONLY for gvisor-proxy, so the governance-only path needs no sudo.
+    isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
+    backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
+    probe = {tool: bool(request.dependency_probe.get(tool, False)) for tool in backend_deps}
+    dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)
     grant_diff = v3_installer.sudo_grant_diff(merged.value("host.sudo_grant"), dep_plan)
     if grant_diff.uncovered:
         raise ApplyRefused(
@@ -727,6 +770,7 @@ def _prepare(
         dep_plan=dep_plan,
         grant_diff=grant_diff,
         profile=profile,
+        isolation_backend=isolation_backend,
         target_repo=target_repo,
         target_branch=target_branch,
         workspace_root=workspace_root,
@@ -782,7 +826,12 @@ def _run_leg(
             if result.get("manual_rollback_required"):
                 raise ApplyFailed("host_dependency_install_failed", str(result.get("reason", "install failed")))
             raise ApplyRefused("host_dependency_install_refused", str(result.get("reason", "install refused")))
-        verified = {tool: driver.verify_tool(tool) for tool in v3_installer.REQUIRED_DEPENDENCIES}
+        # ce-ops#71 Edit B: verify the SELECTED backend's dep set (not the flat
+        # Tier-2 set) — an os-native install must not be failed for absent runsc/proxy.
+        verified = {
+            tool: driver.verify_tool(tool)
+            for tool in v3_installer.BACKEND_DEPS[prepared.isolation_backend]
+        }
         if not all(verified.values()):
             raise ApplyFailed("host_dependency_verify_failed", f"dependency verification failed: {verified}")
         return LegOutcome(
@@ -796,10 +845,14 @@ def _run_leg(
         )
     if leg_id == "runtime_posture":
         provider = str(prepared.merged.value("provider.harness", "") or "")
+        # ce-ops#71 Edit C: materialize the PROFILE's resolved backend (solo-pilot
+        # → os-native), so the governance-only install stops dragging gVisor+proxy.
+        backend = prepared.isolation_backend
         action = driver.provision_runtime(
             state_root=request.state_root,
             workspace_root=prepared.workspace_root,
             provider=provider,
+            backend=backend,
         )
         if not action.get("ok"):
             raise ApplyFailed("runtime_posture_apply_failed", str(action.get("reason", "runtime provisioning failed")))
@@ -807,6 +860,7 @@ def _run_leg(
             state_root=request.state_root,
             workspace_root=prepared.workspace_root,
             provider=provider,
+            backend=backend,
         )
         if not verify.get("ok"):
             raise ApplyFailed("runtime_posture_verify_failed", str(verify))

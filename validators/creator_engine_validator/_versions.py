@@ -105,6 +105,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.noop_backend",
         # v3.5-A.1 OpenShell backend (defined; registration deferred to A.2)
         "runner.openshell_backend",
+        # ce-ops#71 Tranche 1: the unprivileged OS-native backend — a FAIL-CLOSED
+        # scaffold (registered + deny-surface-enforcing; the sandbox mechanism is
+        # HELD pending the srt-vs-CE-native-jail Operator decision, research §9).
+        "runner.os_native_backend",
         # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
         "runner.spend_gate",
         # v3.5-D.0.1 compute-demand artifact: the live usage tap

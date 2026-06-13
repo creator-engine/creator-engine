@@ -34,6 +34,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -161,9 +162,39 @@ class RunnerBackend(abc.ABC):
     #: The ``isolation_backend`` key this backend services (e.g. ``local-noop``).
     backend_key: str
 
-    @abc.abstractmethod
     def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
-        """Provision an isolated runtime for the policy in ``request``."""
+        """Provision an isolated runtime for the policy in ``request``.
+
+        **Enforced invariant (ce-ops#71 req-3): validate-at-provision.** This is
+        a CONCRETE template method — it runs the G-1.0 deny surface FIRST (the
+        record must be a mapping AND ``validate_runtime_policy`` must return no
+        errors, else :class:`PolicyRejected`) and only then delegates the
+        backend-specific work to :meth:`_provision`. Because #71 *adds* a backend
+        (``os-native``), the moat's "every backend re-runs the policy validation"
+        residual is promoted from a per-backend discipline to an ABC-level
+        assertion here: a subclass CANNOT skip it (the validation is not in the
+        overridable method). The registry-level test asserts every registered
+        backend rejects a dirty record through this path.
+        """
+        record = request.runtime_policy
+        if not isinstance(record, dict):
+            raise PolicyRejected("runtime_policy must be a mapping")
+        # Lazy import keeps this module's import side-effect-free (the G-1.1
+        # "zero I/O on import" invariant); the schema read happens at call time.
+        from ..checks.ce_runtime_policy import validate_runtime_policy
+
+        errors = validate_runtime_policy(record, Path(f"<provision:{request.run_id}>"))
+        if errors:
+            rendered = "; ".join(error.format() for error in errors)
+            raise PolicyRejected(
+                f"runtime-policy did not validate clean; refusing to provision: {rendered}"
+            )
+        return self._provision(request)
+
+    @abc.abstractmethod
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        """Backend-specific provisioning, called by :meth:`provision` ONLY after
+        the policy has validated clean (the deny surface is already enforced)."""
         raise NotImplementedError
 
     @abc.abstractmethod

@@ -32,14 +32,11 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
 
-from ..checks.ce_runtime_policy import validate_runtime_policy
 from .backend import (
     BackendUnavailable,
     CollectedEvidence,
-    PolicyRejected,
     ProvisionRequest,
     ProvisionedHandle,
     RunnerBackend,
@@ -228,16 +225,10 @@ class GvisorProxyBackend(RunnerBackend):
         self._runner: ContainerRunner = runner if runner is not None else SubprocessContainerRunner()
         self._plans: dict[str, RunscPlan] = {}
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        # The deny surface (mapping + validate_runtime_policy → PolicyRejected) is
+        # enforced by the RunnerBackend.provision template method before we get here.
         record = request.runtime_policy
-        if not isinstance(record, dict):
-            raise PolicyRejected("runtime_policy must be a mapping")
-        errors = validate_runtime_policy(record, Path(f"<provision:{request.run_id}>"))
-        if errors:
-            rendered = "; ".join(error.format() for error in errors)
-            raise PolicyRejected(
-                f"runtime-policy did not validate clean; refusing to provision: {rendered}"
-            )
         # Pure translation (no side effects).
         plan = translate_to_runsc_plan(record)
         egress = translate_to_egress_proxy_config(record)

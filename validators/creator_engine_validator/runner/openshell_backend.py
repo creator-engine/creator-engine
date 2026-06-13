@@ -70,11 +70,9 @@ from typing import Any, Protocol
 
 import yaml
 
-from ..checks.ce_runtime_policy import validate_runtime_policy
 from .backend import (
     BackendUnavailable,
     CollectedEvidence,
-    PolicyRejected,
     ProvisionRequest,
     ProvisionedHandle,
     RunnerBackend,
@@ -752,17 +750,10 @@ class OpenShellBackend(RunnerBackend):
         #: handle.ref -> OpenShell sandbox_id
         self._sandboxes: dict[str, str] = {}
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        # The G-1.0 deny surface (mapping + validate_runtime_policy → PolicyRejected)
+        # is enforced by the RunnerBackend.provision template method before we get here.
         record = request.runtime_policy
-        if not isinstance(record, dict):
-            raise PolicyRejected("runtime_policy must be a mapping")
-        # Keep the G-1.0 deny surface load-bearing at the boundary.
-        errors = validate_runtime_policy(record, Path(f"<provision:{request.run_id}>"))
-        if errors:
-            rendered = "; ".join(error.format() for error in errors)
-            raise PolicyRejected(
-                f"runtime-policy did not validate clean; refusing to provision: {rendered}"
-            )
         # Pure translation (no side effects), then assemble the create-spec.
         policy = translate_to_sandbox_policy(record)
         spec = SandboxCreateSpec(policy=policy, image=_image_ref_string(record))

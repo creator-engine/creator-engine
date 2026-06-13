@@ -141,13 +141,27 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.calls.append(f"verify_tool:{name}")
         return self.tools.get(name, False)
 
-    def provision_runtime(self, *, state_root, workspace_root, provider):
+    def provision_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
         self.calls.append("provision_runtime")
-        return {"ok": True, "created": [str(state_root / "onboard" / "runtime" / "posture.json")]}
+        self.provisioned_backend = backend
+        # Delegate to the real (pure file-write) provision so posture.json records
+        # the resolved backend — exercises ce-ops#71 Edit A end-to-end.
+        return super().provision_runtime(
+            state_root=state_root, workspace_root=workspace_root, provider=provider, backend=backend
+        )
 
-    def verify_runtime(self, *, state_root, workspace_root, provider):
+    def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
         self.calls.append("verify_runtime")
-        return {"ok": self.runtime_ok, "runsc": True, "proxy": True, "provider_transport": provider == "codex"}
+        self.verified_backend = backend
+        # Delegate to the real dispatch so the os-native path (no runsc/proxy) and
+        # the gvisor-proxy path are both exercised honestly against the live tools.
+        result = super().verify_runtime(
+            state_root=state_root, workspace_root=workspace_root, provider=provider, backend=backend
+        )
+        if backend == "gvisor-proxy":
+            # The fake host has the gVisor tools; preserve the historical green path.
+            return {"ok": self.runtime_ok, "backend": backend, "runsc": True, "proxy": True, "provider_transport": provider == "codex"}
+        return result
 
     def expose_cli(self, *, state_root, command, via):
         self.calls.append("expose_cli")
@@ -349,6 +363,61 @@ def test_runtime_posture_failure_stops_before_github(tmp_path):
     assert _leg(summary, "runtime_posture")["status"] == "failed"
     assert "resolve_secret" not in driver.calls
     assert _leg(summary, "github_bootstrap_token_probe")["status"] == "skipped"
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#71 Edits A+C — the solo-pilot leak fix. The governance-only profile
+# materializes the unprivileged os-native backend and stops dragging gVisor:
+# NO runsc/proxy in the dependency plan or the runtime-posture verification,
+# and it SUCCEEDS with an EMPTY sudo grant on a host without runsc/proxy.
+# ---------------------------------------------------------------------------
+def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
+    answers = _answers(tmp_path)
+    answers["profile"] = "solo-pilot"
+    answers["host"]["sudo_grant"] = []  # governance-only: zero privileged installs
+    # a host WITHOUT the gVisor pairing — os-native must not need it
+    probes = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
+    driver = FakeDriver()
+    summary = _apply(tmp_path, driver, answers=answers, probes=probes)
+
+    assert summary["failed"] == 0
+    assert summary["refused"] == 0
+
+    # the runtime posture is os-native, recorded + verified, no privileged runtime
+    assert driver.provisioned_backend == "os-native"
+    assert driver.verified_backend == "os-native"
+    posture = _leg(summary, "runtime_posture")
+    assert posture["status"] in {"applied", "already_satisfied"}
+    verification = posture["verification"]
+    assert verification["ok"] is True
+    assert verification["backend"] == "os-native"
+    assert verification.get("privileged_runtime_required") is False
+    # no runsc/proxy anywhere in the runtime-posture verification
+    assert "runsc" not in json.dumps(verification)
+    assert "proxy" not in json.dumps(verification)
+
+    # the host-dependency plan is backend-driven: NO privileged runsc/proxy step
+    host_leg = _leg(summary, "host_dependencies")
+    assert host_leg["status"] == "already_satisfied"
+    assert "install_dependencies" not in driver.calls
+    # the materialized posture.json records os-native (not the old gVisor hardwire)
+    posture_json = json.loads(
+        (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
+    )
+    assert posture_json["isolation_backend"] == "os-native"
+
+
+def test_default_profile_preserves_gvisor_proxy_posture(tmp_path):
+    # back-compat (req-4): the default install (no profile) keeps gvisor-proxy.
+    driver = FakeDriver()
+    summary = _apply(tmp_path, driver)
+    assert summary["failed"] == 0
+    assert driver.provisioned_backend == "gvisor-proxy"
+    assert driver.verified_backend == "gvisor-proxy"
+    posture_json = json.loads(
+        (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
+    )
+    assert posture_json["isolation_backend"] == "gvisor-proxy"
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):

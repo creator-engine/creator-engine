@@ -94,7 +94,7 @@ class _SpyBackend(RunnerBackend):
         self._inner = LocalNoopBackend()
         self.calls: list[str] = []
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         self.calls.append("provision")
         return self._inner.provision(request)
 
@@ -238,7 +238,7 @@ def test_orchestrator_registers_no_check_and_no_backend():
     import creator_engine_validator.orchestrator  # noqa: F401  (import = the side-effect surface)
 
     assert not any("orchestrat" in n for n in registered_checks())
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a); orchestrator still adds none
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a); orchestrator still adds none
 
 
 def test_run_plan_no_live_subprocess_or_socket(monkeypatch):
@@ -408,7 +408,7 @@ class _ChangeSetBackend(RunnerBackend):
         self._inner = LocalNoopBackend()
         self.calls: list[str] = []
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         self.calls.append("provision")
         return self._inner.provision(request)
 

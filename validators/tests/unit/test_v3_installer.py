@@ -858,6 +858,63 @@ def test_build_profile_carries_isolation_tier():
 
 
 # ---------------------------------------------------------------------------
+# ce-ops#71 CORE — the BACKEND-KEYED re-frame (Edit B) + the resolver (req 5).
+# Deps follow the SELECTED backend; the unprivileged os-native default needs no
+# sudo; an unknown backend fails closed; the schema default stays gvisor-proxy
+# (the back-compat gate, req 4).
+# ---------------------------------------------------------------------------
+def test_backend_deps_shape_and_no_sudo_default():
+    assert inst.BACKEND_DEPS["os-native"] == ("git", "python", "uv")
+    assert inst.BACKEND_DEPS["gvisor-proxy"] == ("git", "python", "uv", "runsc", "proxy")
+    assert inst.BACKEND_DEPS["openshell"] == ("git", "python", "uv")
+    # only the gvisor pairing is privileged across every backend
+    for backend, deps in inst.BACKEND_DEPS.items():
+        privileged = set(deps) & inst._SUDO_TOOLS
+        assert privileged == ({"runsc", "proxy"} if backend == "gvisor-proxy" else set())
+    # the schema-level default stays gvisor-proxy (req-4 back-compat gate)
+    assert inst.DEFAULT_ISOLATION_BACKEND == "gvisor-proxy"
+
+
+def test_resolve_isolation_backend_precedence():
+    # solo-pilot governance-only → the unprivileged os-native (Edit C)
+    assert inst.resolve_isolation_backend(profile="solo-pilot") == "os-native"
+    # team / absent profile → the conservative back-compat default (OQ-4 escalated)
+    assert inst.resolve_isolation_backend(profile="team") == "gvisor-proxy"
+    assert inst.resolve_isolation_backend() == "gvisor-proxy"
+    assert inst.resolve_isolation_backend(profile=None) == "gvisor-proxy"
+    # an explicit selector wins over the profile default
+    assert inst.resolve_isolation_backend(profile="team", explicit="os-native") == "os-native"
+    # unknown explicit backend → fail-closed
+    with pytest.raises(inst.InstallRefused):
+        inst.resolve_isolation_backend(explicit="podman-rootless")
+
+
+def test_plan_dependencies_by_backend_key():
+    probe_present = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
+    # os-native plans NO privileged installs (zero-root) even with runsc/proxy absent
+    p_osn = inst.plan_dependencies("os-native", probe_present)
+    assert p_osn.needs_sudo is False
+    assert "runsc" not in {s.name for s in p_osn.steps}
+    assert "proxy" not in {s.name for s in p_osn.steps}
+    # gvisor-proxy plans the privileged pairing → needs sudo
+    p_gv = inst.plan_dependencies("gvisor-proxy", probe_present)
+    assert p_gv.needs_sudo is True
+    assert set(p_gv.to_install) == {"runsc", "proxy"}
+    # unknown backend key → fail-closed
+    with pytest.raises(inst.InstallRefused):
+        inst.plan_dependencies("bogus-backend")
+
+
+def test_os_native_converges_with_empty_sudo_grant():
+    # the #71 headline: the governance-only default succeeds with NO sudo grant,
+    # through the SAME sudo_grant_diff path the tiers use.
+    probe = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
+    plan = inst.plan_dependencies("os-native", probe)
+    diff = inst.sudo_grant_diff([], plan)
+    assert diff.converged and diff.uncovered == ()
+
+
+# ---------------------------------------------------------------------------
 # the --inventory emission (the awareness artifact)
 # ---------------------------------------------------------------------------
 def test_inventory_emission_statuses():

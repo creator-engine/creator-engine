@@ -160,7 +160,7 @@ def test_overlay_registers_no_check_and_no_backend():
     AuditOverlayBackend(LocalNoopBackend())  # constructing/using registers nothing
     names = set(registered_checks())
     assert not any("audit" in n or "overlay" in n for n in names)
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a); overlay still adds none
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a); overlay still adds none
 
 
 def test_overlay_leaves_inner_backend_untouched():
