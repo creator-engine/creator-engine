@@ -14,8 +14,42 @@ def _json_pointer(error_path) -> str:
     return "/" + "/".join(parts) if parts else "/"
 
 
+#: Package/repo root. The package's own schema names are embedded as repo-root-relative
+#: constants (e.g. ``SCHEMA = "schemas/install-answers.schema.yaml"``); this is the same
+#: anchor ``ce_event_runtime.py`` / ``fanin_runtime.py`` use for their ``SCHEMA_PATH``s
+#: (``schema.py`` -> parents[0]=package, parents[1]=``validators``, parents[2]=repo root).
+_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+_PACKAGE_SCHEMAS_DIR = _PACKAGE_ROOT / "schemas"
+
+
+def _resolve_schema_path(schema_path: str | Path) -> Path:
+    """Resolve a schema path for loading (ce-ops#54).
+
+    A package schema referenced by a root-relative name (``schemas/…``) is anchored to
+    the package root so the CLI loads it from ANY working directory, not only the repo
+    root. Absolute paths, and genuinely cwd/user-relative paths that are NOT one of the
+    package's own schemas — e.g. a user-supplied ``--answers-schema <relative>`` — are
+    left untouched and keep their existing cwd-relative semantics. The distinguishing
+    test is conservative: anchor only when the joined path is a file that resolves under
+    the package ``schemas/`` directory; otherwise fall back to the path as given.
+    """
+    p = Path(schema_path)
+    if p.is_absolute():
+        return p
+    anchored = _PACKAGE_ROOT / p
+    try:
+        within_package_schemas = anchored.resolve().is_relative_to(
+            _PACKAGE_SCHEMAS_DIR.resolve()
+        )
+    except (OSError, ValueError):  # pragma: no cover - defensive
+        within_package_schemas = False
+    if within_package_schemas and anchored.is_file():
+        return anchored
+    return p
+
+
 def load_schema(schema_path: str | Path) -> dict[str, Any]:
-    data = load_yaml(schema_path)
+    data = load_yaml(_resolve_schema_path(schema_path))
     if not isinstance(data, dict):
         raise ValueError(f"schema must be a mapping: {schema_path}")
     return data
