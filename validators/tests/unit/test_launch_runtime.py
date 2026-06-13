@@ -18,6 +18,22 @@ from creator_engine_validator import launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
+@pytest.fixture(autouse=True)
+def _isolate_seat_state(tmp_path, monkeypatch):
+    """Per-test isolation of the seat-state surface (ce-ops#53 xdist flake fix).
+
+    A ``launch`` without an explicit ``repo_root`` defaults the state root to the
+    CWD and writes ``sentinel-wrapper.sh`` to ``./.ce/state/dispatches/<seat_id>/``
+    — a path keyed only by session/window. The many ``session="s"`` tests here
+    therefore all target the *same* shared path; under xdist (`-n auto`) two run
+    concurrently on different workers and one overwrites the other's wrapper
+    mid-read → flaky ``StopIteration`` on the ``code=$?`` scan. chdir each test
+    into its own unique ``tmp_path`` so the default state root is per-test unique.
+    Tests that pass an explicit absolute ``repo_root=tmp_path`` are unaffected.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 def _inner_argv(result):
     """Recover the EXACT governed/bounded argv embedded in the ce-ops#26 wrapper.
 

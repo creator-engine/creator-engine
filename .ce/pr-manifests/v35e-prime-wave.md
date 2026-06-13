@@ -84,12 +84,15 @@ Cross-cutting (touched by multiple E-steps):
 - **`validators/tests/unit/test_v3_installer.py`** *(M)* — installer-core tests across the E-steps.
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* — version-boundary tests.
 
+ce-ops#53 amend (xdist isolation):
+- **`validators/tests/unit/test_launch_runtime.py`** *(M)* — per-test seat-state isolation (autouse `tmp_path`-chdir). The E-wave's added tests perturbed xdist scheduling and surfaced a latent shared-path collision (`./.ce/state/dispatches/<seat_id>/sentinel-wrapper.sh`) among the `session="s"` launch tests → flaky `StopIteration`. Pre-existing defect, not E-wave content; fix isolates each test's default state root.
+
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=35
+AUTHORIZED_PATHS_COUNT=36
 
-AUTHORIZED_PATHS_SHA256=44573ed711fba34cae45f246393d1d1965753f41add8506120b3c29b2e7f2837
+AUTHORIZED_PATHS_SHA256=e40fc6103b94fb2f69d17129215db2b94ba2158d353cbd240796edad35c86998
 
 ```text
 .ce/pr-manifests/v35e-prime-wave.md
@@ -119,6 +122,7 @@ validators/tests/integration/test_greenfield_first_project.py
 validators/tests/integration/test_install_bootstrap.py
 validators/tests/integration/test_onboard_apply_greenfield.py
 validators/tests/unit/test_install_answers.py
+validators/tests/unit/test_launch_runtime.py
 validators/tests/unit/test_onboard_apply.py
 validators/tests/unit/test_packaging_contract.py
 validators/tests/unit/test_v3_cli.py
