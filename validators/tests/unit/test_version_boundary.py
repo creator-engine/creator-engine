@@ -86,7 +86,8 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#43 added the seat/venue retirement reaper — the substrate-neutral
     # policy fold (``seat_reaper``) + the per-substrate executors
     # (``reaper_executors``): 38 -> 40.
-    assert len(ver.V3_RUNTIME) == 40
+    # ce-ops#34 RS-1 added the AuthorityResolver seam: 40 -> 41.
+    assert len(ver.V3_RUNTIME) == 41
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
