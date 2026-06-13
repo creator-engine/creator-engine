@@ -744,15 +744,117 @@ def test_sudo_grant_diff_scoped_grant_covers_planned_installs():
 
 
 def test_sudo_grant_diff_refuses_drift_outside_the_grant():
+    # ce-ops#71 §A.1: only runsc/proxy are privileged now (git/python/uv are
+    # user-level ALWAYS); a privileged install OUTSIDE the grant → refuse.
     plan = inst.plan_dependencies(
-        inst.REQUIRED_DEPENDENCIES,
-        {"git": False, "python": True, "runsc": False, "proxy": True, "uv": True},
+        2,
+        {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True},
     )
-    diff = inst.sudo_grant_diff(["runsc"], plan)   # git drifted INTO the install set
-    assert not diff.converged and diff.uncovered == ("git",)
+    diff = inst.sudo_grant_diff(["runsc"], plan)   # proxy drifted outside the grant
+    assert not diff.converged and diff.uncovered == ("proxy",)
     # no grant at all → every privileged install needs the ask
     diff = inst.sudo_grant_diff(None, plan)
-    assert set(diff.uncovered) == {"git", "runsc"}
+    assert set(diff.uncovered) == {"runsc", "proxy"}
+    # git/python/uv missing is now user-level → never a sudo install, converges
+    user_level = inst.plan_dependencies(
+        2, {"git": False, "python": False, "runsc": True, "proxy": True, "uv": False}
+    )
+    assert inst.sudo_grant_diff([], user_level).converged
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#71 §A.1–A.3 — the tier-aware planner + the three-tier fail-closed walk.
+# The tier only changes WHAT is in the plan; the SAME sudo_grant_diff converges
+# for Tier 0/1 (zero root) and refuses for Tier 2 — no new fail-closed machinery.
+# ---------------------------------------------------------------------------
+def test_tier_deps_shape_and_sudo_set():
+    assert inst.TIER_DEPS[0] == ("git", "python", "uv")
+    assert inst.TIER_DEPS[1] == ("git", "python", "uv")
+    assert inst.TIER_DEPS[2] == ("git", "python", "uv", "runsc", "proxy")
+    # only the gVisor pairing is privileged; git/python/uv are user-level always
+    assert inst._SUDO_TOOLS == frozenset({"runsc", "proxy"})
+    # the flat default name still points at the heavy Tier-2 set (back-compat)
+    assert inst.REQUIRED_DEPENDENCIES == inst.TIER_DEPS[2]
+    assert inst.DEFAULT_ISOLATION_TIER == 2
+
+
+def test_plan_dependencies_default_tier_preserves_today():
+    # no tier arg == the flat Tier-2 set, preserving today's plan
+    probe = {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True}
+    assert (
+        inst.plan_dependencies(probe=probe).to_install
+        == inst.plan_dependencies(2, probe).to_install
+    )
+
+
+def test_plan_dependencies_accepts_explicit_iterable_backcompat():
+    # the pre-tier flat call (callers pass REQUIRED_DEPENDENCIES) still works
+    plan = inst.plan_dependencies(inst.REQUIRED_DEPENDENCIES, {"uv": False})
+    assert "uv" in plan.to_install
+
+
+def test_plan_dependencies_rejects_unknown_tier():
+    with pytest.raises(inst.InstallRefused):
+        inst.plan_dependencies(3, {})
+
+
+def test_tier0_converges_with_empty_grant():
+    # governance-only: git/python/uv only, none privileged — even all-missing
+    plan = inst.plan_dependencies(0, {"git": False, "python": False, "uv": False})
+    assert plan.needs_sudo is False
+    assert "runsc" not in {s.name for s in plan.steps}
+    assert "proxy" not in {s.name for s in plan.steps}
+    diff = inst.sudo_grant_diff([], plan)
+    assert diff.converged and diff.uncovered == ()
+
+
+def test_tier1_converges_with_empty_grant_zero_root():
+    # unprivileged OS-native sandbox: same dep set; sandbox primitives are
+    # probe-only, never auto-sudo → zero root with sudo_grant: []
+    plan = inst.plan_dependencies(1, {"git": True, "python": True, "uv": True})
+    assert plan.needs_sudo is False
+    # the privileged pairing is NEVER in a Tier-1 plan
+    assert "runsc" not in {s.name for s in plan.steps}
+    assert "proxy" not in {s.name for s in plan.steps}
+    assert inst.sudo_grant_diff([], plan).converged
+
+
+def test_tier2_fails_closed_with_empty_grant():
+    # the heavy opt-in: runsc/proxy missing → privileged installs → NOT converged
+    probe = {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True}
+    plan = inst.plan_dependencies(2, probe)
+    assert plan.needs_sudo is True
+    diff = inst.sudo_grant_diff([], plan)
+    assert not diff.converged and set(diff.uncovered) == {"runsc", "proxy"}
+    # Tier 2 still requires the explicit grant — unchanged from today
+    assert inst.sudo_grant_diff(["runsc", "proxy"], plan).converged
+
+
+def test_build_install_plan_seam_and_tier_are_tier_conditional():
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+    probe = {"git": True, "python": True, "runsc": True, "proxy": True, "uv": True}
+    gvisor = "the runtime backend provisioning (gVisor runsc + egress proxy)"
+    # Tier 2 (default) emits the gVisor seam + carries the tier
+    p2 = inst.build_install_plan(SPEC, sig, pinned_keys=PINNED, probe=probe)
+    assert gvisor in p2["deferred_live_seams"]
+    assert p2["profile"]["isolation_tier"] == 2
+    assert p2["dependencies"]["isolation_tier"] == 2
+    # Tier 0/1 omit it (zero-root; no runtime backend provisioning)
+    for t in (0, 1):
+        p = inst.build_install_plan(SPEC, sig, pinned_keys=PINNED, probe=probe, tier=t)
+        assert gvisor not in p["deferred_live_seams"]
+        assert p["profile"]["isolation_tier"] == t
+        assert p["dependencies"]["needs_sudo"] is False
+
+
+def test_build_profile_carries_isolation_tier():
+    assert inst.build_profile().isolation_tier == 2
+    assert inst.build_profile(isolation_tier=1).isolation_tier == 1
+    assert inst.build_profile(isolation_tier=0).runtime_policy == {
+        "spend_cap_enforcement": "enforce"
+    }
+    with pytest.raises(inst.InstallRefused):
+        inst.build_profile(isolation_tier=9)
 
 
 # ---------------------------------------------------------------------------
