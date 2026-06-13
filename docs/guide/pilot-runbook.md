@@ -6,11 +6,10 @@ the branded `ce session` frame, on your own agent. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
 contracts/designs.*
 
-> **Pilot scope.** This runbook is the operator path for the **CI-pure** product
-> surface. The **live install drive** (the privileged `curl|bash` / backend
-> provisioning) and the **interactive GitHub-App click** are the first-pilot live
-> seams — they are the only steps that touch your machine + your GitHub account,
-> and you (the human) approve them explicitly.
+> **Pilot scope.** The E1 one-liner now performs a real authenticated inventory
+> bootstrap: it verifies the signed spec, installs CE into a user-local venv from
+> hash-pinned artifacts, and runs `onboard --inventory`. Runtime provisioning and
+> the interactive GitHub-App click remain later human-approved apply seams.
 
 ## 0. What you need
 
@@ -24,10 +23,12 @@ You type nothing during setup; you approve only **sudo** (privileged dependency
 installs) and the **GitHub-App authorization click**. Contract:
 [`../contracts/installer.md`](../contracts/installer.md).
 
-- **One-liner** — `curl -fsSL https://creator-engine.dev/install.sh | bash`. It
-  detects dependencies (`git · python · runsc · proxy · uv`), proposes a single
-  batched sudo install for whatever is missing (idempotent; decline gracefully),
-  and hands off to the verified onboard.
+- **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
+  It fetches the signed spec and trust root, verifies the SSHSIG before any
+  persistent mutation, fetches the Pages mirror wheelhouse and answers schema
+  from signed-manifest-pinned hashes, creates/reuses a user-local venv, and runs
+  authenticated `onboard --inventory`. It does not run sudo, provision the
+  runtime, mutate GitHub, or create/adopt a project.
 - **Agent-native** — point your agent at `https://creator-engine.dev/llms-install.md`.
   Your agent fetches the **signed** install spec, **verifies it against the pinned
   CE public key before executing**, and assists the GitHub-App step.
@@ -40,11 +41,12 @@ every answer **upfront, IaC-style**, in a committable
 or answer interactively as each journey step batches its asks. The agent loop:
 
 ```
-ce onboard --spec llms-install.md --inventory          # every input + live status
+# the one-liner runs this once with verified absolute paths:
+<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
 # sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
+ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --plan
+ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --apply --non-interactive
 ```
 
 `--plan` shows the full plan plus the *exact remaining asks*;
@@ -55,12 +57,9 @@ of ever asking (unattended/VPS runs). The one-liner passes a file through too:
 **except a weaker grader** — weakening (the cost opt-out, protections below
 the CE floor) requires your explicit ratified binding, educate-first.
 
-The installer exposes the CE CLI as **`ce`** (this is a v3-only install — there is
-no v1 to collide with). Preview the plan first with a dry-run:
-
-```
-ce onboard --spec llms-install.md --sig-value <published>
-```
+The E1 venv installs both `ce` and `cev3`; the bootstrap invokes `cev3` by
+absolute path. Durable user-facing `ce` exposure is user-local and belongs to
+the later apply path, not a system-wide E1 symlink.
 
 ### Cost safety (the #1 pilot question)
 
@@ -77,12 +76,12 @@ So even opted-out, you are never blind — see
 
 ## 2. Provision the repo + the GitHub App
 
-The installer provisions the Plane-C runtime box (gVisor `runsc` + a deny-by-default
-egress proxy) and the **GitHub App** (its private key lives on tmpfs and mints a
-JIT scoped token only at open/merge, then revokes — never in the box). You complete
-the **GitHub-App authorization click** in your browser. CE opens and merges as the
-**App bot identity** (≠ you), so on a solo repo **you are the reviewer** and
-no-self-approval holds.
+The later apply path provisions the Plane-C runtime box (gVisor `runsc` + a
+deny-by-default egress proxy) and the **GitHub App** (its private key lives on
+tmpfs and mints a JIT scoped token only at open/merge, then revokes — never in
+the box). You complete the **GitHub-App authorization click** in your browser.
+CE opens and merges as the **App bot identity** (≠ you), so on a solo repo **you
+are the reviewer** and no-self-approval holds.
 
 The GitHub leg is fully decomposed and **re-run convergent**:
 
@@ -175,11 +174,11 @@ real first Scope, set the Budget, ratify it, drive the Build, review the PR in a
 distinct venue, and merge through `ce merge --apply`. From there, every change is
 a governed, cost-safe, evidence-backed Scope.
 
-## Deferred (the first live pilot exercises these)
+## Deferred (after E1)
 
-The live install drive (privileged execution + backend provisioning) · the
-interactive GitHub-App click · the live status-line tap · the live run dispatch.
-These are the human-gated live seams the CI-pure surface is built to drive.
+Runtime provisioning · the interactive GitHub-App click · live status-line tap ·
+live run dispatch. These are the human-gated live seams the authenticated
+inventory bootstrap prepares but does not claim.
 
 ## Companions
 

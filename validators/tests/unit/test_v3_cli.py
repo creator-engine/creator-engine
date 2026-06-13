@@ -1150,6 +1150,12 @@ signature:
     return spec
 
 
+def _trust_root(tmp_path, key_material="ce-root-v1 ssh-ed25519 TESTKEY"):
+    trust = tmp_path / "ce-root-v1"
+    trust.write_text(key_material + "\n", encoding="utf-8")
+    return trust
+
+
 def _answers_file(tmp_path, content=_GOOD_ANSWERS_YAML):
     path = tmp_path / "ce-install.answers.yaml"
     path.write_text(content, encoding="utf-8")
@@ -1241,6 +1247,61 @@ def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
     rows = {row["key"]: row for row in payload["inventory"]}
     assert rows["github.bootstrap_token"]["status"] == "secret (ref required)"
     assert rows["cost.profile"]["status"] == "default:default"
+
+
+def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, monkeypatch):
+    calls = []
+
+    def fake_runner(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", fake_runner)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_inventory"
+    assert payload["self_attested"] is False
+    assert payload["verified"] == {"ok": True, "key_id": "ce-root-v1"}
+    assert calls and calls[0]["signature"] == b"sig"
+    assert calls[0]["allowed_signers"].startswith("ce-root-v1 ssh-ed25519")
+    assert calls[0]["namespace"] == v3_installer.SSH_SIG_NAMESPACE
+
+
+def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys):
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "signature block missing" in payload["detail"]
+
+
+def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    spec = _signed_spec(tmp_path)
+    spec.write_text(spec.read_text(encoding="utf-8") + "\ntamper\n", encoding="utf-8")
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(spec),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "content_sha256 does not match" in payload["detail"]
 
 
 def test_onboard_inventory_derives_greenfield_inputs(tmp_path, capsys, monkeypatch):

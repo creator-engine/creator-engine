@@ -2236,8 +2236,59 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     apply_verifier = None
     apply_signature: dict[str, Any] | None = None
     spec_for_plan = spec_bytes
-    self_attested = args.sig_value is None and not apply_mode
-    if apply_mode or args.sig_algo == v3_installer.SSH_ED25519_ALGO:
+    authentic_mode = bool(getattr(args, "require_authentic", False) or getattr(args, "trust_root", None))
+    self_attested = args.sig_value is None and not apply_mode and not authentic_mode
+    if authentic_mode:
+        if not args.trust_root:
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · onboard refused: --require-authentic requires --trust-root"],
+                {"error": "trust_root_required"},
+            )
+        trust_root_path = Path(args.trust_root)
+        try:
+            trust_root_text = trust_root_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · onboard refused: trust root unreadable: {exc}"],
+                {"error": "trust_root_unreadable", "detail": str(exc)},
+            )
+        fetched_keys = v3_installer.parse_allowed_signers(trust_root_text)
+        usable_keys = {
+            key_id: key_material
+            for key_id, key_material in fetched_keys.items()
+            if key_id in v3_installer.PINNED_KEYS
+        }
+        if not usable_keys:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard REFUSED: signature_refused: no fetched trust-root key id is pinned by this wheel"],
+                {"error": "refused", "detail": "signature_refused: no fetched trust-root key id is pinned by this wheel"},
+            )
+        apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
+        try:
+            signed = v3_installer.parse_signed_install_spec(spec_bytes)
+            spec_for_plan = v3_installer.canonical_spec_bytes(spec_bytes)
+            signature = signed.signature
+            verified = v3_installer.require_verified(
+                spec_for_plan,
+                signature,
+                pinned_keys=usable_keys,
+                verifier=apply_verifier,
+            )
+        except v3_installer.InstallRefused as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard REFUSED: {exc}"],
+                {"error": "refused", "detail": str(exc)},
+            )
+        self_attested = False
+    elif apply_mode or args.sig_algo == v3_installer.SSH_ED25519_ALGO:
         apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
         if args.sig_value is not None:
             apply_signature = {
@@ -3047,6 +3098,10 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="signature algorithm (apply requires ssh-ed25519)")
     p_onboard.add_argument("--content-sha256", default=None,
                            help="canonical signed-spec digest when --sig-value is supplied out of band")
+    p_onboard.add_argument("--trust-root", default=None,
+                           help="OpenSSH allowed_signers trust root; implies authentic SSHSIG verification")
+    p_onboard.add_argument("--require-authentic", action="store_true",
+                           help="refuse sha256 self-attestation; require embedded SSHSIG + --trust-root")
     p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
                            help="install mode")
     p_onboard.add_argument("--answers", default=None,

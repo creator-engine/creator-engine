@@ -312,6 +312,316 @@ def require_verified(
     return result
 
 
+@dataclass(frozen=True)
+class SignedInstallSpec:
+    """The embedded SSHSIG block plus the canonical content floor."""
+
+    signature: dict[str, Any]
+    content_sha256: str
+    canonical_sha256: str
+
+
+@dataclass(frozen=True)
+class BootstrapWheel:
+    filename: str
+    url: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class PythonAcquisition:
+    tool: str
+    version: str
+    url: str
+    sha256: str
+    command: str
+
+
+@dataclass(frozen=True)
+class BootstrapManifest:
+    artifact_manifest_version: int
+    package_name: str
+    package_version: str
+    python_requires: str
+    artifact_base_url: str
+    sha256s_url: str
+    sha256s_sha256: str
+    install_sh_url: str
+    install_sh_sha256s_entry: str
+    answers_schema_url: str
+    answers_schema_sha256: str
+    app_wheel: str
+    required_wheels: tuple[BootstrapWheel, ...]
+    python_acquisition: PythonAcquisition
+
+    def wheel_by_filename(self) -> dict[str, BootstrapWheel]:
+        return {wheel.filename: wheel for wheel in self.required_wheels}
+
+
+INSTALL_FAILURE_CLASSES = frozenset({
+    "network_fetch_failed",
+    "pages_mirror_not_ready",
+    "trust_root_unreadable",
+    "signature_refused",
+    "artifact_hash_mismatch",
+    "missing_bootstrap_dependency",
+    "python_acquisition_failed",
+    "python_venv_unavailable",
+    "unsupported_platform",
+    "venv_install_failed",
+    "entrypoint_missing",
+    "onboard_inventory_failed",
+})
+
+
+def parse_embedded_signature_block(spec_bytes: bytes | str) -> dict[str, str]:
+    """Extract the served spec's embedded ``signature:`` block (PURE).
+
+    The block is intentionally a tiny line-oriented subset so shell can parse it
+    before Python exists. Required fields are returned as strings; malformed or
+    incomplete blocks refuse before any caller can proceed.
+    """
+    text = spec_bytes.decode("utf-8") if isinstance(spec_bytes, bytes) else spec_bytes
+    fields: dict[str, str] = {}
+    in_signature = False
+    for raw_line in text.splitlines():
+        if raw_line.strip() == "signature:":
+            in_signature = True
+            continue
+        if not in_signature:
+            continue
+        if raw_line.startswith("  "):
+            key, sep, value = raw_line.strip().partition(":")
+            if sep:
+                fields[key] = value.strip()
+            continue
+        if raw_line.strip():
+            break
+    required = {"key_id", "algo", "namespace", "value", "content_sha256"}
+    missing = sorted(required - fields.keys())
+    if missing:
+        raise InstallRefused(
+            "signature_refused: install spec signature block missing "
+            + ", ".join(missing)
+        )
+    if fields["namespace"] != SSH_SIG_NAMESPACE:
+        raise InstallRefused(
+            f"signature_refused: namespace {fields['namespace']!r} is not {SSH_SIG_NAMESPACE!r}"
+        )
+    if fields["algo"] != SSH_ED25519_ALGO:
+        raise InstallRefused(
+            f"signature_refused: algo {fields['algo']!r} is not {SSH_ED25519_ALGO!r}"
+        )
+    if not _HEX64_RE.match(fields["content_sha256"]):
+        raise InstallRefused("signature_refused: content_sha256 is not a 64-hex digest")
+    return fields
+
+
+def parse_signed_install_spec(spec_bytes: bytes | str) -> SignedInstallSpec:
+    """Parse and content-floor-check the embedded SSHSIG install spec.
+
+    This does not run an asymmetric primitive; it prepares the exact canonical
+    bytes and signature dict that ``require_verified(..., ssh_ed25519_verifier)``
+    consumes at the CLI/shell I/O edge.
+    """
+    fields = parse_embedded_signature_block(spec_bytes)
+    canonical = canonical_spec_bytes(spec_bytes)
+    canonical_sha = content_digest(canonical)
+    if fields["content_sha256"] != canonical_sha:
+        raise InstallRefused(
+            "signature_refused: signed spec content_sha256 does not match canonical bytes"
+        )
+    signature = {
+        "key_id": fields["key_id"],
+        "algo": fields["algo"],
+        "value": fields["value"],
+    }
+    return SignedInstallSpec(
+        signature=signature,
+        content_sha256=fields["content_sha256"],
+        canonical_sha256=canonical_sha,
+    )
+
+
+def _strip_inline_comment(value: str) -> str:
+    return value.split(" #", 1)[0].strip()
+
+
+def _valid_sha256(value: Any) -> bool:
+    return isinstance(value, str) and bool(_HEX64_RE.match(value))
+
+
+def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
+    """Parse the line-oriented ``artifact_manifest:`` block from llms-install.md.
+
+    The format deliberately avoids YAML-only features: two-space scalar keys,
+    ``required_wheels`` list items with ``filename/url/sha256``, and a
+    ``python_acquisition`` map. That keeps shell and this pure parser in parity.
+    """
+    text = spec_bytes.decode("utf-8") if isinstance(spec_bytes, bytes) else spec_bytes
+    lines = text.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "artifact_manifest:")
+    except StopIteration as exc:
+        raise InstallRefused("missing_bootstrap_manifest: artifact_manifest block missing") from exc
+
+    scalars: dict[str, str] = {}
+    wheels: list[dict[str, str]] = []
+    python_acquisition: dict[str, str] = {}
+    section: str | None = None
+    current_wheel: dict[str, str] | None = None
+
+    for raw_line in lines[start + 1:]:
+        if raw_line and not raw_line.startswith("  "):
+            break
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if line == "  required_wheels:":
+            section = "required_wheels"
+            continue
+        if line == "  python_acquisition:":
+            if current_wheel is not None:
+                wheels.append(current_wheel)
+                current_wheel = None
+            section = "python_acquisition"
+            continue
+        if section == "required_wheels":
+            if line.startswith("    - filename: "):
+                if current_wheel is not None:
+                    wheels.append(current_wheel)
+                current_wheel = {"filename": _strip_inline_comment(line.split(": ", 1)[1])}
+                continue
+            if line.startswith("      ") and current_wheel is not None:
+                key, sep, value = line.strip().partition(":")
+                if sep:
+                    current_wheel[key] = _strip_inline_comment(value)
+                continue
+        if section == "python_acquisition" and line.startswith("    "):
+            key, sep, value = line.strip().partition(":")
+            if sep:
+                python_acquisition[key] = _strip_inline_comment(value)
+            continue
+        if line.startswith("  "):
+            key, sep, value = line.strip().partition(":")
+            if sep:
+                scalars[key] = _strip_inline_comment(value)
+    if current_wheel is not None:
+        wheels.append(current_wheel)
+
+    required_scalars = {
+        "artifact_manifest_version",
+        "package_name",
+        "package_version",
+        "python_requires",
+        "artifact_base_url",
+        "sha256s_url",
+        "sha256s_sha256",
+        "install_sh_url",
+        "install_sh_sha256s_entry",
+        "answers_schema_url",
+        "answers_schema_sha256",
+        "app_wheel",
+    }
+    missing = sorted(required_scalars - scalars.keys())
+    if missing:
+        raise InstallRefused("bad_bootstrap_manifest: missing " + ", ".join(missing))
+    try:
+        version = int(scalars["artifact_manifest_version"])
+    except ValueError as exc:
+        raise InstallRefused("bad_bootstrap_manifest: artifact_manifest_version must be an integer") from exc
+    if version != 1:
+        raise InstallRefused(f"bad_bootstrap_manifest: unsupported version {version}")
+    for key in ("sha256s_sha256", "answers_schema_sha256"):
+        if not _valid_sha256(scalars[key]):
+            raise InstallRefused(f"bad_bootstrap_manifest: {key} is not a 64-hex digest")
+    parsed_wheels: list[BootstrapWheel] = []
+    for wheel in wheels:
+        wheel_missing = sorted({"filename", "url", "sha256"} - wheel.keys())
+        if wheel_missing:
+            raise InstallRefused(
+                "bad_bootstrap_manifest: wheel entry missing " + ", ".join(wheel_missing)
+            )
+        if not _valid_sha256(wheel["sha256"]):
+            raise InstallRefused(
+                f"bad_bootstrap_manifest: wheel {wheel['filename']} sha256 is not 64-hex"
+            )
+        parsed_wheels.append(BootstrapWheel(wheel["filename"], wheel["url"], wheel["sha256"]))
+    if not parsed_wheels:
+        raise InstallRefused("bad_bootstrap_manifest: required_wheels is empty")
+    if scalars["app_wheel"] not in {wheel.filename for wheel in parsed_wheels}:
+        raise InstallRefused("bad_bootstrap_manifest: app_wheel is not in required_wheels")
+
+    required_python = {"tool", "version", "url", "sha256", "command"}
+    missing_python = sorted(required_python - python_acquisition.keys())
+    if missing_python:
+        raise InstallRefused("bad_bootstrap_manifest: python_acquisition missing " + ", ".join(missing_python))
+    if not _valid_sha256(python_acquisition["sha256"]):
+        raise InstallRefused("bad_bootstrap_manifest: python_acquisition sha256 is not 64-hex")
+    return BootstrapManifest(
+        artifact_manifest_version=version,
+        package_name=scalars["package_name"],
+        package_version=scalars["package_version"],
+        python_requires=scalars["python_requires"],
+        artifact_base_url=scalars["artifact_base_url"],
+        sha256s_url=scalars["sha256s_url"],
+        sha256s_sha256=scalars["sha256s_sha256"],
+        install_sh_url=scalars["install_sh_url"],
+        install_sh_sha256s_entry=scalars["install_sh_sha256s_entry"],
+        answers_schema_url=scalars["answers_schema_url"],
+        answers_schema_sha256=scalars["answers_schema_sha256"],
+        app_wheel=scalars["app_wheel"],
+        required_wheels=tuple(parsed_wheels),
+        python_acquisition=PythonAcquisition(
+            tool=python_acquisition["tool"],
+            version=python_acquisition["version"],
+            url=python_acquisition["url"],
+            sha256=python_acquisition["sha256"],
+            command=python_acquisition["command"],
+        ),
+    )
+
+
+def parse_sha256s(text: str) -> dict[str, str]:
+    """Parse a SHA256SUMS file into ``{filename: digest}`` for shell parity tests."""
+    parsed: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        digest, filename = fields[0], fields[-1].lstrip("*")
+        if _valid_sha256(digest):
+            parsed[filename] = digest
+    return parsed
+
+
+def build_bootstrap_artifact_plan(
+    manifest: BootstrapManifest,
+    *,
+    os_name: str,
+    machine: str,
+) -> dict[str, Any]:
+    """Select the signed E1 artifact set for injected platform facts."""
+    normalized_os = os_name.lower()
+    normalized_machine = machine.lower()
+    if normalized_os != "linux" or normalized_machine not in {"x86_64", "amd64"}:
+        raise InstallRefused(
+            f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
+            "E1 currently supports Linux x86_64 with CPython 3.14 wheels"
+        )
+    return {
+        "platform": "linux-x86_64-cp314",
+        "package": f"{manifest.package_name}=={manifest.package_version}",
+        "python_requires": manifest.python_requires,
+        "app_wheel": manifest.app_wheel,
+        "wheels": [wheel.__dict__ for wheel in manifest.required_wheels],
+        "python_acquisition": manifest.python_acquisition.__dict__,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dependency detection — detect-don't-assume, fix-with-permission (PURE)
 # ---------------------------------------------------------------------------

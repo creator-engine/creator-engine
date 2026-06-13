@@ -255,6 +255,83 @@ def test_content_floor_regression_unbroken():
     assert inst.verify_spec(SPEC + b"x", sig, pinned_keys=PINNED).ok is False
 
 
+def _fixture_signed_install_spec() -> str:
+    canonical = """\
+kind: ce-install-spec
+signature:
+  key_id: ce-root-v1
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: <published-with-this-spec>
+  content_sha256: <published-with-this-spec>
+"""
+    digest = inst.content_digest(inst.canonical_spec_bytes(canonical))
+    return canonical.replace("  value: <published-with-this-spec>", "  value: c2ln").replace(
+        "  content_sha256: <published-with-this-spec>",
+        f"  content_sha256: {digest}",
+    )
+
+
+def test_parse_signed_install_spec_extracts_embedded_sshsig_and_content_floor():
+    signed = inst.parse_signed_install_spec(_fixture_signed_install_spec())
+    assert signed.signature == {
+        "key_id": "ce-root-v1",
+        "algo": inst.SSH_ED25519_ALGO,
+        "value": "c2ln",
+    }
+    assert signed.content_sha256 == signed.canonical_sha256
+
+
+def test_parse_signed_install_spec_rejects_tampered_content_floor():
+    with pytest.raises(inst.InstallRefused, match="content_sha256 does not match"):
+        inst.parse_signed_install_spec(_fixture_signed_install_spec() + "\ntamper\n")
+
+
+def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
+    manifest = inst.parse_bootstrap_manifest(_SPEC_TEXT)
+    assert manifest.artifact_manifest_version == 1
+    assert manifest.package_name == "creator-engine-validator"
+    assert manifest.package_version == "0.2.0"
+    assert manifest.python_requires == ">=3.14"
+    assert manifest.app_wheel == "creator_engine_validator-0.2.0-py3-none-any.whl"
+    assert manifest.answers_schema_url == "https://creator-engine.dev/schemas/install-answers.schema.yaml"
+    assert manifest.python_acquisition.tool == "uv"
+    assert manifest.python_acquisition.version == "0.11.21"
+    wheels = manifest.wheel_by_filename()
+    assert manifest.app_wheel in wheels
+    assert wheels["attrs-26.1.0-py3-none-any.whl"].sha256 == (
+        "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"
+    )
+
+
+def test_v3_installer_rejects_bad_bootstrap_manifest():
+    bad_missing_app = _SPEC_TEXT.replace(
+        "  app_wheel: creator_engine_validator-0.2.0-py3-none-any.whl\n",
+        "",
+    )
+    with pytest.raises(inst.InstallRefused, match="missing app_wheel"):
+        inst.parse_bootstrap_manifest(bad_missing_app)
+    bad_version = _SPEC_TEXT.replace("  artifact_manifest_version: 1\n", "  artifact_manifest_version: 2\n")
+    with pytest.raises(inst.InstallRefused, match="unsupported version 2"):
+        inst.parse_bootstrap_manifest(bad_version)
+    bad_hash = _SPEC_TEXT.replace(
+        "    sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+        "    sha256: nope",
+    )
+    with pytest.raises(inst.InstallRefused, match="sha256 is not 64-hex"):
+        inst.parse_bootstrap_manifest(bad_hash)
+
+
+def test_sha256s_parser_and_platform_plan():
+    sums = "a" * 64 + "  install.sh\n" + "b" * 64 + "  *wheel.whl\n"
+    assert inst.parse_sha256s(sums) == {"install.sh": "a" * 64, "wheel.whl": "b" * 64}
+    manifest = inst.parse_bootstrap_manifest(_SPEC_TEXT)
+    plan = inst.build_bootstrap_artifact_plan(manifest, os_name="Linux", machine="x86_64")
+    assert plan["platform"] == "linux-x86_64-cp314"
+    with pytest.raises(inst.InstallRefused, match="unsupported_platform"):
+        inst.build_bootstrap_artifact_plan(manifest, os_name="Darwin", machine="arm64")
+
+
 # --- the E2E proof: a REAL detached SSHSIG, stock ssh-keygen, clean dir --------
 def _real_ssh_keygen_runner(**kwargs):
     """The injected runner the CLI/live-drive uses: shell `ssh-keygen -Y verify`

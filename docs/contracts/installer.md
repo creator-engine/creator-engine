@@ -1,4 +1,4 @@
-# Contract: Two-mode installer + onboard apply (G-7.4 · E.2/E.3)
+# Contract: Two-mode installer + onboard apply (G-7.4 · E.1/E.2/E.3/E.4)
 
 **Status:** Canonical. The CI-pure decision substrate is
 `creator_engine_validator/v3_installer.py`; the served artifacts are
@@ -14,19 +14,51 @@ check against `schemas/install-answers.schema.yaml`.
 The **operator-typeless** install: a developer installs CE without typing setup
 commands. Two modes, one human contract.
 
-- **One-liner** — `curl …/install.sh | bash` → `onboard` (the OpenClaw
-  `curl … | bash` pattern). Served + hash-published.
+- **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL …/install.sh | bash`
+  → authenticated `onboard --inventory` from a user-local venv. Served +
+  hash-published.
 - **Agent-native** — the operator points their agent at the CE site; the agent
   fetches the **signed install spec** (`llms-install.md`), **verifies it against a
-  pinned CE public key BEFORE executing**, and assists the interactive GitHub-App
-  step.
+  pinned CE public key BEFORE executing**, and assists from the same inventory
+  artifact.
 
-Both provision the runtime backend (gVisor `runsc` + a deny-by-default egress
-proxy) + the GitHub App (PEM-on-tmpfs custody → a JIT scoped token, never in the
-box) + the policy bundle, and **expose the v3 CLI as `ce`** (see below).
+E1 stops at authenticated inventory. It does **not** run sudo, provision the
+runtime backend, automate the GitHub-App click, mutate branch protections, or
+create/adopt a project. Those remain explicit later apply gates. E1 does create
+or reuse the venv and proves the `cev3` entry point before inventory.
 
-**Human contract:** the operator types nothing and approves only **sudo**
-(privileged dependency installs) + the **GitHub-App authorization click**.
+**Human contract:** the operator types nothing during E1. Later apply gates are
+where the human approves sudo-scoped host changes and the GitHub-App
+authorization click.
+
+## E1 real bootstrap
+
+`docs/install.sh` is the shell I/O edge. Its ordered contract is:
+
+1. Fetch only `llms-install.md` and `keys/ce-root-v1` into a mode-0700 temp
+   workspace.
+2. Reconstruct canonical bytes, check `content_sha256`, verify the embedded
+   SSHSIG with stock `ssh-keygen -Y verify`, and refuse before persistent
+   mutation on any failure.
+3. Parse the signature-covered artifact manifest from `llms-install.md`.
+4. Fetch `downloads/0.2.0/SHA256SUMS`, verify its signed-manifest hash, and
+   fetch/hash-check every required wheel and the answers schema.
+5. If CPython `>=3.14` is absent, fetch the manifest-pinned uv 0.11.21 tarball,
+   hash-check it before extraction/execution, and run `uv python install 3.14`
+   in user space.
+6. Build a staging venv under
+   `${CE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/creator-engine}/bootstrap`,
+   install the validator offline from the verified wheelhouse, prove `cev3
+   --help`, and atomically promote or reuse the existing matching venv.
+7. Execute:
+
+   ```text
+   <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
+   ```
+
+The Pages mirror lives under `docs/downloads/0.2.0/`. Its `SHA256SUMS` publishes
+the wheel hashes and the `install.sh` hash; the signed spec pins the
+`SHA256SUMS` hash and the answers-schema hash.
 
 ## One engine, two modes — the answers file + the input inventory (v3.5-E.3)
 
@@ -246,6 +278,11 @@ The served `llms-install.md` carries a **real detached OpenSSH signature
 breaks the install-time bootstrap circularity (you should not need `ce` to trust
 the spec that installs `ce`).
 
+E1 implementation branches hold at the signing seam with `value:` and
+`content_sha256:` placeholders after all code, docs, wheelhouse, and mirror
+artifacts are otherwise green. The release file carries the real values only
+after the Operator offline-key signing act.
+
 - **Trust root** — `docs/keys/ce-root-v1` (Pages → `creator-engine.dev/keys/ce-root-v1`,
   extension-less) is an OpenSSH `allowed_signers` file: one
   `ce-root-v1 ssh-ed25519 <pubkey>` line (the principal IS the `key_id`), listed
@@ -279,11 +316,11 @@ the spec that installs `ce`).
 `llms-install.md` §0.5 states the supported acquisition paths for `ce` itself —
 the served **one-liner** (`curl …/install.sh | bash`) and **clone + offline
 wheelhouse** — each with an **honest** integrity note: transport integrity is TLS
-(+ the published hash for `install.sh`); the cryptographically **verified** trust
-anchor for the install *procedure* is this signed spec (§0), not the one-liner.
-`install.sh`'s own posture is stated, not overstated — it asserts no signature
-over its own body beyond TLS + the published hash, and takes no privileged action
-without an explicit batched sudo approval.
+(+ the published hash for `install.sh` in `docs/downloads/0.2.0/SHA256SUMS`);
+the cryptographically **verified** trust anchor for the install *procedure* is
+this signed spec (§0), not the one-liner. `install.sh`'s own posture is stated,
+not overstated — it asserts no signature over its own body beyond TLS + the
+published hash, and E1 takes no privileged action.
 
 ## Dependency resolution — detect-don't-assume, fix-with-permission
 
@@ -292,7 +329,8 @@ of `git · python · runsc · proxy · uv` (a **read-only** probe — the CLI do
 live via `shutil.which`; the planner is pure), then for the missing ones plans a
 **permission-gated, idempotent** install (`runsc`/`proxy`/`git`/`python` need
 sudo, **batched** into a single ask; `uv` is user-space). Present tools are
-skipped (idempotent); the operator may gracefully decline.
+skipped (idempotent); the operator may gracefully decline. E1 itself does not
+perform the privileged fix; missing `runsc`/`proxy` surface as inventory facts.
 
 ## The Default-vs-Custom profile + the cost opt-out
 
@@ -316,22 +354,21 @@ skipped (idempotent); the operator may gracefully decline.
 
 ## The `ce` exposure (Operator-ratified user-facing-name directive)
 
-The pilot installs **v3 only** (no v1 `ce` to collide with), so the installer
-exposes this CLI **as `ce`** (`ce_exposure_plan` — an alias/symlink onto the
-internal `cev3` console_script, or a v3-only distribution whose script is named
-`ce`). The user types `ce`; the internal monorepo entry `cev3` exists only to
-avoid the v1 collision in the coexistence repo and is never shown. A
-version-stamped user command (`cev3`/`cev4`) is the anti-pattern this avoids.
+The wheel installs both `ce` and `cev3`. E1 invokes the internal `cev3` by
+absolute venv path for the authenticated bootstrap handoff. A durable user
+`ce` exposure remains a user-local later step (`ce_exposure_plan`) and is never a
+system-wide symlink in E1. A version-stamped user command (`cev3`/`cev4`) remains
+the anti-pattern this avoids.
 
 ## Boundary (pure planner; live executor seam)
 
-CI-pure: verify-before-execute · the dependency planner · the profile/opt-out ·
-the answers/inventory engine (validation, precedence merge, missing list,
-sudo-grant diff) · the decomposed GitHub-leg planners · the `ce` exposure plan ·
-`ce onboard` dry-run. The E2 live executor is the composition seam: it drives
-host/runtime/GitHub/workspace actions only through injected drivers and verifies
-each leg before proceeding. The read-only *detection* (dependency probe; GitHub
-facts injected into planners) remains live; the privileged *fix* is explicit
+CI-pure: parser/canonicalization · artifact-manifest validation · dependency
+planner · profile/opt-out · answers/inventory engine · decomposed GitHub-leg
+planners · the `ce` exposure plan. Live E1 shell work is confined to
+`docs/install.sh`: network fetches, hash checks, venv creation, and authenticated
+inventory. The E2 live executor remains the composition seam for
+host/runtime/GitHub/workspace actions and verifies each leg before proceeding.
+The read-only *detection* remains live; the privileged *fix* is explicit
 `--apply`.
 
 ## Standing requirements honored
