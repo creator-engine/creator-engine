@@ -20,6 +20,24 @@ NOW = datetime(2026, 6, 12, 15, 0, 0, tzinfo=timezone.utc)
 WK = "creator-engine/ce-ops:issue:38"
 
 
+def _ts(delta=timedelta(0)):
+    """Clock-relative ISO-``Z`` timestamp derived from ``NOW`` (ce-ops#57).
+
+    The state-machine tests below pass ``now=NOW`` explicitly, so they are already
+    date-independent; deriving the claim/stale fixtures from ``NOW`` keeps the
+    active (``NOW - 1h``) vs stale (``NOW - 6h``) distinction honest under the 4h
+    (14400s) fence and free of any hardcoded wall-clock-sensitive date.
+    """
+    return (NOW + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.fixture(autouse=True)
+def _frozen_work_claim_clock(freeze_work_claim_clock):
+    # Defense-in-depth: any code path here that defaults to wall-clock ``now``
+    # still resolves to NOW, matching the explicit ``now=NOW`` call sites.
+    freeze_work_claim_clock(NOW)
+
+
 # --- fake GhRunner -----------------------------------------------------------
 
 
@@ -56,17 +74,19 @@ class FakeGh:
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments), stderr="")
 
 
-def _acquire_body(claim_id, holder="ce-dev-2", host="H", claimed_at="2026-06-12T14:00:00Z",
+def _acquire_body(claim_id, holder="ce-dev-2", host="H", claimed_at=None,
                   stale_after=14400, idem="idem-1"):
     return wc.render_marker({
         "kind": "ce-work-claim", "schema_version": 1, "action": "acquire",
         "work_key": WK, "claim_id": claim_id, "holder": holder, "host": host,
-        "claimed_at": claimed_at, "stale_after_seconds": stale_after, "idempotency_key": idem,
+        "claimed_at": claimed_at or _ts(timedelta(hours=-1)),
+        "stale_after_seconds": stale_after, "idempotency_key": idem,
     })
 
 
-def _comment(cid, body, created_at="2026-06-12T14:00:00Z"):
-    return {"id": cid, "body": body, "created_at": created_at, "user": {"login": "bot"}}
+def _comment(cid, body, created_at=None):
+    return {"id": cid, "body": body, "created_at": created_at or _ts(timedelta(hours=-1)),
+            "user": {"login": "bot"}}
 
 
 # --- ticket parser -----------------------------------------------------------
@@ -99,7 +119,7 @@ def test_parse_ticket_rejects_garbage():
 
 
 def test_parse_acquire_marker():
-    m = wc.parse_comment(wc.Comment(1, _acquire_body("wclaim-a"), "2026-06-12T14:00:00Z"))
+    m = wc.parse_comment(wc.Comment(1, _acquire_body("wclaim-a"), _ts(timedelta(hours=-1))))
     assert m.status == "acquire"
     assert m.work_key == WK
     assert m.claim_id == "wclaim-a"
@@ -177,8 +197,8 @@ def test_legacy_lock_released_by_later_deliverable():
 
 
 def test_deterministic_winner_earliest_claimed_at():
-    a = wc.Comment(2, _acquire_body("wclaim-a", claimed_at="2026-06-12T14:30:00Z"))
-    b = wc.Comment(1, _acquire_body("wclaim-b", claimed_at="2026-06-12T14:00:00Z"))
+    a = wc.Comment(2, _acquire_body("wclaim-a", claimed_at=_ts(timedelta(minutes=-30))))
+    b = wc.Comment(1, _acquire_body("wclaim-b", claimed_at=_ts(timedelta(hours=-1))))
     st = wc.compute_state([a, b], WK, NOW)
     assert st.active.claim_id == "wclaim-b"  # earlier claimed_at wins
     losers = [e for e in st.entries if e.status == "conflict"]
@@ -186,7 +206,7 @@ def test_deterministic_winner_earliest_claimed_at():
 
 
 def test_winner_tie_break_by_comment_id():
-    same = "2026-06-12T14:00:00Z"
+    same = _ts(timedelta(hours=-1))
     a = wc.Comment(5, _acquire_body("wclaim-a", claimed_at=same))
     b = wc.Comment(3, _acquire_body("wclaim-b", claimed_at=same))
     st = wc.compute_state([a, b], WK, NOW)
@@ -205,7 +225,7 @@ def test_release_matches_claim_id():
 
 
 def test_stale_status_does_not_release():
-    old = wc.Comment(1, _acquire_body("wclaim-a", claimed_at="2026-06-12T09:00:00Z"))
+    old = wc.Comment(1, _acquire_body("wclaim-a", claimed_at=_ts(timedelta(hours=-6))))
     st = wc.compute_state([old], WK, NOW)  # claimed 6h ago, fence 4h
     assert st.active is not None  # stale ≠ released
     assert st.active.stale is True
@@ -213,11 +233,11 @@ def test_stale_status_does_not_release():
 
 
 def test_explicit_takeover_supersedes():
-    acq = wc.Comment(1, _acquire_body("wclaim-old", claimed_at="2026-06-12T09:00:00Z"))
+    acq = wc.Comment(1, _acquire_body("wclaim-old", claimed_at=_ts(timedelta(hours=-6))))
     tk = wc.Comment(2, wc.render_marker({
         "kind": "ce-work-claim", "schema_version": 1, "action": "takeover",
         "work_key": WK, "claim_id": "wclaim-new", "supersedes_claim_id": "wclaim-old",
-        "holder": "ce-dev-3", "host": "H3", "claimed_at": "2026-06-12T14:30:00Z",
+        "holder": "ce-dev-3", "host": "H3", "claimed_at": _ts(timedelta(minutes=-30)),
         "takeover_reason": "stale", "observed_stale_after_seconds": 14400}))
     st = wc.compute_state([acq, tk], WK, NOW)
     assert st.active.claim_id == "wclaim-new"
@@ -291,7 +311,7 @@ def test_acquire_loses_reread_release_and_fail_closed():
             # inject an earlier-claimed foreign claim into the re-read
             gh.comments.insert(0, _comment(
                 999, _acquire_body("wclaim-earlier", holder="other", host="X",
-                                   claimed_at="2026-06-12T13:00:00Z")))
+                                   claimed_at=_ts(timedelta(hours=-2)))))
             state["posted"] = False  # only once
         result = original_call(argv, input_text)
         if method == "POST":

@@ -1,4 +1,5 @@
 import contextlib
+from datetime import datetime
 import io
 from pathlib import Path
 import sys
@@ -83,3 +84,34 @@ def tenants_root(repo_root: Path) -> Path:
 @pytest.fixture
 def validators_root(repo_root: Path) -> Path:
     return repo_root / "validators"
+
+
+@pytest.fixture
+def freeze_work_claim_clock(monkeypatch):
+    """Freeze the work-claim runtime clock to a supplied instant (ce-ops#57 guard).
+
+    The v3 dispatch path (``v3_cli._acquire_dispatch_claim``) and the ``ce claim``
+    CLI both call ``work_claims.acquire/status/release`` *without* an explicit
+    ``now``, so they evaluate staleness against wall-clock time. A fixed-date
+    claim fixture (``claimed_at = 2026-06-12T14:00:00Z``) therefore silently
+    crosses its stale fence on any later calendar date and flips
+    ``active_foreign_claim`` -> ``stale_foreign_claim`` — the #218 date-bomb.
+
+    This freezes ``work_claims.datetime`` to a ``datetime`` subclass whose
+    ``now()`` returns the supplied aware-UTC instant, while leaving
+    ``fromisoformat``/``max``/construction intact so ``compute_state`` keeps
+    working. Returns the frozen ``now`` for convenience.
+    """
+
+    def _freeze(now: datetime) -> datetime:
+        from creator_engine_validator import work_claims as wc
+
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now if tz is None else now.astimezone(tz)
+
+        monkeypatch.setattr(wc, "datetime", _FrozenDatetime)
+        return now
+
+    return _freeze
