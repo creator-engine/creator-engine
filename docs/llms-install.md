@@ -1,5 +1,5 @@
 <!--
-CE agent-native install spec (G-7.4 · E.3 · E.4-fix). Served at
+CE agent-native install spec (G-7.4 · E.1 real installer · E.3 · E.4-fix). Served at
 creator-engine.dev/llms-install.md. This spec is SIGNED with a real detached
 OpenSSH signature (SSHSIG) over its CANONICAL bytes. An agent MUST verify it
 against the pinned CE trust root (key_id `ce-root-v1`, the allowed_signers file
@@ -11,8 +11,50 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQmd1b0lnakRDRWxxVjI2aXJOdUVtcXAyZEUxN3FzUmdrRmFCU2JlemZpL1NzM3BJNnk0dHg3VW4KenQzRzZ5QUg4clYvckhheVZBRks2SzB4V3hxQzRMCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: a93c9c8977d3cb3c2d70727dbc1bfd50485e9f029590e0fe375d6ed0851470d6
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQTV3QXltdVZYRW05czJDWEthdUo1by9pWTRrS0daVFh0WE1nQjgwZ2R5Y3V5ckxrczQvV3lzUXEKN09Ib0kwbTBLZFlHcnI0dFllNkI1MnVNNm1EWXdICi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 303ab54167b2d7075977eb6fb5b6b4daf84a57d02d1303205b070baeef51dc93
+
+artifact_manifest:
+  artifact_manifest_version: 1
+  package_name: creator-engine-validator
+  package_version: 0.2.0
+  python_requires: >=3.14
+  artifact_base_url: https://creator-engine.dev/downloads/0.2.0
+  sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
+  sha256s_sha256: a8b2dd35bf4f958c31fae5deba6ba5339ea3e5a8e4c7e2744816ceaf38081799
+  install_sh_url: https://creator-engine.dev/install.sh
+  install_sh_sha256s_entry: install.sh
+  answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
+  answers_schema_sha256: 5879efacfd62507abbc83fd5729037e09c1259203d2ab87910cc9d3a9f605488
+  app_wheel: creator_engine_validator-0.2.0-py3-none-any.whl
+  required_wheels:
+    - filename: attrs-26.1.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.2.0/attrs-26.1.0-py3-none-any.whl
+      sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+    - filename: creator_engine_validator-0.2.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
+      sha256: f62eaa9f24a44ba01b3b96a94f6670b9698efde5329371a6eef26ccb18ff581c
+    - filename: jsonschema-4.26.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
+      sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+    - filename: jsonschema_specifications-2025.9.1-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.2.0/jsonschema_specifications-2025.9.1-py3-none-any.whl
+      sha256: 98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+    - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.2.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
+    - filename: referencing-0.37.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.2.0/referencing-0.37.0-py3-none-any.whl
+      sha256: 381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+    - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.2.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      sha256: 47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
+  python_acquisition:
+    tool: uv
+    version: 0.11.21
+    url: https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
+    sha256: 8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050
+    command: uv python install 3.14
 
 # `value` is the base64 of the detached SSHSIG (`.sig`) over the CANONICAL bytes;
 # `content_sha256` is the retained in-tree floor (sha256 of the SAME canonical
@@ -62,20 +104,30 @@ sha256sum ce-spec.canonical
 A tampered byte anywhere outside the two placeholdered fields changes
 `ce-spec.canonical` and the verify FAILS — that is the gate.
 
-## 0.5. How `ce` arrives (the bootstrap)
+## 0.5. How `ce` arrives (the E1 bootstrap)
 
-The steps below invoke `ce onboard`. `ce` itself is acquired by ONE of these
-supported paths — pick one, then return here:
+The public one-liner now performs the bootstrap; it is not a dry-run explainer.
 
-- **One-liner** — `curl -fsSL https://creator-engine.dev/install.sh | bash`.
-  Transport integrity is **TLS** (the host certificate); the bootstrap then hands
-  off to *this* signed, verify-before-execute spec, which is the real
-  procedure trust-anchor. `install.sh` is itself served + hash-published, and is
-  deliberately conservative — it performs **no** privileged or destructive action
-  without an explicit, batched **sudo** approval (detect-don't-assume). It does
-  **not** itself assert a cryptographic signature over its own body beyond TLS +
-  the published hash; treat §0's spec verification (not the one-liner) as the
-  authenticity gate for everything that follows.
+- **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
+  Transport integrity for the script body is **TLS** plus the published
+  `install.sh` hash in `https://creator-engine.dev/downloads/0.2.0/SHA256SUMS`.
+  The script's first authority step is still this signed spec: it fetches
+  `llms-install.md`, fetches the trust root, reconstructs the canonical bytes,
+  verifies the SSHSIG with stock `ssh-keygen`, and stops before persistent
+  mutation on any refusal. Only after that does it fetch the signed-manifest
+  wheelhouse, `SHA256SUMS`, and answers schema, hash-verify every artifact,
+  acquire CPython 3.14 through the pinned uv artifact if needed, create/reuse a
+  user-local venv, install `creator-engine-validator==0.2.0` offline, and run
+  authenticated inventory:
+
+  ```text
+  <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
+  ```
+
+  E1 does **not** run sudo, provision gVisor/proxy, automate the GitHub-App
+  click, mutate branch protections, or create/adopt a project. Missing `runsc`,
+  `proxy`, credentials, and GitHub installation are inventory facts for the next
+  step.
 - **Clone + offline wheelhouse** — clone the CE repo and install the validator
   from the committed `validators/wheelhouse/` (offline, hash-pinned in
   `SHA256SUMS`). Integrity here is the repo's own history + the pinned wheelhouse
@@ -90,8 +142,9 @@ Every input the rest of this journey needs is declared in ONE machine-readable
 inventory (`schemas/install-answers.schema.yaml` — the single source of truth).
 Work the loop:
 
-1. **`ce onboard --spec <this-spec> --inventory`** (you have `ce` from §0.5) —
-   emits every input with
+1. **`<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root
+   <verified-trust-root> --answers-schema <verified-schema> --inventory`** (the
+   one-liner runs this once already) — emits every input with
    live status per key: `detected:<value>` · `default:<value>` ·
    `needed (would ask at step N)` · `secret (ref required)`. This is the
    artifact you read to prepare the operator's answers upfront.
@@ -113,15 +166,17 @@ Work the loop:
    — the terraform-plan analog: validates the file (fail-closed on unknown
    keys), merges `interactive > answers > detected > default`, and prints the
    full plan including the EXACT remaining asks and the decomposed GitHub
-   leg. A file value contradicting a detected fact is a surfaced conflict —
-   resolve it with the operator, never silently.
+   leg. For `github.mode: new`, it also prints `first_project`: the project
+   root, minimal scaffold input supplied to E2's `workspace_checkout` leg, E2
+   apply dependency, and Frame→Ship flags. A file value contradicting a detected
+   fact is a surfaced conflict — resolve it with the operator, never silently.
 4. **Apply** (the steps below). Add `--non-interactive` for unattended runs:
    it refuses with the exact missing list instead of ever asking. The answers
    file configures this VERIFIED procedure — nothing in it bypasses step 0.
    Re-runs converge: detected state (deps, the App installation, protections)
    is skipped or reconciled as a reported diff.
 
-## 2. Detect dependencies (detect-don't-assume)
+## 2. Detect dependencies for later apply (detect-don't-assume)
 
 Check for `git`, `python` (3.14+), `runsc` (gVisor), an egress `proxy`, and `uv`.
 **Do not assume** — probe each. For any that are missing, propose a **single,
@@ -147,7 +202,7 @@ ratification (a `spend_cap_optout` binding). You may never set it yourself. In
 an answers file it is `cost.profile: custom` + the `cost.optout` binding with
 `educate_acknowledged: true` — the file cannot skip the education step.
 
-## 4. Provision the runtime + the GitHub App
+## 4. Later apply provisions the runtime + the GitHub App
 
 Provision the Plane-C box (gVisor `runsc` + deny-by-default egress proxy), then the
 **GitHub App**: store the App private key on **tmpfs** (never in the box; it mints
@@ -159,13 +214,15 @@ converged state is fully declarative.
 
 ## 5. Expose the CLI as `ce`
 
-This is a v3-only install, so expose the CE CLI as **`ce`** (the user-facing
-command). The operator drives work with `ce session` / `ce scope` / `ce drive` /
-`ce report`.
+The E1 venv installs both console scripts and invokes **`cev3`** by absolute
+path for the bootstrap handoff. A user-facing **`ce`** shim remains a later
+user-local exposure step; no system-wide symlink is created by E1. The operator
+eventually drives work with `ce session` / `ce scope` / `ce drive` / `ce report`.
 
 ## 6. Confirm
 
-Run `ce session` to show the governed session frame. Installation is complete when
+For E1, installation is complete when authenticated `onboard_inventory` is
+emitted from the venv-installed wheel. Full onboarding is complete later when
 the operator can file a Scope, ratify it, and get a governed, cost-safe PR.
 
 ## 7. Connect to your collaboration repo
@@ -201,6 +258,15 @@ Values this leg needs (the `github.*` keys):
 - **`github.reviewer`** — the no-self-approval floor (solo: the human IS the
   reviewer; detected as the token's authenticated login).
 
+Greenfield first-project values:
+
+- **`project.name`** — optional local directory name under
+  `host.workspace_root`; absent means CE derives the repo basename.
+- **`project.scaffold.kind`** — `minimal` only. This supplies E2's
+  `workspace_checkout` input contract: neutral README, `.gitignore` for
+  CE/local transient state, configured default branch, and a bootstrap commit.
+  It does not create product code or count as the first ship.
+
 With the values resolved, configure the repo to CE's governed floor and show
 the operator the plan before applying it:
 
@@ -218,3 +284,10 @@ the operator the plan before applying it:
 configured to this floor; **detect and confirm** the settings above rather
 than re-applying them (the diff comes back empty — that is the converged,
 re-run-safe state).
+
+For a brand-new repo, the first governed ship starts only after onboarding:
+Frame chat becomes a confirmed Scope, the operator supplies Budget and runs
+`ce ratify`, Build runs through `ce drive --spawn`, the PR opens through the
+forge leg, review is recorded in a distinct venue or ratified waiver, and
+`ce merge --apply` performs the gated merge. The deterministic E2 smoke Scope
+and bootstrap README commit are onboarding evidence, not the first ship.

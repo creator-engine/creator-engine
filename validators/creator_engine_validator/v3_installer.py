@@ -26,11 +26,11 @@ verify → answers → probe → plan → apply.
 This module is the **CI-pure decision substrate** — the verify-before-execute
 gate, the detect-don't-assume dependency planner, the Default-vs-Custom installer
 profile (with the cost opt-out), and the ``ce`` CLI-exposure plan. **The live
-drive is the deferred seam:** the actual ``curl|bash`` execution, the runtime
-backend provisioning (gVisor / egress proxy), the interactive GitHub-App click,
-and the live transport probe are NOT here — exactly the G-4/G-5/G-6 cut. The
-read-only dependency *detection* (which/probe) is injected (the CLI does it live;
-the planner stays pure).
+drive is the E2 composition seam in ``onboard_apply``:** the actual ``curl|bash``
+execution, runtime backend provisioning (gVisor / egress proxy), interactive
+GitHub-App click, and live transport probe are NOT here. The read-only dependency
+*detection* (which/probe) is injected (the CLI does it live; the planner stays
+pure).
 
 Signing model: this repo ships no asymmetric-crypto dependency, so the in-tree
 floor is a **content-address integrity** binding (sha256), with the real
@@ -54,9 +54,12 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
+
+from . import v3_greenfield
 
 #: The user-facing command the pilot install exposes (Operator-ratified directive).
 CE_CMD = "ce"
@@ -307,6 +310,316 @@ def require_verified(
     if not result.ok:
         raise InstallRefused(f"install spec refused before execution: {result.reason}")
     return result
+
+
+@dataclass(frozen=True)
+class SignedInstallSpec:
+    """The embedded SSHSIG block plus the canonical content floor."""
+
+    signature: dict[str, Any]
+    content_sha256: str
+    canonical_sha256: str
+
+
+@dataclass(frozen=True)
+class BootstrapWheel:
+    filename: str
+    url: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class PythonAcquisition:
+    tool: str
+    version: str
+    url: str
+    sha256: str
+    command: str
+
+
+@dataclass(frozen=True)
+class BootstrapManifest:
+    artifact_manifest_version: int
+    package_name: str
+    package_version: str
+    python_requires: str
+    artifact_base_url: str
+    sha256s_url: str
+    sha256s_sha256: str
+    install_sh_url: str
+    install_sh_sha256s_entry: str
+    answers_schema_url: str
+    answers_schema_sha256: str
+    app_wheel: str
+    required_wheels: tuple[BootstrapWheel, ...]
+    python_acquisition: PythonAcquisition
+
+    def wheel_by_filename(self) -> dict[str, BootstrapWheel]:
+        return {wheel.filename: wheel for wheel in self.required_wheels}
+
+
+INSTALL_FAILURE_CLASSES = frozenset({
+    "network_fetch_failed",
+    "pages_mirror_not_ready",
+    "trust_root_unreadable",
+    "signature_refused",
+    "artifact_hash_mismatch",
+    "missing_bootstrap_dependency",
+    "python_acquisition_failed",
+    "python_venv_unavailable",
+    "unsupported_platform",
+    "venv_install_failed",
+    "entrypoint_missing",
+    "onboard_inventory_failed",
+})
+
+
+def parse_embedded_signature_block(spec_bytes: bytes | str) -> dict[str, str]:
+    """Extract the served spec's embedded ``signature:`` block (PURE).
+
+    The block is intentionally a tiny line-oriented subset so shell can parse it
+    before Python exists. Required fields are returned as strings; malformed or
+    incomplete blocks refuse before any caller can proceed.
+    """
+    text = spec_bytes.decode("utf-8") if isinstance(spec_bytes, bytes) else spec_bytes
+    fields: dict[str, str] = {}
+    in_signature = False
+    for raw_line in text.splitlines():
+        if raw_line.strip() == "signature:":
+            in_signature = True
+            continue
+        if not in_signature:
+            continue
+        if raw_line.startswith("  "):
+            key, sep, value = raw_line.strip().partition(":")
+            if sep:
+                fields[key] = value.strip()
+            continue
+        if raw_line.strip():
+            break
+    required = {"key_id", "algo", "namespace", "value", "content_sha256"}
+    missing = sorted(required - fields.keys())
+    if missing:
+        raise InstallRefused(
+            "signature_refused: install spec signature block missing "
+            + ", ".join(missing)
+        )
+    if fields["namespace"] != SSH_SIG_NAMESPACE:
+        raise InstallRefused(
+            f"signature_refused: namespace {fields['namespace']!r} is not {SSH_SIG_NAMESPACE!r}"
+        )
+    if fields["algo"] != SSH_ED25519_ALGO:
+        raise InstallRefused(
+            f"signature_refused: algo {fields['algo']!r} is not {SSH_ED25519_ALGO!r}"
+        )
+    if not _HEX64_RE.match(fields["content_sha256"]):
+        raise InstallRefused("signature_refused: content_sha256 is not a 64-hex digest")
+    return fields
+
+
+def parse_signed_install_spec(spec_bytes: bytes | str) -> SignedInstallSpec:
+    """Parse and content-floor-check the embedded SSHSIG install spec.
+
+    This does not run an asymmetric primitive; it prepares the exact canonical
+    bytes and signature dict that ``require_verified(..., ssh_ed25519_verifier)``
+    consumes at the CLI/shell I/O edge.
+    """
+    fields = parse_embedded_signature_block(spec_bytes)
+    canonical = canonical_spec_bytes(spec_bytes)
+    canonical_sha = content_digest(canonical)
+    if fields["content_sha256"] != canonical_sha:
+        raise InstallRefused(
+            "signature_refused: signed spec content_sha256 does not match canonical bytes"
+        )
+    signature = {
+        "key_id": fields["key_id"],
+        "algo": fields["algo"],
+        "value": fields["value"],
+    }
+    return SignedInstallSpec(
+        signature=signature,
+        content_sha256=fields["content_sha256"],
+        canonical_sha256=canonical_sha,
+    )
+
+
+def _strip_inline_comment(value: str) -> str:
+    return value.split(" #", 1)[0].strip()
+
+
+def _valid_sha256(value: Any) -> bool:
+    return isinstance(value, str) and bool(_HEX64_RE.match(value))
+
+
+def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
+    """Parse the line-oriented ``artifact_manifest:`` block from llms-install.md.
+
+    The format deliberately avoids YAML-only features: two-space scalar keys,
+    ``required_wheels`` list items with ``filename/url/sha256``, and a
+    ``python_acquisition`` map. That keeps shell and this pure parser in parity.
+    """
+    text = spec_bytes.decode("utf-8") if isinstance(spec_bytes, bytes) else spec_bytes
+    lines = text.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "artifact_manifest:")
+    except StopIteration as exc:
+        raise InstallRefused("missing_bootstrap_manifest: artifact_manifest block missing") from exc
+
+    scalars: dict[str, str] = {}
+    wheels: list[dict[str, str]] = []
+    python_acquisition: dict[str, str] = {}
+    section: str | None = None
+    current_wheel: dict[str, str] | None = None
+
+    for raw_line in lines[start + 1:]:
+        if raw_line and not raw_line.startswith("  "):
+            break
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if line == "  required_wheels:":
+            section = "required_wheels"
+            continue
+        if line == "  python_acquisition:":
+            if current_wheel is not None:
+                wheels.append(current_wheel)
+                current_wheel = None
+            section = "python_acquisition"
+            continue
+        if section == "required_wheels":
+            if line.startswith("    - filename: "):
+                if current_wheel is not None:
+                    wheels.append(current_wheel)
+                current_wheel = {"filename": _strip_inline_comment(line.split(": ", 1)[1])}
+                continue
+            if line.startswith("      ") and current_wheel is not None:
+                key, sep, value = line.strip().partition(":")
+                if sep:
+                    current_wheel[key] = _strip_inline_comment(value)
+                continue
+        if section == "python_acquisition" and line.startswith("    "):
+            key, sep, value = line.strip().partition(":")
+            if sep:
+                python_acquisition[key] = _strip_inline_comment(value)
+            continue
+        if line.startswith("  "):
+            key, sep, value = line.strip().partition(":")
+            if sep:
+                scalars[key] = _strip_inline_comment(value)
+    if current_wheel is not None:
+        wheels.append(current_wheel)
+
+    required_scalars = {
+        "artifact_manifest_version",
+        "package_name",
+        "package_version",
+        "python_requires",
+        "artifact_base_url",
+        "sha256s_url",
+        "sha256s_sha256",
+        "install_sh_url",
+        "install_sh_sha256s_entry",
+        "answers_schema_url",
+        "answers_schema_sha256",
+        "app_wheel",
+    }
+    missing = sorted(required_scalars - scalars.keys())
+    if missing:
+        raise InstallRefused("bad_bootstrap_manifest: missing " + ", ".join(missing))
+    try:
+        version = int(scalars["artifact_manifest_version"])
+    except ValueError as exc:
+        raise InstallRefused("bad_bootstrap_manifest: artifact_manifest_version must be an integer") from exc
+    if version != 1:
+        raise InstallRefused(f"bad_bootstrap_manifest: unsupported version {version}")
+    for key in ("sha256s_sha256", "answers_schema_sha256"):
+        if not _valid_sha256(scalars[key]):
+            raise InstallRefused(f"bad_bootstrap_manifest: {key} is not a 64-hex digest")
+    parsed_wheels: list[BootstrapWheel] = []
+    for wheel in wheels:
+        wheel_missing = sorted({"filename", "url", "sha256"} - wheel.keys())
+        if wheel_missing:
+            raise InstallRefused(
+                "bad_bootstrap_manifest: wheel entry missing " + ", ".join(wheel_missing)
+            )
+        if not _valid_sha256(wheel["sha256"]):
+            raise InstallRefused(
+                f"bad_bootstrap_manifest: wheel {wheel['filename']} sha256 is not 64-hex"
+            )
+        parsed_wheels.append(BootstrapWheel(wheel["filename"], wheel["url"], wheel["sha256"]))
+    if not parsed_wheels:
+        raise InstallRefused("bad_bootstrap_manifest: required_wheels is empty")
+    if scalars["app_wheel"] not in {wheel.filename for wheel in parsed_wheels}:
+        raise InstallRefused("bad_bootstrap_manifest: app_wheel is not in required_wheels")
+
+    required_python = {"tool", "version", "url", "sha256", "command"}
+    missing_python = sorted(required_python - python_acquisition.keys())
+    if missing_python:
+        raise InstallRefused("bad_bootstrap_manifest: python_acquisition missing " + ", ".join(missing_python))
+    if not _valid_sha256(python_acquisition["sha256"]):
+        raise InstallRefused("bad_bootstrap_manifest: python_acquisition sha256 is not 64-hex")
+    return BootstrapManifest(
+        artifact_manifest_version=version,
+        package_name=scalars["package_name"],
+        package_version=scalars["package_version"],
+        python_requires=scalars["python_requires"],
+        artifact_base_url=scalars["artifact_base_url"],
+        sha256s_url=scalars["sha256s_url"],
+        sha256s_sha256=scalars["sha256s_sha256"],
+        install_sh_url=scalars["install_sh_url"],
+        install_sh_sha256s_entry=scalars["install_sh_sha256s_entry"],
+        answers_schema_url=scalars["answers_schema_url"],
+        answers_schema_sha256=scalars["answers_schema_sha256"],
+        app_wheel=scalars["app_wheel"],
+        required_wheels=tuple(parsed_wheels),
+        python_acquisition=PythonAcquisition(
+            tool=python_acquisition["tool"],
+            version=python_acquisition["version"],
+            url=python_acquisition["url"],
+            sha256=python_acquisition["sha256"],
+            command=python_acquisition["command"],
+        ),
+    )
+
+
+def parse_sha256s(text: str) -> dict[str, str]:
+    """Parse a SHA256SUMS file into ``{filename: digest}`` for shell parity tests."""
+    parsed: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        digest, filename = fields[0], fields[-1].lstrip("*")
+        if _valid_sha256(digest):
+            parsed[filename] = digest
+    return parsed
+
+
+def build_bootstrap_artifact_plan(
+    manifest: BootstrapManifest,
+    *,
+    os_name: str,
+    machine: str,
+) -> dict[str, Any]:
+    """Select the signed E1 artifact set for injected platform facts."""
+    normalized_os = os_name.lower()
+    normalized_machine = machine.lower()
+    if normalized_os != "linux" or normalized_machine not in {"x86_64", "amd64"}:
+        raise InstallRefused(
+            f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
+            "E1 currently supports Linux x86_64 with CPython 3.14 wheels"
+        )
+    return {
+        "platform": "linux-x86_64-cp314",
+        "package": f"{manifest.package_name}=={manifest.package_version}",
+        "python_requires": manifest.python_requires,
+        "app_wheel": manifest.app_wheel,
+        "wheels": [wheel.__dict__ for wheel in manifest.required_wheels],
+        "python_acquisition": manifest.python_acquisition.__dict__,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1303,56 @@ REQUIRED_BOOTSTRAP_SCOPES = (
 ORG_CREATE_SCOPE = "org:repo_create"
 #: The CE-published shared GitHub App (fork F5: the solo-pilot default).
 SHARED_APP_SLUG = "creator-engine"
+BROWNFIELD_SKILL_ARTIFACT_PATHS = (
+    ".ce/skills/project-conventions.md",
+    ".ce/skills/project-validation.md",
+)
+BROWNFIELD_SCOPE_SEED_PATH = ".ce/state/scopes/ce-brownfield-adoption.scope.yaml"
+BROWNFIELD_REQUIRED_CHECK = "Validate governance artifacts"
+BROWNFIELD_APPLY_STEP_IDS = (
+    "brownfield_inventory_drift_check",
+    "brownfield_secret_preflight",
+    "brownfield_write_skill_artifacts",
+    "brownfield_write_scope_seed",
+    "github_workflow_install",
+    "github_branch_protection",
+    "brownfield_verify_preserved_checks",
+    "brownfield_record_apply_evidence",
+)
+
+
+def _resolved_values(merged: MergeResult) -> dict[str, Any]:
+    return {key: entry.value for key, entry in merged.resolved.items()}
+
+
+def build_greenfield_first_project_plan(
+    schema: dict[str, Any],
+    merged: MergeResult,
+    missing: Iterable[MissingAnswer],
+    *,
+    e2_apply_result: Mapping[str, Any] | None = None,
+    e2_apply_result_ref: str | None = None,
+) -> dict[str, Any] | None:
+    """Compose the E4 greenfield first-project read model.
+
+    This is an onboard projection only. It does not restate E2's GitHub/scaffold
+    plan, compute E2 convergence counters, or mutate anything.
+    """
+    missing_items = tuple(missing)
+    payload = v3_greenfield.build_first_project_plan(
+        _resolved_values(merged),
+        missing_keys=(item.key for item in missing_items),
+        e2_plan_ref="onboard.github_leg",
+        e2_apply_result=e2_apply_result,
+        e2_apply_result_ref=e2_apply_result_ref,
+    )
+    if payload is None:
+        return None
+    payload["counters"] = {
+        "inventory_inputs": len(schema_inventory(schema)),
+        "missing_answers": len(missing_items),
+    }
+    return payload
 
 
 def app_bot_identity(slug: str = SHARED_APP_SLUG) -> str:
@@ -1310,4 +1673,520 @@ def build_github_leg_plan(
             "the live forge API mutations (repo create · App install · protection PUT · workflow commit)",
             "the HTTPS-Bearer App-JWT mint leg (forge.app_jwt_runner; gh cannot App-JWT auth)",
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#53 E3 — brownfield adoption inventory + pure plan payloads
+# ---------------------------------------------------------------------------
+def _string_list(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    out: list[str] = []
+    seen: set[str] = set()
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    for value in iterator:
+        text = str(value).strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _commands_from_probe(probe: dict[str, Any]) -> list[str]:
+    commands: list[str] = []
+    for item in (probe.get("tests") or {}).get("commands", ()):
+        if isinstance(item, dict):
+            commands.extend(_string_list(item.get("command")))
+        else:
+            commands.extend(_string_list(item))
+    return _string_list(commands)
+
+
+def _candidate_value(candidates: Any) -> str | None:
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    sorted_candidates = sorted(
+        [c for c in candidates if isinstance(c, dict) and c.get("value")],
+        key=lambda c: (-float(c.get("confidence", 0)), str(c.get("value"))),
+    )
+    if not sorted_candidates:
+        return None
+    return str(sorted_candidates[0]["value"])
+
+
+def _history_mode_from_probe(probe: dict[str, Any]) -> str:
+    history = probe.get("history") or {}
+    if history.get("mode") in {"git_history_present", "absent", "unknown"}:
+        return str(history["mode"])
+    if history.get("present") is False or history.get("head_sha") is None and history.get("present") is False:
+        return "absent"
+    if history.get("head_sha"):
+        return "git_history_present"
+    return "unknown"
+
+
+def brownfield_detected_facts(probe: dict[str, Any] | None) -> dict[str, Any]:
+    """Project a read-only project probe into dotted answers facts.
+
+    The same precedence rule handles these facts as every other installer
+    input: an operator file can override them, and contradictions are surfaced
+    as merge conflicts.
+    """
+    probe = probe or {}
+    conventions = probe.get("conventions") or {}
+    detected: dict[str, Any] = {
+        "brownfield.enabled": bool(probe.get("enabled", True)),
+        "brownfield.project_root": str(probe.get("project_root") or "."),
+        "brownfield.history.mode": _history_mode_from_probe(probe),
+        "brownfield.secrets.preflight": str(
+            (probe.get("secrets") or {}).get("preflight", "required")
+        ),
+    }
+    commands = _commands_from_probe(probe)
+    if commands:
+        detected["brownfield.tests.required_commands"] = commands
+    branch_pattern = _candidate_value(conventions.get("branch_patterns"))
+    if branch_pattern:
+        detected["brownfield.conventions.branch_pattern"] = branch_pattern
+    commit_style = _candidate_value(conventions.get("commit_styles"))
+    if commit_style:
+        detected["brownfield.conventions.commit_style"] = commit_style
+    origin = (probe.get("github") or {}).get("origin_remote")
+    if origin:
+        detected.update(github_detected_facts({"origin_remote": origin}))
+    return detected
+
+
+def _canonical_json_bytes(payload: Any) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def canonical_brownfield_inventory_sha256(payload: dict[str, Any]) -> str:
+    """Hash the value-free brownfield inventory payload with stable JSON."""
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def _normalized_workflows(probe: dict[str, Any]) -> list[dict[str, Any]]:
+    workflows: list[dict[str, Any]] = []
+    for wf in (probe.get("ci") or {}).get("workflows", ()):
+        if not isinstance(wf, dict):
+            continue
+        check_names = _string_list(wf.get("check_names"))
+        workflows.append({
+            "path": str(wf.get("path") or ""),
+            "name": str(wf.get("name") or ""),
+            "triggers": _string_list(wf.get("triggers")),
+            "jobs": _string_list(wf.get("jobs")),
+            "check_names": check_names,
+            "ce_validate": bool(wf.get("ce_validate", False)),
+        })
+    return sorted(workflows, key=lambda item: item["path"])
+
+
+def _checks_to_preserve(probe: dict[str, Any], workflows: list[dict[str, Any]]) -> list[str]:
+    checks = _string_list((probe.get("ci") or {}).get("current_required_checks"))
+    for workflow in workflows:
+        checks.extend(_string_list(workflow.get("check_names")))
+    return _string_list(checks)
+
+
+def _waivers_by_id(values: Any) -> dict[str, dict[str, Any]]:
+    waivers: dict[str, dict[str, Any]] = {}
+    if not isinstance(values, list):
+        return waivers
+    for item in values:
+        if isinstance(item, dict) and item.get("finding_id"):
+            waivers[str(item["finding_id"])] = item
+    return waivers
+
+
+def _finding_ids(values: Any) -> list[str]:
+    ids: list[str] = []
+    if not isinstance(values, list):
+        return ids
+    for item in values:
+        if isinstance(item, dict):
+            ids.extend(_string_list(item.get("id") or item.get("finding_id")))
+        else:
+            ids.extend(_string_list(item))
+    return _string_list(ids)
+
+
+def _brownfield_inventory_payload(
+    schema: dict[str, Any],
+    merged: MergeResult,
+    probe: dict[str, Any],
+) -> dict[str, Any]:
+    workflows = _normalized_workflows(probe)
+    floor = reference_protections(schema)
+    ce_check = str((floor.get("required_checks") or [BROWNFIELD_REQUIRED_CHECK])[0])
+    checks_preserved = _checks_to_preserve(probe, workflows)
+    strategy = str(merged.value("brownfield.ci.required_checks_strategy", "preserve-and-add"))
+    checks_to_add = [] if ce_check in checks_preserved or strategy != "preserve-and-add" else [ce_check]
+    history_probe = probe.get("history") or {}
+    tests = _string_list(merged.value("brownfield.tests.required_commands", _commands_from_probe(probe)))
+    secrets = probe.get("secrets") or {}
+    return {
+        "enabled": bool(merged.value("brownfield.enabled", True)),
+        "project_root": str(merged.value("brownfield.project_root", ".")),
+        "ci": {
+            "existing_workflows": workflows,
+            "checks_to_preserve": checks_preserved,
+            "checks_to_add": checks_to_add,
+        },
+        "tests": {
+            "required_commands": tests,
+            "detected_commands": _commands_from_probe(probe),
+        },
+        "history": {
+            "mode": str(merged.value("brownfield.history.mode", _history_mode_from_probe(probe))),
+            "head_sha": history_probe.get("head_sha"),
+            "default_branch": history_probe.get("default_branch"),
+            "commit_count": int(history_probe.get("commit_count") or 0),
+            "last_commit_time": history_probe.get("last_commit_time"),
+            "tags_present": bool(history_probe.get("tags_present", False)),
+            "merge_commits": int(history_probe.get("merge_commits") or 0),
+            "top_changed_dirs": _string_list(history_probe.get("top_changed_dirs")),
+            "dirty": bool(history_probe.get("dirty", False)),
+        },
+        "conventions": {
+            "branch_pattern": merged.value("brownfield.conventions.branch_pattern"),
+            "commit_style": merged.value("brownfield.conventions.commit_style"),
+            "branch_candidates": conventions_list((probe.get("conventions") or {}).get("branch_patterns")),
+            "commit_candidates": conventions_list((probe.get("conventions") or {}).get("commit_styles")),
+        },
+        "secrets_preflight": {
+            "required": merged.value("brownfield.secrets.preflight", "required") == "required",
+            "status": str(secrets.get("status") or "not_run"),
+            "scanner_available": secrets.get("scanner_available"),
+            "planned_report": "onboard/secrets-preflight.json",
+            "findings": _finding_ids(secrets.get("findings")),
+        },
+    }
+
+
+def conventions_list(values: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not isinstance(values, list):
+        return out
+    for item in values:
+        if isinstance(item, dict) and item.get("value"):
+            out.append({
+                "value": str(item["value"]),
+                "confidence": float(item.get("confidence", 0)),
+                "source": str(item.get("source", "detected")),
+            })
+    return sorted(out, key=lambda item: (-item["confidence"], item["value"]))
+
+
+def _scope_seed(inventory: dict[str, Any], inventory_sha256: str) -> dict[str, Any]:
+    tests = inventory["tests"]["required_commands"]
+    checks = inventory["ci"]["checks_to_preserve"] + inventory["ci"]["checks_to_add"]
+    criteria = [
+        "existing CI remains green",
+        "CE validate check is added without dropping existing checks",
+        "project history is preserved",
+    ]
+    criteria.extend(f"local validation passes: {command}" for command in tests)
+    criteria.extend(f"required check remains represented: {check}" for check in checks)
+    return {
+        "scope_id": "ce-brownfield-adoption",
+        "intent": "Adopt the existing project into CE governance",
+        "mutation_class": "code",
+        "acceptance_criteria": _string_list(criteria),
+        "appetite": {"amount": 25.0, "unit": "%", "window": "per_run"},
+        "skill_refs": list(BROWNFIELD_SKILL_ARTIFACT_PATHS),
+        "binding": {"brownfield_inventory_sha256": inventory_sha256},
+        "risk_notes": [
+            f"history mode: {inventory['history']['mode']}",
+            "do not rewrite history, delete branches, or drop existing checks",
+        ],
+    }
+
+
+def _project_conventions_content(inventory: dict[str, Any]) -> str:
+    conventions = inventory["conventions"]
+    branch = conventions.get("branch_pattern") or "No branch pattern was detected."
+    commit = conventions.get("commit_style") or "No commit style was detected."
+    return (
+        "# Project Conventions\n\n"
+        f"- Branch pattern: {branch}\n"
+        f"- Commit style: {commit}\n"
+        "- Preserve existing branch, tag, and release history.\n"
+        "- Do not change branch naming, commit style, CODEOWNERS, workflows, or protections unless the Scope says so.\n"
+    )
+
+
+def _project_validation_content(inventory: dict[str, Any]) -> str:
+    checks = inventory["ci"]["checks_to_preserve"] + inventory["ci"]["checks_to_add"]
+    commands = inventory["tests"]["required_commands"]
+    lines = ["# Project Validation", ""]
+    if commands:
+        lines.append("## Local Commands")
+        lines.extend(f"- `{command}`" for command in commands)
+        lines.append("")
+    else:
+        lines.extend(["## Local Commands", "- No source-controlled test command was detected.", ""])
+    if checks:
+        lines.append("## CI Checks")
+        lines.extend(f"- {check}" for check in _string_list(checks))
+        lines.append("")
+    lines.append("Run the listed commands and preserve the listed checks for governed changes.")
+    return "\n".join(lines) + "\n"
+
+
+def _artifact_plan(inventory: dict[str, Any], inventory_sha256: str) -> dict[str, Any]:
+    convention_content = _project_conventions_content(inventory)
+    validation_content = _project_validation_content(inventory)
+    scope_seed = _scope_seed(inventory, inventory_sha256)
+    skill_artifacts = [
+        {
+            "path": BROWNFIELD_SKILL_ARTIFACT_PATHS[0],
+            "sha256": content_digest(convention_content),
+            "content": convention_content,
+        },
+        {
+            "path": BROWNFIELD_SKILL_ARTIFACT_PATHS[1],
+            "sha256": content_digest(validation_content),
+            "content": validation_content,
+        },
+    ]
+    return {
+        "install_answers_updates": [
+            {"key": "brownfield.tests.required_commands", "value": inventory["tests"]["required_commands"]},
+            {"key": "brownfield.ci.required_checks_strategy", "value": "preserve-and-add"},
+        ],
+        "scope_seed": scope_seed,
+        "scope_seed_path": BROWNFIELD_SCOPE_SEED_PATH,
+        "skill_artifacts": skill_artifacts,
+    }
+
+
+def _brownfield_blockers(
+    inventory: dict[str, Any],
+    merged: MergeResult,
+    probe: dict[str, Any],
+) -> list[dict[str, str]]:
+    blockers: list[dict[str, str]] = []
+    for conflict in merged.conflicts:
+        if conflict.key.startswith("brownfield.") or conflict.key == "github.repo":
+            blockers.append({
+                "code": "needs_operator_answers",
+                "detail": f"{conflict.key} conflicts with detected reality",
+            })
+    if inventory["history"]["mode"] == "absent":
+        blockers.append({
+            "code": "needs_baseline_capture",
+            "detail": "project has no Git history; synthetic history is not permitted",
+        })
+    if inventory["history"]["dirty"]:
+        blockers.append({
+            "code": "blocked_dirty_tree",
+            "detail": "tracked working-tree changes make the inventory stale",
+        })
+    secrets = probe.get("secrets") or {}
+    if inventory["secrets_preflight"]["required"] and secrets.get("scanner_available") is False:
+        blockers.append({
+            "code": "scanner_unavailable",
+            "detail": "secrets preflight is required but no supported scanner is available",
+        })
+    finding_ids = _finding_ids(secrets.get("findings"))
+    answers_waivers = _waivers_by_id(merged.value("brownfield.secrets.waivers", []))
+    unwaived = [fid for fid in finding_ids if fid not in answers_waivers]
+    if unwaived:
+        blockers.append({
+            "code": "blocked_secret_findings",
+            "detail": "unwaived secrets-scrub findings: " + ", ".join(unwaived),
+        })
+    for waiver in answers_waivers.values():
+        if not valid_ratification(waiver.get("ratification"), require_ack=True):
+            blockers.append({
+                "code": "waiver_missing_ratification",
+                "detail": f"waiver {waiver.get('finding_id')} lacks the required ratification binding",
+            })
+    return blockers
+
+
+def _classification(blockers: list[dict[str, str]], inventory: dict[str, Any]) -> str:
+    codes = {b["code"] for b in blockers}
+    for code in (
+        "needs_baseline_capture",
+        "blocked_dirty_tree",
+        "blocked_secret_findings",
+        "needs_operator_answers",
+        "scanner_unavailable",
+        "waiver_missing_ratification",
+    ):
+        if code in codes:
+            return code
+    if inventory["secrets_preflight"]["required"] and inventory["secrets_preflight"]["status"] != "clean":
+        return "adoptable_after_scrub"
+    return "adoptable"
+
+
+def _apply_steps(inventory: dict[str, Any], artifact_plan: dict[str, Any], inventory_sha256: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "brownfield_inventory_drift_check",
+            "e2_leg": "brownfield_probe",
+            "verify": {"inventory_sha256": inventory_sha256},
+        },
+        {
+            "id": "brownfield_secret_preflight",
+            "e2_leg": "brownfield_scrub_preflight",
+            "scan_paths": [".", *[a["path"] for a in artifact_plan["skill_artifacts"]], artifact_plan["scope_seed_path"]],
+            "writes": [],
+        },
+        {
+            "id": "brownfield_write_skill_artifacts",
+            "e2_leg": "brownfield_write_artifacts",
+            "paths": [a["path"] for a in artifact_plan["skill_artifacts"]],
+            "requires": ["secrets_preflight_clean_or_waived"],
+        },
+        {
+            "id": "brownfield_write_scope_seed",
+            "e2_leg": "brownfield_write_scope_seed",
+            "path": artifact_plan["scope_seed_path"],
+            "requires": ["secrets_preflight_clean_or_waived"],
+        },
+        {
+            "id": "github_workflow_install",
+            "e2_leg": "github_workflow_install",
+            "checks_to_add": inventory["ci"]["checks_to_add"],
+        },
+        {
+            "id": "github_branch_protection",
+            "e2_leg": "github_branch_protection",
+            "checks_to_preserve": inventory["ci"]["checks_to_preserve"],
+        },
+        {
+            "id": "brownfield_verify_preserved_checks",
+            "e2_leg": "brownfield_verify_preserved_checks",
+            "checks": inventory["ci"]["checks_to_preserve"] + inventory["ci"]["checks_to_add"],
+        },
+        {
+            "id": "brownfield_record_apply_evidence",
+            "e2_leg": "brownfield_record_apply_evidence",
+            "value_free": True,
+        },
+    ]
+
+
+def _brownfield_counters(
+    inventory: dict[str, Any],
+    artifact_plan: dict[str, Any],
+    apply_steps: list[dict[str, Any]],
+    merged: MergeResult,
+    probe: dict[str, Any],
+) -> dict[str, int]:
+    detected_commands = _commands_from_probe(probe)
+    command_source = merged.resolved.get("brownfield.tests.required_commands")
+    operator_supplied = (
+        len(_string_list(command_source.value))
+        if command_source is not None and command_source.source in {"answers", "interactive"}
+        else 0
+    )
+    findings = inventory["secrets_preflight"]["findings"]
+    waivers = _waivers_by_id(merged.value("brownfield.secrets.waivers", []))
+    blocking = [fid for fid in findings if fid not in waivers]
+    return {
+        "ci_workflows_observed": len(inventory["ci"]["existing_workflows"]),
+        "ci_checks_preserved": len(inventory["ci"]["checks_to_preserve"]),
+        "ci_checks_added": len(inventory["ci"]["checks_to_add"]),
+        "test_commands_detected": len(detected_commands),
+        "test_commands_operator_supplied": operator_supplied,
+        "history_commits_sampled": int(inventory["history"]["commit_count"]),
+        "convention_candidates_detected": (
+            len(inventory["conventions"]["branch_candidates"])
+            + len(inventory["conventions"]["commit_candidates"])
+        ),
+        "skill_artifacts_planned": len(artifact_plan["skill_artifacts"]),
+        "scope_seed_planned": 1 if artifact_plan.get("scope_seed") else 0,
+        "scrub_findings": len(findings),
+        "scrub_findings_waived": len([fid for fid in findings if fid in waivers]),
+        "scrub_findings_blocking": len(blocking),
+        "apply_steps_planned": len(apply_steps),
+    }
+
+
+def brownfield_inventory_summary(
+    schema: dict[str, Any],
+    *,
+    answers: dict[str, Any] | None = None,
+    probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Value-free brownfield block for ``ce onboard --inventory``."""
+    probe = probe or {}
+    merged = merge_answers(schema, answers=answers or None, detected=brownfield_detected_facts(probe))
+    inventory = _brownfield_inventory_payload(schema, merged, probe)
+    blockers = _brownfield_blockers(inventory, merged, probe)
+    return {
+        "enabled": inventory["enabled"],
+        "project_root": inventory["project_root"],
+        "ci": inventory["ci"]["existing_workflows"],
+        "tests": inventory["tests"]["required_commands"],
+        "history": inventory["history"],
+        "conventions": inventory["conventions"],
+        "secrets_preflight": {
+            "required": inventory["secrets_preflight"]["required"],
+            "status": inventory["secrets_preflight"]["status"],
+        },
+        "blockers": blockers,
+    }
+
+
+def build_brownfield_adoption_plan(
+    answers: dict[str, Any] | None,
+    *,
+    schema: dict[str, Any],
+    probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compose the E3 brownfield adoption payload without mutating anything."""
+    answers = answers or {"answers_version": 1}
+    require_valid_answers(answers, schema=schema)
+    probe = probe or {}
+    detected = brownfield_detected_facts(probe)
+    merged = merge_answers(schema, answers=answers or None, detected=detected)
+    inventory = _brownfield_inventory_payload(schema, merged, probe)
+    inventory_sha256 = canonical_brownfield_inventory_sha256(inventory)
+    artifact_plan = _artifact_plan(inventory, inventory_sha256)
+    blockers = _brownfield_blockers(inventory, merged, probe)
+    blocked = bool(blockers)
+    apply_steps = [] if blocked or not inventory["enabled"] else _apply_steps(inventory, artifact_plan, inventory_sha256)
+    counters = _brownfield_counters(inventory, artifact_plan, apply_steps, merged, probe)
+    classification = _classification(blockers, inventory)
+    return {
+        "enabled": inventory["enabled"],
+        "classification": classification,
+        "inventory_sha256": inventory_sha256,
+        "project_root": inventory["project_root"],
+        "ci": inventory["ci"],
+        "tests": {"required_commands": inventory["tests"]["required_commands"]},
+        "history": {
+            "mode": inventory["history"]["mode"],
+            "head_sha": inventory["history"]["head_sha"],
+            "default_branch": inventory["history"]["default_branch"],
+            "blockers": [b for b in blockers if b["code"] in {"needs_baseline_capture", "blocked_dirty_tree"}],
+        },
+        "conventions": {
+            "branch_pattern": inventory["conventions"]["branch_pattern"],
+            "commit_style": inventory["conventions"]["commit_style"],
+        },
+        "secrets_preflight": {
+            "required": inventory["secrets_preflight"]["required"],
+            "planned": True,
+            "status": inventory["secrets_preflight"]["status"],
+            "waivers": list(_waivers_by_id(merged.value("brownfield.secrets.waivers", [])).keys()),
+        },
+        "artifact_plan": artifact_plan,
+        "apply_steps": apply_steps,
+        "blocked": blocked,
+        "blockers": blockers,
+        "counters": counters,
     }

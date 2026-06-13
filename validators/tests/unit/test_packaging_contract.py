@@ -16,6 +16,7 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 """
 from __future__ import annotations
 
+import hashlib
 import tomllib
 import zipfile
 from pathlib import Path
@@ -256,6 +257,10 @@ def _fake_git_runner(*, shallow: bool, cat_file_ok: bool):
     return runner
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_baked_sha_probe_skips_on_shallow_clone_with_absent_object(monkeypatch, tmp_path: Path):
     # depth-1 CI checkout: the baked merge-parent base is truncated away, not
     # missing — the probe must SKIP (regression: PR #214 review CHANGES_REQUESTED).
@@ -268,3 +273,24 @@ def test_baked_sha_probe_flags_absent_object_on_full_clone(monkeypatch, tmp_path
     monkeypatch.setattr(pkg, "_git", _fake_git_runner(shallow=False, cat_file_ok=False))
     problem = pkg._baked_sha_git_problem(tmp_path, "a" * 40)
     assert problem and "not a commit in this repository" in problem
+
+
+def test_pages_mirror_wheels_are_byte_identical_to_wheelhouse(repo_root: Path):
+    wheelhouse = repo_root / "validators" / "wheelhouse"
+    mirror = repo_root / "docs" / "downloads" / "0.2.0"
+    expected = sorted(path.name for path in wheelhouse.glob("*.whl"))
+    assert expected, "wheelhouse must contain installable wheels"
+    for filename in expected:
+        assert (mirror / filename).read_bytes() == (wheelhouse / filename).read_bytes()
+
+
+def test_pages_mirror_sha256s_publishes_install_sh_and_wheels(repo_root: Path):
+    mirror = repo_root / "docs" / "downloads" / "0.2.0"
+    sums = {}
+    for line in (mirror / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        digest, filename = line.split(maxsplit=1)
+        sums[filename.lstrip("*")] = digest
+    install_hash = _sha256(repo_root / "docs" / "install.sh")
+    assert sums["install.sh"] == install_hash
+    for wheel in (repo_root / "validators" / "wheelhouse").glob("*.whl"):
+        assert sums[wheel.name] == _sha256(wheel)

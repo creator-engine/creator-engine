@@ -143,6 +143,11 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_report",
         # v3 G-7 product surface: the two-mode installer logic + cost opt-out
         "v3_installer",
+        # v3.5-E.2 live-drive seam: the signed-spec onboard apply executor.
+        "onboard_apply",
+        # v3.5-E.4 greenfield first-project read model: pure Frame->Ship fold
+        # over E2 onboard_apply facts; imports no v1 module and performs no I/O.
+        "v3_greenfield",
         # v3.5-B.1 Cockpit: the L3 Textual view (binds to L2 snapshots ONLY;
         # a future GUI replaces this module alone — principle 6)
         "v3_cockpit",

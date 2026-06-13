@@ -18,8 +18,10 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
-from creator_engine_validator import v3_cli, v3_seat_bridge
+from creator_engine_validator import onboard_apply, v3_cli, v3_installer, v3_seat_bridge
 from creator_engine_validator.schema import validate_with_schema
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 # ---------------------------------------------------------------------------
@@ -1091,6 +1093,34 @@ github:
   reviewer: chmod735
 """
 
+_GREENFIELD_ANSWERS_YAML = """\
+answers_version: 1
+profile: solo-pilot
+host:
+  sudo_grant: [git, python, runsc, proxy]
+cost:
+  profile: default
+provider:
+  harness: claude-code
+  anthropic_api_key: env://ANTHROPIC_API_KEY
+github:
+  mode: new
+  repo: chmod735/greenfield-first
+  new_repo:
+    visibility: private
+    default_branch: main
+  bootstrap_token: prompt://github-bootstrap-token
+  app:
+    kind: shared
+    installation_id: 12345678
+  protections: reference
+  reviewer: chmod735
+project:
+  name: greenfield-first
+  scaffold:
+    kind: minimal
+"""
+
 
 def _spec(tmp_path):
     spec = tmp_path / "llms-install.md"
@@ -1098,10 +1128,114 @@ def _spec(tmp_path):
     return spec
 
 
+def _signed_spec(tmp_path):
+    canonical = """\
+kind: ce-install-spec
+signature:
+  key_id: ce-root-v1
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: <published-with-this-spec>
+  content_sha256: <published-with-this-spec>
+"""
+    digest = v3_installer.content_digest(v3_installer.canonical_spec_bytes(canonical))
+    spec = tmp_path / "signed-install.md"
+    spec.write_text(
+        canonical.replace("  value: <published-with-this-spec>", "  value: c2ln").replace(
+            "  content_sha256: <published-with-this-spec>",
+            f"  content_sha256: {digest}",
+        ),
+        encoding="utf-8",
+    )
+    return spec
+
+
+def _trust_root(tmp_path, key_material="ce-root-v1 ssh-ed25519 TESTKEY"):
+    trust = tmp_path / "ce-root-v1"
+    trust.write_text(key_material + "\n", encoding="utf-8")
+    return trust
+
+
 def _answers_file(tmp_path, content=_GOOD_ANSWERS_YAML):
     path = tmp_path / "ce-install.answers.yaml"
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _brownfield_cli_probe(origin_remote="chmod735/creator-engine-canonical", *, dirty=False):
+    return {
+        "enabled": True,
+        "project_root": ".",
+        "history": {
+            "mode": "git_history_present",
+            "head_sha": "a" * 40,
+            "default_branch": "main",
+            "commit_count": 1,
+            "dirty": dirty,
+        },
+        "github": {"origin_remote": origin_remote},
+        "ci": {"workflows": [], "current_required_checks": [], "workflow_present": False},
+        "tests": {"commands": []},
+        "conventions": {"branch_patterns": [], "commit_styles": []},
+        "secrets": {"preflight": "required", "status": "not_run", "scanner_available": None, "findings": []},
+    }
+
+
+def _init_brownfield_project(tmp_path: Path) -> Path:
+    import subprocess
+
+    root = tmp_path / "project"
+    root.mkdir()
+    workflow_dir = root / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "ci.yml").write_text(
+        """\
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pytest
+""",
+        encoding="utf-8",
+    )
+    (root / "pyproject.toml").write_text(
+        """\
+[project]
+dependencies = ["pytest"]
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "ce@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "CE Test"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", "feat: initial project"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/acme/app.git"], cwd=root, check=True)
+    return root
+
+
+def _source_files(root: Path) -> set[str]:
+    return {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    }
+
+
+def _brownfield_answers_for(repo: str) -> str:
+    return _GOOD_ANSWERS_YAML.replace(
+        "repo: chmod735/creator-engine-canonical",
+        f"repo: {repo}",
+    ).replace(
+        "target_repo: chmod735/creator-engine-canonical",
+        f"target_repo: {repo}",
+    ).replace(
+        "reviewer: chmod735",
+        "reviewer: operator",
+    )
 
 
 def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
@@ -1115,12 +1249,81 @@ def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
     assert rows["cost.profile"]["status"] == "default:default"
 
 
+def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, monkeypatch):
+    calls = []
+
+    def fake_runner(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", fake_runner)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_inventory"
+    assert payload["self_attested"] is False
+    assert payload["verified"] == {"ok": True, "key_id": "ce-root-v1"}
+    assert calls and calls[0]["signature"] == b"sig"
+    assert calls[0]["allowed_signers"].startswith("ce-root-v1 ssh-ed25519")
+    assert calls[0]["namespace"] == v3_installer.SSH_SIG_NAMESPACE
+
+
+def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys):
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "signature block missing" in payload["detail"]
+
+
+def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    spec = _signed_spec(tmp_path)
+    spec.write_text(spec.read_text(encoding="utf-8") + "\ntamper\n", encoding="utf-8")
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(spec),
+        "--trust-root", str(_trust_root(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "content_sha256 does not match" in payload["detail"]
+
+
+def test_onboard_inventory_derives_greenfield_inputs(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    rows = {row["key"]: row for row in payload["inventory"]}
+    assert rows["project.name"]["step"] == 5
+    assert rows["project.name"]["sensitivity"] == "plain"
+    assert rows["project.name"]["modes"] == ["F", "I"]
+    assert rows["project.name"]["status"] == "not-applicable"
+    assert rows["project.scaffold.kind"]["status"] == "not-applicable"
+
+
 def test_onboard_answers_file_resolves_the_asks(tmp_path, capsys, monkeypatch):
     # pin the live probe (host-independent): claude present, codex absent
     monkeypatch.setattr(
         v3_cli, "_which",
         lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"),
     )
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
     code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)), "--json"])
     assert code == 0
@@ -1146,7 +1349,9 @@ def test_onboard_refuses_raw_secret_in_answers(tmp_path, capsys):
     assert "REFUSED" in out and "SecretRef" in out
 
 
-def test_onboard_non_interactive_refuses_with_exact_missing_list(tmp_path, capsys):
+def test_onboard_non_interactive_refuses_with_exact_missing_list(tmp_path, capsys, monkeypatch):
+    # no origin remote detected here, so github.mode/repo remain real missing inputs
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
     code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--non-interactive", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
@@ -1163,6 +1368,7 @@ def test_onboard_non_interactive_succeeds_on_complete_answers(tmp_path, capsys, 
         v3_cli, "_which",
         lambda tool: tool in ("git", "python", "uv", "claude"),
     )
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
     code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)),
                         "--non-interactive", "--json"])
@@ -1213,6 +1419,208 @@ def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
     assert leg["human_approves"] == []
     # unprobed live facts stay fail-closed in the dry run (the E.4 drive probes them)
     assert leg["bootstrap_token_scopes"]["probed"] is False
+    assert payload["first_project"] is None
+
+
+def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(answers),
+        "--plan",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    first = payload["first_project"]
+    assert first["mode"] == "greenfield"
+    assert first["project_root"].endswith("/greenfield-first")
+    assert first["scaffold_input"]["supplied_to_e2_leg"] == "workspace_checkout"
+    assert first["e2_apply_required"] is True
+    assert first["frame_to_ship"]["first_scope_filed"] is False
+    assert first["first_ship_not_yet_counted"] is True
+
+
+def test_onboard_apply_rejects_read_only_modes(tmp_path, capsys):
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--apply", "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "invalid_onboard_mode"
+
+
+def test_onboard_inventory_and_plan_do_not_create_apply_state(tmp_path, capsys):
+    root = tmp_path / "state"
+    assert v3_cli.main([
+        "onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--root", str(root), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert v3_cli.main([
+        "onboard", "--spec", str(_spec(tmp_path)), "--answers", str(_answers_file(tmp_path)),
+        "--plan", "--root", str(root), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert not (root / "onboard" / "ledger.ndjson").exists()
+    assert not (root / "onboard" / "apply.lock").exists()
+
+
+def test_onboard_brownfield_inventory_is_read_only(tmp_path, capsys, monkeypatch):
+    project = _init_brownfield_project(tmp_path)
+    before = _source_files(project)
+    monkeypatch.chdir(project)
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("inventory must not invoke the E2 executor")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["brownfield"]["history"]["mode"] == "git_history_present"
+    assert payload["brownfield"]["tests"] == ["python -m pytest"]
+    assert _source_files(project) == before
+    assert not (project / ".ce" / "state" / "onboard").exists()
+
+
+def test_onboard_plan_emits_brownfield_adoption_payload(tmp_path, capsys, monkeypatch):
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--plan",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    plan = payload["brownfield_adoption"]
+    assert plan["inventory_sha256"] and len(plan["inventory_sha256"]) == 64
+    assert plan["tests"]["required_commands"] == ["python -m pytest"]
+    assert "Unit tests" in " ".join(plan["ci"]["checks_to_preserve"])
+    assert plan["ci"]["checks_to_add"] == ["Validate governance artifacts"]
+    assert [step["id"] for step in plan["apply_steps"]][:2] == [
+        "brownfield_inventory_drift_check",
+        "brownfield_secret_preflight",
+    ]
+
+
+def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path, capsys, monkeypatch):
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("brownfield apply must refuse before the greenfield E2 executor runs")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "e2_brownfield_seam_unavailable"
+    assert payload["brownfield_adoption"]["apply_steps"]
+    assert payload["brownfield_blockers"] == []
+
+
+def test_onboard_apply_refuses_self_attested_signature(tmp_path, capsys):
+    spec = _spec(tmp_path)
+    digest = v3_installer.content_digest(spec.read_bytes())
+    code = v3_cli.main([
+        "onboard", "--spec", str(spec), "--apply", "--sig-algo", v3_installer.CONTENT_ALGO,
+        "--sig-value", digest, "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "ssh-ed25519" in payload["detail"]
+
+
+def test_onboard_apply_requires_complete_answers_before_executor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("apply_onboard must not run with missing answers")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    code = v3_cli.main(["onboard", "--spec", str(_signed_spec(tmp_path)), "--apply", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "github.mode" in {item["key"] for item in payload["missing"]}
+
+
+def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"),
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    captured: dict[str, object] = {}
+
+    def fake_apply(request, *, verifier):
+        captured["request"] = request
+        captured["verifier"] = verifier
+        return {
+            "action": "onboard_apply",
+            "root": str(request.state_root),
+            "mode": request.mode,
+            "verified": {"ok": True, "key_id": "ce-root-v1", "algo": v3_installer.SSH_ED25519_ALGO},
+            "target_repo": request.answers["github"]["repo"],
+            "greenfield_repos_created": 0,
+            "repos_already_satisfied": 1,
+            "brownfield_deferred": 0,
+            "legs_total": 12,
+            "applied": 1,
+            "already_satisfied": 11,
+            "verified_count": 12,
+            "skipped": 0,
+            "refused": 0,
+            "failed": 0,
+            "rolled_back": 0,
+            "manual_rollback_required": 0,
+            "legs": [],
+        }
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+    root = tmp_path / "state"
+    greenfield_answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    code = v3_cli.main([
+        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(greenfield_answers),
+        "--apply", "--root", str(root), "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_apply"
+    assert payload["first_project"]["e2_apply_required"] is False
+    assert payload["first_project"]["e2_convergence"]["counts"]["verified_count"] == 12
+    request = captured["request"]
+    assert isinstance(request, onboard_apply.ApplyRequest)
+    assert request.state_root == root
+    assert request.explicit_signature is None
+    assert request.answers["github"]["repo"] == "chmod735/greenfield-first"
+    assert captured["verifier"] is not None
 
 
 def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsys, monkeypatch):
@@ -1221,6 +1629,7 @@ def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsy
         v3_cli, "_which",
         lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "codex"),
     )
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
     code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)), "--json"])
     assert code == 0

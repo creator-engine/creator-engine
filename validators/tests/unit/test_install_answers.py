@@ -139,6 +139,27 @@ def test_strengthened_protections_need_no_binding(tmp_path):
     assert _codes(tmp_path) == []
 
 
+def test_brownfield_secret_waiver_requires_acked_binding(tmp_path):
+    _write(tmp_path, GOOD + """
+brownfield:
+  secrets:
+    waivers:
+      - finding_id: finding-1
+""")
+    assert ia.CODE_SCHEMA in _codes(tmp_path)
+    _write(tmp_path, GOOD + f"""
+brownfield:
+  secrets:
+    waivers:
+      - finding_id: finding-1
+        ratification:
+          ratified_prompt_sha: {HEX_A}
+          approver_ref: {HEX_B}
+          educate_acknowledged: true
+""")
+    assert _codes(tmp_path) == []
+
+
 def test_floor_matches_the_v3_engine_floor():
     """The check and the v3 engine must enforce the SAME floor — both derive
     it from the schema's x-ce-reference-posture (single source of truth)."""
