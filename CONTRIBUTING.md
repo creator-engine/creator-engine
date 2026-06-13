@@ -156,6 +156,7 @@ change proven unused by both versions.
 - By contributing, you agree that your contributions are licensed
   under the project's Apache License, Version 2.0
   (see [`LICENSE`](./LICENSE)).
+- By contributing, you certify the Developer Certificate of Origin for each commit by adding a `Signed-off-by: Name <email>` trailer, usually with `git commit -s`.
 
 Thanks for helping keep Creator Engine governed, auditable, and
 useful.
