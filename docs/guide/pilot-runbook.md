@@ -44,12 +44,12 @@ ce onboard --spec llms-install.md --inventory          # every input + live stat
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
 # sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
 ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --non-interactive
+ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
 ```
 
 `--plan` shows the full plan plus the *exact remaining asks*;
-`--non-interactive` is fail-closed — it refuses with that list instead of ever
-asking (unattended/VPS runs). The one-liner passes a file through too:
+`--apply --non-interactive` is fail-closed — it refuses with that list instead
+of ever asking (unattended/VPS runs). The one-liner passes a file through too:
 `CE_ANSWERS=ce-install.answers.yaml curl … | bash` (or
 `bash -s -- --answers <file>`). An answers value can configure anything
 **except a weaker grader** — weakening (the cost opt-out, protections below
@@ -96,6 +96,13 @@ The GitHub leg is fully decomposed and **re-run convergent**:
   reference floor (required CE check · strict up-to-date · dismiss-stale ·
   enforce-admins · reviews ≥ 1 · squash-only): read current → diff → apply
   ONLY the drift, shown to you first. Same answers, second run → empty plan.
+
+For an existing repo, `ce onboard --inventory` and `--plan` also report
+`brownfield` / `brownfield_adoption`: workflows and checks to preserve, detected
+test commands, Git history posture, branch/commit conventions, scrub preflight,
+project skill artifacts, and a first Scope seed. These paths are read-only until
+E2's `onboard_apply` brownfield extension legs perform the writes; a build
+without those legs refuses apply with `e2_brownfield_seam_unavailable`.
 
 ## 3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)
 

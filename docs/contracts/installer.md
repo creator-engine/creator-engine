@@ -118,6 +118,39 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
 document plus one probe dict; `converged: true` is the terraform
 empty-plan analog.
 
+## Brownfield adoption (E3)
+
+Existing projects use the same onboard surface and the same answers inventory.
+`schemas/install-answers.schema.yaml` now carries 11 `brownfield.*` step-5 rows
+for project root correction, CI preservation policy, detected test commands,
+history mode, branch/commit convention guidance, and secrets-scrub waivers.
+There is no second prompt inventory and no brownfield-specific executor.
+
+`ce onboard --inventory` adds a value-free `brownfield` JSON block with observed
+workflows, test commands, history summary, advisory conventions, scrub status,
+and blockers. The CLI reads only source-controlled metadata and read-only Git
+facts. It does not write files, run scanners, call GitHub mutations, or invoke
+E2.
+
+`ce onboard --plan` adds `brownfield_adoption` with a canonical
+`inventory_sha256`, checks to preserve, CE checks to add, detected validation
+commands, history and convention summaries, a scrub preflight plan, a first
+Scope seed, project skill artifacts, and ordered E2 apply-step descriptors.
+Required checks are additive: existing checks are preserved and the CE validate
+check is added only when missing. Unknown test commands remain unknown; the
+planner does not invent commands from an empty project.
+
+The project skill artifacts planned for E2 to write are
+`.ce/skills/project-conventions.md` and `.ce/skills/project-validation.md`.
+Their contents are value-free: no raw secrets, scanner snippets, actor ids, or
+absolute local paths. The first Scope seed references them through `skill_refs`
+and binds to the inventory hash.
+
+Brownfield apply is E2-owned. If the current E2 `onboard_apply` build has no
+brownfield extension legs, `ce onboard --apply` refuses with
+`e2_brownfield_seam_unavailable` and returns the plan payload. See
+[`brownfield-adoption.md`](./brownfield-adoption.md).
+
 ## Onboard apply (E2 live-drive seam)
 
 `creator_engine_validator/onboard_apply.py` is the side-effecting v3 runtime
@@ -141,7 +174,8 @@ host/GitHub drivers.
 
 E2 is greenfield-only. A repo created by an earlier E2 pass can be reused only
 when ledger provenance and live verification match. An arbitrary existing repo
-is refused as `brownfield_deferred`; E3 owns brownfield adoption. SecretRefs
+is refused as `brownfield_deferred`; E3 owns brownfield inventory and planning,
+and live brownfield adoption waits for E2 brownfield extension legs. SecretRefs
 resolve only at the moment of use, and summaries/ledger entries carry refs or
 redacted facts, never secret values.
 

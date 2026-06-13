@@ -398,6 +398,142 @@ properties:
           Reviewer identity (the no-self-approval floor; solo: the human IS
           the reviewer — detected as the bootstrap token's authenticated
           login).
+  brownfield:
+    type: object
+    additionalProperties: false
+    description: |
+      Journey step 5 — brownfield project adoption. These inputs correct or
+      ratify the read-only project inventory that `ce onboard --inventory`
+      detects for an existing repo. They are value-free: no raw secrets,
+      scanner snippets, local actor identities, or destructive Git/GitHub
+      actions are accepted here.
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: Enable brownfield adoption planning for the current project.
+      project_root:
+        type: string
+        minLength: 1
+        default: "."
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: Project root to inventory; prefer repo-relative `.` when adopting the current repo.
+      inventory_depth:
+        type: string
+        enum: [bounded, full]
+        default: bounded
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I]
+        description: Inventory depth. `bounded` samples standard source-controlled metadata only.
+      ci:
+        type: object
+        additionalProperties: false
+        description: Existing CI posture to preserve during adoption.
+        properties:
+          adopt_existing_workflows:
+            type: boolean
+            default: true
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            description: Preserve existing workflows and checks while adding CE validation.
+          required_checks_strategy:
+            type: string
+            enum: [preserve-and-add, preserve-only]
+            default: preserve-and-add
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            description: Required-check posture; default preserves observed checks and adds the CE validate check.
+      tests:
+        type: object
+        additionalProperties: false
+        description: Detected or operator-supplied local validation commands.
+        properties:
+          required_commands:
+            type: array
+            items:
+              type: string
+              minLength: 1
+            uniqueItems: true
+            default: []
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: Commands the first Scope and project skill should preserve; empty means unknown, not invented.
+      history:
+        type: object
+        additionalProperties: false
+        description: Value-free project history classification.
+        properties:
+          mode:
+            type: string
+            enum: [git_history_present, absent, unknown]
+            default: unknown
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: |
+              `git_history_present` preserves existing history; `absent`
+              blocks normal adoption.
+      conventions:
+        type: object
+        additionalProperties: false
+        description: Advisory branch and commit conventions.
+        properties:
+          branch_pattern:
+            type: string
+            minLength: 1
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            x-ce-optional: true
+            description: Advisory branch naming pattern detected or supplied by the operator.
+          commit_style:
+            type: string
+            minLength: 1
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            x-ce-optional: true
+            description: Advisory commit message style detected or supplied by the operator.
+      secrets:
+        type: object
+        additionalProperties: false
+        description: Secrets-scrub preflight plan and per-finding waivers.
+        properties:
+          preflight:
+            type: string
+            enum: [required, clean, waived]
+            default: required
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: Secrets-scrub posture; adoption artifacts require clean or waived scanner evidence before write.
+          waivers:
+            type: array
+            default: []
+            x-ce-step: 5
+            x-ce-sensitivity: ratification
+            x-ce-modes: [F, I]
+            description: Per-finding value-free waivers; each waiver names a finding id and carries the ratified binding.
+            items:
+              type: object
+              required: [finding_id, ratification]
+              additionalProperties: false
+              properties:
+                finding_id:
+                  type: string
+                  minLength: 1
+                  description: Scanner finding id only; never the secret value or scanner snippet.
+                ratification:
+                  $ref: "#/$defs/ratification_binding"
   pilot:
     type: object
     additionalProperties: false

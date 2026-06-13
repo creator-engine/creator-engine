@@ -704,6 +704,232 @@ def test_inventory_derives_from_schema_annotations_only():
     assert {1, 2, 3, 4, 5} <= steps
 
 
+# ===========================================================================
+# ce-ops#53 E3 — brownfield adoption inventory + planning
+# ===========================================================================
+
+def _brownfield_probe(**overrides):
+    probe = {
+        "enabled": True,
+        "project_root": ".",
+        "history": {
+            "mode": "git_history_present",
+            "head_sha": "a" * 40,
+            "default_branch": "main",
+            "commit_count": 12,
+            "last_commit_time": "2026-06-12T10:00:00+00:00",
+            "dirty": False,
+            "tags_present": True,
+            "merge_commits": 1,
+            "top_changed_dirs": ["validators", "docs"],
+        },
+        "github": {"origin_remote": "owner/repo"},
+        "ci": {
+            "workflows": [
+                {
+                    "path": ".github/workflows/ci.yml",
+                    "name": "CI",
+                    "jobs": ["test"],
+                    "check_names": ["CI / test"],
+                }
+            ],
+            "current_required_checks": ["lint"],
+        },
+        "tests": {"commands": [{"command": "python -m pytest", "source": "pyproject.toml"}]},
+        "conventions": {
+            "branch_patterns": [{"value": "feature/*", "confidence": 0.8, "source": "git-branches"}],
+            "commit_styles": [{"value": "conventional-commits", "confidence": 0.9, "source": "git-log"}],
+        },
+        "secrets": {"preflight": "required", "status": "not_run", "scanner_available": None, "findings": []},
+    }
+    for dotted, value in overrides.items():
+        node = probe
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return probe
+
+
+def test_brownfield_rows_derived_from_schema():
+    items = inst.schema_inventory(ANSWERS_SCHEMA)
+    brownfield = {item.key: item for item in items if item.key.startswith("brownfield.")}
+    assert len(items) == 38
+    assert set(brownfield) == {
+        "brownfield.enabled",
+        "brownfield.project_root",
+        "brownfield.inventory_depth",
+        "brownfield.ci.adopt_existing_workflows",
+        "brownfield.ci.required_checks_strategy",
+        "brownfield.tests.required_commands",
+        "brownfield.history.mode",
+        "brownfield.conventions.branch_pattern",
+        "brownfield.conventions.commit_style",
+        "brownfield.secrets.preflight",
+        "brownfield.secrets.waivers",
+    }
+    assert all(item.step == 5 for item in brownfield.values())
+    assert brownfield["brownfield.secrets.waivers"].sensitivity == "ratification"
+    assert brownfield["brownfield.project_root"].modes == ("D", "F", "I")
+
+
+def test_github_existing_detects_brownfield_facts():
+    detected = inst.brownfield_detected_facts(_brownfield_probe())
+    assert detected["github.mode"] == "existing"
+    assert detected["github.repo"] == "owner/repo"
+    assert detected["brownfield.enabled"] is True
+    merged = inst.merge_answers(ANSWERS_SCHEMA, detected=detected)
+    assert merged.value("github.mode") == "existing"
+    assert merged.value("brownfield.history.mode") == "git_history_present"
+
+
+def test_detected_vs_file_conflict_surfaces_for_repo_and_project_root():
+    answers = _answers(**{
+        "github.repo": "other/repo",
+        "brownfield.project_root": "subdir",
+    })
+    detected = inst.brownfield_detected_facts(_brownfield_probe())
+    merged = inst.merge_answers(ANSWERS_SCHEMA, answers=answers, detected=detected)
+    conflicts = {c.key for c in merged.conflicts}
+    assert {"github.repo", "brownfield.project_root"} <= conflicts
+    missing = inst.missing_answers(ANSWERS_SCHEMA, merged)
+    assert {m.key for m in missing if m.reason == "conflict"} >= {"github.repo", "brownfield.project_root"}
+
+
+def test_github_actions_are_preserved_and_ce_check_is_additive():
+    plan = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=_brownfield_probe()
+    )
+    assert {"lint", "CI / test"} <= set(plan["ci"]["checks_to_preserve"])
+    assert plan["ci"]["checks_to_add"] == ["Validate governance artifacts"]
+    assert all("drop" not in step.get("id", "") for step in plan["apply_steps"])
+
+
+def test_test_runner_detection_uses_declared_commands_only():
+    with_command = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=_brownfield_probe()
+    )
+    assert with_command["tests"]["required_commands"] == ["python -m pytest"]
+    absent = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1},
+        schema=ANSWERS_SCHEMA,
+        probe=_brownfield_probe(tests={"commands": []}),
+    )
+    assert absent["tests"]["required_commands"] == []
+
+
+def test_conventions_detection_is_advisory_and_overridable():
+    plan = inst.build_brownfield_adoption_plan(
+        _answers(**{
+            "brownfield.conventions.branch_pattern": "release/*",
+            "brownfield.conventions.commit_style": "short-imperative-subject",
+        }),
+        schema=ANSWERS_SCHEMA,
+        probe=_brownfield_probe(),
+    )
+    assert plan["conventions"] == {
+        "branch_pattern": "release/*",
+        "commit_style": "short-imperative-subject",
+    }
+    assert plan["counters"]["convention_candidates_detected"] == 2
+
+
+def test_history_present_adoptable_has_value_free_hash():
+    probe = _brownfield_probe(secrets={"preflight": "clean", "status": "clean", "scanner_available": True, "findings": []})
+    plan = inst.build_brownfield_adoption_plan({"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=probe)
+    assert plan["classification"] == "adoptable"
+    assert plan["history"]["mode"] == "git_history_present"
+    assert len(plan["inventory_sha256"]) == 64
+    assert plan["blocked"] is False
+
+
+def test_history_absent_blocks_without_apply_writes():
+    plan = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1},
+        schema=ANSWERS_SCHEMA,
+        probe=_brownfield_probe(history={"mode": "absent", "head_sha": None, "commit_count": 0, "dirty": False}),
+    )
+    assert plan["blocked"] is True
+    assert plan["classification"] == "needs_baseline_capture"
+    assert plan["apply_steps"] == []
+
+
+def test_dirty_tree_blocks_apply():
+    plan = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1},
+        schema=ANSWERS_SCHEMA,
+        probe=_brownfield_probe(**{"history.dirty": True}),
+    )
+    assert plan["blocked"] is True
+    assert plan["classification"] == "blocked_dirty_tree"
+    assert plan["apply_steps"] == []
+
+
+def test_secret_preflight_required_plans_scanner_before_artifact_writes():
+    plan = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=_brownfield_probe()
+    )
+    assert plan["classification"] == "adoptable_after_scrub"
+    ids = [step["id"] for step in plan["apply_steps"]]
+    assert ids.index("brownfield_secret_preflight") < ids.index("brownfield_write_skill_artifacts")
+    write_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_write_skill_artifacts")
+    assert "secrets_preflight_clean_or_waived" in write_step["requires"]
+
+
+def test_secret_waiver_requires_ratification_binding():
+    bad = _answers(**{"brownfield.secrets.waivers": [{"finding_id": "finding-1"}]})
+    problems = inst.validate_answers(bad, schema=ANSWERS_SCHEMA)
+    assert any("ratification" in p for p in problems)
+    good = _answers(**{"brownfield.secrets.waivers": [{
+        "finding_id": "finding-1",
+        "ratification": {
+            "ratified_prompt_sha": HEX,
+            "approver_ref": "b" * 64,
+            "educate_acknowledged": True,
+        },
+    }]})
+    assert inst.validate_answers(good, schema=ANSWERS_SCHEMA) == ()
+
+
+def test_scope_seed_maps_inventory_and_skill_artifacts_are_value_free(tmp_path):
+    plan = inst.build_brownfield_adoption_plan(
+        {"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=_brownfield_probe()
+    )
+    seed = plan["artifact_plan"]["scope_seed"]
+    assert "python -m pytest" in " ".join(seed["acceptance_criteria"])
+    assert "CI / test" in " ".join(seed["acceptance_criteria"])
+    assert seed["skill_refs"] == list(inst.BROWNFIELD_SKILL_ARTIFACT_PATHS)
+    content = "\n".join(item["content"] for item in plan["artifact_plan"]["skill_artifacts"])
+    assert str(tmp_path) not in content
+    for forbidden in ("ghp_", "sk-", "scanner snippet", "chmod735"):
+        assert forbidden not in content
+
+
+def test_brownfield_plan_is_idempotent_and_paths_unique():
+    probe = _brownfield_probe()
+    first = inst.build_brownfield_adoption_plan({"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=probe)
+    second = inst.build_brownfield_adoption_plan({"answers_version": 1}, schema=ANSWERS_SCHEMA, probe=probe)
+    assert first["inventory_sha256"] == second["inventory_sha256"]
+    paths = [item["path"] for item in first["artifact_plan"]["skill_artifacts"]]
+    assert len(paths) == len(set(paths))
+
+
+def test_docs_loop_updated_for_brownfield_without_e3_apply_executor():
+    docs = "\n".join(
+        (_REPO_ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "docs/contracts/installer.md",
+            "docs/contracts/brownfield-adoption.md",
+            "docs/llms-install.md",
+            "docs/guide/pilot-runbook.md",
+        )
+    )
+    assert "--inventory" in docs and "--plan" in docs and "--apply" in docs
+    assert "brownfield_adoption" in docs
+    assert "e2_brownfield_seam_unavailable" in docs
+    assert "--apply-brownfield" not in docs
+
+
 
 # ===========================================================================
 # v3.5-E.3 E3-G2 — the GitHub leg, decomposed (pure planners, injected probes)

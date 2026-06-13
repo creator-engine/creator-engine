@@ -267,6 +267,271 @@ def _emit(args: argparse.Namespace, code: int, lines: list[str], payload: dict[s
     return code
 
 
+def _git_read(root: Path, *args: str) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def _github_repo_from_remote(remote: str | None) -> str | None:
+    if not remote:
+        return None
+    remote = remote.strip()
+    patterns = (
+        r"github\.com[:/](?P<owner>[^/\s]+)/(?P<repo>[^/\s]+?)(?:\.git)?$",
+        r"^https?://[^/]*github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, remote)
+        if match:
+            return f"{match.group('owner')}/{match.group('repo')}"
+    return None
+
+
+def _workflow_triggers(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    if isinstance(raw, dict):
+        return [str(key) for key in raw]
+    return []
+
+
+def _detect_ci_workflows(project_root: Path) -> dict[str, Any]:
+    workflows: list[dict[str, Any]] = []
+    workflow_dir = project_root / ".github" / "workflows"
+    candidates = sorted([*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")]) if workflow_dir.is_dir() else []
+    for path in candidates:
+        rel = path.relative_to(project_root).as_posix()
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        name = str(data.get("name") or path.stem)
+        raw_jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+        jobs = sorted(str(job_id) for job_id in raw_jobs)
+        check_names: list[str] = []
+        for job_id, job in sorted(raw_jobs.items()):
+            job_name = str(job.get("name") or job_id) if isinstance(job, dict) else str(job_id)
+            check_names.append(job_name)
+            if name:
+                check_names.append(f"{name} / {job_name}")
+        workflows.append({
+            "path": rel,
+            "name": name,
+            "triggers": _workflow_triggers(data.get("on", data.get(True))),
+            "jobs": jobs,
+            "check_names": sorted(set(check_names)),
+            "ce_validate": (
+                rel == onboard_apply.CE_WORKFLOW_PATH
+                or "Validate governance artifacts" in check_names
+            ),
+        })
+    return {
+        "workflows": workflows,
+        "current_required_checks": [],
+        "workflow_present": any(w["ce_validate"] for w in workflows),
+    }
+
+
+def _package_manager(project_root: Path) -> str:
+    if (project_root / "pnpm-lock.yaml").is_file():
+        return "pnpm"
+    if (project_root / "yarn.lock").is_file():
+        return "yarn"
+    return "npm"
+
+
+def _detect_test_commands(project_root: Path) -> dict[str, Any]:
+    commands: list[dict[str, str]] = []
+
+    def add(command: str, source: str) -> None:
+        if command and command not in {item["command"] for item in commands}:
+            commands.append({"command": command, "source": source, "confidence": "detected"})
+
+    if (project_root / "pytest.ini").is_file():
+        add("python -m pytest", "pytest.ini")
+    pyproject = project_root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            import tomllib
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            data = {}
+        tool = data.get("tool", {}) if isinstance(data, dict) else {}
+        project = data.get("project", {}) if isinstance(data, dict) else {}
+        deps = []
+        if isinstance(project, dict):
+            deps.extend(project.get("dependencies") or [])
+            optional = project.get("optional-dependencies") or {}
+            if isinstance(optional, dict):
+                for group in optional.values():
+                    deps.extend(group or [])
+        if (isinstance(tool, dict) and "pytest" in tool) or any("pytest" in str(dep) for dep in deps):
+            add("python -m pytest", "pyproject.toml")
+    if (project_root / "tox.ini").is_file():
+        add("tox", "tox.ini")
+    if (project_root / "noxfile.py").is_file():
+        add("nox", "noxfile.py")
+    package_json = project_root / "package.json"
+    if package_json.is_file():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        test_script = (data.get("scripts") or {}).get("test") if isinstance(data, dict) else None
+        if isinstance(test_script, str) and test_script and "no test specified" not in test_script:
+            add(f"{_package_manager(project_root)} test", "package.json")
+    if (project_root / "go.mod").is_file():
+        add("go test ./...", "go.mod")
+    if (project_root / "Cargo.toml").is_file():
+        add("cargo test", "Cargo.toml")
+    if (project_root / "pom.xml").is_file():
+        add("mvn test", "pom.xml")
+    if (project_root / "build.gradle").is_file() or (project_root / "build.gradle.kts").is_file():
+        add("./gradlew test" if (project_root / "gradlew").is_file() else "gradle test", "build.gradle")
+    makefile = project_root / "Makefile"
+    if makefile.is_file():
+        try:
+            if re.search(r"(?m)^test\s*:", makefile.read_text(encoding="utf-8")):
+                add("make test", "Makefile")
+        except OSError:
+            pass
+    justfile = project_root / "justfile"
+    if justfile.is_file():
+        try:
+            if re.search(r"(?m)^test(?:\s|:)", justfile.read_text(encoding="utf-8")):
+                add("just test", "justfile")
+        except OSError:
+            pass
+    return {"commands": commands}
+
+
+def _top_changed_dirs(project_root: Path) -> list[str]:
+    output = _git_read(project_root, "log", "--name-only", "--pretty=format:", "-n", "50")
+    if not output:
+        return []
+    counts: dict[str, int] = {}
+    for raw in output.splitlines():
+        path = raw.strip()
+        if not path:
+            continue
+        first = path.split("/", 1)[0]
+        counts[first] = counts.get(first, 0) + 1
+    return [name for name, _count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]]
+
+
+def _branch_candidates(branches: list[str], current: str | None) -> list[dict[str, Any]]:
+    names = [b.removeprefix("origin/") for b in branches if b and "HEAD" not in b]
+    if current:
+        names.append(current)
+    prefixes: dict[str, int] = {}
+    for name in names:
+        if "/" in name:
+            candidate = name.split("/", 1)[0] + "/*"
+            prefixes[candidate] = prefixes.get(candidate, 0) + 1
+        elif re.match(r"^v\d+[a-z0-9-]*", name):
+            prefixes["v*-*"] = prefixes.get("v*-*", 0) + 1
+    if not prefixes:
+        return []
+    total = max(len(names), 1)
+    return [
+        {"value": value, "confidence": round(count / total, 2), "source": "git-branches"}
+        for value, count in sorted(prefixes.items(), key=lambda item: (-item[1], item[0]))[:3]
+    ]
+
+
+def _commit_style_candidates(subjects: list[str]) -> list[dict[str, Any]]:
+    if not subjects:
+        return []
+    conventional = sum(
+        1 for subject in subjects
+        if re.match(r"^(feat|fix|docs|test|tests|refactor|chore|build|ci|perf|style|revert)(\([^)]+\))?:", subject)
+    )
+    ratio = conventional / len(subjects)
+    if ratio >= 0.5:
+        return [{"value": "conventional-commits", "confidence": round(ratio, 2), "source": "git-log"}]
+    return [{"value": "short-imperative-subject", "confidence": round(1 - ratio, 2), "source": "git-log"}]
+
+
+def _detect_git_history(project_root: Path) -> dict[str, Any]:
+    inside = _git_read(project_root, "rev-parse", "--is-inside-work-tree") == "true"
+    origin = _github_repo_from_remote(_git_read(project_root, "config", "--get", "remote.origin.url"))
+    if not inside:
+        return {
+            "mode": "absent",
+            "present": False,
+            "head_sha": None,
+            "default_branch": None,
+            "commit_count": 0,
+            "dirty": False,
+            "branches": [],
+            "commit_subjects": [],
+            "origin_remote": origin,
+        }
+    head = _git_read(project_root, "rev-parse", "--verify", "HEAD")
+    mode = "git_history_present" if head else "absent"
+    default_branch = _git_read(project_root, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+    if default_branch and default_branch.startswith("origin/"):
+        default_branch = default_branch.split("/", 1)[1]
+    default_branch = default_branch or _git_read(project_root, "branch", "--show-current")
+    commit_count_raw = _git_read(project_root, "rev-list", "--count", "HEAD") if head else "0"
+    merge_count_raw = _git_read(project_root, "rev-list", "--merges", "--count", "HEAD") if head else "0"
+    dirty = bool(_git_read(project_root, "status", "--porcelain", "--untracked-files=no"))
+    branches_raw = _git_read(project_root, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+    subjects_raw = _git_read(project_root, "log", "-20", "--pretty=%s") if head else ""
+    return {
+        "mode": mode,
+        "present": mode == "git_history_present",
+        "head_sha": head,
+        "default_branch": default_branch,
+        "commit_count": int(commit_count_raw or 0),
+        "last_commit_time": _git_read(project_root, "log", "-1", "--format=%cI") if head else None,
+        "tags_present": bool(_git_read(project_root, "tag")),
+        "merge_commits": int(merge_count_raw or 0),
+        "top_changed_dirs": _top_changed_dirs(project_root) if head else [],
+        "dirty": dirty,
+        "branches": branches_raw.splitlines() if branches_raw else [],
+        "commit_subjects": subjects_raw.splitlines() if subjects_raw else [],
+        "origin_remote": origin,
+    }
+
+
+def _detect_brownfield_project(project_root: Path) -> dict[str, Any]:
+    history = _detect_git_history(project_root)
+    branches = history.pop("branches", [])
+    subjects = history.pop("commit_subjects", [])
+    return {
+        "enabled": True,
+        "project_root": ".",
+        "history": history,
+        "github": {"origin_remote": history.get("origin_remote")},
+        "ci": _detect_ci_workflows(project_root),
+        "tests": _detect_test_commands(project_root),
+        "conventions": {
+            "branch_patterns": _branch_candidates(branches, history.get("default_branch")),
+            "commit_styles": _commit_style_candidates(subjects),
+        },
+        "secrets": {
+            "preflight": "required",
+            "status": "not_run",
+            "scanner_available": None,
+            "findings": [],
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # ce-ops#38 work-claim hook (shared runtime; forge-native; advisory)
 # ---------------------------------------------------------------------------
@@ -2060,10 +2325,16 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         detected["provider.harness"] = (
             present_harnesses[0] if len(present_harnesses) == 1 else "both"
         )
+    project_root = Path.cwd()
+    brownfield_probe = _detect_brownfield_project(project_root)
+    detected.update(v3_installer.brownfield_detected_facts(brownfield_probe))
     # 4. --inventory: the awareness artifact (schema-derived, never hand-kept).
     if args.inventory:
         rows = v3_installer.inventory_emission(
             schema, detected=detected, answers=answers or None
+        )
+        brownfield = v3_installer.brownfield_inventory_summary(
+            schema, answers=answers or None, probe=brownfield_probe
         )
         lines = [
             f"{_BRAND} · onboard inventory — {len(rows)} inputs "
@@ -2081,11 +2352,17 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             "(secrets ONLY as env:// file:// prompt:// keychain:// refs), then: "
             f"{CE_CMD} onboard --spec <spec> --answers <file> --plan"
         )
+        lines.append(
+            f"{_BRAND} · brownfield inventory — {len(brownfield['ci'])} workflow(s), "
+            f"{len(brownfield['tests'])} test command(s), history {brownfield['history']['mode']}, "
+            f"scrub {brownfield['secrets_preflight']['status']}"
+        )
         return _emit(args, 0, lines, {
             "action": "onboard_inventory",
             "verified": {"ok": True, "key_id": verified.key_id},
             "self_attested": self_attested,
             "inventory": [dict(row) for row in rows],
+            "brownfield": brownfield,
         })
     # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
@@ -2144,7 +2421,42 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         )
     except v3_installer.InstallRefused as exc:
         return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
+    brownfield_plan = v3_installer.build_brownfield_adoption_plan(
+        answers or {"answers_version": 1},
+        schema=schema,
+        probe=brownfield_probe,
+    )
     if apply_mode:
+        if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
+            if brownfield_plan["blocked"]:
+                blocker = brownfield_plan["blockers"][0]
+                return _emit(
+                    args,
+                    1,
+                    [f"{_BRAND} · onboard apply REFUSED ({blocker['code']}): {blocker['detail']}"],
+                    {
+                        "error": "refused",
+                        "code": blocker["code"],
+                        "detail": blocker["detail"],
+                        "brownfield_blockers": brownfield_plan["blockers"],
+                        "brownfield_adoption": brownfield_plan,
+                    },
+                )
+            return _emit(
+                args,
+                1,
+                [
+                    f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
+                    "E3 brownfield adoption is planned, but this E2 onboard_apply build has no brownfield apply legs"
+                ],
+                {
+                    "error": "refused",
+                    "code": "e2_brownfield_seam_unavailable",
+                    "detail": "E3 brownfield apply must run through E2 onboard_apply extension legs; this build only emits the handoff plan",
+                    "brownfield_blockers": [],
+                    "brownfield_adoption": brownfield_plan,
+                },
+            )
         request = onboard_apply.ApplyRequest(
             spec_bytes=spec_bytes,
             schema=schema,
@@ -2206,7 +2518,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     #    probe carries only what it can read today — unprobed = fail-closed).
     github_leg = None
     if args.show_plan and answers.get("github"):
-        github_leg = v3_installer.build_github_leg_plan(answers, schema=schema, probe={})
+        github_probe = {
+            "origin_remote": (brownfield_probe.get("github") or {}).get("origin_remote"),
+            "workflow_present": (brownfield_probe.get("ci") or {}).get("workflow_present"),
+        }
+        github_leg = v3_installer.build_github_leg_plan(answers, schema=schema, probe=github_probe)
     lines = [
         f"{_BRAND} · onboard (dry-run · {plan['mode']}) — spec verified against pinned key "
         f"{plan['verified']['key_id']!r}",
@@ -2249,6 +2565,15 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"protection drift {len(github_leg['branch_protection']['drift'])} · "
             f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to the E.4 drive)'}"
         )
+    if args.show_plan:
+        counters = brownfield_plan["counters"]
+        lines.append(
+            f"    brownfield · {brownfield_plan['classification']} · "
+            f"inventory {brownfield_plan['inventory_sha256'][:12]} · "
+            f"workflows {counters['ci_workflows_observed']} · "
+            f"tests {counters['test_commands_detected']} · "
+            f"E2 steps {counters['apply_steps_planned']}"
+        )
     lines += [
         f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",
         f"{_BRAND} · you approve only: {', '.join(plan['human_approves'])}",
@@ -2274,6 +2599,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                            "uncovered": list(grant_diff.uncovered)},
         } if args.answers else None),
         "github_leg": github_leg,
+        "brownfield_adoption": brownfield_plan if args.show_plan else None,
         "non_interactive": bool(args.non_interactive),
     }
     return _emit(args, 0, lines, payload)
