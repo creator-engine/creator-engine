@@ -121,6 +121,7 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # independently-reviewable pitch artifact)
         "runner.cockpit_demo_seed",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
+        "authority_resolver",
         "coordination",
         # v3.1-G1 live-spawn keystone: the assemble->spawn bridge. Crosses to the
         # v1 launcher as SUBPROCESS + DATA only (`ce launch --json`, files + argv +

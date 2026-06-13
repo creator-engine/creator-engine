@@ -83,7 +83,8 @@ def test_taxonomy_counts_and_disjoint():
     # added the Operator-notify feed (``runner.notify_feed``): 35 -> 36.
     # v3.5-E.2 added the signed-spec onboard apply executor: 36 -> 37.
     # v3.5-E.4 added the greenfield first-project read model: 37 -> 38.
-    assert len(ver.V3_RUNTIME) == 38
+    # ce-ops#34 RS-1 added the AuthorityResolver seam: 38 -> 39.
+    assert len(ver.V3_RUNTIME) == 39
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

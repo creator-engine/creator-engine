@@ -64,6 +64,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from . import (
+    authority_resolver,
     coordination,
     evidence_sink,
     onboard_apply,
@@ -683,7 +684,10 @@ def _cmd_drive(args: argparse.Namespace) -> int:
                 {"error": "policy_malformed", "policy": str(policy_path)},
             )
         runtime_policy = loaded
-    result = coordination.assemble_dispatch(scope, runtime_policy)
+    verdict = authority_resolver.DEV_AUTHORITY_RESOLVER.resolve(
+        authority_resolver.ScopeRatifyDecision(scope=scope, runtime_policy=runtime_policy)
+    )
+    result = verdict.value
     if isinstance(result, coordination.DispatchRefusal):
         lines = [
             f"{_BRAND} · drive REFUSED ({result.reason}) — the front gate held",
@@ -1926,9 +1930,14 @@ def _cmd_merge(args: argparse.Namespace) -> int:
         )
     merge_runner = v3_forge_join.ambient_gh_runner()
     try:
-        result = v3_forge_join.merge_for_run(
-            root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+        verdict = authority_resolver.DEV_AUTHORITY_RESOLVER.resolve(
+            authority_resolver.MergeDecision(
+                gate_read=lambda: v3_forge_join.merge_for_run(
+                    root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+                )
+            )
         )
+        result = verdict.value
     except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
         return _emit(
             args, 1,
