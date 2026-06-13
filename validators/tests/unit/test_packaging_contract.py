@@ -275,22 +275,51 @@ def test_baked_sha_probe_flags_absent_object_on_full_clone(monkeypatch, tmp_path
     assert problem and "not a commit in this repository" in problem
 
 
-def test_pages_mirror_wheels_are_byte_identical_to_wheelhouse(repo_root: Path):
-    wheelhouse = repo_root / "validators" / "wheelhouse"
+def _parse_sha256sums(path: Path) -> dict[str, str]:
+    """Parse a ``SHA256SUMS`` manifest into ``{filename: digest}``.
+
+    Tolerates the ``*`` binary-mode marker coreutils prefixes onto
+    filenames; blank lines are ignored.
+    """
+    sums: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        digest, filename = line.split(maxsplit=1)
+        sums[filename.lstrip("*")] = digest
+    return sums
+
+
+def test_pages_mirror_wheels_match_published_sha256sums(repo_root: Path):
+    # ce-ops#69 re-scope: the published 0.2.0 Pages mirror is a FROZEN,
+    # self-verifying release artifact. Every wheel under docs/downloads/0.2.0/
+    # must hash to the digest recorded in its OWN SHA256SUMS -- we assert the
+    # mirror's INTERNAL self-consistency, NOT a byte-match against the live dev
+    # validators/wheelhouse/ (which advances to 0.2.0+sha freely; the published
+    # wheel only changes at a ratified release + re-sign -> 0.3.0). The dev
+    # wheel<->source contract stays covered by verify_wheel_matches_source.
     mirror = repo_root / "docs" / "downloads" / "0.2.0"
-    expected = sorted(path.name for path in wheelhouse.glob("*.whl"))
-    assert expected, "wheelhouse must contain installable wheels"
-    for filename in expected:
-        assert (mirror / filename).read_bytes() == (wheelhouse / filename).read_bytes()
+    sums = _parse_sha256sums(mirror / "SHA256SUMS")
+    wheels = sorted(path.name for path in mirror.glob("*.whl"))
+    assert wheels, "published mirror must contain installable wheels"
+    for filename in wheels:
+        assert filename in sums, f"published wheel missing from SHA256SUMS: {filename}"
+        assert sums[filename] == _sha256(mirror / filename), f"published wheel digest drift: {filename}"
 
 
 def test_pages_mirror_sha256s_publishes_install_sh_and_wheels(repo_root: Path):
+    # ce-ops#69 re-scope: SHA256SUMS publishes install.sh + the mirror's OWN
+    # wheels, and every published digest matches the actual published artifact
+    # in-place (docs/install.sh for the installer, docs/downloads/0.2.0/ for the
+    # wheels) -- NOT validators/wheelhouse/. Together with the test above this
+    # pins a bijection between the mirror's wheel files and its SHA256SUMS wheel
+    # entries, so neither an orphan file nor an unpublished wheel can slip in.
     mirror = repo_root / "docs" / "downloads" / "0.2.0"
-    sums = {}
-    for line in (mirror / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
-        digest, filename = line.split(maxsplit=1)
-        sums[filename.lstrip("*")] = digest
-    install_hash = _sha256(repo_root / "docs" / "install.sh")
-    assert sums["install.sh"] == install_hash
-    for wheel in (repo_root / "validators" / "wheelhouse").glob("*.whl"):
-        assert sums[wheel.name] == _sha256(wheel)
+    sums = _parse_sha256sums(mirror / "SHA256SUMS")
+    assert sums["install.sh"] == _sha256(repo_root / "docs" / "install.sh")
+    published_wheels = sorted(name for name in sums if name.endswith(".whl"))
+    assert published_wheels, "SHA256SUMS must publish at least one wheel"
+    for filename in published_wheels:
+        wheel = mirror / filename
+        assert wheel.is_file(), f"SHA256SUMS publishes a wheel absent from the mirror: {filename}"
+        assert sums[filename] == _sha256(wheel)
