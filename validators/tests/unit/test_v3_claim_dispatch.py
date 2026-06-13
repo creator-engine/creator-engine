@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import pytest
 import yaml
 
 from creator_engine_validator import v3_cli, v3_seat_bridge, work_claims as wc
@@ -21,6 +22,23 @@ from creator_engine_validator import v3_cli, v3_seat_bridge, work_claims as wc
 APPROVER = "a" * 64
 NOW = datetime(2026, 6, 12, 15, 0, 0, tzinfo=timezone.utc)
 WK = "creator-engine/ce-ops:issue:38"
+
+
+def _ts(delta=timedelta(0)):
+    """Clock-relative ISO-``Z`` timestamp derived from the frozen ``NOW``.
+
+    Fixtures express age relative to ``NOW`` so they stay date-independent: with
+    ``stale_after_seconds = 14400`` (4h), ``NOW - 1h`` is active and ``NOW - 6h``
+    is stale on any host date once the work-claim clock is frozen to ``NOW``.
+    """
+    return (NOW + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.fixture(autouse=True)
+def _frozen_work_claim_clock(freeze_work_claim_clock):
+    # The v3 dispatch claim path reads wall-clock time; freeze it to NOW so the
+    # active-foreign fixture below cannot rot into a stale claim (ce-ops#57).
+    freeze_work_claim_clock(NOW)
 
 
 # --- forge fake --------------------------------------------------------------
@@ -38,7 +56,7 @@ class FakeGh:
             body = json.loads(input_text)["body"]
             cid = self.next_id
             self.next_id += 1
-            self.comments.append({"id": cid, "body": body, "created_at": "2026-06-12T15:00:00Z",
+            self.comments.append({"id": cid, "body": body, "created_at": _ts(),
                                   "user": {"login": "bot"}})
             self.posts.append(body)
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": cid}), stderr="")
@@ -46,11 +64,13 @@ class FakeGh:
 
 
 def _foreign_acquire(claim_id="wclaim-foreign"):
+    # Active relative to NOW: claimed 1h ago against a 4h (14400s) stale fence.
+    claimed = _ts(timedelta(hours=-1))
     body = wc.render_marker({
         "kind": "ce-work-claim", "schema_version": 1, "action": "acquire",
         "work_key": WK, "claim_id": claim_id, "holder": "other-controller", "host": "other-host",
-        "claimed_at": "2026-06-12T14:00:00Z", "stale_after_seconds": 14400, "idempotency_key": "i"})
-    return {"id": 1, "body": body, "created_at": "2026-06-12T14:00:00Z", "user": {"login": "x"}}
+        "claimed_at": claimed, "stale_after_seconds": 14400, "idempotency_key": "i"})
+    return {"id": 1, "body": body, "created_at": claimed, "user": {"login": "x"}}
 
 
 # --- bridge fakes ------------------------------------------------------------
@@ -119,6 +139,13 @@ def test_drive_spawn_foreign_claim_refuses_no_dispatch(tmp_path, capsys, monkeyp
                         "creator-engine/ce-ops#38", "--root", str(tmp_path), "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
+    # ce-ops#57 date-bomb guard: the foreign fixture must be ACTIVE (not stale)
+    # relative to NOW. If the dispatch path ever evaluated it against wall-clock
+    # time again, this fixture would read stale and the reason would flip to
+    # ``claim_stale_foreign_claim`` — that is exactly the #218 regression.
+    foreign = _foreign_acquire()
+    st = wc.compute_state([wc.Comment(foreign["id"], foreign["body"], foreign["created_at"])], WK, NOW)
+    assert st.active is not None and st.active.stale is False
     assert payload["reason"] == "claim_active_foreign_claim"
     # refuse BEFORE side effect: no dispatch dir, no spawn, nothing posted
     assert calls["spawn"] == []

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -17,6 +17,22 @@ from creator_engine_validator import ce_cli, work_claims as wc
 
 NOW = datetime(2026, 6, 12, 15, 0, 0, tzinfo=timezone.utc)
 WK = "creator-engine/ce-ops:issue:38"
+
+
+def _ts(delta=timedelta(0)):
+    """Clock-relative ISO-``Z`` timestamp derived from the frozen ``NOW``.
+
+    The ``ce claim`` command surface calls ``work_claims.acquire/status/release``
+    without an explicit ``now``, so it reads wall-clock time. Expressing fixtures
+    relative to ``NOW`` (active = ``NOW - 1h`` under the 4h fence) keeps them
+    date-independent once the work-claim clock is frozen to ``NOW`` (ce-ops#57).
+    """
+    return (NOW + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.fixture(autouse=True)
+def _frozen_work_claim_clock(freeze_work_claim_clock):
+    freeze_work_claim_clock(NOW)
 
 
 class FakeGh:
@@ -35,7 +51,7 @@ class FakeGh:
             body = json.loads(input_text)["body"]
             cid = self.next_id
             self.next_id += 1
-            self.comments.append({"id": cid, "body": body, "created_at": "2026-06-12T15:00:00Z",
+            self.comments.append({"id": cid, "body": body, "created_at": _ts(),
                                   "user": {"login": "bot"}})
             self.posts.append(body)
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": cid}), stderr="")
@@ -44,15 +60,16 @@ class FakeGh:
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments), stderr="")
 
 
-def _acquire_body(claim_id, holder="ce-dev-2", host="H", claimed_at="2026-06-12T14:00:00Z"):
+def _acquire_body(claim_id, holder="ce-dev-2", host="H", claimed_at=None):
     return wc.render_marker({
         "kind": "ce-work-claim", "schema_version": 1, "action": "acquire",
         "work_key": WK, "claim_id": claim_id, "holder": holder, "host": host,
-        "claimed_at": claimed_at, "stale_after_seconds": 14400, "idempotency_key": "i"})
+        "claimed_at": claimed_at or _ts(timedelta(hours=-1)),
+        "stale_after_seconds": 14400, "idempotency_key": "i"})
 
 
 def _comment(cid, body):
-    return {"id": cid, "body": body, "created_at": "2026-06-12T14:00:00Z", "user": {"login": "bot"}}
+    return {"id": cid, "body": body, "created_at": _ts(timedelta(hours=-1)), "user": {"login": "bot"}}
 
 
 @pytest.fixture()
