@@ -44,7 +44,7 @@ the existing escalation queue (B.8-bannerable); a `conserve` marker is an absolu
 `reap_once` / `reap_watch_tick` / `reap_status`); status + the eval phase of once/watch write
 nothing and leave `events.jsonl` byte-identical.
 
-Per-file purpose (the closed path-set — 15 paths = 14 implementation + this carrier):
+Per-file purpose (the closed path-set — 17 paths = 14 implementation + this carrier + 2 orchestrator-rebuilt wheelhouse artifacts):
 - **`.ce/pr-manifests/ce43-seat-reaper.md`** *(A)* — this carrier (self-inclusive).
 - **`docs/operations/SEAT_REAPER_PROTOCOL.md`** *(A)* — the prose contract (done-when doc).
 - **`schemas/dispatch-record.schema.yaml`** *(M)* — additive OPTIONAL conserved-evidence marker
@@ -85,17 +85,24 @@ Per-file purpose (the closed path-set — 15 paths = 14 implementation + this ca
   missing-when-expected failure; ambiguous refusal).
 - **`validators/tests/unit/test_v3_seat_bridge.py`** *(M)* — the conserved-evidence marker
   validates against the (additively-extended, still-closed) dispatch schema.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* — the committed
+  app wheel, rebuilt by the orchestrator from this branch's source so the packaging-contract guard
+  (`verify_wheel_matches_source`) sees the two new V3 modules + the `_versions.py`/`v3_cli.py` deltas
+  byte-identical (sha256 `88fac613…`).
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* — re-pinned app-wheel digest (only that line changed;
+  the 6 dependency wheels are byte-unchanged).
 
-Posture: the seat commits LOCALLY only — NO `git push`, NO `gh pr`, NO merge. The orchestrator
-handles the committed-wheel rebuild + re-pin (`validators/wheelhouse/*` are NOT in this seat's
-diff) and the push; the Operator merges.
+Posture: the seat committed LOCALLY only — NO `git push`, NO `gh pr`, NO merge. The orchestrator
+then rebuilt the committed app wheel from this branch's source + re-pinned
+`validators/wheelhouse/SHA256SUMS` (the +2 wheelhouse paths above; app wheel sha256 `88fac613…`)
+in a separate commit, then pushes; the Operator merges.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=f326ffb83605ef4551761de4733023f20a04a85d0e137fd57172a39b5b0f2ddb
+AUTHORIZED_PATHS_SHA256=98a95405d266e4950e814684a408f7bf9e5e934b6b91c0c9229069bba54ca75d
 
 ```text
 .ce/pr-manifests/ce43-seat-reaper.md
@@ -113,4 +120,6 @@ validators/tests/unit/test_transcript_archive.py
 validators/tests/unit/test_v3_cli.py
 validators/tests/unit/test_v3_seat_bridge.py
 validators/tests/unit/test_version_boundary.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
