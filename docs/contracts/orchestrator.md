@@ -116,10 +116,12 @@ tests (the `GhRunner` is injected) and registers no check.
 itself. All live work stays behind the G-1.1 adapter and the G-1.2 injectable
 seam: the backend is an injectable parameter, so CI exercises the full lifecycle
 against the inert `LocalNoopBackend` with **zero live subprocess**. Because the
-schema's `isolation_backend` enum is `[gvisor-proxy, openshell]` (it does not
-include `local-noop`), a clean policy selects `gvisor-proxy` (availability-gated)
-or `openshell` (a fast-follow, not yet registered) in production; tests inject
-the inert backend directly. Importing the module performs zero I/O.
+schema's `isolation_backend` enum is `[gvisor-proxy, openshell, os-native]` (it
+does not include `local-noop`), a clean policy selects `gvisor-proxy`
+(availability-gated), `openshell` (a fast-follow), or `os-native` (the ce-ops#71
+unprivileged-default scaffold — registered, deny-surface-enforcing, but
+fail-closed until its sandbox mechanism lands) in production; tests inject the
+inert backend directly. Importing the module performs zero I/O.
 
 The returned evidence is the audit overlay's collect-time spine snapshot
 (`provision`, `run`, `collect`, plus the credential issuance/revocation records

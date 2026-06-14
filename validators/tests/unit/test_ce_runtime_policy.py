@@ -110,6 +110,52 @@ def test_well_formed_openshell_backend_passes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ce-ops#71 Tranche 1 — the os-native backend is schema-valid, and the
+# default-flip migration is GATED (req-4): omitting isolation_backend keeps the
+# gvisor-proxy default, and gvisor-pinned records stay valid.
+# ---------------------------------------------------------------------------
+def test_well_formed_os_native_backend_passes(tmp_path):
+    record = valid_policy()
+    record["isolation_backend"] = "os-native"
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+
+
+def test_default_flip_is_gated_schema_default_stays_gvisor_proxy():
+    # req-4 GATE on the default-flip migration: adding os-native to the enum must
+    # NOT flip the schema-declared default — records/answer-files that don't pin
+    # the field keep gvisor-proxy, so no silent global flip breaks pinned fixtures.
+    schema = yaml.safe_load(
+        Path("schemas/runtime-policy.schema.yaml").read_text(encoding="utf-8")
+    )
+    backend_prop = schema["properties"]["isolation_backend"]
+    assert backend_prop["default"] == "gvisor-proxy"
+    assert "os-native" in backend_prop["enum"]
+    assert "gvisor-proxy" in backend_prop["enum"]
+
+
+def test_gvisor_proxy_pinned_record_still_validates(tmp_path):
+    # req-4 back-compat: a fixture explicitly pinned to gvisor-proxy stays valid
+    # (the default did NOT flip; gvisor-proxy remains in the enum).
+    record = valid_policy()
+    record["isolation_backend"] = "gvisor-proxy"
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+
+
+def test_omitting_isolation_backend_validates_and_resolves_gvisor_proxy(tmp_path):
+    # ce-ops#71 MINOR-A: a Draft 2020-12 validator does NOT inject schema defaults,
+    # so isolation_backend is NOT in `required` — a record that OMITS it must
+    # VALIDATE clean (the actual pre-#71 back-compat story), with the fail-closed
+    # default supplied at RESOLUTION time (resolve_isolation_backend), not by the
+    # schema. (Before this fix the required-list made an omitted field FAIL.)
+    from creator_engine_validator import v3_installer
+
+    record = valid_policy()
+    del record["isolation_backend"]
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+    assert v3_installer.resolve_isolation_backend() == "gvisor-proxy"
+
+
+# ---------------------------------------------------------------------------
 # Schema violations (CODE_SCHEMA)
 # ---------------------------------------------------------------------------
 def test_missing_required_field_fails_schema(tmp_path):

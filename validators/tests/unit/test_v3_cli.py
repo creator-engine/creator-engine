@@ -1380,9 +1380,12 @@ def test_onboard_non_interactive_succeeds_on_complete_answers(tmp_path, capsys, 
 
 
 def test_onboard_non_interactive_refuses_sudo_outside_the_grant(tmp_path, capsys, monkeypatch):
-    # force a privileged install the grant does not cover
+    # ce-ops#71 MAJOR-1: the privileged runsc/proxy pairing only enters the plan for
+    # a gvisor-proxy backend, so this refusal-path test pins a `team` profile (→
+    # gvisor-proxy). force a privileged install the grant does not cover.
     monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv"))
     narrow = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
+        "profile: solo-pilot", "profile: team").replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: [runsc]"))
     code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
                         "--answers", str(narrow), "--non-interactive", "--json"])
@@ -1621,6 +1624,131 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
     assert request.explicit_signature is None
     assert request.answers["github"]["repo"] == "chmod735/greenfield-first"
     assert captured["verifier"] is not None
+
+
+def _fake_apply_success_summary(request):
+    return {
+        "action": "onboard_apply",
+        "root": str(request.state_root),
+        "mode": request.mode,
+        "verified": {"ok": True, "key_id": "ce-root-v1", "algo": v3_installer.SSH_ED25519_ALGO},
+        "target_repo": request.answers["github"]["repo"],
+        "greenfield_repos_created": 1,
+        "repos_already_satisfied": 0,
+        "brownfield_deferred": 0,
+        "legs_total": 12,
+        "applied": 12,
+        "already_satisfied": 0,
+        "verified_count": 12,
+        "skipped": 0,
+        "refused": 0,
+        "failed": 0,
+        "rolled_back": 0,
+        "manual_rollback_required": 0,
+        "legs": [],
+    }
+
+
+def test_onboard_apply_solo_pilot_os_native_not_refused_without_runsc_or_proxy(tmp_path, capsys, monkeypatch):
+    # ce-ops#71 MAJOR-1 (the headline bug) — driven through the REAL CLI entrypoint
+    # (`ce onboard --apply` → ``_cmd_onboard``), NOT apply_onboard/_prepare directly.
+    # A solo-pilot install resolves the os-native backend BEFORE the preflight, so on
+    # a host WITHOUT runsc/proxy and with an EMPTY sudo grant the command does NOT
+    # falsely refuse (the old flat-Tier-2 preflight planned runsc/proxy and tripped
+    # ``sudo_grant_uncovered``). It must reach the executor with an os-native probe.
+    monkeypatch.setattr(
+        v3_cli, "_which",
+        lambda tool: tool in ("git", "python", "uv", "claude"),  # NO runsc / NO proxy
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    captured: dict[str, object] = {}
+
+    def fake_apply(request, *, verifier):
+        captured["request"] = request
+        return _fake_apply_success_summary(request)
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+    # solo-pilot, EMPTY sudo grant — governance-only, zero privileged installs.
+    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML.replace(
+        "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
+    code = v3_cli.main([
+        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"), "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    # NOT refused at the CLI preflight gate.
+    assert code == 0, payload
+    assert payload.get("error") != "refused"
+    # Resolved os-native: the probe handed to the executor carries ONLY the
+    # backend-aware deps — no privileged runsc/proxy the old flat-Tier-2 gate planned.
+    request = captured["request"]
+    assert set(request.dependency_probe) == {"git", "python", "uv"}
+
+
+def test_onboard_apply_team_gvisor_still_refuses_when_runsc_proxy_missing(tmp_path, capsys, monkeypatch):
+    # ce-ops#71 MAJOR-1 back-compat: a `team` profile (→ gvisor-proxy) on a host
+    # genuinely missing runsc/proxy, with a grant that does NOT cover them, STILL
+    # refuses at the CLI preflight (the privileged pairing is real for gvisor-proxy).
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("apply_onboard must not run when the gvisor-proxy preflight refuses")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML.replace(
+        "profile: solo-pilot", "profile: team").replace(
+        "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
+    code = v3_cli.main([
+        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"), "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert set(payload["sudo_uncovered"]) == {"runsc", "proxy"}
+
+
+def test_onboard_apply_solo_pilot_os_native_real_e2e_succeeds_with_held_runtime(tmp_path, capsys, monkeypatch):
+    # ce-ops#71 round 2 / ITEM 3 — REAL end-to-end CLI→apply (NO apply_onboard
+    # monkeypatch). The full ``apply_onboard`` pipeline executes (legs, ledger,
+    # ``_run_leg``, ``verify_runtime``, ``_fold_counters``); only the environment-I/O
+    # seam — the driver, designed-injectable for CI — is faked so the GitHub legs need
+    # no live forge. Proves the no-root solo-pilot ``--apply`` SUCCEEDS while the
+    # os-native runtime is HONESTLY recorded as HELD (item-1 shape), not verified.
+    from validators.tests.unit.test_onboard_apply import FakeDriver
+
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "claude"))  # NO runsc/proxy
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+    # Inject the CI driver through apply_onboard's OWN seam (``ApplyDriver()``), NOT by
+    # replacing apply_onboard — the real apply runs in full.
+    monkeypatch.setattr(onboard_apply, "ApplyDriver", FakeDriver)
+
+    root = tmp_path / "state"
+    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    code = v3_cli.main([
+        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers), "--apply", "--non-interactive",
+        "--root", str(root), "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    # the apply SUCCEEDS end-to-end (exit 0; nothing failed or refused) — the #71 headline.
+    assert code == 0, payload
+    assert payload["failed"] == 0 and payload["refused"] == 0
+    # the runtime_posture leg ran under os-native and is HONESTLY held (NOT verified).
+    legs = {leg["id"]: leg for leg in payload["legs"]}
+    posture = legs["runtime_posture"]
+    assert posture["status"] == "held"
+    assert payload["held"] == 1
+    v = posture["verification"]
+    assert v["backend"] == "os-native"
+    assert v["ok"] is False and v["held"] is True
+    assert v["runtime_available"] is False and v["runtime_held_reason"]
+    # the run was actually recorded — the append-only ledger exists on disk.
+    assert (root / "onboard" / "ledger.ndjson").is_file()
 
 
 def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsys, monkeypatch):

@@ -64,6 +64,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from . import (
+    authority_resolver,
     coordination,
     evidence_sink,
     onboard_apply,
@@ -684,7 +685,10 @@ def _cmd_drive(args: argparse.Namespace) -> int:
                 {"error": "policy_malformed", "policy": str(policy_path)},
             )
         runtime_policy = loaded
-    result = coordination.assemble_dispatch(scope, runtime_policy)
+    verdict = authority_resolver.DEV_AUTHORITY_RESOLVER.resolve(
+        authority_resolver.ScopeRatifyDecision(scope=scope, runtime_policy=runtime_policy)
+    )
+    result = verdict.value
     if isinstance(result, coordination.DispatchRefusal):
         lines = [
             f"{_BRAND} · drive REFUSED ({result.reason}) — the front gate held",
@@ -2089,9 +2093,14 @@ def _cmd_merge(args: argparse.Namespace) -> int:
         )
     merge_runner = v3_forge_join.ambient_gh_runner()
     try:
-        result = v3_forge_join.merge_for_run(
-            root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+        verdict = authority_resolver.DEV_AUTHORITY_RESOLVER.resolve(
+            authority_resolver.MergeDecision(
+                gate_read=lambda: v3_forge_join.merge_for_run(
+                    root, run_id, merge_gh_runner=merge_runner, apply=args.apply,
+                )
+            )
         )
+        result = verdict.value
     except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
         return _emit(
             args, 1,
@@ -2593,8 +2602,16 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
     missing = v3_installer.missing_answers(schema, merged)
-    probe = {tool: _which(tool) for tool in v3_installer.REQUIRED_DEPENDENCIES}
-    dep_plan = v3_installer.plan_dependencies(v3_installer.REQUIRED_DEPENDENCIES, probe)
+    # ce-ops#71 MAJOR-1: resolve the isolation backend BEFORE the preflight, the
+    # SAME way apply does (mirror ``onboard_apply._prepare``), and drive the probe /
+    # dep-plan / sudo-grant diff off the BACKEND-AWARE deps — NOT the flat Tier-2
+    # ``REQUIRED_DEPENDENCIES``. Otherwise a solo-pilot → ``os-native`` install on a
+    # host without runsc/proxy is falsely REFUSED at this CLI gate even though the
+    # fixed, backend-driven apply never needs them. ``gvisor-proxy`` is unchanged.
+    isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
+    backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
+    probe = {tool: _which(tool) for tool in backend_deps}
+    dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)
     grant_diff = v3_installer.sudo_grant_diff(merged.value("host.sudo_grant"), dep_plan)
     # 6. --non-interactive: fail-closed (the terraform -input=false analog).
     if args.non_interactive:
@@ -2642,7 +2659,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     try:
         plan = v3_installer.build_install_plan(
             spec_for_plan, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
-            mode=args.mode, opt_out=opt_out, optout_ratification=optout_ratification,
+            mode=args.mode, tier=v3_installer.tier_for_backend(isolation_backend),
+            opt_out=opt_out, optout_ratification=optout_ratification,
             verifier=apply_verifier,
         )
     except v3_installer.InstallRefused as exc:

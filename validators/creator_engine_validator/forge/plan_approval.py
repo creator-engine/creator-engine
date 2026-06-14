@@ -41,6 +41,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..authority_resolver import DEV_AUTHORITY_RESOLVER, PlanApprovalDecision
 from ..orchestrator import ApprovedPlan
 from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, GhRunner
@@ -153,7 +154,7 @@ def _quorum_approvers(
     return ",".join(approvers) if ok else None
 
 
-def plan_approved(
+def _plan_approved_impl(
     query: ApprovalQuery,
     *,
     seat_identity: str,
@@ -247,3 +248,27 @@ def plan_approved(
         approved_by=approver,
         approval_ref=f"{repo}#{pr}@{head_sha}",
     )
+
+
+def plan_approved(
+    query: ApprovalQuery,
+    *,
+    seat_identity: str,
+    gh_runner: GhRunner | None = None,
+    authority: dict | None = None,
+    mutation_class: str | None = None,
+    changed_paths: Sequence[str] = (),
+) -> ApprovedPlan | None:
+    """Resolve an :class:`ApprovedPlan` through the Dev AuthorityResolver seam."""
+    verdict = DEV_AUTHORITY_RESOLVER.resolve(
+        PlanApprovalDecision(
+            query=query,
+            seat_identity=seat_identity,
+            gh_runner=gh_runner,
+            authority=authority,
+            mutation_class=mutation_class,
+            changed_paths=changed_paths,
+            resolver=_plan_approved_impl,
+        )
+    )
+    return verdict.value

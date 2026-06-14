@@ -94,7 +94,7 @@ class _SpyBackend(RunnerBackend):
         self._inner = LocalNoopBackend()
         self.calls: list[str] = []
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         self.calls.append("provision")
         return self._inner.provision(request)
 
@@ -195,6 +195,27 @@ def test_unknown_isolation_backend_raises_unknown_backend():
         run_plan(valid_policy("no-such-backend"), "run-1", ("echo", "hi"), approved())
 
 
+def test_omitted_isolation_backend_resolves_default_not_keyerror(monkeypatch):
+    # ce-ops#71 round 2 REGRESSION: round-1 dropped ``isolation_backend`` from the
+    # schema ``required`` set (back-compat) and the validator does NOT materialize the
+    # schema default — so a clean policy may OMIT the field. ``run_plan`` must resolve
+    # the fail-closed default (``gvisor-proxy``) through ``resolve_isolation_backend``
+    # instead of ``KeyError``-ing on the old raw ``runtime_policy["isolation_backend"]``
+    # index. (A present-but-unregistered key still raises ``UnknownBackend``, above.)
+    captured: dict[str, str] = {}
+
+    def fake_get_backend(key: str):
+        captured["key"] = key
+        return _SpyBackend()
+
+    monkeypatch.setattr("creator_engine_validator.orchestrator.get_backend", fake_get_backend)
+    policy = valid_policy()
+    del policy["isolation_backend"]
+    evidence = run_plan(policy, "run-1", ("echo", "hi"), approved())
+    assert captured["key"] == "gvisor-proxy"  # the fail-closed default, not a KeyError
+    assert isinstance(evidence, CollectedEvidence)
+
+
 def test_openshell_isolation_backend_resolves_then_refuses_unwired():
     # ``openshell`` is registered (v3.5-A.2a): run_plan resolves it by the policy
     # selector with ZERO orchestrator changes, then the default (unwired) client
@@ -238,7 +259,7 @@ def test_orchestrator_registers_no_check_and_no_backend():
     import creator_engine_validator.orchestrator  # noqa: F401  (import = the side-effect surface)
 
     assert not any("orchestrat" in n for n in registered_checks())
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell")  # +openshell (v3.5-A.2a); orchestrator still adds none
+    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a); orchestrator still adds none
 
 
 def test_run_plan_no_live_subprocess_or_socket(monkeypatch):
@@ -408,7 +429,7 @@ class _ChangeSetBackend(RunnerBackend):
         self._inner = LocalNoopBackend()
         self.calls: list[str] = []
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         self.calls.append("provision")
         return self._inner.provision(request)
 

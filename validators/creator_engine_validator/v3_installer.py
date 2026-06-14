@@ -66,10 +66,123 @@ CE_CMD = "ce"
 #: The internal monorepo console_script the pilot aliases ``ce`` onto.
 INTERNAL_ENTRY = "cev3"
 
-#: The dependencies the installer detects (detect-don't-assume). ``uv`` is
-#: user-space (no sudo); the rest are system installs (batched sudo ask).
-REQUIRED_DEPENDENCIES = ("git", "python", "runsc", "proxy", "uv")
-_SUDO_TOOLS = frozenset({"git", "python", "runsc", "proxy"})
+#: Tier-scoped dependency sets — the planner selects one by isolation tier
+#: (ce-ops#71 §A.1; the gVisor→opt-in demotion). The flat Tier-2 set *was* the
+#: only set; Tier 0/1 are subsets that exclude the privileged ``runsc``/``proxy``
+#: pairing. ``git``/``python``/``uv`` are user-level in every tier.
+#:   Tier 0 — governance-only, no sandbox (zero root).
+#:   Tier 1 — governance + unprivileged OS-native sandbox (bwrap/seccomp/Landlock
+#:     on Linux, Seatbelt on macOS). The sandbox primitives are PROBE-ONLY (never
+#:     auto-sudo-installed — that is what keeps Tier 1 "zero root"); they are NOT
+#:     planned as dep steps here, only surfaced as documented prerequisites.
+#:   Tier 2 — governance + gVisor ``runsc`` + egress proxy (the heavy, privileged
+#:     opt-in; the only tier that drags sudo tools into the plan).
+TIER_DEPS: dict[int, tuple[str, ...]] = {
+    0: ("git", "python", "uv"),
+    1: ("git", "python", "uv"),                       # + sandbox primitives via the probe-only path
+    2: ("git", "python", "uv", "runsc", "proxy"),
+}
+#: The default tier preserves TODAY's behavior (the heavy gVisor pairing). The
+#: default-flip to Tier 1, the ``--sandbox`` selector, and ``solo-pilot→tier1``
+#: are G71.3 (deferred — they touch the CLI/onboard/schema seams).
+DEFAULT_ISOLATION_TIER = 2
+#: The dependencies the installer detects (detect-don't-assume) at the default
+#: tier — kept as a flat name for back-compatible callers; equals the Tier-2 set.
+REQUIRED_DEPENDENCIES = TIER_DEPS[DEFAULT_ISOLATION_TIER]
+#: Only the gVisor pairing is privileged. ``git``/``python``/``uv`` become
+#: user-level ALWAYS (ce-ops#71 §A.1) — so a plan needs sudo iff a Tier-2 plan is
+#: selected and its ``runsc``/``proxy`` are not already present.
+_SUDO_TOOLS = frozenset({"runsc", "proxy"})
+
+#: Backend-KEYED dependency sets — the #71-CORE re-frame of the numeric
+#: :data:`TIER_DEPS` so deps follow the SELECTED RunnerBackend (the neutral
+#: ``isolation_backend`` keys of ``schemas/runtime-policy.schema.yaml``) rather
+#: than a tier number. The mapping is the same fail-closed shape as the tiers:
+#:   ``os-native``    — the unprivileged default DIRECTION; **no sudo** (its
+#:     sandbox primitives are PROBE-ONLY documented prerequisites, never planned
+#:     as auto-sudo dep steps — what keeps it zero-root). == TIER_DEPS[0/1].
+#:   ``gvisor-proxy`` — the heavy single-host opt-in; the only key that drags the
+#:     privileged ``runsc``/``proxy`` pairing into the plan. == TIER_DEPS[2].
+#:   ``openshell``    — the gateway tier delegates ENFORCEMENT to a container
+#:     engine (Docker/Podman/VM), provisioned out-of-band by the gateway, not by
+#:     this installer; the installer's own dep floor is the core no-sudo set.
+#: ``git``/``python``/``uv`` are user-level in every backend.
+BACKEND_DEPS: dict[str, tuple[str, ...]] = {
+    "os-native": ("git", "python", "uv"),
+    "gvisor-proxy": ("git", "python", "uv", "runsc", "proxy"),
+    "openshell": ("git", "python", "uv"),
+}
+#: The schema-level default backend (``schemas/runtime-policy.schema.yaml``
+#: ``isolation_backend.default``). It STAYS ``gvisor-proxy`` so records authored
+#: before #71 (omitting the field) keep today's backend — the GATE on the
+#: default-flip migration (ce-ops#71 req-4): the no-sudo default reaches a record
+#: only by an explicit ``isolation_backend`` or a profile that maps to it, never
+#: by a silent global flip that would break gVisor-pinned fixtures/answer-files.
+DEFAULT_ISOLATION_BACKEND = "gvisor-proxy"
+#: Per-profile default backend (the install-answers ``profile`` field →
+#: ``isolation_backend``). ``solo-pilot`` (governance-only) maps to the
+#: unprivileged ``os-native`` so it stops dragging the gVisor runtime (ce-ops#71
+#: Edit C / OQ-4 "solo-pilot → os-native is clear"). ``team`` stays at the
+#: conservative :data:`DEFAULT_ISOLATION_BACKEND` because the shared-host
+#: threat-model default is an OPEN Operator call (research §9 OQ-4) — NOT
+#: hardcoded to os-native here; ESCALATED.
+PROFILE_DEFAULT_BACKEND: dict[str, str] = {
+    "solo-pilot": "os-native",
+    "team": DEFAULT_ISOLATION_BACKEND,
+}
+
+
+#: Backend → numeric isolation tier (the G71.2 :data:`TIER_DEPS` attestation
+#: seam). Keeps the numeric ``isolation_tier`` carried on the profile in agreement
+#: with the SELECTED backend, so the emitted plan never advertises a heavier tier
+#: than the backend ``--apply`` actually materializes (ce-ops#71 MINOR-C):
+#:   ``os-native``    → Tier 1 (governance + the unprivileged OS-native sandbox).
+#:   ``openshell``    → Tier 0 (the installer provisions no LOCAL sandbox; the
+#:     gateway delegates enforcement to a container engine out-of-band).
+#:   ``gvisor-proxy`` → Tier 2 (the only tier that drags the privileged runtime).
+#: Tiers 0/1 share the same no-sudo dep floor, so the number is attestation
+#: metadata + the ``tier == 2`` gVisor-seam gate — never a privilege change.
+BACKEND_TIER: dict[str, int] = {
+    "os-native": 1,
+    "gvisor-proxy": 2,
+    "openshell": 0,
+}
+
+
+def tier_for_backend(backend: Any) -> int:
+    """Map a resolved ``isolation_backend`` key to its numeric tier (PURE, fail-closed).
+
+    An unknown key is REFUSED (never a silent fall-through to the heavy default) so
+    the tier the plan attests always matches a known backend.
+    """
+    if backend not in BACKEND_TIER:
+        raise InstallRefused(
+            f"unknown isolation backend {backend!r}: expected one of "
+            f"{sorted(BACKEND_TIER)}"
+        )
+    return BACKEND_TIER[backend]
+
+
+def resolve_isolation_backend(*, profile: Any = None, explicit: Any = None) -> str:
+    """Resolve the selected ``isolation_backend`` (PURE, fail-closed).
+
+    Precedence: an **explicit** ``isolation_backend`` (from a record / answers /
+    a future ``--sandbox`` flag) wins; else the **profile** default
+    (:data:`PROFILE_DEFAULT_BACKEND`); else the schema-level
+    :data:`DEFAULT_ISOLATION_BACKEND` (``gvisor-proxy`` — the back-compat gate for
+    pre-#71 records). An explicit backend that is not a known
+    :data:`BACKEND_DEPS` key is REFUSED (fail-closed; never a silent fall-through).
+    """
+    if explicit is not None and explicit != "":
+        if explicit not in BACKEND_DEPS:
+            raise InstallRefused(
+                f"unknown isolation backend {explicit!r}: expected one of "
+                f"{sorted(BACKEND_DEPS)}"
+            )
+        return str(explicit)
+    if isinstance(profile, str) and profile in PROFILE_DEFAULT_BACKEND:
+        return PROFILE_DEFAULT_BACKEND[profile]
+    return DEFAULT_ISOLATION_BACKEND
 
 #: The educate-at-opt-out copy — VERBATIM from ``docs/contracts/spend-envelope.md``.
 EDUCATE_AT_OPTOUT = (
@@ -647,14 +760,44 @@ class InstallPlan:
         return any(s.action == "install" and s.requires_sudo for s in self.steps)
 
 
-def plan_dependencies(required: Any = REQUIRED_DEPENDENCIES, probe: dict[str, bool] | None = None) -> InstallPlan:
+def plan_dependencies(
+    tier: Any = DEFAULT_ISOLATION_TIER,
+    probe: dict[str, bool] | None = None,
+) -> InstallPlan:
     """Plan dependency resolution from an injected presence probe (PURE).
+
+    ``tier`` selects the dependency set, polymorphically:
+      * a **backend key** (``str`` — ``os-native`` / ``gvisor-proxy`` /
+        ``openshell``) resolves to :data:`BACKEND_DEPS`. This is the #71-CORE
+        surface: deps follow the SELECTED backend (unknown key ⇒ fail-closed).
+      * an **isolation tier** (``int`` ``0|1|2``) resolves to :data:`TIER_DEPS`
+        (the G71.2 numeric surface; Tier 0/1 exclude the privileged
+        ``runsc``/``proxy`` pairing).
+      * an explicit **iterable** of dependency names (the pre-tier flat call) —
+        for back-compatible callers.
+    Default is the heavy Tier 2, preserving today's behavior.
 
     ``probe`` maps a tool → present? (the live read-only ``which`` detection is
     done by the CLI and injected here). Present → skip; missing → a
-    permission-gated install step (idempotent; ``_SUDO_TOOLS`` need sudo, batched).
-    Never fail-on-missing — it plans, the human approves.
+    permission-gated install step (idempotent; ``_SUDO_TOOLS`` need sudo, batched
+    — and only ``runsc``/``proxy`` are in that set, so a plan needs sudo iff a
+    Tier-2 plan is selected). Never fail-on-missing — it plans, the human approves.
     """
+    if isinstance(tier, str):
+        if tier not in BACKEND_DEPS:
+            raise InstallRefused(
+                f"unknown isolation backend {tier!r}: expected one of "
+                f"{sorted(BACKEND_DEPS)}"
+            )
+        required: Iterable[str] = BACKEND_DEPS[tier]
+    elif isinstance(tier, int) and not isinstance(tier, bool):
+        if tier not in TIER_DEPS:
+            raise InstallRefused(
+                f"unknown isolation tier {tier!r}: expected one of {sorted(TIER_DEPS)}"
+            )
+        required = TIER_DEPS[tier]
+    else:
+        required = tier  # explicit dependency-name iterable (back-compat)
     probe = probe or {}
     steps: list[DepStep] = []
     for tool in required:
@@ -676,6 +819,11 @@ class InstallerProfile:
     mode: str                    # "default" | "custom"
     runtime_policy: dict[str, Any]   # the spend_cap_* fragment ce_spend_envelope accepts
     educate: str | None          # the educate-at-opt-out copy (present iff opting out)
+    #: The selected isolation tier (0|1|2; ce-ops#71 §A.1). Carried on the profile
+    #: so the plan stays attestable. The selector that SETS it from the answers
+    #: file / ``--sandbox`` flag (and the solo-pilot→tier1 default) is G71.3; here
+    #: it defaults to the heavy Tier 2 to preserve today's behavior.
+    isolation_tier: int = DEFAULT_ISOLATION_TIER
 
 
 def valid_ratification(binding: Any, *, require_ack: bool = False) -> bool:
@@ -707,7 +855,12 @@ def _valid_optout(ratification: Any) -> bool:
     return valid_ratification(ratification)
 
 
-def build_profile(*, opt_out: bool = False, optout_ratification: Any = None) -> InstallerProfile:
+def build_profile(
+    *,
+    opt_out: bool = False,
+    optout_ratification: Any = None,
+    isolation_tier: int = DEFAULT_ISOLATION_TIER,
+) -> InstallerProfile:
     """Assemble the installer profile (PURE).
 
     **Default** → ``spend_cap_enforcement: enforce`` (the cost-runaway protection
@@ -716,9 +869,19 @@ def build_profile(*, opt_out: bool = False, optout_ratification: Any = None) -> 
     The opt-out disables only the budget CAPS — the runaway-DETECTION net (the
     global ceiling + anomaly→escalate) stays on (cap/detection split, G-5). The
     emitted fragment is exactly what ``ce_spend_envelope`` accepts.
+
+    ``isolation_tier`` (ce-ops#71 §A.1) is carried through onto the profile,
+    orthogonal to the cost dial; it defaults to the heavy Tier 2 (today's
+    behavior). The selector that derives it from answers/CLI is G71.3.
     """
+    if isolation_tier not in TIER_DEPS:
+        raise InstallRefused(
+            f"unknown isolation tier {isolation_tier!r}: expected one of {sorted(TIER_DEPS)}"
+        )
     if not opt_out:
-        return InstallerProfile("default", {"spend_cap_enforcement": "enforce"}, None)
+        return InstallerProfile(
+            "default", {"spend_cap_enforcement": "enforce"}, None, isolation_tier
+        )
     if not _valid_optout(optout_ratification):
         raise InstallRefused(
             "cost opt-out is a ratified-HUMAN-only choice — it REQUIRES a "
@@ -729,6 +892,7 @@ def build_profile(*, opt_out: bool = False, optout_ratification: Any = None) -> 
         "custom",
         {"spend_cap_enforcement": "off", "spend_cap_optout": dict(optout_ratification)},
         EDUCATE_AT_OPTOUT,
+        isolation_tier,
     )
 
 
@@ -761,6 +925,7 @@ def build_install_plan(
     pinned_keys: dict[str, Any],
     probe: dict[str, bool] | None = None,
     mode: str = "agent-native",
+    tier: int = DEFAULT_ISOLATION_TIER,
     opt_out: bool = False,
     optout_ratification: Any = None,
     verifier: Callable[[str, bytes, Any, Any], bool] | None = None,
@@ -772,10 +937,26 @@ def build_install_plan(
     unverified spec), then the dependency plan, the profile, and the ``ce``
     exposure. Records the **human-approval contract** (sudo + the GitHub-App click
     are the only human steps). Pure — no execution.
+
+    ``tier`` (ce-ops#71 §A.1) selects the isolation tier (default Tier 2 = today's
+    heavy behavior). The plan stays attestable via ``profile.isolation_tier``, and
+    the gVisor runtime-backend deferred seam is emitted **only for Tier 2** — Tier
+    0/1 are zero-root and do not provision ``runsc``/``proxy``.
     """
     verified = require_verified(spec_bytes, signature, pinned_keys=pinned_keys, verifier=verifier)
-    deps = plan_dependencies(REQUIRED_DEPENDENCIES, probe)
-    profile = build_profile(opt_out=opt_out, optout_ratification=optout_ratification)
+    deps = plan_dependencies(tier, probe)
+    profile = build_profile(
+        opt_out=opt_out, optout_ratification=optout_ratification, isolation_tier=tier
+    )
+    deferred_live_seams = ["the curl|bash / privileged execution"]
+    if tier == 2:
+        deferred_live_seams.append(
+            "the runtime backend provisioning (gVisor runsc + egress proxy)"
+        )
+    deferred_live_seams += [
+        "the interactive GitHub-App authorization",
+        "the live transport probe",
+    ]
     return {
         "mode": mode,
         "verified": {"ok": verified.ok, "key_id": verified.key_id},
@@ -783,8 +964,13 @@ def build_install_plan(
             "install": list(deps.to_install),
             "skip": [s.name for s in deps.steps if s.action == "skip"],
             "needs_sudo": deps.needs_sudo,
+            "isolation_tier": profile.isolation_tier,
         },
-        "profile": {"mode": profile.mode, "runtime_policy": profile.runtime_policy},
+        "profile": {
+            "mode": profile.mode,
+            "runtime_policy": profile.runtime_policy,
+            "isolation_tier": profile.isolation_tier,
+        },
         "educate": profile.educate,
         "expose_cli": ce_exposure_plan(),
         # the ONLY human-approved steps — the operator types nothing else:
@@ -792,12 +978,7 @@ def build_install_plan(
             (["sudo (privileged dependency installs)"] if deps.needs_sudo else [])
             + ["the GitHub-App authorization click"]
         ),
-        "deferred_live_seams": [
-            "the curl|bash / privileged execution",
-            "the runtime backend provisioning (gVisor runsc + egress proxy)",
-            "the interactive GitHub-App authorization",
-            "the live transport probe",
-        ],
+        "deferred_live_seams": deferred_live_seams,
     }
 
 

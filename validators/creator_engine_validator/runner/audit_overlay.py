@@ -499,11 +499,12 @@ class AuditOverlayBackend(RunnerBackend):
         return self._emit_action(handle, event, decision)
 
     # -- the wrapped RunnerBackend lifecycle ---------------------------------
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        # The RunnerBackend.provision template method already validated the record
+        # (deny surface) before delegating here; the inner backend's provision()
+        # re-applies the same guard, so a returned handle means the policy
+        # validated clean → the provision is allowed.
         handle = self._inner.provision(request)
-        # The inner backend's provision() applies the G-1.0 deny guard and would
-        # have raised PolicyRejected on an unclean record, so a returned handle
-        # means the policy validated clean → the provision is allowed.
         if isinstance(request.runtime_policy, dict):
             self._policies[handle.ref] = request.runtime_policy
         self._emit(handle, "provision", ALLOWED)

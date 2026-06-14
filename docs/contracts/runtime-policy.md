@@ -55,7 +55,10 @@ runtime wiring, and **keep-and-translate** the v2
 - **Dropped** (adopt-and-drop): the v2 `runtime_engine`
   `[podman-rootless, docker-rootless]` axis is not carried.
 - **Added** (v3 plane-C): the `isolation_backend`
-  `[gvisor-proxy, openshell]` selector, and the per-endpoint egress
+  `[gvisor-proxy, openshell, os-native]` selector (`os-native` is the
+  ce-ops#71 Tranche-1 unprivileged-default DIRECTION, shipped as a
+  fail-closed scaffold; `default:` stays `gvisor-proxy`), and the
+  per-endpoint egress
   `assurance` (L4 / L7) + optional `binary_identity` (calling-binary)
   axis and `tls_terminated` flag from the secure-runtime egress
   contract.
@@ -72,7 +75,6 @@ All required fields MUST be present. Stricter type rules below apply.
 | `policy_id` | string | slug `^[a-z][a-z0-9-]{2,63}$`. |
 | `policy_sha` | string | 64 lowercase hex characters. |
 | `role` | enum | one of `architect_research`, `implementer`, `verification`. |
-| `isolation_backend` | enum | one of `gvisor-proxy` (default) or `openshell`. |
 | `image_ref` | object | `name` required; `sha` (`sha256:<hex64>`) enforced as a digest pin by the check. |
 | `mount_manifest` | array<object> | each entry `{path, mode}` with `write_justification` required when `mode: rw`. |
 | `egress_allowlist` | array<object> | each entry `{host, ...}`; an empty array declares no egress (the safe floor). |
@@ -82,6 +84,15 @@ All required fields MUST be present. Stricter type rules below apply.
 
 `unevaluatedProperties: false` applies at every object level; any field
 not listed in the schema is a contract violation.
+
+`isolation_backend` is **optional** (ce-ops#71 MINOR-A): one of
+`gvisor-proxy` (the conservative default), `openshell`, or `os-native`
+(the unprivileged-default scaffold, fail-closed). A Draft 2020-12
+validator does not inject the schema `default`, so the field is *not*
+required — an omitted field validates clean and
+`v3_installer.resolve_isolation_backend` supplies the fail-closed
+default (`explicit > profile > gvisor-proxy`), which is what actually
+keeps a pre-#71 record on today's backend.
 
 ## Safety predicates
 
