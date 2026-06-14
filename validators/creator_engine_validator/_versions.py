@@ -105,6 +105,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.noop_backend",
         # v3.5-A.1 OpenShell backend (defined; registration deferred to A.2)
         "runner.openshell_backend",
+        # ce-ops#71 Tranche 1: the unprivileged OS-native backend — a FAIL-CLOSED
+        # scaffold (registered + deny-surface-enforcing; the sandbox mechanism is
+        # HELD pending the srt-vs-CE-native-jail Operator decision, research §9).
+        "runner.os_native_backend",
         # v3 G-5 tokenomics: the pure spend gate (admission + circuit-breaker)
         "runner.spend_gate",
         # v3.5-D.0.1 compute-demand artifact: the live usage tap
@@ -121,6 +125,7 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # independently-reviewable pitch artifact)
         "runner.cockpit_demo_seed",
         # v3 G-6 coordination: the outer-loop Scope dispatch spine
+        "authority_resolver",
         "coordination",
         # v3.1-G1 live-spawn keystone: the assemble->spawn bridge. Crosses to the
         # v1 launcher as SUBPROCESS + DATA only (`ce launch --json`, files + argv +

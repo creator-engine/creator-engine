@@ -60,6 +60,11 @@ from .gvisor_proxy_backend import (
     translate_to_egress_proxy_config,
     translate_to_runsc_plan,
 )
+from .os_native_backend import BACKEND_KEY as OS_NATIVE_BACKEND_KEY
+from .os_native_backend import (
+    LINUX_SANDBOX_PRIMITIVES,
+    OsNativeBackend,
+)
 from .openshell_backend import BACKEND_KEY as OPENSHELL_BACKEND_KEY
 from .openshell_backend import (
     OPENSHELL_PINNED_VERSION,
@@ -117,10 +122,13 @@ __all__ = [
     "FilesystemPolicy",
     "GVISOR_PROXY_BACKEND_KEY",
     "GvisorProxyBackend",
+    "LINUX_SANDBOX_PRIMITIVES",
     "LOCAL_NOOP_BACKEND_KEY",
     "LandlockPolicy",
     "LocalNoopBackend",
     "MountSpec",
+    "OS_NATIVE_BACKEND_KEY",
+    "OsNativeBackend",
     "NetworkRule",
     "OPENSHELL_BACKEND_KEY",
     "OPENSHELL_PINNED_VERSION",

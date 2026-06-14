@@ -86,7 +86,10 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#43 added the seat/venue retirement reaper — the substrate-neutral
     # policy fold (``seat_reaper``) + the per-substrate executors
     # (``reaper_executors``): 38 -> 40.
-    assert len(ver.V3_RUNTIME) == 40
+    # ce-ops#34 RS-1 added the AuthorityResolver seam: 40 -> 41.
+    # ce-ops#71 Tranche 1 added the unprivileged OS-native backend scaffold
+    # (``runner.os_native_backend``): 41 -> 42.
+    assert len(ver.V3_RUNTIME) == 42
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -127,6 +130,7 @@ def test_classify_lines():
     assert ver.classify("v3_greenfield") == ver.V3
     assert ver.classify("seat_reaper") == ver.V3
     assert ver.classify("reaper_executors") == ver.V3
+    assert ver.classify("runner.os_native_backend") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call

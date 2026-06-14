@@ -52,7 +52,6 @@ required:
   - policy_id
   - policy_sha
   - role
-  - isolation_backend
   - image_ref
   - mount_manifest
   - egress_allowlist
@@ -105,17 +104,33 @@ properties:
       additive schema changes; this schema fixes only the three above.
   isolation_backend:
     type: string
-    enum: [gvisor-proxy, openshell]
+    enum: [gvisor-proxy, openshell, os-native]
     default: gvisor-proxy
     description: |
       Runner-backend selector (the G-1.1 adapter axis). `gvisor-proxy`
       is the canonical v3 backend — a hardened gVisor container paired
       with a capability-separation egress proxy (shipped at G-1.2).
       `openshell` is the fast-follow backend behind the same runner
-      abstraction. The v2 `[podman-rootless, docker-rootless]` engines
-      are NOT carried (adopt-and-drop). The selection is recorded so
+      abstraction. `os-native` (ce-ops#71 Tranche 1) is the neutral key
+      for the unprivileged, daemonless OS-native backend (bubblewrap
+      user-ns / Seatbelt + host deny-by-default proxy) — the no-root
+      default DIRECTION; its functional sandbox mechanism (srt vs a
+      CE-native jail) is an open Operator call, so the in-tree backend
+      is a FAIL-CLOSED scaffold (registered + deny-surface-enforcing,
+      refuses to provision a live runtime until the mechanism lands).
+      The v2 `[podman-rootless, docker-rootless]` engines are NOT
+      carried (adopt-and-drop). The `default:` stays `gvisor-proxy` so
+      records authored before #71 (omitting this field) keep today's
+      backend — the default-flip to `os-native` is gated to an explicit
+      Operator decision (§9 OQ-2/OQ-4). The selection is recorded so
       audit predicates can verify the policy was provisioned under the
-      intended backend.
+      intended backend. OPTIONAL at the schema layer (ce-ops#71
+      MINOR-A): a Draft 2020-12 validator does NOT inject `default`, so
+      listing this field as `required` would FAIL a pre-#71 record that
+      omits it — breaking the very back-compat story above. It is
+      therefore not required; an omitted field validates clean and
+      `v3_installer.resolve_isolation_backend` supplies the fail-closed
+      default (`explicit > profile > gvisor-proxy`).
   image_ref:
     type: object
     required: [name]

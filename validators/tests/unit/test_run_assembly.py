@@ -108,7 +108,7 @@ class _ChangeSetBackend(RunnerBackend):
     def __init__(self) -> None:
         self._inner = LocalNoopBackend()
 
-    def provision(self, request):
+    def _provision(self, request):
         return self._inner.provision(request)
 
     def run(self, handle, request):

@@ -15,12 +15,8 @@ names-only-secret / deny-by-default-egress denies stay load-bearing here.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..checks.ce_runtime_policy import validate_runtime_policy
 from .backend import (
     CollectedEvidence,
-    PolicyRejected,
     ProvisionRequest,
     ProvisionedHandle,
     RunnerBackend,
@@ -38,16 +34,10 @@ class LocalNoopBackend(RunnerBackend):
 
     backend_key = BACKEND_KEY
 
-    def provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+    def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
+        # The deny surface (mapping + validate_runtime_policy → PolicyRejected) is
+        # enforced by the RunnerBackend.provision template method before we get here.
         record = request.runtime_policy
-        if not isinstance(record, dict):
-            raise PolicyRejected("runtime_policy must be a mapping")
-        errors = validate_runtime_policy(record, Path(f"<provision:{request.run_id}>"))
-        if errors:
-            rendered = "; ".join(error.format() for error in errors)
-            raise PolicyRejected(
-                f"runtime-policy did not validate clean; refusing to provision: {rendered}"
-            )
         policy_sha = record.get("policy_sha", "")
         return ProvisionedHandle(
             backend_key=self.backend_key,

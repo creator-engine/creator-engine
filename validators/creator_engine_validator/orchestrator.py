@@ -92,6 +92,7 @@ from .runtime_evidence_spine import (
     compute_binding_ref,
     is_policy_sha,
 )
+from .v3_installer import resolve_isolation_backend  # cycle-safe: v3_installer never imports orchestrator
 
 if TYPE_CHECKING:  # type-only: the orchestrator imports ZERO from ``forge`` at runtime
     from .evidence_sink import EvidenceSink
@@ -301,7 +302,10 @@ def run_plan(
        BEFORE any side effect if the run is not ratified + bound to this policy,
        or if ``seat_identity`` approved its own run;
     2. **resolve** the inner isolation backend — the injected ``backend`` else
-       ``get_backend(runtime_policy["isolation_backend"])``;
+       ``get_backend`` of the policy ``isolation_backend``; a MISSING/None selector
+       falls back to the #71 fail-closed default (``gvisor-proxy``) via
+       ``resolve_isolation_backend`` rather than ``KeyError``-ing, while a
+       present-but-unregistered key still raises ``UnknownBackend``;
     3. **wrap** it in :class:`AuditOverlayBackend` so every lifecycle step is
        attested to the hash-chained evidence spine, bound to the policy;
     4. **drive** ``provision -> [mint] -> run -> [revoke] -> collect -> [open
@@ -349,7 +353,18 @@ def run_plan(
     _ratify_or_refuse(runtime_policy, run_id, approved_plan, seat_identity)
 
     # 2) Resolve the inner backend (injected for tests, else by the policy selector).
-    inner = backend if backend is not None else get_backend(runtime_policy["isolation_backend"])
+    #    ce-ops#71 round 2: a clean record may now OMIT ``isolation_backend`` (round-1
+    #    dropped it from the schema ``required`` set for back-compat) and the validator
+    #    does NOT materialize the schema default — so the old raw ``runtime_policy[
+    #    "isolation_backend"]`` index would ``KeyError`` at runtime. Route a MISSING /
+    #    None / empty selector through the fail-closed resolver chokepoint (→
+    #    ``gvisor-proxy``, matching the rest of #71); a PRESENT selector flows straight
+    #    to ``get_backend`` so a genuinely-unregistered key keeps its ``UnknownBackend``
+    #    teeth (the resolver would instead raise ``InstallRefused`` on a bogus explicit
+    #    — not the established orchestrator contract).
+    selector = runtime_policy.get("isolation_backend")
+    resolved = selector if selector else resolve_isolation_backend(explicit=None)
+    inner = backend if backend is not None else get_backend(resolved)
 
     # 3) Wrap in the audit overlay so every lifecycle step is attested. Resolve the
     #    clock HERE (not only inside the overlay) so the terminal run-outcome record
