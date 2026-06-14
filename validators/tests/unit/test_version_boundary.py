@@ -83,7 +83,10 @@ def test_taxonomy_counts_and_disjoint():
     # added the Operator-notify feed (``runner.notify_feed``): 35 -> 36.
     # v3.5-E.2 added the signed-spec onboard apply executor: 36 -> 37.
     # v3.5-E.4 added the greenfield first-project read model: 37 -> 38.
-    assert len(ver.V3_RUNTIME) == 38
+    # ce-ops#43 added the seat/venue retirement reaper — the substrate-neutral
+    # policy fold (``seat_reaper``) + the per-substrate executors
+    # (``reaper_executors``): 38 -> 40.
+    assert len(ver.V3_RUNTIME) == 40
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -122,6 +125,8 @@ def test_classify_lines():
     assert ver.classify("orchestrator") == ver.V3
     assert ver.classify("onboard_apply") == ver.V3
     assert ver.classify("v3_greenfield") == ver.V3
+    assert ver.classify("seat_reaper") == ver.V3
+    assert ver.classify("reaper_executors") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call
@@ -170,3 +175,51 @@ def test_relative_cross_version_import_in_init_is_detected(tmp_path):
     # and they classify as boundary-relevant under the real taxonomy
     assert {ver.classify("forge"), ver.classify("lane_runtime")} == {ver.V3, ver.V1}
     assert ver.classify("orchestrator") == ver.V3
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#43 §10.14 v3-boundary-holds — the reaper modules import no v1 module and
+# cross to archive/release via subprocess+DATA only (AST-asserted contract).
+# ---------------------------------------------------------------------------
+
+import ast as _ast
+from pathlib import Path as _Path
+
+from creator_engine_validator import reaper_executors as _reaper_executors
+from creator_engine_validator import seat_reaper as _seat_reaper
+
+
+def _top_level_imports(module) -> set[str]:
+    src = _Path(module.__file__).read_text(encoding="utf-8")
+    tree = _ast.parse(src)
+    referenced: set[str] = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Import):
+            for alias in node.names:
+                referenced.add(alias.name.split(".")[0])
+        elif isinstance(node, _ast.ImportFrom):
+            if node.module:
+                referenced.add(node.module.split(".")[0])
+            if node.level and node.module is None:  # `from . import x`
+                for alias in node.names:
+                    referenced.add(alias.name.split(".")[0])
+    return referenced
+
+
+def test_14_reaper_modules_are_v3_and_import_no_v1_module():
+    assert "seat_reaper" in ver.V3_RUNTIME
+    assert "reaper_executors" in ver.V3_RUNTIME
+    for module in (_seat_reaper, _reaper_executors):
+        crossed = _top_level_imports(module) & ver.V1_RUNTIME
+        assert crossed == set(), f"{module.__name__} must import no v1 module, found {sorted(crossed)}"
+
+
+def test_14_reaper_crosses_to_v1_legs_via_subprocess_data_only():
+    # The two v1 surfaces the reaper depends on are reached by argv, never import:
+    # `ce lane archive --json` and `creator-engine-validator pco-release`.
+    src = _Path(_reaper_executors.__file__).read_text(encoding="utf-8")
+    assert "lane" in src and "archive" in src and "pco-release" in src
+    # and the v1 modules behind those legs are NOT imported by either reaper module
+    forbidden = {"transcript_archive", "pco_allocator", "ce_cli", "lane_runtime", "launch_runtime"}
+    for module in (_seat_reaper, _reaper_executors):
+        assert _top_level_imports(module).isdisjoint(forbidden)

@@ -2231,3 +2231,143 @@ def test_e2e_scope_to_pr_to_review_to_merge_to_report(tmp_path, capsys, monkeypa
     report = json.loads(capsys.readouterr().out)
     assert report["outcome"] == "pr_merged"
     assert report["action"] == "report"
+
+
+# ===========================================================================
+# ce-ops#43 — `cev3 reap once|watch|status` (the seat/venue retirement reaper)
+# ===========================================================================
+import json as _json
+import signal as _signal
+
+from creator_engine_validator import seat_reaper as _seat_reaper
+
+
+def _write_reap_seat(root: Path, run_id: str, *, events, **disp_over) -> Path:
+    """A minimal dispatch + events surface under <root>/dispatches/<run_id>/."""
+    d = root / "dispatches" / run_id
+    d.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "kind": "dispatch-record", "record_type": "dispatch", "schema_version": "1",
+        "scope_id": "demo-scope", "run_id": run_id, "mutation_class": "code",
+        "harness": "claude", "unattended": True, "session": "ce", "window": "drive",
+        "terminal": {"kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3"},
+        "spawned_at": "20260613T115500Z",
+    }
+    rec.update(disp_over)
+    (d / "dispatch.yaml").write_text(yaml.safe_dump(rec, sort_keys=True), encoding="utf-8")
+    (d / "events.jsonl").write_text(
+        "\n".join(_json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+    return d
+
+
+def _ev(kind: str, run_id: str, *, ts: str, **extra) -> dict:
+    e = {"v": 1, "event": kind, "ts": ts, "seat_id": run_id, "run_id": run_id,
+         "writer": "launcher_wrapper"}
+    e.update(extra)
+    return e
+
+
+def test_reap_status_required_json_shape(tmp_path, capsys):
+    root = tmp_path / "state"
+    (root / "dispatches").mkdir(parents=True)
+    assert v3_cli.main(["reap", "status", "--root", str(root), "--json"]) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    for key in ("action", "root", "observed_dispatches", "eligible", "conserved",
+                "would_escalate", "already_retired", "active_or_unknown", "seats"):
+        assert key in payload, key
+    assert payload["action"] == "reap_status"
+
+
+def test_11_status_is_read_only(tmp_path, capsys):
+    """`reap status` writes nothing and leaves events.jsonl byte-identical; the same
+    byte-identical pin holds across a `reap once` evaluation pass that does not retire."""
+    root = tmp_path / "state"
+    run_id = "run-unclean-20200101T000000Z"
+    # an OLD launched-no-exited seat with a dead pid → always classifies unclean-stop,
+    # independent of the wall clock (the CLI uses real now()).
+    d = _write_reap_seat(
+        root, run_id, events=[_ev("launched", run_id, ts="2020-01-01T00:00:00Z", pid=999999,
+                                  command_sha256="ab" * 32)],
+    )
+    events_path = d / "events.jsonl"
+    before = events_path.read_bytes()
+
+    # (a) status: read-only — writes no escalation/reaper/archive, events byte-identical
+    assert v3_cli.main(["reap", "status", "--root", str(root),
+                        "--ledger-root", str(tmp_path / "ledger"), "--json"]) == 0
+    st = _json.loads(capsys.readouterr().out)
+    assert st["would_escalate"] == 1
+    assert events_path.read_bytes() == before
+    assert not (root / "escalations").exists()
+    assert not (root / "reaper").exists()
+
+    # (b) a `reap once` evaluation pass that does NOT retire still leaves events identical
+    assert v3_cli.main(["reap", "once", "--root", str(root),
+                        "--ledger-root", str(tmp_path / "ledger"), "--repo-root", str(tmp_path),
+                        "--json"]) == 0
+    once = _json.loads(capsys.readouterr().out)
+    assert once["reaped"] == 0 and once["escalated"] == 1
+    assert events_path.read_bytes() == before          # NEVER appends to events.jsonl
+    assert not (root / "reaper").exists()               # no retirement ledger written
+    # the escalation landed in the existing queue (B.8 can banner it)
+    esc = list((root / "escalations").glob("*.yaml"))
+    assert len(esc) == 1
+    _assert_escalation_schema(yaml.safe_load(esc[0].read_text()))
+
+
+def test_reap_once_required_json_shape(tmp_path, capsys):
+    root = tmp_path / "state"
+    run_id = "run-conserved-20260613T110000Z"
+    _write_reap_seat(
+        root, run_id, conserve=True, conserve_reason="evidence", conserved_at="2026-06-13T11:00:00Z",
+        events=[_ev("launched", run_id, ts="2026-06-13T11:00:00Z", pid=1, command_sha256="ab" * 32),
+                _ev("exited", run_id, ts="2026-06-13T11:01:00Z", exit_code=0)],
+    )
+    assert v3_cli.main(["reap", "once", "--root", str(root),
+                        "--ledger-root", str(tmp_path / "l"), "--repo-root", str(tmp_path),
+                        "--json"]) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    for key in ("action", "root", "observed_dispatches", "eligible", "reaped", "conserved",
+                "escalated", "skipped_active_or_unknown", "already_retired", "failed",
+                "step_counts", "retirements", "escalations"):
+        assert key in payload, key
+    assert payload["action"] == "reap_once"
+    assert payload["conserved"] == 1 and payload["reaped"] == 0
+
+
+def test_reap_watch_invalid_interval_refuses_before_loop(tmp_path, capsys):
+    root = tmp_path / "state"
+    (root / "dispatches").mkdir(parents=True)
+    assert v3_cli.main(["reap", "watch", "--root", str(root), "--interval", "0", "--json"]) == 2
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["error"] == "reap_invalid_interval"
+
+
+@pytest.mark.parametrize("sig", [_signal.SIGINT, _signal.SIGTERM])
+def test_12_watch_tick_shape_and_clean_signal_stop(tmp_path, monkeypatch, capsys, sig):
+    """Each watch tick emits the `reap_watch_tick` action/counter shape; SIGINT and
+    SIGTERM stop the loop cleanly after the current pass (exit 0)."""
+    import os as _os
+
+    root = tmp_path / "state"
+    (root / "dispatches").mkdir(parents=True)
+    seen: list[str] = []
+
+    def _stub(root_arg, **kw):
+        seen.append(kw.get("action"))
+        # deliver the stop signal mid-tick; the installed handler flips the stop flag
+        _os.kill(_os.getpid(), sig)
+        return {
+            "action": kw.get("action"), "root": str(root_arg), "observed_dispatches": 0,
+            "eligible": 0, "reaped": 0, "conserved": 0, "escalated": 0,
+            "skipped_active_or_unknown": 0, "already_retired": 0, "failed": 0,
+            "step_counts": {}, "retirements": [], "escalations": [],
+        }
+
+    monkeypatch.setattr(v3_cli.seat_reaper, "reap_once", _stub)
+    rc = v3_cli.main(["reap", "watch", "--root", str(root), "--interval", "5",
+                      "--ledger-root", str(tmp_path / "l"), "--repo-root", str(tmp_path)])
+    assert rc == 0
+    assert seen == ["reap_watch_tick"]  # exactly one pass, then a clean stop
+    assert "reap watch tick" in capsys.readouterr().out

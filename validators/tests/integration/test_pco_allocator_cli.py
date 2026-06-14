@@ -252,3 +252,107 @@ def test_pco_release_exits_nonzero_on_unrecoverable_error(
     assert ret != 0, (
         "pco-release must exit nonzero when release() encounters an unrecoverable error"
     )
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#43 §10.8 pco-release-leg-is-reused — the seat/venue reaper's tmux
+# executor releases the worktree through the EXISTING creator-engine-validator
+# pco-release CLI (subprocess+DATA), then verifies the claim/lease/event/worktree
+# facts WITHOUT deleting the branch. Exercises the REAL pco-release CLI in-process.
+# ---------------------------------------------------------------------------
+
+import contextlib as _contextlib
+import io as _io
+from types import SimpleNamespace as _NS
+
+from creator_engine_validator import reaper_executors as _reaper_executors
+from creator_engine_validator import seat_reaper as _seat_reaper
+
+
+def _bare_plan(**over):
+    base = dict(
+        seat_id="run-x", run_id="run-x", classification=_seat_reaper.CLASS_ELIGIBLE,
+        release_reason=_seat_reaper.RELEASE_REASON_COMPLETED, state_root=Path("."),
+        dispatch={}, dispatch_path=Path("."), events_path=Path("."), archive_root=Path("."),
+        batch_slug="run-x", role="implementer", terminal=None, harness_session_id=None,
+        transcript_ref=None, archive_expected=False, lane_id=None, controller_id=None,
+        ledger_root=None, worktree_path=None, pane_registry_path=None,
+    )
+    base.update(over)
+    return _seat_reaper.RetirementPlan(**base)
+
+
+def test_8_pco_release_leg_is_reused(secondary_worktree: Path, tmp_path: Path):
+    new_wt = tmp_path / "reaper-allocated-wt"
+    ledger = secondary_worktree / ".hermes" / "active-work-ledger"
+    branch = "implementer/ce43-reaper-release-test"
+
+    # allocate a real worktree + claim + lease on a fresh branch (the fixture under test)
+    assert main([
+        "pco-allocate", "--lane-id", "reap-lane", "--worktree-path", str(new_wt),
+        "--controller-id", "ctrl-x", "--branch", branch, "--envelope-ref", "none",
+        "--no-write-authority", "--ledger-root", str(ledger),
+        "--repo-root", str(secondary_worktree),
+    ]) == 0
+    claim_path = ledger / "claims" / "ctrl-x" / "reap-lane.yaml"
+    lease_path = ledger / "leases" / "ctrl-x" / "reap-lane.yaml"
+    assert claim_path.is_file() and lease_path.is_file() and new_wt.is_dir()
+
+    # an in-process runner that drives the REAL creator-engine-validator CLI for the
+    # `pco-release` argv the executor composes — subprocess+DATA, no PATH dependency.
+    recorded: list[list[str]] = []
+
+    def runner(argv, **kw):
+        argv = list(argv)
+        recorded.append(argv)
+        buf_out, buf_err = _io.StringIO(), _io.StringIO()
+        with _contextlib.redirect_stdout(buf_out), _contextlib.redirect_stderr(buf_err):
+            rc = main(argv[1:])  # argv[0] is the exe name
+        return _NS(returncode=rc, stdout=buf_out.getvalue(), stderr=buf_err.getvalue())
+
+    executor = _reaper_executors.TmuxExecutor(runner=runner)
+    plan = _bare_plan(
+        lane_id="reap-lane", controller_id="ctrl-x", ledger_root=ledger, worktree_path=new_wt,
+        release_reason=_seat_reaper.RELEASE_REASON_COMPLETED,
+    )
+    result = executor.release_worktree(plan)
+
+    # the executor invoked the EXISTING pco-release leg
+    assert recorded and recorded[0][1] == "pco-release"
+    assert result.status == _seat_reaper.STEP_SUCCEEDED, result.detail
+
+    # the verified facts (§6.4): claim released, lease gone, claim_released event, worktree gone
+    released = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+    assert released.get("released_at") and released.get("release_reason") == "completed"
+    assert not lease_path.exists()
+    events = list((ledger / "events").rglob("*.yaml"))
+    assert any(
+        yaml.safe_load(p.read_text()).get("event_kind") == "claim_released" for p in events
+    )
+    assert not new_wt.exists()
+
+    # NO branch deletion — the fresh branch still exists in the repo
+    branches = _git(["branch", "--list", branch], secondary_worktree).stdout
+    assert branch in branches
+
+
+def test_8b_pco_release_root_checkout_refusal_is_surfaced(git_repo: Path):
+    """When pco-release refuses the root checkout, the executor surfaces it as a
+    FAILED step flagged root_checkout_refused (the policy escalates, never bypasses)."""
+    def runner(argv, **kw):
+        argv = list(argv)
+        buf_out, buf_err = _io.StringIO(), _io.StringIO()
+        with _contextlib.redirect_stdout(buf_out), _contextlib.redirect_stderr(buf_err):
+            rc = main(argv[1:])
+        return _NS(returncode=rc, stdout=buf_out.getvalue(), stderr=buf_err.getvalue())
+
+    ledger = git_repo / ".hermes" / "active-work-ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    executor = _reaper_executors.TmuxExecutor(runner=runner)
+    # repo_root == the ROOT checkout (git_repo) → pco-release refuses
+    plan = _bare_plan(
+        lane_id="reap-lane", controller_id="ctrl-x", ledger_root=ledger, worktree_path=git_repo,
+    )
+    result = executor.release_worktree(plan)
+    assert result.status == _seat_reaper.STEP_FAILED
+    assert result.data.get("root_checkout_refused") is True
