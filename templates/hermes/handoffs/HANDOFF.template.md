@@ -163,12 +163,14 @@ the same directory.
 
 Enumerate the exact commands the implementer pane MUST run before
 the stop line, with expected exit codes and salient output. Common
-shapes:
+shapes (invoke the validator as `${CE_VALIDATOR_PYTHON:-python}`; set
+`CE_VALIDATOR_PYTHON` for lane worktrees that have no local `.venv` —
+see [`validators/README.md`](../../../validators/README.md), creator-engine#82):
 
 ```bash
-PYTHONPATH=validators python3 -m creator_engine_validator --list-checks
-PYTHONPATH=validators python3 -m creator_engine_validator check examples/well-formed/
-PYTHONPATH=validators python3 -m creator_engine_validator check examples/malformed/
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m creator_engine_validator --list-checks
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m creator_engine_validator check examples/malformed/
 git diff --check
 ```
 

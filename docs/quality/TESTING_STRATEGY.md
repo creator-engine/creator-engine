@@ -55,7 +55,7 @@ size of the diff.
 
 Test placement is convention, not contract. The substrate today
 ships tests under `validators/tests/` and runs them via
-`PYTHONPATH=validators .venv-test/bin/python -m pytest validators/
+`PYTHONPATH=validators ${CE_VALIDATOR_PYTHON:-python} -m pytest validators/
 tests -q` (per
 [`../../validators/README.md`](../../validators/README.md)).
 
