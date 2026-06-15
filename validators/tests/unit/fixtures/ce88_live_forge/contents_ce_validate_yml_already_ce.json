@@ -1,0 +1,18 @@
+{
+  "_links": {
+    "git": "https://api.github.com/repos/creator-engine/creator-engine/git/blobs/53fa6162a418f0941265ce11511b9f40360f05c6",
+    "html": "https://github.com/creator-engine/creator-engine/blob/main/.github/workflows/validate.yml",
+    "self": "https://api.github.com/repos/creator-engine/creator-engine/contents/.github/workflows/validate.yml?ref=main"
+  },
+  "content": "bmFtZTogVmFsaWRhdGUgZ292ZXJuYW5jZSBhcnRpZmFjdHMKCm9uOgogIHB1bGxfcmVxdWVzdDoKICBwdXNoOgogICAgYnJhbmNoZXM6IFttYWluXQoKam9iczoKICB2YWxpZGF0ZToKICAgIG5hbWU6IFZhbGlkYXRlIGdvdmVybmFuY2UgYXJ0aWZhY3RzCiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzdGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QHY0CiAgICAgIC0gdXNlczogYWN0aW9ucy9zZXR1cC1weXRob25AdjUKICAgICAgICB3aXRoOgogICAgICAgICAgcHl0aG9uLXZlcnNpb246ICIzLjE0IgogICAgICAtIHJ1bjogcHl0aG9uIC1tIHBpcCBpbnN0YWxsIC0tbm8taW5kZXggLS1maW5kLWxpbmtzIHZhbGlkYXRvcnMvd2hlZWxob3VzZSAtciB2YWxpZGF0b3JzL3JlcXVpcmVtZW50cy50eHQKICAgICAgLSBydW46IHB5dGhvbiAtbSBweXRlc3QgdmFsaWRhdG9ycy90ZXN0cwo=\n",
+  "download_url": "https://raw.githubusercontent.com/creator-engine/creator-engine/main/.github/workflows/validate.yml",
+  "encoding": "base64",
+  "git_url": "https://api.github.com/repos/creator-engine/creator-engine/git/blobs/53fa6162a418f0941265ce11511b9f40360f05c6",
+  "html_url": "https://github.com/creator-engine/creator-engine/blob/main/.github/workflows/validate.yml",
+  "name": "ce-validate.yml",
+  "path": ".github/workflows/ce-validate.yml",
+  "sha": "0000000000000000000000000000000000000000",
+  "size": 461,
+  "type": "file",
+  "url": "https://api.github.com/repos/creator-engine/creator-engine/contents/.github/workflows/validate.yml?ref=main"
+}

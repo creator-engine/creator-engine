@@ -98,11 +98,89 @@ def test_refuses_admin_permission_level_before_any_call():
     assert runner.calls == []
 
 
-def test_refuses_forbidden_scope_before_any_call():
+# ---------------------------------------------------------------------------
+# ce-ops#88 — the ceiling-driven three-tier permission validator (scope×level×policy).
+# Re-scoped from the old blanket "administration is forbidden at any level" ban (which
+# could not mint the ratified Phase-1 read ceiling) to the policy-ceiling semantics:
+# never-list refuses at any level; an escalation-gated write refuses unless the bound
+# policy ratifies it; the read-mostly baseline (incl. administration:read) is admitted.
+# ---------------------------------------------------------------------------
+def test_admits_administration_read_as_baseline_ceiling():
+    # Tier 3: administration:read is the read-mostly baseline (onboarding's Phase-1 read
+    # ceiling needs it for branch-protection reads). It is ADMITTED — minted, not refused.
+    runner = _fake_runner()
+    token = mint_scoped_token(
+        _request(permissions={"metadata": "read", "contents": "read", "administration": "read"}),
+        gh_runner=runner,
+    )
+    assert token.permissions == (
+        ("administration", "read"),
+        ("contents", "read"),
+        ("metadata", "read"),
+    )
+    assert len(runner.calls) == 1  # the mint POST fired (request passed the ceiling)
+
+
+def test_refuses_never_list_scope_at_any_level_before_any_call():
+    # Tier 1: organization_administration / secrets are never mintable, at any level,
+    # regardless of bound authority.
+    for scope in ("organization_administration", "secrets"):
+        for level in ("read", "write"):
+            runner = _fake_runner()
+            with pytest.raises(TokenMintRefused):
+                mint_scoped_token(_request(permissions={scope: level}), gh_runner=runner)
+            assert runner.calls == []
+
+
+def test_refuses_escalation_gated_write_without_bound_authority():
+    # Tier 2 default-DENY: a write/admin grant refuses when the bound policy carries no
+    # explicit escalation authority for it (a read-only run cannot silently gain write).
+    for scope in ("administration", "contents", "workflows"):
+        runner = _fake_runner()
+        with pytest.raises(TokenMintRefused):
+            mint_scoped_token(_request(permissions={scope: "write"}), gh_runner=runner)
+        assert runner.calls == []
+
+
+def test_admits_escalation_gated_write_with_bound_authority():
+    # Tier 2: the SAME grant is mintable when the bound policy ratifies that exact
+    # (scope, level) — the one-time human-ratified per-install escalation gate.
+    runner = _fake_runner()
+    token = mint_scoped_token(
+        _request(
+            permissions={"contents": "write", "pull_requests": "write"},
+            escalation_authority=(("contents", "write"),),
+        ),
+        gh_runner=runner,
+    )
+    assert ("contents", "write") in token.permissions
+    assert len(runner.calls) == 1  # passed the ceiling and minted
+
+
+def test_escalation_authority_cannot_ratify_a_never_list_scope():
+    # The bound policy's authority is itself bounded by the permanent floor: it can never
+    # ratify a never-list scope (a malformed/hostile policy cannot widen the ceiling).
     runner = _fake_runner()
     with pytest.raises(TokenMintRefused):
-        mint_scoped_token(_request(permissions={"administration": "read"}), gh_runner=runner)
+        mint_scoped_token(
+            _request(
+                permissions={"secrets": "write"},
+                escalation_authority=(("secrets", "write"),),
+            ),
+            gh_runner=runner,
+        )
     assert runner.calls == []
+
+
+def test_baseline_non_escalated_write_needs_no_authority():
+    # Tier 3: a write scope OUTSIDE the escalation-gated set (e.g. pull_requests:write, the
+    # coordination flow's baseline) is admitted with no escalation authority bound.
+    runner = _fake_runner()
+    token = mint_scoped_token(
+        _request(permissions={"contents": "read", "pull_requests": "write"}), gh_runner=runner
+    )
+    assert ("pull_requests", "write") in token.permissions
+    assert len(runner.calls) == 1
 
 
 def test_refuses_empty_permissions_before_any_call():
