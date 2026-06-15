@@ -1,5 +1,12 @@
 # Contract: Brownfield Project Adoption (E3)
 
+> **Not the same as joining an already-CE repo.** Brownfield *adoption* takes a
+> **non-CE** project into CE and is E3-deferred. A new dev joining a repo that is
+> **already** CE-governed is a *plain-join* (E2, auto-detected) — see
+> `plain-join.md` (ce-ops#85). `onboard --apply` auto-detects already-CE and
+> routes to plain-join; only an existing repo that is **not** already-CE reaches
+> the brownfield/E3 refuse described here.
+
 ## Purpose
 
 Brownfield adoption lets `ce onboard` connect CE to an existing project without

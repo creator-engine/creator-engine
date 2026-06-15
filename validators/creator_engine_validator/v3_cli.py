@@ -2371,6 +2371,17 @@ def _cmd_session(args: argparse.Namespace) -> int:
     )
 
 
+def _onboard_apply_driver() -> onboard_apply.ApplyDriver:
+    """Seam (ce-ops#85): the side-effect driver for ``onboard --apply``.
+
+    The default base driver has no live GitHub legs (every verify fails-closed),
+    so plain-join detection naturally DEFERS in production until a live forge
+    driver is wired. Tests monkeypatch this to inject a fake driver that
+    exercises the plain-join apply path end-to-end.
+    """
+    return onboard_apply.ApplyDriver()
+
+
 def _cmd_onboard(args: argparse.Namespace) -> int:
     """Two-mode install — verify the signed spec, then plan or apply.
 
@@ -2674,8 +2685,24 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         schema, merged, missing
     )
     if apply_mode:
+        plain_join_driver = None
         if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
-            if brownfield_plan["blocked"]:
+            # ce-ops#85 — a new dev JOINING an ALREADY-CE repo is a *plain-join*,
+            # NOT brownfield *adoption*. Detect already-CE FAIL-CLOSED and route to
+            # the idempotent verify/reconcile apply legs; genuine brownfield
+            # (existing + NOT already-CE) keeps the UNCHANGED E3 refuse below. The
+            # default driver has no live forge legs, so production defers until a
+            # live driver is wired (detection returns False → the same E3 refuse).
+            candidate_driver = _onboard_apply_driver()
+            target_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
+            if onboard_apply.repo_is_already_ce_governed(
+                candidate_driver,
+                repo=str(merged.value("github.repo") or ""),
+                branch=target_branch,
+                schema=schema,
+            ):
+                plain_join_driver = candidate_driver
+            elif brownfield_plan["blocked"]:
                 blocker = brownfield_plan["blockers"][0]
                 return _emit(
                     args,
@@ -2689,21 +2716,22 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                         "brownfield_adoption": brownfield_plan,
                     },
                 )
-            return _emit(
-                args,
-                1,
-                [
-                    f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
-                    "E3 brownfield adoption is planned, but this E2 onboard_apply build has no brownfield apply legs"
-                ],
-                {
-                    "error": "refused",
-                    "code": "e2_brownfield_seam_unavailable",
-                    "detail": "E3 brownfield apply must run through E2 onboard_apply extension legs; this build only emits the handoff plan",
-                    "brownfield_blockers": [],
-                    "brownfield_adoption": brownfield_plan,
-                },
-            )
+            else:
+                return _emit(
+                    args,
+                    1,
+                    [
+                        f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
+                        "E3 brownfield adoption is planned, but this E2 onboard_apply build has no brownfield apply legs"
+                    ],
+                    {
+                        "error": "refused",
+                        "code": "e2_brownfield_seam_unavailable",
+                        "detail": "E3 brownfield apply must run through E2 onboard_apply extension legs; this build only emits the handoff plan",
+                        "brownfield_blockers": [],
+                        "brownfield_adoption": brownfield_plan,
+                    },
+                )
         request = onboard_apply.ApplyRequest(
             spec_bytes=spec_bytes,
             schema=schema,
@@ -2722,7 +2750,12 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             spawn_smoke=bool(args.spawn_smoke),
         )
         try:
-            summary = onboard_apply.apply_onboard(request, verifier=apply_verifier)
+            if plain_join_driver is not None:
+                summary = onboard_apply.apply_onboard(
+                    request, verifier=apply_verifier, driver=plain_join_driver
+                )
+            else:
+                summary = onboard_apply.apply_onboard(request, verifier=apply_verifier)
         except onboard_apply.ApplyRefused as exc:
             return _emit(
                 args,
@@ -2827,6 +2860,24 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"→ E2 {first_project_plan['scaffold_input']['supplied_to_e2_leg']} · "
             f"first ship counted {str(not first_project_plan['first_ship_not_yet_counted']).lower()}"
         )
+    plain_join_plan = None
+    if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
+        # ce-ops#85 --plan/--apply PARITY: surface the plain-join route so --plan
+        # never implies brownfield apply_steps will run for an already-CE repo.
+        # Detection needs live forge reads, which the dry-run driver lacks — so the
+        # already-CE verdict is HONESTLY deferred to apply, where the live driver
+        # verifies the workflow digest + protection floor before converging.
+        already_ce = onboard_apply.repo_is_already_ce_governed(
+            _onboard_apply_driver(),
+            repo=str(merged.value("github.repo") or ""),
+            branch=str(merged.value("github.new_repo.default_branch", "main") or "main"),
+            schema=schema,
+        )
+        plain_join_plan = {
+            "route": "plain-join" if already_ce else "brownfield-e3-deferred",
+            "already_ce_detected": already_ce,
+            "detection": "verified" if already_ce else "deferred_to_apply_live_forge_read",
+        }
     if args.show_plan:
         counters = brownfield_plan["counters"]
         lines.append(
@@ -2836,6 +2887,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"tests {counters['test_commands_detected']} · "
             f"E2 steps {counters['apply_steps_planned']}"
         )
+        if plain_join_plan is not None:
+            lines.append(
+                f"    plain-join · route {plain_join_plan['route']} · "
+                f"already-CE {plain_join_plan['detection']}"
+            )
     lines += [
         f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",
         f"{_BRAND} · you approve only: {', '.join(plan['human_approves'])}",
@@ -2863,6 +2919,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         "github_leg": github_leg,
         "first_project": first_project_plan,
         "brownfield_adoption": brownfield_plan if args.show_plan else None,
+        "plain_join": plain_join_plan,
         "non_interactive": bool(args.non_interactive),
     }
     return _emit(args, 0, lines, payload)
