@@ -111,6 +111,15 @@ SPAWN_PREFLIGHT_BASE_BINARIES = ("tmux",)
 DEFAULT_READINESS_TIMEOUT_S = 30.0
 READINESS_POLL_INTERVAL_S = 0.5
 
+#: Codex transcript-locator settle window (ce-ops#56). On a cold/idle TUI the codex
+#: harness has not yet written its ``~/.codex/sessions/**/*.jsonl`` when the locator's
+#: first poll fires immediately after ``seed_brief`` — the poll sees zero hits and, on a
+#: short budget, fail-closes with a spurious ``SpawnRefused`` (live-reproduced 2026-06-13,
+#: codex v0.139.0 / gpt-5.5 xhigh). A bounded settle precedes the FIRST poll iteration so
+#: the session file exists by the time we look; it is capped at the locator deadline (it
+#: spends from the same timeout budget, never extends it).
+CODEX_TRANSCRIPT_SETTLE_S = 2.5
+
 #: Foreground commands that mean the harness REPL has NOT yet taken the pane (the
 #: still-initializing login/launch shell). Readiness = the foreground command has
 #: LEFT this set (claude may itself exec as ``node``, so we test shell-departure, not
@@ -827,6 +836,7 @@ def stamp_codex_transcript_locator(
     sessions_root: Path | str | None = None,
     timeout_s: float = DEFAULT_READINESS_TIMEOUT_S,
     poll_interval_s: float = READINESS_POLL_INTERVAL_S,
+    settle_s: float = CODEX_TRANSCRIPT_SETTLE_S,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     now: datetime | None = None,
@@ -836,10 +846,19 @@ def stamp_codex_transcript_locator(
     The lookup is exact and bounded: new JSONL files only, first record must be
     ``session_meta``, and ``payload.cwd`` must equal the launched worktree cwd.
     Zero or ambiguous matches are a failed spawn, not a live dispatch.
+
+    A bounded ``settle_s`` window (ce-ops#56) precedes the FIRST poll so a cold/idle
+    codex has written its session file by the time we look; it is capped at the deadline
+    (spent from the same ``timeout_s`` budget) and uses the existing poll machinery.
     """
     if record.data.get("harness") != CODEX_BRIDGE_HARNESS:
         return record
     deadline = clock() + timeout_s
+    # ce-ops#56: settle before the first poll — bounded by the remaining budget so the
+    # total wait never exceeds the deadline (a no-op when settle_s <= 0).
+    settle = min(max(settle_s, 0.0), max(deadline - clock(), 0.0))
+    if settle:
+        sleep(settle)
     while True:
         hits = _find_codex_transcripts(
             sessions_root=sessions_root,
@@ -887,6 +906,22 @@ def stamp_codex_transcript_locator(
 
 #: The tmux window the reviewer venue occupies.
 REVIEW_WINDOW = "review"
+
+#: The argv prefix that sources a seat env file into a child process, then execs the
+#: command. A LOCAL copy of ``lane_runtime._SEAT_ENV_WRAP_SCRIPT`` — the bridge imports
+#: NO v1 module (``lane_runtime`` is v1-classified), and the ce-ops#58 identity guard
+#: MUST source the seat-env IDENTICALLY to how ``ce lane launch --seat-env-file`` will,
+#: so the ``gh`` probe sees the exact identity the review submission will run under. A
+#: drift-guard test (``test_lane_runtime_reviewer_venue.py``) keeps the two byte-identical.
+_SEAT_ENV_WRAP_SCRIPT = 'set -a; . "$1"; set +a; shift; exec "$@"'
+
+
+def _envelope_actor(envelope_ref: str | Path) -> str:
+    """Read the host-bound reviewer login (``actor``) from a reviewer-authority envelope."""
+    doc = yaml.safe_load(Path(envelope_ref).read_text(encoding="utf-8")) or {}
+    if not isinstance(doc, dict):
+        return ""
+    return str((doc.get("reviewer_authority_envelope") or {}).get("actor") or "")
 
 
 def _resolve_validator_exe(validator_exe: str | None) -> str:
@@ -1217,6 +1252,40 @@ def spawn_review_venue(
         record.data["seat_env_file_ref"] = str(seat_env_file)
     record.data["spawned_at"] = _utcstamp(now or datetime.now(timezone.utc))
     _write_record(record)
+
+    # 2.5) Fail-closed gh-identity guard (ce-ops#58): the venue's EFFECTIVE `gh` login
+    # MUST equal the envelope `actor` before the venue may seed (and thus review). The
+    # envelope records the actor as DATA but never checked it; with GH_TOKEN/GITHUB_TOKEN
+    # unset, the venue's `gh` falls back to ambient auth — the #218 wrong-login leak. We
+    # probe `gh api user --jq .login` through the SAME `runner` seam (CI fakes it), sourcing
+    # the SAME seat-env the review will (so the probe sees the review's identity); on
+    # mismatch or probe error we fail closed — pane CONSERVED for autopsy, claim released,
+    # venue NEVER seeds.
+    expected_actor = _envelope_actor(envelope_ref)
+    if not expected_actor:
+        reason = f"reviewer envelope {envelope_ref!r} carries no actor; refusing to seed"
+        mark_spawn_failed(record, reason, now=now)
+        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
+    gh_argv = ["gh", "api", "user", "--jq", ".login"]
+    if seat_env_file is not None:
+        # source the credential the SAME way lane_runtime's exec-wrap does (value never
+        # transits argv — only the file PATH does), so `gh` IS the envelope actor.
+        gh_argv = ["sh", "-c", _SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(seat_env_file), *gh_argv]
+    identity = runner(gh_argv, capture_output=True, text=True)
+    if getattr(identity, "returncode", 1) != 0:
+        reason = (getattr(identity, "stderr", "") or "").strip() or "(no stderr)"
+        mark_spawn_failed(record, f"reviewer gh-identity probe failed: {reason}", now=now)
+        raise SpawnRefused(
+            f"reviewer-venue gh-identity probe failed for run {record.run_id!r}: {reason}"
+        )
+    effective_login = (getattr(identity, "stdout", "") or "").strip()
+    if effective_login != expected_actor:
+        reason = (
+            f"reviewer venue gh-login != envelope actor; refusing to seed "
+            "(the #218 wrong-identity leak)"
+        )
+        mark_spawn_failed(record, reason, now=now)
+        raise SpawnRefused(f"{reason} (for run {record.run_id!r})")
 
     # 3) seed the venue brief through the SAME seam (ce-ops#16 fix lands once).
     seed_brief(record, runner=runner, clock=clock, sleep=sleep, now=now)

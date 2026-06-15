@@ -327,3 +327,14 @@ def test_seat_env_wrap_sits_inside_resource_bound_wrap(tmp_path):
         "sh", "-c", lane_runtime._SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(env_file.resolve()),
     ]
     assert not any(_SECRET in tok for tok in inner)
+
+
+def test_bridge_seat_env_wrap_matches_lane_runtime():
+    """ce-ops#58 drift-guard. The bridge keeps a LOCAL copy of the seat-env wrap script
+    (it imports no v1 module, and ``lane_runtime`` is v1-classified), and the bridge's
+    step-2.5 gh-identity probe sources the seat-env with it. The probe is only honest if
+    it sources IDENTICALLY to how ``ce lane launch --seat-env-file`` will — so the two
+    copies MUST stay byte-identical."""
+    from creator_engine_validator import v3_seat_bridge
+
+    assert v3_seat_bridge._SEAT_ENV_WRAP_SCRIPT == lane_runtime._SEAT_ENV_WRAP_SCRIPT

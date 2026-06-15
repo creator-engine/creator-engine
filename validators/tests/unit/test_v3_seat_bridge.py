@@ -414,6 +414,71 @@ def test_codex_transcript_locator_missing_fail_closes(tmp_path):
     assert data["terminal"] is None and data["spawned_at"] is None
 
 
+def test_codex_transcript_locator_settles_before_first_poll(tmp_path):
+    """ce-ops#56: a bounded settle precedes the FIRST poll, so a codex that writes its
+    session file slightly late (the cold-start race) still resolves on the first look —
+    no spurious refusal. The settle being the FIRST sleep, with resolution then needing
+    NO poll-interval sleep, is the settle-then-resolve contract."""
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    sessions = tmp_path / "codex-sessions"
+    before = v3_seat_bridge.snapshot_codex_transcripts(sessions)
+    target = sessions / "2026" / "06" / "13" / "session.jsonl"
+    sleeps: list[float] = []
+
+    def _sleep(seconds: float) -> None:
+        # codex finally writes its session file DURING the settle window (the first sleep)
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            _codex_meta(target, session_id="codex-late", cwd=tmp_path)
+
+    v3_seat_bridge.stamp_codex_transcript_locator(
+        rec,
+        before=before,
+        launched_cwd=tmp_path,
+        sessions_root=sessions,
+        clock=lambda: 0.0,  # deadline never trips → isolates the settle behavior
+        sleep=_sleep,
+        now=_FIXED_NOW,
+    )
+    data = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert data["harness_session_id"] == "codex-late"
+    assert data["transcript_ref"] == str(target.resolve())
+    # exactly one sleep — the settle — and it equals the settle window: settle precedes
+    # the first poll, which then resolves (without the settle the first poll would miss).
+    assert sleeps == [v3_seat_bridge.CODEX_TRANSCRIPT_SETTLE_S]
+
+
+def test_codex_transcript_locator_settle_capped_at_deadline(tmp_path):
+    """ce-ops#56: the settle is bounded by the remaining budget — it never sleeps past the
+    deadline, so the total wait stays within ``timeout_s`` even on a tiny budget."""
+    rec = v3_seat_bridge.materialize_dispatch(
+        _plan(), tmp_path, harness="codex", now=_FIXED_NOW
+    )
+    clk = _StubClock()
+    sleeps: list[float] = []
+
+    def _sleep(s: float) -> None:
+        sleeps.append(s)
+        clk.sleep(s)  # advance the clock so the bounded loop terminates
+
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.stamp_codex_transcript_locator(
+            rec,
+            before=set(),
+            launched_cwd=tmp_path,
+            sessions_root=tmp_path / "empty-sessions",
+            timeout_s=1.0,
+            poll_interval_s=0.5,
+            settle_s=5.0,  # larger than the whole budget → must be capped at 1.0
+            clock=clk.now,
+            sleep=_sleep,
+            now=_FIXED_NOW,
+        )
+    assert sleeps and sleeps[0] == 1.0  # settle capped at the deadline, not 5.0
+
+
 def test_spawn_argv_mcp_config_is_relative_record_stays_absolute(tmp_path):
     """D3-fix (CC-D-7): in the drive posture (cwd is an ancestor of the dispatch dir),
     the spawn argv's ``--mcp-config`` value is a CE-owned RELATIVE path, while the
@@ -884,12 +949,17 @@ def _author_dispatch(tmp_path, scope_id="rate-limit-login"):
 class _ReviewRunner:
     """Routes the venue subprocess chain (pco-allocate / lane launch --json / tmux seed)."""
 
-    def __init__(self, *, pco_rc=0, launch_rc=0, pane="%7", launch_stdout=None):
+    def __init__(self, *, pco_rc=0, launch_rc=0, pane="%7", launch_stdout=None,
+                 gh_login=_REVIEWER_LOGIN, gh_rc=0):
         self.calls = []
         self.pco_rc = pco_rc
         self.launch_rc = launch_rc
         self.pane = pane
         self.launch_stdout = launch_stdout
+        # ce-ops#58: the step-2.5 gh-identity probe. Default = the envelope actor (the
+        # happy path: venue login == actor); override to simulate the #218 wrong-login.
+        self.gh_login = gh_login
+        self.gh_rc = gh_rc
 
     def __call__(self, argv, **kw):
         argv = list(argv)
@@ -905,6 +975,12 @@ class _ReviewRunner:
                     "kind": "tmux", "session_id": "$5", "window_id": "@6", "pane_id": self.pane}},
             })
             return _FakeCompleted(returncode=0, stdout=stdout)
+        if "api" in argv and "user" in argv:  # ce-ops#58: `gh api user --jq .login`
+            return _FakeCompleted(
+                returncode=self.gh_rc,
+                stdout="" if self.gh_rc else self.gh_login,
+                stderr="gh boom" if self.gh_rc else "",
+            )
         if "display-message" in argv:
             return _FakeCompleted(returncode=0, stdout="claude")  # ready immediately
         if "capture-pane" in argv:
@@ -1217,3 +1293,90 @@ def test_conserve_marker_unknown_field_still_rejected(tmp_path):
     rec.data["conserve_typo_field"] = "x"  # the schema stays closed (unevaluatedProperties:false)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(rec.data, schema)
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#58 (F-class, #218 lineage) — fail-closed step-2.5 gh-identity guard
+# ---------------------------------------------------------------------------
+
+
+def _review_rec(tmp_path):
+    author = _author_dispatch(tmp_path)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    venue_root = tmp_path / "venues"; venue_root.mkdir(exist_ok=True)
+    return rec, venue_root
+
+
+def test_gh_identity_probe_runs_between_launch_and_seed(tmp_path):
+    """The matching-identity path probes `gh api user --jq .login`, finds the envelope
+    actor, and proceeds to seed — the probe sits between lane launch and the seed."""
+    rec, venue_root = _review_rec(tmp_path)
+    runner = _ReviewRunner(pane="%7")  # default gh_login == _REVIEWER_LOGIN (the actor)
+    v3_seat_bridge.spawn_review_venue(
+        rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "ledger",
+        runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+        sleep=lambda *_: None, clock=lambda: 0.0,
+    )
+    gh = runner.argv_for("api")
+    assert gh is not None and gh[:5] == ["gh", "api", "user", "--jq", ".login"]
+    # identity matched → the venue seeded (send-keys reached)
+    assert runner.argv_for("send-keys") is not None
+
+
+def test_gh_identity_probe_sources_seat_env_when_present(tmp_path):
+    """ce-ops#58: when a seat-env file is supplied the probe sources it the SAME way the
+    review will (`sh -c '<seat-env wrap>' … <file> gh api user …`), so the probe sees the
+    review's identity by construction — the secret never transits the probe argv."""
+    rec, venue_root = _review_rec(tmp_path)
+    env_file = tmp_path / "reviewer.env"
+    env_file.write_text("GH_TOKEN=ghp_secret\nGITHUB_TOKEN=ghp_secret\n", encoding="utf-8")
+    runner = _ReviewRunner(pane="%7")
+    v3_seat_bridge.spawn_review_venue(
+        rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "ledger",
+        seat_env_file=env_file, runner=runner, validator_exe="creator-engine-validator",
+        ce_exe="ce", now=_FIXED_NOW, sleep=lambda *_: None, clock=lambda: 0.0,
+    )
+    gh = runner.argv_for("api")
+    assert gh[:2] == ["sh", "-c"]
+    assert gh[2] == v3_seat_bridge._SEAT_ENV_WRAP_SCRIPT
+    assert str(env_file) in gh
+    assert gh[-5:] == ["gh", "api", "user", "--jq", ".login"]
+    # the secret value never lands in the probe argv (only the file PATH does)
+    assert "ghp_secret" not in " ".join(gh)
+
+
+def test_spawn_review_venue_fail_closed_on_gh_identity_mismatch(tmp_path):
+    """The #218 leak: venue gh-login != envelope actor (ambient wrong identity) → fail
+    closed BEFORE seeding; the failure is conserved and value-free (no login in record)."""
+    rec, venue_root = _review_rec(tmp_path)
+    runner = _ReviewRunner(pane="%7", gh_login="chmod735")  # the author, NOT the reviewer
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+            sleep=lambda *_: None, clock=lambda: 0.0,
+        )
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    assert runner.argv_for("send-keys") is None  # never seeded a wrong-identity venue
+    # value-free: neither the wrong login nor the reviewer login lands in the record bytes
+    record_bytes = rec.dispatch_path.read_text(encoding="utf-8")
+    assert "chmod735" not in record_bytes and _REVIEWER_LOGIN not in record_bytes
+
+
+def test_spawn_review_venue_fail_closed_on_gh_probe_error(tmp_path):
+    """A failed identity probe (gh non-zero) is fail-closed — never an unverified seed."""
+    rec, venue_root = _review_rec(tmp_path)
+    runner = _ReviewRunner(pane="%7", gh_rc=1)
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW,
+            sleep=lambda *_: None, clock=lambda: 0.0,
+        )
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"]
+    assert runner.argv_for("send-keys") is None
