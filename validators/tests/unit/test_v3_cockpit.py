@@ -125,6 +125,45 @@ def test_l3_source_performs_no_direct_reads():
     assert "textual" in source, "v3_cockpit IS the Textual view"
 
 
+def test_l3_journey_source_performs_no_direct_reads_still():
+    """ce-ops#45 (gate spec §7.12): the journey L3 code is still bind-only.
+
+    Extends the L3 source guard to cover the journey screen/detail code: it must
+    not import the read model, a YAML loader, the evidence spine, the registry,
+    or any source-file reader — every journey string is read from the snapshot.
+    """
+    source = (PKG_DIR / "v3_cockpit.py").read_text(encoding="utf-8")
+    # the same 10 forbidden direct-read tokens still hold over the whole file,
+    # which now includes the JourneyScreen / JourneyDetailScreen code.
+    forbidden = (
+        "runtime_evidence_spine",
+        "evidence_sink",
+        "pco_allocator",
+        "cockpit_readmodel",
+        "cockpit_demo_seed",
+        "import yaml",
+        "safe_load",
+        "open(",
+        "read_text",
+        "active-work-ledger",
+    )
+    for token in forbidden:
+        assert token not in source, (
+            f"the L3 journey code must bind to the snapshot only; found "
+            f"direct-read token {token!r} in v3_cockpit.py"
+        )
+    # the journey screen IS present and the detail lookup uses ONLY the
+    # precomputed need_details map (no source-ref parsing / classification).
+    assert "class JourneyScreen" in source
+    assert "class JourneyDetailScreen" in source
+    assert 'journey.get("need_details")' in source
+    # no third vocabulary / classification helpers leaked into the view
+    for jargon in ("PHASE_BY_STATE", "project_scope_state", "_needs_class", "Planning"):
+        assert jargon not in source, (
+            f"the journey view must classify/derive nothing; found {jargon!r}"
+        )
+
+
 # --- rail rendering for B2 live-feed additions ------------------------------
 
 @pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")

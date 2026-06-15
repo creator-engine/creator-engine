@@ -200,8 +200,68 @@ external gate; only **escalations + bet-ratifications + reviews** surface to
 the human. The Operator is a mission controller working a queue — not a
 babysitter watching panes.
 
+## The CEO-mode journey surface (ce-ops#45 minimum)
+
+The **journey** is the solo-founder read of the SAME L2 snapshot: a one-screen
+`Frame → Shape → Build → Review → Ship` arc, an honest "where am I now" marker, a
+plain-language "what needs me" feed, and a click/focus → plain detail for every
+item. It is the CEO-mode *surface* of the journey board — **not** a mode-switching
+framework: there is no persisted persona, no default change, no DEV/CEO/strangeLoop
+switcher, no program roadmap, and no model-generated text. It is read-only — it
+approves, resolves, syncs, dispatches, merges, pushes, and writes nothing.
+
+**L2 — `snapshot["journey"]` (all computation).** The pure fold
+(`_fold_journey`, folded inside `fold_snapshot`) reuses the canon stage skin and
+the already-built facts — it derives no new lifecycle:
+
+- `arc` — the canon `COGNITIVE_PHASES` stages, a plain one-liner per stage, the
+  per-stage counts, and an `availability` flag.
+- `now` — the "you are here" marker, computed with an explicit, honest priority:
+  (1) the oldest open needs-attention item, (2) a live/in-progress Scope, (3) the
+  first non-done visible Scope by stable ordering, (4) none, (5) unavailable when
+  the source is unavailable. `basis` names which rule fired; when several Scopes
+  are in progress it says so plainly (`multiple_active` + an `active_note`) and
+  never implies a singular state.
+- `scopes` — one plain row per board card (`goal` from the Scope's intent,
+  `stage` straight off the card's `phase` via `coordination.PHASE_BY_STATE` — never
+  a third vocabulary like "Planning/Doing/QA/Done").
+- `needs_attention` — a **1:1** plain-language translation of the open
+  `escalations` queue: every open item becomes exactly one needs-attention item
+  and exactly one `need_details` record. An unreachable source renders "I cannot
+  see decisions that need you right now"; a reachable empty source renders
+  "Nothing needs you right now" — the two are distinct on purpose.
+- `need_details` — a deterministic, non-engineer explanation per item (what this
+  means · why CE paused · if you continue · if you decline · what CE will not do ·
+  recommendation · optional technical-source footer). Templates are fixed copy
+  keyed off the item's own value-free text; an unknown class falls back to a
+  conservative generic line. No model-generated explanation ships in this slice.
+- `counters` — `journey_scope_count`, `journey_stage_counts` (sum equals the scope
+  count), `needs_source`, `needs_open`, `needs_translated` (equals `needs_open`
+  when the source is ok), `details_available` (equals `needs_translated`), and
+  `plain_copy_findings` (must be **0**).
+
+**Plain-language law.** CEO-facing text — the arc, the needs feed, every detail
+field, and the L3-rendered journey strings — carries **none** of the blocked
+governance terms (escalation, the AWAITING-OPERATOR marker, Operator,
+mutation_class, ratification, envelope, spine, refusal-chain, the layer labels,
+schema, governance). Value-free source text is scrubbed to plain equivalents
+before it reaches a CEO-facing field, so the `plain_copy_findings` counter is 0
+by construction. Machine JSON keys keep conserved names; the detail's
+technical-source footer may carry a ref, but the item is understandable without
+it.
+
+**L3 — the journey screen (view only).** A dedicated `JourneyScreen` (Textual
+`Screen`) is reachable by the `j` key binding and pushed *on top of* the board —
+the existing expert ops board stays the **default** screen (un-demoted, no default
+change, no persisted preference). The screen renders the arc, the you-are-here
+marker, the plain scope cards, and the needs list; selecting any needs item
+(click / Enter) opens a `JourneyDetailScreen` modal that shows the precomputed
+`need_details[detail_ref]`. The view binds these structures and renders — it
+parses no source ref, derives no stage, classifies no need, and calls no loader
+(the source-level L3 guard test covers the journey code too).
+
 ## Pairs with CEO mode (still later)
 
 The Cockpit remains the natural home of **CEO mode** (a fleet over a ratified
-backlog). CEO mode, the ACP/Tier-A adapter, and the durable Skill axis stay
-post-pilot; the Cockpit no longer waits for them.
+backlog). The ACP/Tier-A adapter and the durable Skill axis stay post-pilot; the
+Cockpit no longer waits for them.
