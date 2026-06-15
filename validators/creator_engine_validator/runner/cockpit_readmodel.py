@@ -180,6 +180,435 @@ _LIVE_STATUSES = frozenset({"starting", "active", "blocked", "closing"})
 
 
 # ---------------------------------------------------------------------------
+# ce-ops#45 — the CEO-mode JOURNEY projection (the minimum surface). PURE.
+#
+# A second, plain-language read of the SAME L2 facts: the five-stage arc, an
+# honest "where am I now" marker, the open work that needs the founder, and a
+# deterministic non-engineer detail record per item. It reuses the canon stage
+# skin (``coordination.PHASE_BY_STATE`` / ``COGNITIVE_PHASES``), the already-built
+# board ``cards``, and the already-folded ``escalations`` section — it derives no
+# new lifecycle, classifies no source, and ships NO model-generated text. The L3
+# Textual view binds these structures and renders; it computes nothing.
+# ---------------------------------------------------------------------------
+
+#: Plain, non-engineer one-liners for each canon stage (the CEO skin over the
+#: same Frame->Shape->Build->Review->Ship arc — never a third vocabulary).
+JOURNEY_STAGE_LABELS = {
+    "Frame": "Framing the work — deciding what to do and why",
+    "Shape": "Shaping the plan — agreeing what 'done' looks like",
+    "Build": "Building it — work is underway",
+    "Review": "Reviewing the result against what you agreed",
+    "Ship": "Shipping — delivering the finished work",
+}
+
+#: The deterministic where-am-I bases (machine key + the plain phrase L3 may
+#: render verbatim). No model text — every phrase is fixed here.
+JOURNEY_BASIS_LABELS = {
+    "needs_attention": "This is the oldest thing waiting on your decision.",
+    "live_scope": "This is what is being worked on right now.",
+    "active_scope": "This is the next piece of work still open.",
+    "none": "Nothing is in progress right now.",
+    "unavailable": "I cannot tell where things stand right now.",
+}
+
+#: The two honesty strings for the needs-attention feed (spec 3.4). Distinct on
+#: purpose: an unreachable source is NOT an empty queue.
+NEEDS_EMPTY_MESSAGE = "Nothing needs you right now"
+NEEDS_UNAVAILABLE_MESSAGE = "I cannot see decisions that need you right now"
+
+#: The conservative generic detail template for an item whose class is unknown
+#: (spec 3.6). Plain by construction.
+NEEDS_GENERIC_PLAIN = "CE paused because it needs your choice before it continues."
+
+#: Deterministic plain-language detail TEMPLATES keyed by a value-free item
+#: class. The class is matched from the open item's own value-free text by simple
+#: keyword presence (no model call). Every field is fixed copy — there is no
+#: generated explanation in this minimum slice.
+_NEEDS_TEMPLATES = {
+    "spend": {
+        "what_this_means": (
+            "A piece of work reached the budget you set for it, so CE stopped "
+            "before spending any more."
+        ),
+        "why_ce_paused": (
+            "CE will not quietly spend past a budget you committed. It is "
+            "waiting for you to say whether to raise the budget or stop here."
+        ),
+        "if_you_continue": (
+            "If you raise the budget, the work picks up from where it stopped "
+            "and keeps going."
+        ),
+        "if_you_decline": (
+            "If you keep the budget as-is, the work stops here and nothing more "
+            "is spent on it."
+        ),
+        "ce_will_not": (
+            "CE will not raise the budget, spend past it, or restart the work on "
+            "its own — that choice is yours."
+        ),
+    },
+    "merge": {
+        "what_this_means": (
+            "A piece of work is finished and ready to be delivered, but it needs "
+            "your sign-off before it goes out."
+        ),
+        "why_ce_paused": (
+            "CE will not release finished work without you. It is waiting for you "
+            "to approve the delivery or send it back for changes."
+        ),
+        "if_you_continue": (
+            "If you approve it, the finished work is delivered."
+        ),
+        "if_you_decline": (
+            "If you send it back, the work returns for changes and nothing is "
+            "delivered yet."
+        ),
+        "ce_will_not": (
+            "CE will not deliver the work, change it, or sign off for you — that "
+            "choice is yours."
+        ),
+    },
+}
+
+#: The plain-language scrub map (spec 3.5). Any blocked term that survives in a
+#: value-free source string is replaced 1:1 with a plain equivalent BEFORE the
+#: text reaches a CEO-facing field, so ``plain_copy_findings`` is 0 by
+#: construction. Order matters: longer phrases first. Machine JSON keys keep
+#: conserved names; only the rendered prose is scrubbed.
+_JARGON_PLAIN = (
+    ("AWAITING-OPERATOR", "waiting for you"),
+    ("refusal-chain", "the safety record"),
+    ("mutation_class", "kind of change"),
+    ("ratification", "your approval"),
+    ("governance", "the safety rules"),
+    ("escalations", "decisions waiting for you"),
+    ("escalation", "a decision waiting for you"),
+    ("Operator", "you"),
+    ("operator", "you"),
+    ("envelope", "permission"),
+    ("schema", "record format"),
+    ("spine", "the record trail"),
+    ("L1", "the records"),
+    ("L2", "the read model"),
+    ("L3", "the screen"),
+)
+
+#: The exact blocked-term denylist (spec 3.5), used by the plain-copy audit. The
+#: scrub above guarantees these never appear in a CEO-facing field.
+JOURNEY_BLOCKED_TERMS = (
+    "escalation",
+    "AWAITING-OPERATOR",
+    "Operator",
+    "mutation_class",
+    "ratification",
+    "envelope",
+    "spine",
+    "refusal-chain",
+    "L1",
+    "L2",
+    "L3",
+    "schema",
+    "governance",
+)
+
+#: The conserved-lifecycle states that count as "done"/shipped for where-am-I:
+#: the first non-done open Scope is preferred over a shipped one.
+_JOURNEY_DONE_STATES = frozenset({"done"})
+#: The conserved-lifecycle state that is a LIVE/in-progress build.
+_JOURNEY_LIVE_STATE = "in_progress"
+
+
+def plain_text_findings(*texts: Any) -> list[str]:
+    """Return the blocked CEO-jargon terms (spec 3.5) present in the given text(s).
+
+    A case-insensitive substring sweep used by the plain-copy counter and the
+    tests. An empty result == clean copy. PURE.
+    """
+    blob = "\n".join(str(t) for t in texts if t is not None).lower()
+    found: list[str] = []
+    for term in JOURNEY_BLOCKED_TERMS:
+        if term.lower() in blob:
+            found.append(term)
+    return found
+
+
+def _scrub_jargon(text: Any) -> str:
+    """Replace any blocked governance term in a source string with plain copy. PURE."""
+    out = str(text or "")
+    for term, plain in _JARGON_PLAIN:
+        if term in out:
+            out = out.replace(term, plain)
+    return out
+
+
+def _needs_class(item: Mapping[str, Any]) -> str:
+    """Classify an open item from its OWN value-free text (keyword presence). PURE.
+
+    A pure, deterministic match — never a model call. An unmatched item falls to
+    the conservative generic template (spec 3.6).
+    """
+    blob = " ".join(
+        str(item.get(field) or "")
+        for field in ("title", "decision_needed", "recommendation", "source_ref")
+    ).lower()
+    if any(word in blob for word in ("spend", "budget", "cost", "cap", "breach")):
+        return "spend"
+    if any(word in blob for word in ("merge", "ship", "deliver", "release", "approve")):
+        return "merge"
+    return "generic"
+
+
+def _journey_need(open_item: Mapping[str, Any], stage: str | None) -> dict[str, Any]:
+    """Translate ONE open queue item into a plain needs-attention item (PURE).
+
+    The machine ids (``need_id``, ``source_ref``) keep conserved values; every
+    CEO-facing field is plain — built from a deterministic template plus a
+    jargon scrub of the value-free source text.
+    """
+    need_id = open_item.get("escalation_id")
+    headline = _scrub_jargon(open_item.get("title")) or "A decision is waiting for you"
+    plain_ask = _scrub_jargon(open_item.get("decision_needed")) or NEEDS_GENERIC_PLAIN
+    recommended = _scrub_jargon(open_item.get("recommendation")) or (
+        "Review this and choose how to proceed."
+    )
+    return {
+        "need_id": need_id,
+        "detail_ref": need_id,
+        "scope_id": None,
+        "stage": stage,
+        "headline": headline,
+        "plain_ask": plain_ask,
+        "recommended_next_step": recommended,
+        "why_now": (
+            "CE paused this work and will wait until you decide — nothing moves "
+            "on it until then."
+        ),
+        "created_at": open_item.get("created_at"),
+        "age_rank": open_item.get("age_rank"),
+        "source_ref": open_item.get("source_ref"),
+    }
+
+
+def _journey_detail(open_item: Mapping[str, Any], need: Mapping[str, Any]) -> dict[str, Any]:
+    """Build ONE deterministic, non-engineer detail record (spec 3.6). PURE."""
+    klass = _needs_class(open_item)
+    template = _NEEDS_TEMPLATES.get(klass)
+    if template is None:
+        what_this_means = NEEDS_GENERIC_PLAIN
+        why_ce_paused = (
+            "CE stopped here because it needs your decision before it can "
+            "continue."
+        )
+        if_you_continue = "If you choose how to proceed, CE picks the work back up."
+        if_you_decline = "If you decide not to proceed, the work stays paused."
+        ce_will_not = "CE will not decide this for you or move ahead on its own."
+    else:
+        what_this_means = template["what_this_means"]
+        why_ce_paused = template["why_ce_paused"]
+        if_you_continue = template["if_you_continue"]
+        if_you_decline = template["if_you_decline"]
+        ce_will_not = template["ce_will_not"]
+    return {
+        "need_id": need.get("need_id"),
+        "title": need.get("headline"),
+        "what_this_means": what_this_means,
+        "why_ce_paused": why_ce_paused,
+        "if_you_continue": if_you_continue,
+        "if_you_decline": if_you_decline,
+        "ce_will_not": ce_will_not,
+        "recommendation": need.get("recommended_next_step"),
+        # The technical source is an OPTIONAL footer, never the explanation
+        # (spec 4.3). It is value-free and the item is understandable without it.
+        "technical_source": open_item.get("source_ref"),
+    }
+
+
+def _fold_journey(
+    cards: list[dict[str, Any]],
+    escalation_section: Mapping[str, Any],
+    *,
+    board_available: bool,
+    escalations_available: bool,
+) -> dict[str, Any]:
+    """Fold the CEO-mode journey surface from the already-built L2 facts (PURE).
+
+    Reuses the board ``cards`` (canon stage skin already derived there) and the
+    folded ``escalations`` section. Computes the honest where-am-I marker, the
+    plain needs-attention feed (1:1 with open items), the deterministic detail
+    records, and the acceptance counters. NO disk, NO clock, NO model text.
+    """
+    arc_availability = AVAILABLE if board_available else UNAVAILABLE
+
+    # --- the scopes (one plain row per board card, stage from the card) ------
+    scopes: list[dict[str, Any]] = []
+    stage_counts = {phase: 0 for phase in coordination.COGNITIVE_PHASES}
+    for card in cards:
+        stage = card.get("phase")
+        if stage in stage_counts:
+            stage_counts[stage] += 1
+        # The goal is the Scope's own intent text rendered to the founder, so it
+        # rides the same plain-language scrub as every other CEO-facing string —
+        # a value-free term like "permission" never leaks the engine word.
+        goal = _scrub_jargon(card.get("title")) if card.get("title") else "(no goal set yet)"
+        scopes.append(
+            {
+                "scope_id": card.get("scope_id"),
+                "goal": goal,
+                "stage": stage,
+                "state": card.get("state"),
+                "ready": bool(card.get("ready")),
+                "needs_attention": False,  # filled below from the open feed
+                "need_ids": [],
+            }
+        )
+
+    # --- the needs-attention feed (1:1 translation of open queue items) ------
+    open_items = list(escalation_section.get("open") or [])
+    needs_items: list[dict[str, Any]] = []
+    need_details: dict[str, Any] = {}
+    if escalations_available:
+        for open_item in open_items:
+            need = _journey_need(open_item, None)
+            needs_items.append(need)
+            detail = _journey_detail(open_item, need)
+            need_details[str(need["need_id"])] = detail
+
+    needs_source = AVAILABLE if escalations_available else UNAVAILABLE
+    open_count = len(open_items) if escalations_available else 0
+    needs_translated = len(needs_items)
+    details_available = len(need_details)
+
+    needs_message = None
+    if not escalations_available:
+        needs_message = NEEDS_UNAVAILABLE_MESSAGE
+    elif not needs_items:
+        needs_message = NEEDS_EMPTY_MESSAGE
+
+    needs_attention = {
+        "availability": needs_source,
+        "open_count": open_count,
+        "message": needs_message,
+        "items": needs_items,
+    }
+
+    # --- where am I now? (honest priority, spec 3.3) -------------------------
+    live_scopes = [s for s in scopes if s.get("state") == _JOURNEY_LIVE_STATE]
+    non_done = [s for s in scopes if s.get("state") not in _JOURNEY_DONE_STATES]
+    active_count = len(live_scopes)
+    if not board_available:
+        now = {
+            "scope_id": None,
+            "stage": None,
+            "label": JOURNEY_BASIS_LABELS["unavailable"],
+            "basis": "unavailable",
+        }
+    elif needs_items:
+        # (1) the oldest open needs-attention item (no scope binding in this
+        #     minimum slice, but it IS the honest "what to look at first").
+        oldest = needs_items[0]
+        now = {
+            "scope_id": oldest.get("scope_id"),
+            "stage": oldest.get("stage"),
+            "label": JOURNEY_BASIS_LABELS["needs_attention"],
+            "basis": "needs_attention",
+        }
+    elif live_scopes:
+        # (2) a live/in-progress Scope.
+        first_live = live_scopes[0]
+        now = {
+            "scope_id": first_live.get("scope_id"),
+            "stage": first_live.get("stage"),
+            "label": JOURNEY_BASIS_LABELS["live_scope"],
+            "basis": "live_scope",
+        }
+    elif non_done:
+        # (3) the first non-done visible Scope by stable L2 ordering.
+        first_open = non_done[0]
+        now = {
+            "scope_id": first_open.get("scope_id"),
+            "stage": first_open.get("stage"),
+            "label": JOURNEY_BASIS_LABELS["active_scope"],
+            "basis": "active_scope",
+        }
+    else:
+        # (4) no active Scope visible.
+        now = {
+            "scope_id": None,
+            "stage": None,
+            "label": JOURNEY_BASIS_LABELS["none"],
+            "basis": "none",
+        }
+    # Honesty: if several scopes are live, say so plainly and keep the marker's
+    # basis explicit (never imply a singular state — spec 3.3).
+    now["active_scope_count"] = active_count
+    now["multiple_active"] = active_count > 1
+    if active_count > 1:
+        now["active_note"] = (
+            f"{active_count} pieces of work are in progress; the marker above "
+            "points at the one to look at first."
+        )
+    else:
+        now["active_note"] = None
+
+    # --- the plain-copy audit over EVERY CEO-facing string we produced -------
+    ceo_texts: list[Any] = list(JOURNEY_STAGE_LABELS.values())
+    ceo_texts.extend(JOURNEY_BASIS_LABELS.values())
+    ceo_texts.append(NEEDS_EMPTY_MESSAGE)
+    ceo_texts.append(NEEDS_UNAVAILABLE_MESSAGE)
+    ceo_texts.append(now.get("label"))
+    ceo_texts.append(now.get("active_note"))
+    ceo_texts.append(needs_message)
+    for scope in scopes:
+        ceo_texts.append(scope.get("goal"))
+    for need in needs_items:
+        ceo_texts.extend(
+            [
+                need.get("headline"),
+                need.get("plain_ask"),
+                need.get("recommended_next_step"),
+                need.get("why_now"),
+            ]
+        )
+    for detail in need_details.values():
+        ceo_texts.extend(
+            [
+                detail.get("title"),
+                detail.get("what_this_means"),
+                detail.get("why_ce_paused"),
+                detail.get("if_you_continue"),
+                detail.get("if_you_decline"),
+                detail.get("ce_will_not"),
+                detail.get("recommendation"),
+            ]
+        )
+    plain_copy_findings = len(plain_text_findings(*ceo_texts))
+
+    counters = {
+        "journey_scope_count": len(scopes),
+        "journey_stage_counts": dict(stage_counts),
+        "needs_source": needs_source,
+        "needs_open": open_count,
+        "needs_translated": needs_translated,
+        "details_available": details_available,
+        "plain_copy_findings": plain_copy_findings,
+    }
+
+    return {
+        "arc": {
+            "stages": list(coordination.COGNITIVE_PHASES),
+            "stage_labels": dict(JOURNEY_STAGE_LABELS),
+            "stage_counts": dict(stage_counts),
+            "availability": arc_availability,
+        },
+        "now": now,
+        "scopes": scopes,
+        "needs_attention": needs_attention,
+        "need_details": need_details,
+        "counters": counters,
+    }
+
+
+# ---------------------------------------------------------------------------
 # The PURE fold — L1-shaped values -> ONE JSON-serializable snapshot
 # ---------------------------------------------------------------------------
 def _seat_card(
@@ -1162,6 +1591,16 @@ def fold_snapshot(
     for card in cards:
         phase_counts[card["phase"]] += 1
 
+    # ce-ops#45 — the CEO-mode journey projection over the SAME L2 facts (the
+    # board cards + the folded escalation queue). Honest availability mirrors the
+    # board / escalations source flags.
+    journey = _fold_journey(
+        cards,
+        escalation_section,
+        board_available=scopes is not None,
+        escalations_available=escalations is not None,
+    )
+
     # The crabfleet all/mine/live filter triad, FOLDED HERE (principle 6):
     # L3 only binds the precomputed id lists.
     filters = {
@@ -1263,6 +1702,7 @@ def fold_snapshot(
             ),
         },
         "escalations": escalation_section,
+        "journey": journey,
         "dispatches": dispatch_section,
         "seat_events": seat_events_section,
         "claims": claims_section,

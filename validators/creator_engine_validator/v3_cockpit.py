@@ -51,6 +51,7 @@ from typing import Any, Callable, Sequence
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabPane, TabbedContent
 
 APP_TITLE = "◆ CE Cockpit"
@@ -487,6 +488,262 @@ def _claims_band_lines(snapshot: dict[str, Any]) -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------------------
+# ce-ops#45 — the CEO-mode JOURNEY view (L3, render-only).
+#
+# A second SCREEN over the SAME L2 snapshot, reachable by a key binding — the
+# expert ops board stays the DEFAULT screen (un-demoted, no product mode
+# switcher, no persisted preference). Every string below is read straight from
+# ``snapshot["journey"]``; this view parses nothing, derives nothing, classifies
+# nothing, and calls no loader. The detail comes only from the precomputed
+# ``snapshot["journey"]["need_details"][detail_ref]``.
+# ---------------------------------------------------------------------------
+
+#: The journey needs-attention table columns (presentation labels over the
+#: precomputed L2 item fields).
+_JOURNEY_NEEDS_COLUMNS = ("#", "What needs you", "Your decision", "Suggested next step")
+
+
+def _journey_arc_text(journey: dict[str, Any]) -> str:
+    """Render the five-stage arc with the 'you are here' marker (render-only)."""
+    arc = journey.get("arc") or {}
+    now = journey.get("now") or {}
+    stages = list(arc.get("stages") or [])
+    counts = arc.get("stage_counts") or {}
+    here = now.get("stage")
+    if (arc.get("availability") or "ok") == "unavailable":
+        return "I cannot show the work stages right now."
+    cells = []
+    for stage in stages:
+        marker = "▶ " if stage == here else "  "
+        count = counts.get(stage, 0)
+        hex_color = SEMANTIC_HEX["violet"] if stage == here else THEME["fg"]
+        cells.append(f"[{hex_color}]{marker}{stage} ({count})[/]")
+    return "   ".join(cells)
+
+
+def _journey_now_text(journey: dict[str, Any]) -> str:
+    """Render the plain 'where am I now' line (render-only — label is precomputed)."""
+    now = journey.get("now") or {}
+    lines = [f"[{SEMANTIC_HEX['violet']}]You are here:[/] {now.get('label', '—')}"]
+    stage = now.get("stage")
+    if stage:
+        lines.append(f"  stage: {stage}")
+    note = now.get("active_note")
+    if note:
+        lines.append(f"  [{SEMANTIC_HEX['amber']}]{note}[/]")
+    return "\n".join(lines)
+
+
+def _journey_scope_line(scope: dict[str, Any]) -> str:
+    """Render ONE scope card with plain Goal/Stage/Ready labels (render-only)."""
+    ready = "Ready" if scope.get("ready") else "not ready"
+    attention = ""
+    if scope.get("needs_attention"):
+        attention = f" [{SEMANTIC_HEX['gate']}]· needs you[/]"
+    return (
+        f"[{SEMANTIC_HEX['violet']}]Goal:[/] {scope.get('goal', '—')}\n"
+        f"  {scope.get('stage', '—')} · {ready}{attention}"
+    )
+
+
+def _journey_scopes_text(journey: dict[str, Any]) -> str:
+    """Render the scope-card list (render-only)."""
+    scopes = journey.get("scopes") or []
+    if not scopes:
+        return "No work to show yet."
+    return "\n".join(_journey_scope_line(scope) for scope in scopes)
+
+
+def _journey_needs_header_text(journey: dict[str, Any]) -> str:
+    """Render the needs-attention header — honest empty vs unavailable (render-only)."""
+    needs = journey.get("needs_attention") or {}
+    open_count = needs.get("open_count", 0)
+    heading_hex = SEMANTIC_HEX["gate"] if open_count else SEMANTIC_HEX["spark"]
+    lines = [f"[{heading_hex}]What needs you ({open_count})[/]"]
+    message = needs.get("message")
+    if message:
+        lines.append(f"  {message}")
+    return "\n".join(lines)
+
+
+def _journey_need_row(item: dict[str, Any]) -> tuple[str, ...]:
+    """Format ONE needs-attention item into a display row (render-only)."""
+    return (
+        str(item.get("age_rank", "—")),
+        str(item.get("headline", "—")),
+        str(item.get("plain_ask", "—")),
+        str(item.get("recommended_next_step", "—")),
+    )
+
+
+def _journey_detail_text(detail: dict[str, Any]) -> str:
+    """Render ONE precomputed plain detail record (render-only — no derivation).
+
+    Reads ONLY the precomputed ``need_details[detail_ref]`` fields; it parses no
+    source ref, classifies nothing, and calls no loader.
+    """
+    if not detail:
+        return "No detail available for this item."
+    violet = SEMANTIC_HEX["violet"]
+    lines = [
+        f"[{violet}]{detail.get('title', '—')}[/]",
+        "",
+        f"[{violet}]What this means[/]",
+        f"  {detail.get('what_this_means', '—')}",
+        "",
+        f"[{violet}]Why CE paused[/]",
+        f"  {detail.get('why_ce_paused', '—')}",
+        "",
+        f"[{violet}]If you continue[/]",
+        f"  {detail.get('if_you_continue', '—')}",
+        "",
+        f"[{violet}]If you decline or change direction[/]",
+        f"  {detail.get('if_you_decline', '—')}",
+        "",
+        f"[{violet}]What CE will not do by itself[/]",
+        f"  {detail.get('ce_will_not', '—')}",
+        "",
+        f"[{SEMANTIC_HEX['spark']}]Suggested next step[/]",
+        f"  {detail.get('recommendation', '—')}",
+    ]
+    technical = detail.get("technical_source")
+    if technical:
+        # The OPTIONAL technical-source footer — never the explanation.
+        lines += ["", f"[{THEME['fg']}]technical source: {technical}[/]"]
+    return "\n".join(lines)
+
+
+class JourneyDetailScreen(ModalScreen[None]):
+    """A modal that shows ONE precomputed plain detail record (render-only)."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+    ]
+    CSS = f"""
+    JourneyDetailScreen {{
+        align: center middle;
+    }}
+    #journey-detail-box {{
+        width: 80%;
+        max-width: 100;
+        height: auto;
+        max-height: 80%;
+        background: {THEME["ink-850"]};
+        border: solid {THEME["violet"]};
+        padding: 1 2;
+    }}
+    """
+
+    def __init__(self, detail: dict[str, Any]) -> None:
+        super().__init__()
+        self._detail = detail or {}
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="journey-detail-box"):
+            yield Static(_journey_detail_text(self._detail), id="journey-detail-text")
+
+    def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(None)
+
+
+class JourneyScreen(Screen[None]):
+    """The CEO-mode journey: arc · you-are-here · scopes · what-needs-you (render-only).
+
+    Binds the precomputed ``snapshot["journey"]`` structures only. Selecting a
+    needs-attention row opens the precomputed detail (looked up by ``detail_ref``
+    in ``need_details``) — no parsing, no classification, no loader.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Board"),
+        Binding("b", "back", "Board"),
+        Binding("q", "back", "Board"),
+    ]
+    CSS = f"""
+    JourneyScreen {{
+        background: {THEME["ink-900"]};
+        color: {THEME["fg"]};
+    }}
+    #journey-arc {{
+        dock: top;
+        height: auto;
+        background: {THEME["ink-800"]};
+        border-bottom: solid {THEME["violet"]};
+        padding: 1 1;
+    }}
+    #journey-now {{
+        height: auto;
+        padding: 0 1;
+    }}
+    #journey-scopes {{
+        height: 1fr;
+        padding: 0 1;
+        border-top: solid {THEME["violet"]};
+    }}
+    #journey-needs-header {{
+        height: auto;
+        padding: 0 1;
+    }}
+    #journey-needs {{
+        height: 1fr;
+    }}
+    """
+
+    def __init__(self, snapshot: dict[str, Any]) -> None:
+        super().__init__()
+        self._snapshot = snapshot
+        self._need_rows: list[str | None] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static("", id="journey-arc")
+        yield Static("", id="journey-now")
+        yield VerticalScroll(Static("", id="journey-scopes-text"), id="journey-scopes")
+        yield Static("", id="journey-needs-header")
+        yield DataTable(id="journey-needs")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#journey-needs", DataTable)
+        table.add_columns(*_JOURNEY_NEEDS_COLUMNS)
+        table.cursor_type = "row"
+        self._bind_journey()
+
+    def _bind_journey(self) -> None:
+        journey = self._snapshot.get("journey") or {}
+        self.query_one("#journey-arc", Static).update(_journey_arc_text(journey))
+        self.query_one("#journey-now", Static).update(_journey_now_text(journey))
+        self.query_one("#journey-scopes-text", Static).update(_journey_scopes_text(journey))
+        self.query_one("#journey-needs-header", Static).update(
+            _journey_needs_header_text(journey)
+        )
+        table = self.query_one("#journey-needs", DataTable)
+        table.clear()
+        self._need_rows = []
+        for item in (journey.get("needs_attention") or {}).get("items", []):
+            table.add_row(*_journey_need_row(item))
+            # Carry ONLY the precomputed detail_ref — the L3 binds it, never
+            # parses it (spec 3.7).
+            self._need_rows.append(item.get("detail_ref"))
+
+    def _open_detail(self, index: int) -> None:
+        if not (0 <= index < len(self._need_rows)):
+            return
+        detail_ref = self._need_rows[index]
+        journey = self._snapshot.get("journey") or {}
+        # The ONLY lookup the L3 performs: the precomputed detail by its ref.
+        detail = (journey.get("need_details") or {}).get(str(detail_ref)) or {}
+        self.app.push_screen(JourneyDetailScreen(detail))
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self._open_detail(event.cursor_row)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
 class CockpitApp(App[None]):
     """The read-only Cockpit TUI — one view bound to one L2 snapshot."""
 
@@ -497,6 +754,10 @@ class CockpitApp(App[None]):
         Binding("a", "filter('all')", "All"),
         Binding("m", "filter('mine')", "Mine"),
         Binding("l", "filter('live')", "Live"),
+        # ce-ops#45: open the CEO-mode journey screen ON TOP of the board (the
+        # board stays the DEFAULT screen — no product mode switcher, no default
+        # change, no persisted preference).
+        Binding("j", "journey", "Journey"),
     ]
     # Control-Room Violet (B.6): surfaces ink-900/850/800 · text fg · violet =
     # governance/authority/brand chrome · amber = the DEMO watermark. The
@@ -657,6 +918,10 @@ class CockpitApp(App[None]):
         if name in _FILTER_KEYS:
             self._active_filter = name
             self._bind_snapshot()
+
+    def action_journey(self) -> None:
+        """Open the CEO-mode journey screen over the board (the board stays default)."""
+        self.push_screen(JourneyScreen(self._snapshot))
 
     async def _watch_loop(self) -> None:
         """Tail the L1 roots and re-bind on change (the fold runs in L2 via reload)."""
