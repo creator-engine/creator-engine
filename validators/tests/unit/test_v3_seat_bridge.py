@@ -950,12 +950,17 @@ class _ReviewRunner:
     """Routes the venue subprocess chain (pco-allocate / lane launch --json / tmux seed)."""
 
     def __init__(self, *, pco_rc=0, launch_rc=0, pane="%7", launch_stdout=None,
-                 gh_login=_REVIEWER_LOGIN, gh_rc=0):
+                 gh_login=_REVIEWER_LOGIN, gh_rc=0,
+                 repo_root="/repo/secondary-wt", repo_root_rc=0):
         self.calls = []
         self.pco_rc = pco_rc
         self.launch_rc = launch_rc
         self.pane = pane
         self.launch_stdout = launch_stdout
+        # ce-ops#89: the step-0.5 `git -C <ledger> rev-parse --show-toplevel` probe that
+        # resolves the (non-root) repo_root pco-allocate runs `git worktree add` from.
+        self.repo_root = repo_root
+        self.repo_root_rc = repo_root_rc
         # ce-ops#58: the step-2.5 gh-identity probe. Default = the envelope actor (the
         # happy path: venue login == actor); override to simulate the #218 wrong-login.
         self.gh_login = gh_login
@@ -964,6 +969,12 @@ class _ReviewRunner:
     def __call__(self, argv, **kw):
         argv = list(argv)
         self.calls.append({"argv": argv, "kw": kw})
+        if "rev-parse" in argv:  # ce-ops#89: repo-root resolution probe
+            return _FakeCompleted(
+                returncode=self.repo_root_rc,
+                stdout="" if self.repo_root_rc else f"{self.repo_root}\n",
+                stderr="not a git repository" if self.repo_root_rc else "",
+            )
         if "pco-allocate" in argv:
             return _FakeCompleted(returncode=self.pco_rc, stderr="pco boom" if self.pco_rc else "")
         if "launch" in argv and "lane" in argv:
@@ -1064,6 +1075,55 @@ def test_review_run_id_satisfies_ledger_lane_and_lease_patterns(tmp_path):
     assert re.match(lease_pattern, lease_id), f"{lease_id!r} violates lease pattern {lease_pattern!r}"
 
 
+def test_review_run_id_clamps_long_scope_id_within_lease_bound(tmp_path):
+    """ce-ops#89 (PCO-020): for a scope_id long enough to overflow the naive
+    ``rev-<scope>-<stamp>`` → ``lease-<lane>-<14>`` derivation past 64 chars, the
+    minted run_id is clamped (hash-suffixed) so BOTH the lane and lease ids stay
+    schema-valid — and the clamp is read from the live schema patterns."""
+    import re
+
+    schemas_dir = Path(__file__).resolve().parents[3] / "schemas"
+    ledger = yaml.safe_load((schemas_dir / "active-work-ledger.schema.yaml").read_text(encoding="utf-8"))
+    lane_pattern = ledger["properties"]["lane_id"]["pattern"]
+    lease = yaml.safe_load((schemas_dir / "worktree-lease.schema.yaml").read_text(encoding="utf-8"))
+    lease_pattern = lease["properties"]["lease_id"]["pattern"]
+
+    # 40-char scope_id ⇒ naive lease_id would be 82 chars (overflow). The clamp MUST
+    # bring it back inside the bound. pco derives lease_id with a 14-digit stamp, so
+    # construct the worst case here too.
+    long_scope = "b7-fleet-cost-meter-with-a-very-long-tail"  # 41 chars
+    assert len(long_scope) > 22  # i.e. it genuinely overflows the naive form
+    author = _author_dispatch(tmp_path, scope_id=long_scope)
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD,
+        now=_FIXED_NOW,
+    )
+    run_id = rec.run_id
+    lease_id = f"lease-{run_id}-{'9' * 14}"
+    assert len(lease_id) <= 64, f"lease_id overflowed: {len(lease_id)} chars ({lease_id!r})"
+    assert re.match(lane_pattern, run_id), f"{run_id!r} violates lane pattern {lane_pattern!r}"
+    assert re.match(lease_pattern, lease_id), f"{lease_id!r} violates lease pattern {lease_pattern!r}"
+
+
+def test_review_run_id_clamp_is_collision_free_for_distinct_long_scopes(tmp_path):
+    """ce-ops#89: two DISTINCT long scope_ids that share a clipped prefix must still
+    mint DISTINCT run_ids (the hash-suffix preserves uniqueness), and a given
+    scope_id is deterministic for a fixed stamp."""
+    stamp = "20260615T120000Z"
+    shared_prefix = "scope-shared-prefix-aaaaaaaaaaaaaaaa"
+    a = v3_seat_bridge._derive_review_run_id(shared_prefix + "-alpha-tail-distinct-A", stamp)
+    b = v3_seat_bridge._derive_review_run_id(shared_prefix + "-alpha-tail-distinct-B", stamp)
+    assert a != b, "clipped long scope_ids collided into the same lane id"
+    # deterministic for a fixed (scope_id, stamp)
+    again = v3_seat_bridge._derive_review_run_id(shared_prefix + "-alpha-tail-distinct-A", stamp)
+    assert a == again
+    # both stay within the lease budget
+    for run_id in (a, b):
+        assert len(f"lease-{run_id}-{'0' * 14}") <= 64
+    # short scope_ids keep the readable, lossless form (no needless hashing)
+    assert v3_seat_bridge._derive_review_run_id("short-scope", stamp) == f"rev-short-scope-{stamp.lower()}"
+
+
 def test_review_dispatch_record_is_value_free(tmp_path):
     author = _author_dispatch(tmp_path)
     rec = v3_seat_bridge.materialize_review_dispatch(
@@ -1109,6 +1169,10 @@ def test_spawn_review_venue_runs_pco_then_lane_launch_then_seed(tmp_path):
     assert pco is not None and "--no-write-authority" in pco
     pco_call = next(c for c in runner.calls if "pco-allocate" in c["argv"])
     assert pco_call["kw"].get("cwd") == str(venue_root)
+    # ce-ops#89: pco carries an explicit, resolved --repo-root (the ledger's git
+    # toplevel) so `git worktree add` targets a real repo and no longer exits 128
+    # against the non-git venue zone.
+    assert "--repo-root" in pco and pco[pco.index("--repo-root") + 1] == "/repo/secondary-wt"
     # lane launch bound the reviewer envelope on a distinct reviewer venue, JSON-mode
     launch = runner.argv_for("launch")
     assert "--role" in launch and launch[launch.index("--role") + 1] == "reviewer"
@@ -1138,6 +1202,24 @@ def test_spawn_review_venue_fail_closed_on_pco_refusal(tmp_path):
     drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
     assert drec["spawn_failed_at"] and drec["terminal"] is None
     assert runner.argv_for("launch") is None  # never reached lane launch
+
+
+def test_spawn_review_venue_fail_closed_on_unresolved_repo_root(tmp_path):
+    """ce-ops#89: if the ledger-root is not inside a git worktree, repo-root cannot
+    be resolved — the venue MUST fail closed BEFORE pco-allocate (no half-venue),
+    stamping the dispatch, rather than letting `git worktree add` exit 128 downstream."""
+    author = _author_dispatch(tmp_path)
+    venue_root = tmp_path / "venues"; venue_root.mkdir()
+    rec = v3_seat_bridge.materialize_review_dispatch(
+        author, tmp_path, reviewer_actor=_REVIEWER_LOGIN, pr_number=7, head_sha=_PR_HEAD, now=_FIXED_NOW)
+    runner = _ReviewRunner(repo_root_rc=1)  # `git rev-parse --show-toplevel` fails
+    with pytest.raises(v3_seat_bridge.SpawnRefused):
+        v3_seat_bridge.spawn_review_venue(
+            rec, controller_id="ctrl-x", venue_root=venue_root, ledger_root=tmp_path / "l",
+            runner=runner, validator_exe="creator-engine-validator", ce_exe="ce", now=_FIXED_NOW)
+    drec = yaml.safe_load(rec.dispatch_path.read_text(encoding="utf-8"))
+    assert drec["spawn_failed_at"] and drec["terminal"] is None
+    assert runner.argv_for("pco-allocate") is None  # refused before any pco side effect
 
 
 def test_spawn_review_venue_fail_closed_on_lane_launch_refusal(tmp_path):

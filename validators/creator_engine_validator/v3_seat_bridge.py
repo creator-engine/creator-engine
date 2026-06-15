@@ -171,6 +171,47 @@ def _utcstamp(now: datetime) -> str:
     return now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+# ce-ops#89 (PCO-020): the review run_id is fed to ``pco-allocate`` AS the ledger
+# lane id, and pco derives the lease id as ``lease-<lane_id>-<14-digit stamp>``.
+# The worktree-lease schema bounds ``lease_id`` at 64 chars, so the lane id (this
+# run_id) must leave room for pco's fixed 21-char envelope ("lease-" + "-" + a
+# 14-digit compact UTC stamp). For long scope_ids the naive ``rev-<scope>-<stamp>``
+# overflowed that bound and fail-closed refused the venue. Clamp the run_id to the
+# residual budget, hash-suffixing the scope segment when it must be clipped so two
+# distinct long scope_ids never collide into the same lane.
+_LEASE_ID_MAX = 64
+_LEASE_DERIVE_OVERHEAD = len("lease-") + len("-") + 14  # pco's ``lease-<lane>-<YYYYmmddHHMMSS>``
+_REVIEW_RUN_ID_MAX = _LEASE_ID_MAX - _LEASE_DERIVE_OVERHEAD  # == 43
+_REVIEW_RUN_ID_HASH_LEN = 8
+
+
+def _derive_review_run_id(scope_id: str, stamp: str) -> str:
+    """Mint ``rev-<scope_id>-<stamp>`` clamped so the pco-derived lease id stays
+    within the 64-char ``worktree-lease`` bound (PCO-020) for ANY scope_id length.
+
+    Short scope_ids keep the readable, lossless form. When the full id would
+    overflow the lane budget, the scope segment is clipped and a deterministic
+    8-hex digest of the *full* scope_id is appended — so distinct long scope_ids
+    sharing a clipped prefix still mint distinct (collision-free) lane ids.
+    """
+    stamp_lc = stamp.lower()
+    full = f"rev-{scope_id}-{stamp_lc}"
+    if len(full) <= _REVIEW_RUN_ID_MAX:
+        return full
+    prefix = "rev-"
+    suffix = f"-{stamp_lc}"
+    scope_budget = _REVIEW_RUN_ID_MAX - len(prefix) - len(suffix)
+    digest = hashlib.sha256(scope_id.encode("utf-8")).hexdigest()[:_REVIEW_RUN_ID_HASH_LEN]
+    head_len = scope_budget - len(digest) - 1  # 1 for the joining dash
+    if head_len < 1:
+        # Pathological (tiny budget): fall back to a pure-digest scope segment,
+        # still bounded by scope_budget so the lane never overflows.
+        scope_segment = digest[:scope_budget]
+    else:
+        scope_segment = f"{scope_id[:head_len]}-{digest}"
+    return f"{prefix}{scope_segment}{suffix}"
+
+
 @dataclass
 class DispatchRecord:
     """A materialized dispatch — the on-disk handoff between drive and the seat.
@@ -940,6 +981,31 @@ def _resolve_validator_exe(validator_exe: str | None) -> str:
     )
 
 
+def _resolve_repo_root(
+    ledger_root: Path | str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+) -> str | None:
+    """Resolve the git worktree root enclosing ``ledger_root`` (ce-ops#89).
+
+    pco-allocate needs a real ``--repo-root`` to run ``git worktree add`` from; the
+    bridge runs pco with its cwd set to the out-of-repo venue zone (PCO-031), so the
+    repo context must be passed explicitly. The active-work-ledger lives inside the
+    controller's (secondary) worktree, so its enclosing git toplevel is exactly the
+    non-root repo_root pco needs. Returns the absolute toplevel, or ``None`` when
+    ``ledger_root`` is not inside a git worktree (caller fails closed).
+    """
+    probe = runner(
+        ["git", "-C", str(ledger_root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if getattr(probe, "returncode", 1) != 0:
+        return None
+    toplevel = (getattr(probe, "stdout", "") or "").strip()
+    return toplevel or None
+
+
 def compose_reviewer_envelope(
     dispatch_dir: Path | str,
     *,
@@ -1035,8 +1101,9 @@ def materialize_review_dispatch(
 
     Reads the AUTHOR dispatch (scope_id, the author run_id, the value-free ratification + mutation
     class) AS DATA, mints a review run_id ``rev-<scope_id>-<lowercased utcstamp>`` (lowercased so
-    the id satisfies the active-work-ledger lane pattern and the derived lease id stays within the
-    worktree-lease length bound when fed to ``pco-allocate``), composes a
+    the id satisfies the active-work-ledger lane pattern; clamped + hash-suffixed for long scope_ids
+    via :func:`_derive_review_run_id` so the derived lease id stays within the worktree-lease length
+    bound when fed to ``pco-allocate`` — ce-ops#89/PCO-020), composes a
     schema-valid reviewer-authority envelope (bound to the author's ``ratified_scope_sha``), writes
     the reviewer mandate brief, and persists the review ``dispatch.yaml`` with ``role: reviewer`` +
     a value-free ``review_of`` block (author run_id, PR number, envelope path ref). No spawn happens
@@ -1049,7 +1116,9 @@ def materialize_review_dispatch(
     scope_id = str(author_dispatch["scope_id"])
     author_run_id = str(author_dispatch["run_id"])
     stamp = _utcstamp(now or datetime.now(timezone.utc))
-    review_run_id = f"rev-{scope_id}-{stamp.lower()}"
+    # ce-ops#89: clamp the run_id so the pco-derived lease id stays schema-valid
+    # (<=64) for long scope_ids while remaining unique (see _derive_review_run_id).
+    review_run_id = _derive_review_run_id(scope_id, stamp)
     dispatch_dir = root_path / DISPATCHES_SUBDIR / review_run_id
     dispatch_dir.mkdir(parents=True, exist_ok=True)
     # D6 (F9): mint the harness session id at materialize (pre-spawn) for the venue too.
@@ -1171,8 +1240,29 @@ def spawn_review_venue(
     worktree_path = venue_root_path / record.run_id
     brief_sha = hashlib.sha256(Path(record.brief_ref).read_bytes()).hexdigest()
 
-    # 1) pco-allocate — provision the worktree + claim (cwd outside the repo).
+    # 1) pco-allocate — provision the worktree + claim.
+    #
+    # ce-ops#89: pco-allocate runs ``git worktree add`` from its ``repo_root``, which
+    # defaults to the process cwd (cli.py:578). The bridge runs pco with cwd = the
+    # out-of-repo venue zone (so PCO-031's root-checkout refusal does not trip) — but
+    # that zone is NOT a git repo, so without an explicit ``--repo-root`` the worktree
+    # add exits 128 and the venue never provisions. Resolve a REAL repo context from
+    # the ledger-root's enclosing git worktree and pass it explicitly. PCO-031 stays
+    # enforced inside pco-allocate (it refuses if that resolves to the root checkout),
+    # so a secondary worktree ledger-root yields a valid, non-root repo_root.
     validator = _resolve_validator_exe(validator_exe)
+    repo_root = _resolve_repo_root(ledger_root, runner=runner)
+    if not repo_root:
+        mark_spawn_failed(
+            record,
+            "pco-allocate repo-root unresolved: --ledger-root "
+            f"{str(ledger_root)!r} is not inside a git worktree",
+            now=now,
+        )
+        raise SpawnRefused(
+            f"reviewer-venue pco-allocate cannot resolve a repo-root for run "
+            f"{record.run_id!r}: ledger-root {str(ledger_root)!r} is not inside a git worktree"
+        )
     pco_argv = [
         validator, "pco-allocate",
         "--lane-id", record.run_id,
@@ -1182,6 +1272,7 @@ def spawn_review_venue(
         "--no-write-authority",
         "--controller-id", controller_id,
         "--ledger-root", str(ledger_root),
+        "--repo-root", repo_root,
         "--pane-label", "reviewer",
     ]
     pco = runner(pco_argv, capture_output=True, text=True, cwd=str(venue_root_path))
