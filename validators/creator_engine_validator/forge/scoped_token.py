@@ -15,10 +15,13 @@ least-privilege ceiling BEFORE issuance, and the credential is revoked immediate
 Defensive invariants (deliberate, load-bearing):
 
 * **Refuse over-broad / un-time-boxed requests BEFORE any forge call.** :func:`mint_scoped_token`
-  raises :class:`TokenMintRefused` (a ``ForgeConfigRefused``) on an empty permission set, an
-  ``admin``/forbidden scope, a ttl outside ``0 < t <= MAX_TTL_SECONDS`` (the GitHub 1h
-  ceiling), a non-64-hex ``policy_sha``, a malformed ``repo``, or a non-positive
-  ``installation_id`` — refuse-before-side-effect, mirroring the G-1.0 deny discipline.
+  raises :class:`TokenMintRefused` (a ``ForgeConfigRefused``) on an empty permission set, a
+  permission outside the ceiling-driven three-tier ceiling (ce-ops#88: a never-list scope at
+  any level, or an escalation-gated write/admin grant with no bound escalation authority — see
+  :data:`NEVER_SCOPES` / :data:`ESCALATION_GATED_GRANTS`), a non-least-privilege level, a ttl
+  outside ``0 < t <= MAX_TTL_SECONDS`` (the GitHub 1h ceiling), a non-64-hex ``policy_sha``, a
+  malformed ``repo``, or a non-positive ``installation_id`` — refuse-before-side-effect,
+  mirroring the G-1.0 deny discipline.
 * **Secret hygiene.** The minted token VALUE is redacted from :class:`ScopedToken`'s
   ``repr``/``str``, is never logged, and never enters an evidence record (only the secret
   name / scope / expiry / a non-secret correlation ref are attestable).
@@ -51,8 +54,32 @@ from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 MAX_TTL_SECONDS = 3600
 #: Least-privilege permission levels a per-run credential may request (never ``admin``).
 ALLOWED_PERMISSION_LEVELS = ("read", "write")
-#: Permission scopes a per-run sandbox credential must never request (admin / org-wide).
-FORBIDDEN_SCOPES = frozenset({"administration", "organization_administration", "secrets"})
+
+# ce-ops#88 — the ceiling-driven three-tier permission validator. Replaces the old
+# level-blind blanket ``FORBIDDEN_SCOPES`` ban with a ``scope × level × policy``
+# decision that is the SINGLE enforcement point in :func:`_validate_request`:
+#
+#   1. Permanent never-list — never mintable by any run, at any level (the hardest
+#      floor: org-wide admin + the secrets store).
+#   2. Escalation-gated (default-DENY) — the write/admin grants whose blast radius
+#      jumps. Mintable ONLY when the bound runtime-policy carries explicit per-install
+#      escalation authority for that exact ``(scope, level)`` (a one-time human-ratified
+#      gate, never a routine autonomous grant). With no authority bound (the default)
+#      these refuse, so a read-only run cannot silently acquire a write/admin scope.
+#   3. Read-mostly baseline — every other ``(scope, level)`` at a least-privilege level
+#      is the baseline (e.g. ``metadata:read`` / ``contents:read`` / ``administration:read``
+#      — the read ceiling onboarding binds — and the non-escalated writes such as
+#      ``pull_requests:write`` the forge-coordination flow already uses).
+#:
+#: Tier 1 — never mintable at ANY level, regardless of bound authority.
+NEVER_SCOPES = frozenset({"organization_administration", "secrets"})
+#: Tier 2 — default-DENIED ``(scope, level)`` grants; mintable only against an explicit
+#: bound escalation authority. ``org repo-create`` (Phase-2 greenfield) rides on the
+#: broadest of these, ``administration:write`` — it is not a distinct repo-scoped
+#: installation-token permission.
+ESCALATION_GATED_GRANTS = frozenset(
+    {("administration", "write"), ("contents", "write"), ("workflows", "write")}
+)
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _POLICY_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -61,10 +88,11 @@ _POLICY_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 class TokenMintRefused(ForgeConfigRefused):
     """A scoped-token request was refused on a least-privilege / time-box precondition.
 
-    Raised BEFORE any forge call when the request is over-broad (empty / ``admin`` /
-    forbidden permissions), not time-boxed (ttl outside ``0 < t <= MAX_TTL_SECONDS``), or
-    not bound to a valid policy / repo / installation. A *policy* refusal — distinct from a
-    *transport* :class:`ForgeConfigError`.
+    Raised BEFORE any forge call when the request is over-broad (empty, a never-list scope,
+    a non-least-privilege level, or an escalation-gated grant with no bound authority), not
+    time-boxed (ttl outside ``0 < t <= MAX_TTL_SECONDS``), or not bound to a valid policy /
+    repo / installation. A *policy* refusal — distinct from a *transport*
+    :class:`ForgeConfigError`.
     """
 
     code = "V3-FORGE-TOKEN-REFUSED"
@@ -90,6 +118,12 @@ class TokenRequest:
     permissions: Mapping[str, str]
     secret_name: str
     requested_ttl_seconds: int
+    #: ce-ops#88 — the ``(scope, level)`` escalation grants the BOUND runtime-policy
+    #: ratifies (default empty → no escalation, so every Tier-2 grant refuses). A tuple
+    #: of pairs rather than a mapping so the request stays a frozen, hashable value;
+    #: ``policy_sha`` already binds issuance to the policy in force, and this is that
+    #: policy's explicit, attestable escalation ceiling (never a never-list scope).
+    escalation_authority: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -154,23 +188,51 @@ def _gh_api_method(
 
 
 def _validate_request(request: TokenRequest) -> None:
-    """Refuse an over-broad / un-time-boxed / unbound request BEFORE any forge call."""
+    """Refuse an over-broad / un-time-boxed / unbound request BEFORE any forge call.
+
+    ce-ops#88: the permission decision is the ``scope × level × policy`` three-tier
+    ceiling (see :data:`NEVER_SCOPES` / :data:`ESCALATION_GATED_GRANTS`) — never-list
+    refuses at any level, an escalation-gated grant refuses unless the bound policy's
+    :attr:`TokenRequest.escalation_authority` ratifies that exact ``(scope, level)``,
+    and everything else at a least-privilege level is the baseline.
+    """
     perms = request.permissions
     if not perms:
         raise TokenMintRefused(
             "a scoped token must request an explicit least-privilege permission set "
             "(empty set = refuse; never inherit the installation's full grant)"
         )
-    for scope, level in perms.items():
-        if scope in FORBIDDEN_SCOPES:
+    # The bound policy's escalation authority is itself bounded: it can ratify neither a
+    # permanent never-list scope nor a non-least-privilege level (a policy cannot author
+    # authority the floor forbids), so a malformed/hostile policy cannot widen the ceiling.
+    authority = {(str(s), str(l)) for s, l in request.escalation_authority}
+    for scope, level in authority:
+        if scope in NEVER_SCOPES:
             raise TokenMintRefused(
-                f"permission scope {scope!r} is forbidden for a per-run sandbox credential"
+                f"escalation authority cannot ratify never-list scope {scope!r} (any level)"
             )
+        if level not in ALLOWED_PERMISSION_LEVELS:
+            raise TokenMintRefused(
+                f"escalation authority level {level!r} for {scope!r} is not least-privilege "
+                f"(allowed: {', '.join(ALLOWED_PERMISSION_LEVELS)})"
+            )
+    for scope, level in perms.items():
         if level not in ALLOWED_PERMISSION_LEVELS:
             raise TokenMintRefused(
                 f"permission level {level!r} for {scope!r} is not least-privilege "
                 f"(allowed: {', '.join(ALLOWED_PERMISSION_LEVELS)})"
             )
+        if scope in NEVER_SCOPES:  # Tier 1 — never mintable, at any level
+            raise TokenMintRefused(
+                f"permission scope {scope!r} is never mintable by a per-run credential (any level)"
+            )
+        if (scope, level) in ESCALATION_GATED_GRANTS and (scope, level) not in authority:
+            # Tier 2 — default-DENY: the bound policy carries no escalation authority for it.
+            raise TokenMintRefused(
+                f"permission {scope}:{level} is escalation-gated; the bound policy carries no "
+                f"explicit per-install escalation authority for it (default-deny)"
+            )
+        # Tier 3 — baseline: in-ceiling read-mostly scope, admitted.
     if not 0 < request.requested_ttl_seconds <= MAX_TTL_SECONDS:
         raise TokenMintRefused(
             f"requested_ttl_seconds {request.requested_ttl_seconds} is not time-boxed in "

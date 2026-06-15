@@ -87,6 +87,13 @@ RUNS_SUBDIR = "runs"
 
 #: The EXACT least-privilege permission set a PR-open per-run credential requests — never broader.
 PR_TOKEN_PERMISSIONS: dict[str, str] = {"contents": "write", "pull_requests": "write"}
+#: ce-ops#88 — under the ceiling-driven three-tier minter, ``contents:write`` is an
+#: escalation-gated grant (default-DENY). The PR-open flow's authority to push a branch is
+#: NOT new: it is the already-ratified, orchestrator-gated per-run deploy authority
+#: ([[ce-push-deploy-authority-model]]) the run is provisioned under. We make that authority
+#: EXPLICIT here so the mint passes the new single enforcement point WITHOUT widening it —
+#: ``pull_requests:write`` stays a Tier-3 baseline grant and needs no escalation entry.
+PR_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (("contents", "write"),)
 #: The PR-open credential time-box (<= the 1h ceiling, well under it — a PR-open is seconds of work).
 PR_TOKEN_TTL_SECONDS = 900
 #: The logical secret name the per-run PR credential satisfies.
@@ -382,6 +389,7 @@ def open_change_for_run(
         permissions=PR_TOKEN_PERMISSIONS,
         secret_name=PR_SECRET_NAME,
         requested_ttl_seconds=PR_TOKEN_TTL_SECONDS,
+        escalation_authority=PR_TOKEN_ESCALATION_AUTHORITY,
     )
     mint_runner = mint_gh_runner if mint_gh_runner is not None else _default_mint_runner(app_config)
     token = mint_scoped_token(request, gh_runner=mint_runner)

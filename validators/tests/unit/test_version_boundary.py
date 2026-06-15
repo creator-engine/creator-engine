@@ -89,7 +89,8 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#34 RS-1 added the AuthorityResolver seam: 40 -> 41.
     # ce-ops#71 Tranche 1 added the unprivileged OS-native backend scaffold
     # (``runner.os_native_backend``): 41 -> 42.
-    assert len(ver.V3_RUNTIME) == 42
+    # ce-ops#88 added the production live-forge ApplyDriver (``onboard_apply_live``): 42 -> 43.
+    assert len(ver.V3_RUNTIME) == 43
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

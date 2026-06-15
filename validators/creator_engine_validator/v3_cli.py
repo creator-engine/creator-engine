@@ -68,6 +68,7 @@ from . import (
     coordination,
     evidence_sink,
     onboard_apply,
+    onboard_apply_live,
     runtime_evidence_spine,
     seat_reaper,
     v3_forge_join,
@@ -2378,8 +2379,24 @@ def _onboard_apply_driver() -> onboard_apply.ApplyDriver:
     so plain-join detection naturally DEFERS in production until a live forge
     driver is wired. Tests monkeypatch this to inject a fake driver that
     exercises the plain-join apply path end-to-end.
+
+    ce-ops#88: the live-vs-base selection is NOT here — it is the
+    ``onboard_apply_live.live_forge_select`` factory the call sites delegate to,
+    so this seam's zero-arg signature stays unchanged and the FakeDriver
+    monkeypatch keeps working (the factory is a pass-through when live-forge is OFF).
     """
     return onboard_apply.ApplyDriver()
+
+
+def _close_apply_driver(driver: Any) -> None:
+    """Revoke a live-forge driver's token if it has a ``close()`` lifecycle hook (ce-ops#88).
+
+    A no-op for the base :class:`onboard_apply.ApplyDriver` and the test ``FakeDriver``
+    (neither defines ``close``), so this is invisible to the existing seam contract.
+    """
+    close = getattr(driver, "close", None)
+    if callable(close):
+        close()
 
 
 def _cmd_onboard(args: argparse.Namespace) -> int:
@@ -2613,6 +2630,10 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
     missing = v3_installer.missing_answers(schema, merged)
+    # ce-ops#88 — the canonical install-spec digest binds any live-forge token mint to the
+    # verified install spec in force (the minter's policy_sha). Computed once; used at both
+    # the apply and the --plan plain-join detection sites below.
+    _install_spec_digest = v3_installer.content_digest(v3_installer.canonical_spec_bytes(spec_bytes))
     # ce-ops#71 MAJOR-1: resolve the isolation backend BEFORE the preflight, the
     # SAME way apply does (mirror ``onboard_apply._prepare``), and drive the probe /
     # dep-plan / sudo-grant diff off the BACKEND-AWARE deps — NOT the flat Tier-2
@@ -2686,6 +2707,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     )
     if apply_mode:
         plain_join_driver = None
+        live_candidate = None  # ce-ops#88 — a live-forge driver to revoke on every exit
         if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
             # ce-ops#85 — a new dev JOINING an ALREADY-CE repo is a *plain-join*,
             # NOT brownfield *adoption*. Detect already-CE FAIL-CLOSED and route to
@@ -2693,7 +2715,14 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             # (existing + NOT already-CE) keeps the UNCHANGED E3 refuse below. The
             # default driver has no live forge legs, so production defers until a
             # live driver is wired (detection returns False → the same E3 refuse).
-            candidate_driver = _onboard_apply_driver()
+            # ce-ops#88 — the zero-arg seam still returns the base/monkeypatched driver; the
+            # live-forge factory wraps it (default OFF → pass-through, so the FakeDriver
+            # monkeypatch is untouched). A live driver mints a token during detection, so it
+            # is tracked in ``live_candidate`` and revoked (``close``) on every exit path.
+            candidate_driver = onboard_apply_live.live_forge_select(
+                _onboard_apply_driver(), merged=merged, policy_sha=_install_spec_digest
+            )
+            live_candidate = candidate_driver
             target_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
             if onboard_apply.repo_is_already_ce_governed(
                 candidate_driver,
@@ -2703,6 +2732,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             ):
                 plain_join_driver = candidate_driver
             elif brownfield_plan["blocked"]:
+                _close_apply_driver(live_candidate)
                 blocker = brownfield_plan["blockers"][0]
                 return _emit(
                     args,
@@ -2717,6 +2747,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                     },
                 )
             else:
+                _close_apply_driver(live_candidate)
                 return _emit(
                     args,
                     1,
@@ -2770,6 +2801,10 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 [f"{_BRAND} · onboard apply FAILED ({exc.code}): {exc.detail}"],
                 {"error": "failed", "code": exc.code, "detail": exc.detail},
             )
+        finally:
+            # ce-ops#88 — revoke the live-forge read token the instant the legs finish
+            # (success OR refuse/fail); a no-op for the base/Fake driver.
+            _close_apply_driver(live_candidate)
         first_project_after_apply = v3_installer.build_greenfield_first_project_plan(
             schema,
             merged,
@@ -2867,12 +2902,20 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         # Detection needs live forge reads, which the dry-run driver lacks — so the
         # already-CE verdict is HONESTLY deferred to apply, where the live driver
         # verifies the workflow digest + protection floor before converging.
-        already_ce = onboard_apply.repo_is_already_ce_governed(
-            _onboard_apply_driver(),
-            repo=str(merged.value("github.repo") or ""),
-            branch=str(merged.value("github.new_repo.default_branch", "main") or "main"),
-            schema=schema,
+        # ce-ops#88 — same fail-closed live-forge selection as the apply path (default OFF →
+        # the base dry-run driver, so --plan stays honest); revoke after the read-only probe.
+        _plan_driver = onboard_apply_live.live_forge_select(
+            _onboard_apply_driver(), merged=merged, policy_sha=_install_spec_digest
         )
+        try:
+            already_ce = onboard_apply.repo_is_already_ce_governed(
+                _plan_driver,
+                repo=str(merged.value("github.repo") or ""),
+                branch=str(merged.value("github.new_repo.default_branch", "main") or "main"),
+                schema=schema,
+            )
+        finally:
+            _close_apply_driver(_plan_driver)
         plain_join_plan = {
             "route": "plain-join" if already_ce else "brownfield-e3-deferred",
             "already_ce_detected": already_ce,

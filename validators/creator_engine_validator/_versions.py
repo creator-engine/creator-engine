@@ -150,6 +150,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "v3_installer",
         # v3.5-E.2 live-drive seam: the signed-spec onboard apply executor.
         "onboard_apply",
+        # ce-ops#88: the production live-forge ApplyDriver (Phase 1) — composes the v3
+        # forge credential toolchain (mint/app-jwt/credential runner) over onboard_apply.
+        "onboard_apply_live",
         # v3.5-E.4 greenfield first-project read model: pure Frame->Ship fold
         # over E2 onboard_apply facts; imports no v1 module and performs no I/O.
         "v3_greenfield",
