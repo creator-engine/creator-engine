@@ -1543,6 +1543,77 @@ def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path
     assert payload["brownfield_blockers"] == []
 
 
+def test_onboard_apply_existing_already_ce_repo_routes_to_plain_join(tmp_path, capsys, monkeypatch):
+    # ce-ops#85 — an existing ALREADY-CE repo is NOT refused as brownfield: the gate
+    # detects already-CE (fail-closed) and routes to the plain-join apply, handing the
+    # SAME detection driver to the executor. Genuine brownfield stays E3-deferred
+    # (covered by test_onboard_apply_existing_brownfield_refuses_without_e2_extension).
+    from validators.tests.unit.test_onboard_apply import FakeDriver
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    # inject a driver that reports the repo is already CE-governed
+    monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: FakeDriver(repo_exists=True))
+
+    captured: dict[str, object] = {}
+
+    def fake_apply(request, *, verifier, driver):
+        captured["request"] = request
+        captured["driver"] = driver
+        return {
+            "action": "onboard_apply", "root": str(request.state_root), "mode": request.mode,
+            "verified": {"ok": True, "key_id": "ce-root-v1", "algo": v3_installer.SSH_ED25519_ALGO},
+            "target_repo": request.answers["github"]["repo"],
+            "greenfield_repos_created": 0, "repos_already_satisfied": 12, "brownfield_deferred": 0,
+            "legs_total": 12, "applied": 0, "already_satisfied": 12, "verified_count": 12,
+            "skipped": 0, "refused": 0, "failed": 0, "rolled_back": 0, "manual_rollback_required": 0,
+            "legs": [],
+        }
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_apply"
+    assert payload.get("code") != "e2_brownfield_seam_unavailable"
+    # the gate routed to plain-join and handed its already-CE driver to the executor
+    assert isinstance(captured["driver"], FakeDriver)
+    assert captured["request"].answers["github"]["mode"] == "existing"
+
+
+def test_onboard_plan_surfaces_plain_join_route_for_already_ce_repo(tmp_path, capsys, monkeypatch):
+    # ce-ops#85 --plan/--apply PARITY — --plan surfaces the plain-join route (kills the
+    # "plan-level only" honesty gap) when the injected driver reports already-CE.
+    from validators.tests.unit.test_onboard_apply import FakeDriver
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: FakeDriver(repo_exists=True))
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--plan",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["plain_join"]["route"] == "plain-join"
+    assert payload["plain_join"]["already_ce_detected"] is True
+
+
 def test_onboard_apply_refuses_self_attested_signature(tmp_path, capsys):
     spec = _spec(tmp_path)
     digest = v3_installer.content_digest(spec.read_bytes())

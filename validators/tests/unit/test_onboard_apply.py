@@ -113,6 +113,8 @@ class FakeDriver(onboard_apply.ApplyDriver):
         runtime_ok: bool = True,
         host_install_ok: bool = True,
         scope_sets: tuple[str, ...] | None = None,
+        branch_protection_ok: bool = True,
+        existing_protection_contexts: tuple[str, ...] = (),
     ):
         self.calls: list[str] = []
         self.tools = {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES}
@@ -123,6 +125,11 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.runtime_ok = runtime_ok
         self.host_install_ok = host_install_ok
         self.scope_sets = scope_sets
+        # ce-ops#85 plain-join detection/reconcile knobs: whether the live branch
+        # protection floor verifies, and the live required-check contexts the
+        # reconcile must PRESERVE (never drop).
+        self.branch_protection_ok = branch_protection_ok
+        self.existing_protection_contexts = existing_protection_contexts
         self.captured_policy = None
 
     def probe_tool(self, name: str) -> bool:
@@ -228,7 +235,11 @@ class FakeDriver(onboard_apply.ApplyDriver):
 
     def verify_branch_protection(self, *, repo, branch, policy):
         self.calls.append("verify_branch_protection")
-        return {"ok": True, "contexts": list(policy.required_status_check_contexts)}
+        return {"ok": self.branch_protection_ok, "contexts": list(policy.required_status_check_contexts)}
+
+    def existing_branch_protection_contexts(self, *, repo, branch):
+        self.calls.append("existing_branch_protection_contexts")
+        return self.existing_protection_contexts
 
     def checkout_workspace(self, *, repo, branch, workspace_root):
         self.calls.append("checkout_workspace")
@@ -452,11 +463,86 @@ def test_greenfield_repo_create_is_idempotent_on_rerun_via_ledger_provenance(tmp
 
 
 def test_existing_repo_is_deferred_to_brownfield_gate(tmp_path):
-    driver = FakeDriver(repo_exists=True)
+    # ce-ops#85: a genuine brownfield repo — it EXISTS but is NOT already-CE (no CE
+    # validate workflow at the pinned digest). Plain-join detection fails-closed, so
+    # it stays E3-deferred (UNCHANGED behavior); no mutation occurs.
+    driver = FakeDriver(repo_exists=True, workflow_digest_ok=False)
     summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
     assert _leg(summary, "github_repo_create")["status"] == "refused"
+    assert _leg(summary, "github_repo_create")["verification"]["code"] == "brownfield_deferred"
     assert summary["brownfield_deferred"] == 1
     assert _leg(summary, "github_app_install")["status"] == "skipped"
+    # fail-closed: the genuine-brownfield refuse mutates nothing downstream
+    assert "configure_branch_protection" not in driver.calls
+    assert "install_workflow" not in driver.calls
+
+
+def test_plain_join_existing_already_ce_repo_converges(tmp_path):
+    # ce-ops#85 — a new dev JOINING an ALREADY-CE repo (CE workflow + protection
+    # floor present) is a plain-join: it CONVERGES via the idempotent verify/reconcile
+    # legs instead of refusing brownfield.
+    driver = FakeDriver(repo_exists=True)
+    summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
+    assert summary["failed"] == 0
+    assert summary["refused"] == 0
+    assert summary["brownfield_deferred"] == 0
+    assert summary["greenfield_repos_created"] == 0
+    assert summary["repos_already_satisfied"] == 1
+    repo_leg = _leg(summary, "github_repo_create")
+    assert repo_leg["status"] == "already_satisfied"
+    assert repo_leg["action"] == "join_existing_ce_repo"
+    assert repo_leg["verification"]["plain_join"] is True
+    # the CE repo is NOT (re)created and its workflow is NOT overwritten
+    assert "create_repo" not in driver.calls
+    assert "install_workflow" not in driver.calls
+    workflow_leg = _leg(summary, "github_workflow_install")
+    assert workflow_leg["status"] == "already_satisfied"
+    # verify-only, no overwrite: the install driver leg is never invoked
+    assert workflow_leg["action"] == "verify_existing_ce_workflow"
+    # every leg converged (applied or already_satisfied); none refused/failed/skipped
+    assert summary["applied"] + summary["already_satisfied"] == len(onboard_apply.LEG_IDS)
+
+
+def test_plain_join_branch_protection_preserves_existing_checks(tmp_path):
+    # ce-ops#85 HARD requirement — the reconcile ADDS the CE floor check and NEVER
+    # drops a check the live repo already enforces.
+    driver = FakeDriver(
+        repo_exists=True,
+        existing_protection_contexts=("Existing CI", "Lint"),
+    )
+    summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
+    assert summary["failed"] == 0
+    assert _leg(summary, "github_branch_protection")["status"] in {"applied", "already_satisfied"}
+    contexts = set(driver.captured_policy.required_status_check_contexts)
+    # the CE floor was ADDED ...
+    assert "Validate governance artifacts" in contexts
+    # ... and the live checks were PRESERVED (never removed)
+    assert {"Existing CI", "Lint"}.issubset(contexts)
+
+
+def test_plain_join_is_idempotent_on_rerun(tmp_path):
+    # ce-ops#85 — re-running plain-join against the same already-CE repo converges
+    # again with no fresh mutation (already_satisfied across the join legs).
+    first = FakeDriver(repo_exists=True)
+    first_summary = _apply(tmp_path, first, answers=_answers(tmp_path, mode="existing"))
+    assert first_summary["repos_already_satisfied"] == 1
+    second = FakeDriver(repo_exists=True)
+    second_summary = _apply(tmp_path, second, answers=_answers(tmp_path, mode="existing"))
+    assert second_summary["refused"] == 0 and second_summary["failed"] == 0
+    assert _leg(second_summary, "github_repo_create")["status"] == "already_satisfied"
+    assert _leg(second_summary, "github_workflow_install")["status"] == "already_satisfied"
+
+
+def test_plain_join_detection_fail_closed_when_protection_floor_missing(tmp_path):
+    # ce-ops#85 fail-closed — an existing repo with the CE workflow but NO branch
+    # protection floor is AMBIGUOUS → NOT plain-join → refuse, with NO mutation.
+    driver = FakeDriver(repo_exists=True, branch_protection_ok=False)
+    summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
+    assert _leg(summary, "github_repo_create")["status"] == "refused"
+    assert _leg(summary, "github_repo_create")["verification"]["code"] == "brownfield_deferred"
+    assert summary["repos_already_satisfied"] == 0
+    assert "configure_branch_protection" not in driver.calls
+    assert "install_workflow" not in driver.calls
 
 
 def test_github_app_click_requirement_is_explicit_refusal(tmp_path):

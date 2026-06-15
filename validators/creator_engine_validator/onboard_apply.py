@@ -439,6 +439,22 @@ class ApplyDriver:
     ) -> dict[str, Any]:
         return {"ok": False, "reason": "no_branch_protection_verify_driver"}
 
+    def existing_branch_protection_contexts(
+        self,
+        *,
+        repo: str,
+        branch: str,
+    ) -> tuple[str, ...]:
+        """Read the LIVE required-status-check contexts on ``branch`` (ce-ops#85).
+
+        Used by the plain-join branch-protection reconcile so we ADD missing CE
+        checks while NEVER dropping a check the repo already enforces. The default
+        driver has no live forge, so it reports none known — the reconcile then
+        unions only the CE floor, which is moot because plain-join is gated off
+        in production until a live driver is wired (detection fails-closed).
+        """
+        return ()
+
     def checkout_workspace(
         self,
         *,
@@ -812,6 +828,54 @@ def _prepare(
     )
 
 
+def repo_is_already_ce_governed(
+    driver: ApplyDriver,
+    *,
+    repo: str,
+    branch: str,
+    schema: Mapping[str, Any],
+) -> bool:
+    """FAIL-CLOSED: is ``repo`` ALREADY a CE-governed repo (ce-ops#85)?
+
+    A *new dev joining an already-CE repo* is a **plain-join** — distinct from
+    brownfield *adoption* (taking a NON-CE repo into CE, which stays E3-deferred).
+    Already-CE iff ALL of these read-only signals hold; ANY uncertainty,
+    missing signal, or driver exception returns ``False`` so the caller falls
+    through to the brownfield/E3 refuse and NEVER silently proceeds:
+
+      * the repo is reachable (``repo_exists``),
+      * the CE validate workflow is present at the pinned digest
+        (``verify_workflow`` ok — reuses the same read the install leg verifies
+        with), AND
+      * the branch-protection reference floor is present
+        (``verify_branch_protection`` ok against the floor policy).
+
+    This NEVER mutates: every driver call here is a read-only verify/probe.
+    """
+    try:
+        if not driver.repo_exists(repo):
+            return False
+        workflow = driver.verify_workflow(
+            repo=repo,
+            branch=branch,
+            path=CE_WORKFLOW_PATH,
+            digest=CE_WORKFLOW_SHA256,
+        )
+        if not workflow.get("ok"):
+            return False
+        floor = v3_installer.reference_protections(dict(schema))
+        contexts = tuple(str(c) for c in floor.get("required_checks", ()))
+        policy = DEFAULT_MAIN_PROTECTION.with_contexts(contexts)
+        protection = driver.verify_branch_protection(
+            repo=repo,
+            branch=branch,
+            policy=policy,
+        )
+        return bool(protection.get("ok"))
+    except Exception:  # noqa: BLE001 — fail-closed: any probe error → NOT already-CE
+        return False
+
+
 def _run_leg(
     leg_id: str,
     request: ApplyRequest,
@@ -971,6 +1035,43 @@ def _run_leg(
     if leg_id == "github_repo_create":
         mode = prepared.merged.value("github.mode")
         if mode != "new":
+            # ce-ops#85 — a new dev JOINING an ALREADY-CE repo is a *plain-join*:
+            # detect already-CE FAIL-CLOSED and converge via verify/reconcile.
+            # Genuine brownfield (existing + NOT already-CE) stays E3-deferred.
+            if repo_is_already_ce_governed(
+                driver,
+                repo=prepared.target_repo,
+                branch=prepared.target_branch,
+                schema=request.schema,
+            ):
+                visibility = str(prepared.merged.value("github.new_repo.visibility", "private"))
+                verified = driver.verify_repo(
+                    repo=prepared.target_repo,
+                    default_branch=prepared.target_branch,
+                    visibility=visibility,
+                    spec_digest=prepared.signed.canonical_sha256,
+                    ledger=ledger,
+                )
+                if not verified.get("ok"):
+                    # detection said already-CE but the repo no longer verifies —
+                    # fail-closed: do NOT proceed; defer rather than mutate blindly.
+                    prepared.summary["brownfield_deferred"] = 1
+                    raise ApplyRefused(
+                        "brownfield_deferred",
+                        "existing repo failed plain-join verify; brownfield adoption is E3",
+                    )
+                prepared.summary["repos_already_satisfied"] = 1
+                return LegOutcome(
+                    leg_id,
+                    "already_satisfied",
+                    "join_existing_ce_repo",
+                    verification={
+                        "ok": True,
+                        **verified,
+                        "plain_join": True,
+                        "spec_digest": prepared.signed.canonical_sha256,
+                    },
+                )
             prepared.summary["brownfield_deferred"] = 1
             raise ApplyRefused("brownfield_deferred", "E2 is greenfield-only; existing repo adoption is E3")
         token = _bootstrap_token(token_holder)
@@ -1048,6 +1149,25 @@ def _run_leg(
             manual_rollback_required=not bool(action.get("detected")),
         )
     if leg_id == "github_workflow_install":
+        if prepared.merged.value("github.mode") != "new":
+            # ce-ops#85 plain-join — the CE validate workflow is ALREADY present
+            # (detection confirmed the pinned digest). Verify-only; do NOT overwrite
+            # the live repo's workflow file.
+            verify = driver.verify_workflow(
+                repo=prepared.target_repo,
+                branch=prepared.target_branch,
+                path=CE_WORKFLOW_PATH,
+                digest=CE_WORKFLOW_SHA256,
+            )
+            if not verify.get("ok"):
+                raise ApplyFailed("workflow_digest_verify_failed", str(verify))
+            return LegOutcome(
+                leg_id,
+                "already_satisfied",
+                "verify_existing_ce_workflow",
+                verification={"ok": True, "path": CE_WORKFLOW_PATH, "sha256": CE_WORKFLOW_SHA256, **verify},
+                mutated=False,
+            )
         token = _bootstrap_token(token_holder)
         action = driver.install_workflow(
             repo=prepared.target_repo,
@@ -1081,6 +1201,16 @@ def _run_leg(
         policy = DEFAULT_MAIN_PROTECTION.with_contexts(contexts)
         desired = v3_installer.effective_protections(prepared.merged.value("github.protections", "reference"), floor=floor)
         policy = policy_from_reference(desired, base=policy)
+        if prepared.merged.value("github.mode") != "new":
+            # ce-ops#85 plain-join — RECONCILE against the live repo: union the live
+            # required checks INTO the policy so we ADD missing CE checks and NEVER
+            # remove a check the repo already enforces (HARD requirement: this runs
+            # against the live OSS repo). ``with_contexts`` unions (never drops).
+            existing = driver.existing_branch_protection_contexts(
+                repo=prepared.target_repo,
+                branch=prepared.target_branch,
+            )
+            policy = policy.with_contexts(tuple(existing))
         action = driver.configure_branch_protection(
             repo=prepared.target_repo,
             branch=prepared.target_branch,
