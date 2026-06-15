@@ -133,6 +133,13 @@ PYTHONPATH=validators python3 -m creator_engine_validator check
 
 A PR whose changes do not pass these checks locally will not pass CI.
 
+> **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
+> `ce-worktrees/*` have no local `.venv` — it is gitignored and lives only in the
+> canonical checkout. The commands above use your active interpreter; when no
+> virtualenv is active, set `CE_VALIDATOR_PYTHON` to a known interpreter (e.g. the
+> canonical checkout's venv) and invoke the validator as `${CE_VALIDATOR_PYTHON:-python}`.
+> See [`validators/README.md`](./validators/README.md).
+
 ## Version boundary (v1 ↔ v3)
 
 Creator Engine v1.0 and v3.x coexist in this repository on a shared base, and

@@ -44,12 +44,13 @@ To run the validator test suite from a fresh clone without network access, insta
 
 ```bash
 python -m venv .venv-test
-.venv-test/bin/pip install --no-index \
+source .venv-test/bin/activate
+pip install --no-index \
   --find-links validators/wheelhouse \
   --find-links validators/wheelhouse-dev \
   -r validators/requirements.txt \
   -r validators/requirements-dev.txt
-PYTHONPATH=validators .venv-test/bin/python -m pytest validators/tests -q
+PYTHONPATH=validators python -m pytest validators/tests -q
 ```
 
 `validators/requirements-dev.txt` and `validators/wheelhouse-dev/` are for developer/test tooling only. Keep `validators/requirements.txt` and `validators/wheelhouse/` runtime-only.
@@ -57,20 +58,46 @@ PYTHONPATH=validators .venv-test/bin/python -m pytest validators/tests -q
 ### Sanctioned test invocations
 
 Parallelism is opt-in per invocation (there is no `addopts`), so choose the lane
-that matches what you are doing. `PYTHONPATH=validators` is required for every form.
+that matches what you are doing. `PYTHONPATH=validators` is required for every form,
+and every form runs the interpreter `${CE_VALIDATOR_PYTHON:-python}` (see
+**Validator-Python (`CE_VALIDATOR_PYTHON`)** below — this keeps the commands correct
+in isolated worktrees that have no local `.venv`).
 
 ```bash
 # 1. Full suite, serial — minimal environment, no xdist needed.
-PYTHONPATH=validators python -m pytest validators/tests -q
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m pytest validators/tests -q
 
-# 2. Full suite, parallel — THE merge-green gate (CI-identical invocation).
-PYTHONPATH=validators python -m pytest validators/tests -q -n auto --dist loadgroup
+# 2. Full suite, parallel — THE merge-green gate. CI runs this with
+#    CE_VALIDATOR_PYTHON unset, so by default it is the CI-identical invocation.
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m pytest validators/tests -q -n auto --dist loadgroup
 
 # 3. Fast lane — inner loop only: deselects the memoized `check-examples` sweep
 #    (its consumers carry the auto-applied `sweep` marker), cutting the wall-time
 #    floor. Use while iterating on an unrelated unit.
-PYTHONPATH=validators python -m pytest validators/tests -q -n auto --dist loadgroup -m "not sweep"
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m pytest validators/tests -q -n auto --dist loadgroup -m "not sweep"
 ```
+
+#### Validator-Python (`CE_VALIDATOR_PYTHON`)
+
+Every sanctioned command runs the interpreter `${CE_VALIDATOR_PYTHON:-python}` — the
+`CE_VALIDATOR_PYTHON` environment variable when set, otherwise `python` (the active
+interpreter). This keeps the documented commands portable to **isolated git
+worktrees** (CE lane worktrees under `ce-worktrees/*`), which contain tracked source
+but **no local `.venv`**: `.venv/` is gitignored and lives only in the canonical
+checkout, so a hardcoded worktree-relative `.venv/bin/python` fails there
+(creator-engine#82). When a lane runs in a worktree with no active venv, point
+`CE_VALIDATOR_PYTHON` at a known interpreter — e.g. the canonical checkout's venv
+(an absolute path):
+
+```bash
+export CE_VALIDATOR_PYTHON=/path/to/canonical-checkout/.venv/bin/python
+PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m pytest validators/tests -q
+```
+
+Do not hardcode a worktree-relative `.venv/bin/python` in lane prompts, templates, or
+docs; use `${CE_VALIDATOR_PYTHON:-python}` so the command holds whether or not the
+worktree has its own venv. A regression guard
+(`validators/tests/unit/test_lane_venv_assumption.py`) enforces this.
 
 The `sweep` marker is derived automatically at collection time from every test that
 requests the session-scoped `check_examples_result` fixture — there is no
