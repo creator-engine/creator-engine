@@ -194,6 +194,27 @@ def _utc_now_str() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _event_ts_compact() -> str:
+    """Compact UTC stamp (``YYYYMMDDhhmmss``) for event ids. Single seam so
+    tests can pin the second to exercise the same-second collision case."""
+    return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+
+
+def _event_id(prefix: str, ts_compact: str) -> str:
+    """Build a collision-proof event id (creator-engine#98).
+
+    The ``events/YYYY/MM/DD`` directory is shared across every controller and
+    lane, but the legacy ``{prefix}-YYYYMMDDhhmmss`` id had only second
+    resolution and no controller/lane/entropy component — so two releases (or
+    two claims) in the SAME second produced the SAME filename and the second
+    silently overwrote the first, losing an event while schema and conflict
+    checks still passed. An 8-hex random suffix (the module's established
+    nonce idiom) guarantees uniqueness within the per-second, shared-directory
+    scope without a filesystem scan, which would race across the per-lane
+    release lock. Stays within the schema's 64-char ``event_id`` bound."""
+    return f"{prefix}-{ts_compact}-{uuid.uuid4().hex[:8]}"
+
+
 def _expires_at_str(lease_seconds: int) -> str:
     dt = datetime.now(UTC) + timedelta(seconds=lease_seconds)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -341,9 +362,9 @@ def allocate(
 
         now = _utc_now_str()
         expires_at = _expires_at_str(lease_seconds)
-        ts_compact = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        ts_compact = _event_ts_compact()
         lease_id = f"lease-{lane_id}-{ts_compact}"
-        event_id = f"claim-created-{ts_compact}"
+        event_id = _event_id("claim-created", ts_compact)
 
         lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
         claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
@@ -499,8 +520,8 @@ def release(
         claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
         lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
         event_dir = ledger_root / "events" / datetime.now(UTC).strftime("%Y/%m/%d")
-        ts_compact = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-        event_id = f"claim-released-{ts_compact}"
+        ts_compact = _event_ts_compact()
+        event_id = _event_id("claim-released", ts_compact)
         event_path = event_dir / f"{event_id}.yaml"
 
         # Step 3: mark claim released (tolerate missing file; raise on read/write failure)

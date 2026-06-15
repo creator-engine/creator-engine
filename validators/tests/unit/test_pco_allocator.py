@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -689,6 +690,96 @@ def test_release_appends_claim_released_event(tmp_path: Path):
     events = [yaml.safe_load(p.read_text(encoding="utf-8")) for p in event_files]
     release_events = [e for e in events if e.get("event_kind") == "claim_released"]
     assert release_events, "A claim_released event must be emitted"
+
+
+# creator-engine#98: the events/YYYY/MM/DD directory is shared across every
+# controller and lane, so an event id with only second resolution and no
+# entropy collided when two releases happened in the same second — the second
+# silently overwrote the first while schema/conflict checks still passed.
+_EVENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
+
+
+def test_release_same_second_two_lanes_keeps_both_events(tmp_path: Path):
+    """Two pco-release calls in the SAME second must both survive on disk."""
+    wt = _make_worktree_root(tmp_path)
+    ledger = _make_ledger_root(wt)
+    _write_claim(
+        ledger, "hermes-primary", "pco-lane-a",
+        _valid_claim("hermes-primary", "pco-lane-a", "/worktrees/a"),
+    )
+    _write_claim(
+        ledger, "hermes-primary", "pco-lane-b",
+        _valid_claim("hermes-primary", "pco-lane-b", "/worktrees/b"),
+    )
+
+    # Pin the second so both releases land in the identical per-second scope —
+    # the exact collision the legacy filename lost. Pre-fix, both map to
+    # claim-released-20260615120000.yaml and the second overwrites the first.
+    with patch(
+        "creator_engine_validator.pco_allocator._event_ts_compact",
+        return_value="20260615120000",
+    ):
+        for lane in ("pco-lane-a", "pco-lane-b"):
+            release(
+                repo_root=wt,
+                ledger_root=ledger,
+                lane_id=lane,
+                controller_id="hermes-primary",
+                _git_fn=_noop_git_remove,
+            )
+
+    event_files = list((ledger / "events").rglob("*.yaml"))
+    released = [
+        e
+        for e in (yaml.safe_load(p.read_text(encoding="utf-8")) for p in event_files)
+        if e.get("event_kind") == "claim_released"
+    ]
+    assert len(released) == 2, (
+        "BOTH same-second claim_released events must survive; "
+        f"found {len(released)} (a filename collision lost one)"
+    )
+    assert {e["lane_id"] for e in released} == {"pco-lane-a", "pco-lane-b"}
+    # Distinct event ids, distinct files — nothing was overwritten.
+    assert len({e["event_id"] for e in released}) == 2
+    assert len({p.name for p in event_files}) == len(event_files)
+    for event in released:
+        assert _EVENT_ID_PATTERN.match(event["event_id"]), (
+            f"event_id {event['event_id']!r} must stay within the schema pattern"
+        )
+
+
+def test_allocate_same_second_two_lanes_keeps_both_events(tmp_path: Path):
+    """The same collision guard applies to claim-created events (same helper)."""
+    wt = _make_worktree_root(tmp_path)
+    ledger = _make_ledger_root(wt)
+
+    with patch(
+        "creator_engine_validator.pco_allocator._event_ts_compact",
+        return_value="20260615120000",
+    ):
+        for lane in ("pco-lane-a", "pco-lane-b"):
+            allocate(
+                repo_root=wt,
+                ledger_root=ledger,
+                lane_id=lane,
+                worktree_path=tmp_path / f"allocated-{lane}",
+                envelope_ref=".hermes/envelopes/test.md",
+                branch=f"implementer/{lane}",
+                controller_id="hermes-primary",
+                _git_fn=_noop_git,
+            )
+
+    event_files = list((ledger / "events").rglob("*.yaml"))
+    created = [
+        e
+        for e in (yaml.safe_load(p.read_text(encoding="utf-8")) for p in event_files)
+        if e.get("event_kind") == "claim_created"
+    ]
+    assert len(created) == 2, (
+        "BOTH same-second claim_created events must survive; "
+        f"found {len(created)} (a filename collision lost one)"
+    )
+    assert len({e["event_id"] for e in created}) == 2
 
 
 def test_release_calls_git_worktree_remove(tmp_path: Path):
