@@ -74,6 +74,44 @@ jobs:
       - run: python -m pytest validators/tests
 """
 CE_WORKFLOW_SHA256 = hashlib.sha256(CE_WORKFLOW_CONTENT.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class CeWorkflowIdentity:
+    """A KNOWN-GOOD CE-validator-invoking workflow, byte-pinned for anti-tamper (ce-ops#90).
+
+    Already-CE detection keys on a GOVERNANCE SIGNAL — the repo's CI invokes the
+    pinned/verified CE validator — NOT one cosmetic filename. Each identity pins the
+    EXACT bytes (``sha256``) of a workflow at ``path`` that runs the CE validator; a
+    repo is workflow-CE iff ANY identity verifies at its pinned digest. The
+    per-identity byte-pin is preserved (it is the SAME read the install leg verifies
+    with), so a tampered / drifted / non-CE / absent workflow matches NONE. ``label``
+    is a stable, non-secret identifier surfaced in the ledger/verification record.
+    """
+
+    path: str
+    sha256: str
+    label: str
+
+
+#: The flagship ``creator-engine/creator-engine`` repo predates the canonical
+#: ``ce-validate.yml`` filename: its CE validate workflow lives at the LEGACY
+#: ``validate.yml`` path. Its EXACT bytes are pinned here (a VERBATIM live capture —
+#: ``tests/unit/fixtures/ce88_live_forge/contents_validate_yml.json``) so detection
+#: accepts the flagship as already-CE WITHOUT renaming the file. Renaming the
+#: flagship's ``validate.yml`` → ``ce-validate.yml`` is the deferred ce-ops#90 Option B.
+LEGACY_CE_WORKFLOW_PATH = ".github/workflows/validate.yml"
+LEGACY_CE_WORKFLOW_SHA256 = "40714085d9862e05039f7b2cc4ce3aed95066178bb1d498d6d5f710172985fe0"
+
+#: The KNOWN SET of CE workflow identities (ce-ops#90, "loosen ≠ weaken").
+#: :func:`repo_is_already_ce_governed` and the plain-join workflow-verify leg accept a
+#: repo as already-CE iff ANY of these verifies at its pinned digest. Order is the
+#: detection order (canonical first). Adding a future identity is a one-line append
+#: that NEVER weakens the byte-pin — it only widens the set of accepted exact bytes.
+KNOWN_CE_WORKFLOWS: tuple[CeWorkflowIdentity, ...] = (
+    CeWorkflowIdentity(CE_WORKFLOW_PATH, CE_WORKFLOW_SHA256, "ce-validate"),
+    CeWorkflowIdentity(LEGACY_CE_WORKFLOW_PATH, LEGACY_CE_WORKFLOW_SHA256, "legacy-validate"),
+)
 DEFAULT_FIRST_SCOPE_ID = "ce-first-project-smoke"
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$")
 
@@ -828,6 +866,35 @@ def _prepare(
     )
 
 
+def detect_ce_workflow(
+    driver: ApplyDriver,
+    *,
+    repo: str,
+    branch: str,
+) -> CeWorkflowIdentity | None:
+    """Return the first KNOWN CE workflow identity present at its pinned digest, else ``None``.
+
+    Governance-signal detection (ce-ops#90, "loosen ≠ weaken"): the repo is
+    workflow-CE iff it carries a KNOWN-GOOD CE-validator-invoking workflow at its
+    EXACT pinned bytes — under the canonical ``ce-validate.yml`` filename OR a known
+    legacy filename (the flagship's ``validate.yml``). Every probe is the SAME
+    read-only ``verify_workflow`` byte-pin the install leg uses, so a tampered,
+    byte-drifted, non-CE, or absent workflow matches NO identity and the caller fails
+    closed. A non-matching identity is simply skipped — a 404 / digest mismatch is
+    EXPECTED for the filenames this particular repo does not use.
+    """
+    for identity in KNOWN_CE_WORKFLOWS:
+        result = driver.verify_workflow(
+            repo=repo,
+            branch=branch,
+            path=identity.path,
+            digest=identity.sha256,
+        )
+        if result.get("ok"):
+            return identity
+    return None
+
+
 def repo_is_already_ce_governed(
     driver: ApplyDriver,
     *,
@@ -835,7 +902,7 @@ def repo_is_already_ce_governed(
     branch: str,
     schema: Mapping[str, Any],
 ) -> bool:
-    """FAIL-CLOSED: is ``repo`` ALREADY a CE-governed repo (ce-ops#85)?
+    """FAIL-CLOSED: is ``repo`` ALREADY a CE-governed repo (ce-ops#85, loosened ce-ops#90)?
 
     A *new dev joining an already-CE repo* is a **plain-join** — distinct from
     brownfield *adoption* (taking a NON-CE repo into CE, which stays E3-deferred).
@@ -844,24 +911,23 @@ def repo_is_already_ce_governed(
     through to the brownfield/E3 refuse and NEVER silently proceeds:
 
       * the repo is reachable (``repo_exists``),
-      * the CE validate workflow is present at the pinned digest
-        (``verify_workflow`` ok — reuses the same read the install leg verifies
-        with), AND
+      * a KNOWN CE validate workflow identity is present at its pinned digest
+        (``detect_ce_workflow`` ok — the canonical ``ce-validate.yml`` OR a known
+        legacy filename such as the flagship's ``validate.yml``; the per-identity
+        byte-pin is the SAME anti-tamper read the install leg verifies with, so a
+        tampered/drifted/non-CE workflow still fails), AND
       * the branch-protection reference floor is present
         (``verify_branch_protection`` ok against the floor policy).
 
-    This NEVER mutates: every driver call here is a read-only verify/probe.
+    ce-ops#90 LOOSENED the workflow signal from a single cosmetic filename+digest to
+    the KNOWN SET of CE workflow identities — WITHOUT weakening the byte-level
+    anti-tamper guarantee. This NEVER mutates: every driver call here is a read-only
+    verify/probe.
     """
     try:
         if not driver.repo_exists(repo):
             return False
-        workflow = driver.verify_workflow(
-            repo=repo,
-            branch=branch,
-            path=CE_WORKFLOW_PATH,
-            digest=CE_WORKFLOW_SHA256,
-        )
-        if not workflow.get("ok"):
+        if detect_ce_workflow(driver, repo=repo, branch=branch) is None:
             return False
         floor = v3_installer.reference_protections(dict(schema))
         contexts = tuple(str(c) for c in floor.get("required_checks", ()))
@@ -1182,22 +1248,29 @@ def _run_leg(
         )
     if leg_id == "github_workflow_install":
         if prepared.merged.value("github.mode") != "new":
-            # ce-ops#85 plain-join — the CE validate workflow is ALREADY present
-            # (detection confirmed the pinned digest). Verify-only; do NOT overwrite
-            # the live repo's workflow file.
-            verify = driver.verify_workflow(
+            # ce-ops#85/#90 plain-join — a KNOWN CE validate workflow is ALREADY present
+            # (detection confirmed a pinned-digest identity, canonical OR legacy). Verify
+            # against the SAME known-set; do NOT overwrite the live repo's workflow file.
+            identity = detect_ce_workflow(
+                driver,
                 repo=prepared.target_repo,
                 branch=prepared.target_branch,
-                path=CE_WORKFLOW_PATH,
-                digest=CE_WORKFLOW_SHA256,
             )
-            if not verify.get("ok"):
-                raise ApplyFailed("workflow_digest_verify_failed", str(verify))
+            if identity is None:
+                raise ApplyFailed(
+                    "workflow_digest_verify_failed",
+                    "no known CE validate workflow present at its pinned digest",
+                )
             return LegOutcome(
                 leg_id,
                 "already_satisfied",
                 "verify_existing_ce_workflow",
-                verification={"ok": True, "path": CE_WORKFLOW_PATH, "sha256": CE_WORKFLOW_SHA256, **verify},
+                verification={
+                    "ok": True,
+                    "path": identity.path,
+                    "sha256": identity.sha256,
+                    "identity": identity.label,
+                },
                 mutated=False,
             )
         token = _bootstrap_token(token_holder)
