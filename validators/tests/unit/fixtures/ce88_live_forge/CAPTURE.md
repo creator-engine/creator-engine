@@ -38,4 +38,13 @@ review; values are byte-faithful to the API). They are reproducible by re-runnin
 - **`user_response_headers.txt`** — `gh api -i user`: the `X-Oauth-Scopes` header is verbatim
   (`gist, project, read:org, repo, workflow`); the body is reduced to the non-PII identity
   (`login`/`id`/`type`) — private fields (email/name) elided. The driver reads `X-Oauth-Scopes`
-  (→ CE bootstrap permissions) and `login`.
+  (→ CE bootstrap permissions) and `login`. This is a **classic** PAT (`ghp_`).
+- **`user_response_finegrained.txt`** — `gh api -i user` authenticated as a **fine-grained** PAT
+  (`github_pat_` prefix), captured **2026-06-16 on CE-DEV-1 (`ce-pilot-1`) as the `ce-dev-3` fine-grained
+  bootstrap PAT** — the exact token that surfaced ce-ops#94. Capture command:
+  `sudo -u ce-dev-3 gh api -i user`. The defining VERBATIM property: a fine-grained PAT emits **NO
+  `X-Oauth-Scopes` header** (only `X-Accepted-Github-Permissions: allows_permissionless_access=true`,
+  kept verbatim as the genuine fine-grained marker); body reduced to the non-PII identity
+  (`login: ce-dev-3` / `id` / `type`), volatile/sensitive headers (Date/Etag/request-id/ratelimit/
+  token-expiration) elided. Exercises ce-ops#94: token-type detection (`github_pat_` → fine-grained)
+  and the no-`X-Oauth-Scopes` path that the classic-only parser wrongly read as "missing everything".

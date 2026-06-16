@@ -1005,22 +1005,53 @@ def _run_leg(
         token = driver.resolve_secret(ref)
         token_holder["bootstrap"] = token
         org_create_needed = _org_create_needed(prepared.merged)
+        mode = str(prepared.merged.value("github.mode") or "")
+        # ce-ops#94: right-size the bootstrap-PAT requirement to the operation. Plain-join performs
+        # ZERO forge writes with the PAT (all forge ops ride the App installation token; protection
+        # is verify-first/defer-not-mutate) → identity-only ((), no scopes). Greenfield → full set.
+        required = v3_installer.bootstrap_required_scopes(mode=mode, org_create_needed=org_create_needed)
         probe = driver.probe_bootstrap_token(
             token=token,
             repo=prepared.target_repo,
             org_create_needed=org_create_needed,
         )
-        scopes = v3_installer.bootstrap_scope_table(
-            probe.get("scopes") if probe.get("ok") else None,
-            org_create_needed=org_create_needed,
-        )
         login = probe.get("login")
         reviewer = prepared.merged.value("github.reviewer")
         bot = prepared.github_plan["app"]["bot_identity"]
-        if not probe.get("ok") or not scopes["ok"]:
-            raise ApplyRefused("bootstrap_token_scope_refused", f"missing bootstrap scopes: {scopes['missing']}")
+        token_type = probe.get("token_type")
+        # 1) Token must be valid — GET /user succeeded with an identity. (Fail-closed.)
+        if not probe.get("ok"):
+            raise ApplyRefused("bootstrap_token_invalid", str(probe.get("reason", "bootstrap probe failed")))
+        # 2) Identity must differ from the App bot / reviewer (UNCHANGED — solo no-self-approval).
         if not login or login == bot or reviewer == bot:
             raise ApplyRefused("bootstrap_token_identity_refused", "bootstrap/reviewer identity must differ from App bot")
+        # 3) Capability, right-sized to the operation (ce-ops#94), fail-closed on the unverifiable.
+        if not required:
+            # plain-join: identity-only (the PAT writes nothing; the App token is the real ceiling).
+            capability: dict[str, Any] = {"verified": True, "mode": "identity_only_plain_join"}
+        elif token_type == "classic":
+            table = v3_installer.bootstrap_scope_table(probe.get("scopes"), required=required)
+            if not table["ok"]:
+                raise ApplyRefused("bootstrap_token_scope_refused", f"missing bootstrap scopes: {table['missing']}")
+            capability = {"verified": True, "mode": "classic_scopes", "scope_rows": table["rows"]}
+        elif token_type == "fine_grained":
+            # A fine-grained PAT's granted permissions are NOT introspectable and its write-capability
+            # is not non-destructively verifiable (ce-ops#94 research Q3/Q5/Q8). Identity/validity are
+            # verified above; the greenfield write legs (repo-create / workflow-install / protection
+            # PUT) are the fail-closed enforcement point — each refuses on a 403. No capability is
+            # silently assumed: the App token does the privileged reads, and the PAT can only do what
+            # GitHub lets it (capability = user-access ∩ token-grant).
+            capability = {
+                "verified": "deferred",
+                "mode": "fine_grained_enforced_at_write_legs",
+                "required": list(required),
+            }
+        else:
+            # Unknown token type AND no X-OAuth-Scopes → cannot verify the required capability. Refuse.
+            raise ApplyRefused(
+                "bootstrap_token_unverifiable",
+                f"unrecognized bootstrap token type; cannot verify {list(required)}",
+            )
         return LegOutcome(
             leg_id,
             "already_satisfied",
@@ -1028,7 +1059,8 @@ def _run_leg(
             verification={
                 "ok": True,
                 "login": login,
-                "scope_rows": scopes["rows"],
+                "token_type": token_type,
+                "capability": capability,
                 "secret_ref": ref.ref,
             },
         )

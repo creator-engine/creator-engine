@@ -164,6 +164,35 @@ def _bootstrap_scopes_from_oauth(oauth_scopes: set[str], *, org_create_needed: b
     return sorted(granted)
 
 
+def _has_oauth_scopes_header(raw_response: str) -> bool:
+    """True iff a ``gh api -i`` response carries an ``X-OAuth-Scopes`` header (classic/OAuth actor)."""
+    for line in raw_response.splitlines():
+        if not line.strip():
+            break  # headers end at the first blank line; the body follows
+        if line.lower().startswith("x-oauth-scopes:"):
+            return True
+    return False
+
+
+def _detect_token_type(token: str, *, oauth_header_present: bool) -> str:
+    """Classify the bootstrap PAT by prefix (ce-ops#94); header-presence as a fallback.
+
+    Grounded in GitHub's documented token-format scheme: ``github_pat_`` = fine-grained PAT (emits
+    NO ``X-OAuth-Scopes`` and exposes no permission introspection); ``ghp_`` = classic PAT,
+    ``gho_`` = OAuth, ``ghu_`` = App user-to-server — all coarse-grained actors that DO emit
+    ``X-OAuth-Scopes``. An unrecognized prefix that nonetheless carries the classic header is
+    treated as ``classic``; anything else is ``unknown`` so the caller can fail closed.
+    """
+    t = (token or "").strip()
+    if t.startswith("github_pat_"):
+        return "fine_grained"
+    if t.startswith(("ghp_", "gho_", "ghu_")):
+        return "classic"
+    if oauth_header_present:
+        return "classic"
+    return "unknown"
+
+
 class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
     """Production live-forge driver (Phase 1): forge reads + idempotent plain-join apply.
 
@@ -318,7 +347,11 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         """Validity probe of the human BOOTSTRAP PAT (``GET /user``) — distinct auth from the App.
 
         Authenticates AS the bootstrap token (value in the child ``GH_TOKEN`` env only, never argv)
-        and reports its login + the CE bootstrap permissions implied by its classic OAuth scopes.
+        and reports its login + ``token_type`` (ce-ops#94). For a CLASSIC token it also reports the
+        CE bootstrap permissions implied by its ``X-OAuth-Scopes``. A FINE-GRAINED PAT emits no
+        ``X-OAuth-Scopes`` and is not permission-introspectable, so NO ``scopes`` set is fabricated
+        here (an empty list would falsely read as "missing everything"); its write-capability is
+        enforced fail-closed at the greenfield write legs. The capability gate lives in the leg.
         """
         try:
             holder = ScopedToken(
@@ -337,8 +370,8 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             return {"ok": False, "reason": "bootstrap_probe_failed"}
         if proc.returncode != 0:
             return {"ok": False, "reason": "bootstrap_probe_failed"}
-        oauth_scopes = _parse_oauth_scopes_header(proc.stdout or "")
-        body = (proc.stdout or "").split("\n\n", 1)[-1].strip()
+        raw = proc.stdout or ""
+        body = raw.split("\n\n", 1)[-1].strip()
         login = None
         try:
             login = (json.loads(body) or {}).get("login")
@@ -346,11 +379,16 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             login = None
         if not login:
             return {"ok": False, "reason": "bootstrap_probe_no_identity"}
-        return {
-            "ok": True,
-            "login": login,
-            "scopes": _bootstrap_scopes_from_oauth(oauth_scopes, org_create_needed=org_create_needed),
-        }
+        token_type = _detect_token_type(token, oauth_header_present=_has_oauth_scopes_header(raw))
+        result: dict[str, Any] = {"ok": True, "login": login, "token_type": token_type}
+        if token_type == "classic":
+            # Only classic/OAuth actors expose capability via X-OAuth-Scopes (ce-ops#94). Fine-grained
+            # PATs emit none and are not introspectable — capability is enforced at the write legs,
+            # never fabricated here as an empty (= "missing everything") scope set.
+            result["scopes"] = _bootstrap_scopes_from_oauth(
+                _parse_oauth_scopes_header(raw), org_create_needed=org_create_needed
+            )
+        return result
 
     def verify_app_installation(
         self, *, installation_id: int, repo: str, bot_identity: str

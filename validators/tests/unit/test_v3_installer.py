@@ -1330,6 +1330,33 @@ def test_bootstrap_scope_table_org_create_only_when_needed():
     ]
 
 
+# ce-ops#94 — right-sizing the bootstrap-PAT requirement to the operation
+def test_bootstrap_required_scopes_greenfield_is_full_write_set():
+    assert inst.bootstrap_required_scopes(mode="new") == inst.REQUIRED_BOOTSTRAP_SCOPES
+    with_org = inst.bootstrap_required_scopes(mode="new", org_create_needed=True)
+    assert inst.ORG_CREATE_SCOPE in with_org
+    assert set(inst.REQUIRED_BOOTSTRAP_SCOPES).issubset(set(with_org))
+
+
+def test_bootstrap_required_scopes_plain_join_is_identity_only():
+    # A plain-join (any non-"new" mode) writes NOTHING with the bootstrap PAT -> identity-only.
+    assert inst.bootstrap_required_scopes(mode="existing") == ()
+    assert inst.bootstrap_required_scopes(mode="join", org_create_needed=True) == ()
+
+
+def test_bootstrap_scope_table_identity_only_required_is_trivially_ok():
+    # required=() (plain-join) -> no rows, nothing missing, ok True even when unprobed.
+    table = inst.bootstrap_scope_table(None, required=())
+    assert table["ok"] and table["rows"] == [] and table["missing"] == []
+
+
+def test_bootstrap_scope_table_required_override_subset_ok():
+    table = inst.bootstrap_scope_table(["contents:write"], required=("contents:write",))
+    assert table["ok"] and table["missing"] == []
+    # the default (full) requirement is unaffected by the override path
+    assert not inst.bootstrap_scope_table(["contents:write"])["ok"]
+
+
 # ---------------------------------------------------------------------------
 # the App plan — shared vs own; click-or-detect (re-run convergence)
 # ---------------------------------------------------------------------------

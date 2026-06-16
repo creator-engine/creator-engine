@@ -55,6 +55,19 @@ Later legs run only after earlier required legs verify or are already satisfied.
 Greenfield repo reuse requires E2 ledger provenance plus live verification.
 Arbitrary existing repos are refused as `brownfield_deferred`; E3 owns adoption.
 
+The `github_bootstrap_token_probe` requirement is **right-sized to the operation**
+(ce-ops#94): a **plain-join** (joining an already-CE repo) requires only a valid
+identity distinct from the App bot — the PAT writes nothing (forge ops ride the
+App's JIT token; protection is verify-only) — while a **greenfield** create
+requires `contents/administration/actions/workflows:write` (+ org repo-create
+when new-in-org). **Fine-grained PATs are accepted** (GitHub's recommended
+default): they emit no `X-OAuth-Scopes` and expose no permission introspection,
+so for greenfield their write-capability is enforced **fail-closed at the write
+legs** (each refuses on a 403). An invalid token refuses as
+`bootstrap_token_invalid`; an unrecognized/unverifiable token type as
+`bootstrap_token_unverifiable`; a classic token missing greenfield scopes as
+`bootstrap_token_scope_refused`.
+
 ## Summary Counters
 
 The JSON action is `onboard_apply`. Top-level counters are derived from actual

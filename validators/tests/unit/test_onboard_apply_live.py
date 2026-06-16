@@ -26,7 +26,8 @@ from creator_engine_validator.forge.github_repo_config import DEFAULT_MAIN_PROTE
 _FX = Path(__file__).parent / "fixtures" / "ce88_live_forge"
 _REPO = "creator-engine/creator-engine"
 _MINTED = "ghs_fake_minted_value"  # the value the fake mint transport returns
-_BOOTSTRAP_PAT = "bootstrap-pat-value"
+_BOOTSTRAP_PAT = "ghp_fakeclassicbootstrappatvalue0000000000"  # classic PAT (ghp_ prefix)
+_BOOTSTRAP_PAT_FG = "github_pat_11FAKEfinegrainedbootstrappatvalue00000"  # fine-grained PAT (ce-ops#94)
 
 
 def _schema() -> dict[str, Any]:
@@ -45,13 +46,23 @@ class _ModeBForge:
     drifts — OQ-C). ``protection`` overrides the protection JSON (to drive the OQ-F defer case).
     """
 
-    def __init__(self, *, contents: str | None = None, protection: str | None = None):
+    def __init__(
+        self,
+        *,
+        contents: str | None = None,
+        protection: str | None = None,
+        user_response: str | None = None,
+    ):
         self.repo_json = _fx("repo.json")
         self.protection_json = protection if protection is not None else _fx("protection.json")
         self.contents_json = contents if contents is not None else _fx(
             "contents_ce_validate_yml_already_ce.json"
         )
-        self.user_response = _fx("user_response_headers.txt")
+        # ce-ops#94: classic capture by default; a fine-grained capture (no X-Oauth-Scopes) is
+        # injected by the fine-grained probe test.
+        self.user_response = user_response if user_response is not None else _fx(
+            "user_response_headers.txt"
+        )
         # App-installation coverage (GET /installation/repositories): the standard envelope
         # carrying the VERBATIM-captured repo object — confirms the install covers the repo.
         self.installation_repos = json.dumps(
@@ -78,6 +89,7 @@ class _ModeBForge:
         # HYGIENE: the secret rides in GH_TOKEN only — never the argv.
         assert _MINTED not in " ".join(argv)
         assert _BOOTSTRAP_PAT not in " ".join(argv)
+        assert _BOOTSTRAP_PAT_FG not in " ".join(argv)
         joined = " ".join(argv)
 
         def done(rc: int, out: str = "") -> subprocess.CompletedProcess:
@@ -245,8 +257,35 @@ def test_probe_bootstrap_token_maps_oauth_scopes_to_ce_permissions():
     )
     assert result["ok"] is True
     assert result["login"] == "chmod735"
+    assert result["token_type"] == "classic"
     # the captured X-Oauth-Scopes (… repo, workflow) map to the full required bootstrap set.
     assert set(v3_installer.REQUIRED_BOOTSTRAP_SCOPES).issubset(set(result["scopes"]))
+
+
+def test_probe_bootstrap_token_finegrained_passes_without_oauth_scopes():
+    # ce-ops#94: a fine-grained PAT emits NO X-Oauth-Scopes. The probe must classify it by prefix,
+    # report a valid identity, and NOT fabricate an empty (= "missing everything") scope set.
+    # Fixture = VERBATIM capture from ce-dev-3's real fine-grained PAT (see CAPTURE.md).
+    forge = _ModeBForge(user_response=_fx("user_response_finegrained.txt"))
+    result = _driver(forge).probe_bootstrap_token(
+        token=_BOOTSTRAP_PAT_FG, repo=_REPO, org_create_needed=False
+    )
+    assert result["ok"] is True
+    assert result["token_type"] == "fine_grained"
+    assert result["login"] == "ce-dev-3"
+    assert "scopes" not in result  # no classic-scope set is invented for a fine-grained token
+
+
+def test_detect_token_type_by_prefix_and_header_fallback():
+    detect = onboard_apply_live._detect_token_type
+    assert detect(_BOOTSTRAP_PAT_FG, oauth_header_present=False) == "fine_grained"
+    assert detect("ghp_classic", oauth_header_present=False) == "classic"
+    assert detect("gho_oauth", oauth_header_present=False) == "classic"
+    assert detect("ghu_appuser", oauth_header_present=False) == "classic"
+    # unknown prefix but the classic X-Oauth-Scopes header IS present -> classic (corroborating)
+    assert detect("legacy-opaque-value", oauth_header_present=True) == "classic"
+    # unknown prefix AND no classic header -> fail-closed unknown
+    assert detect("legacy-opaque-value", oauth_header_present=False) == "unknown"
 
 
 def test_checkout_workspace_clones_locally_and_verifies(tmp_path):

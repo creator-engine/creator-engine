@@ -1604,18 +1604,43 @@ def plan_repo(
     }
 
 
+def bootstrap_required_scopes(*, mode: str, org_create_needed: bool = False) -> tuple[str, ...]:
+    """Right-size the bootstrap-PAT capability requirement to the actual operation (ce-ops#94).
+
+    A *plain-join* (``mode != "new"`` — a new dev joining an already-CE repo) performs ZERO forge
+    writes with the bootstrap PAT: every forge op rides the App installation token and branch
+    protection is verify-first/defer-not-mutate (never written), so the requirement is
+    IDENTITY-ONLY (empty). Greenfield (``mode == "new"``) genuinely creates the repo, installs the
+    workflow, and writes protection WITH the PAT — so the full write set (+ org repo-create when
+    creating in an org) is required.
+    """
+    if mode != "new":
+        return ()
+    required = list(REQUIRED_BOOTSTRAP_SCOPES)
+    if org_create_needed:
+        required.append(ORG_CREATE_SCOPE)
+    return tuple(required)
+
+
 def bootstrap_scope_table(
     granted: Any,
     *,
     org_create_needed: bool = False,
+    required: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """The bootstrap-token scope VERIFICATION table (a check, not an input).
 
     ``granted`` is the injected probe result (an iterable of granted scopes);
-    ``None`` = unprobed → fail-closed (every row unverified, ok False)."""
-    required = list(REQUIRED_BOOTSTRAP_SCOPES)
-    if org_create_needed:
-        required.append(ORG_CREATE_SCOPE)
+    ``None`` = unprobed → fail-closed (every row unverified, ok False). ``required`` overrides the
+    verified set (ce-ops#94 right-sizing — e.g. ``bootstrap_required_scopes``); when omitted it
+    defaults to ``REQUIRED_BOOTSTRAP_SCOPES`` (+ org repo-create when needed), preserving the prior
+    behavior. An empty ``required`` (plain-join, identity-only) yields no rows → trivially ``ok``."""
+    if required is None:
+        required = list(REQUIRED_BOOTSTRAP_SCOPES)
+        if org_create_needed:
+            required.append(ORG_CREATE_SCOPE)
+    else:
+        required = list(required)
     probed = granted is not None
     granted_set = set(granted) if probed else set()
     rows = [
