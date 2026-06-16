@@ -40,6 +40,10 @@ exit_code = os.environ.get("CE_FAKE_HOOK_EXIT")
 if exit_code:
     print("fake hook-check failed", file=sys.stderr)
     raise SystemExit(int(exit_code))
+raw_stdout = os.environ.get("CE_FAKE_HOOK_STDOUT_RAW")
+if raw_stdout is not None:
+    print(raw_stdout)
+    raise SystemExit(0)
 print(json.dumps({
     "decision": os.environ.get("CE_FAKE_HOOK_DECISION", "allow"),
     "reason": os.environ.get("CE_FAKE_HOOK_REASON", "restricted mechanic (deploy)"),
@@ -172,6 +176,107 @@ def test_hook_check_cli_failure_is_fail_closed(tmp_path):
     assert completed.returncode == DENY_EXIT_CODE
     assert "hook-check CLI failed for git" in completed.stderr
     assert not marker.exists()
+
+
+def test_hook_check_invalid_json_is_fail_closed(tmp_path):
+    config, _, _ = _config(tmp_path)
+    shim_dir = _install(tmp_path, config)
+    marker = tmp_path / "real-git-ran"
+    env = {
+        **os.environ,
+        "CE_FAKE_HOOK_CAPTURE": str(tmp_path / "event.json"),
+        "CE_FAKE_HOOK_STDOUT_RAW": "not-json",
+        "CE_REAL_TOOL_MARKER": str(marker),
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / "git"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == DENY_EXIT_CODE
+    assert "hook-check returned invalid JSON for git" in completed.stderr
+    assert not marker.exists()
+
+
+def test_hook_check_non_object_decision_is_fail_closed(tmp_path):
+    config, _, _ = _config(tmp_path)
+    shim_dir = _install(tmp_path, config)
+    marker = tmp_path / "real-git-ran"
+    env = {
+        **os.environ,
+        "CE_FAKE_HOOK_CAPTURE": str(tmp_path / "event.json"),
+        "CE_FAKE_HOOK_STDOUT_RAW": '["allow"]',
+        "CE_REAL_TOOL_MARKER": str(marker),
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / "git"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == DENY_EXIT_CODE
+    assert "hook-check returned a non-object decision for git" in completed.stderr
+    assert not marker.exists()
+
+
+def test_hook_check_malformed_decision_is_fail_closed(tmp_path):
+    config, _, _ = _config(tmp_path)
+    shim_dir = _install(tmp_path, config)
+    marker = tmp_path / "real-git-ran"
+    env = {
+        **os.environ,
+        "CE_FAKE_HOOK_CAPTURE": str(tmp_path / "event.json"),
+        "CE_FAKE_HOOK_DECISION": "permit",
+        "CE_REAL_TOOL_MARKER": str(marker),
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / "git"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == DENY_EXIT_CODE
+    assert "hook-check returned malformed decision 'permit' for git" in completed.stderr
+    assert not marker.exists()
+
+
+def test_allow_exec_failure_is_fail_closed(tmp_path):
+    hook = _fake_hook_check(tmp_path / "fake-hook-check")
+    missing_real_git = tmp_path / "missing-real-git"
+    config = Ring1ToolGuardConfig(
+        posture="auto",
+        tools=("git",),
+        real_binaries=(("git", str(missing_real_git)),),
+        validator_argv=(str(hook),),
+        base_path=os.environ.get("PATH", ""),
+    )
+    shim_dir = _install(tmp_path, config)
+    env = {
+        **os.environ,
+        "CE_FAKE_HOOK_CAPTURE": str(tmp_path / "event.json"),
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / "git"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == DENY_EXIT_CODE
+    assert "allowed git could not exec real binary" in completed.stderr
+    assert str(missing_real_git) in completed.stderr
 
 
 def test_guarded_env_puts_shim_dir_first():

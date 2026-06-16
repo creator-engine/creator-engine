@@ -8,8 +8,8 @@ Base:
 
 This is the closed path set for the PATH-shim proof only. It intentionally does
 not claim hardened Ring-1 coverage for absolute binary paths, bundled clients,
-libgit2/JGit, direct HTTPS API writes, PATH resets, or arbitrary filesystem
-syscalls.
+libgit2/JGit, direct HTTPS API writes, PATH resets, environment/posture reset
+(e.g. `CE_RING1_POSTURE`), or arbitrary filesystem syscalls.
 
 Per-file purpose:
 
