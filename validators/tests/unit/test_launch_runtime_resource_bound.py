@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -24,6 +25,18 @@ WRAP_PREFIX_HEAD = [
     "systemd-run", "--user", "--scope", "--collect",
     "--expand-environment=no", "--unit",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_state_root(tmp_path, monkeypatch):
+    """Keep default launch state per-test unique under xdist.
+
+    These tests intentionally reuse session names while reading the generated
+    sentinel wrapper from the default ``./.ce/state`` surface. Without a
+    per-test cwd, the active-collision test can overwrite another worker's
+    wrapper and make the stable-unit assertion observe ``-2``.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 class FakeAdapter:
@@ -243,6 +256,33 @@ def test_live_launch_wraps_confirms_oom_group_and_fleet_cap(tmp_path):
     assert ["systemctl", "--user", "set-property", "--runtime", "ce-fleet.slice",
             "MemoryMax=9G"] in systemctl.calls
     assert result.plan.resource_bound["unit"] == "ce-seat-v35f-seat"
+
+
+def test_resource_unit_is_session_derived_not_lifecycle_seat_id(tmp_path):
+    adapter = FakeAdapter()
+    systemctl = FakeSystemctl(cgroupfs_root=tmp_path)
+    dispatch_dir = tmp_path / ".ce" / "state" / "dispatches" / "run-v35f-seat-2"
+    dispatch_dir.mkdir(parents=True)
+
+    result = launch_runtime.launch(
+        harness="claude",
+        session="v35f-seat",
+        repo_root=tmp_path,
+        ledger_root=tmp_path / ".hermes" / "active-work-ledger",
+        tmux_adapter=adapter,
+        runtime_policy=_write_policy(dispatch_dir),
+        systemctl_runner=systemctl,
+        support_probe=_ok_probe,
+        cgroupfs_root=tmp_path,
+    )
+
+    spawned_command = _inner_argv(result)
+    assert spawned_command[6] == "ce-seat-v35f-seat"
+    assert result.plan.resource_bound["unit"] == "ce-seat-v35f-seat"
+    assert Path(result.events_ref).parent == dispatch_dir
+    record = yaml.safe_load(Path(result.seat_record_ref).read_text(encoding="utf-8"))
+    assert record["seat"]["seat_id"] == "run-v35f-seat-2"
+    assert record["resources"]["resource_bound"]["unit"] == "ce-seat-v35f-seat"
 
 
 def test_live_launch_resolves_unit_collision_with_suffix(tmp_path):

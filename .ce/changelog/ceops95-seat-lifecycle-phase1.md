@@ -21,6 +21,11 @@ registration for `ce launch` and `ce lane launch`.
   `SEAT_LIFECYCLE_FAIL_CLOSED = False`.
 - Added lifecycle refs to launch results and CLI JSON, and persisted
   `--claim-ticket` work-claim bindings into the lifecycle record.
+- Fixed the resource-bound launch tests under CI xdist by isolating the default
+  seat-state surface per test and asserting lifecycle seat-id suffixes do not
+  affect the session-derived cgroup/OOM-group unit name.
+- Moved the PR scope carrier to `.ce/pr-manifests/ceops95-phase1.md` so the
+  current per-PR path-manifest gate validates the closed diff set.
 - Rebuilt the validator app wheel and refreshed `validators/wheelhouse/SHA256SUMS`.
 
 Not included: `ce seats ls`, sampling/read-model surfaces, cockpit integration,
