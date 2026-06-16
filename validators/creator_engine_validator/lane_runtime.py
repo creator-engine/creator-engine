@@ -32,7 +32,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import claude_launch_spec, resource_bound_spec, seat_sentinel
+from . import claude_launch_spec, resource_bound_spec, seat_lifecycle, seat_sentinel
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -175,6 +175,17 @@ class ResourceBoundRefused(LaneLaunchError):
     code = "G3-RESOURCE-REFUSED"
 
 
+class SeatLifecycleRegistrationFailed(LaneLaunchError):
+    """ce-ops#95: post-spawn lifecycle registration failed.
+
+    Phase 1 compatibility posture warns + escalates while allowing success.
+    When ``seat_lifecycle.SEAT_LIFECYCLE_FAIL_CLOSED`` flips to true this error
+    becomes the fail-closed lane launch result.
+    """
+
+    code = "G3-SEAT-LIFECYCLE-FAILED"
+
+
 class SeatEnvFileInvalid(LaneLaunchError):
     """v3.1-G2f (F4/D2): a ``--seat-env-file`` was supplied that is missing, not a
     regular file, or group/world-readable. Fail-closed before any side effect — a
@@ -265,6 +276,11 @@ class LaunchResult:
     # surface (`<state_root>/dispatches/<lane_id>/events.jsonl`), also recorded in
     # the ignored sidecar. None only if sentinel materialization was skipped.
     events_ref: str | None = None
+    # ce-ops#95: one lifecycle object per spawned seat. None for Phase-1
+    # compatibility launches whose post-spawn registration failed and proceeded
+    # ungoverned with an AWAITING-OPERATOR escalation.
+    seat_record_ref: str | None = None
+    seat_lifecycle_state: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +598,8 @@ def launch(
     reviewer_authority_ref: str | None = None,
     seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
+    work_claim: Any | None = None,
+    purpose: str | None = None,
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
     cgroupfs_root: Path | str = "/sys/fs/cgroup",
@@ -969,6 +987,54 @@ def launch(
         sidecar = _governance_sidecar_path(ledger_root, controller_id, lane_id)
         _atomic_write(sidecar, json.dumps(sidecar_payload, indent=2, sort_keys=True))
 
+    seat_record_ref: str | None = None
+    seat_lifecycle_state: str | None = None
+    dispatch_ref = Path(sentinel.seat_dir) / "dispatch.yaml"
+    resolved_worktree_for_lifecycle = str(resolved_worktree) if resolved_worktree else None
+    harness_kind = "claude" if claude_governance is not None else "shell"
+    try:
+        registration = seat_lifecycle.register_spawn(
+            ledger_root=ledger_root,
+            repo_root=repo_root,
+            seat_id=lane_id,
+            owner_controller_id=controller_id,
+            host_id=host_id,
+            launch_surface="ce_lane_launch",
+            terminal=record["terminal"],
+            harness_kind=harness_kind,
+            purpose=purpose or lane_id,
+            cwd=worktree_path or repo_root,
+            launch_command=launch_command,
+            work_claim=work_claim,
+            pco_claim_ref=f"claims/{controller_id}/{lane_id}.yaml",
+            pco_lease_ref=f"leases/{controller_id}/{lane_id}.yaml",
+            worktree_path=resolved_worktree_for_lifecycle,
+            branch=str(resolved_branch) if resolved_branch else None,
+            envelope_ref=str(resolved_envelope) if resolved_envelope and resolved_envelope != "none" else None,
+            dispatch_ref=str(dispatch_ref) if dispatch_ref.exists() else None,
+            events_ref=str(sentinel.events_path),
+            sentinel_wrapper_ref=str(sentinel.wrapper_path),
+            pane_registry_ref=str(pane_path),
+            runtime_policy_ref=str(runtime_policy) if runtime_policy is not None else None,
+            resource_bound=resource_bound_stamp,
+        )
+        seat_record_ref = str(registration.record_path)
+        seat_lifecycle_state = registration.state
+    except seat_lifecycle.SeatLifecycleError as exc:
+        escalation_ref = seat_lifecycle.write_registration_failure_escalation(
+            state_root=resolved_state_root,
+            host_id=host_id,
+            seat_id=lane_id,
+            source_ref=str(sentinel.events_path),
+            error=exc,
+        )
+        seat_lifecycle.warn_registration_failure(
+            surface="ce lane launch", escalation_ref=escalation_ref, error=exc
+        )
+        if seat_lifecycle.SEAT_LIFECYCLE_FAIL_CLOSED:
+            raise SeatLifecycleRegistrationFailed(str(exc)) from exc
+        seat_lifecycle_state = seat_lifecycle.REGISTRATION_STATE_UNGOVERNED
+
     return LaunchResult(
         pane_path=pane_path,
         record=record,
@@ -981,6 +1047,8 @@ def launch(
         reviewer_authority_ref=reviewer_authority_ref,
         resource_bound=resource_bound_stamp,
         events_ref=str(sentinel.events_path),
+        seat_record_ref=seat_record_ref,
+        seat_lifecycle_state=seat_lifecycle_state,
     )
 
 

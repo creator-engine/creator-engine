@@ -66,6 +66,7 @@ from . import (
     lane_runtime,
     launch_runtime,
     pcl_runtime,
+    seat_lifecycle,
     side_effect_ledger_runtime,
     transcript_archive,
     version,
@@ -214,6 +215,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="ce-ops#38: acquire + verify a work-claim lock on this ticket "
         "(owner/name#N / issue URL / N inside the slug) BEFORE any lane side "
         "effect; a foreign active claim refuses the launch",
+    )
+    launch.add_argument(
+        "--purpose",
+        default=None,
+        help="operator-readable purpose recorded in the governed seat lifecycle record",
     )
     launch.add_argument("--host-id", default=lane_runtime.DEFAULT_HOST_ID)
     launch.add_argument("--pane-id", default=None)
@@ -709,6 +715,27 @@ def _build_parser() -> argparse.ArgumentParser:
             "(owner/name#N, an issue URL, or N inside the slug) BEFORE any launch "
             "side effect; a foreign active claim refuses the launch",
         )
+        p.add_argument("--repo-root", default=".", help="repo root for lifecycle registration")
+        p.add_argument(
+            "--ledger-root",
+            default=None,
+            help="path to .hermes/active-work-ledger for lifecycle registration",
+        )
+        p.add_argument(
+            "--controller-id",
+            default=None,
+            help="owner/controller id recorded in the governed seat lifecycle record",
+        )
+        p.add_argument(
+            "--host-id",
+            default=None,
+            help="host id recorded in the governed seat lifecycle record",
+        )
+        p.add_argument(
+            "--purpose",
+            default=None,
+            help="operator-readable purpose recorded in the governed seat lifecycle record",
+        )
         p.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     launch = groups.add_parser(
@@ -762,16 +789,12 @@ def _lane_launch(args) -> int:
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
             seat_env_file=getattr(args, "seat_env_file", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            work_claim=_claim_binding(claim_ctx),
+            purpose=_claim_purpose(args, claim_ctx),
             tmux_adapter=_make_tmux_adapter(),
         )
     except lane_runtime.LaneLaunchError as exc:
-        if claim_ctx is not None:  # release the claim we acquired before this refused leg
-            key, runner, claim_id = claim_ctx
-            work_claims.best_effort_release(
-                key, runner, claim_id,
-                holder=work_claims.resolve_holder(), host=work_claims.resolve_host(),
-                reason="launch-refused-before-side-effect",
-            )
+        _release_claim_context(claim_ctx, reason="launch-refused-before-side-effect")
         print(f"ERROR: ce lane launch refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json_output", False):
@@ -779,7 +802,12 @@ def _lane_launch(args) -> int:
         # Registry record already carries the value-free terminal {session_id, window_id, pane_id};
         # the v3 reviewer-venue bridge parses this to stamp the review dispatch.
         print(json.dumps(
-            {"pane_path": str(result.pane_path), "record": result.record},
+            {
+                "pane_path": str(result.pane_path),
+                "record": result.record,
+                "seat_record_ref": result.seat_record_ref,
+                "seat_lifecycle_state": result.seat_lifecycle_state,
+            },
             indent=2, sort_keys=True,
         ))
     else:
@@ -1573,16 +1601,16 @@ def _launch(args, invoked_as: str = "launch") -> int:
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            repo_root=getattr(args, "repo_root", None),
+            ledger_root=getattr(args, "ledger_root", None),
+            owner_controller_id=getattr(args, "controller_id", None),
+            host_id=getattr(args, "host_id", None),
+            purpose=_claim_purpose(args, claim_ctx),
+            work_claim=_claim_binding(claim_ctx),
             tmux_adapter=_make_tmux_adapter(),
         )
     except launch_runtime.LaunchError as exc:
-        if claim_ctx is not None:  # release the claim we acquired before this refused leg
-            key, runner, claim_id = claim_ctx
-            work_claims.best_effort_release(
-                key, runner, claim_id,
-                holder=work_claims.resolve_holder(), host=work_claims.resolve_host(),
-                reason="launch-refused-before-side-effect",
-            )
+        _release_claim_context(claim_ctx, reason="launch-refused-before-side-effect")
         print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json_output", False):
@@ -1699,13 +1727,52 @@ def _emit_claim(args, code: int, message: str, payload) -> int:
     return code
 
 
+def _claim_binding(claim_ctx: object) -> seat_lifecycle.WorkClaimBinding | None:
+    if not isinstance(claim_ctx, dict):
+        return None
+    binding = claim_ctx.get("binding")
+    return binding if isinstance(binding, seat_lifecycle.WorkClaimBinding) else None
+
+
+def _claim_purpose(args, claim_ctx: object) -> str | None:
+    purpose = getattr(args, "purpose", None)
+    if purpose:
+        return purpose
+    if isinstance(claim_ctx, dict):
+        ticket = claim_ctx.get("ticket")
+        if ticket:
+            return str(ticket)
+    return getattr(args, "claim_ticket", None)
+
+
+def _release_claim_context(claim_ctx: object, *, reason: str) -> None:
+    if not isinstance(claim_ctx, dict):
+        return
+    key = claim_ctx.get("key")
+    runner = claim_ctx.get("runner")
+    claim_id = claim_ctx.get("claim_id")
+    holder = claim_ctx.get("holder")
+    host = claim_ctx.get("host")
+    if key is None or runner is None or not claim_id:
+        return
+    work_claims.best_effort_release(
+        key,
+        runner,
+        str(claim_id),
+        holder=str(holder or work_claims.resolve_holder()),
+        host=str(host or work_claims.resolve_host()),
+        reason=reason,
+    )
+
+
 def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:
     """Acquire + verify the v1 launch work claim (ce-ops#38), refuse-before-side-effect.
 
     Returns ``(exit_code, None)`` on refusal/bad-input (the caller returns it) or
     ``(0, claim_context)`` when the claim is held — ``claim_context`` is the
-    ``(key, runner, claim_id)`` tuple the caller uses to best-effort-release if
-    the subsequent launch leg refuses. ``(0, None)`` means no ``--claim-ticket``.
+    context the caller uses to best-effort-release if the subsequent launch leg
+    refuses, and to bind the work claim into the seat lifecycle record.
+    ``(0, None)`` means no ``--claim-ticket``.
     """
     ticket = getattr(args, "claim_ticket", None)
     if not ticket:
@@ -1713,7 +1780,9 @@ def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:
     try:
         key = work_claims.parse_ticket(ticket)
         runner = _make_gh_runner()
-        result = work_claims.acquire(key, runner, reason="manual")
+        holder = work_claims.resolve_holder()
+        host = work_claims.resolve_host()
+        result = work_claims.acquire(key, runner, reason="manual", holder=holder, host=host)
     except work_claims.WorkClaimError as exc:
         print(f"ERROR: ce {invoked_as} refused: --claim-ticket {exc}", file=sys.stderr)
         return 2, None
@@ -1723,7 +1792,23 @@ def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:
             file=sys.stderr,
         )
         return 1, None
-    return 0, (key, runner, result.claim_id)
+    binding = seat_lifecycle.WorkClaimBinding(
+        work_key=key.work_key,
+        claim_id=str(result.claim_id),
+        claim_comment_url=result.posted_url,
+        holder=holder,
+        host=host,
+        stale_after_seconds=work_claims.DEFAULT_STALE_AFTER_SECONDS,
+    )
+    return 0, {
+        "key": key,
+        "runner": runner,
+        "claim_id": result.claim_id,
+        "holder": holder,
+        "host": host,
+        "binding": binding,
+        "ticket": f"{key.repo_slug}#{key.number}",
+    }
 
 
 _LANE_DISPATCH = {

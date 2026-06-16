@@ -160,6 +160,41 @@ def test_launch_writes_pane_record_bound_to_live_claim(tmp_path):
     assert record["envelope_ref"] == "envelopes/gate3.md"
 
 
+def test_launch_writes_pane_registry_and_seat_lifecycle_record(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        host_id="ce-dev-2",
+        purpose="creator-engine/ce-ops#95",
+    )
+
+    assert result.pane_path == ledger / "panes" / "hermes-primary" / "gate3-lane.yaml"
+    assert result.pane_path.is_file()
+    assert result.seat_lifecycle_state == "alive"
+    assert result.seat_record_ref is not None
+    record_path = Path(result.seat_record_ref)
+    assert record_path == ledger / "seats" / "ce-dev-2" / "gate3-lane.yaml"
+    lifecycle = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert lifecycle["seat"]["seat_id"] == "gate3-lane"
+    assert lifecycle["seat"]["owner_controller_id"] == "hermes-primary"
+    assert lifecycle["seat"]["launch_surface"] == "ce_lane_launch"
+    assert lifecycle["seat"]["purpose"] == "creator-engine/ce-ops#95"
+    assert lifecycle["work"]["pco_claim_ref"] == "claims/hermes-primary/gate3-lane.yaml"
+    assert lifecycle["work"]["pco_lease_ref"] == "leases/hermes-primary/gate3-lane.yaml"
+    assert lifecycle["work"]["worktree_path"] == "/worktrees/gate3-lane"
+    assert lifecycle["dispatch"]["pane_registry_ref"] == str(result.pane_path)
+    assert lifecycle["terminal"]["pane_pid"] == 4242
+    assert lifecycle["policy"]["policy_id"] == "default-governed-seat-v1"
+    event_path = ledger / "seat-events" / "ce-dev-2" / "gate3-lane.ndjson"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    assert events[0]["event"] == "registered"
+    assert events[0]["seat_id"] == "gate3-lane"
+    assert events[0]["state"] == "alive"
+    assert events[0]["record_ref"] == str(record_path)
+
+
 def test_written_pane_record_passes_pane_registry_schema(tmp_path):
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")

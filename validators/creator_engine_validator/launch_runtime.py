@@ -27,7 +27,14 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import claude_launch_spec, codex_launch_spec, hermes_launch_spec, resource_bound_spec, seat_sentinel
+from . import (
+    claude_launch_spec,
+    codex_launch_spec,
+    hermes_launch_spec,
+    resource_bound_spec,
+    seat_lifecycle,
+    seat_sentinel,
+)
 from .loader import LoaderError, load_yaml
 
 DEFAULT_HARNESS = "claude"
@@ -84,6 +91,17 @@ class ResourceBoundRefused(LaunchError):
     failed launch-confirm (fleet cap / ``memory.oom.group``). Fail-closed."""
 
     code = "G6-LAUNCH-RESOURCE-REFUSED"
+
+
+class SeatLifecycleRegistrationFailed(LaunchError):
+    """ce-ops#95: post-spawn lifecycle registration failed.
+
+    Phase 1 compatibility posture warns + escalates while allowing success.
+    When ``seat_lifecycle.SEAT_LIFECYCLE_FAIL_CLOSED`` flips to true this error
+    becomes the fail-closed launch result.
+    """
+
+    code = "G6-LAUNCH-SEAT-LIFECYCLE-FAILED"
 
 
 def _confirm_pack(repo_root: Path | str | None) -> bool:
@@ -151,6 +169,11 @@ class LaunchResult:
     # surface; None on dry-run (no side effect). The v3 bridge stamps it onto the
     # dispatch record so the cockpit/Monitor join events ↔ run by run_id.
     events_ref: str | None = None
+    # ce-ops#95: registry record for the CE-substrate lifecycle object. None for
+    # dry-run or for Phase-1 compatibility launches whose post-spawn registration
+    # failed and proceeded ungoverned with an AWAITING-OPERATOR escalation.
+    seat_record_ref: str | None = None
+    seat_lifecycle_state: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -160,6 +183,8 @@ class LaunchResult:
             "terminal": self.terminal,
             "resource_confirm": self.resource_confirm,
             "events_ref": self.events_ref,
+            "seat_record_ref": self.seat_record_ref,
+            "seat_lifecycle_state": self.seat_lifecycle_state,
         }
 
 
@@ -255,6 +280,11 @@ def launch(
     extra_args: Sequence[str] | None = None,
     tmux_adapter: Any | None = None,
     repo_root: Path | str | None = None,
+    ledger_root: Path | str | None = None,
+    owner_controller_id: str | None = None,
+    host_id: str | None = None,
+    purpose: str | None = None,
+    work_claim: Any | None = None,
     mcp_config_path: str | None = None,
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
@@ -502,6 +532,10 @@ def launch(
         "window_id": pane.window_id,
         "pane_id": pane.pane_id,
     }
+    if getattr(pane, "pane_tty", None):
+        terminal["pane_tty"] = pane.pane_tty
+    if getattr(pane, "pane_pid", None) is not None:
+        terminal["pane_pid"] = pane.pane_pid
 
     # v3.5-F launch-confirm: the seat scope must materialize. Write
     # memory.oom.group=1 (kernel kills the SEAT, never a random child) and
@@ -529,6 +563,58 @@ def launch(
             "fleet_memory_max": resource_policy.fleet_memory_max,
         }
 
+    seat_record_ref: str | None = None
+    seat_lifecycle_state: str | None = None
+    resolved_repo_root = Path(repo_root or ".")
+    resolved_ledger_root = Path(ledger_root) if ledger_root is not None else (
+        resolved_repo_root / ".hermes" / "active-work-ledger"
+    )
+    state_root = (
+        seat_dir.parent.parent
+        if seat_dir.parent.name == seat_sentinel.DISPATCHES_SUBDIR
+        else resolved_repo_root / ".ce" / "state"
+    )
+    dispatch_ref = seat_dir / "dispatch.yaml"
+    try:
+        registration = seat_lifecycle.register_spawn(
+            ledger_root=resolved_ledger_root,
+            repo_root=resolved_repo_root,
+            seat_id=seat_id,
+            owner_controller_id=owner_controller_id,
+            host_id=host_id,
+            launch_surface="ce_launch",
+            terminal=terminal,
+            harness_kind=harness,
+            purpose=purpose,
+            cwd=resolved_repo_root,
+            launch_command=plan.command,
+            work_claim=work_claim,
+            ticket=purpose,
+            dispatch_ref=str(dispatch_ref) if dispatch_ref.exists() else None,
+            events_ref=str(sentinel.events_path),
+            sentinel_wrapper_ref=str(sentinel.wrapper_path),
+            run_id=seat_run_id,
+            runtime_policy_ref=str(runtime_policy) if runtime_policy is not None else None,
+            resource_bound=plan.resource_bound,
+            resource_confirm=resource_confirm,
+        )
+        seat_record_ref = str(registration.record_path)
+        seat_lifecycle_state = registration.state
+    except seat_lifecycle.SeatLifecycleError as exc:
+        escalation_ref = seat_lifecycle.write_registration_failure_escalation(
+            state_root=state_root,
+            host_id=host_id,
+            seat_id=seat_id,
+            source_ref=str(sentinel.events_path),
+            error=exc,
+        )
+        seat_lifecycle.warn_registration_failure(
+            surface=f"ce {invoked_as}", escalation_ref=escalation_ref, error=exc
+        )
+        if seat_lifecycle.SEAT_LIFECYCLE_FAIL_CLOSED:
+            raise SeatLifecycleRegistrationFailed(str(exc)) from exc
+        seat_lifecycle_state = seat_lifecycle.REGISTRATION_STATE_UNGOVERNED
+
     return LaunchResult(
         plan=plan,
         spawned=True,
@@ -536,4 +622,6 @@ def launch(
         terminal=terminal,
         resource_confirm=resource_confirm,
         events_ref=str(sentinel.events_path),
+        seat_record_ref=seat_record_ref,
+        seat_lifecycle_state=seat_lifecycle_state,
     )
