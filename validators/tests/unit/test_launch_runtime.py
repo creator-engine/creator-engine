@@ -13,6 +13,7 @@ import shlex
 from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator import launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
@@ -103,6 +104,22 @@ def test_dry_run_does_not_spawn():
     assert adapter.spawned == []
 
 
+def test_dry_run_writes_no_seat_lifecycle_record(tmp_path):
+    adapter = FakeAdapter()
+    ledger = tmp_path / ".hermes" / "active-work-ledger"
+    result = launch_runtime.launch(
+        harness="claude",
+        dry_run=True,
+        repo_root=tmp_path,
+        ledger_root=ledger,
+        tmux_adapter=adapter,
+    )
+    assert result.seat_record_ref is None
+    assert result.seat_lifecycle_state is None
+    assert not (ledger / "seats").exists()
+    assert not (ledger / "seat-events").exists()
+
+
 def test_dry_run_works_without_tmux_available():
     # Planning must not require a live tmux (or provider) — dry-run is pure.
     adapter = FakeAdapter(available=False)
@@ -164,6 +181,83 @@ def test_launch_spawns_visible_controller_seat():
     assert result.spawned is True
     assert adapter.spawned, "controller seat should be spawned in a visible tmux pane"
     assert result.plan.visibility == "operator_visible"
+
+
+def test_launch_writes_seat_lifecycle_record_and_event(tmp_path):
+    adapter = FakeAdapter()
+    ledger = tmp_path / ".hermes" / "active-work-ledger"
+    result = launch_runtime.launch(
+        harness="claude",
+        session="ce-controller",
+        window="controller",
+        repo_root=tmp_path,
+        ledger_root=ledger,
+        owner_controller_id="chmod735",
+        host_id="ce-dev-2",
+        purpose="creator-engine/ce-ops#95",
+        tmux_adapter=adapter,
+    )
+
+    assert result.seat_lifecycle_state == "alive"
+    assert result.seat_record_ref is not None
+    record_path = Path(result.seat_record_ref)
+    assert record_path == ledger / "seats" / "ce-dev-2" / "ce-controller--controller.yaml"
+    record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert record["kind"] == "seat-lifecycle-record"
+    assert record["seat"]["seat_id"] == "ce-controller--controller"
+    assert record["seat"]["owner_controller_id"] == "chmod735"
+    assert record["seat"]["host_id"] == "ce-dev-2"
+    assert record["seat"]["launch_surface"] == "ce_launch"
+    assert record["seat"]["purpose"] == "creator-engine/ce-ops#95"
+    assert record["terminal"]["pane_pid"] == 999
+    assert record["lifecycle"]["state"] == "alive"
+    assert record["policy"]["policy_id"] == "default-governed-seat-v1"
+    assert record["policy"]["ttl_seconds"] == 28800
+    assert record["policy"]["idle_timeout_seconds"] == 7200
+
+    event_path = ledger / "seat-events" / "ce-dev-2" / "ce-controller--controller.ndjson"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    assert events == [{
+        "event": "registered",
+        "host_id": "ce-dev-2",
+        "record_ref": str(record_path),
+        "seat_id": "ce-controller--controller",
+        "state": "alive",
+        "ts": events[0]["ts"],
+    }]
+
+
+def test_launch_registration_failure_warns_escalates_and_returns_ungoverned(
+    tmp_path, monkeypatch, capsys
+):
+    adapter = FakeAdapter()
+
+    def _boom(**_kwargs):
+        raise launch_runtime.seat_lifecycle.SeatLifecycleError("synthetic write fault")
+
+    monkeypatch.setattr(launch_runtime.seat_lifecycle, "register_spawn", _boom)
+    monkeypatch.setattr(launch_runtime.seat_lifecycle, "SEAT_LIFECYCLE_FAIL_CLOSED", False)
+    result = launch_runtime.launch(
+        harness="claude",
+        session="fault-seat",
+        window="controller",
+        repo_root=tmp_path,
+        ledger_root=tmp_path / ".hermes" / "active-work-ledger",
+        host_id="ce-dev-2",
+        tmux_adapter=adapter,
+    )
+
+    assert result.spawned is True
+    assert result.seat_record_ref is None
+    assert result.seat_lifecycle_state == "ungoverned_registration_failed"
+    err = capsys.readouterr().err
+    assert "WARNING: seat lifecycle registration failed after pane spawn" in err
+    assert "AWAITING-OPERATOR" in err
+    escalations = list((tmp_path / ".ce" / "state" / "escalations").glob("*.yaml"))
+    assert len(escalations) == 1
+    escalation = yaml.safe_load(escalations[0].read_text(encoding="utf-8"))
+    assert escalation["record_type"] == "escalation"
+    assert "Seat lifecycle registration failed" in escalation["title"]
 
 
 def test_launch_result_to_dict_is_json_safe():

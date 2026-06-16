@@ -8,8 +8,11 @@ or a live provider login.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import subprocess
 
 import pytest
+import yaml
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
@@ -33,6 +36,41 @@ class FakeAdapter:
         self.spawned.append((session, window, list(command)))
         self._sessions.add(session)
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3")
+
+
+class FakeGhRunner:
+    """Tiny `gh api` double that supports the work-claim acquire reread loop."""
+
+    def __init__(self):
+        self.comments: list[dict] = []
+        self.next_id = 100
+
+    def __call__(self, argv, input_text=None):
+        method = None
+        if "--method" in argv:
+            method = argv[argv.index("--method") + 1]
+        if method == "GET":
+            return subprocess.CompletedProcess(
+                list(argv), 0, stdout=json.dumps(self.comments), stderr=""
+            )
+        if method == "POST":
+            payload = json.loads(input_text or "{}")
+            comment = {
+                "id": self.next_id,
+                "body": payload["body"],
+                "created_at": "2026-06-16T00:00:00Z",
+                "user": {"login": "chmod735"},
+                "html_url": (
+                    "https://github.com/creator-engine/ce-ops/issues/95"
+                    f"#issuecomment-{self.next_id}"
+                ),
+            }
+            self.next_id += 1
+            self.comments.append(comment)
+            return subprocess.CompletedProcess(
+                list(argv), 0, stdout=json.dumps({"html_url": comment["html_url"]}), stderr=""
+            )
+        raise AssertionError(f"unexpected gh invocation: {argv!r}")
 
 
 @pytest.fixture()
@@ -86,6 +124,44 @@ def test_launch_spawns_visible_seat(use_fake_tmux):
     use_fake_tmux(adapter)
     ret = ce_cli.main(["launch", "--session", "ce-controller"])
     assert ret == 0
+    assert adapter.spawned
+
+
+def test_launch_claim_ticket_binding_is_persisted_in_seat_lifecycle(
+    tmp_path, use_fake_tmux, monkeypatch
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    gh = FakeGhRunner()
+    ledger = tmp_path / ".hermes" / "active-work-ledger"
+    monkeypatch.setattr(ce_cli, "_make_gh_runner", lambda: gh)
+    monkeypatch.setattr(ce_cli.work_claims, "resolve_holder", lambda holder=None, environ=None: "chmod735")
+    monkeypatch.setattr(ce_cli.work_claims, "resolve_host", lambda host=None: "ce-dev-2")
+    monkeypatch.setattr(ce_cli.work_claims.time, "sleep", lambda _seconds: None)
+
+    ret = ce_cli.main([
+        "launch",
+        "--session", "ce95",
+        "--repo-root", str(tmp_path),
+        "--ledger-root", str(ledger),
+        "--controller-id", "chmod735",
+        "--host-id", "ce-dev-2",
+        "--claim-ticket", "creator-engine/ce-ops#95",
+    ])
+
+    assert ret == 0
+    record_path = ledger / "seats" / "ce-dev-2" / "ce95--controller.yaml"
+    record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert record["work"]["ticket"] == "creator-engine/ce-ops#95"
+    claim = record["work"]["work_claim"]
+    assert claim["work_key"] == "creator-engine/ce-ops:issue:95"
+    assert claim["claim_id"].startswith("wclaim-")
+    assert claim["claim_comment_url"] == (
+        "https://github.com/creator-engine/ce-ops/issues/95#issuecomment-100"
+    )
+    assert claim["holder"] == "chmod735"
+    assert claim["host"] == "ce-dev-2"
+    assert claim["stale_after_seconds"] == 14400
     assert adapter.spawned
 
 

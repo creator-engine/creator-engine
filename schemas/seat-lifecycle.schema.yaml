@@ -1,0 +1,343 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/seat-lifecycle.schema.yaml"
+title: "Creator Engine Seat Lifecycle Record"
+description: |
+  Machine-readable schema for one CE-substrate-owned seat lifecycle record.
+  Records live under `.hermes/active-work-ledger/seats/<host_id>/<seat_id>.yaml`
+  and bind spawn-time seat identity to terminal, dispatch, work-claim, PCO,
+  harness, resource, lifecycle, and retirement facts.
+
+  These records are instance-local runtime state. The reusable schema belongs
+  upstream; concrete records MUST NOT be tracked.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - seat
+  - work
+  - dispatch
+  - terminal
+  - harness
+  - resources
+  - lifecycle
+  - policy
+  - retirement
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: seat-lifecycle-record
+  record_type:
+    type: string
+    const: seat_lifecycle
+  schema_version:
+    type: string
+    enum: ["1"]
+  seat:
+    type: object
+    required:
+      - seat_id
+      - host_id
+      - owner_controller_id
+      - launch_surface
+      - registered_at
+      - spawned_at
+      - repo_root
+    unevaluatedProperties: false
+    properties:
+      seat_id:
+        type: string
+        minLength: 1
+      host_id:
+        type: string
+        minLength: 1
+      owner_controller_id:
+        type: string
+        minLength: 1
+      launch_surface:
+        type: string
+        enum: [ce_launch, ce_lane_launch, v3_bridge, backfill]
+      launch_command_ref:
+        type: string
+        minLength: 1
+      purpose:
+        type: string
+        minLength: 1
+      registered_at:
+        $ref: "#/$defs/timestamp"
+      spawned_at:
+        $ref: "#/$defs/timestamp"
+      cwd:
+        type: string
+        minLength: 1
+      repo_root:
+        type: string
+        minLength: 1
+  work:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      ticket:
+        type: string
+        minLength: 1
+      work_claim:
+        oneOf:
+          - type: "null"
+          - type: object
+            required: [work_key, claim_id]
+            unevaluatedProperties: false
+            properties:
+              work_key:
+                type: string
+                minLength: 1
+              claim_id:
+                type: string
+                minLength: 1
+              claim_comment_url:
+                type: string
+                minLength: 1
+              holder:
+                type: string
+                minLength: 1
+              host:
+                type: string
+                minLength: 1
+              stale_after_seconds:
+                type: integer
+                minimum: 60
+      pco_claim_ref:
+        type: string
+        minLength: 1
+      pco_lease_ref:
+        type: string
+        minLength: 1
+      worktree_path:
+        type: string
+        minLength: 1
+      branch:
+        type: string
+        minLength: 1
+      envelope_ref:
+        type: string
+        minLength: 1
+  dispatch:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      dispatch_ref:
+        type: string
+        minLength: 1
+      events_ref:
+        type: string
+        minLength: 1
+      sentinel_wrapper_ref:
+        type: string
+        minLength: 1
+      run_id:
+        type: string
+        minLength: 1
+      scope_id:
+        type: string
+        minLength: 1
+      mutation_class:
+        type: string
+        minLength: 1
+      pane_registry_ref:
+        type: string
+        minLength: 1
+      conserve:
+        type: boolean
+  terminal:
+    type: object
+    required: [kind]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        enum: [tmux, plain_terminal, unknown]
+      session_id:
+        type: string
+        minLength: 1
+      window_id:
+        type: string
+        minLength: 1
+      pane_id:
+        type: string
+        minLength: 1
+      pane_tty:
+        type: string
+        minLength: 1
+      pane_pid:
+        oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            pattern: "^[0-9]+$"
+      attached_controller:
+        type: object
+        required: [attached]
+        unevaluatedProperties: false
+        properties:
+          attached:
+            type: boolean
+          evidence:
+            type: string
+            minLength: 1
+          sampled_at:
+            $ref: "#/$defs/timestamp"
+  harness:
+    type: object
+    required: [kind]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        minLength: 1
+      model:
+        type: string
+        minLength: 1
+      effort:
+        type: string
+        minLength: 1
+      harness_boundary:
+        type: string
+        minLength: 1
+      harness_session_id:
+        type: string
+        minLength: 1
+      transcript_ref:
+        type: string
+        minLength: 1
+  resources:
+    type: object
+    unevaluatedProperties: false
+    properties:
+      runtime_policy_ref:
+        type: string
+        minLength: 1
+      resource_bound:
+        oneOf:
+          - type: "null"
+          - type: string
+          - type: object
+      resource_confirm:
+        oneOf:
+          - type: "null"
+          - type: object
+      last_sample:
+        oneOf:
+          - type: "null"
+          - type: object
+  lifecycle:
+    type: object
+    required:
+      - state
+      - state_reason
+      - state_since
+      - last_heartbeat_at
+      - last_activity_at
+    unevaluatedProperties: false
+    properties:
+      state:
+        type: string
+        enum: [alive, idle, spent, dead]
+      state_reason:
+        type: string
+        minLength: 1
+      state_since:
+        $ref: "#/$defs/timestamp"
+      last_heartbeat_at:
+        $ref: "#/$defs/timestamp"
+      last_activity_at:
+        $ref: "#/$defs/timestamp"
+      idle_since:
+        oneOf:
+          - type: "null"
+          - $ref: "#/$defs/timestamp"
+      terminal_exit_code:
+        oneOf:
+          - type: "null"
+          - type: integer
+      outcome:
+        oneOf:
+          - type: "null"
+          - type: string
+      outcome_source:
+        type: string
+        minLength: 1
+  policy:
+    type: object
+    required:
+      - policy_id
+      - ttl_seconds
+      - idle_timeout_seconds
+      - spent_grace_seconds
+      - dead_grace_seconds
+      - auto_reap_spent
+      - auto_reap_dead_clean
+      - auto_reap_idle
+      - require_operator_for
+    unevaluatedProperties: false
+    properties:
+      policy_id:
+        type: string
+        minLength: 1
+      ttl_seconds:
+        type: integer
+        minimum: 60
+      idle_timeout_seconds:
+        type: integer
+        minimum: 60
+      spent_grace_seconds:
+        type: integer
+        minimum: 0
+      dead_grace_seconds:
+        type: integer
+        minimum: 0
+      auto_reap_spent:
+        type: boolean
+      auto_reap_dead_clean:
+        type: boolean
+      auto_reap_idle:
+        type: boolean
+      require_operator_for:
+        type: array
+        items:
+          type: string
+          minLength: 1
+  retirement:
+    type: object
+    required: [status]
+    unevaluatedProperties: false
+    properties:
+      status:
+        type: string
+        enum: [not_requested, planned, awaiting_operator, running, retired, failed]
+      eligible_after:
+        oneOf:
+          - type: "null"
+          - $ref: "#/$defs/timestamp"
+      escalation_ref:
+        oneOf:
+          - type: "null"
+          - type: string
+            minLength: 1
+      ratification_ref:
+        oneOf:
+          - type: "null"
+          - type: string
+            minLength: 1
+      retirement_ledger_ref:
+        oneOf:
+          - type: "null"
+          - type: string
+            minLength: 1
+      retired_at:
+        oneOf:
+          - type: "null"
+          - $ref: "#/$defs/timestamp"
+$defs:
+  timestamp:
+    type: string
+    minLength: 1
