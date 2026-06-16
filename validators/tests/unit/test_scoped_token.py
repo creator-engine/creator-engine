@@ -13,6 +13,7 @@ import subprocess
 
 import pytest
 
+from creator_engine_validator import v3_forge_join
 from creator_engine_validator.forge import ForgeConfigError
 from creator_engine_validator.forge.scoped_token import (
     MAX_TTL_SECONDS,
@@ -181,6 +182,44 @@ def test_baseline_non_escalated_write_needs_no_authority():
     )
     assert ("pull_requests", "write") in token.permissions
     assert len(runner.calls) == 1
+
+
+def test_p1_operation_token_bindings_are_minimal_and_mintable():
+    merge_runner = _fake_runner()
+    merge_token = mint_scoped_token(
+        _request(
+            permissions=v3_forge_join.MERGE_TOKEN_PERMISSIONS,
+            secret_name=v3_forge_join.MERGE_SECRET_NAME,
+            escalation_authority=v3_forge_join.MERGE_TOKEN_ESCALATION_AUTHORITY,
+        ),
+        gh_runner=merge_runner,
+    )
+    assert merge_token.permissions == (("contents", "write"),)
+    assert json.loads(merge_runner.inputs[0])["permissions"] == {"contents": "write"}
+
+    reviewer_runner = _fake_runner()
+    reviewer_token = mint_scoped_token(
+        _request(
+            permissions=v3_forge_join.REVIEWER_TOKEN_PERMISSIONS,
+            secret_name=v3_forge_join.REVIEWER_SECRET_NAME,
+            escalation_authority=v3_forge_join.REVIEWER_TOKEN_ESCALATION_AUTHORITY,
+        ),
+        gh_runner=reviewer_runner,
+    )
+    assert reviewer_token.permissions == (("pull_requests", "write"),)
+    assert v3_forge_join.REVIEWER_TOKEN_ESCALATION_AUTHORITY == ()
+    assert json.loads(reviewer_runner.inputs[0])["permissions"] == {"pull_requests": "write"}
+
+    auto_runner = _fake_runner()
+    auto_token = mint_scoped_token(
+        _request(
+            permissions=v3_forge_join.AUTO_MERGE_TOKEN_PERMISSIONS,
+            secret_name=v3_forge_join.AUTO_MERGE_SECRET_NAME,
+            escalation_authority=v3_forge_join.AUTO_MERGE_TOKEN_ESCALATION_AUTHORITY,
+        ),
+        gh_runner=auto_runner,
+    )
+    assert auto_token.permissions == (("contents", "write"), ("pull_requests", "write"))
 
 
 def test_refuses_empty_permissions_before_any_call():

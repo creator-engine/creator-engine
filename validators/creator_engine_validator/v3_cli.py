@@ -81,6 +81,14 @@ from . import (
     work_claims,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
+from .forge import (
+    RulesetBypassActor,
+    RulesetPolicy,
+    allow_auto_merge,
+    configure_repo,
+    delete_ruleset,
+    upsert_ruleset,
+)
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
@@ -1946,6 +1954,215 @@ def _cmd_pr(args: argparse.Namespace) -> int:
     )
 
 
+def _operation_policy_sha(action: str, repo: str, payload: Mapping[str, Any]) -> str:
+    body = {"action": action, "repo": repo, **dict(payload)}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _run_scoped_cli_op(
+    *,
+    app_config: v3_forge_join.AppConfig,
+    action: str,
+    payload: Mapping[str, Any],
+    permissions: Mapping[str, str],
+    secret_name: str,
+    ttl_seconds: int,
+    escalation_authority: tuple[tuple[str, str], ...],
+    op,
+):
+    token = v3_forge_join.mint_operation_token(
+        app_config,
+        run_id=action,
+        policy_sha_value=_operation_policy_sha(action, app_config.repo, payload),
+        permissions=permissions,
+        secret_name=secret_name,
+        requested_ttl_seconds=ttl_seconds,
+        escalation_authority=escalation_authority,
+    )
+    try:
+        runner = v3_forge_join.authenticated_gh_runner(token)
+        return op(runner)
+    finally:
+        v3_forge_join._revoke_best_effort(token)  # best-effort cleanup mirrors forge join apply legs
+
+
+def _cmd_configure_repo(args: argparse.Namespace) -> int:
+    """Plan/apply repo-level GitHub configuration through a scoped admin token."""
+    try:
+        app_config = v3_forge_join.load_app_config(args.app_config)
+
+        def op(runner):
+            if args.allow_auto_merge:
+                return allow_auto_merge(app_config.repo, apply=args.apply, gh_runner=runner)
+            return configure_repo(app_config.repo, branch=args.branch, apply=args.apply, gh_runner=runner)
+
+        result = _run_scoped_cli_op(
+            app_config=app_config,
+            action="configure_repo",
+            payload={
+                "branch": args.branch,
+                "apply": bool(args.apply),
+                "allow_auto_merge": bool(args.allow_auto_merge),
+            },
+            permissions=v3_forge_join.REPO_ADMIN_TOKEN_PERMISSIONS,
+            secret_name=v3_forge_join.REPO_ADMIN_SECRET_NAME,
+            ttl_seconds=v3_forge_join.REPO_ADMIN_TOKEN_TTL_SECONDS,
+            escalation_authority=v3_forge_join.REPO_ADMIN_TOKEN_ESCALATION_AUTHORITY,
+            op=op,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · configure-repo refused: {exc}"],
+            {"action": "configure_repo_refused", "detail": str(exc)},
+        )
+    planned = not bool(args.apply)
+    action = "repo_config_planned" if planned else "repo_config_applied"
+    lines = [
+        f"{_BRAND} · {'REPO CONFIG PLAN' if planned else 'REPO CONFIG APPLIED'} for {app_config.repo}",
+        f"    operation: {result.operation} · changed={result.changed} · verified={result.verified}",
+    ]
+    return _emit(args, 0, lines, {"action": action, **result.to_dict()})
+
+
+def _cmd_ruleset(args: argparse.Namespace) -> int:
+    """Plan/apply a repo ruleset through a scoped admin token."""
+    try:
+        app_config = v3_forge_join.load_app_config(args.app_config)
+        actor = RulesetBypassActor(
+            actor_id=args.bypass_integration_id,
+            actor_type="Integration",
+            bypass_mode="pull_request",
+        )
+        policy = RulesetPolicy(
+            name=args.name,
+            branch=args.branch,
+            required_approving_review_count=args.required_approvals,
+            bypass_actors=(actor,),
+        )
+
+        def op(runner):
+            if args.delete:
+                return delete_ruleset(app_config.repo, args.name, apply=args.apply, gh_runner=runner)
+            return upsert_ruleset(app_config.repo, policy, apply=args.apply, gh_runner=runner)
+
+        result = _run_scoped_cli_op(
+            app_config=app_config,
+            action="ruleset",
+            payload={
+                "name": args.name,
+                "branch": args.branch,
+                "apply": bool(args.apply),
+                "delete": bool(args.delete),
+                "bypass_integration_id": args.bypass_integration_id,
+            },
+            permissions=v3_forge_join.REPO_ADMIN_TOKEN_PERMISSIONS,
+            secret_name=v3_forge_join.REPO_ADMIN_SECRET_NAME,
+            ttl_seconds=v3_forge_join.REPO_ADMIN_TOKEN_TTL_SECONDS,
+            escalation_authority=v3_forge_join.REPO_ADMIN_TOKEN_ESCALATION_AUTHORITY,
+            op=op,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · ruleset refused: {exc}"],
+            {"action": "ruleset_refused", "detail": str(exc)},
+        )
+    planned = not bool(args.apply)
+    action = "ruleset_planned" if planned else "ruleset_applied"
+    lines = [
+        f"{_BRAND} · {'RULESET PLAN' if planned else 'RULESET APPLIED'} for {app_config.repo}",
+        f"    {result.operation}: {result.name} · changed={result.changed} · verified={result.verified}",
+    ]
+    return _emit(args, 0, lines, {"action": action, **result.to_dict()})
+
+
+def _cmd_review_submit(args: argparse.Namespace) -> int:
+    """Submit the separate reviewer App's APPROVE for a run's opened PR."""
+    root = Path(args.root)
+    try:
+        dispatch = _load_dispatch(root, args.run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-submit refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · review-submit refused: run {args.run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": args.run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    try:
+        reviewer = v3_forge_join.load_reviewer_app_config(args.reviewer_app_config)
+        result = v3_forge_join.submit_review_for_run(
+            root, args.run_id, reviewer_app_config=reviewer, apply=args.apply, body=args.body or "",
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · review-submit refused: {exc}"],
+            {"action": "review_submit_refused", "run_id": args.run_id, "detail": str(exc)},
+        )
+    planned = not bool(args.apply)
+    action = "review_submit_planned" if planned else "review_submitted"
+    lines = [
+        f"{_BRAND} · {'REVIEW-SUBMIT PLAN' if planned else 'REVIEW SUBMITTED'} "
+        f"for PR #{result.pr_number} (run {args.run_id})",
+    ]
+    return _emit(args, 0, lines, {"action": action, "scope_id": args.scope_id,
+                                  "run_id": args.run_id, **result.to_dict()})
+
+
+def _cmd_auto_merge(args: argparse.Namespace) -> int:
+    """Plan/apply per-PR GraphQL auto-merge for a run's opened PR."""
+    root = Path(args.root)
+    try:
+        dispatch = _load_dispatch(root, args.run_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return _emit(args, 2, [f"{_BRAND} · auto-merge refused: {exc}"], {"error": str(exc)})
+    if dispatch.get("scope_id") != args.scope_id:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · auto-merge refused: run {args.run_id!r} belongs to Scope "
+             f"{dispatch.get('scope_id')!r}, not {args.scope_id!r}"],
+            {"error": "scope_mismatch", "run_id": args.run_id,
+             "dispatch_scope_id": dispatch.get("scope_id")},
+        )
+    repo_setting = None
+    try:
+        app_config = v3_forge_join.load_app_config(args.app_config)
+        if args.enable_repo_setting:
+            repo_setting = _run_scoped_cli_op(
+                app_config=app_config,
+                action="allow_auto_merge",
+                payload={"apply": bool(args.apply)},
+                permissions=v3_forge_join.REPO_ADMIN_TOKEN_PERMISSIONS,
+                secret_name=v3_forge_join.REPO_ADMIN_SECRET_NAME,
+                ttl_seconds=v3_forge_join.REPO_ADMIN_TOKEN_TTL_SECONDS,
+                escalation_authority=v3_forge_join.REPO_ADMIN_TOKEN_ESCALATION_AUTHORITY,
+                op=lambda runner: allow_auto_merge(app_config.repo, apply=args.apply, gh_runner=runner),
+            )
+        result = v3_forge_join.enable_auto_merge_for_run(
+            root, args.run_id, app_config=app_config, method=args.method, apply=args.apply,
+        )
+    except (v3_forge_join.ForgeJoinRefused, ForgeConfigError) as exc:
+        return _emit(
+            args, 1,
+            [f"{_BRAND} · auto-merge refused: {exc}"],
+            {"action": "auto_merge_refused", "run_id": args.run_id, "detail": str(exc)},
+        )
+    planned = not bool(args.apply)
+    action = "auto_merge_planned" if planned else "auto_merge_enabled"
+    lines = [
+        f"{_BRAND} · {'AUTO-MERGE PLAN' if planned else 'AUTO-MERGE ENABLED'} "
+        f"for PR #{result.pr_number} (run {args.run_id})",
+    ]
+    payload = {"action": action, "scope_id": args.scope_id, "run_id": args.run_id, **result.to_dict()}
+    if repo_setting is not None:
+        payload["repo_setting"] = repo_setting.to_dict()
+    return _emit(args, 0, lines, payload)
+
+
 def _cmd_review(args: argparse.Namespace) -> int:
     """Dispatch a distinct CE-governed reviewer venue for a run's opened PR (G2b).
 
@@ -3246,6 +3463,76 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="perform the gated squash-merge (default: plan-only — read the gate)")
     _add_root(p_merge)
 
+    p_configure_repo = sub.add_parser(
+        "configure-repo",
+        help="plan/apply GitHub repo branch-protection or repo auto-merge setting "
+             "(scoped administration:write token)",
+    )
+    p_configure_repo.add_argument(
+        "--app-config", required=True, dest="app_config",
+        help="REQUIRED path to the host GitHub-App config JSON — no default",
+    )
+    p_configure_repo.add_argument("--branch", default="main", help="branch to protect (default: main)")
+    p_configure_repo.add_argument(
+        "--allow-auto-merge", action="store_true", dest="allow_auto_merge",
+        help="toggle the repository-level allow_auto_merge setting instead of branch protection",
+    )
+    p_configure_repo.add_argument("--apply", action="store_true",
+                                  help="apply the repo configuration (default: plan-only)")
+    _add_root(p_configure_repo)
+
+    p_ruleset = sub.add_parser(
+        "ruleset",
+        help="plan/apply a repo ruleset with pull_request bypass actor "
+             "(scoped administration:write token)",
+    )
+    p_ruleset.add_argument("--app-config", required=True, dest="app_config",
+                           help="REQUIRED path to the host GitHub-App config JSON — no default")
+    p_ruleset.add_argument("--name", default="ce-p1-devops", help="repo ruleset name")
+    p_ruleset.add_argument("--branch", default="main", help="protected branch (default: main)")
+    p_ruleset.add_argument("--required-approvals", type=int, default=1, dest="required_approvals",
+                           help="required approving review count (default: 1)")
+    p_ruleset.add_argument("--bypass-integration-id", type=int, default=4070181,
+                           dest="bypass_integration_id",
+                           help="GitHub App integration id for pull_request bypass")
+    p_ruleset.add_argument("--delete", action="store_true", help="delete the named repo ruleset")
+    p_ruleset.add_argument("--apply", action="store_true",
+                           help="apply the ruleset change (default: plan-only)")
+    _add_root(p_ruleset)
+
+    p_review_submit = sub.add_parser(
+        "review-submit",
+        help="submit the separate reviewer App's APPROVE for a run's opened PR "
+             "(scoped pull_requests:write token)",
+    )
+    p_review_submit.add_argument("scope_id", metavar="ID", help="the Scope the author run delivered")
+    p_review_submit.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                                 help="the AUTHOR run id whose opened PR is approved")
+    p_review_submit.add_argument("--reviewer-app-config", required=True, dest="reviewer_app_config",
+                                 help="REQUIRED path to the separate reviewer App config JSON")
+    p_review_submit.add_argument("--body", default="", help="optional review body")
+    p_review_submit.add_argument("--apply", action="store_true",
+                                 help="submit the review (default: plan-only)")
+    _add_root(p_review_submit)
+
+    p_auto_merge = sub.add_parser(
+        "auto-merge",
+        help="plan/apply GraphQL per-PR auto-merge for a run's opened PR "
+             "(scoped contents:write + pull_requests:write token)",
+    )
+    p_auto_merge.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
+    p_auto_merge.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
+                              help="the run whose dispatch carries the opened PR")
+    p_auto_merge.add_argument("--app-config", required=True, dest="app_config",
+                              help="REQUIRED path to the host GitHub-App config JSON — no default")
+    p_auto_merge.add_argument("--method", default="squash", choices=["merge", "squash", "rebase"],
+                              help="auto-merge method (default: squash)")
+    p_auto_merge.add_argument("--enable-repo-setting", action="store_true",
+                              help="also plan/apply the repo-level allow_auto_merge toggle")
+    p_auto_merge.add_argument("--apply", action="store_true",
+                              help="enable auto-merge (default: plan-only)")
+    _add_root(p_auto_merge)
+
     p_escalation = sub.add_parser(
         "escalation",
         help="manage local AWAITING-OPERATOR escalation records",
@@ -3506,6 +3793,10 @@ _DISPATCH = {
     "drive": _cmd_drive,
     "collect": _cmd_collect,
     "pr": _cmd_pr,
+    "configure-repo": _cmd_configure_repo,
+    "ruleset": _cmd_ruleset,
+    "review-submit": _cmd_review_submit,
+    "auto-merge": _cmd_auto_merge,
     "review": _cmd_review,
     "merge": _cmd_merge,
     "escalation": _cmd_escalation,

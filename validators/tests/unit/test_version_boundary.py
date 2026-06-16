@@ -92,7 +92,9 @@ def test_taxonomy_counts_and_disjoint():
     # (``runner.os_native_backend``): 41 -> 42.
     # ce-ops#88 added the production live-forge ApplyDriver (``onboard_apply_live``): 42 -> 43.
     # G-A2 runner Ring-1 increment 1 added ``runner.ring1_tool_guard``: 43 -> 44.
-    assert len(ver.V3_RUNTIME) == 44
+    # ce-ops#99 P1 added three repo-scope devops forge ops
+    # (``forge.ruleset``, ``forge.review_submit``, ``forge.auto_merge``): 44 -> 47.
+    assert len(ver.V3_RUNTIME) == 47
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
