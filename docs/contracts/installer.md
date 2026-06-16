@@ -119,11 +119,20 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
 - **Repo plan** (`plan_repo`): `existing` (detect-and-offer the cwd origin)
   vs `new` (visibility / default branch / description); idempotent — a
   re-run where the repo already exists converges to use-existing.
-- **Bootstrap-token scope VERIFICATION** (`bootstrap_scope_table`): the
-  installer's one-time credential is *checked, not asked* — minimal
-  fine-grained scopes `administration:write · contents:write ·
-  actions:write · workflows:write` (+ org repo-create iff new-in-org);
-  unprobed = fail-closed. Never stored: runtime forge access is the App's
+- **Bootstrap-token VERIFICATION** (`bootstrap_scope_table` /
+  `bootstrap_required_scopes`): the installer's one-time credential is
+  *checked, not asked*, and the requirement is **right-sized to the operation**
+  (ce-ops#94). A **plain-join** (joining an already-CE repo) writes nothing with
+  this PAT — every forge op rides the App's JIT scoped token and protection is
+  verify-only — so the requirement is **identity-only** (a valid login distinct
+  from the App bot). A **greenfield** create needs `contents:write ·
+  administration:write · actions:write · workflows:write` (+ org repo-create iff
+  new-in-org). **Both classic and fine-grained PATs are accepted**: a classic
+  PAT is verified via its `X-OAuth-Scopes`; a fine-grained PAT (GitHub's
+  recommended default) emits none and is not permission-introspectable, so its
+  greenfield write-capability is enforced **fail-closed at the write legs**
+  (each refuses on a 403) rather than at the probe. Unprobed / unknown-and-
+  unverifiable = fail-closed. Never stored: runtime forge access is the App's
   JIT scoped token, never this one.
 - **App plan** (`plan_github_app`): `shared` (the CE-published App — the
   solo-pilot default) vs `own` (`app_id` / `client_id` / PEM **SecretRef,

@@ -115,6 +115,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         scope_sets: tuple[str, ...] | None = None,
         branch_protection_ok: bool = True,
         existing_protection_contexts: tuple[str, ...] = (),
+        token_type: str = "classic",
     ):
         self.calls: list[str] = []
         self.tools = {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES}
@@ -125,6 +126,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.runtime_ok = runtime_ok
         self.host_install_ok = host_install_ok
         self.scope_sets = scope_sets
+        self.token_type = token_type
         # ce-ops#85 plain-join detection/reconcile knobs: whether the live branch
         # protection floor verifies, and the live required-check contexts the
         # reconcile must PRESERVE (never drop).
@@ -184,12 +186,17 @@ class FakeDriver(onboard_apply.ApplyDriver):
 
     def probe_bootstrap_token(self, *, token, repo, org_create_needed):
         self.calls.append("probe_bootstrap_token")
-        scopes = self.scope_sets
-        if scopes is None:
-            scopes = v3_installer.REQUIRED_BOOTSTRAP_SCOPES + (
-                (v3_installer.ORG_CREATE_SCOPE,) if org_create_needed else ()
-            )
-        return {"ok": True, "login": "human-reviewer", "scopes": scopes}
+        result = {"ok": True, "login": "human-reviewer", "token_type": self.token_type}
+        # ce-ops#94: only a classic token reports a derived scope set; a fine-grained / unknown
+        # token reports none (capability is gated by token_type + right-sized requirement).
+        if self.token_type == "classic":
+            scopes = self.scope_sets
+            if scopes is None:
+                scopes = v3_installer.REQUIRED_BOOTSTRAP_SCOPES + (
+                    (v3_installer.ORG_CREATE_SCOPE,) if org_create_needed else ()
+                )
+            result["scopes"] = scopes
+        return result
 
     def repo_exists(self, repo: str) -> bool:
         self.calls.append("repo_exists")
@@ -584,4 +591,54 @@ def test_bootstrap_token_scope_table_fail_closed(tmp_path):
     summary = _apply(tmp_path, driver)
     leg = _leg(summary, "github_bootstrap_token_probe")
     assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == "bootstrap_token_scope_refused"
     assert "missing bootstrap scopes" in leg["detail"]
+
+
+def test_plain_join_finegrained_pat_passes_identity_only(tmp_path):
+    # ce-ops#94 / #90 end-to-end: ce-dev-3 joining an already-CE repo with a FINE-GRAINED PAT.
+    # Plain-join writes NOTHING with the PAT (forge ops ride the App token; protection is
+    # verify-first/defer-not-mutate) -> identity-only -> the probe passes and the onboard
+    # converges with NO PAT broadening and NO admin role.
+    driver = FakeDriver(repo_exists=True, token_type="fine_grained")
+    summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    leg = _leg(summary, "github_bootstrap_token_probe")
+    assert leg["status"] == "already_satisfied"
+    assert leg["verification"]["token_type"] == "fine_grained"
+    assert leg["verification"]["capability"]["mode"] == "identity_only_plain_join"
+    assert summary["repos_already_satisfied"] == 1
+
+
+def test_greenfield_finegrained_pat_probe_defers_capability_to_write_legs(tmp_path):
+    # ce-ops#94: greenfield with a fine-grained PAT (GitHub's recommended default). Its write
+    # capability is NOT introspectable pre-flight, so the probe accepts on identity/validity and
+    # the greenfield write legs are the fail-closed enforcement point. The probe must NOT refuse.
+    driver = FakeDriver(token_type="fine_grained")
+    summary = _apply(tmp_path, driver)  # default mode="new"
+    leg = _leg(summary, "github_bootstrap_token_probe")
+    assert leg["status"] == "already_satisfied"
+    assert leg["verification"]["capability"]["mode"] == "fine_grained_enforced_at_write_legs"
+
+
+def test_greenfield_unknown_token_type_is_fail_closed(tmp_path):
+    # Unknown token type AND no classic X-OAuth-Scopes -> the greenfield requirement cannot be
+    # verified -> refuse (never silent-pass).
+    driver = FakeDriver(token_type="unknown")
+    summary = _apply(tmp_path, driver)
+    leg = _leg(summary, "github_bootstrap_token_probe")
+    assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == "bootstrap_token_unverifiable"
+
+
+def test_bootstrap_invalid_token_is_refused_distinctly(tmp_path):
+    # An invalid token (GET /user fails) refuses with a DISTINCT code, separate from scope refusal.
+    class _InvalidProbe(FakeDriver):
+        def probe_bootstrap_token(self, *, token, repo, org_create_needed):
+            self.calls.append("probe_bootstrap_token")
+            return {"ok": False, "reason": "bootstrap_probe_failed"}
+
+    summary = _apply(tmp_path, _InvalidProbe())
+    leg = _leg(summary, "github_bootstrap_token_probe")
+    assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == "bootstrap_token_invalid"

@@ -1,0 +1,5 @@
+HTTP/2.0 200 OK
+Content-Type: application/json; charset=utf-8
+X-Accepted-Github-Permissions: allows_permissionless_access=true
+
+{"login":"ce-dev-3","id":293633657,"type":"User"}
