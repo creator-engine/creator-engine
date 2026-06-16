@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from creator_engine_validator import _versions as ver
+from creator_engine_validator.runner import ring1_tool_guard as _ring1_tool_guard
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.version_boundary import (
     CHECK_NAME,
@@ -90,7 +91,8 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#71 Tranche 1 added the unprivileged OS-native backend scaffold
     # (``runner.os_native_backend``): 41 -> 42.
     # ce-ops#88 added the production live-forge ApplyDriver (``onboard_apply_live``): 42 -> 43.
-    assert len(ver.V3_RUNTIME) == 43
+    # G-A2 runner Ring-1 increment 1 added ``runner.ring1_tool_guard``: 43 -> 44.
+    assert len(ver.V3_RUNTIME) == 44
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -132,6 +134,7 @@ def test_classify_lines():
     assert ver.classify("seat_reaper") == ver.V3
     assert ver.classify("reaper_executors") == ver.V3
     assert ver.classify("runner.os_native_backend") == ver.V3
+    assert ver.classify("runner.ring1_tool_guard") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call
@@ -228,3 +231,9 @@ def test_14_reaper_crosses_to_v1_legs_via_subprocess_data_only():
     forbidden = {"transcript_archive", "pco_allocator", "ce_cli", "lane_runtime", "launch_runtime"}
     for module in (_seat_reaper, _reaper_executors):
         assert _top_level_imports(module).isdisjoint(forbidden)
+
+
+def test_ring1_tool_guard_is_v3_and_imports_no_v1_hook_check():
+    assert "runner.ring1_tool_guard" in ver.V3_RUNTIME
+    imports = _top_level_imports(_ring1_tool_guard)
+    assert "hook_check" not in imports

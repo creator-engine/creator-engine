@@ -81,6 +81,13 @@ from .backend import (
     TeardownResult,
     register_backend,
 )
+from .ring1_tool_guard import (
+    DEFAULT_SHIM_DIR as DEFAULT_RING1_SHIM_DIR,
+    Ring1GuardRuntime,
+    Ring1ToolGuardConfig,
+    build_runtime as build_ring1_runtime,
+    render_install_script as render_ring1_install_script,
+)
 
 BACKEND_KEY = "openshell"
 
@@ -597,6 +604,9 @@ class FakeSandboxClient:
         self._delete_released = delete_released
         self.created_specs: list[SandboxCreateSpec] = []
         self.exec_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.exec_environments: list[dict[str, str] | None] = []
+        self.exec_workdirs: list[str | None] = []
+        self.exec_timeouts: list[int | None] = []
         self.deleted: list[str] = []
 
     def create_sandbox(self, spec: SandboxCreateSpec) -> str:
@@ -613,6 +623,9 @@ class FakeSandboxClient:
         timeout_seconds: int | None = None,
     ) -> ExecOutcome:
         self.exec_calls.append((sandbox_id, tuple(command)))
+        self.exec_environments.append(dict(environment) if environment is not None else None)
+        self.exec_workdirs.append(workdir)
+        self.exec_timeouts.append(timeout_seconds)
         return ExecOutcome(exit_code=self._exit_code, stdout=self._stdout, stderr=self._stderr)
 
     def collect_evidence(self, sandbox_id: str) -> Sequence[dict[str, Any]]:
@@ -745,10 +758,19 @@ class OpenShellBackend(RunnerBackend):
 
     backend_key = BACKEND_KEY
 
-    def __init__(self, client: SandboxClient | None = None) -> None:
+    def __init__(
+        self,
+        client: SandboxClient | None = None,
+        ring1_guard: Ring1ToolGuardConfig | None = None,
+    ) -> None:
         self._client: SandboxClient = client if client is not None else _UnwiredSandboxClient()
+        self._ring1_guard = ring1_guard
         #: handle.ref -> OpenShell sandbox_id
         self._sandboxes: dict[str, str] = {}
+        #: handle.ref -> installed Ring-1 guard runtime. Increment 1 is PATH-shim
+        #: mediation for shell-level git/gh only; binary hiding, filesystem
+        #: mediation, and egress defenses are later gates.
+        self._guard_runtimes: dict[str, Ring1GuardRuntime] = {}
 
     def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         # The G-1.0 deny surface (mapping + validate_runtime_policy → PolicyRejected)
@@ -767,11 +789,28 @@ class OpenShellBackend(RunnerBackend):
             ref=f"openshell:{request.run_id}",
         )
         self._sandboxes[handle.ref] = sandbox_id
+        if self._ring1_guard is not None:
+            runtime = build_ring1_runtime(self._ring1_guard, DEFAULT_RING1_SHIM_DIR)
+            install = render_ring1_install_script(self._ring1_guard, runtime.shim_dir)
+            outcome = self._client.exec_sandbox(sandbox_id, ("sh", "-c", install))
+            if outcome.exit_code != 0:
+                self._sandboxes.pop(handle.ref, None)
+                self._guard_runtimes.pop(handle.ref, None)
+                self._client.delete_sandbox(sandbox_id)
+                detail = (outcome.stderr or outcome.stdout or "").strip()
+                suffix = f": {detail}" if detail else ""
+                raise BackendUnavailable(f"failed to install Ring-1 tool guard{suffix}")
+            self._guard_runtimes[handle.ref] = runtime
         return handle
 
     def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
         sandbox_id = self._sandboxes.get(handle.ref, handle.ref)
-        outcome = self._client.exec_sandbox(sandbox_id, request.command)
+        runtime = self._guard_runtimes.get(handle.ref)
+        outcome = self._client.exec_sandbox(
+            sandbox_id,
+            request.command,
+            environment=runtime.env if runtime is not None else None,
+        )
         return RunResult(
             exit_code=outcome.exit_code,
             stdout=outcome.stdout or "",
@@ -791,6 +830,7 @@ class OpenShellBackend(RunnerBackend):
 
     def teardown(self, handle: ProvisionedHandle) -> TeardownResult:
         sandbox_id = self._sandboxes.pop(handle.ref, handle.ref)
+        self._guard_runtimes.pop(handle.ref, None)
         released = self._client.delete_sandbox(sandbox_id)
         return TeardownResult(handle_ref=handle.ref, released=bool(released))
 
