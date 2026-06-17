@@ -2924,6 +2924,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     )
     if apply_mode:
         plain_join_driver = None
+        adoption_driver = None  # ce-ops#85 — the E3 adoption driver (genuine-brownfield join PR)
+        adoption_mode = False
         live_candidate = None  # ce-ops#88 — a live-forge driver to revoke on every exit
         if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
             # ce-ops#85 — a new dev JOINING an ALREADY-CE repo is a *plain-join*,
@@ -2936,7 +2938,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             # live-forge factory wraps it (default OFF → pass-through, so the FakeDriver
             # monkeypatch is untouched). A live driver mints a token during detection, so it
             # is tracked in ``live_candidate`` and revoked (``close``) on every exit path.
-            candidate_driver = onboard_apply_live.live_forge_select(
+            # ce-ops#85 — the adoption selector returns the E3 adoption driver ONLY under the
+            # DUAL escalation (CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE); otherwise it
+            # delegates to the read-only live driver (or the base), so an unauthorized run keeps
+            # the unchanged brownfield_deferred status quo. The driver still serves detection.
+            candidate_driver = onboard_apply_live.adoption_forge_select(
                 _onboard_apply_driver(), merged=merged, policy_sha=_install_spec_digest
             )
             live_candidate = candidate_driver
@@ -2949,6 +2955,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             ):
                 plain_join_driver = candidate_driver
             elif brownfield_plan["blocked"]:
+                # A blocker (needs_baseline_capture / dirty tree / scanner_unavailable /
+                # unwaived findings / unratified waiver) ALWAYS refuses — even when authorized.
                 _close_apply_driver(live_candidate)
                 blocker = brownfield_plan["blockers"][0]
                 return _emit(
@@ -2963,19 +2971,28 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                         "brownfield_adoption": brownfield_plan,
                     },
                 )
+            elif (
+                isinstance(candidate_driver, onboard_apply_live.LiveForgeAdoptionDriver)
+                and brownfield_plan["classification"] in {"adoptable", "adoptable_after_scrub"}
+            ):
+                # ce-ops#85 — AUTHORIZED genuine-brownfield adoption: drive the join-PR legs.
+                adoption_driver = candidate_driver
+                adoption_mode = True
             else:
+                # Not authorized for the write escalation → unchanged status-quo refuse.
                 _close_apply_driver(live_candidate)
                 return _emit(
                     args,
                     1,
                     [
                         f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
-                        "E3 brownfield adoption is planned, but this E2 onboard_apply build has no brownfield apply legs"
+                        "E3 brownfield adoption is planned, but this onboard_apply run is not authorized "
+                        "for the adoption write escalation (set CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE)"
                     ],
                     {
                         "error": "refused",
                         "code": "e2_brownfield_seam_unavailable",
-                        "detail": "E3 brownfield apply must run through E2 onboard_apply extension legs; this build only emits the handoff plan",
+                        "detail": "E3 brownfield apply requires the adoption write escalation (CE_FORGE_ADOPTION_WRITE); this run only emits the handoff plan",
                         "brownfield_blockers": [],
                         "brownfield_adoption": brownfield_plan,
                     },
@@ -2996,11 +3013,16 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             first_scope_id=args.first_scope_id,
             lock_timeout_seconds=args.lock_timeout,
             spawn_smoke=bool(args.spawn_smoke),
+            # ce-ops#85 adoption-apply: the join-PR projection + fresh probe + the mode flag.
+            adoption_apply=adoption_mode,
+            brownfield_plan=brownfield_plan if adoption_mode else None,
+            brownfield_probe=brownfield_probe if adoption_mode else None,
         )
         try:
-            if plain_join_driver is not None:
+            apply_driver = adoption_driver or plain_join_driver
+            if apply_driver is not None:
                 summary = onboard_apply.apply_onboard(
-                    request, verifier=apply_verifier, driver=plain_join_driver
+                    request, verifier=apply_verifier, driver=apply_driver
                 )
             else:
                 summary = onboard_apply.apply_onboard(request, verifier=apply_verifier)
@@ -3040,6 +3062,14 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"    outcomes · applied {summary['applied']} · already {summary['already_satisfied']} "
             f"· refused {summary['refused']} · failed {summary['failed']} · skipped {summary['skipped']}",
         ]
+        if summary.get("brownfield_adopted"):
+            pr = summary.get("brownfield_adoption_pr") or {}
+            lines.append(
+                f"    adoption · join PR #{pr.get('pr_number')} on {pr.get('repo')} "
+                f"({pr.get('branch')} → {pr.get('base')}) · scrub findings "
+                f"{summary.get('brownfield_scrub_findings', 0)} "
+                f"(waived {summary.get('brownfield_scrub_findings_waived', 0)})"
+            )
         if summary["manual_rollback_required"]:
             lines.append(
                 f"    rollback · {summary['manual_rollback_required']} leg(s) require manual verification/cleanup"

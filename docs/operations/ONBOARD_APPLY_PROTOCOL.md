@@ -53,7 +53,38 @@ The ratified E2 leg order is stable:
 
 Later legs run only after earlier required legs verify or are already satisfied.
 Greenfield repo reuse requires E2 ledger provenance plus live verification.
-Arbitrary existing repos are refused as `brownfield_deferred`; E3 owns adoption.
+
+### Adoption legs (ce-ops#85 E3 adoption-apply, mode-gated)
+
+For a genuine non-CE existing repo, when the dual escalation is authorized
+(`CE_FORGE_LIVE_FORGE=1` + `CE_FORGE_ADOPTION_WRITE=1`) and the repo is
+`adoptable`/`adoptable_after_scrub`, `onboard --apply` drives seven adoption legs
+appended to `LEG_IDS` (the join-PR flow); the greenfield FORGE legs (6–12 above)
+return `skipped` (`brownfield_adoption_mode`), and the early local legs (1–5) run
+in both modes:
+
+13. `brownfield_inventory_drift_check`
+14. `brownfield_secret_preflight` (the hard, affirmatively fail-closed scrub)
+15. `brownfield_build_scaffold`
+16. `brownfield_push_branch` (never force)
+17. `brownfield_open_join_pr` (exactly one PR; idempotent claim)
+18. `brownfield_verify_preserved_checks`
+19. `brownfield_record_apply_evidence`
+
+In every non-adoption run these seven return `skipped` (`not_brownfield_adoption`).
+Reads (13/14/18 + the clone) ride the inherited Phase-1 READ token
+(`administration:read`); the writes (16/17) ride a separate WRITE token
+(`contents:write`+`workflows:write` Tier-2, `pull_requests:write` Tier-3) minted
+for those two legs only and revoked immediately after — `administration:write` is
+never minted. With the escalation absent, an existing non-CE repo keeps the
+unchanged `brownfield_deferred` / `e2_brownfield_seam_unavailable` refuse. See
+`docs/contracts/brownfield-adoption.md` for the full join-PR contract.
+
+The live scrub in leg 14 runs only with runtime sha256-pinned scanner configuration:
+`CE_FORGE_GITLEAKS_URL` + `CE_FORGE_GITLEAKS_SHA256` and
+`CE_FORGE_TRUFFLEHOG_URL` + `CE_FORGE_TRUFFLEHOG_SHA256`. Missing, partial, or
+invalid pins are not clean; they keep the leg fail-closed until the VPS Mode-A host
+supplies the verified scanner pins.
 
 The `github_bootstrap_token_probe` requirement is **right-sized to the operation**
 (ce-ops#94): a **plain-join** (joining an already-CE repo) requires only a valid
@@ -74,10 +105,16 @@ The JSON action is `onboard_apply`. Top-level counters are derived from actual
 leg outcomes: `applied`, `already_satisfied`, `verified_count`, `skipped`,
 `refused`, `failed`, `rolled_back`, `manual_rollback_required`,
 `greenfield_repos_created`, `repos_already_satisfied`, and
-`brownfield_deferred`.
+`brownfield_deferred`. The adoption-apply counters (ce-ops#85) are
+`brownfield_adopted` (a join PR opened **or** idempotently claimed **and verified**
+this run — the one counter rule), `brownfield_adoption_pr`
+(`{repo,branch,base,pr_number,head_sha,plan_ref}` when opened, else `null`),
+`brownfield_scrub_findings`, `brownfield_scrub_findings_waived`, and
+`brownfield_scrub_findings_blocking`.
 
-A planned action is not counted as applied. A failed verification makes the leg
-failed even when the mutation API returned success. Manual rollback is explicit
+A planned action is not counted as applied — `brownfield_adopted` is never
+incremented on a planned-but-unpushed branch or an unverified PR. A failed
+verification makes the leg failed even when the mutation API returned success. Manual rollback is explicit
 for package installs, App authorization, remote repo deletion, or any cleanup
 that cannot be proven safe.
 

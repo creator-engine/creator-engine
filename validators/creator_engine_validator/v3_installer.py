@@ -1490,13 +1490,20 @@ BROWNFIELD_SKILL_ARTIFACT_PATHS = (
 )
 BROWNFIELD_SCOPE_SEED_PATH = ".ce/state/scopes/ce-brownfield-adoption.scope.yaml"
 BROWNFIELD_REQUIRED_CHECK = "Validate governance artifacts"
+BROWNFIELD_ADOPTION_BRANCH = "ce/adopt-governance"
+#: ce-ops#85 E3 adoption-APPLY (the join-PR layer) — the CANONICAL executor leg ids.
+#: This names the actual ``onboard_apply`` adoption legs (the join-PR flow), so the
+#: projection (this constant + the ``--plan`` ``apply_steps`` below) and the executor
+#: AGREE (verify-verdict MINOR). ``github_branch_protection`` is DROPPED: the join PR is
+#: PR-mediated and never mutates branch protection (``administration:write`` is excluded
+#: from the §6 ceiling — OQ-1), so the projection must not promise a step the executor
+#: never performs. ``onboard_apply.ADOPTION_LEG_IDS`` aliases this exact tuple.
 BROWNFIELD_APPLY_STEP_IDS = (
     "brownfield_inventory_drift_check",
     "brownfield_secret_preflight",
-    "brownfield_write_skill_artifacts",
-    "brownfield_write_scope_seed",
-    "github_workflow_install",
-    "github_branch_protection",
+    "brownfield_build_scaffold",
+    "brownfield_push_branch",
+    "brownfield_open_join_pr",
     "brownfield_verify_preserved_checks",
     "brownfield_record_apply_evidence",
 )
@@ -1978,6 +1985,27 @@ def canonical_brownfield_inventory_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
+def brownfield_inventory_sha256(
+    schema: dict[str, Any],
+    answers: dict[str, Any] | None,
+    probe: dict[str, Any] | None,
+) -> str:
+    """Recompute the brownfield inventory digest from (schema, answers, probe).
+
+    ce-ops#85 E3 adoption-APPLY: the ``brownfield_inventory_drift_check`` leg recomputes
+    this over a FRESH read-only inventory at apply time and compares it to the ratified
+    plan's ``inventory_sha256``; a mismatch means the repo drifted since ``--plan`` and the
+    adoption refuses (``brownfield_inventory_drift``) before any scrub/build/push. It is the
+    SAME canonical payload + hash :func:`build_brownfield_adoption_plan` emits, so a
+    no-drift re-run reproduces the plan's digest exactly.
+    """
+    merged = merge_answers(
+        schema, answers=answers or None, detected=brownfield_detected_facts(probe or {})
+    )
+    payload = _brownfield_inventory_payload(schema, merged, probe or {})
+    return canonical_brownfield_inventory_sha256(payload)
+
+
 def _normalized_workflows(probe: dict[str, Any]) -> list[dict[str, Any]]:
     workflows: list[dict[str, Any]] = []
     for wf in (probe.get("ci") or {}).get("workflows", ()):
@@ -2197,11 +2225,32 @@ def _brownfield_blockers(
             "detail": "tracked working-tree changes make the inventory stale",
         })
     secrets = probe.get("secrets") or {}
-    if inventory["secrets_preflight"]["required"] and secrets.get("scanner_available") is False:
-        blockers.append({
-            "code": "scanner_unavailable",
-            "detail": "secrets preflight is required but no supported scanner is available",
-        })
+    scanner_available = secrets.get("scanner_available")
+    secrets_status = str(secrets.get("status") or "not_run")
+    if inventory["secrets_preflight"]["required"]:
+        # ce-ops#85 verify-verdict MAJOR-2 (plan-side fail-open fix): the old guard only
+        # blocked on an EXPLICIT ``scanner_available is False`` — a ``None``/absent value
+        # (a probe that simply did not RUN the scanner yet) slipped through. That is
+        # benign for the pre-apply ``not_run`` projection (the apply leg runs + fail-closes
+        # the scrub for real, see ``onboard_apply.brownfield_secret_preflight``), so it
+        # stays ``adoptable_after_scrub``. The fail-OPEN we close: a probe that CLAIMS the
+        # scrub is ``clean`` WITHOUT an affirmative ``scanner_available is True`` — absence
+        # of an affirmed scanner must never read as "clean" (a green ``adoptable`` verdict
+        # that lets a consumer treat apply as already-scrubbed). Treat anything other than
+        # an affirmative ``True`` behind a ``clean`` claim as a STOP.
+        if scanner_available is False:
+            blockers.append({
+                "code": "scanner_unavailable",
+                "detail": "secrets preflight is required but no supported scanner is available",
+            })
+        elif secrets_status == "clean" and scanner_available is not True:
+            blockers.append({
+                "code": "scanner_unavailable",
+                "detail": (
+                    "secrets preflight reports 'clean' without an affirmative available "
+                    "scanner; absence of a parsed/affirmed scanner is NOT clean (fail-closed)"
+                ),
+            })
     finding_ids = _finding_ids(secrets.get("findings"))
     answers_waivers = _waivers_by_id(merged.value("brownfield.secrets.waivers", []))
     unwaived = [fid for fid in finding_ids if fid not in answers_waivers]
@@ -2237,6 +2286,11 @@ def _classification(blockers: list[dict[str, str]], inventory: dict[str, Any]) -
 
 
 def _apply_steps(inventory: dict[str, Any], artifact_plan: dict[str, Any], inventory_sha256: str) -> list[dict[str, Any]]:
+    scaffold_paths = [
+        *[a["path"] for a in artifact_plan["skill_artifacts"]],
+        artifact_plan["scope_seed_path"],
+        ".github/workflows/ce-validate.yml",
+    ]
     return [
         {
             "id": "brownfield_inventory_drift_check",
@@ -2246,31 +2300,35 @@ def _apply_steps(inventory: dict[str, Any], artifact_plan: dict[str, Any], inven
         {
             "id": "brownfield_secret_preflight",
             "e2_leg": "brownfield_scrub_preflight",
-            "scan_paths": [".", *[a["path"] for a in artifact_plan["skill_artifacts"]], artifact_plan["scope_seed_path"]],
+            "scan_paths": [".", *scaffold_paths],
             "writes": [],
         },
         {
-            "id": "brownfield_write_skill_artifacts",
-            "e2_leg": "brownfield_write_artifacts",
-            "paths": [a["path"] for a in artifact_plan["skill_artifacts"]],
+            "id": "brownfield_build_scaffold",
+            "e2_leg": "brownfield_build_scaffold",
+            "paths": scaffold_paths,
             "requires": ["secrets_preflight_clean_or_waived"],
         },
         {
-            "id": "brownfield_write_scope_seed",
-            "e2_leg": "brownfield_write_scope_seed",
-            "path": artifact_plan["scope_seed_path"],
-            "requires": ["secrets_preflight_clean_or_waived"],
+            "id": "brownfield_push_branch",
+            "e2_leg": "brownfield_push_branch",
+            "branch": BROWNFIELD_ADOPTION_BRANCH,
+            "requires": ["brownfield_build_scaffold"],
         },
         {
-            "id": "github_workflow_install",
-            "e2_leg": "github_workflow_install",
-            "checks_to_add": inventory["ci"]["checks_to_add"],
+            "id": "brownfield_open_join_pr",
+            "e2_leg": "brownfield_open_join_pr",
+            "base": inventory["history"]["default_branch"],
+            "branch": BROWNFIELD_ADOPTION_BRANCH,
+            "manifest_paths": scaffold_paths,
+            "plan_ref": inventory_sha256,
+            "requires": ["brownfield_push_branch"],
         },
-        {
-            "id": "github_branch_protection",
-            "e2_leg": "github_branch_protection",
-            "checks_to_preserve": inventory["ci"]["checks_to_preserve"],
-        },
+        # ce-ops#85 verify-verdict MINOR: NO ``github_branch_protection`` step. The
+        # adoption join PR is PR-mediated and never mutates branch protection
+        # (``administration:write`` excluded, §6 OQ-1); the union is only *recommended*
+        # in the PR body. The projection must not promise a write the executor never
+        # issues, so this step is dropped (projection ↔ executor agree).
         {
             "id": "brownfield_verify_preserved_checks",
             "e2_leg": "brownfield_verify_preserved_checks",

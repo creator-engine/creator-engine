@@ -1206,9 +1206,14 @@ def test_secret_preflight_required_plans_scanner_before_artifact_writes():
     )
     assert plan["classification"] == "adoptable_after_scrub"
     ids = [step["id"] for step in plan["apply_steps"]]
-    assert ids.index("brownfield_secret_preflight") < ids.index("brownfield_write_skill_artifacts")
-    write_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_write_skill_artifacts")
-    assert "secrets_preflight_clean_or_waived" in write_step["requires"]
+    assert ids == list(inst.BROWNFIELD_APPLY_STEP_IDS)
+    assert ids.index("brownfield_secret_preflight") < ids.index("brownfield_build_scaffold")
+    scrub_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_secret_preflight")
+    assert ".github/workflows/ce-validate.yml" in scrub_step["scan_paths"]
+    build_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_build_scaffold")
+    assert "secrets_preflight_clean_or_waived" in build_step["requires"]
+    pr_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_open_join_pr")
+    assert pr_step["plan_ref"] == plan["inventory_sha256"]
 
 
 def test_secret_waiver_requires_ratification_binding():
