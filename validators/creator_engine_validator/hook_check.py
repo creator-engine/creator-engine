@@ -274,6 +274,54 @@ _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
         "merge-base",
     }
 )
+_GIT_BUILTINS = _GIT_SAFE_READONLY_SUBCOMMANDS | frozenset(
+    {
+        # Restricted outward/binding side effects.
+        "push",
+        "branch",
+        # Ordinary local porcelain used constantly inside governed seats.
+        "add",
+        "am",
+        "apply",
+        "bisect",
+        "blame",
+        "checkout",
+        "cherry-pick",
+        "clean",
+        "clone",
+        "commit",
+        "config",
+        "fetch",
+        "grep",
+        "init",
+        "merge",
+        "mv",
+        "notes",
+        "pull",
+        "rebase",
+        "reflog",
+        "remote",
+        "reset",
+        "restore",
+        "revert",
+        "rm",
+        "stash",
+        "submodule",
+        "switch",
+        "tag",
+        "worktree",
+        # Common plumbing/read helpers.
+        "check-attr",
+        "check-ignore",
+        "check-ref-format",
+        "count-objects",
+        "for-each-ref",
+        "hash-object",
+        "ls-remote",
+        "rev-list",
+        "update-index",
+    }
+)
 
 
 def _shell_tokens(command: str) -> list[str]:
@@ -312,14 +360,17 @@ def _classify_git_subcommand(
 ) -> str | None:
     """Map a resolved git subcommand to a restricted mechanic.
 
-    Git aliases can hide the effective subcommand. Inline ``-c alias.*=...``
-    definitions are resolved here; shell aliases (``!cmd``), recursive aliases,
-    or unknown subcommands are treated as the conservative ``git_opaque`` deny
-    class rather than being allowed through a fail-open gap.
+    Git built-ins take precedence over same-named aliases. Only ``push`` and
+    branch deletion are restricted; ordinary local built-ins return ``None``.
+    Inline aliases are resolved only for non-built-in names. Unparseable alias
+    shapes stay conservative (``git_opaque``), while plain unknown subcommands
+    without aliases return ``None`` because git itself will reject them.
     """
 
     seen: set[str] = set()
-    while subcommand in aliases:
+    while subcommand not in _GIT_BUILTINS:
+        if subcommand not in aliases:
+            return _GIT_OPAQUE_MECHANIC if seen else None
         if subcommand in seen:
             return _GIT_OPAQUE_MECHANIC
         seen.add(subcommand)
@@ -335,6 +386,8 @@ def _classify_git_subcommand(
         if _is_git_executable(alias_tokens[0]):
             nested = _classify_git_tokens(alias_tokens[1:])
             return nested or _GIT_OPAQUE_MECHANIC
+        if alias_tokens[0].startswith("-"):
+            return _GIT_OPAQUE_MECHANIC
         subcommand = alias_tokens[0]
         args = (*alias_tokens[1:], *args)
 
@@ -342,9 +395,7 @@ def _classify_git_subcommand(
         return "deploy"
     if subcommand == "branch":
         return "alter_repo_settings" if _git_branch_deletes(args) else None
-    if subcommand in _GIT_SAFE_READONLY_SUBCOMMANDS:
-        return None
-    return _GIT_OPAQUE_MECHANIC
+    return None
 
 
 def _classify_git_tokens(tokens: list[str]) -> str | None:

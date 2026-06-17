@@ -138,10 +138,81 @@ def test_governed_bash_git_push_denies():
 @pytest.mark.parametrize(
     "command",
     [
+        pytest.param("git commit -m x", id="commit"),
+        pytest.param("git add -A", id="add_all"),
+        pytest.param("git checkout -b f", id="checkout_branch"),
+        pytest.param("git switch main", id="switch"),
+        pytest.param("git restore .", id="restore"),
+        pytest.param("git fetch origin", id="fetch"),
+        pytest.param("git pull", id="pull"),
+        pytest.param("git merge f", id="merge"),
+        pytest.param("git rebase main", id="rebase"),
+        pytest.param("git reset --hard", id="reset_hard"),
+        pytest.param("git stash", id="stash"),
+        pytest.param("git tag v", id="tag"),
+        pytest.param("git cherry-pick a", id="cherry_pick"),
+        pytest.param("git revert a", id="revert"),
+        pytest.param("git mv a b", id="mv"),
+        pytest.param("git rm f", id="rm"),
+        pytest.param("git worktree add ../x", id="worktree_add"),
+        pytest.param("git submodule update", id="submodule_update"),
+        pytest.param("git config user.name x", id="config"),
+        pytest.param("git remote -v", id="remote"),
+        pytest.param("git reflog", id="reflog"),
+        pytest.param("git -C . status", id="global_C_status"),
+        pytest.param("git -C . log", id="global_C_log"),
+    ],
+)
+def test_git_grammar_local_subcommands_allow(command):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+@pytest.mark.parametrize(
+    ("command", "action"),
+    [
+        pytest.param("git -c alias.push=status push origin main", "deploy", id="alias_cannot_shadow_push"),
+        pytest.param("git -c alias.push=log push", "deploy", id="alias_log_cannot_shadow_push"),
+        pytest.param(
+            "git -c alias.branch=status branch -D f",
+            "alter_repo_settings",
+            id="alias_cannot_shadow_branch_delete",
+        ),
+        pytest.param("git -C . -c alias.push=status push", "deploy", id="global_C_alias_cannot_shadow_push"),
+    ],
+)
+def test_git_grammar_builtin_alias_shadowing_denies(command, action):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) == action
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert f"restricted mechanic ({action})" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("git -c alias.commit=status commit -m x", id="alias_cannot_shadow_commit"),
+        pytest.param("git -c alias.status=push status", id="alias_cannot_shadow_status"),
+    ],
+)
+def test_git_grammar_builtin_alias_shadowing_allows_local_builtins(command):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         pytest.param("git -C . push origin main", id="git_global_C_push"),
+        pytest.param("git push origin main", id="git_plain_push"),
         pytest.param("git -c alias.p=push p origin main", id="git_alias_push"),
         pytest.param("git --git-dir=/x push", id="git_git_dir_push"),
-        pytest.param("git push origin main", id="git_plain_push"),
+        pytest.param("git --work-tree=/x -C / push", id="git_work_tree_C_push"),
+        pytest.param("git -c http.x=y -C . push", id="git_config_C_push"),
     ],
 )
 def test_git_grammar_deploy_canaries_deny(command):
@@ -153,9 +224,24 @@ def test_git_grammar_deploy_canaries_deny(command):
     assert "restricted mechanic (deploy)" in decision.reason
 
 
-def test_git_grammar_status_with_global_option_allows():
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("git -c alias.x=!sh x", id="shell_alias"),
+        pytest.param("git -c alias.x=not-a-git-command x", id="alias_unknown_target"),
+    ],
+)
+def test_git_grammar_unresolvable_alias_is_opaque_deny(command):
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
-    command = "git -C . status"
+    assert hook_check.classify_mechanics(command) == "git_opaque"
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert "restricted mechanic (git_opaque)" in decision.reason
+
+
+def test_git_grammar_plain_unknown_subcommand_allows():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    command = "git not-a-git-command"
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 

@@ -26,6 +26,10 @@ Adds increment 1 of runner-owned Ring-1 enforcement for OpenShell-backed runs.
   options and inline aliases before matching destructive subcommands; canaries
   now cover `git -C . push`, `git -c alias.p=push p`, `git --git-dir=/x push`,
   plain `git push`, and the non-deploy `git -C . status` read path.
+- Corrected the ce-ops#104 classifier after review: Ring-1 now restricts only
+  outward git mechanics (`push` and branch deletion), allows ordinary local git
+  subcommands such as commit/fetch/checkout/merge/rebase/reset, and honors git
+  built-in precedence so aliases cannot shadow `push` or `branch -D`.
 - Rebuilt the validator app wheel and refreshed `validators/wheelhouse/SHA256SUMS`.
 
 Coverage is precise: this increment proves harness-agnostic shell-level
