@@ -16,8 +16,17 @@ module directly; the version-boundary guard relies on that separation.
 from __future__ import annotations
 
 import json
+import os
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from ..fs_mediation import (
+    FsMediationCapability,
+    RunnerFsConfinement,
+    build_runner_fs_capability,
+    landlock_preexec,
+)
 
 
 DEFAULT_SHIM_DIR = "/tmp/ce-ring1-tool-guard"
@@ -41,13 +50,16 @@ class Ring1ToolGuardConfig:
     ``tools`` is the guarded command surface for this first slice. ``real_binaries``
     pins the downstream executable each shim may exec after an allow decision.
     ``validator_argv`` invokes the public validator CLI and must name a command
-    that accepts ``hook-check`` as its next argument.
+    that accepts ``hook-check`` as its next argument. ``extra_read_roots`` names
+    runner-owned runtime code/config roots that must remain readable after
+    Section-8c Landlock is installed.
     """
 
     posture: str = DEFAULT_POSTURE
     evidence_root: str = DEFAULT_EVIDENCE_ROOT
     posture_root: str | None = None
     ledger_root: str | None = None
+    extra_read_roots: tuple[str, ...] = ()
     posture_env: str = "CE_RING1_POSTURE"
     posture_root_env: str = "CE_RING1_POSTURE_ROOT"
     evidence_root_env: str = "CE_RING1_EVIDENCE_ROOT"
@@ -71,6 +83,9 @@ class Ring1ToolGuardConfig:
         ):
             if value is not None and not value:
                 raise ValueError(f"{label} must be non-empty when provided")
+        for root in self.extra_read_roots:
+            if not isinstance(root, str) or not root:
+                raise ValueError(f"extra_read_roots entries must be non-empty strings: {root!r}")
         real = dict(self.real_binaries)
         for tool in self.tools:
             if not tool or "/" in tool:
@@ -90,10 +105,13 @@ class Ring1ToolGuardConfig:
 
 @dataclass(frozen=True)
 class Ring1GuardRuntime:
-    """Installed guard directory plus environment injected into sandbox runs."""
+    """Installed guard directory plus launch mediation for sandbox runs."""
 
     shim_dir: str
     env: dict[str, str]
+    fs_confinement: RunnerFsConfinement
+    fs_capability: FsMediationCapability
+    fs_preexec_fn: Callable[[], None] | None
 
 
 def _real_binary_for(tool: str, config: Ring1ToolGuardConfig) -> str:
@@ -281,9 +299,35 @@ def guarded_env(config: Ring1ToolGuardConfig, shim_dir: str) -> dict[str, str]:
     return env
 
 
+def _workspace_read_roots(config: Ring1ToolGuardConfig, shim_dir: str) -> tuple[str, ...]:
+    roots: list[str] = [config.posture_root or os.getcwd(), shim_dir]
+    if config.ledger_root is not None and config.ledger_root not in roots:
+        roots.append(config.ledger_root)
+    for root in config.extra_read_roots:
+        if root not in roots:
+            roots.append(root)
+    return tuple(roots)
+
+
 def build_runtime(
-    config: Ring1ToolGuardConfig, shim_dir: str = DEFAULT_SHIM_DIR
+    config: Ring1ToolGuardConfig,
+    shim_dir: str = DEFAULT_SHIM_DIR,
+    *,
+    require_fs_enforcement: bool = True,
 ) -> Ring1GuardRuntime:
     """Build the runtime descriptor for an installed guard directory."""
 
-    return Ring1GuardRuntime(shim_dir=shim_dir, env=guarded_env(config, shim_dir))
+    confinement = RunnerFsConfinement(
+        workspace_read_roots=_workspace_read_roots(config, shim_dir)
+    )
+    capability = build_runner_fs_capability(
+        confinement, require_enforcement=require_fs_enforcement
+    )
+    fs_preexec_fn = landlock_preexec(confinement) if capability.sandbox_fs_enforced else None
+    return Ring1GuardRuntime(
+        shim_dir=shim_dir,
+        env=guarded_env(config, shim_dir),
+        fs_confinement=confinement,
+        fs_capability=capability,
+        fs_preexec_fn=fs_preexec_fn,
+    )

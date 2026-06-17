@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import fs_mediation as fm
 from creator_engine_validator.runner.ring1_tool_guard import (
     DENY_EXIT_CODE,
     DEFAULT_EVIDENCE_ROOT,
     Ring1ToolGuardConfig,
+    build_runtime,
     guarded_env,
     render_install_script,
 )
@@ -307,6 +309,39 @@ def test_guarded_env_includes_backend_pinned_roots():
     env = guarded_env(config, "/tmp/guard")
     assert env["CE_RING1_POSTURE_ROOT"] == "/runtime/worktree"
     assert env["CE_LEDGER_ROOT"] == "/runtime/worktree/.hermes/active-work-ledger"
+
+
+def test_build_runtime_carries_required_landlock_preexec(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    work = tmp_path / "worktree"
+    runtime_code = tmp_path / "validator-code"
+    work.mkdir()
+    runtime_code.mkdir()
+    config = Ring1ToolGuardConfig(
+        base_path="/usr/bin",
+        posture_root=str(work),
+        extra_read_roots=(str(runtime_code),),
+    )
+
+    runtime = build_runtime(config, "/tmp/guard")
+
+    assert runtime.env["PATH"] == "/tmp/guard:/usr/bin"
+    assert runtime.fs_capability.sandbox_fs_enforced is True
+    assert runtime.fs_capability.mechanism == fm.MECHANISM_LANDLOCK
+    assert str(work) in runtime.fs_capability.allow_read_roots
+    assert "/tmp/guard" in runtime.fs_capability.allow_read_roots
+    assert str(runtime_code) in runtime.fs_capability.allow_read_roots
+    assert runtime.fs_preexec_fn is not None
+
+
+def test_build_runtime_fails_closed_when_required_landlock_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: None)
+    work = tmp_path / "worktree"
+    work.mkdir()
+    config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
+
+    with pytest.raises(fm.FsMediationUnavailable, match="fail-closed"):
+        build_runtime(config, "/tmp/guard")
 
 
 @pytest.mark.parametrize("posture", ["auto", "ungoverned"])
