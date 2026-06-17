@@ -1,4 +1,4 @@
-"""OpenShell lifecycle tests for opt-in runner-owned Ring-1 tool guards."""
+"""OpenShell lifecycle tests for default runner-owned Ring-1 tool guards."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def valid_policy() -> dict:
 
 def test_provision_installs_guard_after_sandbox_create():
     fake = FakeSandboxClient()
-    backend = OpenShellBackend(client=fake, ring1_guard=Ring1ToolGuardConfig())
+    backend = OpenShellBackend(client=fake)
 
     backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ring1"))
 
@@ -56,6 +56,9 @@ def test_provision_installs_guard_after_sandbox_create():
     assert command[:2] == ("sh", "-c")
     assert f"cat > {DEFAULT_SHIM_DIR}/git" in command[2]
     assert f"cat > {DEFAULT_SHIM_DIR}/gh" in command[2]
+    assert '"posture": "governed"' in command[2]
+    assert '"posture_root": "/runtime/worktree"' in command[2]
+    assert '"ledger_root": ""' in command[2]
     assert fake.exec_environments == [None]
 
 
@@ -73,8 +76,28 @@ def test_run_injects_guard_path_environment():
     env = fake.exec_environments[-1]
     assert env is not None
     assert env["PATH"] == f"{DEFAULT_SHIM_DIR}:/usr/bin:/bin"
-    assert env["CE_RING1_POSTURE"] == "auto"
+    assert env["CE_RING1_POSTURE"] == "governed"
     assert env["CE_RING1_EVIDENCE_ROOT"] == DEFAULT_EVIDENCE_ROOT
+
+
+def test_default_guard_honors_backend_pinned_root_overrides():
+    fake = FakeSandboxClient(sandbox_id="openshell-sandbox-ring1")
+    backend = OpenShellBackend(
+        client=fake,
+        ring1_posture_root="/runtime/worktree",
+        ring1_ledger_root="/runtime/worktree/.hermes/active-work-ledger",
+    )
+    handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ring1"))
+
+    install = fake.exec_calls[0][1][2]
+    assert '"posture_root": "/runtime/worktree"' in install
+    assert '"ledger_root": "/runtime/worktree/.hermes/active-work-ledger"' in install
+
+    backend.run(handle, RunRequest(command=("codex", "exec")))
+    env = fake.exec_environments[-1]
+    assert env is not None
+    assert env["CE_RING1_POSTURE_ROOT"] == "/runtime/worktree"
+    assert env["CE_LEDGER_ROOT"] == "/runtime/worktree/.hermes/active-work-ledger"
 
 
 def test_no_guard_install_occurs_before_policy_validation_rejects():

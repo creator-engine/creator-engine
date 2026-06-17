@@ -243,8 +243,9 @@ def test_full_lifecycle_through_fake_client():
     assert isinstance(result, RunResult)
     assert result.exit_code == 0 and result.stdout == "hello"
     assert result.started_ref == handle.ref
-    # The injected client saw the exec against the created sandbox id.
-    assert fake.exec_calls == [("openshell-sandbox-xyz", ("echo", "hi"))]
+    # Provision installs the default Ring-1 guard first; the requested run is
+    # still executed against the created sandbox id.
+    assert fake.exec_calls[-1] == ("openshell-sandbox-xyz", ("echo", "hi"))
 
     evidence = backend.collect(handle)
     assert isinstance(evidence, CollectedEvidence)

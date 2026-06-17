@@ -113,6 +113,7 @@ DEFAULT_ENDPOINT_ACCESS = "read-write"
 # CE egress is all-REST today; websocket is a future per-endpoint refinement;
 # full/raw-tunnel endpoints omit the L7 axis.
 DEFAULT_ENDPOINT_PROTOCOL = "rest"
+DEFAULT_RING1_POSTURE_ROOT = "/runtime/worktree"
 
 #: The OpenShell ``SandboxPolicy`` YAML schema version. The live v0.0.57 gateway
 #: REQUIRES a top-level ``version`` (it is the one non-defaulted field in the
@@ -762,15 +763,47 @@ class OpenShellBackend(RunnerBackend):
         self,
         client: SandboxClient | None = None,
         ring1_guard: Ring1ToolGuardConfig | None = None,
+        ring1_posture_root: str | None = None,
+        ring1_ledger_root: str | None = None,
     ) -> None:
         self._client: SandboxClient = client if client is not None else _UnwiredSandboxClient()
         self._ring1_guard = ring1_guard
+        self._ring1_posture_root = ring1_posture_root
+        self._ring1_ledger_root = ring1_ledger_root
         #: handle.ref -> OpenShell sandbox_id
         self._sandboxes: dict[str, str] = {}
         #: handle.ref -> installed Ring-1 guard runtime. Increment 1 is PATH-shim
         #: mediation for shell-level git/gh only; binary hiding, filesystem
         #: mediation, and egress defenses are later gates.
         self._guard_runtimes: dict[str, Ring1GuardRuntime] = {}
+
+    @staticmethod
+    def _default_ring1_posture_root(record: Mapping[str, Any]) -> str:
+        mount_manifest = record.get("mount_manifest")
+        if isinstance(mount_manifest, list):
+            for entry in mount_manifest:
+                if not isinstance(entry, dict) or entry.get("mode") != "rw":
+                    continue
+                mount_path = entry.get("path")
+                justification = entry.get("write_justification")
+                if not isinstance(mount_path, str) or not mount_path:
+                    continue
+                if (
+                    mount_path == DEFAULT_RING1_POSTURE_ROOT
+                    or mount_path.rstrip("/").endswith("/worktree")
+                    or (
+                        isinstance(justification, str)
+                        and "worktree" in justification.lower()
+                    )
+                ):
+                    return mount_path
+        return DEFAULT_RING1_POSTURE_ROOT
+
+    def _effective_ring1_guard(self, record: Mapping[str, Any]) -> Ring1ToolGuardConfig:
+        if self._ring1_guard is not None:
+            return self._ring1_guard
+        posture_root = self._ring1_posture_root or self._default_ring1_posture_root(record)
+        return Ring1ToolGuardConfig(posture_root=posture_root, ledger_root=self._ring1_ledger_root)
 
     def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         # The G-1.0 deny surface (mapping + validate_runtime_policy → PolicyRejected)
@@ -789,18 +822,18 @@ class OpenShellBackend(RunnerBackend):
             ref=f"openshell:{request.run_id}",
         )
         self._sandboxes[handle.ref] = sandbox_id
-        if self._ring1_guard is not None:
-            runtime = build_ring1_runtime(self._ring1_guard, DEFAULT_RING1_SHIM_DIR)
-            install = render_ring1_install_script(self._ring1_guard, runtime.shim_dir)
-            outcome = self._client.exec_sandbox(sandbox_id, ("sh", "-c", install))
-            if outcome.exit_code != 0:
-                self._sandboxes.pop(handle.ref, None)
-                self._guard_runtimes.pop(handle.ref, None)
-                self._client.delete_sandbox(sandbox_id)
-                detail = (outcome.stderr or outcome.stdout or "").strip()
-                suffix = f": {detail}" if detail else ""
-                raise BackendUnavailable(f"failed to install Ring-1 tool guard{suffix}")
-            self._guard_runtimes[handle.ref] = runtime
+        guard = self._effective_ring1_guard(record)
+        runtime = build_ring1_runtime(guard, DEFAULT_RING1_SHIM_DIR)
+        install = render_ring1_install_script(guard, runtime.shim_dir)
+        outcome = self._client.exec_sandbox(sandbox_id, ("sh", "-c", install))
+        if outcome.exit_code != 0:
+            self._sandboxes.pop(handle.ref, None)
+            self._guard_runtimes.pop(handle.ref, None)
+            self._client.delete_sandbox(sandbox_id)
+            detail = (outcome.stderr or outcome.stdout or "").strip()
+            suffix = f": {detail}" if detail else ""
+            raise BackendUnavailable(f"failed to install Ring-1 tool guard{suffix}")
+        self._guard_runtimes[handle.ref] = runtime
         return handle
 
     def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
