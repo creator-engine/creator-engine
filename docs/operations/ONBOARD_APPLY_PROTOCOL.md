@@ -86,6 +86,11 @@ The live scrub in leg 14 runs only with runtime sha256-pinned scanner configurat
 invalid pins are not clean; they keep the leg fail-closed until the VPS Mode-A host
 supplies the verified scanner pins.
 
+With pins supplied, leg 14 scans the full mutation surface declared by the plan:
+`[".", *scaffold_paths]`. The driver copies the existing checkout to a temporary
+scan tree, overlays every scaffold artifact there, runs the scanners over that
+materialized tree, and removes it before leg 15 can build/push/open the join PR.
+
 The `github_bootstrap_token_probe` requirement is **right-sized to the operation**
 (ce-ops#94): a **plain-join** (joining an already-CE repo) requires only a valid
 identity distinct from the App bot — the PAT writes nothing (forge ops ride the

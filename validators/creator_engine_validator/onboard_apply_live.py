@@ -1043,9 +1043,14 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
         as-shipped state — concrete binary pins are commissioned at the VPS Mode-A rehearsal)
         the report is ``ran=False`` so the leg refuses ``brownfield_secret_scanner_unavailable``
         — NO unverified binary is ever executed and absence is never read as clean.
+
+        When scanner pins are supplied, scan a temporary materialized tree containing BOTH the
+        pre-existing project bytes and every scaffold artifact leg 3 would commit, matching the
+        plan-side ``scan_paths`` contract: ``[".", *scaffold_paths]``.
         """
         reports: dict[str, Any] = {}
         scanner_pins = self._cfg.brownfield_scanners or BROWNFIELD_SCANNERS
+        active_pins: dict[str, BrownfieldScanner] = {}
         for name in REQUIRED_SCRUB_SCANNERS:
             pin = scanner_pins.get(name)
             if pin is None or not pin.sha256:
@@ -1059,8 +1064,41 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
                     ),
                 }
             else:
-                reports[name] = self._run_pinned_scanner(pin, scan_root)
-        return {"scanners": reports}
+                active_pins[name] = pin
+        if not active_pins:
+            return {"scanners": reports}
+        materialized_root, cleanup_root, scan_paths = self._materialize_scrub_scan_tree(scan_root, scaffold)
+        try:
+            for name, pin in active_pins.items():
+                reports[name] = self._run_pinned_scanner(pin, materialized_root)
+            return {"scanners": reports, "scan_paths": scan_paths}
+        finally:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
+
+    def _materialize_scrub_scan_tree(
+        self, scan_root: str, scaffold: Sequence[Mapping[str, Any]]
+    ) -> tuple[str, str, list[str]]:
+        """Copy ``scan_root`` and overlay scaffold artifacts so scanners cover the full mutation surface."""
+        source = Path(scan_root).expanduser()
+        if not source.is_dir():
+            raise FileNotFoundError(f"scrub scan root is not a directory: {scan_root}")
+        cleanup_root = Path(tempfile.mkdtemp(prefix="ce-scrub-tree-"))
+        materialized = cleanup_root / "tree"
+        try:
+            shutil.copytree(source, materialized, symlinks=True)
+            scaffold_paths: list[str] = []
+            for artifact in scaffold:
+                rel = Path(str(artifact["path"]))
+                if rel.is_absolute() or ".." in rel.parts:
+                    raise ValueError(f"scaffold path escapes scrub tree: {rel}")
+                target = materialized / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(str(artifact["content"]), encoding="utf-8")
+                scaffold_paths.append(rel.as_posix())
+            return str(materialized), str(cleanup_root), [".", *scaffold_paths]
+        except Exception:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
+            raise
 
     def _run_pinned_scanner(self, pin: "BrownfieldScanner", scan_root: str) -> dict[str, Any]:
         """Stage the sha256-pinned scanner binary (fetch+verify) and run it; never raises.

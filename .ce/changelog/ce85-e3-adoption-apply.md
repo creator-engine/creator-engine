@@ -55,6 +55,11 @@ protection, and idempotent (a re-run reconciles to the same branch + same PR).
   `CE_FORGE_GITLEAKS_URL`, `CE_FORGE_GITLEAKS_SHA256`,
   `CE_FORGE_TRUFFLEHOG_URL`, and `CE_FORGE_TRUFFLEHOG_SHA256`; absent or invalid
   pins keep the scrub fail-closed.
+- **PR #251 scrub-surface fix.** The live default scrub now materializes a temporary
+  scan tree containing the pre-existing checkout plus every scaffold artifact before
+  running pinned scanners, matching the plan contract `scan_paths: [".",
+  *scaffold_paths]`. A scanner clean result therefore covers the exact bytes the
+  join PR would commit; the caller's source tree is not mutated.
 - **Scope reconcile.** This PR deliberately names
   `validators/tests/unit/test_v3_installer.py` as an exception to the ratified
   10-path seed manifest because it owns the planner-side `_apply_steps` contract

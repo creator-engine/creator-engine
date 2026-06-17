@@ -153,6 +153,12 @@ PR'd. A finding passes only with a complete ratified per-finding waiver. Scanner
 reports and waiver ids are value-free (no secret value is ever printed, stored, or
 copied into an artifact/PR).
 
+The live scrub surface is the full mutation surface declared by the plan:
+`[".", *scaffold_paths]`. Before invoking pinned scanners, the driver materializes a
+temporary scan tree from the existing checkout and overlays every scaffold artifact
+that `brownfield_build_scaffold` would commit. The original tree is not mutated, and
+scanner clean means pre-existing bytes plus scaffold bytes are clean.
+
 Live Mode-A scanner binaries are supplied by sha256-pinned host configuration, not
 by committing unverified binaries. `resolve_live_config` reads
 `CE_FORGE_GITLEAKS_URL` + `CE_FORGE_GITLEAKS_SHA256` and

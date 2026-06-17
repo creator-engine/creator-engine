@@ -36,6 +36,8 @@ registered checks):
   EXCLUDED) minted for legs 4-5 ONLY and revoked immediately after. The sha-pinned two-scanner scrub seam
   reads runtime host pins (`CE_FORGE_GITLEAKS_URL`/`CE_FORGE_GITLEAKS_SHA256`,
   `CE_FORGE_TRUFFLEHOG_URL`/`CE_FORGE_TRUFFLEHOG_SHA256`) and fail-closes until valid pins are supplied.
+  With valid pins, it materializes a temporary scan tree containing the existing checkout plus every
+  scaffold artifact before scanning, so the live scrub surface matches `scan_paths: [".", *scaffold_paths]`.
   `adoption_forge_select` gates on the dual ENV escalation `CE_FORGE_LIVE_FORGE` +
   `CE_FORGE_ADOPTION_WRITE` (OQ-3). PR #251 fixes additionally make branch-protection read failures
   fail-closed unless GitHub returns the explicit "Branch not protected" signal, and verify the committed
@@ -54,9 +56,9 @@ registered checks):
   unparseable/not-two-scanner-clean; two-token write-legs-only + revoked + read token admin:read; mint-without-
   escalation refuses; push-never-force; PR-idempotent claim; preserved-checks loss). PR #251 adds the
   fail-closed error-branch regressions for 403/transient/generic-404 protection reads, commit failures,
-  committed-tree omissions, and runtime scanner pins. `test_onboard_apply.py` greenfield/plain-join count
-  asserts updated for the grown `LEG_IDS` (7 adoption legs skip), and `test_v3_installer.py` pins the
-  plan/executor step-id alignment.
+  committed-tree omissions, runtime scanner pins, and scaffold-payload scanner coverage. `test_onboard_apply.py`
+  greenfield/plain-join count asserts updated for the grown `LEG_IDS` (7 adoption legs skip), and
+  `test_v3_installer.py` pins the plan/executor step-id alignment.
 
 Scope reconcile for the 10-path ratified seed manifest:
 `validators/tests/unit/test_v3_installer.py` is a named exception in this per-PR carrier, alongside the
@@ -75,7 +77,7 @@ runs in the coordination/merge flow the adoption phase never enters).
 Wheel pair (required by the `validators/creator_engine_validator/**` edit):
 `creator_engine_validator-0.2.0-py3-none-any.whl` rebuilt from current source (`uv build --wheel`,
 `setuptools.build_meta`; `build/` + egg-info leak removed before commit) + `validators/wheelhouse/SHA256SUMS`
-updated (only the app-wheel line, digest `a0bfe9a5b52367cd46c0f886096d8e3c29f72d556be6bfa30cb4022692fecd96`,
+updated (only the app-wheel line, digest `884aeb457cc008120622910dc8a59ea1fa893b50d24f7db6af3048c9f9bca2ff`,
 self-verified via `sha256sum -c`). `verify_wheel_matches_source`
 clean; `_version.py` untouched (no version bump — 0.2.0).
 

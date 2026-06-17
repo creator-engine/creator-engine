@@ -1371,6 +1371,84 @@ def test_resolve_live_config_supplies_runtime_scanner_pins_and_scrub_runs(tmp_pa
     driver.close()
 
 
+def test_adoption_scrub_scans_materialized_scaffold_payload(tmp_path):
+    # PR #251 re-review regression: the live default scrub must scan the scaffold bytes that
+    # leg 3 will commit, not only the pre-existing tree. A secret exists ONLY in the scaffold.
+    scan_root = tmp_path / "repo"
+    scan_root.mkdir()
+    (scan_root / "README.md").write_text("pre-existing tree is clean\n", encoding="utf-8")
+    secret = "ghp_" + ("x" * 36)
+    scaffold_path = ".ce/skills/project-validation.md"
+    clean_scaffold = [{"path": scaffold_path, "content": "run pytest\n"}]
+    dirty_scaffold = [{"path": scaffold_path, "content": f"leaked command token: {secret}\n"}]
+    gitleaks_bytes = b"gitleaks-bin"
+    trufflehog_bytes = b"trufflehog-bin"
+    urls = {
+        "https://creator-engine.dev/downloads/scanners/gitleaks": gitleaks_bytes,
+        "https://creator-engine.dev/downloads/scanners/trufflehog": trufflehog_bytes,
+    }
+    scanners = {
+        "gitleaks": onboard_apply_live.BrownfieldScanner(
+            tool="gitleaks",
+            version="test",
+            url="https://creator-engine.dev/downloads/scanners/gitleaks",
+            sha256=hashlib.sha256(gitleaks_bytes).hexdigest(),
+        ),
+        "trufflehog": onboard_apply_live.BrownfieldScanner(
+            tool="trufflehog",
+            version="test",
+            url="https://creator-engine.dev/downloads/scanners/trufflehog",
+            sha256=hashlib.sha256(trufflehog_bytes).hexdigest(),
+        ),
+    }
+
+    def scanner_spawn(argv):
+        tool = Path(argv[0]).name
+        root = Path(argv[argv.index("--source") + 1]) if tool == "gitleaks" else Path(argv[2])
+        hits = []
+        for candidate in root.rglob("*"):
+            if candidate.is_file() and secret in candidate.read_text(encoding="utf-8", errors="ignore"):
+                hits.append(candidate.relative_to(root).as_posix())
+        if tool == "gitleaks":
+            stdout = json.dumps([{"File": hit, "StartLine": 1} for hit in hits])
+        else:
+            stdout = "\n".join(
+                json.dumps({"SourceMetadata": {"Data": hit}, "line": 1}) for hit in hits
+            )
+        return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        mirror_fetch=lambda url: urls[url],
+        pip_spawn=scanner_spawn,
+        brownfield_scanners=scanners,
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(cfg)
+
+    clean = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=clean_scaffold)
+    assert clean["scan_paths"] == [".", scaffold_path]
+    assert onboard_apply._evaluate_scrub_result(clean, waived_ids=set()) == {"findings": [], "waived": []}
+    assert not (scan_root / scaffold_path).exists(), "scrub must not mutate the caller's tree"
+
+    dirty = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=dirty_scaffold)
+    findings = [
+        finding
+        for report in dirty["scanners"].values()
+        for finding in report["findings"]
+    ]
+    assert any(scaffold_path in finding for finding in findings)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(dirty, waived_ids=set())
+    assert exc.value.code == "brownfield_secret_findings"
+    assert not (scan_root / scaffold_path).exists(), "scrub must only write the temporary scan tree"
+    driver.close()
+
+
 def test_adoption_scanner_unparseable_stdout_is_fail_closed(tmp_path):
     # MAJOR-2 — a zero-exit scanner with malformed non-empty output is NOT "empty findings".
     scanner = onboard_apply_live.BrownfieldScanner(
