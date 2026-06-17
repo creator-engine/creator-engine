@@ -1511,10 +1511,13 @@ def test_onboard_plan_emits_brownfield_adoption_payload(tmp_path, capsys, monkey
     assert plan["tests"]["required_commands"] == ["python -m pytest"]
     assert "Unit tests" in " ".join(plan["ci"]["checks_to_preserve"])
     assert plan["ci"]["checks_to_add"] == ["Validate governance artifacts"]
-    assert [step["id"] for step in plan["apply_steps"]][:2] == [
-        "brownfield_inventory_drift_check",
-        "brownfield_secret_preflight",
-    ]
+    assert [step["id"] for step in plan["apply_steps"]] == list(v3_installer.BROWNFIELD_APPLY_STEP_IDS)
+    scrub_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_secret_preflight")
+    assert ".github/workflows/ce-validate.yml" in scrub_step["scan_paths"]
+    build_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_build_scaffold")
+    assert "secrets_preflight_clean_or_waived" in build_step["requires"]
+    pr_step = next(step for step in plan["apply_steps"] if step["id"] == "brownfield_open_join_pr")
+    assert pr_step["plan_ref"] == plan["inventory_sha256"]
 
 
 def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path, capsys, monkeypatch):
@@ -1541,6 +1544,70 @@ def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path
     assert payload["code"] == "e2_brownfield_seam_unavailable"
     assert payload["brownfield_adoption"]["apply_steps"]
     assert payload["brownfield_blockers"] == []
+
+
+def test_onboard_apply_authorized_brownfield_routes_to_adoption(tmp_path, capsys, monkeypatch):
+    # ce-ops#85 — with the DUAL escalation authorized (CE_FORGE_LIVE_FORGE +
+    # CE_FORGE_ADOPTION_WRITE) and the repo genuine-brownfield (NOT already-CE) + adoptable, the
+    # CLI routes to the adoption-apply legs: it hands the adoption driver to apply_onboard and
+    # sets adoption_apply=True + the brownfield plan/probe. (The leg loop itself is covered by
+    # the onboard_apply unit/integration tests; here we pin the CLI ROUTING decision.)
+    from creator_engine_validator import onboard_apply_live
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+
+    # an adoption driver instance (its forge legs never run — apply_onboard is stubbed).
+    adoption_driver = onboard_apply_live.LiveForgeAdoptionDriver(
+        onboard_apply_live.LiveForgeConfig(
+            repo="acme/app", installation_id=1, app_client_id="x",
+            signer=lambda _b: b"", policy_sha="a" * 64, run_id="t",
+        )
+    )
+    monkeypatch.setattr(
+        v3_cli.onboard_apply_live, "adoption_forge_select",
+        lambda *a, **k: adoption_driver,
+    )
+    # genuine brownfield: NOT already-CE.
+    monkeypatch.setattr(v3_cli.onboard_apply, "repo_is_already_ce_governed", lambda *a, **k: False)
+
+    captured = {}
+
+    def fake_apply(request, **kwargs):
+        captured["adoption_apply"] = request.adoption_apply
+        captured["has_plan"] = request.brownfield_plan is not None
+        captured["driver_is_adoption"] = kwargs.get("driver") is adoption_driver
+        return {
+            "action": "onboard_apply", "mode": request.mode, "target_repo": "acme/app",
+            "verified_count": 12, "legs_total": 19, "greenfield_repos_created": 0,
+            "repos_already_satisfied": 0, "brownfield_deferred": 0, "applied": 5,
+            "already_satisfied": 7, "refused": 0, "failed": 0, "skipped": 7,
+            "manual_rollback_required": 0, "brownfield_adopted": 1,
+            "brownfield_adoption_pr": {"repo": "acme/app", "branch": "ce/adopt-governance",
+                                       "base": "main", "pr_number": 11},
+            "brownfield_scrub_findings": 0, "brownfield_scrub_findings_waived": 0, "legs": [],
+        }
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+    monkeypatch.setenv("CE_FORGE_LIVE_FORGE", "1")
+    monkeypatch.setenv("CE_FORGE_ADOPTION_WRITE", "1")
+
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 0
+    assert captured == {"adoption_apply": True, "has_plan": True, "driver_is_adoption": True}
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["brownfield_adopted"] == 1
+    assert payload["brownfield_adoption_pr"]["pr_number"] == 11
 
 
 def test_onboard_apply_existing_already_ce_repo_routes_to_plain_join(tmp_path, capsys, monkeypatch):

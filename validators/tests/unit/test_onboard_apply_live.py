@@ -13,8 +13,10 @@ forge reads) is the clean-room VPS rehearsal DoD — done later by the orchestra
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -935,3 +937,554 @@ def test_expose_cli_resolves_cev3_at_install_location_not_on_path(tmp_path, monk
 
 def test_resolve_console_script_returns_none_when_absent(tmp_path):
     assert _verify_fix_driver(tmp_path)._resolve_console_script("cev3") is None
+
+
+# ===========================================================================
+# ce-ops#85 E3 adoption driver — the TWO-TOKEN model (verify-verdict MAJOR-1)
+# + the §6.1 write ceiling, exercised against VERBATIM-shaped forge responses.
+# ===========================================================================
+from creator_engine_validator.forge.scoped_token import (  # noqa: E402
+    TokenMintRefused,
+    TokenRequest,
+    mint_scoped_token,
+)
+
+_READ_TOKEN = "ghs_read_token_value"
+_WRITE_TOKEN = "ghs_write_token_value"
+
+
+class _AdoptionForge:
+    """Mode-B forge for the adoption driver: distinct READ vs WRITE token values.
+
+    The mint transport returns ``_WRITE_TOKEN`` when the request body asks for ``contents:write``
+    (the §6.1 write ceiling) and ``_READ_TOKEN`` otherwise (the Phase-1 read ceiling) — so a test
+    can prove WHICH token authenticated each call (the two-token split, MAJOR-1).
+    """
+
+    def __init__(
+        self,
+        *,
+        fast_forward: bool = True,
+        pr_exists: bool = False,
+        protection_rc: int = 0,
+        protection_out: str | None = None,
+        protection_err: str = "",
+        commit_rc: int = 0,
+        commit_out: str = "committed",
+        commit_err: str = "",
+        committed_paths: list[str] | None = None,
+        workflow_blob: str | None = None,
+    ):
+        self.calls: list[dict[str, Any]] = []
+        self.mint_perms: list[dict[str, str]] = []
+        self.fast_forward = fast_forward
+        self.pr_exists = pr_exists
+        self.protection_rc = protection_rc
+        self.protection_err = protection_err
+        self.commit_rc = commit_rc
+        self.commit_out = commit_out
+        self.commit_err = commit_err
+        self.committed_paths = committed_paths
+        self.workflow_blob = workflow_blob if workflow_blob is not None else onboard_apply.CE_WORKFLOW_CONTENT
+        self._posted = False  # once a PR is POSTed, the re-read GET must reflect it (verify)
+        self.repo_json = _fx("repo.json")
+        self.protection_json = protection_out if protection_out is not None else _fx("protection.json")
+        self.contents_json = _fx("contents_ce_validate_yml_already_ce.json")
+        self.installation_repos = json.dumps({"total_count": 1, "repositories": [json.loads(self.repo_json)]})
+
+    def transport(self, method: str, url: str, headers: dict[str, str], body: str | None):
+        assert headers.get("Authorization", "").startswith("Bearer "), "App auth must be Bearer JWT"
+        perms = (json.loads(body or "{}") or {}).get("permissions", {})
+        self.mint_perms.append(perms)
+        token = _WRITE_TOKEN if perms.get("contents") == "write" else _READ_TOKEN
+        return 201, json.dumps({"token": token, "expires_at": "2026-06-17T15:00:00Z", "permissions": perms})
+
+    def _done(self, argv, rc, out="", err=""):
+        return subprocess.CompletedProcess(list(argv), rc, stdout=out, stderr=err)
+
+    def spawn(self, argv, input_text, env):
+        token = env.get("GH_TOKEN")
+        self.calls.append({"argv": list(argv), "env_token": token})
+        assert _READ_TOKEN not in " ".join(argv) and _WRITE_TOKEN not in " ".join(argv)
+        joined = " ".join(argv)
+        if "-X" in argv and "DELETE" in argv and "installation/token" in joined:
+            return self._done(argv, 0)  # revoke
+        if "/branches/main/protection" in joined:
+            return self._done(argv, self.protection_rc, self.protection_json, self.protection_err)
+        if "installation/repositories" in joined:
+            return self._done(argv, 0, self.installation_repos)
+        if "/contents/" in joined:
+            return self._done(argv, 0, self.contents_json)
+        if "pulls" in joined and "-X" in argv and "POST" in argv:
+            self._posted = True
+            return self._done(argv, 0, json.dumps({"number": 42, "head": {"sha": "f" * 40}}))
+        if "pulls" in joined:  # GET open pulls
+            if self.pr_exists or self._posted:
+                return self._done(argv, 0, json.dumps([{"number": 42, "head": {"sha": "f" * 40}}]))
+            return self._done(argv, 0, "[]")
+        if f"repos/{_REPO}" in joined:
+            return self._done(argv, 0, self.repo_json)
+        return self._done(argv, 1)
+
+    def git_spawn(self, argv, input_text, env):
+        token = env.get("GH_TOKEN")
+        self.calls.append({"argv": list(argv), "env_token": token})
+        joined = " ".join(argv)
+        assert _READ_TOKEN not in joined and _WRITE_TOKEN not in joined
+        if "clone" in argv:
+            dest = Path(argv[4])
+            (dest / ".git").mkdir(parents=True, exist_ok=True)
+            return self._done(argv, 0)
+        if "ls-remote" in argv:
+            # empty → branch absent on remote (a clean create push); else a non-ancestor sha.
+            return self._done(argv, 0, "" if self.fast_forward else ("9" * 40 + "\trefs/heads/ce/adopt-governance"))
+        if "merge-base" in argv:
+            return self._done(argv, 0 if self.fast_forward else 1)
+        if "rev-parse" in argv:
+            return self._done(argv, 0, "f" * 40)
+        if "commit" in argv:
+            return self._done(argv, self.commit_rc, self.commit_out, self.commit_err)
+        if "ls-tree" in argv:
+            paths = self.committed_paths
+            if paths is None:
+                paths = [
+                    ".ce/skills/project-conventions.md",
+                    ".ce/state/scopes/ce-brownfield-adoption.scope.yaml",
+                    onboard_apply.CE_WORKFLOW_PATH,
+                ]
+            return self._done(argv, 0, "\n".join(paths) + "\n")
+        if "show" in argv and f"HEAD:{onboard_apply.CE_WORKFLOW_PATH}" in argv:
+            if self.workflow_blob is None:
+                return self._done(argv, 1, "", "fatal: path missing")
+            return self._done(argv, 0, self.workflow_blob)
+        # checkout / add / push all succeed
+        return self._done(argv, 0, "ok")
+
+    def write_token_calls(self):
+        return [c for c in self.calls if c["env_token"] == _WRITE_TOKEN]
+
+    def read_token_calls(self):
+        return [c for c in self.calls if c["env_token"] == _READ_TOKEN]
+
+    def revoke_calls(self):
+        return [c for c in self.calls if "DELETE" in c["argv"] and "installation/token" in " ".join(c["argv"])]
+
+
+def _adoption_driver(forge: _AdoptionForge) -> onboard_apply_live.LiveForgeAdoptionDriver:
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        transport=forge.transport,
+        spawn=forge.spawn,
+        git_spawn=forge.git_spawn,
+    )
+    return onboard_apply_live.LiveForgeAdoptionDriver(config)
+
+
+def _sample_scaffold() -> list[dict[str, str]]:
+    return onboard_apply.adoption_scaffold_artifacts(
+        {"artifact_plan": {
+            "skill_artifacts": [{"path": ".ce/skills/project-conventions.md", "content": "x\n"}],
+            "scope_seed": {"scope_id": "ce-brownfield-adoption"},
+            "scope_seed_path": ".ce/state/scopes/ce-brownfield-adoption.scope.yaml",
+        }}
+    )
+
+
+def test_adoption_write_token_ceiling_is_exact_and_excludes_admin_write():
+    # §10.7 / §6.1 — the minted WRITE token requests EXACTLY the least-privilege join-PR ceiling.
+    # (contents:write subsumes contents:read in GitHub's scope->level map; administration:write
+    # is DELIBERATELY ABSENT — OQ-1.)
+    forge = _AdoptionForge()
+    driver = _adoption_driver(forge)
+    driver.push_adoption_branch(repo=_REPO, branch="ce/adopt-governance", source_dir="/tmp/x")
+    write_mints = [p for p in forge.mint_perms if p.get("contents") == "write"]
+    assert write_mints, "a write token must have been minted for the push"
+    assert write_mints[0] == {
+        "metadata": "read", "contents": "write", "workflows": "write", "pull_requests": "write",
+    }
+    assert "administration" not in write_mints[0]
+    driver.close()
+
+
+def test_adoption_read_token_carries_admin_read():
+    # MAJOR-1 — the inherited READ token (legs 1/2/6 + clone) carries administration:read, NEVER
+    # a write scope. A read (preserved-checks) mints the Phase-1 read ceiling.
+    forge = _AdoptionForge()
+    driver = _adoption_driver(forge)
+    driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    read_mints = [p for p in forge.mint_perms if p.get("contents") == "read"]
+    assert read_mints, "a read token must have been minted for the preserved-checks read"
+    assert read_mints[0] == {"metadata": "read", "contents": "read", "administration": "read"}
+    assert "write" not in read_mints[0].values()
+    driver.close()
+
+
+def test_adoption_preserved_checks_404_is_no_protection():
+    # BLOCKER-1 regression: only an affirmative 404/not-protected response may pass as
+    # "no branch protection"; this is the no-required-checks case.
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=json.dumps({"message": "Branch not protected", "status": "404"}),
+        protection_err="gh: Branch not protected (HTTP 404)",
+    )
+    driver = _adoption_driver(forge)
+    result = driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    assert result == {"ok": True, "existing_checks": [], "dropped": []}
+    driver.close()
+
+
+def test_adoption_preserved_checks_403_refuses_fail_closed():
+    # BLOCKER-1 regression: missing/insufficient administration:read must not look like
+    # "unprotected"; it refuses before leg 6 can claim preservation.
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=json.dumps({"message": "Resource not accessible by integration"}),
+        protection_err="gh: Resource not accessible by integration (HTTP 403)",
+    )
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    assert exc.value.code == "brownfield_protection_read_failed"
+    driver.close()
+
+
+def test_adoption_preserved_checks_transient_error_refuses_fail_closed():
+    # BLOCKER-1 regression: any non-404 transient/API error is fail-closed.
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=json.dumps({"message": "server error"}),
+        protection_err="gh: upstream unavailable (HTTP 502)",
+    )
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    assert exc.value.code == "brownfield_protection_read_failed"
+    driver.close()
+
+
+def test_adoption_preserved_checks_generic_404_refuses_fail_closed():
+    # BLOCKER-1 guardrail: a generic 404/Not Found can hide auth/repo/branch failure and must not
+    # be treated as the documented "Branch not protected" signal.
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=json.dumps({"message": "Not Found", "status": "404"}),
+        protection_err="gh: Not Found (HTTP 404)",
+    )
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    assert exc.value.code == "brownfield_protection_read_failed"
+    driver.close()
+
+
+def test_adoption_mint_without_escalation_authority_refuses_before_forge():
+    # §6.3 defence-in-depth — a write request that does NOT bind the Tier-2 escalation authority
+    # refuses at the minter (default-deny) BEFORE any forge call. This is why the adoption driver
+    # MUST bind ADOPTION_ESCALATION_AUTHORITY.
+    request = TokenRequest(
+        repo=_REPO, installation_id=140271364, run_id="x", policy_sha="a" * 64,
+        permissions=onboard_apply_live.ADOPTION_WRITE_PERMISSIONS,
+        secret_name="adoption_write", requested_ttl_seconds=600,
+        escalation_authority=(),  # NOT bound → must refuse
+    )
+    with pytest.raises(TokenMintRefused):
+        mint_scoped_token(request, gh_runner=lambda argv, inp=None: subprocess.CompletedProcess(argv, 0, "{}", ""))
+    # and the SAME request WITH the adoption escalation mints clean
+    ok = TokenRequest(
+        repo=_REPO, installation_id=140271364, run_id="x", policy_sha="a" * 64,
+        permissions=onboard_apply_live.ADOPTION_WRITE_PERMISSIONS,
+        secret_name="adoption_write", requested_ttl_seconds=600,
+        escalation_authority=onboard_apply_live.ADOPTION_ESCALATION_AUTHORITY,
+    )
+
+    def _mint_runner(argv, inp=None):
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"token": "ghs_x", "expires_at": "z"}), "")
+
+    minted = mint_scoped_token(ok, gh_runner=_mint_runner)
+    assert minted.value == "ghs_x"
+
+
+def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revoked():
+    # MAJOR-1 end-to-end on the driver: clone/read ride the READ token; push + open-PR ride the
+    # WRITE token; the WRITE token is REVOKED the instant leg 5 finishes; neither value hits argv.
+    forge = _AdoptionForge()
+    driver = _adoption_driver(forge)
+    scaffold = _sample_scaffold()
+    workspace = Path("/tmp/ce85_adoption_two_token")
+    import shutil as _sh
+    _sh.rmtree(workspace, ignore_errors=True)
+    build = driver.build_adoption_scaffold(
+        repo=_REPO, base="main", branch="ce/adopt-governance",
+        workspace_root=workspace, artifacts=scaffold,
+    )
+    assert build["ok"] is True
+    push = driver.push_adoption_branch(repo=_REPO, branch="ce/adopt-governance", source_dir=build["source_dir"])
+    assert push["ok"] is True and push["pushed"] is True
+    pr = driver.open_adoption_pr(
+        repo=_REPO, branch="ce/adopt-governance", base="main",
+        manifest_paths=[a["path"] for a in scaffold], plan_ref="a" * 64,
+    )
+    assert pr["ok"] is True and pr["verified"] is True and pr["pr_number"] == 42
+
+    # the WRITE token authenticated the push (ls-remote/push) and the PR (pulls) calls...
+    assert forge.write_token_calls(), "push/PR must use the write token"
+    assert any("pulls" in " ".join(c["argv"]) for c in forge.write_token_calls())
+    assert any("push" in c["argv"] or "ls-remote" in c["argv"] for c in forge.write_token_calls())
+    # ...the READ token authenticated the clone (a contents read)...
+    assert any("clone" in c["argv"] for c in forge.read_token_calls())
+    # ...and the WRITE token was REVOKED immediately after leg 5 (open PR), not just at close().
+    assert len(forge.revoke_calls()) == 1
+    assert forge.revoke_calls()[0]["env_token"] == _WRITE_TOKEN
+    assert driver._write_token is None  # the write token is gone after leg 5
+    # hygiene: neither token value ever rode the argv, nor leaks in the driver repr.
+    for c in forge.calls:
+        assert _READ_TOKEN not in " ".join(c["argv"]) and _WRITE_TOKEN not in " ".join(c["argv"])
+    assert _WRITE_TOKEN not in repr(driver) and _READ_TOKEN not in repr(driver)
+    driver.close()
+    _sh.rmtree(workspace, ignore_errors=True)
+
+
+def test_adoption_scaffold_commit_failure_raises_before_push(tmp_path):
+    # BLOCKER-2 regression: a real git commit failure is not "ok"; it stops before push/PR.
+    forge = _AdoptionForge(commit_rc=128, commit_err="Author identity unknown")
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyFailed) as exc:
+        driver.build_adoption_scaffold(
+            repo=_REPO,
+            base="main",
+            branch="ce/adopt-governance",
+            workspace_root=tmp_path,
+            artifacts=_sample_scaffold(),
+        )
+    assert exc.value.code == "brownfield_scaffold_commit_failed"
+    joined_calls = "\n".join(" ".join(c["argv"]) for c in forge.calls)
+    assert "ls-remote" not in joined_calls and " git push " not in joined_calls and "pulls" not in joined_calls
+    driver.close()
+
+
+def test_adoption_scaffold_committed_tree_missing_workflow_refuses(tmp_path):
+    # BLOCKER-2 regression: verification reads the COMMITTED tree, not the working tree or a
+    # driver-returned path list. Missing workflow/.ce paths in HEAD refuse before push.
+    forge = _AdoptionForge(committed_paths=[".ce/skills/project-conventions.md"])
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyFailed) as exc:
+        driver.build_adoption_scaffold(
+            repo=_REPO,
+            base="main",
+            branch="ce/adopt-governance",
+            workspace_root=tmp_path,
+            artifacts=_sample_scaffold(),
+        )
+    assert exc.value.code == "brownfield_scaffold_commit_verify_failed"
+    joined_calls = "\n".join(" ".join(c["argv"]) for c in forge.calls)
+    assert "ls-tree" in joined_calls
+    assert "ls-remote" not in joined_calls and " git push " not in joined_calls and "pulls" not in joined_calls
+    driver.close()
+
+
+def test_adoption_push_refuses_non_fast_forward_never_force():
+    # §10.5 — a non-fast-forward remote ⇒ the live push REFUSES (never --force).
+    forge = _AdoptionForge(fast_forward=False)
+    driver = _adoption_driver(forge)
+    result = driver.push_adoption_branch(repo=_REPO, branch="ce/adopt-governance", source_dir="/tmp/x")
+    assert result["ok"] is False and result["reason"] == "push_refused"
+    # no git push argv was ever issued (refused before the push)
+    assert not any("push" in c["argv"] for c in forge.calls)
+    assert len(forge.revoke_calls()) == 1
+    assert forge.revoke_calls()[0]["env_token"] == _WRITE_TOKEN
+    driver.close()
+
+
+def test_adoption_open_pr_claims_existing_no_duplicate():
+    # §10.6 — when a PR already claims the branch, open_change is a verified no-op (claimed).
+    forge = _AdoptionForge(pr_exists=True)
+    driver = _adoption_driver(forge)
+    pr = driver.open_adoption_pr(
+        repo=_REPO, branch="ce/adopt-governance", base="main",
+        manifest_paths=[".ce/skills/project-conventions.md"], plan_ref="a" * 64,
+    )
+    assert pr["ok"] is True and pr["verified"] is True and pr["claimed"] is True
+    # no POST (no duplicate PR opened)
+    assert not any("POST" in c["argv"] and "pulls" in " ".join(c["argv"]) for c in forge.calls)
+    driver.close()
+
+
+def test_adoption_scrub_default_is_fail_closed_until_pinned():
+    # MAJOR-2 — the live scrub default fail-closes (ran=False) until the scanner binary pins are
+    # commissioned at the VPS rehearsal; no unverified binary is ever executed.
+    forge = _AdoptionForge()
+    driver = _adoption_driver(forge)
+    result = driver.secret_preflight_scan(scan_root=".", scaffold=[])
+    for name in onboard_apply_live.REQUIRED_SCRUB_SCANNERS:
+        assert result["scanners"][name]["ran"] is False
+    # and the leg's affirmative gate refuses on it
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(result, waived_ids=set())
+    assert exc.value.code == "brownfield_secret_scanner_unavailable"
+    driver.close()
+
+
+def test_resolve_live_config_supplies_runtime_scanner_pins_and_scrub_runs(tmp_path):
+    # BLOCKER-3 regression: production config can receive host-supplied, sha-pinned scanner
+    # config at runtime; default remains fail-closed when these env pins are absent.
+    pem = tmp_path / "ce-app.pem"
+    pem.write_text("k", encoding="utf-8")
+    gitleaks_bytes = b"gitleaks-bin"
+    trufflehog_bytes = b"trufflehog-bin"
+    gitleaks_url = "https://creator-engine.dev/downloads/scanners/gitleaks"
+    trufflehog_url = "https://creator-engine.dev/downloads/scanners/trufflehog"
+    env = {
+        **_creds_env(pem),
+        onboard_apply_live.ENV_GITLEAKS_URL: gitleaks_url,
+        onboard_apply_live.ENV_GITLEAKS_SHA256: hashlib.sha256(gitleaks_bytes).hexdigest(),
+        onboard_apply_live.ENV_GITLEAKS_VERSION: "test-gitleaks",
+        onboard_apply_live.ENV_TRUFFLEHOG_URL: trufflehog_url,
+        onboard_apply_live.ENV_TRUFFLEHOG_SHA256: hashlib.sha256(trufflehog_bytes).hexdigest(),
+        onboard_apply_live.ENV_TRUFFLEHOG_VERSION: "test-trufflehog",
+    }
+    cfg = onboard_apply_live.resolve_live_config(_merged(), policy_sha="a" * 64, env=env)
+    assert cfg is not None
+    assert cfg.brownfield_scanners is not None
+    assert cfg.brownfield_scanners["gitleaks"].url == gitleaks_url
+    assert cfg.brownfield_scanners["trufflehog"].url == trufflehog_url
+
+    def mirror_fetch(url):
+        return {gitleaks_url: gitleaks_bytes, trufflehog_url: trufflehog_bytes}[url]
+
+    def scanner_spawn(argv):
+        tool = Path(argv[0]).name
+        stdout = "[]" if tool == "gitleaks" else ""
+        return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(
+        replace(cfg, mirror_fetch=mirror_fetch, pip_spawn=scanner_spawn)
+    )
+    result = driver.secret_preflight_scan(scan_root=str(tmp_path), scaffold=[])
+    assert result["scanners"]["gitleaks"]["ran"] is True
+    assert result["scanners"]["trufflehog"]["ran"] is True
+    assert onboard_apply._evaluate_scrub_result(result, waived_ids=set()) == {"findings": [], "waived": []}
+    driver.close()
+
+
+def test_adoption_scrub_scans_materialized_scaffold_payload(tmp_path):
+    # PR #251 re-review regression: the live default scrub must scan the scaffold bytes that
+    # leg 3 will commit, not only the pre-existing tree. A secret exists ONLY in the scaffold.
+    scan_root = tmp_path / "repo"
+    scan_root.mkdir()
+    (scan_root / "README.md").write_text("pre-existing tree is clean\n", encoding="utf-8")
+    secret = "ghp_" + ("x" * 36)
+    scaffold_path = ".ce/skills/project-validation.md"
+    clean_scaffold = [{"path": scaffold_path, "content": "run pytest\n"}]
+    dirty_scaffold = [{"path": scaffold_path, "content": f"leaked command token: {secret}\n"}]
+    gitleaks_bytes = b"gitleaks-bin"
+    trufflehog_bytes = b"trufflehog-bin"
+    urls = {
+        "https://creator-engine.dev/downloads/scanners/gitleaks": gitleaks_bytes,
+        "https://creator-engine.dev/downloads/scanners/trufflehog": trufflehog_bytes,
+    }
+    scanners = {
+        "gitleaks": onboard_apply_live.BrownfieldScanner(
+            tool="gitleaks",
+            version="test",
+            url="https://creator-engine.dev/downloads/scanners/gitleaks",
+            sha256=hashlib.sha256(gitleaks_bytes).hexdigest(),
+        ),
+        "trufflehog": onboard_apply_live.BrownfieldScanner(
+            tool="trufflehog",
+            version="test",
+            url="https://creator-engine.dev/downloads/scanners/trufflehog",
+            sha256=hashlib.sha256(trufflehog_bytes).hexdigest(),
+        ),
+    }
+
+    def scanner_spawn(argv):
+        tool = Path(argv[0]).name
+        root = Path(argv[argv.index("--source") + 1]) if tool == "gitleaks" else Path(argv[2])
+        hits = []
+        for candidate in root.rglob("*"):
+            if candidate.is_file() and secret in candidate.read_text(encoding="utf-8", errors="ignore"):
+                hits.append(candidate.relative_to(root).as_posix())
+        if tool == "gitleaks":
+            stdout = json.dumps([{"File": hit, "StartLine": 1} for hit in hits])
+        else:
+            stdout = "\n".join(
+                json.dumps({"SourceMetadata": {"Data": hit}, "line": 1}) for hit in hits
+            )
+        return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        mirror_fetch=lambda url: urls[url],
+        pip_spawn=scanner_spawn,
+        brownfield_scanners=scanners,
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(cfg)
+
+    clean = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=clean_scaffold)
+    assert clean["scan_paths"] == [".", scaffold_path]
+    assert onboard_apply._evaluate_scrub_result(clean, waived_ids=set()) == {"findings": [], "waived": []}
+    assert not (scan_root / scaffold_path).exists(), "scrub must not mutate the caller's tree"
+
+    dirty = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=dirty_scaffold)
+    findings = [
+        finding
+        for report in dirty["scanners"].values()
+        for finding in report["findings"]
+    ]
+    assert any(scaffold_path in finding for finding in findings)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(dirty, waived_ids=set())
+    assert exc.value.code == "brownfield_secret_findings"
+    assert not (scan_root / scaffold_path).exists(), "scrub must only write the temporary scan tree"
+    driver.close()
+
+
+def test_adoption_scanner_unparseable_stdout_is_fail_closed(tmp_path):
+    # MAJOR-2 — a zero-exit scanner with malformed non-empty output is NOT "empty findings".
+    scanner = onboard_apply_live.BrownfieldScanner(
+        tool="gitleaks",
+        version="test",
+        url="https://creator-engine.dev/downloads/test/gitleaks",
+        sha256="8dccd4162aa662bef179d8e3c1d3e6fa2bb7643be6c1b382bd4fd02ecaf846d2",
+    )
+    forge = _AdoptionForge()
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        transport=forge.transport,
+        spawn=forge.spawn,
+        git_spawn=forge.git_spawn,
+        mirror_fetch=lambda _url: b"fake-bin",
+        pip_spawn=lambda _argv: subprocess.CompletedProcess(list(_argv), 0, stdout="not-json", stderr=""),
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
+    result = driver._run_pinned_scanner(scanner, str(tmp_path))
+    assert result["ran"] is True
+    assert result["exit_code"] == 0
+    assert "unparseable scanner JSON output" in result["error"]
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(
+            {
+                "scanners": {
+                    "gitleaks": result,
+                    "trufflehog": {"ran": True, "exit_code": 0, "findings": []},
+                }
+            },
+            waived_ids=set(),
+        )
+    assert exc.value.code == "brownfield_secret_scanner_unavailable"
+    driver.close()

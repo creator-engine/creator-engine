@@ -24,6 +24,8 @@ import shutil
 import subprocess
 import time
 import uuid
+
+import yaml
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +40,8 @@ __ce_version_line__ = "v3"
 ONBOARD_SUBDIR = "onboard"
 LOCK_BASENAME = "apply.lock"
 LEDGER_BASENAME = "ledger.ndjson"
-LEG_IDS: tuple[str, ...] = (
+#: The ratified E2 greenfield legs (unchanged order).
+GREENFIELD_LEG_IDS: tuple[str, ...] = (
     "signed_spec_verify",
     "answers_merge",
     "host_dependencies",
@@ -52,6 +55,38 @@ LEG_IDS: tuple[str, ...] = (
     "workspace_checkout",
     "first_project_smoke",
 )
+#: ce-ops#85 E3 adoption-APPLY (the join-PR layer). The seven adoption legs realize the
+#: canonical ``v3_installer.BROWNFIELD_APPLY_STEP_IDS`` projection as a join-PR flow (E2 §6
+#: seam 1: added WITHOUT changing the ledger/LegOutcome shape). They are MODE-GATED — they
+#: run only in an authorized brownfield-adoption run (``ApplyRequest.adoption_apply``) and
+#: return ``skipped`` ("not_brownfield_adoption") otherwise. The constant is aliased from
+#: ``v3_installer`` so the projection (plan) and the executor (these legs) are the SAME list.
+ADOPTION_LEG_IDS: tuple[str, ...] = tuple(v3_installer.BROWNFIELD_APPLY_STEP_IDS)
+#: The greenfield FORGE legs that an adoption run SKIPS ("brownfield_adoption_mode"): the
+#: bootstrap-PAT probe (adoption writes ride the §6 minted App token, not the PAT), the
+#: greenfield repo create / App install / direct workflow install / branch-protection write
+#: (the join PR carries the workflow on its branch and never mutates protection), the
+#: greenfield workspace checkout (the scaffold leg does its own checkout), and the smoke
+#: drive (adoption opens a PR, it does not run a first-project smoke). The early LOCAL legs
+#: (signed_spec_verify, answers_merge, host_dependencies, runtime_posture, cli_exposure) are
+#: mode-agnostic and RUN in both modes (the operator is installing CE locally either way).
+ADOPTION_SKIPPED_GREENFIELD_LEG_IDS: frozenset[str] = frozenset({
+    "github_bootstrap_token_probe",
+    "github_repo_create",
+    "github_app_install",
+    "github_workflow_install",
+    "github_branch_protection",
+    "workspace_checkout",
+    "first_project_smoke",
+})
+LEG_IDS: tuple[str, ...] = (*GREENFIELD_LEG_IDS, *ADOPTION_LEG_IDS)
+#: The stable adoption branch name — a CONSTANT so a re-run reconciles to the SAME head
+#: branch + the SAME PR (idempotency, §3.2). It is the head; the repo's default branch is
+#: the PR base, so the two always differ (``open_change`` refuses ``base == branch``).
+BROWNFIELD_ADOPTION_BRANCH = v3_installer.BROWNFIELD_ADOPTION_BRANCH
+#: The scrub gate (§3.3, verify-verdict MAJOR-2) requires an AFFIRMATIVE clean from BOTH of
+#: these scanners — absence of a parsed finding is NOT clean.
+REQUIRED_SCRUB_SCANNERS: tuple[str, ...] = ("gitleaks", "trufflehog")
 CE_WORKFLOW_PATH = ".github/workflows/ce-validate.yml"
 CE_WORKFLOW_CONTENT = """\
 name: Validate governance artifacts
@@ -159,6 +194,17 @@ class ApplyRequest:
     lock_timeout_seconds: float | None = None
     allow_destructive_rollback: bool = False
     spawn_smoke: bool = False
+    #: ce-ops#85 E3 adoption-APPLY (the join-PR layer). When ``True``, this run drives the
+    #: seven adoption legs (and skips the greenfield forge legs); the CLI sets it ONLY for a
+    #: genuine non-CE repo that is ``adoptable``/``adoptable_after_scrub`` AND authorized
+    #: (``CE_FORGE_LIVE_FORGE`` + ``CE_FORGE_ADOPTION_WRITE``), with an adoption driver bound.
+    adoption_apply: bool = False
+    #: The ratified ``build_brownfield_adoption_plan`` projection (inventory_sha256, artifact
+    #: plan, ci.checks_to_preserve, history.default_branch). The adoption legs consume it.
+    brownfield_plan: Mapping[str, Any] | None = None
+    #: The fresh read-only project probe used to recompute the inventory hash at apply time
+    #: (drift check, leg 1). Value-free.
+    brownfield_probe: Mapping[str, Any] | None = None
 
 
 @dataclass
@@ -204,6 +250,10 @@ class PreparedApply:
     workspace_root: Path
     github_plan: dict[str, Any]
     summary: dict[str, Any]
+    #: ce-ops#85 adoption-apply state (default = non-adoption greenfield/plain-join run).
+    adoption_mode: bool = False
+    brownfield_plan: Mapping[str, Any] | None = None
+    adoption_branch: str = BROWNFIELD_ADOPTION_BRANCH
 
 
 class ApplyDriver:
@@ -508,6 +558,77 @@ class ApplyDriver:
     def verify_checkout(self, *, repo: str, branch: str, path: Path) -> dict[str, Any]:
         return {"ok": False, "reason": "no_checkout_verify_driver"}
 
+    # -- ce-ops#85 E3 adoption-APPLY (join-PR) seams ----------------------------------------
+    # The base implementations refuse: the noop base driver has no live forge/scanner, so an
+    # adoption run with it never side-effects (it is only ever driven by the live adoption
+    # driver, which overrides these). They exist so the legs have a stable injection seam.
+    def secret_preflight_scan(
+        self, *, scan_root: str, scaffold: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        """Run the sha-pinned two-scanner secrets-scrub over ``scan_root`` (§3.3, MAJOR-2).
+
+        MUST return per-scanner reports under ``{"scanners": {name: {ran, exit_code,
+        findings, error}}}`` so the leg can AFFIRMATIVELY gate on a zero-exit + empty-findings
+        from BOTH Gitleaks AND TruffleHog. A scanner that is unavailable / errored / timed out
+        / produced unparseable output is NOT clean. The base has no scanner → fail-closed.
+        """
+        return {"ok": False, "reason": "no_secret_scanner", "scanners": {}}
+
+    def build_adoption_scaffold(
+        self,
+        *,
+        repo: str,
+        base: str,
+        branch: str,
+        workspace_root: Path,
+        artifacts: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Local checkout → write the value-free scaffold on the adoption branch → commit (local).
+
+        Returns ``{ok, source_dir, head_sha, scaffold_paths, workflow_sha256}``. NO forge write
+        (local git only). The base has no live git → refuse.
+        """
+        return {"ok": False, "reason": "no_adoption_scaffold_driver"}
+
+    def push_adoption_branch(
+        self, *, repo: str, branch: str, source_dir: str
+    ) -> dict[str, Any]:
+        """Push the adoption branch via ``forge.push_change`` under the §6 WRITE token (legs 4).
+
+        Plan-by-default forge primitive; NEVER force-pushes (a non-fast-forward returns
+        ``{"ok": False, "reason": "push_refused"}`` so the leg refuses ``brownfield_push_refused``).
+        Returns ``{ok, pushed, up_to_date, local_head, remote_head}``. The base refuses.
+        """
+        return {"ok": False, "reason": "no_adoption_push_driver"}
+
+    def open_adoption_pr(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        base: str,
+        manifest_paths: Sequence[str],
+        plan_ref: str,
+    ) -> dict[str, Any]:
+        """Open (or idempotently claim) exactly one join PR via ``forge.open_change`` (leg 5).
+
+        Uses the §6 WRITE token (``pull_requests:write``) and REVOKES the write token the
+        instant legs 4-5 are done. Returns ``{ok, pr_number, head_sha, verified, claimed}``.
+        The base refuses.
+        """
+        return {"ok": False, "reason": "no_adoption_pr_driver"}
+
+    def read_preserved_checks(
+        self, *, repo: str, base: str, expected_checks: Sequence[str]
+    ) -> dict[str, Any]:
+        """Read (via the inherited READ token) the repo's live checks; confirm none dropped (leg 6).
+
+        The join PR is additive, so nothing is dropped by construction; this CONFIRMS it.
+        Returns ``{ok, existing_checks, dropped}``; a non-empty ``dropped`` → the leg refuses
+        ``brownfield_protection_loss``. The base refuses.
+        """
+        return {"ok": False, "reason": "no_preserved_checks_driver"}
+
     def run_first_project_smoke(
         self,
         *,
@@ -730,6 +851,7 @@ def apply_onboard(
         token_holder: dict[str, str] = {}
         workspace_holder: dict[str, Path] = {}
         installation_holder: dict[str, int] = {}
+        adoption_holder: dict[str, Any] = {}
         stopped = False
         for leg_id in LEG_IDS:
             if stopped:
@@ -745,6 +867,7 @@ def apply_onboard(
                         token_holder,
                         workspace_holder,
                         installation_holder,
+                        adoption_holder,
                     )
                 except ApplyRefused as exc:
                     outcome = LegOutcome(
@@ -843,6 +966,15 @@ def _prepare(
     )
     target_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
     workspace_root = Path(os.path.expanduser(str(merged.value("host.workspace_root", "~/ce-workspaces"))))
+    # ce-ops#85 adoption-apply: the CLI sets ``adoption_apply`` ONLY for a genuine non-CE
+    # adoptable repo under an authorized adoption driver. The PR base is the repo's real
+    # default branch (from the plan's history), NOT the greenfield ``new_repo.default_branch``.
+    adoption_mode = bool(request.adoption_apply)
+    brownfield_plan = dict(request.brownfield_plan) if request.brownfield_plan else None
+    if adoption_mode and brownfield_plan:
+        target_branch = str(
+            (brownfield_plan.get("history") or {}).get("default_branch") or target_branch or "main"
+        )
     summary = _empty_summary(
         root=request.state_root,
         mode=request.mode,
@@ -863,6 +995,9 @@ def _prepare(
         workspace_root=workspace_root,
         github_plan=github_plan,
         summary=summary,
+        adoption_mode=adoption_mode,
+        brownfield_plan=brownfield_plan,
+        adoption_branch=BROWNFIELD_ADOPTION_BRANCH,
     )
 
 
@@ -951,7 +1086,20 @@ def _run_leg(
     token_holder: dict[str, str],
     workspace_holder: dict[str, Path],
     installation_holder: dict[str, int],
+    adoption_holder: dict[str, Any],
 ) -> LegOutcome:
+    # ce-ops#85 mode gate (E2 §6 seam 1; LegOutcome shape unchanged): in an authorized
+    # adoption run the greenfield FORGE legs skip ("brownfield_adoption_mode"); in every
+    # non-adoption run the seven adoption legs skip ("not_brownfield_adoption"). The early
+    # LOCAL legs run in both modes.
+    if prepared.adoption_mode and leg_id in ADOPTION_SKIPPED_GREENFIELD_LEG_IDS:
+        return LegOutcome(leg_id, "skipped", "brownfield_adoption_mode")
+    if not prepared.adoption_mode and leg_id in ADOPTION_LEG_IDS:
+        return LegOutcome(leg_id, "skipped", "not_brownfield_adoption")
+    if leg_id in ADOPTION_LEG_IDS:
+        return _run_adoption_leg(
+            leg_id, request, prepared, driver, workspace_holder, adoption_holder
+        )
     if leg_id == "signed_spec_verify":
         return LegOutcome(
             leg_id,
@@ -1382,6 +1530,334 @@ def _run_leg(
     raise ApplyFailed("unknown_leg", leg_id)
 
 
+def adoption_scaffold_artifacts(plan: Mapping[str, Any]) -> list[dict[str, str]]:
+    """The value-free scaffold the join PR carries (deterministic; derived from the plan).
+
+    The two skill artifacts + the scope seed come from the ratified plan's ``artifact_plan``
+    (CE-generated, value-free); the CE validate workflow is the byte-pinned
+    :data:`CE_WORKFLOW_CONTENT` (OQ-4: the workflow rides the join PR). Stable bytes (sorted
+    YAML for the scope seed) so a re-run reproduces the same head + the same PR.
+    """
+    artifact_plan = plan.get("artifact_plan") or {}
+    artifacts: list[dict[str, str]] = []
+    for entry in artifact_plan.get("skill_artifacts") or ():
+        artifacts.append({"path": str(entry["path"]), "content": str(entry["content"])})
+    scope_seed = artifact_plan.get("scope_seed")
+    scope_seed_path = artifact_plan.get("scope_seed_path")
+    if scope_seed is not None and scope_seed_path:
+        artifacts.append({
+            "path": str(scope_seed_path),
+            "content": yaml.safe_dump(scope_seed, sort_keys=True),
+        })
+    artifacts.append({"path": CE_WORKFLOW_PATH, "content": CE_WORKFLOW_CONTENT})
+    return artifacts
+
+
+def _evaluate_scrub_result(
+    result: Any, *, waived_ids: set[str]
+) -> dict[str, list[str]]:
+    """AFFIRMATIVELY fail-closed scrub gate (§3.3, verify-verdict MAJOR-2).
+
+    "Clean" is established ONLY by an affirmative zero-exit + a parseable empty findings list
+    from BOTH required scanners (Gitleaks AND TruffleHog). RAISE :class:`ApplyRefused` on ANY
+    of: a missing/unparseable result, a scanner that did not run, a scanner error/timeout, a
+    non-zero exit, unparseable findings, or an unwaived finding. The ABSENCE of parsed findings
+    is NEVER treated as clean — only an affirmative report is. Returns the (all-waived) findings
+    disposition on success.
+    """
+    if not isinstance(result, Mapping):
+        raise ApplyRefused(
+            "brownfield_secret_scanner_unavailable",
+            "secrets-scrub produced no parseable result (absence of findings is NOT clean)",
+        )
+    scanners = result.get("scanners")
+    if not isinstance(scanners, Mapping):
+        raise ApplyRefused(
+            "brownfield_secret_scanner_unavailable",
+            "secrets-scrub result carries no scanner reports (absence is NOT clean)",
+        )
+    all_findings: list[str] = []
+    for name in REQUIRED_SCRUB_SCANNERS:
+        report = scanners.get(name)
+        if not isinstance(report, Mapping):
+            raise ApplyRefused(
+                "brownfield_secret_scanner_unavailable",
+                f"{name}: no report — a scanner that did not run is NOT clean",
+            )
+        if report.get("error"):
+            raise ApplyRefused(
+                "brownfield_secret_scanner_unavailable",
+                f"{name}: scanner error/timeout: {report.get('error')}",
+            )
+        if report.get("ran") is not True:
+            raise ApplyRefused(
+                "brownfield_secret_scanner_unavailable",
+                f"{name}: did not affirmatively run (absence is NOT clean)",
+            )
+        if report.get("exit_code") != 0:
+            raise ApplyRefused(
+                "brownfield_secret_scanner_unavailable",
+                f"{name}: non-zero/missing exit code {report.get('exit_code')!r}",
+            )
+        findings = report.get("findings")
+        if not isinstance(findings, list):
+            raise ApplyRefused(
+                "brownfield_secret_scanner_unavailable",
+                f"{name}: unparseable findings (absence is NOT clean)",
+            )
+        all_findings.extend(str(f) for f in findings)
+    # Affirmative two-scanner clean established. Now disposition the findings.
+    unique = sorted(set(all_findings))
+    unwaived = [f for f in unique if f not in waived_ids]
+    if unwaived:
+        raise ApplyRefused(
+            "brownfield_secret_findings",
+            "unwaived secrets-scrub findings: " + ", ".join(unwaived),
+        )
+    return {"findings": unique, "waived": [f for f in unique if f in waived_ids]}
+
+
+def _ratified_waivers(prepared: PreparedApply) -> tuple[set[str], set[str]]:
+    """(ratified finding ids, unratified finding ids) from the answers' brownfield waivers."""
+    ratified: set[str] = set()
+    unratified: set[str] = set()
+    for waiver in prepared.merged.value("brownfield.secrets.waivers", []) or ():
+        if isinstance(waiver, Mapping) and waiver.get("finding_id"):
+            fid = str(waiver["finding_id"])
+            if v3_installer.valid_ratification(waiver.get("ratification"), require_ack=True):
+                ratified.add(fid)
+            else:
+                unratified.add(fid)
+    return ratified, unratified
+
+
+def _run_adoption_leg(
+    leg_id: str,
+    request: ApplyRequest,
+    prepared: PreparedApply,
+    driver: ApplyDriver,
+    workspace_holder: dict[str, Path],
+    adoption_holder: dict[str, Any],
+) -> LegOutcome:
+    """The ce-ops#85 join-PR adoption legs (§5). Each fails CLOSED before its side effect."""
+    plan = dict(prepared.brownfield_plan or {})
+    repo = prepared.target_repo
+    base = prepared.target_branch
+    branch = prepared.adoption_branch
+    summary = prepared.summary
+
+    if leg_id == "brownfield_inventory_drift_check":
+        expected = str(plan.get("inventory_sha256") or "")
+        fresh = v3_installer.brownfield_inventory_sha256(
+            request.schema, request.answers, dict(request.brownfield_probe or {})
+        )
+        if not expected or fresh != expected:
+            raise ApplyRefused(
+                "brownfield_inventory_drift",
+                f"inventory drifted since --plan (plan {expected[:12]}.. != fresh {fresh[:12]}..)",
+            )
+        return LegOutcome(
+            leg_id,
+            "already_satisfied",
+            "verify_inventory_no_drift",
+            verification={"ok": True, "inventory_sha256": fresh},
+        )
+
+    if leg_id == "brownfield_secret_preflight":
+        ratified_ids, unratified_ids = _ratified_waivers(prepared)
+        if unratified_ids:
+            # A provided waiver missing the {ratified_prompt_sha, approver_ref,
+            # educate_acknowledged} binding is refused BEFORE the scanner runs (§7).
+            raise ApplyRefused(
+                "brownfield_waiver_unratified",
+                "waiver(s) missing the required ratification binding: "
+                + ", ".join(sorted(unratified_ids)),
+            )
+        artifacts = adoption_scaffold_artifacts(plan)
+        scan_root = os.path.expanduser(str(plan.get("project_root") or "."))
+        result = driver.secret_preflight_scan(scan_root=scan_root, scaffold=artifacts)
+        disposition = _evaluate_scrub_result(result, waived_ids=ratified_ids)
+        summary["brownfield_scrub_findings"] = len(disposition["findings"])
+        summary["brownfield_scrub_findings_waived"] = len(disposition["waived"])
+        summary["brownfield_scrub_findings_blocking"] = 0
+        return LegOutcome(
+            leg_id,
+            "already_satisfied",
+            "secrets_scrub_two_scanner_clean",
+            verification={
+                "ok": True,
+                "scanners": list(REQUIRED_SCRUB_SCANNERS),
+                "findings": len(disposition["findings"]),
+                "findings_waived": len(disposition["waived"]),
+            },
+        )
+
+    if leg_id == "brownfield_build_scaffold":
+        artifacts = adoption_scaffold_artifacts(plan)
+        scaffold_paths = tuple(sorted({a["path"] for a in artifacts}))
+        action = driver.build_adoption_scaffold(
+            repo=repo,
+            base=base,
+            branch=branch,
+            workspace_root=prepared.workspace_root,
+            artifacts=artifacts,
+        )
+        if not action.get("ok"):
+            raise ApplyFailed("brownfield_scaffold_failed", str(action.get("reason", "scaffold failed")))
+        source_dir = action.get("source_dir")
+        if not source_dir:
+            raise ApplyFailed("brownfield_scaffold_verify_failed", "scaffold reported no source dir")
+        present = {str(p) for p in (action.get("scaffold_paths") or ())}
+        if not set(scaffold_paths).issubset(present):
+            raise ApplyFailed(
+                "brownfield_scaffold_verify_failed",
+                f"scaffold paths missing: {sorted(set(scaffold_paths) - present)}",
+            )
+        if action.get("workflow_sha256") != CE_WORKFLOW_SHA256:
+            raise ApplyFailed(
+                "brownfield_scaffold_verify_failed",
+                "scaffold workflow digest != pinned CE_WORKFLOW_SHA256",
+            )
+        workspace_holder["adoption_source_dir"] = Path(str(source_dir))
+        adoption_holder["scaffold_paths"] = scaffold_paths
+        adoption_holder["head_sha"] = action.get("head_sha")
+        return LegOutcome(
+            leg_id,
+            "already_satisfied" if action.get("already") else "applied",
+            "build_adoption_scaffold",
+            verification={
+                "ok": True,
+                "branch": branch,
+                "head_sha": action.get("head_sha"),
+                "scaffold_paths": list(scaffold_paths),
+                "workflow_sha256": CE_WORKFLOW_SHA256,
+            },
+            rollback={"automatic": "delete only the local adoption checkout/branch this run created"},
+            mutated=not bool(action.get("already")),
+        )
+
+    if leg_id == "brownfield_push_branch":
+        source_dir = workspace_holder.get("adoption_source_dir")
+        if not source_dir:
+            raise ApplyFailed("brownfield_push_failed", "no adoption scaffold source dir from leg 3")
+        action = driver.push_adoption_branch(repo=repo, branch=branch, source_dir=str(source_dir))
+        if not action.get("ok"):
+            if action.get("reason") == "push_refused":
+                raise ApplyRefused(
+                    "brownfield_push_refused",
+                    str(action.get("detail", "non-fast-forward; this primitive never force-pushes")),
+                )
+            raise ApplyFailed("brownfield_push_failed", str(action.get("reason", "push failed")))
+        remote_head, local_head = action.get("remote_head"), action.get("local_head")
+        if remote_head and local_head and remote_head != local_head:
+            raise ApplyFailed("brownfield_push_verify_failed", "remote head != local head after push")
+        return LegOutcome(
+            leg_id,
+            "already_satisfied" if action.get("up_to_date") else "applied",
+            "push_adoption_branch",
+            verification={
+                "ok": True,
+                "branch": branch,
+                "local_head": local_head,
+                "remote_head": remote_head,
+                "up_to_date": bool(action.get("up_to_date")),
+            },
+            rollback={"automatic": "delete only the remote adoption branch this run pushed (never the default branch)"},
+            mutated=not bool(action.get("up_to_date")),
+        )
+
+    if leg_id == "brownfield_open_join_pr":
+        plan_ref = str(plan.get("inventory_sha256") or "")
+        scaffold_paths = adoption_holder.get("scaffold_paths") or tuple(
+            sorted({a["path"] for a in adoption_scaffold_artifacts(plan)})
+        )
+        action = driver.open_adoption_pr(
+            repo=repo,
+            branch=branch,
+            base=base,
+            manifest_paths=scaffold_paths,
+            plan_ref=plan_ref,
+        )
+        if not action.get("ok"):
+            raise ApplyFailed("brownfield_open_pr_failed", str(action.get("reason", "open PR failed")))
+        if not action.get("verified"):
+            raise ApplyFailed(
+                "brownfield_open_pr_verify_failed",
+                "join PR not verified open after open_change (counter-honesty: not counted)",
+            )
+        pr = {
+            "repo": repo,
+            "branch": branch,
+            "base": base,
+            "pr_number": action.get("pr_number"),
+            "head_sha": action.get("head_sha"),
+            "plan_ref": plan_ref,
+        }
+        # ce-ops#85 verify-verdict MINOR — ONE counter rule: ``brownfield_adopted`` counts a
+        # join PR that is VERIFIED open this run, whether newly opened OR idempotently claimed
+        # (a re-run reconciles to the same PR and counts 1 — open-transition AND steady-state
+        # converge on "the join PR exists, verified"). Never counted on an unverified PR.
+        summary["brownfield_adopted"] = 1
+        summary["brownfield_adoption_pr"] = pr
+        adoption_holder["pr"] = pr
+        return LegOutcome(
+            leg_id,
+            "already_satisfied" if action.get("claimed") else "applied",
+            "open_join_pr",
+            verification={"ok": True, "claimed": bool(action.get("claimed")), **pr},
+            rollback={"automatic": "close the join PR + delete the adoption branch (maintainer action)"},
+            mutated=not bool(action.get("claimed")),
+        )
+
+    if leg_id == "brownfield_verify_preserved_checks":
+        expected = [str(c) for c in (plan.get("ci") or {}).get("checks_to_preserve", ())]
+        action = driver.read_preserved_checks(repo=repo, base=base, expected_checks=expected)
+        if not action.get("ok"):
+            raise ApplyFailed(
+                "brownfield_verify_checks_failed", str(action.get("reason", "preserved-checks read failed"))
+            )
+        dropped = [str(c) for c in (action.get("dropped") or ())]
+        if dropped:
+            raise ApplyRefused(
+                "brownfield_protection_loss",
+                "join PR would drop existing required check(s): " + ", ".join(dropped),
+            )
+        return LegOutcome(
+            leg_id,
+            "already_satisfied",
+            "verify_no_check_dropped",
+            verification={
+                "ok": True,
+                "existing_checks": list(action.get("existing_checks") or ()),
+                "preserved": True,
+            },
+        )
+
+    if leg_id == "brownfield_record_apply_evidence":
+        pr = adoption_holder.get("pr") or summary.get("brownfield_adoption_pr") or {}
+        record = {
+            "ok": True,
+            "repo": repo,
+            "branch": branch,
+            "base": base,
+            "pr_number": pr.get("pr_number"),
+            "head_sha": pr.get("head_sha"),
+            "plan_ref": pr.get("plan_ref"),
+            "scrub": {
+                "findings": summary.get("brownfield_scrub_findings", 0),
+                "findings_waived": summary.get("brownfield_scrub_findings_waived", 0),
+            },
+        }
+        return LegOutcome(
+            leg_id,
+            "applied",
+            "record_value_free_adoption_evidence",
+            verification=record,
+        )
+
+    raise ApplyFailed("unknown_leg", leg_id)
+
+
 def policy_from_reference(
     desired: Mapping[str, Any],
     *,
@@ -1451,6 +1927,14 @@ def _empty_summary(
         "greenfield_repos_created": 0,
         "repos_already_satisfied": 0,
         "brownfield_deferred": 0,
+        # ce-ops#85 E3 adoption-APPLY counters (§4) — facts, never intent. A join PR is
+        # ``brownfield_adopted`` only once ``open_change`` verifies it open; the scrub
+        # counters reflect actual scanner findings (never "clean" before scanner evidence).
+        "brownfield_adopted": 0,
+        "brownfield_adoption_pr": None,
+        "brownfield_scrub_findings": 0,
+        "brownfield_scrub_findings_waived": 0,
+        "brownfield_scrub_findings_blocking": 0,
         "legs_total": len(LEG_IDS),
         "applied": 0,
         "already_satisfied": 0,

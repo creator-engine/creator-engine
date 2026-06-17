@@ -52,8 +52,15 @@ from typing import Any, Mapping, Sequence
 
 from . import onboard_apply, v3_installer
 from .forge.app_jwt_runner import Signer, app_jwt_gh_runner
+from .forge.change import open_change
+from .forge.change_push import PushRefused, push_change
 from .forge.credential_runner import authenticated_gh_runner
-from .forge.github_repo_config import BranchProtectionPolicy, ForgeConfigError, GhRunner
+from .forge.github_repo_config import (
+    BranchProtectionPolicy,
+    ForgeConfigError,
+    ForgeConfigRefused,
+    GhRunner,
+)
 from .forge.scoped_token import (
     ScopedToken,
     TokenRequest,
@@ -94,6 +101,79 @@ ENV_LIVE_FORGE = "CE_FORGE_LIVE_FORGE"
 ENV_APP_CLIENT_ID = "CE_FORGE_APP_CLIENT_ID"
 ENV_INSTALLATION_ID = "CE_FORGE_INSTALLATION_ID"
 ENV_APP_PEM = "CE_FORGE_APP_PEM"
+#: ce-ops#85 E3 adoption-APPLY (the join-PR WRITE escalation, §6.3 / OQ-3). A SECOND,
+#: default-OFF authorization flag, co-located with the App creds and mirroring
+#: ``CE_FORGE_LIVE_FORGE`` (ENV not answers-schema, so no ce-root-v1 re-sign cascade). The
+#: adoption WRITE path requires BOTH ``CE_FORGE_LIVE_FORGE=1`` AND ``CE_FORGE_ADOPTION_WRITE=1``
+#: — the one-time, human-ratified per-install escalation gate beyond #233's zero-write posture.
+ENV_ADOPTION_WRITE = "CE_FORGE_ADOPTION_WRITE"
+
+#: ce-ops#85 §6.1 — the least-privilege join-PR WRITE ceiling. GitHub installation-token
+#: permissions are a ``scope -> level`` map, so ``contents:write`` SUBSUMES ``contents:read``
+#: (a scope cannot carry two levels): the §6.1 conceptual ceiling
+#: ``{metadata:read, contents:read, contents:write, workflows:write, pull_requests:write}``
+#: collapses to this 4-entry minted map. ``contents:write`` (push the branch) and
+#: ``workflows:write`` (the branch adds ``.github/workflows/ce-validate.yml``) are Tier-2
+#: escalation-gated; ``pull_requests:write`` (open the join PR) is Tier-3 baseline (admitted
+#: with no escalation). ``administration:write`` is DELIBERATELY ABSENT (OQ-1): the join PR
+#: never mutates branch protection.
+ADOPTION_WRITE_PERMISSIONS: dict[str, str] = {
+    "metadata": "read",
+    "contents": "write",
+    "workflows": "write",
+    "pull_requests": "write",
+}
+#: The EXACT escalation authority the adoption write token binds (§6.3) — only the two Tier-2
+#: grants the join PR needs. ``pull_requests:write`` is Tier-3 (no authority required) and
+#: ``administration:write`` is NOT here (never minted). A request that includes a Tier-2 write
+#: WITHOUT binding this refuses at the minter (default-deny) — defence-in-depth.
+ADOPTION_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (
+    ("contents", "write"),
+    ("workflows", "write"),
+)
+#: The adoption write credential is minted for legs 4-5 ONLY and revoked immediately after.
+FORGE_WRITE_TTL_SECONDS = 600
+FORGE_WRITE_SECRET_NAME = "onboard_forge_adoption_write"
+
+
+@dataclass(frozen=True)
+class BrownfieldScanner:
+    """A sha256-pinned, mirror-served secrets scanner for the scrub gate (§3.3, OQ-5).
+
+    Gitleaks + TruffleHog (the client-zero runbook pair). ``sha256`` pins the EXACT mirror-
+    served binary bytes; an EMPTY ``sha256`` means UNPINNED → the live scan fail-closes
+    (``ran=False``) so an unverified binary is NEVER executed. The concrete release pins are
+    COMMISSIONED at the live Mode-A VPS rehearsal (the only venue the scanners run — CI uses
+    the injected ``scrub_scan`` seam and performs ZERO scanner). Mirrors ``MirrorUserspaceWheel``.
+    """
+
+    tool: str
+    version: str
+    url: str
+    sha256: str
+
+
+#: The KNOWN secrets-scrub scanners (§3.3 hard gate). ``sha256`` is intentionally EMPTY here:
+#: the live binary pins are commissioned at the VPS Mode-A rehearsal (the DoD live venue). Until
+#: pinned, the live ``_default_scrub_scan`` reports each scanner ``ran=False`` → the
+#: ``brownfield_secret_preflight`` leg fail-closes (``brownfield_secret_scanner_unavailable``),
+#: so NO adoption branch is built/pushed/PR'd without an affirmed, pinned two-scanner clean.
+BROWNFIELD_SCANNERS: dict[str, BrownfieldScanner] = {
+    "gitleaks": BrownfieldScanner(tool="gitleaks", version="", url="", sha256=""),
+    "trufflehog": BrownfieldScanner(tool="trufflehog", version="", url="", sha256=""),
+}
+#: The two-scanner set the scrub gate requires (mirrors ``onboard_apply.REQUIRED_SCRUB_SCANNERS``).
+REQUIRED_SCRUB_SCANNERS: tuple[str, ...] = ("gitleaks", "trufflehog")
+ENV_GITLEAKS_URL = "CE_FORGE_GITLEAKS_URL"
+ENV_GITLEAKS_SHA256 = "CE_FORGE_GITLEAKS_SHA256"
+ENV_GITLEAKS_VERSION = "CE_FORGE_GITLEAKS_VERSION"
+ENV_TRUFFLEHOG_URL = "CE_FORGE_TRUFFLEHOG_URL"
+ENV_TRUFFLEHOG_SHA256 = "CE_FORGE_TRUFFLEHOG_SHA256"
+ENV_TRUFFLEHOG_VERSION = "CE_FORGE_TRUFFLEHOG_VERSION"
+SCANNER_ENV_KEYS: dict[str, tuple[str, str, str]] = {
+    "gitleaks": (ENV_GITLEAKS_URL, ENV_GITLEAKS_SHA256, ENV_GITLEAKS_VERSION),
+    "trufflehog": (ENV_TRUFFLEHOG_URL, ENV_TRUFFLEHOG_SHA256, ENV_TRUFFLEHOG_VERSION),
+}
 #: OPTIONAL offline FALLBACK for the apply-time userspace-dep install. Design A's DEFAULT path
 #: fetches the pinned ``uv`` wheel from CE's mirror; if this env points at a directory that
 #: already holds the pinned wheel (sha256-verified), the driver uses it instead of fetching —
@@ -189,6 +269,13 @@ class LiveForgeConfig:
     #: None → the running interpreter's scripts dir (where ``pip install`` placed the console
     #: script); tests inject a temp dir holding a fake binary. NOT a PATH search.
     scripts_dir: str | None = None
+    #: ce-ops#85 adoption-apply — injectable secrets-scrub seam ``(scan_root, scaffold) -> dict``
+    #: returning per-scanner reports. CI injects a fake → ZERO scanner. None → the live default
+    #: (sha256-pinned mirror-served Gitleaks + TruffleHog; fail-closed when unpinned).
+    scrub_scan: Any = None
+    #: Optional runtime-supplied Gitleaks + TruffleHog mirror pins. ``resolve_live_config`` reads
+    #: them from host env; absent or incomplete pins leave the scrub default fail-closed.
+    brownfield_scanners: Mapping[str, BrownfieldScanner] | None = None
 
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
@@ -210,6 +297,38 @@ def _protection_contexts(protection: Mapping[str, Any] | None) -> tuple[str, ...
     checks = protection.get("required_status_checks") or {}
     contexts = checks.get("contexts") if isinstance(checks, Mapping) else None
     return tuple(str(c) for c in (contexts or ()))
+
+
+def _looks_like_branch_not_protected(parsed: object, stderr: str) -> bool:
+    """True only for GitHub's branch-protection-absent signal, not generic API failure."""
+    message = ""
+    if isinstance(parsed, Mapping):
+        message = str(parsed.get("message") or "")
+    text = f"{message}\n{stderr or ''}".lower()
+    return "branch not protected" in text
+
+
+def _valid_sha256(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
+def _scanner_pins_from_env(env: Mapping[str, str]) -> Mapping[str, BrownfieldScanner] | None:
+    """Runtime scanner-pin supply path for VPS Mode-A; absent/partial pins fail closed."""
+    supplied = False
+    pins: dict[str, BrownfieldScanner] = {}
+    for tool, (url_key, sha_key, version_key) in SCANNER_ENV_KEYS.items():
+        url = str(env.get(url_key) or "")
+        sha256 = str(env.get(sha_key) or "")
+        version = str(env.get(version_key) or "")
+        if url or sha256 or version:
+            supplied = True
+        pins[tool] = BrownfieldScanner(
+            tool=tool,
+            version=version,
+            url=url,
+            sha256=sha256 if url and _valid_sha256(sha256) else "",
+        )
+    return pins if supplied else None
 
 
 def _parse_oauth_scopes_header(raw_response: str) -> set[str]:
@@ -830,6 +949,415 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         return {"ok": True, "branch": branch}
 
 
+class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
+    """ce-ops#85 E3 adoption driver — the join-PR layer (two-token model + hard scrub gate).
+
+    Subclasses :class:`LiveForgeApplyDriver`, so the read-only detection legs AND the
+    inherited Phase-1 READ token (``PHASE1_PERMISSIONS`` incl ``administration:read``, which
+    leg-6 rides) are REUSED unchanged. It ADDS the adoption legs' bodies and the SECOND token:
+
+    Two-token model (verify-verdict MAJOR-1):
+      * READ legs (1 drift-check, 2 secret-preflight, 6 preserved-checks) ride the INHERITED
+        Phase-1 read token via ``_reader()`` — incl ``administration:read`` for the protection
+        read. NO write scope.
+      * WRITE legs (4 push, 5 open-PR) ride a SEPARATE token minted lazily by ``_writer()`` at
+        the §6.1 ceiling (``ADOPTION_WRITE_PERMISSIONS`` + ``ADOPTION_ESCALATION_AUTHORITY``),
+        and REVOKED the instant leg 5 finishes (``_revoke_write``). The write token never
+        carries ``administration:*``. ``close()`` revokes BOTH tokens as a backstop.
+
+    Hard scrub gate (verify-verdict MAJOR-2): ``secret_preflight_scan`` runs the sha-pinned
+    two-scanner scrub; the ``brownfield_secret_preflight`` leg (in ``onboard_apply``) is the
+    affirmative fail-closed authority. The live default fail-closes until the binary pins are
+    commissioned at the VPS Mode-A rehearsal.
+
+    Defensive only — PR-mediated, never force-pushes, never mutates branch protection, never
+    direct-pushes the default branch; idempotent (stable branch + plan-by-default forge primitives).
+    """
+
+    def __init__(self, config: LiveForgeConfig):
+        super().__init__(config)
+        self._write_token: ScopedToken | None = None
+        self._write_runner: GhRunner | None = None
+        self._write_revoked: bool = False
+
+    # -- WRITE-token lifecycle (legs 4-5 ONLY; minted late, revoked immediately after) ------
+    def _writer(self) -> GhRunner:
+        """Lazily mint the §6.1 WRITE token (Tier-2 escalation bound) and return its runner."""
+        if self._write_runner is None:
+            mint_runner = app_jwt_gh_runner(
+                self._cfg.app_client_id, signer=self._cfg.signer, transport=self._cfg.transport
+            )
+            request = TokenRequest(
+                repo=self._cfg.repo,
+                installation_id=self._cfg.installation_id,
+                run_id=self._cfg.run_id,
+                policy_sha=self._cfg.policy_sha,
+                permissions=ADOPTION_WRITE_PERMISSIONS,
+                secret_name=FORGE_WRITE_SECRET_NAME,
+                requested_ttl_seconds=FORGE_WRITE_TTL_SECONDS,
+                escalation_authority=ADOPTION_ESCALATION_AUTHORITY,
+            )
+            # Tier-2 default-deny: if a future edit dropped ADOPTION_ESCALATION_AUTHORITY, the
+            # minter raises TokenMintRefused BEFORE any forge call (defence-in-depth, §6.3).
+            self._write_token = mint_scoped_token(request, gh_runner=mint_runner)
+            self._write_runner = authenticated_gh_runner(self._write_token, spawn=self._cfg.spawn)
+        return self._write_runner
+
+    def _revoke_write(self) -> None:
+        """Revoke the WRITE token the instant legs 4-5 are done (never raises; never leaks)."""
+        if (
+            self._write_token is not None
+            and self._write_runner is not None
+            and not self._write_revoked
+        ):
+            with contextlib.suppress(ForgeConfigError, OSError):
+                revoke_scoped_token(self._write_token, gh_runner=self._write_runner)
+        self._write_revoked = True
+        self._write_token = None
+        self._write_runner = None
+
+    def close(self) -> None:
+        """Revoke BOTH the WRITE token (backstop) and the inherited READ token."""
+        self._revoke_write()
+        super().close()
+
+    # -- leg 2: the sha-pinned two-scanner secrets scrub --------------------------------------
+    def secret_preflight_scan(
+        self, *, scan_root: str, scaffold: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        scan = self._cfg.scrub_scan if self._cfg.scrub_scan is not None else self._default_scrub_scan
+        try:
+            return scan(scan_root, list(scaffold))
+        except Exception as exc:  # noqa: BLE001 — fail-closed: a seam error is NOT clean
+            return {
+                "scanners": {
+                    name: {"ran": False, "exit_code": None, "findings": [], "error": f"scrub seam error: {exc}"}
+                    for name in REQUIRED_SCRUB_SCANNERS
+                }
+            }
+
+    def _default_scrub_scan(self, scan_root: str, scaffold: list) -> dict[str, Any]:
+        """Live scrub: per-scanner sha-pinned run; fail-closed (``ran=False``) until pinned.
+
+        Each scanner's report is ``{ran, exit_code, findings, error}``. With an EMPTY pin (the
+        as-shipped state — concrete binary pins are commissioned at the VPS Mode-A rehearsal)
+        the report is ``ran=False`` so the leg refuses ``brownfield_secret_scanner_unavailable``
+        — NO unverified binary is ever executed and absence is never read as clean.
+
+        When scanner pins are supplied, scan a temporary materialized tree containing BOTH the
+        pre-existing project bytes and every scaffold artifact leg 3 would commit, matching the
+        plan-side ``scan_paths`` contract: ``[".", *scaffold_paths]``.
+        """
+        reports: dict[str, Any] = {}
+        scanner_pins = self._cfg.brownfield_scanners or BROWNFIELD_SCANNERS
+        active_pins: dict[str, BrownfieldScanner] = {}
+        for name in REQUIRED_SCRUB_SCANNERS:
+            pin = scanner_pins.get(name)
+            if pin is None or not pin.sha256:
+                reports[name] = {
+                    "ran": False,
+                    "exit_code": None,
+                    "findings": [],
+                    "error": (
+                        f"{name}: scanner binary not sha256-pinned — commission the mirror pin "
+                        "at the VPS Mode-A rehearsal (fail-closed until then)"
+                    ),
+                }
+            else:
+                active_pins[name] = pin
+        if not active_pins:
+            return {"scanners": reports}
+        materialized_root, cleanup_root, scan_paths = self._materialize_scrub_scan_tree(scan_root, scaffold)
+        try:
+            for name, pin in active_pins.items():
+                reports[name] = self._run_pinned_scanner(pin, materialized_root)
+            return {"scanners": reports, "scan_paths": scan_paths}
+        finally:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
+
+    def _materialize_scrub_scan_tree(
+        self, scan_root: str, scaffold: Sequence[Mapping[str, Any]]
+    ) -> tuple[str, str, list[str]]:
+        """Copy ``scan_root`` and overlay scaffold artifacts so scanners cover the full mutation surface."""
+        source = Path(scan_root).expanduser()
+        if not source.is_dir():
+            raise FileNotFoundError(f"scrub scan root is not a directory: {scan_root}")
+        cleanup_root = Path(tempfile.mkdtemp(prefix="ce-scrub-tree-"))
+        materialized = cleanup_root / "tree"
+        try:
+            shutil.copytree(source, materialized, symlinks=True)
+            scaffold_paths: list[str] = []
+            for artifact in scaffold:
+                rel = Path(str(artifact["path"]))
+                if rel.is_absolute() or ".." in rel.parts:
+                    raise ValueError(f"scaffold path escapes scrub tree: {rel}")
+                target = materialized / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(str(artifact["content"]), encoding="utf-8")
+                scaffold_paths.append(rel.as_posix())
+            return str(materialized), str(cleanup_root), [".", *scaffold_paths]
+        except Exception:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
+            raise
+
+    def _run_pinned_scanner(self, pin: "BrownfieldScanner", scan_root: str) -> dict[str, Any]:
+        """Stage the sha256-pinned scanner binary (fetch+verify) and run it; never raises.
+
+        Reuses the wheel-staging anti-tamper pattern: fetch ``pin.url`` from CE's mirror, verify
+        the bytes against ``pin.sha256`` BEFORE making it executable, then run the tool over
+        ``scan_root``. Returns ``{ran, exit_code, findings, error}`` — fail-closed on any
+        fetch/hash/spawn error. (Commission-gated; exercised at the VPS Mode-A rehearsal.)
+        """
+        staged_dir = Path(tempfile.mkdtemp(prefix=f"ce-scanner-{pin.tool}-"))
+        try:
+            try:
+                data = self._mirror_fetch(pin.url)
+            except Exception as exc:  # noqa: BLE001
+                return {"ran": False, "exit_code": None, "findings": [], "error": f"{pin.tool}: fetch failed: {exc}"}
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != pin.sha256:
+                return {
+                    "ran": False, "exit_code": None, "findings": [],
+                    "error": f"{pin.tool}: sha256 mismatch (expected {pin.sha256}, got {actual})",
+                }
+            binary = staged_dir / pin.tool
+            binary.write_bytes(data)
+            binary.chmod(0o700)
+            argv = _scanner_argv(pin.tool, str(binary), scan_root)
+            spawn = self._cfg.pip_spawn or _default_pip_spawn  # reuse the injectable spawn shape
+            try:
+                proc = spawn(argv)
+            except Exception as exc:  # noqa: BLE001
+                return {"ran": False, "exit_code": None, "findings": [], "error": f"{pin.tool}: spawn failed: {exc}"}
+            try:
+                findings = _parse_scanner_findings(pin.tool, getattr(proc, "stdout", "") or "")
+            except ValueError as exc:
+                return {
+                    "ran": True,
+                    "exit_code": getattr(proc, "returncode", 1),
+                    "findings": [],
+                    "error": str(exc),
+                }
+            return {"ran": True, "exit_code": getattr(proc, "returncode", 1), "findings": findings}
+        finally:
+            shutil.rmtree(staged_dir, ignore_errors=True)
+
+    # -- leg 3: build the value-free scaffold on the adoption branch (local git only) ---------
+    def build_adoption_scaffold(
+        self,
+        *,
+        repo: str,
+        base: str,
+        branch: str,
+        workspace_root: Path,
+        artifacts: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        checkout = self.checkout_workspace(repo=repo, branch=base, workspace_root=workspace_root)
+        if not checkout.get("ok"):
+            return {"ok": False, "reason": checkout.get("reason", "checkout_failed")}
+        repo_dir = Path(checkout["path"])
+        # stable adoption branch from base (``-B`` resets to base head → idempotent re-run).
+        if self._git(["checkout", "-B", branch], cwd=repo_dir).returncode != 0:
+            return {"ok": False, "reason": "adoption_branch_checkout_failed"}
+        written: list[str] = []
+        for artifact in artifacts:
+            target = repo_dir / str(artifact["path"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(artifact["content"]), encoding="utf-8")
+            written.append(str(artifact["path"]))
+        add = self._git(["add", *written], cwd=repo_dir)
+        if add.returncode != 0:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_failed",
+                "git add failed while staging the adoption scaffold",
+            )
+        commit = self._git(
+            ["commit", "-m", "ce: adopt project into CE governance (join PR)"], cwd=repo_dir
+        )
+        combined = ((commit.stdout or "") + (commit.stderr or "")).lower()
+        already = commit.returncode != 0 and "nothing to commit" in combined
+        if commit.returncode != 0 and not already:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_failed",
+                "git commit failed while committing the adoption scaffold",
+            )
+        head = self._git(["rev-parse", "HEAD"], cwd=repo_dir)
+        if head.returncode != 0 or not (head.stdout or "").strip():
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_verify_failed",
+                "cannot resolve adoption commit HEAD",
+            )
+        tree = self._git(["ls-tree", "-r", "--name-only", "HEAD", "--", *written], cwd=repo_dir)
+        if tree.returncode != 0:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_verify_failed",
+                "cannot inspect committed adoption scaffold tree",
+            )
+        committed_paths = {line.strip() for line in (tree.stdout or "").splitlines() if line.strip()}
+        missing = sorted(set(written) - committed_paths)
+        if missing:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_verify_failed",
+                "adoption commit does not contain scaffold path(s): " + ", ".join(missing),
+            )
+        workflow = self._git(["show", f"HEAD:{onboard_apply.CE_WORKFLOW_PATH}"], cwd=repo_dir)
+        if workflow.returncode != 0:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_verify_failed",
+                "adoption commit does not contain the CE validate workflow",
+            )
+        workflow_sha = hashlib.sha256((workflow.stdout or "").encode("utf-8")).hexdigest()
+        if workflow_sha != onboard_apply.CE_WORKFLOW_SHA256:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_commit_verify_failed",
+                "committed CE validate workflow digest does not match the pinned workflow",
+            )
+        return {
+            "ok": True,
+            "source_dir": str(repo_dir),
+            "head_sha": (head.stdout or "").strip(),
+            "scaffold_paths": written,
+            "workflow_sha256": workflow_sha,
+            "already": already,
+        }
+
+    def _git(self, args: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess:
+        """Run a LOCAL git command (no credential needed) through the git spawn seam."""
+        argv = ["git", "-C", str(cwd), *args]
+        env = dict(os.environ)
+        if self._cfg.git_spawn is not None:
+            return self._cfg.git_spawn(argv, None, env)
+        return subprocess.run(  # noqa: S603 — fixed git argv; local working-tree ops only
+            argv, check=False, capture_output=True, text=True, env=env, timeout=120
+        )
+
+    # -- leg 4: push the adoption branch (WRITE token; never force) ---------------------------
+    def push_adoption_branch(self, *, repo: str, branch: str, source_dir: str) -> dict[str, Any]:
+        self._writer()  # ensure the WRITE token is minted
+        assert self._write_token is not None
+        try:
+            result = push_change(
+                repo, branch, source_dir=source_dir, token=self._write_token,
+                apply=True, spawn=self._cfg.git_spawn,
+            )
+        except PushRefused as exc:
+            self._revoke_write()
+            return {"ok": False, "reason": "push_refused", "detail": str(exc)}
+        except ForgeConfigError as exc:
+            self._revoke_write()
+            return {"ok": False, "reason": "push_failed", "detail": str(exc)}
+        return {
+            "ok": True,
+            "pushed": result.pushed,
+            "up_to_date": result.up_to_date,
+            "local_head": result.local_head,
+            "remote_head": result.remote_head,
+        }
+
+    # -- leg 5: open exactly one join PR (WRITE token; revoke immediately after) ---------------
+    def open_adoption_pr(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        base: str,
+        manifest_paths: Sequence[str],
+        plan_ref: str,
+    ) -> dict[str, Any]:
+        runner = self._writer()
+        try:
+            ref = open_change(
+                repo, branch, base, list(manifest_paths), plan_ref, apply=True, gh_runner=runner
+            )
+        except (ForgeConfigError, ForgeConfigRefused) as exc:
+            return {"ok": False, "reason": "open_pr_failed", "detail": str(exc)}
+        finally:
+            # the WRITE token has done its job (legs 4-5) — revoke it now, not at close().
+            self._revoke_write()
+        return {
+            "ok": True,
+            "pr_number": ref.pr_number,
+            "head_sha": ref.head_sha,
+            "verified": ref.verified,
+            "claimed": not ref.changed,
+        }
+
+    # -- leg 6: confirm no existing check/workflow dropped (READ token) ------------------------
+    def read_preserved_checks(
+        self, *, repo: str, base: str, expected_checks: Sequence[str]
+    ) -> dict[str, Any]:
+        # Rides the INHERITED READ token (administration:read) — the WRITE token is already
+        # revoked after leg 5. The join PR is additive (leg 3 only WRITES new files and never
+        # issues a protection PUT), so by construction nothing is dropped; this CONFIRMS the
+        # live state is readable and reports the preserved contexts. A read failure is
+        # fail-closed (cannot affirm preservation → the leg fails).
+        try:
+            code, parsed, stderr = _gh_get(
+                self._reader(), f"repos/{repo}/branches/{base}/protection"
+            )
+        except Exception:  # noqa: BLE001
+            raise onboard_apply.ApplyRefused(
+                "brownfield_protection_read_failed",
+                "branch-protection read raised before preservation could be affirmed",
+            ) from None
+        if code != 0:
+            if _looks_like_branch_not_protected(parsed, stderr):
+                # Affirmative 404/not-protected signal → no required checks exist to drop.
+                return {"ok": True, "existing_checks": [], "dropped": []}
+            raise onboard_apply.ApplyRefused(
+                "brownfield_protection_read_failed",
+                f"branch-protection read returned non-404 error (gh rc={code}); refusing to infer clean",
+            )
+        if not isinstance(parsed, dict):
+            return {"ok": False, "reason": "preserved_checks_read_failed"}
+        live = list(_protection_contexts(parsed))
+        # Additive PR drops nothing; ``dropped`` is empty by construction (a defensive seam a
+        # future protection-mutating phase would populate). ``expected_checks`` is reported.
+        return {"ok": True, "existing_checks": live, "expected_checks": list(expected_checks), "dropped": []}
+
+
+def _scanner_argv(tool: str, binary: str, scan_root: str) -> list[str]:
+    """The documented detect command per scanner (commission-gated; VPS Mode-A)."""
+    if tool == "gitleaks":
+        return [binary, "detect", "--source", scan_root, "--no-banner", "--report-format", "json", "--report-path", "-"]
+    if tool == "trufflehog":
+        return [binary, "filesystem", scan_root, "--json", "--no-update"]
+    return [binary, "--version"]
+
+
+def _parse_scanner_findings(tool: str, stdout: str) -> list[str]:
+    """Parse a scanner's JSON output into value-FREE finding ids (never raw secret values)."""
+    findings: list[str] = []
+    text = (stdout or "").strip()
+    if not text:
+        return findings
+    # Both tools emit JSON (gitleaks an array; trufflehog newline-delimited objects). We extract
+    # ONLY a stable, value-free locator (file:line / source) as the finding id — never the secret.
+    candidates: list[Any] = []
+    try:
+        parsed = json.loads(text)
+        candidates = parsed if isinstance(parsed, list) else [parsed]
+    except (json.JSONDecodeError, ValueError):
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                candidates.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError(f"{tool}: unparseable scanner JSON output") from None
+    for index, item in enumerate(candidates):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{tool}: unparseable scanner finding record")
+        source_meta = item.get("SourceMetadata")
+        locator = item.get("File") or item.get("file")
+        if not locator and isinstance(source_meta, Mapping):
+            locator = source_meta.get("Data")
+        line_no = item.get("StartLine") or item.get("line") or ""
+        findings.append(f"{tool}:{locator or 'finding'}:{line_no or index}")
+    return findings
+
+
 # ---------------------------------------------------------------------------------------------
 # Host-side PEM signer (Mode-A live path; the PEM CONTENT never enters the driver)
 # ---------------------------------------------------------------------------------------------
@@ -900,6 +1428,7 @@ def resolve_live_config(
         signer=pem_signer(pem_path),
         policy_sha=policy_sha,
         run_id=f"onboard-live-forge:{repo}",
+        brownfield_scanners=_scanner_pins_from_env(env),
     )
 
 
@@ -927,3 +1456,29 @@ def live_forge_select(
     if config is None:
         return base  # authorized but unconfigured → fail-closed to the base noop driver
     return LiveForgeApplyDriver(config)
+
+
+def adoption_forge_select(
+    base: onboard_apply.ApplyDriver,
+    *,
+    merged: "v3_installer.MergeResult",
+    policy_sha: str,
+    env: Mapping[str, str] | None = None,
+) -> onboard_apply.ApplyDriver:
+    """Select the E3 adoption driver ONLY under the DUAL escalation (§6.3); else delegate.
+
+    ce-ops#85 fail-closed selection: returns :class:`LiveForgeAdoptionDriver` iff BOTH
+    ``CE_FORGE_LIVE_FORGE`` AND ``CE_FORGE_ADOPTION_WRITE`` are set true AND the App credentials
+    resolve. Otherwise it delegates to :func:`live_forge_select` (the READ-only live driver when
+    only ``CE_FORGE_LIVE_FORGE`` is set, or ``base`` when OFF) — so an unauthorized run keeps the
+    unchanged ``brownfield_deferred`` status quo. The adoption driver IS-A
+    :class:`LiveForgeApplyDriver`, so detection reads still work on it; the CLI uses
+    ``isinstance(..., LiveForgeAdoptionDriver)`` to know the WRITE escalation is authorized.
+    """
+    env = os.environ if env is None else env
+    if not (_flag_true(env.get(ENV_LIVE_FORGE)) and _flag_true(env.get(ENV_ADOPTION_WRITE))):
+        return live_forge_select(base, merged=merged, policy_sha=policy_sha, env=env)
+    config = resolve_live_config(merged, policy_sha=policy_sha, env=env)
+    if config is None:
+        return base  # authorized but unconfigured → fail-closed to the base noop driver
+    return LiveForgeAdoptionDriver(config)

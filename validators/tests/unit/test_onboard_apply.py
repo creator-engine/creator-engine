@@ -341,8 +341,14 @@ def test_greenfield_success_writes_ledger_and_honest_counters(tmp_path):
     assert summary["refused"] == 0
     assert summary["legs_total"] == len(onboard_apply.LEG_IDS)
     assert len(summary["legs"]) == len(onboard_apply.LEG_IDS)
-    assert summary["applied"] + summary["already_satisfied"] == len(onboard_apply.LEG_IDS)
+    # ce-ops#85: the 7 adoption legs SKIP in a greenfield run; the 12 greenfield legs converge.
+    assert summary["skipped"] == len(onboard_apply.ADOPTION_LEG_IDS)
+    assert (
+        summary["applied"] + summary["already_satisfied"] + summary["skipped"]
+        == len(onboard_apply.LEG_IDS)
+    )
     assert summary["greenfield_repos_created"] == 1
+    assert summary["brownfield_adopted"] == 0
     ledger_lines = (tmp_path / "state" / "onboard" / "ledger.ndjson").read_text(encoding="utf-8").splitlines()
     assert len(ledger_lines) == len(onboard_apply.LEG_IDS)
     assert {json.loads(line)["leg_id"] for line in ledger_lines} == set(onboard_apply.LEG_IDS)
@@ -410,7 +416,10 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
     # into applied/verified_count; so the run record never claims it was verified.
     assert posture["status"] == "held"
     assert summary["held"] == 1
-    assert summary["verified_count"] == summary["legs_total"] - 1  # the held leg is excluded
+    # the held leg is excluded from verified_count; the 7 adoption legs SKIP in greenfield, so
+    # verified_count = the greenfield legs minus the one held leg (ce-ops#85 grew LEG_IDS).
+    assert summary["skipped"] == len(onboard_apply.ADOPTION_LEG_IDS)
+    assert summary["verified_count"] == len(onboard_apply.GREENFIELD_LEG_IDS) - 1
     verification = posture["verification"]
     # PRIMARY ok is honest-False (the live runtime is NOT verified); `held` flags it
     # as accepted (posture applied), never a bare ok=True implying the sandbox works.
@@ -506,8 +515,13 @@ def test_plain_join_existing_already_ce_repo_converges(tmp_path):
     assert workflow_leg["status"] == "already_satisfied"
     # verify-only, no overwrite: the install driver leg is never invoked
     assert workflow_leg["action"] == "verify_existing_ce_workflow"
-    # every leg converged (applied or already_satisfied); none refused/failed/skipped
-    assert summary["applied"] + summary["already_satisfied"] == len(onboard_apply.LEG_IDS)
+    # every greenfield leg converged (applied or already_satisfied); the 7 adoption legs
+    # SKIP (plain-join is not adoption); none refused/failed.
+    assert summary["skipped"] == len(onboard_apply.ADOPTION_LEG_IDS)
+    assert (
+        summary["applied"] + summary["already_satisfied"] + summary["skipped"]
+        == len(onboard_apply.LEG_IDS)
+    )
 
 
 def test_plain_join_branch_protection_preserves_existing_checks(tmp_path):
@@ -642,3 +656,372 @@ def test_bootstrap_invalid_token_is_refused_distinctly(tmp_path):
     leg = _leg(summary, "github_bootstrap_token_probe")
     assert leg["status"] == "refused"
     assert leg["verification"]["code"] == "bootstrap_token_invalid"
+
+
+# ===========================================================================
+# ce-ops#85 E3 brownfield ADOPTION-APPLY (the join-PR layer) — §10 test plan.
+# ===========================================================================
+def _brownfield_probe(*, dirty: bool = False, scanner_clean: bool = True) -> dict[str, Any]:
+    secrets = {
+        "preflight": "required",
+        "status": "clean" if scanner_clean else "not_run",
+        "scanner_available": True if scanner_clean else None,
+        "findings": [],
+    }
+    return {
+        "enabled": True,
+        "project_root": ".",
+        "history": {
+            "mode": "git_history_present",
+            "head_sha": "a" * 40,
+            "default_branch": "main",
+            "commit_count": 3,
+            "dirty": dirty,
+        },
+        "github": {"origin_remote": "octo/greenfield"},
+        "ci": {
+            "workflows": [
+                {
+                    "path": ".github/workflows/ci.yml",
+                    "name": "CI",
+                    "jobs": ["test"],
+                    "check_names": ["CI / test"],
+                }
+            ],
+            "current_required_checks": ["lint"],
+        },
+        "tests": {"commands": [{"command": "python -m pytest", "source": "pyproject.toml"}]},
+        "conventions": {"branch_patterns": [], "commit_styles": []},
+        "secrets": secrets,
+    }
+
+
+def _adoption_plan(tmp_path: Path, probe: dict[str, Any]) -> dict[str, Any]:
+    return v3_installer.build_brownfield_adoption_plan(
+        _answers(tmp_path, mode="existing"), schema=_schema(), probe=probe
+    )
+
+
+class FakeAdoptionDriver(FakeDriver):
+    """A unit fake for the adoption legs — local legs from FakeDriver, adoption legs here."""
+
+    def __init__(
+        self,
+        *,
+        scrub_result: dict[str, Any] | None = None,
+        push_result: dict[str, Any] | None = None,
+        pr_result: dict[str, Any] | None = None,
+        preserved_result: dict[str, Any] | None = None,
+        scaffold_ok: bool = True,
+        scaffold_workflow_sha: str | None = None,
+    ):
+        super().__init__(repo_exists=True)
+        # NOTE: ``is not None`` (not ``or``) — an empty {} scrub_result is a DELIBERATE
+        # fail-closed case, not "use the default".
+        self._scrub_result = scrub_result if scrub_result is not None else {
+            "scanners": {
+                "gitleaks": {"ran": True, "exit_code": 0, "findings": []},
+                "trufflehog": {"ran": True, "exit_code": 0, "findings": []},
+            }
+        }
+        self._push_result = push_result if push_result is not None else {
+            "ok": True, "pushed": True, "up_to_date": False,
+            "local_head": "f" * 40, "remote_head": None,
+        }
+        self._pr_result = pr_result if pr_result is not None else {
+            "ok": True, "pr_number": 7, "head_sha": "f" * 40, "verified": True, "claimed": False,
+        }
+        self._preserved_result = preserved_result if preserved_result is not None else {
+            "ok": True, "existing_checks": ["CI / test", "lint"], "dropped": [],
+        }
+        self._scaffold_ok = scaffold_ok
+        self._scaffold_workflow_sha = (
+            scaffold_workflow_sha if scaffold_workflow_sha is not None else onboard_apply.CE_WORKFLOW_SHA256
+        )
+        self.scaffold_artifacts: list[dict[str, Any]] | None = None
+
+    def secret_preflight_scan(self, *, scan_root, scaffold):
+        self.calls.append("secret_preflight_scan")
+        return self._scrub_result
+
+    def build_adoption_scaffold(self, *, repo, base, branch, workspace_root, artifacts):
+        self.calls.append("build_adoption_scaffold")
+        self.scaffold_artifacts = list(artifacts)
+        if not self._scaffold_ok:
+            return {"ok": False, "reason": "adoption_branch_checkout_failed"}
+        return {
+            "ok": True,
+            "source_dir": str(workspace_root / repo.split("/", 1)[1]),
+            "head_sha": "f" * 40,
+            "scaffold_paths": [a["path"] for a in artifacts],
+            "workflow_sha256": self._scaffold_workflow_sha,
+            "already": False,
+        }
+
+    def push_adoption_branch(self, *, repo, branch, source_dir):
+        self.calls.append("push_adoption_branch")
+        return self._push_result
+
+    def open_adoption_pr(self, *, repo, branch, base, manifest_paths, plan_ref):
+        self.calls.append("open_adoption_pr")
+        self.opened_with = {"manifest_paths": list(manifest_paths), "plan_ref": plan_ref, "base": base}
+        return self._pr_result
+
+    def read_preserved_checks(self, *, repo, base, expected_checks):
+        self.calls.append("read_preserved_checks")
+        return self._preserved_result
+
+
+def _adoption_apply(tmp_path: Path, driver: FakeAdoptionDriver, *, plan=None, probe=None, plan_override=None):
+    probe = probe if probe is not None else _brownfield_probe()
+    plan = plan if plan is not None else _adoption_plan(tmp_path, probe)
+    if plan_override:
+        plan = {**plan, **plan_override}
+    answers = _answers(tmp_path, mode="existing")
+    answer_bytes = yaml.safe_dump(answers, sort_keys=True).encode("utf-8")
+    request = onboard_apply.ApplyRequest(
+        spec_bytes=_signed_spec(),
+        schema=_schema(),
+        answers=answers,
+        answers_sha256=v3_installer.content_digest(answer_bytes),
+        state_root=tmp_path / "state",
+        dependency_probe={tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES},
+        non_interactive=True,
+        adoption_apply=True,
+        brownfield_plan=plan,
+        brownfield_probe=probe,
+    )
+    return onboard_apply.apply_onboard(
+        request, verifier=_verifier(), driver=driver, invocation_id="test-adoption"
+    )
+
+
+def test_adoption_opens_join_pr_and_skips_greenfield_forge_legs(tmp_path):
+    # §10.6/§10.11 — the happy path: the 7 adoption legs run, the greenfield forge legs skip,
+    # exactly one verified join PR is counted, and the ledger carries value-free evidence.
+    driver = FakeAdoptionDriver()
+    summary = _adoption_apply(tmp_path, driver)
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    assert summary["brownfield_adopted"] == 1
+    assert summary["brownfield_adoption_pr"]["pr_number"] == 7
+    assert summary["brownfield_deferred"] == 0
+    # the greenfield forge legs are skipped under brownfield_adoption_mode
+    for leg_id in onboard_apply.ADOPTION_SKIPPED_GREENFIELD_LEG_IDS:
+        assert _leg(summary, leg_id)["status"] == "skipped"
+        assert _leg(summary, leg_id)["action"] == "brownfield_adoption_mode"
+    # all 7 adoption legs converged
+    for leg_id in onboard_apply.ADOPTION_LEG_IDS:
+        assert _leg(summary, leg_id)["status"] in {"applied", "already_satisfied"}
+    # never created a repo / installed a workflow directly / mutated protection
+    assert "create_repo" not in driver.calls
+    assert "install_workflow" not in driver.calls
+    assert "configure_branch_protection" not in driver.calls
+    # the PR carried the scaffold paths + the inventory-sha plan ref
+    plan = _adoption_plan(tmp_path, _brownfield_probe())
+    assert driver.opened_with["plan_ref"] == plan["inventory_sha256"]
+    assert onboard_apply.CE_WORKFLOW_PATH in driver.opened_with["manifest_paths"]
+
+
+def test_adoption_drift_check_refuses_before_scrub_or_build(tmp_path):
+    # §10.2 — a plan inventory sha that no longer matches the fresh recompute refuses
+    # brownfield_inventory_drift before the scrub/build/push.
+    driver = FakeAdoptionDriver()
+    summary = _adoption_apply(tmp_path, driver, plan_override={"inventory_sha256": "0" * 64})
+    drift = _leg(summary, "brownfield_inventory_drift_check")
+    assert drift["status"] == "refused"
+    assert drift["verification"]["code"] == "brownfield_inventory_drift"
+    assert "secret_preflight_scan" not in driver.calls
+    assert "build_adoption_scaffold" not in driver.calls
+    assert summary["brownfield_adopted"] == 0
+
+
+def test_adoption_scrub_finding_refuses_hard(tmp_path):
+    # §10.3 — an unwaived finding from a scanner refuses brownfield_secret_findings; no build/push.
+    driver = FakeAdoptionDriver(scrub_result={
+        "scanners": {
+            "gitleaks": {"ran": True, "exit_code": 1, "findings": ["gitleaks:cfg.py:3"]},
+            "trufflehog": {"ran": True, "exit_code": 0, "findings": []},
+        }
+    })
+    summary = _adoption_apply(tmp_path, driver)
+    # exit 1 / a finding both make this non-clean; the scanner-unavailable check fires first on
+    # the non-zero exit (affirmative fail-closed) — either way it refuses before any build/push.
+    scrub = _leg(summary, "brownfield_secret_preflight")
+    assert scrub["status"] == "refused"
+    assert scrub["verification"]["code"] in {
+        "brownfield_secret_findings", "brownfield_secret_scanner_unavailable"
+    }
+    assert "build_adoption_scaffold" not in driver.calls
+    assert "push_adoption_branch" not in driver.calls
+    assert summary["brownfield_adopted"] == 0
+
+
+def test_adoption_scrub_finding_with_clean_exit_refuses_secret_findings(tmp_path):
+    # A finding reported with an affirmative zero-exit (the scanner ran clean-process but FOUND a
+    # secret) refuses brownfield_secret_findings specifically.
+    driver = FakeAdoptionDriver(scrub_result={
+        "scanners": {
+            "gitleaks": {"ran": True, "exit_code": 0, "findings": ["gitleaks:env:9"]},
+            "trufflehog": {"ran": True, "exit_code": 0, "findings": []},
+        }
+    })
+    summary = _adoption_apply(tmp_path, driver)
+    scrub = _leg(summary, "brownfield_secret_preflight")
+    assert scrub["status"] == "refused"
+    assert scrub["verification"]["code"] == "brownfield_secret_findings"
+
+
+def test_adoption_scrub_fail_closed_on_scanner_problems(tmp_path):
+    # §10.3 / MAJOR-2 — EVERY non-affirmative-clean scanner state refuses
+    # brownfield_secret_scanner_unavailable (absence of findings is NOT clean).
+    cases = [
+        {"gitleaks": {"ran": True, "exit_code": 0, "findings": []}},  # trufflehog MISSING
+        {"gitleaks": {"ran": False, "exit_code": None, "findings": []},
+         "trufflehog": {"ran": True, "exit_code": 0, "findings": []}},  # did not run
+        {"gitleaks": {"ran": True, "exit_code": 2, "findings": []},
+         "trufflehog": {"ran": True, "exit_code": 0, "findings": []}},  # non-zero exit
+        {"gitleaks": {"ran": True, "exit_code": 0, "error": "timeout", "findings": []},
+         "trufflehog": {"ran": True, "exit_code": 0, "findings": []}},  # error/timeout
+        {"gitleaks": {"ran": True, "exit_code": 0, "findings": "oops"},
+         "trufflehog": {"ran": True, "exit_code": 0, "findings": []}},  # unparseable findings
+    ]
+    for scanners in cases:
+        driver = FakeAdoptionDriver(scrub_result={"scanners": scanners})
+        summary = _adoption_apply(tmp_path, driver)
+        scrub = _leg(summary, "brownfield_secret_preflight")
+        assert scrub["status"] == "refused", scanners
+        assert scrub["verification"]["code"] == "brownfield_secret_scanner_unavailable", scanners
+        assert "build_adoption_scaffold" not in driver.calls
+
+
+def test_adoption_scrub_empty_result_is_fail_closed(tmp_path):
+    # A driver that returns NO scanners report is NOT clean (the fail-open seam this closes).
+    driver = FakeAdoptionDriver(scrub_result={})
+    summary = _adoption_apply(tmp_path, driver)
+    scrub = _leg(summary, "brownfield_secret_preflight")
+    assert scrub["status"] == "refused"
+    assert scrub["verification"]["code"] == "brownfield_secret_scanner_unavailable"
+
+
+def test_adoption_scrub_finding_passes_with_ratified_waiver(tmp_path):
+    # §10.3 — a finding carrying a complete ratified waiver passes the scrub gate.
+    probe = _brownfield_probe()
+    answers = _answers(tmp_path, mode="existing")
+    answers["brownfield"] = {
+        "secrets": {
+            "waivers": [
+                {
+                    "finding_id": "gitleaks:env:9",
+                    "ratification": {
+                        "ratified_prompt_sha": "b" * 64,
+                        "approver_ref": "c" * 64,
+                        "educate_acknowledged": True,
+                    },
+                }
+            ]
+        }
+    }
+    plan = v3_installer.build_brownfield_adoption_plan(answers, schema=_schema(), probe=probe)
+    driver = FakeAdoptionDriver(scrub_result={
+        "scanners": {
+            "gitleaks": {"ran": True, "exit_code": 0, "findings": ["gitleaks:env:9"]},
+            "trufflehog": {"ran": True, "exit_code": 0, "findings": []},
+        }
+    })
+    answer_bytes = yaml.safe_dump(answers, sort_keys=True).encode("utf-8")
+    request = onboard_apply.ApplyRequest(
+        spec_bytes=_signed_spec(), schema=_schema(), answers=answers,
+        answers_sha256=v3_installer.content_digest(answer_bytes),
+        state_root=tmp_path / "state",
+        dependency_probe={tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES},
+        non_interactive=True, adoption_apply=True, brownfield_plan=plan, brownfield_probe=probe,
+    )
+    summary = onboard_apply.apply_onboard(request, verifier=_verifier(), driver=driver)
+    scrub = _leg(summary, "brownfield_secret_preflight")
+    assert scrub["status"] == "already_satisfied"
+    assert summary["brownfield_scrub_findings"] == 1
+    assert summary["brownfield_scrub_findings_waived"] == 1
+    assert summary["brownfield_adopted"] == 1
+
+
+def test_adoption_push_never_force_refuses_non_fast_forward(tmp_path):
+    # §10.5 — a non-fast-forward push refuses brownfield_push_refused (never force); no PR opened.
+    driver = FakeAdoptionDriver(push_result={"ok": False, "reason": "push_refused", "detail": "non-ff"})
+    summary = _adoption_apply(tmp_path, driver)
+    push = _leg(summary, "brownfield_push_branch")
+    assert push["status"] == "refused"
+    assert push["verification"]["code"] == "brownfield_push_refused"
+    assert "open_adoption_pr" not in driver.calls
+    assert summary["brownfield_adopted"] == 0
+
+
+def test_adoption_idempotent_rerun_claims_existing_pr(tmp_path):
+    # §10.6 — a re-run reconciles: up_to_date push + a CLAIMED existing PR, still adopted == 1.
+    driver = FakeAdoptionDriver(
+        push_result={"ok": True, "pushed": False, "up_to_date": True, "local_head": "f" * 40, "remote_head": "f" * 40},
+        pr_result={"ok": True, "pr_number": 7, "head_sha": "f" * 40, "verified": True, "claimed": True},
+    )
+    summary = _adoption_apply(tmp_path, driver)
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    assert _leg(summary, "brownfield_push_branch")["status"] == "already_satisfied"
+    assert _leg(summary, "brownfield_open_join_pr")["status"] == "already_satisfied"
+    assert summary["brownfield_adopted"] == 1
+
+
+def test_adoption_unverified_pr_is_not_counted(tmp_path):
+    # §10.6 counter-honesty — an unverified PR fails the leg and is NEVER counted adopted.
+    driver = FakeAdoptionDriver(pr_result={"ok": True, "pr_number": None, "head_sha": None, "verified": False})
+    summary = _adoption_apply(tmp_path, driver)
+    pr = _leg(summary, "brownfield_open_join_pr")
+    assert pr["status"] == "failed"
+    assert pr["verification"]["code"] == "brownfield_open_pr_verify_failed"
+    assert summary["brownfield_adopted"] == 0
+
+
+def test_adoption_preserved_checks_loss_refuses(tmp_path):
+    # §10.8 — leg 6 refuses brownfield_protection_loss if an existing check would be dropped.
+    driver = FakeAdoptionDriver(
+        preserved_result={"ok": True, "existing_checks": ["lint"], "dropped": ["CI / test"]}
+    )
+    summary = _adoption_apply(tmp_path, driver)
+    leg = _leg(summary, "brownfield_verify_preserved_checks")
+    assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == "brownfield_protection_loss"
+
+
+def test_adoption_scaffold_workflow_digest_pinned(tmp_path):
+    # §10.4 — the scaffold's workflow must verify at the pinned CE_WORKFLOW_SHA256.
+    driver = FakeAdoptionDriver(scaffold_workflow_sha="dead" * 16)
+    summary = _adoption_apply(tmp_path, driver)
+    leg = _leg(summary, "brownfield_build_scaffold")
+    assert leg["status"] == "failed"
+    assert leg["verification"]["code"] == "brownfield_scaffold_verify_failed"
+
+
+def test_adoption_scaffold_is_value_free(tmp_path):
+    # §10.4 — the scaffold the join PR carries is value-free (skills + scope seed + workflow),
+    # the workflow rides at the pinned digest, and the manifest paths are the four scaffold files.
+    driver = FakeAdoptionDriver()
+    summary = _adoption_apply(tmp_path, driver)
+    assert summary["failed"] == 0
+    paths = {a["path"] for a in driver.scaffold_artifacts}
+    assert onboard_apply.CE_WORKFLOW_PATH in paths
+    assert ".ce/state/scopes/ce-brownfield-adoption.scope.yaml" in paths
+    assert any(p.startswith(".ce/skills/") for p in paths)
+    rendered = json.dumps(summary, sort_keys=True)
+    assert "secret-token" not in rendered  # no bootstrap secret (the probe leg is skipped)
+    # ledger evidence is value-free
+    record = _leg(summary, "brownfield_record_apply_evidence")["verification"]
+    assert record["pr_number"] == 7
+    assert "scrub" in record
+
+
+def test_adoption_waiver_missing_ratification_rejected_at_schema(tmp_path):
+    # §7 — a provided waiver missing the {ratified_prompt_sha, approver_ref,
+    # educate_acknowledged} binding never reaches the leg: the answers schema rejects it
+    # fail-closed at validation (the leg-side brownfield_waiver_unratified check is
+    # defense-in-depth for that same invariant).
+    answers = _answers(tmp_path, mode="existing")
+    answers["brownfield"] = {"secrets": {"waivers": [{"finding_id": "f1"}]}}
+    problems = v3_installer.validate_answers(answers, schema=_schema())
+    assert any("ratification" in p for p in problems)
