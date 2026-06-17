@@ -11,8 +11,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQ0dhN2pvV2RJMXFxLzFMTHlkOGsrRUMzenFPeG9uRG52bWY4TTdYSHRVdVZqcnVNNEdHcDF3THEKbWlmUXkvbkFaRUUyWW1XcmprWmZmTE1WbGtDRDhECi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: ee5e5a757f72d5d46ff3f92995211e45065ca81b1dcb8359a5af2051869532c0
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDJsSkJIOWRmRzhzOEtLOFRldnVYSXppdTVDS0ZJOVBWK25Ed3BLSjc4YkljVHUyejR2REhoUWUKcDRGRXlyKzA4SHkrdkY5Tmd4akgzdFNkQWhZczhGCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 616925502d5343af4c8bbfa3524eba5372afd552ee0de20348cbea627408558f
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -21,7 +21,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: 0a2231f5702de286e7a1abcbb03e81ad2eea6f010b85a5c441009740cb50dbed
+  sha256s_sha256: a5daacd7aea6311bea9ebb29365c8fbd0e825b159e0dc33dfd8374ca937ee8fd
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -33,7 +33,7 @@ artifact_manifest:
       sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: f94d6db443a980be06e7fbe6e977559b7cb0efb77d94ae6a70714a048b42559c
+      sha256: d81c646c5ef7f3ba73569e1aaa34c9280ab8c82579927a9697036d66149707e1
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
       sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
