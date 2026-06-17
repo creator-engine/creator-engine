@@ -138,6 +138,31 @@ def test_governed_bash_git_push_denies():
 @pytest.mark.parametrize(
     "command",
     [
+        pytest.param("git -C . push origin main", id="git_global_C_push"),
+        pytest.param("git -c alias.p=push p origin main", id="git_alias_push"),
+        pytest.param("git --git-dir=/x push", id="git_git_dir_push"),
+        pytest.param("git push origin main", id="git_plain_push"),
+    ],
+)
+def test_git_grammar_deploy_canaries_deny(command):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) == "deploy"
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "restricted mechanic (deploy)" in decision.reason
+
+
+def test_git_grammar_status_with_global_option_allows():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    command = "git -C . status"
+    assert hook_check.classify_mechanics(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "gh pr merge 72 --squash",
         "gh pr review 72 --approve",
         "gh pr comment 72 --body hi",

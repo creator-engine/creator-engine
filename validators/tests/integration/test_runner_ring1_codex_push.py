@@ -9,6 +9,7 @@ downstream git binary can execute.
 from __future__ import annotations
 
 import os
+import pytest
 import stat
 import subprocess
 import sys
@@ -155,7 +156,14 @@ def _valid_policy() -> dict:
     }
 
 
-def test_codex_child_git_push_denied_under_governed_posture(tmp_path):
+@pytest.mark.parametrize(
+    "git_command",
+    [
+        pytest.param("git push origin main", id="git_plain_push"),
+        pytest.param("git -C . push origin main", id="git_global_C_push"),
+    ],
+)
+def test_codex_child_git_command_denied_under_governed_posture(tmp_path, git_command):
     sandbox_dir = tmp_path / "sandbox"
     sandbox_dir.mkdir()
     _write_governed_ledger(sandbox_dir)
@@ -173,7 +181,7 @@ def test_codex_child_git_push_denied_under_governed_posture(tmp_path):
         f"""#!/usr/bin/env sh
 set -eu
 printf 'codex child reached\\n' > {codex_marker}
-git push origin main
+{git_command}
 printf 'after git\\n' > {codex_after_marker}
 """,
     )

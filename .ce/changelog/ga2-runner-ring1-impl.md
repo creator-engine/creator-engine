@@ -1,9 +1,9 @@
 ---
 slug: ga2-runner-ring1-impl
-date: 2026-06-16
+date: 2026-06-17
 kind: added
 scope: runner / Ring-1 PATH shim proof
-base: bcf84649ab6343784bd1aa45690f32ded21ba339
+base: dd46b64597c29fe482384a04b8d56984c503c623
 ---
 
 Adds increment 1 of runner-owned Ring-1 enforcement for OpenShell-backed runs.
@@ -22,6 +22,10 @@ Adds increment 1 of runner-owned Ring-1 enforcement for OpenShell-backed runs.
 - Added an integration proof where a fake `codex` child process runs
   `git push origin main`; the runner-installed shim resolves governed posture
   through the real hook-check CLI and denies before downstream git is reached.
+- Closed ce-ops#104 by making the shared deploy classifier parse git global
+  options and inline aliases before matching destructive subcommands; canaries
+  now cover `git -C . push`, `git -c alias.p=push p`, `git --git-dir=/x push`,
+  plain `git push`, and the non-deploy `git -C . status` read path.
 - Rebuilt the validator app wheel and refreshed `validators/wheelhouse/SHA256SUMS`.
 
 Coverage is precise: this increment proves harness-agnostic shell-level
