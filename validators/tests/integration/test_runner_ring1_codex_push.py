@@ -211,7 +211,7 @@ printf 'real git reached\\n' > {real_git_marker}
 
     assert client.exec_calls[-1] == ("local-openshell-sandbox", ("codex",))
     assert codex_marker.exists(), "fake codex child process did not run"
-    assert result.exit_code == 126
+    assert result.exit_code == 121
     assert "by hook-check" in result.stderr
     assert "posture=governed" in result.stderr
     assert "restricted mechanic (deploy)" in result.stderr
