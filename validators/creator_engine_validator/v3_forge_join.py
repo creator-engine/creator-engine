@@ -60,7 +60,9 @@ from .forge.change_push import push_change
 from .forge.change_status import pr_state
 from .forge.credential_runner import authenticated_gh_runner
 from .forge.github_repo_config import ForgeConfigError, GhRunner
+from .forge.auto_merge import AutoMergeResult, enable_auto_merge
 from .forge.merge import MergeResult, merge
+from .forge.review_submit import ReviewResult, submit_review
 from .forge.scoped_token import (
     ScopedToken,
     TokenRequest,
@@ -74,6 +76,9 @@ from .runtime_evidence_spine import RUN_OUTCOME_RECORD_TYPE, append as _spine_ap
 #: ``--app-config`` flag is REQUIRED on ``cev3 pr`` (host filenames differ); this is documentation
 #: of the shape, not a silent default the CLI applies.
 DEFAULT_APP_CONFIG_PATH = "~/.ce-keys/ce-forge-app.json"
+#: Documentation-only reviewer config convention. The CLI requires an explicit path so host-local
+#: reviewer credentials cannot be silently confused with the author App.
+DEFAULT_REVIEWER_APP_CONFIG_PATH = "~/.ce-keys/agent-reviewer-app.json"
 
 #: The CE repo the PR is opened against — constant across the org's hosts (the host-bound facts are
 #: the App credential + reviewer identity, NOT the repo). A config may override it via a ``repo`` key.
@@ -98,6 +103,38 @@ PR_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (("contents", "writ
 PR_TOKEN_TTL_SECONDS = 900
 #: The logical secret name the per-run PR credential satisfies.
 PR_SECRET_NAME = "forge_pr_open"
+
+#: D1/P1 — a merge token, when a caller explicitly chooses to mint one, must carry only
+#: ``contents:write``. The default merge path still uses the injected/ambient runner and
+#: mints no token in P1.
+MERGE_TOKEN_PERMISSIONS: dict[str, str] = {"contents": "write"}
+MERGE_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (("contents", "write"),)
+MERGE_TOKEN_TTL_SECONDS = 900
+MERGE_SECRET_NAME = "forge_merge"
+
+#: D3/P1 — the independent reviewer App may only approve PRs. It must never carry
+#: ``contents:write`` or any escalation authority.
+REVIEWER_TOKEN_PERMISSIONS: dict[str, str] = {"pull_requests": "write"}
+REVIEWER_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = ()
+REVIEWER_TOKEN_TTL_SECONDS = 900
+REVIEWER_SECRET_NAME = "forge_review_submit"
+
+#: D4/P1 — per-PR auto-merge needs PR write plus Contents write; only Contents is Tier-2.
+AUTO_MERGE_TOKEN_PERMISSIONS: dict[str, str] = {
+    "contents": "write",
+    "pull_requests": "write",
+}
+AUTO_MERGE_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (("contents", "write"),)
+AUTO_MERGE_TOKEN_TTL_SECONDS = 900
+AUTO_MERGE_SECRET_NAME = "forge_auto_merge"
+
+#: D2/D4 repo configuration writes are repo-administration writes, bound per operation.
+REPO_ADMIN_TOKEN_PERMISSIONS: dict[str, str] = {"administration": "write"}
+REPO_ADMIN_TOKEN_ESCALATION_AUTHORITY: tuple[tuple[str, str], ...] = (
+    ("administration", "write"),
+)
+REPO_ADMIN_TOKEN_TTL_SECONDS = 900
+REPO_ADMIN_SECRET_NAME = "forge_repo_admin"
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -219,6 +256,16 @@ def load_app_config(path: str | Path = DEFAULT_APP_CONFIG_PATH) -> AppConfig:
     )
 
 
+def load_reviewer_app_config(path: str | Path = DEFAULT_REVIEWER_APP_CONFIG_PATH) -> AppConfig:
+    """Read the separate reviewer App config.
+
+    This intentionally reuses :func:`load_app_config`'s shape checks while keeping a distinct
+    call site/flag in the CLI. The reviewer App must be a separate identity and its token
+    requests are constrained by :data:`REVIEWER_TOKEN_PERMISSIONS`.
+    """
+    return load_app_config(path)
+
+
 # ---------------------------------------------------------------------------
 # The production RS256 signer — the App private key stays behind openssl
 # ---------------------------------------------------------------------------
@@ -333,6 +380,143 @@ def _default_mint_runner(app_config: AppConfig) -> GhRunner:  # pragma: no cover
     return app_jwt_gh_runner(
         app_config.client_id, signer=openssl_signer(app_config.pem_path)
     )
+
+
+def _default_reviewer_mint_runner(app_config: AppConfig) -> GhRunner:  # pragma: no cover
+    """Production App-JWT mint runner for the separate reviewer App identity."""
+    return _default_mint_runner(app_config)
+
+
+def mint_operation_token(
+    app_config: AppConfig,
+    *,
+    run_id: str,
+    policy_sha_value: str,
+    permissions: Mapping[str, str],
+    secret_name: str,
+    requested_ttl_seconds: int,
+    escalation_authority: tuple[tuple[str, str], ...] = (),
+    mint_gh_runner: GhRunner | None = None,
+) -> ScopedToken:
+    """Mint one operation-scoped App token using an explicit minimal permission set."""
+    request = TokenRequest(
+        repo=app_config.repo,
+        installation_id=app_config.installation_id,
+        run_id=run_id,
+        policy_sha=policy_sha_value,
+        permissions=permissions,
+        secret_name=secret_name,
+        requested_ttl_seconds=requested_ttl_seconds,
+        escalation_authority=escalation_authority,
+    )
+    mint_runner = mint_gh_runner if mint_gh_runner is not None else _default_mint_runner(app_config)
+    return mint_scoped_token(request, gh_runner=mint_runner)
+
+
+def _change_from_dispatch(root: Path, run_id: str, repo: str) -> tuple[ChangeRef, str]:
+    dispatch = _load_dispatch(root, run_id)
+    change = dispatch.get("change") or {}
+    pr_number = change.get("pr_number")
+    head_sha = str(change.get("head_sha") or "").strip()
+    if not pr_number or not head_sha:
+        raise ForgeJoinRefused(
+            f"run {run_id!r} has no opened PR change block with pr_number/head_sha"
+        )
+    branch = str(change.get("branch") or run_id)
+    base = str(change.get("base") or "main")
+    manifest_paths = tuple(str(p) for p in (change.get("manifest_paths") or ()))
+    plan_ref = policy_sha(_read_policy(dispatch))
+    return (
+        ChangeRef(
+            repo=repo, branch=branch, base=base, pr_number=int(pr_number),
+            head_sha=head_sha, manifest_paths=manifest_paths, plan_ref=plan_ref,
+            changed=True, applied=True, verified=True,
+        ),
+        plan_ref,
+    )
+
+
+def _revoke_best_effort(token: ScopedToken, *, token_spawn: Any = None) -> None:
+    try:
+        revoke_scoped_token(token, gh_runner=authenticated_gh_runner(token, spawn=token_spawn))
+    except ForgeConfigError:
+        logging.getLogger(__name__).warning(
+            "scoped-token revoke failed for run %s (token_ref %s); it will expire on its ttl",
+            token.run_id,
+            token.token_ref,
+        )
+
+
+def submit_review_for_run(
+    root: Path | str,
+    run_id: str,
+    *,
+    reviewer_app_config: AppConfig,
+    apply: bool = False,
+    body: str = "",
+    mint_gh_runner: GhRunner | None = None,
+    token_spawn: Any = None,
+) -> ReviewResult:
+    """Mint reviewer-App token -> submit independent APPROVE for the run's opened PR."""
+    root = Path(root)
+    change, plan_ref = _change_from_dispatch(root, run_id, reviewer_app_config.repo)
+    token = mint_operation_token(
+        reviewer_app_config,
+        run_id=run_id,
+        policy_sha_value=plan_ref,
+        permissions=REVIEWER_TOKEN_PERMISSIONS,
+        secret_name=REVIEWER_SECRET_NAME,
+        requested_ttl_seconds=REVIEWER_TOKEN_TTL_SECONDS,
+        escalation_authority=REVIEWER_TOKEN_ESCALATION_AUTHORITY,
+        mint_gh_runner=(
+            mint_gh_runner
+            if mint_gh_runner is not None
+            else _default_reviewer_mint_runner(reviewer_app_config)
+        ),
+    )
+    try:
+        return submit_review(
+            change,
+            body=body,
+            apply=apply,
+            gh_runner=authenticated_gh_runner(token, spawn=token_spawn),
+        )
+    finally:
+        _revoke_best_effort(token, token_spawn=token_spawn)
+
+
+def enable_auto_merge_for_run(
+    root: Path | str,
+    run_id: str,
+    *,
+    app_config: AppConfig,
+    method: str = "squash",
+    apply: bool = False,
+    mint_gh_runner: GhRunner | None = None,
+    token_spawn: Any = None,
+) -> AutoMergeResult:
+    """Mint author-App token -> enable GraphQL auto-merge for the run's opened PR."""
+    root = Path(root)
+    change, plan_ref = _change_from_dispatch(root, run_id, app_config.repo)
+    token = mint_operation_token(
+        app_config,
+        run_id=run_id,
+        policy_sha_value=plan_ref,
+        permissions=AUTO_MERGE_TOKEN_PERMISSIONS,
+        secret_name=AUTO_MERGE_SECRET_NAME,
+        requested_ttl_seconds=AUTO_MERGE_TOKEN_TTL_SECONDS,
+        escalation_authority=AUTO_MERGE_TOKEN_ESCALATION_AUTHORITY,
+        mint_gh_runner=mint_gh_runner,
+    )
+    try:
+        return enable_auto_merge(
+            change,
+            method=method,
+            apply=apply,
+            gh_runner=authenticated_gh_runner(token, spawn=token_spawn),
+        )
+    finally:
+        _revoke_best_effort(token, token_spawn=token_spawn)
 
 
 def open_change_for_run(

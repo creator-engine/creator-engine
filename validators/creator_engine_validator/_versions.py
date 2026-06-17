@@ -81,6 +81,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge",
         "forge._redact",
         "forge.app_jwt_runner",
+        # ce-ops#99 P1 repo-scope devops ops: all plan-by-default, injectable-runner
+        # forge surfaces, classified with the rest of the v3 forge adapter family.
+        "forge.auto_merge",
         # v3.5-C α-precursor: the Projects-v2 backlog reader/writer + the
         # forge-projected advisory claim (assignee + Status=Running, §A.4);
         # consumed by the A-C4 forge_claim_dedup gate.
@@ -95,6 +98,8 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.github_repo_config",
         "forge.merge",
         "forge.plan_approval",
+        "forge.review_submit",
+        "forge.ruleset",
         "forge.scoped_token",
         # runner backends
         "runner",

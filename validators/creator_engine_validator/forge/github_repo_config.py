@@ -33,6 +33,7 @@ what *would* change; they mutate the live forge only when called with
 """
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from collections.abc import Callable, Sequence
@@ -395,6 +396,150 @@ def configure_repo(
     return ConfigResult(
         repo=repo, branch=branch, operation="configure_repo",
         changed=True, applied=True, verified=verified, before=observed, after=desired,
+        actions=actions,
+    )
+
+
+def allow_auto_merge(
+    repo: str,
+    *,
+    apply: bool = False,
+    gh_runner: GhRunner | None = None,
+) -> ConfigResult:
+    """Ensure the repository-level ``allow_auto_merge`` setting is enabled."""
+    runner = gh_runner or _default_gh_runner
+    code, parsed, stderr = _gh_api(runner, f"repos/{repo}")
+    if code != 0 or not isinstance(parsed, dict):
+        raise ForgeConfigError(
+            f"could not read repository settings for {repo}: "
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
+        )
+    before = {"allow_auto_merge": bool(parsed.get("allow_auto_merge", False))}
+    after = {"allow_auto_merge": True}
+    actions: list[str] = []
+    if before == after:
+        actions.append("repo auto-merge setting already enabled")
+        return ConfigResult(
+            repo=repo, branch="", operation="allow_auto_merge",
+            changed=False, applied=False, verified=True, before=before, after=after,
+            actions=actions,
+        )
+    if not apply:
+        actions.append("PLAN: would enable repo auto-merge setting")
+        return ConfigResult(
+            repo=repo, branch="", operation="allow_auto_merge",
+            changed=True, applied=False, verified=False, before=before, after=after,
+            actions=actions,
+        )
+    pcode, _pparsed, pstderr = _gh_api(
+        runner, f"repos/{repo}", method="PATCH", body={"allow_auto_merge": True}
+    )
+    if pcode != 0:
+        raise ForgeConfigError(
+            f"PATCH allow_auto_merge for {repo} failed: "
+            f"{redact_gh_stderr(pstderr) or 'unknown error'}"
+        )
+    actions.append("APPLIED: enabled repo auto-merge setting")
+    vcode, vparsed, _ = _gh_api(runner, f"repos/{repo}")
+    verified = (
+        vcode == 0
+        and isinstance(vparsed, dict)
+        and bool(vparsed.get("allow_auto_merge", False)) is True
+    )
+    if not verified:
+        actions.append(f"VERIFY MISMATCH: live={vparsed} desired={after}")
+    return ConfigResult(
+        repo=repo, branch="", operation="allow_auto_merge",
+        changed=True, applied=True, verified=verified, before=before, after=after,
+        actions=actions,
+    )
+
+
+def _codeowners_body(owners: Sequence[str]) -> str:
+    cleaned = tuple(str(owner).strip() for owner in owners if str(owner).strip())
+    if not cleaned:
+        raise ForgeConfigRefused("CODEOWNERS update requires at least one owner")
+    return f"* {' '.join(cleaned)}\n"
+
+
+def _decode_content_file(parsed: object) -> tuple[str | None, str | None]:
+    if not isinstance(parsed, dict):
+        return None, None
+    sha = parsed.get("sha")
+    raw = str(parsed.get("content") or "")
+    if not raw:
+        return None, (str(sha) if sha else None)
+    try:
+        content = base64.b64decode(raw.encode("ascii"), validate=False).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        content = None
+    return content, (str(sha) if sha else None)
+
+
+def set_codeowners(
+    repo: str,
+    owners: Sequence[str],
+    *,
+    branch: str = "main",
+    apply: bool = False,
+    gh_runner: GhRunner | None = None,
+) -> ConfigResult:
+    """Write ``.github/CODEOWNERS`` through the Contents API (plan-by-default)."""
+    desired_content = _codeowners_body(owners)
+    runner = gh_runner or _default_gh_runner
+    path = f"repos/{repo}/contents/.github/CODEOWNERS?ref={branch}"
+    code, parsed, stderr = _gh_api(runner, path)
+    current_content: str | None = None
+    current_sha: str | None = None
+    if code == 0:
+        current_content, current_sha = _decode_content_file(parsed)
+    elif "404" not in stderr and "Not Found" not in stderr:
+        raise ForgeConfigError(
+            f"could not read CODEOWNERS for {repo}@{branch}: "
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
+        )
+    before = {"content": current_content, "sha": current_sha}
+    after = {"content": desired_content}
+    changed = current_content != desired_content
+    actions: list[str] = []
+    if not changed:
+        actions.append("CODEOWNERS already matches desired owners")
+        return ConfigResult(
+            repo=repo, branch=branch, operation="set_codeowners",
+            changed=False, applied=False, verified=True, before=before, after=after,
+            actions=actions,
+        )
+    if not apply:
+        actions.append("PLAN: would write .github/CODEOWNERS")
+        return ConfigResult(
+            repo=repo, branch=branch, operation="set_codeowners",
+            changed=True, applied=False, verified=False, before=before, after=after,
+            actions=actions,
+        )
+    body = {
+        "message": "chore: update CODEOWNERS",
+        "content": base64.b64encode(desired_content.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if current_sha:
+        body["sha"] = current_sha
+    pcode, _pparsed, pstderr = _gh_api(
+        runner, f"repos/{repo}/contents/.github/CODEOWNERS", method="PUT", body=body
+    )
+    if pcode != 0:
+        raise ForgeConfigError(
+            f"PUT CODEOWNERS for {repo}@{branch} failed: "
+            f"{redact_gh_stderr(pstderr) or 'unknown error'}"
+        )
+    actions.append("APPLIED: wrote .github/CODEOWNERS")
+    vcode, vparsed, _ = _gh_api(runner, path)
+    verified_content, _ = _decode_content_file(vparsed) if vcode == 0 else (None, None)
+    verified = verified_content == desired_content
+    if not verified:
+        actions.append("VERIFY MISMATCH: live CODEOWNERS did not match desired content")
+    return ConfigResult(
+        repo=repo, branch=branch, operation="set_codeowners",
+        changed=True, applied=True, verified=verified, before=before, after=after,
         actions=actions,
     )
 

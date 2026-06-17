@@ -15,6 +15,7 @@ injected in-memory fake GitHub (``FakeGh``). Asserts:
 from __future__ import annotations
 
 import json
+import base64
 import subprocess
 
 import pytest
@@ -24,8 +25,11 @@ from creator_engine_validator.forge.github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
     BranchProtectionPolicy,
     ForgeConfigError,
+    ForgeConfigRefused,
+    allow_auto_merge,
     configure_repo,
     install_required_checks,
+    set_codeowners,
 )
 
 REPO = "creator-engine/creator-engine"
@@ -70,8 +74,17 @@ class FakeGh:
     state so the read -> apply -> re-read -> verify loop is exercised for real.
     """
 
-    def __init__(self, protection: dict | None):
+    def __init__(
+        self,
+        protection: dict | None,
+        *,
+        repo_settings: dict | None = None,
+        codeowners: str | None = None,
+    ):
         self.protection = protection
+        self.repo_settings = {"allow_auto_merge": False, **(repo_settings or {})}
+        self.codeowners = codeowners
+        self.codeowners_sha = "codeowners-sha"
         self.calls: list[tuple[list[str], str | None]] = []
 
     # -- argv parsing --
@@ -116,6 +129,29 @@ class FakeGh:
                 rsc["strict"] = body["strict"]
                 rsc["contexts"] = list(body["contexts"])
                 return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(rsc))
+
+        if path == f"repos/{REPO}":
+            if method == "GET":
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.repo_settings))
+            if method == "PATCH":
+                self.repo_settings.update(body or {})
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.repo_settings))
+
+        if path == f"repos/{REPO}/contents/.github/CODEOWNERS?ref=main":
+            if method == "GET":
+                if self.codeowners is None:
+                    return subprocess.CompletedProcess(argv, 1, stdout="", stderr="HTTP 404: Not Found")
+                payload = {
+                    "sha": self.codeowners_sha,
+                    "content": base64.b64encode(self.codeowners.encode("utf-8")).decode("ascii"),
+                }
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload))
+
+        if path == f"repos/{REPO}/contents/.github/CODEOWNERS" and method == "PUT":
+            self.codeowners = base64.b64decode(body["content"].encode("ascii")).decode("utf-8")
+            self.codeowners_sha = "codeowners-sha-2"
+            payload = {"content": {"sha": self.codeowners_sha}}
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload))
 
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr=f"unexpected {method} {path}")
 
@@ -275,6 +311,79 @@ def test_configure_repo_reports_verify_mismatch():
     assert res.applied is True
     assert res.verified is False
     assert any("VERIFY MISMATCH" in line for line in res.actions)
+
+
+# --------------------------------------------------------------------------
+# allow_auto_merge
+# --------------------------------------------------------------------------
+def test_allow_auto_merge_idempotent_no_patch():
+    fake = FakeGh(_get_shape(), repo_settings={"allow_auto_merge": True})
+    res = allow_auto_merge(REPO, apply=True, gh_runner=fake)
+    assert res.changed is False
+    assert res.verified is True
+    assert "PATCH" not in fake.methods()
+
+
+def test_allow_auto_merge_plan_does_not_patch():
+    fake = FakeGh(_get_shape(), repo_settings={"allow_auto_merge": False})
+    res = allow_auto_merge(REPO, apply=False, gh_runner=fake)
+    assert res.changed is True
+    assert res.applied is False
+    assert res.after == {"allow_auto_merge": True}
+    assert "PATCH" not in fake.methods()
+
+
+def test_allow_auto_merge_apply_patches_and_verifies():
+    fake = FakeGh(_get_shape(), repo_settings={"allow_auto_merge": False})
+    res = allow_auto_merge(REPO, apply=True, gh_runner=fake)
+    assert res.changed is True and res.applied is True and res.verified is True
+    patch_bodies = [body for (argv, body) in fake.calls if "--method" in argv and "PATCH" in argv]
+    assert json.loads(patch_bodies[0]) == {"allow_auto_merge": True}
+
+
+# --------------------------------------------------------------------------
+# set_codeowners
+# --------------------------------------------------------------------------
+def test_set_codeowners_idempotent_no_put():
+    fake = FakeGh(_get_shape(), codeowners="* @ubuntuaws745-cmyk\n")
+    res = set_codeowners(REPO, ["@ubuntuaws745-cmyk"], apply=True, gh_runner=fake)
+    assert res.changed is False
+    assert res.verified is True
+    assert "PUT" not in fake.methods()
+
+
+def test_set_codeowners_plan_does_not_put():
+    fake = FakeGh(_get_shape(), codeowners="* @old\n")
+    res = set_codeowners(REPO, ["@ubuntuaws745-cmyk", "@cedev1vps-cmd"], apply=False, gh_runner=fake)
+    assert res.changed is True
+    assert res.after["content"] == "* @ubuntuaws745-cmyk @cedev1vps-cmd\n"
+    assert "PUT" not in fake.methods()
+
+
+def test_set_codeowners_apply_puts_contents_payload_and_verifies():
+    fake = FakeGh(_get_shape(), codeowners="* @old\n")
+    res = set_codeowners(REPO, ["@ubuntuaws745-cmyk"], apply=True, gh_runner=fake)
+    assert res.changed is True and res.applied is True and res.verified is True
+    put_bodies = [body for (argv, body) in fake.calls if "--method" in argv and "PUT" in argv]
+    payload = json.loads(put_bodies[0])
+    assert payload["branch"] == "main"
+    assert payload["sha"] == "codeowners-sha"
+    assert base64.b64decode(payload["content"]).decode("utf-8") == "* @ubuntuaws745-cmyk\n"
+
+
+def test_set_codeowners_can_create_when_absent():
+    fake = FakeGh(_get_shape(), codeowners=None)
+    res = set_codeowners(REPO, ["@ubuntuaws745-cmyk"], apply=True, gh_runner=fake)
+    assert res.changed is True and res.verified is True
+    put_bodies = [body for (argv, body) in fake.calls if "--method" in argv and "PUT" in argv]
+    assert "sha" not in json.loads(put_bodies[0])
+
+
+def test_set_codeowners_empty_owner_refuses_before_call():
+    fake = FakeGh(_get_shape(), codeowners=None)
+    with pytest.raises(ForgeConfigRefused):
+        set_codeowners(REPO, [], apply=True, gh_runner=fake)
+    assert fake.calls == []
 
 
 # --------------------------------------------------------------------------

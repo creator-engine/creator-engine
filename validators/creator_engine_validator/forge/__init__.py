@@ -55,11 +55,23 @@ from .github_repo_config import (
     ForgeConfigError,
     ForgeConfigRefused,
     GhRunner,
+    allow_auto_merge,
     configure_repo,
     install_required_checks,
+    set_codeowners,
 )
+from .auto_merge import AutoMergeRefused, AutoMergeResult, enable_auto_merge
 from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
+from .review_submit import ReviewResult, ReviewSubmitRefused, submit_review
+from .ruleset import (
+    RulesetBypassActor,
+    RulesetPolicy,
+    RulesetRefused,
+    RulesetResult,
+    delete_ruleset,
+    upsert_ruleset,
+)
 from .scoped_token import (
     ScopedToken,
     TokenMintRefused,
@@ -83,15 +95,26 @@ __all__ = [
     "MergeRefused",
     "MergeResult",
     "OpenChangeRefused",
+    "AutoMergeRefused",
+    "AutoMergeResult",
+    "ReviewResult",
+    "ReviewSubmitRefused",
     "ReviewState",
+    "RulesetBypassActor",
+    "RulesetPolicy",
+    "RulesetRefused",
+    "RulesetResult",
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
     "app_jwt_gh_runner",
     "authenticated_gh_runner",
+    "allow_auto_merge",
     "change_conflicts",
     "checks_state",
     "configure_repo",
+    "delete_ruleset",
+    "enable_auto_merge",
     "install_required_checks",
     "merge",
     "mint_scoped_token",
@@ -99,4 +122,7 @@ __all__ = [
     "plan_approved",
     "review_state",
     "revoke_scoped_token",
+    "set_codeowners",
+    "submit_review",
+    "upsert_ruleset",
 ]

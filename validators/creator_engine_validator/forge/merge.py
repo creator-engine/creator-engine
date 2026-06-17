@@ -41,6 +41,8 @@ Defensive invariants (deliberate, load-bearing):
 * **Carries NO credential.** :func:`merge` takes no token argument and :class:`MergeResult`
   holds no token value; auth lives only in the injected ``gh_runner``'s environment (the secret
   never appears in argv).
+  The production App token that may back that runner must be scoped to ``contents:write`` only;
+  the merge endpoint is not a ``pull_requests:write`` operation.
 * **Server-side gates still rule.** This merges OUR OWN already-reviewed, already-green PR; it
   is NOT a bypass — GitHub's branch-protection still enforces the gates, so a merge the server
   rejects (``405`` not mergeable / ``409`` head moved) surfaces as a transport
