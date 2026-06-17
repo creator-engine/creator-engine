@@ -105,6 +105,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.noop_backend",
         # v3.5-A.1 OpenShell backend (defined; registration deferred to A.2)
         "runner.openshell_backend",
+        # Runner-owned Ring-1 increment 1: PATH-precedence git/gh shims that call
+        # the public hook-check CLI. This remains v3 runner code and must not
+        # import the retained v1 hook_check module directly.
+        "runner.ring1_tool_guard",
         # ce-ops#71 Tranche 1: the unprivileged OS-native backend — a FAIL-CLOSED
         # scaffold (registered + deny-surface-enforcing; the sandbox mechanism is
         # HELD pending the srt-vs-CE-native-jail Operator decision, research §9).

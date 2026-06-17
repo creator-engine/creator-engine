@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -200,11 +201,9 @@ def is_secret_path(file_path: Any) -> str | None:
 # anchored to the canonical taxonomy rather than a bespoke parallel list.
 _MECHANIC_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bgh\s+pr\s+merge\b"), "merge"),
-    (re.compile(r"\bgit\s+push\b"), "deploy"),
     (re.compile(r"\b(npm|pnpm|yarn)\s+publish\b"), "publish"),
     (re.compile(r"\btwine\s+upload\b"), "publish"),
     (re.compile(r"\bcargo\s+publish\b"), "publish"),
-    (re.compile(r"\bgit\s+branch\s+-[dD]\b"), "alter_repo_settings"),
 )
 
 # Mechanics the seat contract prohibits that do not map onto a mutation-class
@@ -217,6 +216,243 @@ _MECHANIC_RULES_NONVOCAB: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bce\s+(integration-queue|iq)\b"), "live_integration_queue"),
 )
 
+_GIT_OPAQUE_MECHANIC = "git_opaque"
+_GIT_GLOBAL_OPTIONS_WITH_VALUE = frozenset(
+    {
+        "-C",
+        "-c",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--config-env",
+        "--super-prefix",
+    }
+)
+_GIT_GLOBAL_OPTIONS_WITH_OPTIONAL_VALUE = frozenset({"--exec-path"})
+_GIT_GLOBAL_OPTIONS_WITH_EQUALS = tuple(
+    f"{option}="
+    for option in (
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--config-env",
+        "--super-prefix",
+    )
+)
+_GIT_GLOBAL_OPTIONS_NO_VALUE = frozenset(
+    {
+        "-p",
+        "--paginate",
+        "--no-pager",
+        "--bare",
+        "--no-replace-objects",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+        "--no-optional-locks",
+        "--version",
+        "--help",
+    }
+)
+_SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "(", ")"})
+_GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
+    {
+        "status",
+        "diff",
+        "log",
+        "show",
+        "rev-parse",
+        "show-ref",
+        "ls-files",
+        "ls-tree",
+        "cat-file",
+        "describe",
+        "name-rev",
+        "merge-base",
+    }
+)
+_GIT_BUILTINS = _GIT_SAFE_READONLY_SUBCOMMANDS | frozenset(
+    {
+        # Restricted outward/binding side effects.
+        "push",
+        "branch",
+        # Ordinary local porcelain used constantly inside governed seats.
+        "add",
+        "am",
+        "apply",
+        "bisect",
+        "blame",
+        "checkout",
+        "cherry-pick",
+        "clean",
+        "clone",
+        "commit",
+        "config",
+        "fetch",
+        "grep",
+        "init",
+        "merge",
+        "mv",
+        "notes",
+        "pull",
+        "rebase",
+        "reflog",
+        "remote",
+        "reset",
+        "restore",
+        "revert",
+        "rm",
+        "stash",
+        "submodule",
+        "switch",
+        "tag",
+        "worktree",
+        # Common plumbing/read helpers.
+        "check-attr",
+        "check-ignore",
+        "check-ref-format",
+        "count-objects",
+        "for-each-ref",
+        "hash-object",
+        "ls-remote",
+        "rev-list",
+        "update-index",
+    }
+)
+
+
+def _shell_tokens(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def _is_git_executable(token: str) -> bool:
+    return token == "git" or token.endswith("/git")
+
+
+def _record_git_alias(config: str, aliases: dict[str, str]) -> None:
+    key, sep, value = config.partition("=")
+    if not sep:
+        return
+    key = key.strip().lower()
+    if key.startswith("alias.") and len(key) > len("alias."):
+        aliases[key[len("alias.") :]] = value.strip()
+
+
+def _git_branch_deletes(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in {"-d", "-D", "--delete"} or arg.startswith("--delete="):
+            return True
+        if arg.startswith("-") and not arg.startswith("--") and ("d" in arg or "D" in arg):
+            return True
+    return False
+
+
+def _classify_git_subcommand(
+    subcommand: str,
+    args: tuple[str, ...],
+    aliases: dict[str, str],
+) -> str | None:
+    """Map a resolved git subcommand to a restricted mechanic.
+
+    Git built-ins take precedence over same-named aliases. Only ``push`` and
+    branch deletion are restricted; ordinary local built-ins return ``None``.
+    Inline aliases are resolved only for non-built-in names. Unparseable alias
+    shapes stay conservative (``git_opaque``), while plain unknown subcommands
+    without aliases return ``None`` because git itself will reject them.
+    """
+
+    seen: set[str] = set()
+    while subcommand not in _GIT_BUILTINS:
+        if subcommand not in aliases:
+            return _GIT_OPAQUE_MECHANIC if seen else None
+        if subcommand in seen:
+            return _GIT_OPAQUE_MECHANIC
+        seen.add(subcommand)
+        alias = aliases[subcommand]
+        if not alias or alias.startswith("!"):
+            return _GIT_OPAQUE_MECHANIC
+        try:
+            alias_tokens = _shell_tokens(alias)
+        except ValueError:
+            return _GIT_OPAQUE_MECHANIC
+        if not alias_tokens:
+            return _GIT_OPAQUE_MECHANIC
+        if _is_git_executable(alias_tokens[0]):
+            nested = _classify_git_tokens(alias_tokens[1:])
+            return nested or _GIT_OPAQUE_MECHANIC
+        if alias_tokens[0].startswith("-"):
+            return _GIT_OPAQUE_MECHANIC
+        subcommand = alias_tokens[0]
+        args = (*alias_tokens[1:], *args)
+
+    if subcommand == "push":
+        return "deploy"
+    if subcommand == "branch":
+        return "alter_repo_settings" if _git_branch_deletes(args) else None
+    return None
+
+
+def _classify_git_tokens(tokens: list[str]) -> str | None:
+    aliases: dict[str, str] = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token.startswith("-c") and token != "-c":
+            _record_git_alias(token[2:], aliases)
+            i += 1
+            continue
+        if any(token.startswith(prefix) for prefix in _GIT_GLOBAL_OPTIONS_WITH_EQUALS):
+            i += 1
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            if token == "-c":
+                if i + 1 >= len(tokens):
+                    return _GIT_OPAQUE_MECHANIC
+                _record_git_alias(tokens[i + 1], aliases)
+                i += 2
+                continue
+            if token in _GIT_GLOBAL_OPTIONS_WITH_OPTIONAL_VALUE:
+                if i + 1 < len(tokens) and tokens[i + 1] not in _SHELL_SEPARATORS:
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if i + 1 >= len(tokens):
+                return _GIT_OPAQUE_MECHANIC
+            i += 2
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_NO_VALUE:
+            i += 1
+            continue
+        if token == "--":
+            i += 1
+            continue
+        if token.startswith("-"):
+            return _GIT_OPAQUE_MECHANIC
+        return _classify_git_subcommand(token, tuple(tokens[i + 1 :]), aliases)
+    return None
+
+
+def _classify_git_mechanics(command: str) -> str | None:
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return _GIT_OPAQUE_MECHANIC if re.search(r"\bgit\b", command) else None
+    for index, token in enumerate(tokens):
+        if _is_git_executable(token):
+            action = _classify_git_tokens(tokens[index + 1 :])
+            if action is not None:
+                return action
+    return None
+
 
 def classify_mechanics(command: Any) -> str | None:
     """Return the restricted classification for ``command``, or ``None``.
@@ -227,6 +463,9 @@ def classify_mechanics(command: Any) -> str | None:
     """
     if not isinstance(command, str):
         return None
+    git_action = _classify_git_mechanics(command)
+    if git_action is not None:
+        return git_action
     for pattern, action in _MECHANIC_RULES + _MECHANIC_RULES_NONVOCAB:
         if pattern.search(command):
             return action
@@ -427,6 +666,7 @@ _MECHANIC_RECORD_AXES: dict[str, tuple[str, str]] = {
     "pr_lifecycle": ("egress", "governance"),
     "live_lane_launch": ("exec", "governance"),
     "live_integration_queue": ("exec", "governance"),
+    _GIT_OPAQUE_MECHANIC: ("vcs", "governance"),
 }
 
 #: Bound the value-free ``target`` provenance field.
