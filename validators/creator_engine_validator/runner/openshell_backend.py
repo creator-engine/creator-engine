@@ -114,7 +114,6 @@ DEFAULT_ENDPOINT_ACCESS = "read-write"
 # full/raw-tunnel endpoints omit the L7 axis.
 DEFAULT_ENDPOINT_PROTOCOL = "rest"
 DEFAULT_RING1_POSTURE_ROOT = "/runtime/worktree"
-DEFAULT_RING1_LEDGER_RELATIVE = ".hermes/active-work-ledger"
 
 #: The OpenShell ``SandboxPolicy`` YAML schema version. The live v0.0.57 gateway
 #: REQUIRES a top-level ``version`` (it is the one non-defaulted field in the
@@ -800,16 +799,11 @@ class OpenShellBackend(RunnerBackend):
                     return mount_path
         return DEFAULT_RING1_POSTURE_ROOT
 
-    @staticmethod
-    def _default_ring1_ledger_root(posture_root: str) -> str:
-        return f"{posture_root.rstrip('/')}/{DEFAULT_RING1_LEDGER_RELATIVE}"
-
     def _effective_ring1_guard(self, record: Mapping[str, Any]) -> Ring1ToolGuardConfig:
         if self._ring1_guard is not None:
             return self._ring1_guard
         posture_root = self._ring1_posture_root or self._default_ring1_posture_root(record)
-        ledger_root = self._ring1_ledger_root or self._default_ring1_ledger_root(posture_root)
-        return Ring1ToolGuardConfig(posture_root=posture_root, ledger_root=ledger_root)
+        return Ring1ToolGuardConfig(posture_root=posture_root, ledger_root=self._ring1_ledger_root)
 
     def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         # The G-1.0 deny surface (mapping + validate_runtime_policy → PolicyRejected)

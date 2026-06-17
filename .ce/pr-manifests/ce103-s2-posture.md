@@ -23,19 +23,21 @@ The changes (ce-ops#103 Scope-2 S2):
   that decision.
 - Optional posture/ledger roots are rendered as immutable shim constants. The
   OpenShell backend's default guard derives the runtime worktree root from the
-  provisioning policy and bakes its Active-Work Ledger root by default.
+  provisioning policy; ledger-root baking remains explicit-only so the v3 runner
+  surface does not redeclare legacy local-state path literals.
 - The deployed-Claude `--posture auto` path is unchanged.
 - Tests cover both directions: env-spoofed `git push` remains denied with exit
   121, and governed `git status` remains allowed.
 - The validator app wheel is rebuilt from the current source and
   `validators/wheelhouse/SHA256SUMS` is refreshed. New app-wheel digest:
-  `9ab4107e7667e324c75bfee2e30eca31d39998cd8563abf180ae134313b87cfc`.
+  `f94d6db443a980be06e7fbe6e977559b7cb0efb77d94ae6a70714a048b42559c`.
 
 Per-file purpose (the closed path-set - 11 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce103-s2-posture.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce103-s2-posture.md`** *(A)* - this carrier.
 - **`validators/creator_engine_validator/runner/openshell_backend.py`** *(M)* -
-  default Ring-1 guard provisioning with baked posture/ledger roots.
+  default Ring-1 guard provisioning with baked posture root and explicit-only
+  ledger root.
 - **`validators/creator_engine_validator/runner/ring1_tool_guard.py`** *(M)* -
   governed posture hard floor and immutable shim posture/root constants.
 - **`validators/tests/integration/test_runner_ring1_codex_push.py`** *(M)* -

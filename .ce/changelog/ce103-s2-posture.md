@@ -14,13 +14,13 @@ downgrade governed posture by exporting mutable environment.
 - Renders `--posture governed` as an immutable generated-shim constant. The
   shim no longer reads `CE_RING1_POSTURE` or `CE_LEDGER_ROOT` from child
   environment when deciding posture or ledger binding.
-- Wires OpenShell default guard provisioning to bake the runtime worktree root
-  and its `.hermes/active-work-ledger` root, with explicit backend overrides
-  available for specialized provisioning.
+- Wires OpenShell default guard provisioning to bake the runtime worktree root;
+  ledger-root baking is explicit-only so the v3 runner surface does not
+  redeclare legacy local-state path literals.
 - Leaves the deployed-Claude `--posture auto` hook path unchanged.
 - Adds both-direction coverage: env-spoofed `git push` still exits with the CE
   Ring-1 deny code, while governed `git status` still reaches the real git
   binary.
 - Rebuilds `creator_engine_validator-0.2.0-py3-none-any.whl` and refreshes
   `validators/wheelhouse/SHA256SUMS` with digest
-  `9ab4107e7667e324c75bfee2e30eca31d39998cd8563abf180ae134313b87cfc`.
+  `f94d6db443a980be06e7fbe6e977559b7cb0efb77d94ae6a70714a048b42559c`.

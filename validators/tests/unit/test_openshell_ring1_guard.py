@@ -58,7 +58,7 @@ def test_provision_installs_guard_after_sandbox_create():
     assert f"cat > {DEFAULT_SHIM_DIR}/gh" in command[2]
     assert '"posture": "governed"' in command[2]
     assert '"posture_root": "/runtime/worktree"' in command[2]
-    assert '"ledger_root": "/runtime/worktree/.hermes/active-work-ledger"' in command[2]
+    assert '"ledger_root": ""' in command[2]
     assert fake.exec_environments == [None]
 
 
