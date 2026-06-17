@@ -34,14 +34,26 @@ exfiltrate credentials, entirely outside Ring-1).
   non-coverage (in-workspace `.env` residual → in-band hook/shim layer;
   pre-`restrict_self` re-exec; `READ_DIR` enumeration; net exfil = Section-8b
   #108; FUSE/fanotify deferred).
+- Wires Section-8c into the real Ring-1 runtime: `build_runtime` now constructs
+  `RunnerFsConfinement`, resolves the fail-closed capability by default, and
+  carries `landlock_preexec` on `Ring1GuardRuntime`. OpenShell `run` passes that
+  hook through `exec_sandbox`, and the live CLI client forwards it to
+  `subprocess.run` before user code execs.
+- Composes caller-supplied `preexec_fn` under `run_confined` with Landlock first,
+  so a supplied child hook cannot disable enforcement or read out-of-workspace
+  credentials before exec.
+- Extends credential-shape coverage with `.ce-keys`, `github_token`, and
+  `*_token` basenames.
 - Scope is the runner subprocess only; the deployed-Claude/controller path is
-  untouched, and this is independent of the OpenShell/gVisor backends.
+  untouched.
 - Tests both directions, gated on real Landlock availability for the live proof:
   out-of-workspace `.env` / `~/.ssh/id_rsa` / `~/.aws/credentials` reads are
   DENIED under a launched confinement; in-workspace source reads and
   `git status` / `git add` are unaffected; the in-workspace `.env` residual is
-  proven and declared. Host-portable unit tests cover the ABI probe, capability
-  shapes, the fail-closed/advisory fallback, and the config guard.
+  proven and declared; a caller-supplied `preexec_fn` cannot read the exact
+  out-of-workspace `.env` before exec. Host-portable unit tests cover the ABI
+  probe, capability shapes, the fail-closed/advisory fallback, config guard,
+  OpenShell hook handoff, and new credential-shape coverage.
 - Rebuilds `creator_engine_validator-0.2.0-py3-none-any.whl` and refreshes
   `validators/wheelhouse/SHA256SUMS` with digest
-  `1299a4769cf42678d5d780923e394f5de0e19cf555a8a5b7ed0fc986e1b1ee84`.
+  `d81c646c5ef7f3ba73569e1aaa34c9280ab8c82579927a9697036d66149707e1`.

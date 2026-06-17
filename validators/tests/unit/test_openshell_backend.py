@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from creator_engine_validator import fs_mediation as fm
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.runner import (
     BackendUnavailable,
@@ -52,6 +53,11 @@ _IMAGE_SHA = "sha256:" + "b" * 64
 #: Real OpenShell v0.0.57 OCSF text-log lines captured live in A.2b (the parser's
 #: ground truth). Mirrors ``fixtures/openshell_ocsf_textlog.sample``.
 _OCSF_TEXTLOG_FIXTURE = Path(__file__).parent / "fixtures" / "openshell_ocsf_textlog.sample"
+
+
+@pytest.fixture(autouse=True)
+def _landlock_available(monkeypatch):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
 
 
 def valid_policy() -> dict:
@@ -246,6 +252,7 @@ def test_full_lifecycle_through_fake_client():
     # Provision installs the default Ring-1 guard first; the requested run is
     # still executed against the created sandbox id.
     assert fake.exec_calls[-1] == ("openshell-sandbox-xyz", ("echo", "hi"))
+    assert fake.exec_preexec_fns[-1] is not None
 
     evidence = backend.collect(handle)
     assert isinstance(evidence, CollectedEvidence)

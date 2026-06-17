@@ -19,7 +19,8 @@ Design invariants (deliberate, load-bearing):
   runner launch via a ``preexec_fn`` (apply-then-exec) so the launched process
   cannot opt out — Landlock survives ``execve`` and ``no_new_privs`` lets an
   unprivileged process keep the domain. It does NOT touch the deployed-Claude /
-  controller path and is independent of OpenShell/gVisor backends.
+  controller path; OpenShell wires the same hook into its local runner launch
+  seam before user code execs.
 * **Single source of truth.** The credential-shape predicate is
   ``secret_paths.is_secret_path`` (shared line); this module REUSES it as a
   fail-closed configuration guard (an allow root that is itself credential-shaped
@@ -395,6 +396,18 @@ def landlock_preexec(confinement: RunnerFsConfinement) -> Callable[[], None]:
     return _preexec
 
 
+def compose_preexec_fns(
+    first: Callable[[], None], second: Callable[[], None]
+) -> Callable[[], None]:
+    """Return a ``preexec_fn`` that runs ``first`` then ``second`` in the child."""
+
+    def _preexec() -> None:  # pragma: no cover - runs only in the forked child
+        first()
+        second()
+
+    return _preexec
+
+
 def run_confined(
     argv: Sequence[str],
     confinement: RunnerFsConfinement,
@@ -413,5 +426,14 @@ def run_confined(
         confinement, require_enforcement=require_enforcement
     )
     if capability.sandbox_fs_enforced:
-        popen_kwargs.setdefault("preexec_fn", landlock_preexec(confinement))
+        fs_preexec = landlock_preexec(confinement)
+        caller_preexec = popen_kwargs.get("preexec_fn")
+        if caller_preexec is None:
+            popen_kwargs["preexec_fn"] = fs_preexec
+        elif callable(caller_preexec):
+            # Landlock must be installed before any caller-supplied child hook can
+            # run, otherwise that hook could read credentials before exec.
+            popen_kwargs["preexec_fn"] = compose_preexec_fns(fs_preexec, caller_preexec)
+        else:
+            raise TypeError("preexec_fn must be callable when supplied")
     return subprocess.run(list(argv), **popen_kwargs)  # type: ignore[arg-type]

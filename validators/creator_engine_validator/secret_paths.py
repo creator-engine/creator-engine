@@ -26,7 +26,16 @@ from typing import Any
 
 # Exact basenames that name a credential/token store outright.
 SECRET_EXACT_NAMES = frozenset(
-    {"credentials", "credentials.json", ".netrc", ".npmrc", ".pypirc", ".pgpass", ".htpasswd"}
+    {
+        "credentials",
+        "credentials.json",
+        ".ce-keys",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        ".pgpass",
+        ".htpasswd",
+    }
 )
 # Private SSH key basenames (the matching ``.pub`` is intentionally NOT secret).
 SECRET_KEY_NAMES = frozenset({"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"})
@@ -48,6 +57,7 @@ CREDENTIAL_PATH_RULE_CLASSES: tuple[str, ...] = (
     "private-key-or-cert-suffix",
     "credential-store-directory",
     "credential-or-secret-in-name",
+    "token-name",
 )
 
 
@@ -74,4 +84,6 @@ def is_secret_path(file_path: Any) -> str | None:
         return "credential-store-directory"
     if "credential" in lowered or "secret" in lowered:
         return "credential-like-name"
+    if lowered == "github_token" or lowered.endswith("_token"):
+        return "token-name"
     return None

@@ -63,7 +63,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -506,6 +506,7 @@ class SandboxClient(Protocol):
         workdir: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
+        preexec_fn: Callable[[], None] | None = None,
     ) -> ExecOutcome:
         """``ExecSandbox`` — run a command; return its collapsed exit outcome."""
         ...
@@ -541,6 +542,7 @@ class _UnwiredSandboxClient:
         workdir: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
+        preexec_fn: Callable[[], None] | None = None,
     ) -> ExecOutcome:
         raise BackendUnavailable(self._MESSAGE)
 
@@ -608,6 +610,7 @@ class FakeSandboxClient:
         self.exec_environments: list[dict[str, str] | None] = []
         self.exec_workdirs: list[str | None] = []
         self.exec_timeouts: list[int | None] = []
+        self.exec_preexec_fns: list[Callable[[], None] | None] = []
         self.deleted: list[str] = []
 
     def create_sandbox(self, spec: SandboxCreateSpec) -> str:
@@ -622,11 +625,13 @@ class FakeSandboxClient:
         workdir: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
+        preexec_fn: Callable[[], None] | None = None,
     ) -> ExecOutcome:
         self.exec_calls.append((sandbox_id, tuple(command)))
         self.exec_environments.append(dict(environment) if environment is not None else None)
         self.exec_workdirs.append(workdir)
         self.exec_timeouts.append(timeout_seconds)
+        self.exec_preexec_fns.append(preexec_fn)
         return ExecOutcome(exit_code=self._exit_code, stdout=self._stdout, stderr=self._stderr)
 
     def collect_evidence(self, sandbox_id: str) -> Sequence[dict[str, Any]]:
@@ -712,6 +717,7 @@ class SubprocessSandboxClient:
         workdir: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
+        preexec_fn: Callable[[], None] | None = None,
     ) -> ExecOutcome:
         argv = [self._binary, "sandbox", "exec", "-n", sandbox_id, "--no-tty"]
         if workdir is not None:
@@ -725,7 +731,13 @@ class SubprocessSandboxClient:
         if environment:
             env_prefix = ["env", *(f"{key}={value}" for key, value in environment.items())]
         argv += ["--", *env_prefix, *command]
-        completed = subprocess.run(argv, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            preexec_fn=preexec_fn,
+        )
         return ExecOutcome(
             exit_code=completed.returncode,
             stdout=completed.stdout or "",
@@ -772,9 +784,9 @@ class OpenShellBackend(RunnerBackend):
         self._ring1_ledger_root = ring1_ledger_root
         #: handle.ref -> OpenShell sandbox_id
         self._sandboxes: dict[str, str] = {}
-        #: handle.ref -> installed Ring-1 guard runtime. Increment 1 is PATH-shim
-        #: mediation for shell-level git/gh only; binary hiding, filesystem
-        #: mediation, and egress defenses are later gates.
+        #: handle.ref -> installed Ring-1 guard runtime. Carries PATH-shim
+        #: mediation for shell-level git/gh plus the Section-8c Landlock
+        #: pre-exec hook required for the runner subprocess launch.
         self._guard_runtimes: dict[str, Ring1GuardRuntime] = {}
 
     @staticmethod
@@ -809,6 +821,8 @@ class OpenShellBackend(RunnerBackend):
         # The G-1.0 deny surface (mapping + validate_runtime_policy → PolicyRejected)
         # is enforced by the RunnerBackend.provision template method before we get here.
         record = request.runtime_policy
+        guard = self._effective_ring1_guard(record)
+        runtime = build_ring1_runtime(guard, DEFAULT_RING1_SHIM_DIR)
         # Pure translation (no side effects), then assemble the create-spec.
         policy = translate_to_sandbox_policy(record)
         spec = SandboxCreateSpec(policy=policy, image=_image_ref_string(record))
@@ -822,8 +836,6 @@ class OpenShellBackend(RunnerBackend):
             ref=f"openshell:{request.run_id}",
         )
         self._sandboxes[handle.ref] = sandbox_id
-        guard = self._effective_ring1_guard(record)
-        runtime = build_ring1_runtime(guard, DEFAULT_RING1_SHIM_DIR)
         install = render_ring1_install_script(guard, runtime.shim_dir)
         outcome = self._client.exec_sandbox(sandbox_id, ("sh", "-c", install))
         if outcome.exit_code != 0:
@@ -843,6 +855,7 @@ class OpenShellBackend(RunnerBackend):
             sandbox_id,
             request.command,
             environment=runtime.env if runtime is not None else None,
+            preexec_fn=runtime.fs_preexec_fn if runtime is not None else None,
         )
         return RunResult(
             exit_code=outcome.exit_code,

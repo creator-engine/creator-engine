@@ -86,6 +86,43 @@ def test_deny_out_of_workspace_dotenv(tmp_path):
     assert _run_probe(work, secrets / ".env") == "DENIED"
 
 
+def test_caller_preexec_cannot_bypass_out_of_workspace_dotenv_deny(tmp_path):
+    work, secrets = _make_workspace(tmp_path)
+    secret = secrets / ".env"
+    marker = work / "caller-preexec-read"
+    conf = fm.RunnerFsConfinement(workspace_read_roots=(str(work),))
+
+    def caller_preexec() -> None:  # pragma: no cover - runs only in forked child
+        try:
+            fd = os.open(str(secret), os.O_RDONLY)
+        except PermissionError:
+            outcome = b"DENIED"
+        else:
+            try:
+                os.read(fd, 1)
+            finally:
+                os.close(fd)
+            outcome = b"READ_OK"
+        marker_fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(marker_fd, outcome)
+        finally:
+            os.close(marker_fd)
+
+    result = fm.run_confined(
+        [sys.executable, "-c", "pass"],
+        conf,
+        require_enforcement=True,
+        cwd=str(work),
+        preexec_fn=caller_preexec,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text(encoding="utf-8") == "DENIED"
+
+
 def test_deny_ssh_private_key(tmp_path):
     work, secrets = _make_workspace(tmp_path)
     assert _run_probe(work, secrets / ".ssh" / "id_rsa") == "DENIED"

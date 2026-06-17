@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from creator_engine_validator import fs_mediation as fm
 from creator_engine_validator.runner import (
     FakeSandboxClient,
     OpenShellBackend,
@@ -19,6 +20,11 @@ from creator_engine_validator.runner.ring1_tool_guard import (
 
 _POLICY_SHA = "a" * 64
 _IMAGE_SHA = "sha256:" + "b" * 64
+
+
+@pytest.fixture(autouse=True)
+def _landlock_available(monkeypatch):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
 
 
 def valid_policy() -> dict:
@@ -78,6 +84,7 @@ def test_run_injects_guard_path_environment():
     assert env["PATH"] == f"{DEFAULT_SHIM_DIR}:/usr/bin:/bin"
     assert env["CE_RING1_POSTURE"] == "governed"
     assert env["CE_RING1_EVIDENCE_ROOT"] == DEFAULT_EVIDENCE_ROOT
+    assert fake.exec_preexec_fns[-1] is not None
 
 
 def test_default_guard_honors_backend_pinned_root_overrides():
@@ -98,6 +105,19 @@ def test_default_guard_honors_backend_pinned_root_overrides():
     assert env is not None
     assert env["CE_RING1_POSTURE_ROOT"] == "/runtime/worktree"
     assert env["CE_LEDGER_ROOT"] == "/runtime/worktree/.hermes/active-work-ledger"
+    assert fake.exec_preexec_fns[-1] is not None
+
+
+def test_provision_fails_closed_before_sandbox_create_when_landlock_unavailable(monkeypatch):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: None)
+    fake = FakeSandboxClient()
+    backend = OpenShellBackend(client=fake)
+
+    with pytest.raises(fm.FsMediationUnavailable, match="fail-closed"):
+        backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ring1"))
+
+    assert fake.created_specs == []
+    assert fake.exec_calls == []
 
 
 def test_no_guard_install_occurs_before_policy_validation_rejects():

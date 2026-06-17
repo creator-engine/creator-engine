@@ -14,7 +14,7 @@ import pytest
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,7 @@ class LocalSandboxClient:
         workdir: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
+        preexec_fn: Callable[[], None] | None = None,
     ) -> ExecOutcome:
         self.exec_calls.append((sandbox_id, tuple(command)))
         self.exec_environments.append(dict(environment) if environment is not None else None)
@@ -71,6 +72,7 @@ class LocalSandboxClient:
             text=True,
             timeout=timeout_seconds,
             check=False,
+            preexec_fn=preexec_fn,
         )
         return ExecOutcome(
             exit_code=completed.returncode,
@@ -169,8 +171,8 @@ def test_codex_child_git_command_denied_under_governed_posture(tmp_path, git_com
     sandbox_dir.mkdir()
     _write_governed_ledger(sandbox_dir)
 
-    harness_bin = tmp_path / "harness-bin"
-    real_bin = tmp_path / "real-bin"
+    harness_bin = sandbox_dir / "harness-bin"
+    real_bin = sandbox_dir / "real-bin"
     harness_bin.mkdir()
     real_bin.mkdir()
     real_git_marker = sandbox_dir / "real-git-ran"
@@ -201,6 +203,8 @@ printf 'real git reached\\n' > {real_git_marker}
 
     guard = Ring1ToolGuardConfig(
         base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
+        posture_root=str(sandbox_dir),
+        extra_read_roots=(str(VALIDATORS_ROOT),),
         real_binaries=(
             ("git", str(real_bin / "git-real")),
             ("gh", str(real_bin / "gh-real")),
@@ -228,8 +232,8 @@ def test_codex_child_git_status_allowed_under_pinned_governed_posture(tmp_path):
     sandbox_dir.mkdir()
     _write_governed_ledger(sandbox_dir)
 
-    harness_bin = tmp_path / "harness-bin"
-    real_bin = tmp_path / "real-bin"
+    harness_bin = sandbox_dir / "harness-bin"
+    real_bin = sandbox_dir / "real-bin"
     harness_bin.mkdir()
     real_bin.mkdir()
     real_git_marker = sandbox_dir / "real-git-ran"
@@ -256,6 +260,8 @@ printf '%s\\n' "$*" > {real_git_marker}
 
     guard = Ring1ToolGuardConfig(
         base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
+        posture_root=str(sandbox_dir),
+        extra_read_roots=(str(VALIDATORS_ROOT),),
         real_binaries=(
             ("git", str(real_bin / "git-real")),
             ("gh", str(real_bin / "gh-real")),

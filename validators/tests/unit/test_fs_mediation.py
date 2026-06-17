@@ -101,6 +101,30 @@ def test_run_confined_unavailable_required_fails_closed(monkeypatch):
         fm.run_confined(["/bin/true"], _conf(), require_enforcement=True)
 
 
+def test_run_confined_composes_caller_preexec_under_enforcement(monkeypatch):
+    calls: list[str] = []
+
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    monkeypatch.setattr(fm, "landlock_preexec", lambda confinement: lambda: calls.append("landlock"))
+
+    def fake_run(argv, **kwargs):
+        preexec = kwargs.get("preexec_fn")
+        assert callable(preexec)
+        preexec()
+        return fm.subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(fm.subprocess, "run", fake_run)
+
+    fm.run_confined(
+        ["/bin/true"],
+        _conf(),
+        require_enforcement=True,
+        preexec_fn=lambda: calls.append("caller"),
+    )
+
+    assert calls == ["landlock", "caller"]
+
+
 # --- capability serialization ------------------------------------------------
 
 def test_capability_to_dict_round_trip(monkeypatch):
