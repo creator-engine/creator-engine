@@ -11,8 +11,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: <published-with-this-spec>
-  content_sha256: <published-with-this-spec>
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQldHM3RDM3pGeGdnMnJ0bGQ1OHJJVUxwUGRzWm1sb2dsR0xydjBzTWZGek9vNklwM2lGNUZaS0YKZ0d6eUFxOW9ZR1BCMHJKeFpTbjVoWS9PVzhHWElNCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: b0aa99c1d2ae3bb82bd52f9464369e4846714556c8558a5de986a1d6800cff7a
 
 artifact_manifest:
   artifact_manifest_version: 1
