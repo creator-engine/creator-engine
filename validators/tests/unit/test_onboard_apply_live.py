@@ -823,3 +823,115 @@ def test_wait_for_app_installation_fails_closed_when_installation_id_unconfigure
     result = onboard_apply_live.LiveForgeApplyDriver(cfg).wait_for_app_installation(app_plan={}, repo=_REPO)
     assert result["ok"] is False
     assert result["reason"] == "app_installation_id_unconfigured"
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#90 verify-fix (dev-3 found on a live --apply) — the userspace-tool verify must probe
+# the INSTALL LOCATION (the venv scripts dir), NOT os.environ PATH. uv installs to <venv>/bin,
+# which is not on PATH, so the inherited base shutil.which returned None → userspace_tool_verify_failed
+# even though the install succeeded. + audit fix: cli_exposure resolves `cev3` the same way.
+# ---------------------------------------------------------------------------
+import os as _os
+import stat as _stat
+
+
+def _fake_console_script(path: Path, *, version_line: str) -> None:
+    # Absolute /bin/sh shebang + builtin echo → the fake runs PATH-INDEPENDENTLY, so a test can
+    # empty os.environ['PATH'] (to reproduce "tool off PATH") and the install-location probe still
+    # exec's it. A real uv is a compiled binary with no such shebang dependency.
+    path.write_text(f'#!/bin/sh\necho "{version_line}"\n', encoding="utf-8")
+    path.chmod(path.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+
+
+def _verify_fix_driver(scripts_dir: Path):
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="verify-fix",
+        scripts_dir=str(scripts_dir),
+    )
+    return onboard_apply_live.LiveForgeApplyDriver(cfg)
+
+
+def test_verify_tool_uv_resolves_at_install_location_not_on_path(tmp_path, monkeypatch):
+    # THE REGRESSION (dev-3): uv present at the venv scripts dir but NOT on os.environ['PATH'].
+    scripts = tmp_path / "venv-bin"
+    scripts.mkdir()
+    _fake_console_script(scripts / "uv", version_line="uv 0.11.21")
+    # ensure uv is NOT reachable via PATH → reproduces the #244 defect precondition.
+    empty_path = tmp_path / "emptybin"
+    empty_path.mkdir()
+    monkeypatch.setenv("PATH", str(empty_path))
+    import shutil as _sh
+    assert _sh.which("uv") is None, "precondition: uv must be off PATH to reproduce the defect"
+    # the FIX: verify resolves uv via the install-location probe and passes.
+    assert _verify_fix_driver(scripts).verify_tool("uv") is True
+
+
+def test_verify_tool_uv_fails_closed_when_absent(tmp_path):
+    scripts = tmp_path / "venv-bin"
+    scripts.mkdir()  # no uv written
+    assert _verify_fix_driver(scripts).verify_tool("uv") is False
+
+
+def test_verify_tool_uv_fails_closed_on_version_mismatch(tmp_path):
+    scripts = tmp_path / "venv-bin"
+    scripts.mkdir()
+    _fake_console_script(scripts / "uv", version_line="uv 9.9.9")  # wrong version
+    assert _verify_fix_driver(scripts).verify_tool("uv") is False
+
+
+def test_verify_tool_system_tool_uses_base_path_probe(tmp_path, monkeypatch):
+    # a SYSTEM tool (not in MIRROR_USERSPACE_WHEELS) keeps the inherited base PATH probe UNCHANGED.
+    sysbin = tmp_path / "sysbin"
+    sysbin.mkdir()
+    _fake_console_script(sysbin / "git", version_line="git version 2.x")
+    monkeypatch.setenv("PATH", str(sysbin))
+    driver = _verify_fix_driver(tmp_path / "venv-bin")  # scripts_dir need not exist for the system branch
+    assert driver.verify_tool("git") is True            # resolved via PATH (base)
+    monkeypatch.setenv("PATH", str(tmp_path / "nope"))
+    assert driver.verify_tool("git") is False            # base PATH probe, fail-closed
+
+
+def test_install_dependencies_end_to_end_verifies_via_install_location(tmp_path, monkeypatch):
+    # END-TO-END regression: fetch (fake) + pip install (fake, writes uv into the venv scripts dir)
+    # + the REAL verify (NOT overridden) → the leg now SUCCEEDS even with uv OFF os.environ['PATH'].
+    scripts = tmp_path / "venv-bin"
+    scripts.mkdir()
+    empty_path = tmp_path / "emptybin"
+    empty_path.mkdir()
+    monkeypatch.setenv("PATH", str(empty_path))  # uv NOT on PATH
+
+    def pip_spawn(argv):
+        # simulate `pip install … uv` placing the console script in the venv scripts dir.
+        _fake_console_script(scripts / "uv", version_line="uv 0.11.21")
+        return subprocess.CompletedProcess(list(argv), 0)
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="e2e",
+        mirror_fetch=lambda url: _UV_BYTES, pip_spawn=pip_spawn, scripts_dir=str(scripts),
+    )
+    driver = onboard_apply_live.LiveForgeApplyDriver(cfg)  # real verify_tool (no override)
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result == {"ok": True, "installed": ["uv"]}, result
+
+
+def test_expose_cli_resolves_cev3_at_install_location_not_on_path(tmp_path, monkeypatch):
+    # AUDIT fix (whack-a-mole break): cli_exposure's `via=cev3` is a venv console script; resolve it
+    # at the install location so the shim is created even when cev3 is OFF os.environ['PATH'].
+    scripts = tmp_path / "venv-bin"
+    scripts.mkdir()
+    _fake_console_script(scripts / "cev3", version_line="cev3")
+    monkeypatch.setenv("PATH", str(tmp_path / "emptybin"))
+    import shutil as _sh
+    assert _sh.which("cev3") is None, "precondition: cev3 off PATH"
+    driver = _verify_fix_driver(scripts)
+    state_root = tmp_path / "state"
+    result = driver.expose_cli(state_root=state_root, command="ce", via="cev3")
+    assert result["ok"] is True
+    shim = state_root / "onboard" / "bin" / "ce"
+    assert shim.is_symlink() and _os.readlink(shim) == str(scripts / "cev3")  # → venv, not PATH
+
+
+def test_resolve_console_script_returns_none_when_absent(tmp_path):
+    assert _verify_fix_driver(tmp_path)._resolve_console_script("cev3") is None

@@ -44,6 +44,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,6 +117,10 @@ class MirrorUserspaceWheel:
     filename: str
     url: str
     sha256: str
+    #: The expected ``<tool> --version`` substring — confirms the installed binary RUNS and is
+    #: the pinned version (ce-ops#90 verify-fix: the post-install verify probes the install
+    #: location and runs the version check there, not bare ``shutil.which`` on ``os.environ`` PATH).
+    version: str = ""
 
 
 #: The KNOWN SET of mirror-served userspace-tool wheels (design A). ``uv`` 0.11.21 matches the
@@ -131,6 +136,7 @@ MIRROR_USERSPACE_WHEELS: dict[str, MirrorUserspaceWheel] = {
             "uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
         ),
         sha256="b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd",
+        version="0.11.21",
     ),
 }
 
@@ -179,6 +185,10 @@ class LiveForgeConfig:
     mirror_fetch: Any = None
     #: Injectable ``pip`` spawn seam (argv -> CompletedProcess); tests inject a fake → ZERO pip.
     pip_spawn: Any = None
+    #: Override for the venv scripts dir the userspace-tool verify probes (ce-ops#90 verify-fix).
+    #: None → the running interpreter's scripts dir (where ``pip install`` placed the console
+    #: script); tests inject a temp dir holding a fake binary. NOT a PATH search.
+    scripts_dir: str | None = None
 
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
@@ -573,7 +583,101 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             }
         return {"ok": True, "installation_id": installation_id, "detected": True}
 
+    def verify_tool(self, name: str) -> bool:
+        """Verify a dep is installed — BRANCHED by tool class (ce-ops#90 verify-fix, dev-3).
+
+        A userspace tool (``uv``) installs into the venv SCRIPTS dir, which is NOT on
+        ``os.environ['PATH']``; the inherited base ``verify_tool`` → ``probe_tool`` →
+        ``shutil.which`` therefore returned ``None`` and the leg refused
+        ``userspace_tool_verify_failed`` even though the install succeeded (the #244 defect dev-3
+        hit on a live ``--apply``). For a userspace tool we probe the ACTUAL install location
+        (the absolute ``<scripts>/<tool>``) and run its ``--version`` there — NOT a PATH search.
+        System tools (``git``/``python``/``runsc``/``proxy``) are correctly on PATH, so they keep
+        the inherited base probe UNCHANGED. Fail-closed (missing / non-runnable / wrong version →
+        ``False``), so a broken install still refuses.
+        """
+        if name in MIRROR_USERSPACE_WHEELS:
+            return self._verify_userspace_tool(name)
+        return super().verify_tool(name)
+
+    def expose_cli(self, *, state_root: Path, command: str, via: str) -> dict[str, Any]:
+        """Expose the v3 CLI as ``ce`` — resolving ``via`` at its INSTALL location, not just PATH.
+
+        ce-ops#90 verify-fix AUDIT (whack-a-mole break): ``via`` is ``cev3``, a venv console
+        script that — exactly like the ``uv`` verify defect dev-3 hit — may NOT be on
+        ``os.environ['PATH']`` on a fresh userspace install, so the inherited base
+        ``shutil.which('cev3')`` returns ``None`` → ``cli_exposure_failed`` at the NEXT leg. We
+        resolve ``via`` to its absolute install path (the venv scripts dir) first; the base then
+        accepts it (``shutil.which`` on an absolute executable returns it) and symlinks the shim
+        onto it. Falls back to the bare name (PATH search, the base behavior) when the
+        install-location resolution finds nothing — preserving non-venv layouts. The shim itself
+        is invoked by absolute path in ``verify_cli``, so no PATH dependency remains downstream.
+        """
+        resolved = self._resolve_console_script(via)
+        return super().expose_cli(state_root=state_root, command=command, via=resolved or via)
+
     # -- helpers for the host/app legs -------------------------------------------------------
+    def _resolve_console_script(self, name: str) -> str | None:
+        """Absolute path to a venv-installed console script at its INSTALL location, else ``None``."""
+        for scripts in self._userspace_scripts_dirs():
+            candidate = scripts / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        return None
+
+    def _verify_userspace_tool(self, tool: str) -> bool:
+        """Probe a venv-installed userspace tool at its INSTALL LOCATION (not ``os.environ`` PATH).
+
+        Resolves the interpreter's scripts dir(s) — where ``pip install`` placed the console
+        script — and verifies the absolute ``<scripts>/<tool>`` exists AND ``<tool> --version``
+        runs and reports the pinned version. Fail-closed on every miss (ce-ops#90 verify-fix).
+        """
+        pin = MIRROR_USERSPACE_WHEELS.get(tool)
+        if pin is None:
+            return False
+        for scripts in self._userspace_scripts_dirs():
+            candidate = scripts / tool
+            if not candidate.is_file():
+                continue
+            try:
+                proc = subprocess.run(  # noqa: S603 — fixed argv; candidate is an absolute install path
+                    [str(candidate), "--version"],
+                    check=False, capture_output=True, text=True, timeout=30,
+                )
+            except Exception:  # noqa: BLE001 — not runnable (perms/arch/...) → fail-closed
+                continue
+            if proc.returncode != 0:
+                continue
+            output = (proc.stdout or "") + (proc.stderr or "")
+            if not pin.version or pin.version in output:
+                return True
+        return False
+
+    def _userspace_scripts_dirs(self) -> list[Path]:
+        """The candidate scripts dirs the userspace verify probes (NOT a PATH search).
+
+        Config override (tests) → the running interpreter's ``sysconfig`` scripts path AND
+        ``dirname(sys.executable)`` (a venv puts both at ``<venv>/bin`` and pip installs console
+        scripts there). De-duplicated, order-preserving; fail-closed callers tolerate an empty list.
+        """
+        if self._cfg.scripts_dir:
+            return [Path(self._cfg.scripts_dir)]
+        candidates: list[Path] = []
+        try:
+            scripts = sysconfig.get_path("scripts")
+            if scripts:
+                candidates.append(Path(scripts))
+        except Exception:  # noqa: BLE001 — defensive: sysconfig scheme edge cases never crash verify
+            pass
+        candidates.append(Path(sys.executable).resolve().parent)
+        seen: set[str] = set()
+        unique: list[Path] = []
+        for c in candidates:
+            if str(c) not in seen:
+                seen.add(str(c))
+                unique.append(c)
+        return unique
+
     def _installation_covers_repo(self, repo: str) -> bool:
         """True iff the configured App installation's repositories include ``repo`` (read-only GET)."""
         try:
