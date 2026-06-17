@@ -246,6 +246,52 @@ def test_git_grammar_plain_unknown_subcommand_allows():
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 
 
+# ce-ops#105 S1 — outward sub-verb bridges (send-pack / p4 submit / svn dcommit),
+# the abbreviation guard (unique prefix of a restricted verb), and an alias that
+# expands to a restricted verb must all classify outward => deploy (deny).
+@pytest.mark.parametrize(
+    ("command", "action"),
+    [
+        pytest.param("git send-pack origin main", "deploy", id="send_pack"),
+        pytest.param("git p4 submit", "deploy", id="p4_submit"),
+        pytest.param("git svn dcommit", "deploy", id="svn_dcommit"),
+        pytest.param("git pus origin main", "deploy", id="unique_prefix_pus"),
+        pytest.param(
+            "git -c alias.ship=send-pack ship origin main",
+            "deploy",
+            id="alias_expands_to_send_pack",
+        ),
+        pytest.param("git p4", "deploy", id="p4_absent_subverb_conservative"),
+        pytest.param("git svn", "deploy", id="svn_absent_subverb_conservative"),
+    ],
+)
+def test_git_grammar_outward_bridges_and_prefix_deny(command, action):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) == action
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert f"restricted mechanic ({action})" in decision.reason
+
+
+# The inward (read) bridge sub-verbs and any unknown that is NOT a unique prefix
+# of a restricted verb must stay allowed — the hardening adds no over-denial.
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("git p4 sync", id="p4_sync_read"),
+        pytest.param("git svn fetch", id="svn_fetch_read"),
+        pytest.param("git status", id="status"),
+        pytest.param("git log", id="log"),
+        pytest.param("git renamed-thing", id="plain_unknown_non_prefix"),
+    ],
+)
+def test_git_grammar_inward_bridges_and_nonprefix_allow(command):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    assert hook_check.classify_mechanics(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
 @pytest.mark.parametrize(
     "command",
     [

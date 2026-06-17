@@ -278,7 +278,12 @@ _GIT_BUILTINS = _GIT_SAFE_READONLY_SUBCOMMANDS | frozenset(
     {
         # Restricted outward/binding side effects.
         "push",
+        "send-pack",
         "branch",
+        # Foreign-VCS bridges: only their outward sub-verb (p4 submit /
+        # svn dcommit) binds remotely; the per-sub-verb split happens below.
+        "p4",
+        "svn",
         # Ordinary local porcelain used constantly inside governed seats.
         "add",
         "am",
@@ -353,6 +358,61 @@ def _git_branch_deletes(args: tuple[str, ...]) -> bool:
     return False
 
 
+# Conceptual restricted "verbs" for the abbreviation guard: a directly-typed
+# unknown subcommand that is a UNIQUE prefix of exactly one of these maps to that
+# verb's mechanic (e.g. ``git pus`` -> push -> deploy), which removes the
+# dependency on git's autocorrect. An ambiguous prefix (matching >1 verb) or a
+# non-prefix unknown is NOT a unique prefix and stays ``None`` (allow).
+_RESTRICTED_PREFIX_VERBS: tuple[tuple[str, str], ...] = (
+    ("push", "deploy"),
+    ("send-pack", "deploy"),
+    ("branch-delete", "alter_repo_settings"),
+)
+
+# Foreign-VCS bridge subcommands -> their ONLY known outward (deploy) sub-verb.
+# Every other sub-verb (e.g. ``p4 sync`` / ``svn fetch``) is a read -> allow; an
+# ABSENT or unparseable sub-verb is conservatively classified as the outward one.
+_VCS_BRIDGE_OUTWARD_SUBVERB: dict[str, str] = {
+    "p4": "submit",
+    "svn": "dcommit",
+}
+
+
+def _classify_unknown_prefix(subcommand: str) -> str | None:
+    """Abbreviation guard for a directly-typed unknown git subcommand.
+
+    Return the mechanic of the restricted verb that ``subcommand`` is a UNIQUE
+    prefix of. If it prefixes more than one restricted verb (ambiguous) or none,
+    it is not a unique prefix and stays ``None`` (allow).
+    """
+    if not subcommand:
+        return None
+    matched = [
+        (verb, mechanic)
+        for verb, mechanic in _RESTRICTED_PREFIX_VERBS
+        if verb.startswith(subcommand)
+    ]
+    return matched[0][1] if len(matched) == 1 else None
+
+
+def _vcs_bridge_subverb(args: tuple[str, ...]) -> str | None:
+    """Return the first positional (non-option) token in ``args`` — the p4/svn
+    sub-verb — or ``None`` when none is determinable (absent / unparseable).
+
+    Leading options are skipped; a shell separator ends parsing. ``None`` is the
+    caller's signal to fall conservative (treat the bridge call as outward).
+    """
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return None
+
+
 def _classify_git_subcommand(
     subcommand: str,
     args: tuple[str, ...],
@@ -360,17 +420,23 @@ def _classify_git_subcommand(
 ) -> str | None:
     """Map a resolved git subcommand to a restricted mechanic.
 
-    Git built-ins take precedence over same-named aliases. Only ``push`` and
-    branch deletion are restricted; ordinary local built-ins return ``None``.
-    Inline aliases are resolved only for non-built-in names. Unparseable alias
-    shapes stay conservative (``git_opaque``), while plain unknown subcommands
-    without aliases return ``None`` because git itself will reject them.
+    Git built-ins take precedence over same-named aliases. Restricted built-ins
+    are ``push`` / ``send-pack`` (deploy), branch deletion (alter_repo_settings),
+    and the foreign-VCS bridges' outward sub-verb (``p4 submit`` / ``svn
+    dcommit`` -> deploy); ordinary local built-ins return ``None``. Inline aliases
+    are resolved only for non-built-in names. Unparseable alias shapes stay
+    conservative (``git_opaque``). A directly-typed unknown subcommand is run
+    through the abbreviation guard (unique prefix of a restricted verb), else
+    ``None`` because git itself will reject it.
     """
 
     seen: set[str] = set()
     while subcommand not in _GIT_BUILTINS:
         if subcommand not in aliases:
-            return _GIT_OPAQUE_MECHANIC if seen else None
+            # A directly-typed unknown (no alias, no prior alias hop) gets the
+            # abbreviation guard; an unknown reached VIA an alias hop stays
+            # conservative (git_opaque) — we cannot trust its expansion.
+            return _GIT_OPAQUE_MECHANIC if seen else _classify_unknown_prefix(subcommand)
         if subcommand in seen:
             return _GIT_OPAQUE_MECHANIC
         seen.add(subcommand)
@@ -391,10 +457,15 @@ def _classify_git_subcommand(
         subcommand = alias_tokens[0]
         args = (*alias_tokens[1:], *args)
 
-    if subcommand == "push":
+    if subcommand in {"push", "send-pack"}:
         return "deploy"
     if subcommand == "branch":
         return "alter_repo_settings" if _git_branch_deletes(args) else None
+    if subcommand in _VCS_BRIDGE_OUTWARD_SUBVERB:
+        subverb = _vcs_bridge_subverb(args)
+        if subverb is None:
+            return "deploy"  # absent/unparseable sub-verb -> conservative deploy
+        return "deploy" if subverb == _VCS_BRIDGE_OUTWARD_SUBVERB[subcommand] else None
     return None
 
 

@@ -25,7 +25,11 @@ DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"
 DEFAULT_VALIDATOR_ARGV = ("python", "-m", "creator_engine_validator")
 DEFAULT_REAL_BINARIES = (("git", "/usr/bin/git"), ("gh", "/usr/bin/gh"))
-DENY_EXIT_CODE = 126
+# A deliberately non-standard exit code so a CE Ring-1 denial is observably
+# distinct from shell exit 126 ("command found but not executable"), which a
+# real exec failure would emit. Observability only — the deny semantics are
+# unchanged; only the emitted code value differs.
+DENY_EXIT_CODE = 121
 
 
 @dataclass(frozen=True)
@@ -93,7 +97,7 @@ def render_posix_tool_shim(
 
     The shim builds a Bash-shaped PreToolUse event, calls the validator CLI with
     ``--format raw``, parses the JSON decision, and converts ``deny``/``block``
-    to exit 126 before the real binary can run.
+    to exit ``DENY_EXIT_CODE`` (121) before the real binary can run.
     """
 
     if tool not in config.tools:
