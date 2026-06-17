@@ -157,39 +157,14 @@ class HookDecision:
 # --------------------------------------------------------------------------
 # Secret classification (PreToolUse Read)
 # --------------------------------------------------------------------------
-
-_SECRET_EXACT_NAMES = frozenset(
-    {"credentials", "credentials.json", ".netrc", ".npmrc", ".pypirc", ".pgpass", ".htpasswd"}
-)
-_SECRET_KEY_NAMES = frozenset({"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"})
-_SECRET_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"})
-_SECRET_DIR_PARTS = frozenset({"secrets", ".ssh", ".gnupg", ".aws"})
-
-
-def is_secret_path(file_path: Any) -> str | None:
-    """Return a non-secret *category label* when ``file_path`` looks like a
-    credential / token store, else ``None``.
-
-    The returned label names the matched rule class (e.g. ``".env"`` or
-    ``"private-key/cert"``); it is never the file's contents — this module
-    never reads the file.
-    """
-    if not isinstance(file_path, str) or not file_path.strip():
-        return None
-    p = PurePosixPath(file_path.strip())
-    name = p.name
-    lowered = name.lower()
-    if name == ".env" or name.startswith(".env."):
-        return ".env"
-    if name in _SECRET_EXACT_NAMES or name in _SECRET_KEY_NAMES:
-        return name
-    if p.suffix in _SECRET_SUFFIXES:
-        return "private-key/cert"
-    if set(p.parts) & _SECRET_DIR_PARTS:
-        return "credential-store-directory"
-    if "credential" in lowered or "secret" in lowered:
-        return "credential-like-name"
-    return None
+#
+# The credential-path predicate is the single source of truth, hoisted into the
+# shared ``secret_paths`` module so the v3 runner filesystem-mediation layer can
+# reuse the EXACT same rules without crossing the v1<->v3 version boundary
+# (importing a *shared* module is allowed from either line). Re-exported here so
+# this module's public ``hook_check.is_secret_path`` API is byte-for-byte
+# unchanged for existing callers.
+from .secret_paths import is_secret_path  # noqa: E402  (re-export; single source of truth)
 
 
 # --------------------------------------------------------------------------
