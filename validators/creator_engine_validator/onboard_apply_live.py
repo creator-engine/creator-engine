@@ -41,7 +41,10 @@ import contextlib
 import hashlib
 import json
 import os
+import shutil
 import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -90,6 +93,66 @@ ENV_LIVE_FORGE = "CE_FORGE_LIVE_FORGE"
 ENV_APP_CLIENT_ID = "CE_FORGE_APP_CLIENT_ID"
 ENV_INSTALLATION_ID = "CE_FORGE_INSTALLATION_ID"
 ENV_APP_PEM = "CE_FORGE_APP_PEM"
+#: OPTIONAL offline FALLBACK for the apply-time userspace-dep install. Design A's DEFAULT path
+#: fetches the pinned ``uv`` wheel from CE's mirror; if this env points at a directory that
+#: already holds the pinned wheel (sha256-verified), the driver uses it instead of fetching —
+#: a no-egress fallback for air-gapped / pre-seeded hosts. Absent → mirror-fetch (the default).
+ENV_WHEELHOUSE = "CE_FORGE_WHEELHOUSE"
+
+
+@dataclass(frozen=True)
+class MirrorUserspaceWheel:
+    """A sha256-pinned, no-sudo userspace tool wheel SERVED FROM CE's own 0.2.0 mirror.
+
+    Design A (Operator-ratified, ce-ops#90): the apply-time ``install_dependencies`` leg
+    fetches ``url`` from CE's mirror (``docs/downloads/0.2.0/``, NOT astral.sh / PyPI), verifies
+    the downloaded bytes against ``sha256`` BEFORE install (anti-tamper), then installs OFFLINE
+    via ``pip install --no-index --find-links <downloaded-dir> <tool>``. The pin is bound to the
+    SIGNED ``required_wheels`` entry in ``docs/llms-install.md`` and the served wheel by a parity
+    test, so the in-code pin can never silently drift from the signed manifest.
+    """
+
+    tool: str
+    filename: str
+    url: str
+    sha256: str
+
+
+#: The KNOWN SET of mirror-served userspace-tool wheels (design A). ``uv`` 0.11.21 matches the
+#: ``python_acquisition`` version pinned in the signed ``docs/llms-install.md`` manifest and is
+#: also listed under that manifest's ``required_wheels`` (so its integrity is rooted in the
+#: ce-root-v1 signature). uv has NO Python dependencies → a single wheel installs offline clean.
+MIRROR_USERSPACE_WHEELS: dict[str, MirrorUserspaceWheel] = {
+    "uv": MirrorUserspaceWheel(
+        tool="uv",
+        filename="uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        url=(
+            "https://creator-engine.dev/downloads/0.2.0/"
+            "uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+        ),
+        sha256="b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd",
+    ),
+}
+
+
+def _default_pip_spawn(argv: Sequence[str]) -> subprocess.CompletedProcess:
+    """Run an offline ``pip`` install in this interpreter; injectable so tests do ZERO pip."""
+    return subprocess.run(  # noqa: S603 — fixed argv built from a pinned tool name + local dir
+        list(argv), check=False, capture_output=True, text=True, timeout=300
+    )
+
+
+def _default_mirror_fetch(url: str) -> bytes:
+    """GET ``url`` from CE's public mirror and return the bytes; injectable so tests do ZERO net.
+
+    A plain HTTPS GET of a single pinned artifact from CE's OWN mirror — NOT a package index
+    resolve (no PyPI/astral). The caller sha256-verifies the bytes against the in-code pin before
+    use, so a tampered transport is caught at the verify gate, never trusted.
+    """
+    import urllib.request  # local import: keep the module import-light; only the live path needs it
+
+    with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — fixed https CE mirror URL
+        return resp.read()
 
 
 @dataclass(frozen=True)
@@ -111,6 +174,11 @@ class LiveForgeConfig:
     transport: Any = None  # app-JWT HTTPS transport seam
     spawn: Any = None  # authenticated-gh subprocess seam
     git_spawn: Any = None  # workspace-clone subprocess seam
+    #: Injectable mirror-fetch seam (url -> bytes) for the apply-time userspace-dep install;
+    #: tests inject a fake → ZERO network. None → live HTTPS GET of CE's mirror.
+    mirror_fetch: Any = None
+    #: Injectable ``pip`` spawn seam (argv -> CompletedProcess); tests inject a fake → ZERO pip.
+    pip_spawn: Any = None
 
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
@@ -425,6 +493,166 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             "bot_identity": bot_identity,
             "covered": True,
         }
+
+    # -- plain-join HOST/APP legs (ce-ops#90 — 2nd live-driver gap, dev-3 dogfood; design A) --
+    def install_dependencies(
+        self,
+        tools: Sequence[str],
+        *,
+        sudo_tools: Sequence[str],
+        userspace_tools: Sequence[str],
+    ) -> dict[str, Any]:
+        """Install MISSING deps for an already-CE plain-join — OFFLINE, no-sudo, sha256-pinned.
+
+        The base :class:`onboard_apply.ApplyDriver` refuses every userspace install
+        (``no_userspace_installer_configured``); the dev-3 brownfield dogfood hit exactly that
+        on the os-native ``uv`` dep (the 2nd live-forge driver leg left on the conservative base
+        — the 1st was the detector, ce-ops#90 #241). **Design A (Operator-ratified):** each
+        userspace tool's wheel is fetched from CE's own 0.2.0 mirror (``docs/downloads/0.2.0/``,
+        NOT astral.sh / a live index), its bytes sha256-verified against the in-code pin
+        (``MIRROR_USERSPACE_WHEELS``, bound to the SIGNED ``required_wheels`` entry) BEFORE
+        install, then installed OFFLINE via ``pip install --no-index --find-links <dir> <tool>``;
+        ``verify_tool`` must pass after. A pre-seeded ``CE_FORGE_WHEELHOUSE`` dir is honored as an
+        offline FALLBACK (no fetch) when it already holds the pinned wheel. ``sudo_tools`` keep
+        the base refusal (a §7 governed seat has no host package installer). Fail CLOSED on every
+        fetch / hash-mismatch / install / verify failure; the staged temp dir is always cleaned.
+        """
+        if not tools:
+            return {"ok": True, "installed": []}
+        if sudo_tools:
+            # governed seat: no host package installer, no sudo (base posture, unchanged).
+            return {
+                "ok": False,
+                "reason": "no_host_package_installer_configured",
+                "manual_rollback_required": True,
+                "package_names": list(sudo_tools),
+            }
+        installed: list[str] = []
+        staged_tmpdirs: list[Path] = []
+        try:
+            for tool in userspace_tools:
+                pin = MIRROR_USERSPACE_WHEELS.get(tool)
+                if pin is None:
+                    return {"ok": False, "reason": "no_pinned_userspace_wheel", "tool": tool}
+                staged = self._stage_userspace_wheel(pin)
+                if not staged.get("ok"):
+                    return staged
+                if staged.get("tmpdir"):
+                    staged_tmpdirs.append(Path(staged["dir"]))
+                if not self._pip_install_offline(tool, Path(staged["dir"])):
+                    return {"ok": False, "reason": "userspace_install_failed", "tool": tool}
+                if not self.verify_tool(tool):
+                    return {"ok": False, "reason": "userspace_tool_verify_failed", "tool": tool}
+                installed.append(tool)
+            return {"ok": True, "installed": installed}
+        finally:
+            for d in staged_tmpdirs:
+                shutil.rmtree(d, ignore_errors=True)
+
+    def wait_for_app_installation(
+        self, *, app_plan: Mapping[str, Any], repo: str
+    ) -> dict[str, Any]:
+        """Read-only already-installed-App DETECT — the companion to ``verify_app_installation``.
+
+        The base refuses ``app_installation_click_required`` unless the answers carry an
+        ``installation_id``; a plain-join onto an already-CE repo has the App ALREADY installed,
+        and the live driver holds the ``installation_id`` in its config. This confirms
+        (read-only) the configured installation covers ``repo``, then returns ``detected=True`` —
+        NO interactive click, NO mutation. Fail CLOSED if the id is unconfigured or coverage
+        cannot be confirmed. (The leg then calls ``verify_app_installation`` for the authoritative
+        coverage gate.)
+        """
+        installation_id = self._cfg.installation_id
+        if not installation_id:
+            return {"ok": False, "reason": "app_installation_id_unconfigured"}
+        if not self._installation_covers_repo(repo):
+            return {
+                "ok": False,
+                "reason": "app_installation_repo_not_covered",
+                "installation_id": installation_id,
+            }
+        return {"ok": True, "installation_id": installation_id, "detected": True}
+
+    # -- helpers for the host/app legs -------------------------------------------------------
+    def _installation_covers_repo(self, repo: str) -> bool:
+        """True iff the configured App installation's repositories include ``repo`` (read-only GET)."""
+        try:
+            code, parsed, _ = _gh_get(self._reader(), "installation/repositories?per_page=100")
+        except Exception:  # noqa: BLE001 — fail-closed: any read error → not confirmable
+            return False
+        if code != 0 or not isinstance(parsed, dict):
+            return False
+        repos = parsed.get("repositories") or []
+        return any(isinstance(r, Mapping) and r.get("full_name") == repo for r in repos)
+
+    def _stage_userspace_wheel(self, pin: "MirrorUserspaceWheel") -> dict[str, Any]:
+        """Make a ``--find-links`` dir holding the sha256-verified pinned wheel.
+
+        DEFAULT = fetch ``pin.url`` from CE's mirror into a fresh temp dir (caller cleans it).
+        FALLBACK = if ``CE_FORGE_WHEELHOUSE`` points at a dir already holding the pinned wheel,
+        verify + use it in place (no fetch, no temp dir). Either way the wheel's bytes are
+        sha256-verified against the pin BEFORE it is returned; fail-closed on mismatch / fetch
+        error. Returns ``{ok, dir, tmpdir?}`` or ``{ok: False, reason, ...}``.
+        """
+        env_dir = os.environ.get(ENV_WHEELHOUSE)
+        if env_dir:
+            d = Path(env_dir)
+            wheel = d / pin.filename
+            if d.is_dir() and wheel.is_file():
+                actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+                if actual != pin.sha256:
+                    return {
+                        "ok": False,
+                        "reason": "userspace_wheel_sha256_mismatch",
+                        "tool": pin.tool,
+                        "source": "wheelhouse_fallback",
+                        "expected": pin.sha256,
+                        "actual": actual,
+                    }
+                return {"ok": True, "dir": str(d), "tmpdir": False, "source": "wheelhouse_fallback"}
+            # env set but the pinned wheel is absent there → fall through to the mirror default.
+        tmpdir = Path(tempfile.mkdtemp(prefix="ce-userspace-dep-"))
+        try:
+            data = self._mirror_fetch(pin.url)
+        except Exception:  # noqa: BLE001 — fail-closed: any fetch/transport error → refuse
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return {"ok": False, "reason": "userspace_wheel_fetch_failed", "tool": pin.tool, "url": pin.url}
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != pin.sha256:
+            # ANTI-TAMPER: a fetched wheel whose bytes drift from the signed pin is REFUSED.
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return {
+                "ok": False,
+                "reason": "userspace_wheel_sha256_mismatch",
+                "tool": pin.tool,
+                "source": "mirror_fetch",
+                "expected": pin.sha256,
+                "actual": actual,
+            }
+        (tmpdir / pin.filename).write_bytes(data)
+        return {"ok": True, "dir": str(tmpdir), "tmpdir": True, "source": "mirror_fetch"}
+
+    def _mirror_fetch(self, url: str) -> bytes:
+        """Fetch ``url`` via the injected seam, else the default live HTTPS GET of CE's mirror."""
+        fetch = self._cfg.mirror_fetch if self._cfg.mirror_fetch is not None else _default_mirror_fetch
+        return fetch(url)
+
+    def _pip_install_offline(self, tool: str, find_links: Path) -> bool:
+        """``pip install --no-index --find-links <dir> <tool>`` — OFFLINE; never raises.
+
+        ``--no-index`` guarantees no PyPI/astral resolve; the tool installs only from the
+        sha256-verified local ``find_links`` dir. The spawn seam is injectable (tests → ZERO pip).
+        """
+        argv = [
+            sys.executable, "-m", "pip", "install",
+            "--no-index", "--find-links", str(find_links), tool,
+        ]
+        spawn = self._cfg.pip_spawn or _default_pip_spawn
+        try:
+            proc = spawn(argv)
+        except Exception:  # noqa: BLE001 — fail-closed: any spawn error → install failed
+            return False
+        return getattr(proc, "returncode", 1) == 0
 
     # -- plain-join APPLY legs (Phase 1) -----------------------------------------------------
     def configure_branch_protection(

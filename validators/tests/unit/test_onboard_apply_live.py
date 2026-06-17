@@ -637,3 +637,189 @@ def test_plain_join_apply_completes_for_legacy_validate_yml_repo(tmp_path):
     # NO e2_brownfield_seam_unavailable anywhere, and OQ-F holds: zero forge WRITES.
     assert all("brownfield" not in (l.get("detail") or "") for l in summary["legs"])
     assert forge.write_argvs() == []
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#90 (design A, Operator-ratified) — 2nd live-forge driver gap (dev-3 dogfood).
+# install_dependencies fetches the pinned userspace wheel (uv) from CE's OWN mirror
+# (docs/downloads/0.2.0/, NOT astral.sh / a live index), sha256-verifies it against the
+# in-code pin (bound to the signed required_wheels entry), then installs OFFLINE via
+# `pip --no-index --find-links`. wait_for_app_installation is a read-only already-installed
+# detect. All tests are OFFLINE: injected mirror_fetch + pip_spawn → ZERO network / pip.
+# ---------------------------------------------------------------------------
+_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.2.0"
+_UV_PIN = onboard_apply_live.MIRROR_USERSPACE_WHEELS["uv"]
+_UV_BYTES = (_MIRROR_DIR / _UV_PIN.filename).read_bytes()
+
+
+def _deps_driver(*, fetch_bytes: bytes | None = _UV_BYTES, fetch_exc: bool = False,
+                 pip_rc: int = 0, verify: bool = True):
+    """A live driver wired ONLY for install_dependencies: injected mirror_fetch + pip spawn."""
+    calls: dict[str, list] = {"fetch": [], "pip": []}
+
+    def mirror_fetch(url):
+        calls["fetch"].append(url)
+        if fetch_exc:
+            raise RuntimeError("simulated network failure")
+        return fetch_bytes
+
+    def pip_spawn(argv):
+        calls["pip"].append(list(argv))
+        return subprocess.CompletedProcess(list(argv), pip_rc)
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="deps-test",
+        mirror_fetch=mirror_fetch, pip_spawn=pip_spawn,
+    )
+    driver = onboard_apply_live.LiveForgeApplyDriver(cfg)
+    driver.verify_tool = lambda name: verify  # control the post-install verify deterministically
+    return driver, calls
+
+
+# -- install_dependencies: mirror-fetch success + fail-closed paths -----------
+def test_install_dependencies_fetches_uv_from_mirror_and_installs_offline():
+    driver, calls = _deps_driver()
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result == {"ok": True, "installed": ["uv"]}
+    # fetched the pinned wheel from CE's mirror (NOT astral/PyPI) ...
+    assert calls["fetch"] == [_UV_PIN.url]
+    assert "creator-engine.dev/downloads/0.2.0/" in _UV_PIN.url
+    assert "astral" not in _UV_PIN.url
+    # ... and installed it OFFLINE from a local find-links dir.
+    assert len(calls["pip"]) == 1
+    argv = calls["pip"][0]
+    assert "--no-index" in argv and "--find-links" in argv and argv[-1] == "uv"
+    assert all("astral" not in a and "pypi" not in a.lower() for a in argv)
+
+
+def test_install_dependencies_fails_closed_on_fetched_sha256_mismatch():
+    # ANTI-TAMPER: a fetched wheel whose bytes drift from the signed pin is REFUSED, no install.
+    driver, calls = _deps_driver(fetch_bytes=b"not the pinned uv wheel bytes")
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result["ok"] is False
+    assert result["reason"] == "userspace_wheel_sha256_mismatch"
+    assert result["expected"] == _UV_PIN.sha256 and result["actual"] != _UV_PIN.sha256
+    assert calls["pip"] == []  # the sha gate runs BEFORE any pip install
+
+
+def test_install_dependencies_fails_closed_on_fetch_failure():
+    driver, calls = _deps_driver(fetch_exc=True)
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result["ok"] is False
+    assert result["reason"] == "userspace_wheel_fetch_failed"
+    assert calls["pip"] == []
+
+
+def test_install_dependencies_empty_is_noop():
+    driver, calls = _deps_driver()
+    assert driver.install_dependencies([], sudo_tools=[], userspace_tools=[]) == {"ok": True, "installed": []}
+    assert calls["fetch"] == [] and calls["pip"] == []
+
+
+def test_install_dependencies_refuses_sudo_tools_no_host_installer():
+    driver, calls = _deps_driver()
+    result = driver.install_dependencies(["runsc"], sudo_tools=["runsc"], userspace_tools=[])
+    assert result["ok"] is False
+    assert result["reason"] == "no_host_package_installer_configured"
+    assert result["manual_rollback_required"] is True
+    assert result["package_names"] == ["runsc"]
+    assert calls["fetch"] == [] and calls["pip"] == []  # no fetch/pip on the sudo path
+
+
+def test_install_dependencies_fails_closed_on_pip_failure():
+    driver, calls = _deps_driver(pip_rc=1)
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result["ok"] is False
+    assert result["reason"] == "userspace_install_failed"
+    assert len(calls["pip"]) == 1  # pip attempted (after a verified fetch), then refused
+
+
+def test_install_dependencies_fails_closed_when_verify_tool_fails():
+    driver, _calls = _deps_driver(verify=False)
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result["ok"] is False
+    assert result["reason"] == "userspace_tool_verify_failed"
+
+
+def test_install_dependencies_fails_closed_on_unpinned_userspace_tool():
+    driver, _calls = _deps_driver()
+    result = driver.install_dependencies(["mystery"], sudo_tools=[], userspace_tools=["mystery"])
+    assert result["ok"] is False
+    assert result["reason"] == "no_pinned_userspace_wheel"
+    assert result["tool"] == "mystery"
+
+
+def test_install_dependencies_offline_fallback_uses_preseeded_wheelhouse(tmp_path, monkeypatch):
+    # CE_FORGE_WHEELHOUSE FALLBACK: a pre-seeded dir holding the pinned wheel is used WITHOUT
+    # any mirror fetch (air-gapped / no-egress hosts). The wheel is still sha256-verified.
+    seed = tmp_path / "wheelhouse"
+    seed.mkdir()
+    (seed / _UV_PIN.filename).write_bytes(_UV_BYTES)
+    monkeypatch.setenv(onboard_apply_live.ENV_WHEELHOUSE, str(seed))
+    driver, calls = _deps_driver()
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result == {"ok": True, "installed": ["uv"]}
+    assert calls["fetch"] == []  # the fallback short-circuits the mirror fetch
+    assert len(calls["pip"]) == 1
+
+
+def test_install_dependencies_fallback_with_tampered_wheel_fails_closed(tmp_path, monkeypatch):
+    seed = tmp_path / "wheelhouse"
+    seed.mkdir()
+    (seed / _UV_PIN.filename).write_bytes(b"tampered preseeded wheel")
+    monkeypatch.setenv(onboard_apply_live.ENV_WHEELHOUSE, str(seed))
+    driver, calls = _deps_driver()
+    result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])
+    assert result["ok"] is False
+    assert result["reason"] == "userspace_wheel_sha256_mismatch"
+    assert calls["fetch"] == [] and calls["pip"] == []
+
+
+def test_uv_pin_matches_served_mirror_wheel_and_signed_manifest():
+    # the in-code pin must equal the ACTUAL served mirror wheel bytes (reproduced) AND the
+    # docs/downloads/0.2.0/SHA256SUMS line AND the docs/llms-install.md required_wheels entry —
+    # so the apply-time anti-tamper pin can never silently drift from the signed manifest.
+    import hashlib as _h
+    served = _MIRROR_DIR / _UV_PIN.filename
+    assert served.is_file(), f"uv wheel not served on the mirror: {served}"
+    assert _h.sha256(served.read_bytes()).hexdigest() == _UV_PIN.sha256
+    repo_root = Path(__file__).resolve().parents[3]
+    sums = (_MIRROR_DIR / "SHA256SUMS").read_text(encoding="utf-8")
+    assert f"{_UV_PIN.sha256}  {_UV_PIN.filename}" in sums
+    llms = (repo_root / "docs" / "llms-install.md").read_text(encoding="utf-8")
+    assert _UV_PIN.filename in llms and _UV_PIN.sha256 in llms and _UV_PIN.url in llms
+
+
+# -- wait_for_app_installation: detect + fail-closed -------------------------
+def test_wait_for_app_installation_detects_already_installed_app_read_only():
+    forge = _ModeBForge()  # /installation/repositories covers the repo (captured envelope)
+    driver = _driver(forge)
+    result = driver.wait_for_app_installation(app_plan={"bot_identity": "creator-engine[bot]"}, repo=_REPO)
+    driver.close()
+    assert result["ok"] is True and result["detected"] is True
+    assert result["installation_id"] == 140271364
+    assert forge.write_argvs() == []  # pure read, no click, no mutation
+
+
+def test_wait_for_app_installation_fails_closed_when_repo_not_covered():
+    class _NoCover(_ModeBForge):
+        def __init__(self):
+            super().__init__()
+            self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
+
+    forge = _NoCover()
+    result = _driver(forge).wait_for_app_installation(app_plan={}, repo=_REPO)
+    assert result["ok"] is False
+    assert result["reason"] == "app_installation_repo_not_covered"
+    assert forge.write_argvs() == []
+
+
+def test_wait_for_app_installation_fails_closed_when_installation_id_unconfigured():
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=0, app_client_id="Iv1.testclient",
+        signer=lambda b: b"sig", policy_sha="a" * 64, run_id="t",
+    )
+    result = onboard_apply_live.LiveForgeApplyDriver(cfg).wait_for_app_installation(app_plan={}, repo=_REPO)
+    assert result["ok"] is False
+    assert result["reason"] == "app_installation_id_unconfigured"
