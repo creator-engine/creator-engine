@@ -3,7 +3,8 @@
 The command launched through OpenShellBackend is a fake ``codex`` harness. That
 child process shells out to ``git push``; the runner-installed PATH shim calls
 the real ``hook-check`` CLI, observes governed posture, and denies before the
-downstream git binary can execute.
+downstream git binary can execute, even if the child process tries to spoof
+posture/ledger environment.
 """
 
 from __future__ import annotations
@@ -175,12 +176,16 @@ def test_codex_child_git_command_denied_under_governed_posture(tmp_path, git_com
     real_git_marker = sandbox_dir / "real-git-ran"
     codex_marker = sandbox_dir / "codex-ran"
     codex_after_marker = sandbox_dir / "codex-after-git"
+    attacker_ledger = tmp_path / "attacker-ledger"
+    attacker_ledger.mkdir()
 
     _write_executable(
         harness_bin / "codex",
         f"""#!/usr/bin/env sh
 set -eu
 printf 'codex child reached\\n' > {codex_marker}
+export CE_RING1_POSTURE=ungoverned
+export CE_LEDGER_ROOT={attacker_ledger}
 {git_command}
 printf 'after git\\n' > {codex_after_marker}
 """,
@@ -195,7 +200,6 @@ printf 'real git reached\\n' > {real_git_marker}
     _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
 
     guard = Ring1ToolGuardConfig(
-        posture="auto",
         base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
         real_binaries=(
             ("git", str(real_bin / "git-real")),
@@ -217,3 +221,54 @@ printf 'real git reached\\n' > {real_git_marker}
     assert "restricted mechanic (deploy)" in result.stderr
     assert not real_git_marker.exists(), "downstream real git must not execute"
     assert not codex_after_marker.exists(), "codex child must stop at denied git push"
+
+
+def test_codex_child_git_status_allowed_under_pinned_governed_posture(tmp_path):
+    sandbox_dir = tmp_path / "sandbox"
+    sandbox_dir.mkdir()
+    _write_governed_ledger(sandbox_dir)
+
+    harness_bin = tmp_path / "harness-bin"
+    real_bin = tmp_path / "real-bin"
+    harness_bin.mkdir()
+    real_bin.mkdir()
+    real_git_marker = sandbox_dir / "real-git-ran"
+    codex_marker = sandbox_dir / "codex-ran"
+    codex_after_marker = sandbox_dir / "codex-after-git"
+
+    _write_executable(
+        harness_bin / "codex",
+        f"""#!/usr/bin/env sh
+set -eu
+printf 'codex child reached\\n' > {codex_marker}
+git status
+printf 'after git\\n' > {codex_after_marker}
+""",
+    )
+    _write_executable(
+        real_bin / "git-real",
+        f"""#!/usr/bin/env sh
+set -eu
+printf '%s\\n' "$*" > {real_git_marker}
+""",
+    )
+    _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
+
+    guard = Ring1ToolGuardConfig(
+        base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
+        real_binaries=(
+            ("git", str(real_bin / "git-real")),
+            ("gh", str(real_bin / "gh-real")),
+        ),
+        validator_argv=(sys.executable, "-m", "creator_engine_validator"),
+    )
+    client = LocalSandboxClient(sandbox_dir)
+    backend = OpenShellBackend(client=client, ring1_guard=guard)
+    handle = backend.provision(ProvisionRequest(runtime_policy=_valid_policy(), run_id="ring1-codex"))
+
+    result = backend.run(handle, RunRequest(command=("codex",)))
+
+    assert result.exit_code == 0, result.stderr
+    assert codex_marker.exists(), "fake codex child process did not run"
+    assert real_git_marker.read_text(encoding="utf-8").strip() == "status"
+    assert codex_after_marker.exists(), "codex child should continue after allowed git status"

@@ -8,6 +8,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator.runner.ring1_tool_guard import (
     DENY_EXIT_CODE,
     DEFAULT_EVIDENCE_ROOT,
@@ -79,7 +81,6 @@ def _config(tmp_path: Path) -> tuple[Ring1ToolGuardConfig, Path, Path]:
     hook = _fake_hook_check(tmp_path / "fake-hook-check")
     real_git = _fake_real_tool(tmp_path / "real-git")
     config = Ring1ToolGuardConfig(
-        posture="auto",
         tools=("git",),
         real_binaries=(("git", str(real_git)),),
         validator_argv=(str(hook),),
@@ -96,9 +97,14 @@ def test_rendered_shim_maps_git_push_to_bash_pretooluse_event(tmp_path):
     marker = tmp_path / "real-git-ran"
     workdir = tmp_path / "work"
     workdir.mkdir()
+    attacker_ledger = tmp_path / "attacker-ledger"
+    attacker_ledger.mkdir()
 
     env = {
         **os.environ,
+        "CE_RING1_POSTURE": "ungoverned",
+        "CE_RING1_POSTURE_ROOT": str(tmp_path / "attacker-root"),
+        "CE_LEDGER_ROOT": str(attacker_ledger),
         "CE_FAKE_HOOK_CAPTURE": str(capture),
         "CE_FAKE_HOOK_ARGV_CAPTURE": str(argv_capture),
         "CE_REAL_TOOL_MARKER": str(marker),
@@ -118,14 +124,20 @@ def test_rendered_shim_maps_git_push_to_bash_pretooluse_event(tmp_path):
     assert event["tool_name"] == "Bash"
     assert event["tool_input"] == {"command": "git push origin main"}
     assert event["cwd"] == str(workdir)
-    assert event["ce"]["posture"] == "auto"
+    assert event["ce"]["posture"] == "governed"
     assert event["ce"]["evidence_root"] == DEFAULT_EVIDENCE_ROOT
     assert marker.read_text(encoding="utf-8").strip() == "push origin main"
 
+    shim_text = (shim_dir / "git").read_text(encoding="utf-8")
+    assert "CE_RING1_POSTURE" not in shim_text
+    assert "CE_LEDGER_ROOT" not in shim_text
+
     hook_argv = json.loads(argv_capture.read_text(encoding="utf-8"))
     assert hook_argv[:5] == ["hook-check", "--stdin", "--format", "raw", "--posture"]
+    assert hook_argv[hook_argv.index("--posture") + 1] == "governed"
     assert "--posture-root" in hook_argv
     assert str(workdir) in hook_argv
+    assert "--ledger-root" not in hook_argv
 
 
 def test_raw_deny_exits_nonzero_without_execing_real_binary(tmp_path):
@@ -254,7 +266,6 @@ def test_allow_exec_failure_is_fail_closed(tmp_path):
     hook = _fake_hook_check(tmp_path / "fake-hook-check")
     missing_real_git = tmp_path / "missing-real-git"
     config = Ring1ToolGuardConfig(
-        posture="auto",
         tools=("git",),
         real_binaries=(("git", str(missing_real_git)),),
         validator_argv=(str(hook),),
@@ -283,5 +294,22 @@ def test_guarded_env_puts_shim_dir_first():
     config = Ring1ToolGuardConfig(base_path="/usr/bin")
     env = guarded_env(config, "/tmp/guard")
     assert env["PATH"] == "/tmp/guard:/usr/bin"
-    assert env["CE_RING1_POSTURE"] == "auto"
+    assert env["CE_RING1_POSTURE"] == "governed"
     assert env["CE_RING1_EVIDENCE_ROOT"] == DEFAULT_EVIDENCE_ROOT
+
+
+def test_guarded_env_includes_backend_pinned_roots():
+    config = Ring1ToolGuardConfig(
+        base_path="/usr/bin",
+        posture_root="/runtime/worktree",
+        ledger_root="/runtime/worktree/.hermes/active-work-ledger",
+    )
+    env = guarded_env(config, "/tmp/guard")
+    assert env["CE_RING1_POSTURE_ROOT"] == "/runtime/worktree"
+    assert env["CE_LEDGER_ROOT"] == "/runtime/worktree/.hermes/active-work-ledger"
+
+
+@pytest.mark.parametrize("posture", ["auto", "ungoverned"])
+def test_guard_config_rejects_non_governed_posture(posture):
+    with pytest.raises(ValueError, match="hard-pinned"):
+        Ring1ToolGuardConfig(posture=posture)

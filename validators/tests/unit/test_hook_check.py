@@ -654,6 +654,23 @@ def test_gate_b_regression_2_unpinned_seat_is_ungoverned(tmp_path):
     assert ctx.posture == "ungoverned"
 
 
+def test_runner_governed_override_ignores_child_supplied_ungoverned(tmp_path):
+    # Runner shims now pass `--posture governed` as an immutable rendered
+    # constant; an in-band child event cannot downgrade that via ce.posture.
+    attacker_ledger = tmp_path / "attacker-ledger"
+    attacker_ledger.mkdir()
+
+    posture, claim = hook_check._resolve_posture(
+        {"posture": "ungoverned"},
+        "governed",
+        str(tmp_path),
+        ledger_root=str(attacker_ledger),
+    )
+
+    assert posture == "governed"
+    assert claim is None
+
+
 def test_gate_b_regression_3_git_push_under_governed_seat_is_hard_denied(tmp_path):
     # (3) THE SACRED INVARIANT: `git push` under a real governed seat is still
     # HARD-DENIED (decision=="deny"). This exercises the full posture-resolution
