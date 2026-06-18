@@ -439,10 +439,12 @@ class BootstrapWheel:
     filename: str
     url: str
     sha256: str
+    platforms: tuple[str, ...] = ("all",)
 
 
 @dataclass(frozen=True)
 class PythonAcquisition:
+    platform: str
     tool: str
     version: str
     url: str
@@ -465,10 +467,32 @@ class BootstrapManifest:
     answers_schema_sha256: str
     app_wheel: str
     required_wheels: tuple[BootstrapWheel, ...]
-    python_acquisition: PythonAcquisition
+    python_acquisitions: tuple[PythonAcquisition, ...]
 
     def wheel_by_filename(self) -> dict[str, BootstrapWheel]:
         return {wheel.filename: wheel for wheel in self.required_wheels}
+
+    @property
+    def python_acquisition(self) -> PythonAcquisition:
+        return self.python_acquisition_for_platform("linux-x86_64-cp314")
+
+    def python_acquisition_for_platform(self, platform: str) -> PythonAcquisition:
+        for acquisition in self.python_acquisitions:
+            if acquisition.platform == platform:
+                return acquisition
+        raise InstallRefused(f"bad_bootstrap_manifest: python_acquisition missing for {platform}")
+
+    def wheels_for_platform(self, platform: str) -> tuple[BootstrapWheel, ...]:
+        selected = tuple(
+            wheel
+            for wheel in self.required_wheels
+            if "all" in wheel.platforms or platform in wheel.platforms
+        )
+        if self.app_wheel not in {wheel.filename for wheel in selected}:
+            raise InstallRefused(
+                f"bad_bootstrap_manifest: app_wheel is not listed for {platform}"
+            )
+        return selected
 
 
 INSTALL_FAILURE_CLASSES = frozenset({
@@ -564,12 +588,41 @@ def _valid_sha256(value: Any) -> bool:
     return isinstance(value, str) and bool(_HEX64_RE.match(value))
 
 
+def _parse_platforms(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ("all",)
+    normalized = _strip_inline_comment(value).strip()
+    if normalized in {"", "*", "all"}:
+        return ("all",)
+    platforms = tuple(part for part in re.split(r"[,\s]+", normalized) if part)
+    return platforms or ("all",)
+
+
+def _platform_tag_for(os_name: str, machine: str) -> str:
+    normalized_os = os_name.lower()
+    normalized_machine = machine.lower()
+    if normalized_os != "linux":
+        raise InstallRefused(
+            f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
+            "E1 supports Linux x86_64/amd64 and Linux aarch64/arm64 with CPython 3.14 wheels"
+        )
+    if normalized_machine in {"x86_64", "amd64"}:
+        return "linux-x86_64-cp314"
+    if normalized_machine in {"aarch64", "arm64"}:
+        return "linux-aarch64-cp314"
+    raise InstallRefused(
+        f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
+        "E1 supports Linux x86_64/amd64 and Linux aarch64/arm64 with CPython 3.14 wheels"
+    )
+
+
 def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
     """Parse the line-oriented ``artifact_manifest:`` block from llms-install.md.
 
     The format deliberately avoids YAML-only features: two-space scalar keys,
-    ``required_wheels`` list items with ``filename/url/sha256``, and a
-    ``python_acquisition`` map. That keeps shell and this pure parser in parity.
+    ``required_wheels`` list items with ``filename/url/sha256/platforms``, and a
+    platform-qualified ``python_acquisition`` list. That keeps shell and this
+    pure parser in parity.
     """
     text = spec_bytes.decode("utf-8") if isinstance(spec_bytes, bytes) else spec_bytes
     lines = text.splitlines()
@@ -580,9 +633,11 @@ def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
 
     scalars: dict[str, str] = {}
     wheels: list[dict[str, str]] = []
-    python_acquisition: dict[str, str] = {}
+    python_acquisitions: list[dict[str, str]] = []
+    legacy_python_acquisition: dict[str, str] = {}
     section: str | None = None
     current_wheel: dict[str, str] | None = None
+    current_python_acquisition: dict[str, str] | None = None
 
     for raw_line in lines[start + 1:]:
         if raw_line and not raw_line.startswith("  "):
@@ -610,10 +665,24 @@ def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
                 if sep:
                     current_wheel[key] = _strip_inline_comment(value)
                 continue
-        if section == "python_acquisition" and line.startswith("    "):
-            key, sep, value = line.strip().partition(":")
-            if sep:
-                python_acquisition[key] = _strip_inline_comment(value)
+        if section == "python_acquisition":
+            if line.startswith("    - platform: "):
+                if current_python_acquisition is not None:
+                    python_acquisitions.append(current_python_acquisition)
+                current_python_acquisition = {
+                    "platform": _strip_inline_comment(line.split(": ", 1)[1])
+                }
+                continue
+            if line.startswith("      ") and current_python_acquisition is not None:
+                key, sep, value = line.strip().partition(":")
+                if sep:
+                    current_python_acquisition[key] = _strip_inline_comment(value)
+                continue
+            if line.startswith("    ") and current_python_acquisition is None:
+                key, sep, value = line.strip().partition(":")
+                if sep:
+                    legacy_python_acquisition[key] = _strip_inline_comment(value)
+                continue
             continue
         if line.startswith("  "):
             key, sep, value = line.strip().partition(":")
@@ -621,6 +690,8 @@ def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
                 scalars[key] = _strip_inline_comment(value)
     if current_wheel is not None:
         wheels.append(current_wheel)
+    if current_python_acquisition is not None:
+        python_acquisitions.append(current_python_acquisition)
 
     required_scalars = {
         "artifact_manifest_version",
@@ -659,18 +730,45 @@ def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
             raise InstallRefused(
                 f"bad_bootstrap_manifest: wheel {wheel['filename']} sha256 is not 64-hex"
             )
-        parsed_wheels.append(BootstrapWheel(wheel["filename"], wheel["url"], wheel["sha256"]))
+        parsed_wheels.append(
+            BootstrapWheel(
+                wheel["filename"],
+                wheel["url"],
+                wheel["sha256"],
+                _parse_platforms(wheel.get("platforms")),
+            )
+        )
     if not parsed_wheels:
         raise InstallRefused("bad_bootstrap_manifest: required_wheels is empty")
     if scalars["app_wheel"] not in {wheel.filename for wheel in parsed_wheels}:
         raise InstallRefused("bad_bootstrap_manifest: app_wheel is not in required_wheels")
 
     required_python = {"tool", "version", "url", "sha256", "command"}
-    missing_python = sorted(required_python - python_acquisition.keys())
-    if missing_python:
-        raise InstallRefused("bad_bootstrap_manifest: python_acquisition missing " + ", ".join(missing_python))
-    if not _valid_sha256(python_acquisition["sha256"]):
-        raise InstallRefused("bad_bootstrap_manifest: python_acquisition sha256 is not 64-hex")
+    if legacy_python_acquisition and not python_acquisitions:
+        legacy_python_acquisition.setdefault("platform", "linux-x86_64-cp314")
+        python_acquisitions.append(legacy_python_acquisition)
+    parsed_python_acquisitions: list[PythonAcquisition] = []
+    for acquisition in python_acquisitions:
+        missing_python = sorted((required_python | {"platform"}) - acquisition.keys())
+        if missing_python:
+            raise InstallRefused(
+                "bad_bootstrap_manifest: python_acquisition missing "
+                + ", ".join(missing_python)
+            )
+        if not _valid_sha256(acquisition["sha256"]):
+            raise InstallRefused("bad_bootstrap_manifest: python_acquisition sha256 is not 64-hex")
+        parsed_python_acquisitions.append(
+            PythonAcquisition(
+                platform=acquisition["platform"],
+                tool=acquisition["tool"],
+                version=acquisition["version"],
+                url=acquisition["url"],
+                sha256=acquisition["sha256"],
+                command=acquisition["command"],
+            )
+        )
+    if not parsed_python_acquisitions:
+        raise InstallRefused("bad_bootstrap_manifest: python_acquisition is empty")
     return BootstrapManifest(
         artifact_manifest_version=version,
         package_name=scalars["package_name"],
@@ -685,13 +783,7 @@ def parse_bootstrap_manifest(spec_bytes: bytes | str) -> BootstrapManifest:
         answers_schema_sha256=scalars["answers_schema_sha256"],
         app_wheel=scalars["app_wheel"],
         required_wheels=tuple(parsed_wheels),
-        python_acquisition=PythonAcquisition(
-            tool=python_acquisition["tool"],
-            version=python_acquisition["version"],
-            url=python_acquisition["url"],
-            sha256=python_acquisition["sha256"],
-            command=python_acquisition["command"],
-        ),
+        python_acquisitions=tuple(parsed_python_acquisitions),
     )
 
 
@@ -718,20 +810,16 @@ def build_bootstrap_artifact_plan(
     machine: str,
 ) -> dict[str, Any]:
     """Select the signed E1 artifact set for injected platform facts."""
-    normalized_os = os_name.lower()
-    normalized_machine = machine.lower()
-    if normalized_os != "linux" or normalized_machine not in {"x86_64", "amd64"}:
-        raise InstallRefused(
-            f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
-            "E1 currently supports Linux x86_64 with CPython 3.14 wheels"
-        )
+    platform = _platform_tag_for(os_name, machine)
+    wheels = manifest.wheels_for_platform(platform)
+    python_acquisition = manifest.python_acquisition_for_platform(platform)
     return {
-        "platform": "linux-x86_64-cp314",
+        "platform": platform,
         "package": f"{manifest.package_name}=={manifest.package_version}",
         "python_requires": manifest.python_requires,
         "app_wheel": manifest.app_wheel,
-        "wheels": [wheel.__dict__ for wheel in manifest.required_wheels],
-        "python_acquisition": manifest.python_acquisition.__dict__,
+        "wheels": [wheel.__dict__ for wheel in wheels],
+        "python_acquisition": python_acquisition.__dict__,
     }
 
 

@@ -92,7 +92,8 @@ is reserved. v1.0 docs (G8) state the deferral explicitly. **Deferred, not rejec
   3.14.5, released 2026-05-10). Floor = compatibility promise; target = what is built/tested/shipped.
 - **3.13 intentionally excluded** (cleaner/narrower support + cp314-only wheelhouse simplicity);
   **3.11 / 3.12 rejected** as security-only floors; **3.15 invalid** (unreleased; planned 2026-10-01).
-- **v1.0 wheelhouse is cp314-only** (x86-64); any later ABI widening is a fresh Source decision.
+- **v1.0 wheelhouse is cp314-only** for Linux x86_64 and Linux aarch64; any later ABI
+  widening beyond those architectures is a fresh Source decision.
 - **Install is uv-first** with a **pip/`--no-index` fallback** retained for a uv-less host; no network
   fetch at install or runtime authority. **Reproducibility contract = `pyproject.toml` + `uv.lock`
   (per-file hashes) + offline wheelhouse**; `validators/requirements.txt` is a `uv export`-derived

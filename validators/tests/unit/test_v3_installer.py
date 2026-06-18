@@ -297,11 +297,18 @@ def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
     assert manifest.answers_schema_url == "https://creator-engine.dev/schemas/install-answers.schema.yaml"
     assert manifest.python_acquisition.tool == "uv"
     assert manifest.python_acquisition.version == "0.11.21"
+    assert manifest.python_acquisition.platform == "linux-x86_64-cp314"
+    assert manifest.python_acquisition_for_platform("linux-aarch64-cp314").url.endswith(
+        "/uv-aarch64-unknown-linux-gnu.tar.gz"
+    )
     wheels = manifest.wheel_by_filename()
     assert manifest.app_wheel in wheels
     assert wheels["attrs-26.1.0-py3-none-any.whl"].sha256 == (
         "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"
     )
+    assert wheels[
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+    ].platforms == ("linux-aarch64-cp314",)
 
 
 def test_v3_installer_rejects_bad_bootstrap_manifest():
@@ -328,8 +335,27 @@ def test_sha256s_parser_and_platform_plan():
     manifest = inst.parse_bootstrap_manifest(_SPEC_TEXT)
     plan = inst.build_bootstrap_artifact_plan(manifest, os_name="Linux", machine="x86_64")
     assert plan["platform"] == "linux-x86_64-cp314"
+    wheel_names = {wheel["filename"] for wheel in plan["wheels"]}
+    assert "pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl" in wheel_names
+    assert "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" in wheel_names
+    assert "uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" in wheel_names
+    assert not any("aarch64" in name for name in wheel_names)
+
+    arm_plan = inst.build_bootstrap_artifact_plan(manifest, os_name="Linux", machine="arm64")
+    assert arm_plan["platform"] == "linux-aarch64-cp314"
+    arm_wheel_names = {wheel["filename"] for wheel in arm_plan["wheels"]}
+    assert "attrs-26.1.0-py3-none-any.whl" in arm_wheel_names
+    assert "creator_engine_validator-0.2.0-py3-none-any.whl" in arm_wheel_names
+    assert "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl" in arm_wheel_names
+    assert "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl" in arm_wheel_names
+    assert "uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl" in arm_wheel_names
+    assert not any("x86_64" in name for name in arm_wheel_names)
+    assert arm_plan["python_acquisition"]["url"].endswith("/uv-aarch64-unknown-linux-gnu.tar.gz")
+
     with pytest.raises(inst.InstallRefused, match="unsupported_platform"):
         inst.build_bootstrap_artifact_plan(manifest, os_name="Darwin", machine="arm64")
+    with pytest.raises(inst.InstallRefused, match="unsupported_platform"):
+        inst.build_bootstrap_artifact_plan(manifest, os_name="Linux", machine="s390x")
 
 
 # --- the E2E proof: a REAL detached SSHSIG, stock ssh-keygen, clean dir --------
@@ -359,7 +385,11 @@ def _embedded_signature_value(spec_text: str):
 _SSH_KEYGEN = _shutil.which("ssh-keygen")
 _SPEC_TEXT = _LLMS_INSTALL.read_text(encoding="utf-8") if _LLMS_INSTALL.exists() else ""
 _EMBEDDED_VALUE = _embedded_signature_value(_SPEC_TEXT)
-_SIGNED = _EMBEDDED_VALUE is not None and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
+_SIGNED = (
+    _EMBEDDED_VALUE is not None
+    and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
+    and not _EMBEDDED_VALUE.startswith("<")
+)
 
 
 @pytest.mark.skipif(_SSH_KEYGEN is None, reason="stock ssh-keygen not available")

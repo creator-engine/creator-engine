@@ -188,42 +188,87 @@ manifest_value() {
   ' "$SPEC_FILE"
 }
 
-manifest_nested_value() {
-  section="$1"
-  key="$2"
-  awk -v section="$section" -v key="$key" '
-    $0 == "  " section ":" { in_section = 1; next }
-    in_section && $0 !~ /^    / && NF { exit }
-    in_section {
-      prefix = "    " key ": "
-      if (index($0, prefix) == 1) {
-        print substr($0, length(prefix) + 1)
-        exit
+manifest_wheels_tsv() {
+  platform="$1"
+  awk -v platform="$platform" '
+    function platform_match(list, parts, n, i) {
+      if (list == "" || list == "all" || list == "*") return 1
+      gsub(/,/, " ", list)
+      n = split(list, parts, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        if (parts[i] == "all" || parts[i] == platform) return 1
+      }
+      return 0
+    }
+    function emit() {
+      if (filename != "" && url != "" && sha != "" && platform_match(platforms)) {
+        print filename "\t" url "\t" sha
       }
     }
-  ' "$SPEC_FILE"
-}
-
-manifest_wheels_tsv() {
-  awk '
     $0 == "  required_wheels:" { in_wheels = 1; next }
     in_wheels && $0 == "  python_acquisition:" {
-      if (filename != "") print filename "\t" url "\t" sha
+      emit()
       filename = ""
       in_wheels = 0
       exit
     }
     in_wheels && $0 ~ /^    - filename: / {
-      if (filename != "") print filename "\t" url "\t" sha
+      emit()
       filename = substr($0, length("    - filename: ") + 1)
       url = ""
       sha = ""
+      platforms = "all"
       next
     }
     in_wheels && $0 ~ /^      url: / { url = substr($0, length("      url: ") + 1); next }
     in_wheels && $0 ~ /^      sha256: / { sha = substr($0, length("      sha256: ") + 1); next }
+    in_wheels && $0 ~ /^      platforms: / { platforms = substr($0, length("      platforms: ") + 1); next }
     END {
-      if (in_wheels && filename != "" && url != "" && sha != "") print filename "\t" url "\t" sha
+      if (in_wheels) emit()
+    }
+  ' "$SPEC_FILE"
+}
+
+manifest_python_acquisition_tsv() {
+  platform="$1"
+  awk -v platform="$platform" '
+    function reset_entry() {
+      tool = ""
+      version = ""
+      url = ""
+      sha = ""
+      command = ""
+      emitted_current = 0
+    }
+    function emit() {
+      if (emitted_current) return
+      if (entry_platform == platform && tool != "" && version != "" && url != "" && sha != "" && command != "") {
+        print tool "\t" version "\t" url "\t" sha "\t" command
+        found = 1
+        emitted_current = 1
+      }
+    }
+    $0 == "  python_acquisition:" { in_python = 1; next }
+    in_python && $0 !~ /^    / && NF { emit(); exit }
+    in_python && $0 ~ /^    - platform: / {
+      emit()
+      entry_platform = substr($0, length("    - platform: ") + 1)
+      reset_entry()
+      next
+    }
+    in_python && $0 ~ /^      tool: / { tool = substr($0, length("      tool: ") + 1); next }
+    in_python && $0 ~ /^      version: / { version = substr($0, length("      version: ") + 1); next }
+    in_python && $0 ~ /^      url: / { url = substr($0, length("      url: ") + 1); next }
+    in_python && $0 ~ /^      sha256: / { sha = substr($0, length("      sha256: ") + 1); next }
+    in_python && $0 ~ /^      command: / { command = substr($0, length("      command: ") + 1); next }
+    in_python && $0 ~ /^    tool: / { if (entry_platform == "") entry_platform = "linux-x86_64-cp314"; tool = substr($0, length("    tool: ") + 1); next }
+    in_python && $0 ~ /^    version: / { if (entry_platform == "") entry_platform = "linux-x86_64-cp314"; version = substr($0, length("    version: ") + 1); next }
+    in_python && $0 ~ /^    url: / { if (entry_platform == "") entry_platform = "linux-x86_64-cp314"; url = substr($0, length("    url: ") + 1); next }
+    in_python && $0 ~ /^    sha256: / { if (entry_platform == "") entry_platform = "linux-x86_64-cp314"; sha = substr($0, length("    sha256: ") + 1); next }
+    in_python && $0 ~ /^    command: / { if (entry_platform == "") entry_platform = "linux-x86_64-cp314"; command = substr($0, length("    command: ") + 1); next }
+    END {
+      if (in_python) emit()
+      if (!found) exit 1
     }
   ' "$SPEC_FILE"
 }
@@ -347,25 +392,36 @@ INSTALL_SH_ENTRY="$(manifest_value install_sh_sha256s_entry)"
 ANSWERS_SCHEMA_URL="$(manifest_value answers_schema_url)"
 ANSWERS_SCHEMA_SHA="$(manifest_value answers_schema_sha256)"
 APP_WHEEL="$(manifest_value app_wheel)"
-UV_TOOL="$(manifest_nested_value python_acquisition tool)"
-UV_VERSION="$(manifest_nested_value python_acquisition version)"
-UV_URL="$(manifest_nested_value python_acquisition url)"
-UV_SHA="$(manifest_nested_value python_acquisition sha256)"
-UV_COMMAND="$(manifest_nested_value python_acquisition command)"
 
 [ "$MANIFEST_VERSION" = "1" ] || fail signature_refused "unsupported artifact_manifest_version $MANIFEST_VERSION"
 [ "$PACKAGE_NAME" = "creator-engine-validator" ] || fail signature_refused "unexpected package_name $PACKAGE_NAME"
 [ "$PYTHON_REQUIRES" = ">=3.14" ] || fail signature_refused "unexpected python_requires $PYTHON_REQUIRES"
 [ -n "$ARTIFACT_BASE_URL" ] || fail signature_refused "artifact_base_url missing"
-printf '%s\n' "$SHA256S_SHA" "$ANSWERS_SCHEMA_SHA" "$UV_SHA" | awk '/^[0-9a-f]{64}$/ { next } { bad = 1 } END { exit bad ? 1 : 0 }' \
-  || fail signature_refused "artifact manifest contains a non-hex sha256"
 
 OS_NAME="${CE_TEST_UNAME_S:-$(uname -s)}"
 MACHINE="${CE_TEST_UNAME_M:-$(uname -m)}"
 case "${OS_NAME}/${MACHINE}" in
-  Linux/x86_64|Linux/amd64) ;;
-  *) fail unsupported_platform "no signed wheelhouse for ${OS_NAME}/${MACHINE}; E1 supports Linux x86_64 CPython 3.14" ;;
+  Linux/x86_64|Linux/amd64)
+    PLATFORM_TAG="linux-x86_64-cp314"
+    UV_BIN_REL="uv-x86_64-unknown-linux-gnu/uv"
+    ;;
+  Linux/aarch64|Linux/arm64)
+    PLATFORM_TAG="linux-aarch64-cp314"
+    UV_BIN_REL="uv-aarch64-unknown-linux-gnu/uv"
+    ;;
+  *) fail unsupported_platform "no signed wheelhouse for ${OS_NAME}/${MACHINE}; E1 supports Linux x86_64/amd64 and Linux aarch64/arm64 CPython 3.14" ;;
 esac
+
+PYTHON_ACQ_TSV="$(manifest_python_acquisition_tsv "$PLATFORM_TAG" || true)"
+[ -n "$PYTHON_ACQ_TSV" ] || fail signature_refused "python_acquisition missing for ${PLATFORM_TAG}"
+OLDIFS="$IFS"
+IFS=$'\t'
+read -r UV_TOOL UV_VERSION UV_URL UV_SHA UV_COMMAND <<EOF
+$PYTHON_ACQ_TSV
+EOF
+IFS="$OLDIFS"
+printf '%s\n' "$SHA256S_SHA" "$ANSWERS_SCHEMA_SHA" "$UV_SHA" | awk '/^[0-9a-f]{64}$/ { next } { bad = 1 } END { exit bad ? 1 : 0 }' \
+  || fail signature_refused "artifact manifest contains a non-hex sha256"
 
 if [ -n "$CE_INSTALL_ROOT" ]; then
   BOOTSTRAP_ROOT="$CE_INSTALL_ROOT"
@@ -389,7 +445,7 @@ if [ -z "$PYTHON_BIN" ]; then
   fetch_url "$UV_URL" "$UV_TARBALL" python_acquisition_failed
   verify_hash "$UV_SHA" "$UV_TARBALL" "uv-${UV_VERSION}"
   tar -xzf "$UV_TARBALL" -C "$UV_EXTRACT" || fail python_acquisition_failed "uv extraction failed"
-  UV_BIN="$UV_EXTRACT/uv-x86_64-unknown-linux-gnu/uv"
+  UV_BIN="$UV_EXTRACT/$UV_BIN_REL"
   [ -x "$UV_BIN" ] || fail python_acquisition_failed "uv executable missing after extraction"
   "$UV_BIN" python install 3.14 >/dev/null 2>&1 \
     || fail python_acquisition_failed "uv python install 3.14 failed (${UV_COMMAND})"
@@ -411,7 +467,7 @@ verify_hash "$ANSWERS_SCHEMA_SHA" "$SCHEMA_FILE" "install-answers.schema.yaml"
 
 mkdir -p "$ARTIFACT_CACHE"
 WHEELS_TSV="$TMPDIR_CE/wheels.tsv"
-manifest_wheels_tsv >"$WHEELS_TSV"
+manifest_wheels_tsv "$PLATFORM_TAG" >"$WHEELS_TSV"
 app_wheel_seen=0
 while IFS=$'\t' read -r filename url expected; do
   [ -n "$filename" ] || continue

@@ -12,8 +12,8 @@ script on this same distribution — DP-1 = A, no rename).
 - `validators/uv.lock` is the primary lockfile; `validators/requirements.txt`
   is the lockstep `uv export`-derived fallback.
 - Runtime dependencies are pinned at **PyYAML 6.0.3** and **jsonschema 4.26.0**.
-- The checked-in `validators/wheelhouse/` is a **cp314**, x86-64 offline
-  wheelhouse with a `SHA256SUMS` manifest. The `uvx` one-line operator install
+- The checked-in `validators/wheelhouse/` is a **cp314**, Linux x86_64/aarch64
+  offline wheelhouse with a `SHA256SUMS` manifest. The `uvx` one-line operator install
   is POST-V1 (B3); the v1.0 install surface is a source checkout.
 
 ## Offline runtime install
@@ -53,7 +53,7 @@ pip install --no-index \
 PYTHONPATH=validators python -m pytest validators/tests -q
 ```
 
-`validators/requirements-dev.txt` and `validators/wheelhouse-dev/` are for developer/test tooling only. Keep `validators/requirements.txt` and `validators/wheelhouse/` runtime-only.
+`validators/requirements-dev.txt` and `validators/wheelhouse-dev/` are for developer/test tooling only. Keep `validators/requirements.txt` runtime-only; `validators/wheelhouse/` carries runtime wheels plus signed installer wheelhouse artifacts.
 
 ### Sanctioned test invocations
 

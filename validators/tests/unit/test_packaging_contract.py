@@ -9,7 +9,7 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 
 * ``requires-python = ">=3.14"`` (floor); tested/target band is **3.14.x**.
 * runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
-* cp314-only x86-64 offline wheelhouse — **no** cp311/cp312/cp313 artifacts.
+* cp314-only dual-arch Linux offline wheelhouse — **no** cp311/cp312/cp313 artifacts.
 * ``uv.lock`` is the primary lock; ``requirements.txt`` is a lockstep export.
 * build backend ``setuptools.build_meta``; both ``creator-engine-validator`` and
   ``ce`` console scripts retained; distribution **not** renamed (DP-1 = A).
@@ -102,6 +102,19 @@ def test_wheelhouse_contains_cp314_abi_wheels(validators_dir: Path):
     wheels = pkg.wheelhouse_wheels(validators_dir / "wheelhouse")
     cp314 = [w for w in wheels if "cp314" in w]
     assert cp314, "wheelhouse must contain at least one cp314 ABI wheel (e.g. PyYAML/rpds-py)"
+
+
+def test_wheelhouse_contains_linux_x86_64_and_aarch64_native_wheels(validators_dir: Path):
+    wheels = pkg.wheelhouse_wheels(validators_dir / "wheelhouse")
+    expected_fragments = [
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64",
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64",
+        "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64",
+        "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64",
+        "uv-0.11.21-py3-none-manylinux_2_17_aarch64",
+    ]
+    for fragment in expected_fragments:
+        assert any(fragment in wheel for wheel in wheels), f"wheelhouse missing {fragment}: {wheels}"
 
 
 def test_wheelhouse_covers_runtime_dependencies(validators_dir: Path):
@@ -323,3 +336,18 @@ def test_pages_mirror_sha256s_publishes_install_sh_and_wheels(repo_root: Path):
         wheel = mirror / filename
         assert wheel.is_file(), f"SHA256SUMS publishes a wheel absent from the mirror: {filename}"
         assert sums[filename] == _sha256(wheel)
+
+
+def test_pages_mirror_publishes_dual_arch_native_wheels(repo_root: Path):
+    mirror = repo_root / "docs" / "downloads" / "0.2.0"
+    wheels = sorted(path.name for path in mirror.glob("*.whl"))
+    expected_fragments = [
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64",
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64",
+        "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64",
+        "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64",
+        "uv-0.11.21-py3-none-manylinux_2_17_x86_64",
+        "uv-0.11.21-py3-none-manylinux_2_17_aarch64",
+    ]
+    for fragment in expected_fragments:
+        assert any(fragment in wheel for wheel in wheels), f"mirror missing {fragment}: {wheels}"

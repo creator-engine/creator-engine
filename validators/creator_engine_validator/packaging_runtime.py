@@ -11,7 +11,7 @@ The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 * Python floor ``>=3.14``; tested/target band is **3.14.x** (3.13 excluded,
   3.15 invalid/unreleased at decision time).
 * runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
-* cp314-only x86-64 offline wheelhouse (no cp311/cp312/cp313 artifacts).
+    * cp314-only dual-arch Linux offline wheelhouse (no cp311/cp312/cp313 artifacts).
 * ``uv.lock`` is primary; ``requirements.txt`` is a lockstep export.
 * build backend ``setuptools.build_meta``; distribution stays
   ``creator-engine-validator`` (DP-1 = A); both console scripts retained.

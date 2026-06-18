@@ -137,7 +137,8 @@ ADR-0001 §4; `_assumptions.md` §6; roadmap §2.2.
   stable patch at decision time 3.14.5, released 2026-05-10). Floor = compatibility promise; target =
   what is built/tested/shipped. **Python 3.13 intentionally excluded** unless Source later widens
   support by a fresh decision; 3.11/3.12 rejected (security-only); 3.15 invalid (unreleased).
-- **v1.0 wheelhouse is cp314-only** (x86-64). Any later ABI widening is a fresh Source decision.
+- **v1.0 wheelhouse is cp314-only** for Linux x86_64 and Linux aarch64. Any later ABI widening
+  beyond those architectures is a fresh Source decision.
 - **Install is uv-first** (`uv pip install --no-index --find-links validators/wheelhouse …` /
   `uv sync --offline --locked`) with a **pip/`--no-index` fallback** retained for a uv-less host. No
   network fetch at install or runtime authority.
