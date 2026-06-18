@@ -1,8 +1,8 @@
 # PR path manifest - ce123-scanner-mirror - scanner mirror commissioning
 
-Root closed-manifest carrier for ce-ops#123. CI/path review should compare this
-branch's `base..HEAD` diff to the authorized path set below. This carrier lists
-itself.
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention).
+CI/path review should compare this branch's `base..HEAD` diff to the authorized
+path set below. This carrier lists itself.
 
 Ratified:
 Operator dispatch for ce-ops#123 on 2026-06-18: commission sha256-pinned
@@ -22,10 +22,15 @@ The changes:
   continues to refuse unsupported/unpinned/fetch-failed/sha-mismatched scanners.
 - Tests cover pinned x86_64 clean, sha mismatch refusal, fetch/unpinned
   fail-closed behavior, env commissioning, and arm64 manifest/hash resolution.
+- The validator app wheel is rebuilt from the current branch source and
+  `validators/wheelhouse/SHA256SUMS` is refreshed; the signed Pages mirror
+  release files outside this PR's scanner staging set are intentionally
+  untouched.
 
-Per-file purpose (the closed path-set - 9 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 11 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce123-scanner-mirror.md`** *(A)* - changelog fragment.
-- **`.ce/pr-path-manifest.md`** *(A)* - this root closed-manifest carrier.
+- **`.ce/pr-manifests/ce123-scanner-mirror.md`** *(A)* - this per-PR
+  closed-manifest carrier.
 - **`docs/downloads/0.2.0/scanners/gitleaks-8.30.1-linux-arm64`** *(A)* -
   staged Gitleaks 8.30.1 Linux arm64 executable.
 - **`docs/downloads/0.2.0/scanners/gitleaks-8.30.1-linux-x86_64`** *(A)* -
@@ -40,17 +45,21 @@ Per-file purpose (the closed path-set - 9 paths; `(A)` add, `(M)` modify):
   platform-aware scanner pins and fail-closed runtime override handling.
 - **`validators/tests/unit/test_onboard_apply_live.py`** *(M)* -
   scanner mirror commissioning and fail-closed regression coverage.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - refreshed dev wheelhouse
+  digest manifest for the rebuilt validator app wheel.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`**
+  *(M)* - rebuilt validator app wheel matching this branch's source.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=4d12552190f8b56f4144ebd7002437b5d749faada2ed8924106475d951ecb716
+AUTHORIZED_PATHS_SHA256=34639f6376a47f50d3d9f8224d090578ccd0246bf2a3b242c9f7e4fa6a17f97a
 
 ```text
 .ce/changelog/ce123-scanner-mirror.md
-.ce/pr-path-manifest.md
+.ce/pr-manifests/ce123-scanner-mirror.md
 docs/downloads/0.2.0/scanners/gitleaks-8.30.1-linux-arm64
 docs/downloads/0.2.0/scanners/gitleaks-8.30.1-linux-x86_64
 docs/downloads/0.2.0/scanners/scanner-mirror.fragment.yaml
@@ -58,4 +67,6 @@ docs/downloads/0.2.0/scanners/trufflehog-3.95.6-linux-arm64
 docs/downloads/0.2.0/scanners/trufflehog-3.95.6-linux-x86_64
 validators/creator_engine_validator/onboard_apply_live.py
 validators/tests/unit/test_onboard_apply_live.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
