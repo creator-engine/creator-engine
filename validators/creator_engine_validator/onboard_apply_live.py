@@ -143,28 +143,81 @@ class BrownfieldScanner:
 
     Gitleaks + TruffleHog (the client-zero runbook pair). ``sha256`` pins the EXACT mirror-
     served binary bytes; an EMPTY ``sha256`` means UNPINNED → the live scan fail-closes
-    (``ran=False``) so an unverified binary is NEVER executed. The concrete release pins are
-    COMMISSIONED at the live Mode-A VPS rehearsal (the only venue the scanners run — CI uses
-    the injected ``scrub_scan`` seam and performs ZERO scanner). Mirrors ``MirrorUserspaceWheel``.
+    (``ran=False``) so an unverified binary is NEVER executed. ``platform`` selects the
+    commissioned Linux scanner binary for the host architecture. Mirrors ``MirrorUserspaceWheel``.
     """
 
     tool: str
     version: str
     url: str
     sha256: str
+    platform: str = ""
 
 
-#: The KNOWN secrets-scrub scanners (§3.3 hard gate). ``sha256`` is intentionally EMPTY here:
-#: the live binary pins are commissioned at the VPS Mode-A rehearsal (the DoD live venue). Until
-#: pinned, the live ``_default_scrub_scan`` reports each scanner ``ran=False`` → the
-#: ``brownfield_secret_preflight`` leg fail-closes (``brownfield_secret_scanner_unavailable``),
-#: so NO adoption branch is built/pushed/PR'd without an affirmed, pinned two-scanner clean.
-BROWNFIELD_SCANNERS: dict[str, BrownfieldScanner] = {
-    "gitleaks": BrownfieldScanner(tool="gitleaks", version="", url="", sha256=""),
-    "trufflehog": BrownfieldScanner(tool="trufflehog", version="", url="", sha256=""),
-}
 #: The two-scanner set the scrub gate requires (mirrors ``onboard_apply.REQUIRED_SCRUB_SCANNERS``).
 REQUIRED_SCRUB_SCANNERS: tuple[str, ...] = ("gitleaks", "trufflehog")
+SCANNER_MIRROR_BASE_URL = "https://creator-engine.dev/downloads/0.2.0/scanners"
+
+#: ce-ops#123 commissioned scanner mirror pins. Hashes are reproduced from the executable bytes
+#: extracted from the upstream GitHub release archives, then staged under ``docs/downloads`` for
+#: controller re-verification and ce-root-v1 signing/publish. The live path never executes a
+#: scanner whose fetched bytes drift from these pins.
+BROWNFIELD_SCANNER_MIRROR: tuple[BrownfieldScanner, ...] = (
+    BrownfieldScanner(
+        tool="gitleaks",
+        version="8.30.1",
+        url=f"{SCANNER_MIRROR_BASE_URL}/gitleaks-8.30.1-linux-x86_64",
+        sha256="88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+        platform="linux/x86_64",
+    ),
+    BrownfieldScanner(
+        tool="gitleaks",
+        version="8.30.1",
+        url=f"{SCANNER_MIRROR_BASE_URL}/gitleaks-8.30.1-linux-arm64",
+        sha256="00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",
+        platform="linux/arm64",
+    ),
+    BrownfieldScanner(
+        tool="trufflehog",
+        version="3.95.6",
+        url=f"{SCANNER_MIRROR_BASE_URL}/trufflehog-3.95.6-linux-x86_64",
+        sha256="d4414128597485471941f9d03c2aecf072141d84aa5d728b31dfbfe79d64d2b9",
+        platform="linux/x86_64",
+    ),
+    BrownfieldScanner(
+        tool="trufflehog",
+        version="3.95.6",
+        url=f"{SCANNER_MIRROR_BASE_URL}/trufflehog-3.95.6-linux-arm64",
+        sha256="c2c5117f305b214f4e07d215d070e51e33479bae87e365c641ba3d9e8b2af0eb",
+        platform="linux/arm64",
+    ),
+)
+
+
+def _host_scanner_platform() -> str | None:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system != "linux":
+        return None
+    if machine in {"x86_64", "amd64"}:
+        return "linux/x86_64"
+    if machine in {"aarch64", "arm64"}:
+        return "linux/arm64"
+    return None
+
+
+def _scanner_pins_for_platform(platform: str | None) -> dict[str, BrownfieldScanner]:
+    """Return the commissioned scanner pins for a supported platform, else fail-closed empty."""
+    if not platform:
+        return {}
+    return {pin.tool: pin for pin in BROWNFIELD_SCANNER_MIRROR if pin.platform == platform}
+
+
+#: The live default scanner pins for this host. Unsupported hosts get an empty mapping, which
+#: keeps the scrub gate fail-closed with ``brownfield_secret_scanner_unavailable``.
+BROWNFIELD_SCANNERS: dict[str, BrownfieldScanner] = _scanner_pins_for_platform(
+    _host_scanner_platform()
+)
 ENV_GITLEAKS_URL = "CE_FORGE_GITLEAKS_URL"
 ENV_GITLEAKS_SHA256 = "CE_FORGE_GITLEAKS_SHA256"
 ENV_GITLEAKS_VERSION = "CE_FORGE_GITLEAKS_VERSION"
@@ -364,7 +417,8 @@ class LiveForgeConfig:
     #: (sha256-pinned mirror-served Gitleaks + TruffleHog; fail-closed when unpinned).
     scrub_scan: Any = None
     #: Optional runtime-supplied Gitleaks + TruffleHog mirror pins. ``resolve_live_config`` reads
-    #: them from host env; absent or incomplete pins leave the scrub default fail-closed.
+    #: them from host env; absent pins use the commissioned mirror defaults, while incomplete pins
+    #: still fail closed before any unverified scanner binary can execute.
     brownfield_scanners: Mapping[str, BrownfieldScanner] | None = None
     #: Install-time forge actor login resolved from the onboard/GitHub identity config. Local
     #: adoption commits MUST bind to this identity and MUST NOT inherit ambient host git config.
@@ -446,6 +500,7 @@ def _scanner_pins_from_env(env: Mapping[str, str]) -> Mapping[str, BrownfieldSca
             version=version,
             url=url,
             sha256=sha256 if url and _valid_sha256(sha256) else "",
+            platform=_host_scanner_platform() or "",
         )
     return pins if supplied else None
 
@@ -1402,8 +1457,8 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
 
     Hard scrub gate (verify-verdict MAJOR-2): ``secret_preflight_scan`` runs the sha-pinned
     two-scanner scrub; the ``brownfield_secret_preflight`` leg (in ``onboard_apply``) is the
-    affirmative fail-closed authority. The live default fail-closes until the binary pins are
-    commissioned at the VPS Mode-A rehearsal.
+    affirmative fail-closed authority. The live default selects only commissioned Linux scanner
+    pins and fail-closes on unsupported platforms or incomplete runtime overrides.
 
     Defensive only — PR-mediated, never force-pushes, never mutates branch protection, never
     direct-pushes the default branch; idempotent (stable branch + plan-by-default forge primitives).
@@ -1472,19 +1527,23 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
             }
 
     def _default_scrub_scan(self, scan_root: str, scaffold: list) -> dict[str, Any]:
-        """Live scrub: per-scanner sha-pinned run; fail-closed (``ran=False``) until pinned.
+        """Live scrub: per-scanner sha-pinned run; fail-closed (``ran=False``) when unpinned.
 
-        Each scanner's report is ``{ran, exit_code, findings, error}``. With an EMPTY pin (the
-        as-shipped state — concrete binary pins are commissioned at the VPS Mode-A rehearsal)
-        the report is ``ran=False`` so the leg refuses ``brownfield_secret_scanner_unavailable``
-        — NO unverified binary is ever executed and absence is never read as clean.
+        Each scanner's report is ``{ran, exit_code, findings, error}``. With an EMPTY pin (an
+        unsupported host platform or incomplete runtime override) the report is ``ran=False`` so
+        the leg refuses ``brownfield_secret_scanner_unavailable`` — NO unverified binary is ever
+        executed and absence is never read as clean.
 
         When scanner pins are supplied, scan a temporary materialized tree containing BOTH the
         pre-existing project bytes and every scaffold artifact leg 3 would commit, matching the
         plan-side ``scan_paths`` contract: ``[".", *scaffold_paths]``.
         """
         reports: dict[str, Any] = {}
-        scanner_pins = self._cfg.brownfield_scanners or BROWNFIELD_SCANNERS
+        scanner_pins = (
+            self._cfg.brownfield_scanners
+            if self._cfg.brownfield_scanners is not None
+            else BROWNFIELD_SCANNERS
+        )
         active_pins: dict[str, BrownfieldScanner] = {}
         for name in REQUIRED_SCRUB_SCANNERS:
             pin = scanner_pins.get(name)
