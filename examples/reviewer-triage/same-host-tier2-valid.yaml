@@ -1,0 +1,60 @@
+kind: reviewer-triage-decision
+schema_version: "1"
+work_ref:
+  repo: creator-engine/creator-engine
+  pr_number: 125
+  head_sha: ffffffffffffffffffffffffffffffffffffffff
+  author_run_id: run-author-125
+  author_identity:
+    login: chmod735
+    human_id: peer-operator
+    controller_id: ce-dev-1
+    venue_id: author-venue
+    credential_domain_ref: credential-author
+    os_user_ref: os-user-author
+    host_ref: ce-pilot-1
+changed_paths:
+  - validators/creator_engine_validator/reviewer_triage.py
+mutation_classes: [code]
+risk_tier: medium
+candidate_generation:
+  sources: [CODEOWNERS, .ce/coordination.yml, reviewer-registry]
+  ownership_only: true
+  git_history_scoring: false
+  candidates: [same-host-peer]
+  ranking_method: lexicographic_reviewer_id
+  broad_team_fallback: null
+eligibility_results:
+  - reviewer_id: same-host-peer
+    eligible: true
+    reasons: []
+    identity_ref: tenants/creator-engine/reviewers/same-host-peer.yml
+    human_id: human-same-host-peer
+    isolation_domain_attestation:
+      forge_principal: same-host-peer
+      credential_domain_ref: credential-same-host-peer
+      os_user_ref: os-user-same-host-peer
+      controller_principal_ref: ce-reviewer-same-host-peer
+      execution_sandbox_ref: sandbox-same-host-peer
+      containment_ref: containment-same-host-peer
+      host_ref: ce-pilot-1
+      computed_tier: tier-2
+      containment_status: enforced
+      evidence_timestamp: "2026-06-18T00:00:00Z"
+      source: reviewer-registry-example
+    containment_status: enforced
+availability_results:
+  - reviewer_id: same-host-peer
+    available: true
+    reasons: []
+assignment:
+  selected_reviewers: [same-host-peer]
+  selected_identity_refs: [tenants/creator-engine/reviewers/same-host-peer.yml]
+  review_request_action: request_review
+  venue_dispatch_ref: null
+  envelope_ref: null
+  broad_team_fallback: null
+escalation:
+  status: none
+  reason: none
+non_authority_statement: "Reviewer triage assigns review only; it does not approve, ratify, merge, or waive policy."
