@@ -159,6 +159,12 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
   exist and differ from the AUTHOR identity of CE's PRs (the App bot) —
   solo: the human (the bootstrap token's authenticated login) IS the
   reviewer, so no-self-approval holds.
+- **Forge author identity binding**: any local Git commit authored during
+  install/apply binds `user.name` / `user.email` from the install-time
+  forge identity resolved through onboard GitHub config, sets
+  `user.useConfigOnly=true`, surfaces the resolved identity in leg evidence,
+  and refuses if that identity is unresolved. Ambient host `git config` is
+  never an accepted fallback.
 
 `build_github_leg_plan` composes all of it from a *validated* answers
 document plus one probe dict; `converged: true` is the terraform

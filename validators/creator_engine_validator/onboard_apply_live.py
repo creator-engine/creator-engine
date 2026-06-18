@@ -277,6 +277,11 @@ class LiveForgeConfig:
     #: Optional runtime-supplied Gitleaks + TruffleHog mirror pins. ``resolve_live_config`` reads
     #: them from host env; absent or incomplete pins leave the scrub default fail-closed.
     brownfield_scanners: Mapping[str, BrownfieldScanner] | None = None
+    #: Install-time forge actor login resolved from the onboard/GitHub identity config. Local
+    #: adoption commits MUST bind to this identity and MUST NOT inherit ambient host git config.
+    forge_actor_login: str | None = None
+    #: Optional explicit author email for the forge actor. Absent -> GitHub noreply from login.
+    forge_actor_email: str | None = None
 
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
@@ -498,6 +503,36 @@ def _app_installation_zero_repos_error(*, installation_id: int, repo: str) -> di
             "install the App on the account that owns the target repo or select the target "
             "repo explicitly."
         ),
+    }
+
+
+def _forge_noreply_email(login: str) -> str:
+    return f"{login}@users.noreply.github.com"
+
+
+def _resolved_forge_identity(login: Any, email: Any = None) -> dict[str, str]:
+    """Resolve the local git author identity from install-time forge config only.
+
+    Empty/invalid input refuses; callers must never fall back to ambient git config because that
+    can bind a dev install to a shared controller identity.
+    """
+    resolved_login = str(login or "").strip()
+    if not resolved_login or any(ch.isspace() for ch in resolved_login):
+        raise onboard_apply.ApplyRefused(
+            "forge_identity_unresolved",
+            "forge actor identity is unresolved; refusing ambient git author fallback",
+        )
+    resolved_email = str(email or "").strip() or _forge_noreply_email(resolved_login)
+    if not resolved_email or any(ch.isspace() for ch in resolved_email) or "@" not in resolved_email:
+        raise onboard_apply.ApplyRefused(
+            "forge_identity_unresolved",
+            "forge actor email is unresolved; refusing ambient git author fallback",
+        )
+    return {
+        "login": resolved_login,
+        "name": resolved_login,
+        "email": resolved_email,
+        "source": "install_config",
     }
 
 
@@ -1290,6 +1325,11 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
         # stable adoption branch from base (``-B`` resets to base head → idempotent re-run).
         if self._git(["checkout", "-B", branch], cwd=repo_dir).returncode != 0:
             return {"ok": False, "reason": "adoption_branch_checkout_failed"}
+        identity = _resolved_forge_identity(
+            self._cfg.forge_actor_login,
+            self._cfg.forge_actor_email,
+        )
+        self._bind_git_commit_identity(repo_dir, identity)
         written: list[str] = []
         for artifact in artifacts:
             target = repo_dir / str(artifact["path"])
@@ -1343,6 +1383,7 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
                 "brownfield_scaffold_commit_verify_failed",
                 "committed CE validate workflow digest does not match the pinned workflow",
             )
+        self._verify_git_commit_identity(repo_dir, identity)
         return {
             "ok": True,
             "source_dir": str(repo_dir),
@@ -1350,7 +1391,51 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
             "scaffold_paths": written,
             "workflow_sha256": workflow_sha,
             "already": already,
+            "forge_identity": identity,
         }
+
+    def _bind_git_commit_identity(self, repo_dir: Path, identity: Mapping[str, str]) -> None:
+        """Bind local git author config to install-time identity and verify no ambient fallback."""
+        expected = {
+            "user.name": identity["name"],
+            "user.email": identity["email"],
+            "user.useConfigOnly": "true",
+        }
+        for key, value in expected.items():
+            proc = self._git(["config", "--local", key, value], cwd=repo_dir)
+            if proc.returncode != 0:
+                raise onboard_apply.ApplyFailed(
+                    "brownfield_scaffold_identity_failed",
+                    f"failed to bind local git identity {key}",
+                )
+        for key, value in expected.items():
+            proc = self._git(["config", "--local", "--get", key], cwd=repo_dir)
+            actual = (proc.stdout or "").strip()
+            if proc.returncode != 0 or actual != value:
+                raise onboard_apply.ApplyFailed(
+                    "brownfield_scaffold_identity_failed",
+                    f"local git identity {key} resolved to {actual!r}, expected {value!r}",
+                )
+
+    def _verify_git_commit_identity(self, repo_dir: Path, identity: Mapping[str, str]) -> None:
+        proc = self._git(["log", "-1", "--format=%an%x00%ae", "HEAD"], cwd=repo_dir)
+        if proc.returncode != 0:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_identity_failed",
+                "cannot verify adoption commit author identity",
+            )
+        raw = proc.stdout or ""
+        if "\0" not in raw:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_identity_failed",
+                "adoption commit author identity was not parseable",
+            )
+        name, email = raw.rstrip("\n").split("\0", 1)
+        if name != identity["name"] or email != identity["email"]:
+            raise onboard_apply.ApplyFailed(
+                "brownfield_scaffold_identity_failed",
+                "adoption commit author identity did not match install-time forge identity",
+            )
 
     def _git(self, args: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess:
         """Run a LOCAL git command (no credential needed) through the git spawn seam."""
@@ -1560,6 +1645,7 @@ def resolve_live_config(
         policy_sha=policy_sha,
         run_id=f"onboard-live-forge:{repo}",
         brownfield_scanners=_scanner_pins_from_env(env),
+        forge_actor_login=str(merged.value("github.reviewer") or "").strip() or None,
     )
 
 
