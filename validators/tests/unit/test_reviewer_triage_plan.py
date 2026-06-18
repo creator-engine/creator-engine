@@ -286,6 +286,23 @@ def test_codeowners_path_and_ruleset_team_match_are_required():
     assert decision["assignment"]["selected_reviewers"] == []
 
 
+def test_registry_path_glob_owner_is_valid_without_codeowners_entry():
+    registry = _registry([
+        _reviewer("registry-owner", login="registry-owner", paths=["validators/**"]),
+    ])
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(
+            registry=registry,
+            codeowners_text="* @unregistered-codeowner\n",
+            changed_paths=["validators/creator_engine_validator/reviewer_triage.py"],
+        )
+    )
+
+    reasons = {r["reviewer_id"]: set(r["reasons"]) for r in decision["eligibility_results"]}
+    assert "not_owner_for_changed_paths" not in reasons["registry-owner"]
+    assert decision["assignment"]["selected_reviewers"] == ["registry-owner"]
+
+
 def test_head_sha_mismatch_fails_closed_without_assignment():
     decision = rt.plan_reviewer_triage(**_base_kwargs(expected_head_sha="b" * 40))
 

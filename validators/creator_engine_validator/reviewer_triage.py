@@ -165,10 +165,13 @@ def _is_owner_for_paths(reviewer: dict[str, Any], changed_paths: list[str], code
     ownership = reviewer.get("ownership")
     if not isinstance(ownership, dict):
         return False
+    path_globs = [str(p) for p in _as_list(ownership.get("path_globs"))]
+    if path_globs and _any_path_matches(path_globs, changed_paths):
+        return True
     logins = set(_identity_values(reviewer, "logins"))
     teams = set(_identity_values(reviewer, "teams"))
     if (logins | teams).intersection(codeowners) and _any_path_matches(
-        [str(p) for p in _as_list(ownership.get("path_globs"))], changed_paths
+        path_globs, changed_paths
     ):
         return True
     if set(str(ref) for ref in _as_list(ownership.get("area_owner_refs"))).intersection(area_refs):
