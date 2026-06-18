@@ -1249,16 +1249,16 @@ def _run_leg(
                 raise ApplyRefused("bootstrap_token_scope_refused", f"missing bootstrap scopes: {table['missing']}")
             capability = {"verified": True, "mode": "classic_scopes", "scope_rows": table["rows"]}
         elif token_type == "fine_grained":
-            # A fine-grained PAT's granted permissions are NOT introspectable and its write-capability
-            # is not non-destructively verifiable (ce-ops#94 research Q3/Q5/Q8). Identity/validity are
-            # verified above; the greenfield write legs (repo-create / workflow-install / protection
-            # PUT) are the fail-closed enforcement point — each refuses on a 403. No capability is
-            # silently assumed: the App token does the privileged reads, and the PAT can only do what
-            # GitHub lets it (capability = user-access ∩ token-grant).
+            table = v3_installer.bootstrap_scope_table(probe.get("permissions"), required=required)
+            if not table["ok"]:
+                raise ApplyRefused(
+                    "bootstrap_token_permission_refused",
+                    f"missing fine-grained bootstrap permissions: {table['missing']}",
+                )
             capability = {
-                "verified": "deferred",
-                "mode": "fine_grained_enforced_at_write_legs",
-                "required": list(required),
+                "verified": True,
+                "mode": "fine_grained_permissions",
+                "permission_rows": table["rows"],
             }
         else:
             # Unknown token type AND no X-OAuth-Scopes → cannot verify the required capability. Refuse.

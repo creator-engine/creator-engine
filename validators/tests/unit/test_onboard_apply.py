@@ -116,6 +116,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         branch_protection_ok: bool = True,
         existing_protection_contexts: tuple[str, ...] = (),
         token_type: str = "classic",
+        fine_grained_permissions: tuple[str, ...] | None = None,
     ):
         self.calls: list[str] = []
         self.tools = {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES}
@@ -127,6 +128,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.host_install_ok = host_install_ok
         self.scope_sets = scope_sets
         self.token_type = token_type
+        self.fine_grained_permissions = fine_grained_permissions
         # ce-ops#85 plain-join detection/reconcile knobs: whether the live branch
         # protection floor verifies, and the live required-check contexts the
         # reconcile must PRESERVE (never drop).
@@ -187,8 +189,8 @@ class FakeDriver(onboard_apply.ApplyDriver):
     def probe_bootstrap_token(self, *, token, repo, org_create_needed):
         self.calls.append("probe_bootstrap_token")
         result = {"ok": True, "login": "human-reviewer", "token_type": self.token_type}
-        # ce-ops#94: only a classic token reports a derived scope set; a fine-grained / unknown
-        # token reports none (capability is gated by token_type + right-sized requirement).
+        # ce-ops#94: classic tokens report derived OAuth scopes; fine-grained tokens report the
+        # permission-specific probe result (never a fabricated classic scope set).
         if self.token_type == "classic":
             scopes = self.scope_sets
             if scopes is None:
@@ -196,6 +198,13 @@ class FakeDriver(onboard_apply.ApplyDriver):
                     (v3_installer.ORG_CREATE_SCOPE,) if org_create_needed else ()
                 )
             result["scopes"] = scopes
+        if self.token_type == "fine_grained":
+            result["permissions"] = (
+                self.fine_grained_permissions
+                if self.fine_grained_permissions is not None
+                else v3_installer.REQUIRED_BOOTSTRAP_SCOPES
+                + ((v3_installer.ORG_CREATE_SCOPE,) if org_create_needed else ())
+            )
         return result
 
     def repo_exists(self, repo: str) -> bool:
@@ -624,15 +633,27 @@ def test_plain_join_finegrained_pat_passes_identity_only(tmp_path):
     assert summary["repos_already_satisfied"] == 1
 
 
-def test_greenfield_finegrained_pat_probe_defers_capability_to_write_legs(tmp_path):
-    # ce-ops#94: greenfield with a fine-grained PAT (GitHub's recommended default). Its write
-    # capability is NOT introspectable pre-flight, so the probe accepts on identity/validity and
-    # the greenfield write legs are the fail-closed enforcement point. The probe must NOT refuse.
+def test_greenfield_finegrained_pat_probe_accepts_verified_permissions(tmp_path):
+    # ce-ops#94: greenfield with a fine-grained PAT (GitHub's recommended default) must validate
+    # the actual fine-grained write permissions, not fall through classic X-OAuth-Scopes parsing.
     driver = FakeDriver(token_type="fine_grained")
     summary = _apply(tmp_path, driver)  # default mode="new"
     leg = _leg(summary, "github_bootstrap_token_probe")
     assert leg["status"] == "already_satisfied"
-    assert leg["verification"]["capability"]["mode"] == "fine_grained_enforced_at_write_legs"
+    assert leg["verification"]["capability"]["mode"] == "fine_grained_permissions"
+    assert set(leg["verification"]["capability"]["permission_rows"][0]) == {"scope", "granted"}
+
+
+def test_greenfield_finegrained_pat_missing_permission_is_refused(tmp_path):
+    driver = FakeDriver(
+        token_type="fine_grained",
+        fine_grained_permissions=("administration:write", "contents:write", "actions:write"),
+    )
+    summary = _apply(tmp_path, driver)
+    leg = _leg(summary, "github_bootstrap_token_probe")
+    assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == "bootstrap_token_permission_refused"
+    assert "workflows:write" in leg["detail"]
 
 
 def test_greenfield_unknown_token_type_is_fail_closed(tmp_path):
