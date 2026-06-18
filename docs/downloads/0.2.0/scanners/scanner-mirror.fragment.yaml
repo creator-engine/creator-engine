@@ -1,7 +1,7 @@
 scanner_manifest:
   scanner_manifest_version: 1
   commissioned_for: ce-ops#123
-  status: unsigned-controller-signing-required
+  status: unsigned
   entries:
     - name: gitleaks
       version: 8.30.1
