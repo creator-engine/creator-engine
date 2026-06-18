@@ -11,7 +11,7 @@ wire the live brownfield secret-preflight verifier, commit locally only, and do
 not push, sign, or publish the mirror.
 
 Base:
-`8d2a83be700d9337aeaaa7b704e6306da79744c8` (`origin/main` at branch creation).
+`4b62822fcb23b50f05b1e80d5cc1f1e7d3bc2084` (`origin/main` after #255/#256 merge rebase).
 
 The changes:
 - Four extracted scanner binaries are staged under the 0.2.0 Pages mirror path:
