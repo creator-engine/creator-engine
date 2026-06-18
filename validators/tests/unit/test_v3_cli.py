@@ -1610,6 +1610,100 @@ def test_onboard_apply_authorized_brownfield_routes_to_adoption(tmp_path, capsys
     assert payload["brownfield_adoption_pr"]["pr_number"] == 11
 
 
+def test_onboard_apply_authorized_brownfield_gets_driver_from_onboard_apply_seam(
+    tmp_path, capsys, monkeypatch
+):
+    # ce-ops#88 — production apply-driver selection belongs in _onboard_apply_driver().
+    # The existing-repo apply path must ask that seam for an adoption-capable driver with
+    # the merged install answers and verified policy digest, not bypass it through a
+    # call-site selector.
+    from creator_engine_validator import onboard_apply_live
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+
+    adoption_driver = onboard_apply_live.LiveForgeAdoptionDriver(
+        onboard_apply_live.LiveForgeConfig(
+            repo="acme/app", installation_id=1, app_client_id="x",
+            signer=lambda _b: b"", policy_sha="a" * 64, run_id="t",
+        )
+    )
+    captured: dict[str, object] = {}
+
+    def driver_factory(*, merged, policy_sha, adoption):
+        captured["repo"] = merged.value("github.repo")
+        captured["policy_sha_len"] = len(policy_sha)
+        captured["adoption"] = adoption
+        return adoption_driver
+
+    monkeypatch.setattr(v3_cli, "_onboard_apply_driver", driver_factory)
+    monkeypatch.setattr(v3_cli.onboard_apply, "repo_is_already_ce_governed", lambda *a, **k: False)
+
+    def fake_apply(request, **kwargs):
+        captured["adoption_apply"] = request.adoption_apply
+        captured["driver_is_adoption"] = kwargs.get("driver") is adoption_driver
+        return {
+            "action": "onboard_apply", "mode": request.mode, "target_repo": "acme/app",
+            "verified_count": 12, "legs_total": 19, "greenfield_repos_created": 0,
+            "repos_already_satisfied": 0, "brownfield_deferred": 0, "applied": 5,
+            "already_satisfied": 7, "refused": 0, "failed": 0, "skipped": 7,
+            "manual_rollback_required": 0, "brownfield_adopted": 1,
+            "brownfield_adoption_pr": {"repo": "acme/app", "branch": "ce/adopt-governance",
+                                       "base": "main", "pr_number": 12},
+            "brownfield_scrub_findings": 0, "brownfield_scrub_findings_waived": 0, "legs": [],
+        }
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
+
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 0
+    assert captured == {
+        "repo": "acme/app",
+        "policy_sha_len": 64,
+        "adoption": True,
+        "adoption_apply": True,
+        "driver_is_adoption": True,
+    }
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["brownfield_adoption_pr"]["pr_number"] == 12
+
+
+def test_onboard_apply_driver_selects_live_adoption_driver_when_authorized(
+    tmp_path, monkeypatch
+):
+    from creator_engine_validator import onboard_apply_live
+
+    pem = tmp_path / "ce-app.pem"
+    pem.write_text("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n", encoding="utf-8")
+    monkeypatch.setenv("CE_FORGE_LIVE_FORGE", "1")
+    monkeypatch.setenv("CE_FORGE_ADOPTION_WRITE", "1")
+    monkeypatch.setenv("CE_FORGE_APP_CLIENT_ID", "Iv1.testclient")
+    monkeypatch.setenv("CE_FORGE_APP_PEM", str(pem))
+
+    answers = yaml.safe_load(_brownfield_answers_for("acme/app"))
+    answers["github"]["app"] = {"installation_id": 140271364}
+    schema = yaml.safe_load((_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH).read_text())
+    merged = v3_installer.merge_answers(schema, answers=answers, detected={})
+
+    driver = v3_cli._onboard_apply_driver(
+        merged=merged, policy_sha="a" * 64, adoption=True
+    )
+    try:
+        assert isinstance(driver, onboard_apply_live.LiveForgeAdoptionDriver)
+    finally:
+        v3_cli._close_apply_driver(driver)
+
+
 def test_onboard_apply_existing_already_ce_repo_routes_to_plain_join(tmp_path, capsys, monkeypatch):
     # ce-ops#85 — an existing ALREADY-CE repo is NOT refused as brownfield: the gate
     # detects already-CE (fail-closed) and routes to the plain-join apply, handing the
