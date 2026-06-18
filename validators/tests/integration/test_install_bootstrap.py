@@ -242,6 +242,31 @@ def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Pat
     assert "pages_mirror_not_ready" in pages.stderr
 
 
+def test_install_sh_accepts_linux_aarch64_and_selects_arm_wheelhouse(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    arm_pyyaml = (
+        "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64."
+        "manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+    )
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        extra_env={
+            "CE_TEST_UNAME_S": "Linux",
+            "CE_TEST_UNAME_M": "aarch64",
+            "FAKE_BAD_WHEEL": arm_pyyaml,
+        },
+    )
+    assert proc.returncode != 0
+    assert "artifact_hash_mismatch" in proc.stderr
+    assert "unsupported_platform" not in proc.stderr
+    assert arm_pyyaml in proc.stderr
+    urls = _curl_urls(tmp_path / "curl.log")
+    assert any(url.endswith(f"/downloads/0.2.0/{arm_pyyaml}") for url in urls)
+    assert not any("pyyaml" in url and "x86_64" in url for url in urls)
+
+
 def test_install_sh_fetch_hardening_and_uv_path_are_declared(repo_root: Path):
     script = (repo_root / "docs" / "install.sh").read_text(encoding="utf-8")
     assert "CURL_FLAGS=(--proto '=https' --tlsv1.2 -fsSL)" in script
@@ -249,3 +274,5 @@ def test_install_sh_fetch_hardening_and_uv_path_are_declared(repo_root: Path):
     assert "uv python install 3.14" in script
     assert "verify_hash \"$UV_SHA\" \"$UV_TARBALL\"" in script
     assert "tar -xzf \"$UV_TARBALL\"" in script
+    assert "uv-x86_64-unknown-linux-gnu/uv" in script
+    assert "uv-aarch64-unknown-linux-gnu/uv" in script

@@ -11,8 +11,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQk14ejVieEpkVStXZDBrUVMrWU40YjhnMzlHZXJBb0pjV05kai9uSDFFYys5YlpjN0RvQUFGTmYKLzRzVkJDVjNmTDNVK0krQlp0ZVc3Mi9oVCtIU3NMCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: e222a4ccbc4bd996bcf75f58f494a42a4eda2c7da01e4d8f8ae23df79a941499
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRHRsTS9RVmt3MVZZUHhrTjlHSTJ0ckZRMTlZZWZjaldUa0NBZzE1SzN0a1RtQnFPTVU2M1ZTNEEKelgzTHoxaEdxMklpaGRhbitCSXpQQ2diT2tBbHdCCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 2d2d4ef30da2371e3a5f78cbe23a401386658cc28dd9247e5c932b57bc6d59df
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -21,7 +21,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: 886dede1e7f618c57af8dbab1307f19ed6238c96062c8cf7a7df8803f3982e57
+  sha256s_sha256: e6460c09e925576bfe39ae9465fea1e589df182e318b520d6867be0cb145f86c
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -31,33 +31,60 @@ artifact_manifest:
     - filename: attrs-26.1.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/attrs-26.1.0-py3-none-any.whl
       sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+      platforms: all
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: 884aeb457cc008120622910dc8a59ea1fa893b50d24f7db6af3048c9f9bca2ff
+      sha256: 768451ab925bd9fe32d5187cec2fdb609920da81173fc42b41f482c48c112f85
+      platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
       sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+      platforms: all
     - filename: jsonschema_specifications-2025.9.1-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema_specifications-2025.9.1-py3-none-any.whl
       sha256: 98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+      platforms: all
     - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       url: https://creator-engine.dev/downloads/0.2.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
+      platforms: linux-x86_64-cp314
+    - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.2.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+      sha256: 501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
+      platforms: linux-aarch64-cp314
     - filename: referencing-0.37.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/referencing-0.37.0-py3-none-any.whl
       sha256: 381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+      platforms: all
     - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       url: https://creator-engine.dev/downloads/0.2.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: 47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
+      platforms: linux-x86_64-cp314
+    - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.2.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+      sha256: f251c812357a3fed308d684a5079ddfb9d933860fc6de89f2b7ab00da481e65f
+      platforms: linux-aarch64-cp314
     - filename: uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       url: https://creator-engine.dev/downloads/0.2.0/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd
+      platforms: linux-x86_64-cp314
+    - filename: uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.2.0/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
+      sha256: 00193e4e077c27ee3d66da356744dbf0b3aa59356dfbd9a9efb1dc8469af8ad7
+      platforms: linux-aarch64-cp314
   python_acquisition:
-    tool: uv
-    version: 0.11.21
-    url: https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
-    sha256: 8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050
-    command: uv python install 3.14
+    - platform: linux-x86_64-cp314
+      tool: uv
+      version: 0.11.21
+      url: https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
+      sha256: 8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050
+      command: uv python install 3.14
+    - platform: linux-aarch64-cp314
+      tool: uv
+      version: 0.11.21
+      url: https://github.com/astral-sh/uv/releases/download/0.11.21/uv-aarch64-unknown-linux-gnu.tar.gz
+      sha256: 88e800834007cc5efd4675f166eb2a51e7e3ad19876d85fa8805a6fb5c922397
+      command: uv python install 3.14
 
 # `value` is the base64 of the detached SSHSIG (`.sig`) over the CANONICAL bytes;
 # `content_sha256` is the retained in-tree floor (sha256 of the SAME canonical
