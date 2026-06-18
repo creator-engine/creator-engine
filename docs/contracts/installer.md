@@ -139,7 +139,12 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
   tmpfs custody**); **click-or-detect** — the click is the contract's
   irreducibly interactive human-approval step on the FIRST run; a detected
   (or declared) `installation_id` SKIPS it on re-run, so the *converged*
-  state is fully declarative.
+  state is fully declarative. The installation MUST expose the target
+  `github.repo` to the App token. An installation that lists zero accessible
+  repositories is unusable, even when GitHub reports `repo_selection=all` on
+  an account that does not contain the target repo; the operator must install
+  or reconfigure the App on the account that owns the target repo, or select
+  the target repo explicitly.
 - **Branch-protection desired-state diff** (`plan_branch_protection`): the
   reference posture lives AS DATA in the answers schema
   (`x-ce-reference-posture` — strict, dismiss-stale, enforce-admins,

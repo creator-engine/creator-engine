@@ -482,6 +482,25 @@ def _probe_fine_grained_bootstrap_permissions(
     return sorted(set(granted))
 
 
+def _app_installation_zero_repos_error(*, installation_id: int, repo: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "reason": "app_installation_zero_accessible_repos",
+        "installation_id": installation_id,
+        "repo": repo,
+        "message": (
+            f"GitHub App installation {installation_id} reports zero accessible repositories; "
+            f"it cannot cover target repo {repo}."
+        ),
+        "action": (
+            "install or reconfigure the GitHub App installation so it has access to "
+            f"{repo}. If repo_selection=all is enabled on an account with no target repo, "
+            "install the App on the account that owns the target repo or select the target "
+            "repo explicitly."
+        ),
+    }
+
+
 class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
     """Production live-forge driver (Phase 1): forge reads + idempotent plain-join apply.
 
@@ -703,6 +722,8 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         if code != 0 or not isinstance(parsed, dict):
             return {"ok": False, "reason": "app_installation_read_failed"}
         repos = parsed.get("repositories") or []
+        if not repos and parsed.get("total_count") == 0:
+            return _app_installation_zero_repos_error(installation_id=installation_id, repo=repo)
         covered = any(
             isinstance(r, Mapping) and r.get("full_name") == repo for r in repos
         )
@@ -790,12 +811,11 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         installation_id = self._cfg.installation_id
         if not installation_id:
             return {"ok": False, "reason": "app_installation_id_unconfigured"}
-        if not self._installation_covers_repo(repo):
-            return {
-                "ok": False,
-                "reason": "app_installation_repo_not_covered",
-                "installation_id": installation_id,
-            }
+        coverage = self._installation_repo_coverage(repo)
+        if not coverage.get("ok"):
+            result = dict(coverage)
+            result["installation_id"] = installation_id
+            return result
         return {"ok": True, "installation_id": installation_id, "detected": True}
 
     def verify_tool(self, name: str) -> bool:
@@ -895,14 +915,29 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
 
     def _installation_covers_repo(self, repo: str) -> bool:
         """True iff the configured App installation's repositories include ``repo`` (read-only GET)."""
+        return bool(self._installation_repo_coverage(repo).get("ok"))
+
+    def _installation_repo_coverage(self, repo: str) -> dict[str, Any]:
+        """Read the configured App installation repo list and classify target coverage."""
         try:
             code, parsed, _ = _gh_get(self._reader(), "installation/repositories?per_page=100")
         except Exception:  # noqa: BLE001 — fail-closed: any read error → not confirmable
-            return False
+            return {"ok": False, "reason": "app_installation_read_failed"}
         if code != 0 or not isinstance(parsed, dict):
-            return False
+            return {"ok": False, "reason": "app_installation_read_failed"}
         repos = parsed.get("repositories") or []
-        return any(isinstance(r, Mapping) and r.get("full_name") == repo for r in repos)
+        if not repos and parsed.get("total_count") == 0:
+            return _app_installation_zero_repos_error(
+                installation_id=self._cfg.installation_id,
+                repo=repo,
+            )
+        if any(isinstance(r, Mapping) and r.get("full_name") == repo for r in repos):
+            return {"ok": True, "covered": True}
+        return {
+            "ok": False,
+            "reason": "app_installation_repo_not_covered",
+            "repo": repo,
+        }
 
     def _stage_userspace_wheel(self, pin: "MirrorUserspaceWheel") -> dict[str, Any]:
         """Make a ``--find-links`` dir holding the sha256-verified pinned wheel.

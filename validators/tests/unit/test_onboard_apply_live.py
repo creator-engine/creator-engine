@@ -404,7 +404,10 @@ def test_verify_app_installation_coverage_get_confirms_repo_no_mutation():
 
 
 def test_verify_app_installation_fails_closed_when_repo_not_covered():
-    not_covering = json.dumps({"total_count": 0, "repositories": []})
+    not_covering = json.dumps({
+        "total_count": 1,
+        "repositories": [{"full_name": "elsewhere/not-the-target"}],
+    })
 
     class _NoCover(_ModeBForge):
         def __init__(self):
@@ -416,6 +419,27 @@ def test_verify_app_installation_fails_closed_when_repo_not_covered():
     )
     assert result["ok"] is False
     assert result["reason"] == "app_installation_repo_not_covered"
+
+
+def test_verify_app_installation_zero_repos_reports_actionable_scope_error():
+    class _ZeroRepos(_ModeBForge):
+        def __init__(self):
+            super().__init__()
+            self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
+
+    result = _driver(_ZeroRepos()).verify_app_installation(
+        installation_id=141102698,
+        repo=_REPO,
+        bot_identity="ce-forge-dev4[bot]",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "app_installation_zero_accessible_repos"
+    assert result["installation_id"] == 141102698
+    assert result["repo"] == _REPO
+    assert "zero accessible repositories" in result["message"]
+    assert "install or reconfigure" in result["action"]
+    assert _REPO in result["action"]
 
 
 # ---------------------------------------------------------------------------
@@ -854,12 +878,34 @@ def test_wait_for_app_installation_fails_closed_when_repo_not_covered():
     class _NoCover(_ModeBForge):
         def __init__(self):
             super().__init__()
-            self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
+            self.installation_repos = json.dumps({
+                "total_count": 1,
+                "repositories": [{"full_name": "elsewhere/not-the-target"}],
+            })
 
     forge = _NoCover()
     result = _driver(forge).wait_for_app_installation(app_plan={}, repo=_REPO)
     assert result["ok"] is False
     assert result["reason"] == "app_installation_repo_not_covered"
+    assert forge.write_argvs() == []
+
+
+def test_wait_for_app_installation_zero_repos_reports_actionable_scope_error():
+    class _ZeroRepos(_ModeBForge):
+        def __init__(self):
+            super().__init__()
+            self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
+
+    forge = _ZeroRepos()
+    result = _driver(forge).wait_for_app_installation(app_plan={}, repo=_REPO)
+
+    assert result["ok"] is False
+    assert result["reason"] == "app_installation_zero_accessible_repos"
+    assert result["installation_id"] == 140271364
+    assert result["repo"] == _REPO
+    assert "zero accessible repositories" in result["message"]
+    assert "install or reconfigure" in result["action"]
+    assert _REPO in result["action"]
     assert forge.write_argvs() == []
 
 
