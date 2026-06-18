@@ -1,0 +1,44 @@
+kind: reviewer-triage-decision
+schema_version: "1"
+work_ref:
+  repo: creator-engine/creator-engine
+  pr_number: 122
+  head_sha: cccccccccccccccccccccccccccccccccccccccc
+  author_run_id: run-author-122
+  author_identity:
+    login: chmod735
+    human_id: peer-operator
+    controller_id: ce-dev-1
+    venue_id: author-venue
+changed_paths:
+  - schemas/reviewer-registry.schema.yaml
+mutation_classes: [schema]
+risk_tier: high
+candidate_generation:
+  sources: [CODEOWNERS, .ce/coordination.yml, reviewer-registry]
+  ownership_only: true
+  git_history_scoring: false
+  candidates: [reviewer-no-access]
+  ranking_method: lexicographic_reviewer_id
+  broad_team_fallback: null
+eligibility_results:
+  - reviewer_id: reviewer-no-access
+    eligible: false
+    reasons: [missing_source_host_review_counting_permission]
+    identity_ref: tenants/creator-engine/reviewers/reviewer-no-access.yml
+    human_id: human-reviewer-no-access
+availability_results:
+  - reviewer_id: reviewer-no-access
+    available: true
+    reasons: []
+assignment:
+  selected_reviewers: []
+  selected_identity_refs: []
+  review_request_action: none
+  venue_dispatch_ref: null
+  envelope_ref: null
+  broad_team_fallback: null
+escalation:
+  status: operator
+  reason: no_eligible_available_reviewer
+non_authority_statement: "Reviewer triage assigns review only; it does not approve, ratify, merge, or waive policy."

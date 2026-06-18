@@ -21,6 +21,11 @@ G2.007.2 adds `schemas/reviewer-authority-envelope.schema.yaml`, the `reviewer_a
 validator, a prose contract, examples, and **modifies the Ring-2 enforcement engine
 `hook_check.py`** — the first gate to do so.
 
+The distinct-controller-review rule referenced by this ADR is canonically recorded in
+ce-ops `decision-records/ADR-0003-reviewer-independence-isolation-domain.md`. This
+in-repo ADR remains the Creator Engine anchor for reviewer-venue authority; readers resolving
+"per ADR-0003" should follow that ce-ops decision record for the isolation-domain rule.
+
 Key decisions:
 
 - **Bounded, auditable envelope.** A `reviewer_authority_envelope` authorizes exactly one mechanic

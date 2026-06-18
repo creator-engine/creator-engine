@@ -1,0 +1,160 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/reviewer-triage-decision.schema.yaml"
+title: "Creator Engine reviewer triage decision"
+description: >-
+  Auditable plan-only reviewer assignment decision. It records candidate
+  generation, eligibility, availability, assignment, and escalation facts. It
+  never grants approval, ratification, merge, waiver, review-request apply,
+  reviewer-venue launch, or reviewer-authority-envelope minting authority.
+type: object
+required:
+  - kind
+  - schema_version
+  - work_ref
+  - changed_paths
+  - mutation_classes
+  - risk_tier
+  - candidate_generation
+  - eligibility_results
+  - availability_results
+  - assignment
+  - escalation
+  - non_authority_statement
+additionalProperties: false
+properties:
+  kind:
+    type: string
+    const: reviewer-triage-decision
+  schema_version:
+    type: string
+    enum: ["1"]
+  work_ref:
+    type: object
+    required: [repo, pr_number, head_sha, author_run_id, author_identity]
+    additionalProperties: false
+    properties:
+      repo:
+        $ref: "#/$defs/non_empty_string"
+      pr_number:
+        type: integer
+        minimum: 1
+      head_sha:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+      author_run_id:
+        $ref: "#/$defs/non_empty_string"
+      author_identity:
+        type: object
+        required: [login, human_id, controller_id, venue_id]
+        additionalProperties: false
+        properties:
+          login:
+            type: string
+          human_id:
+            type: string
+          controller_id:
+            type: string
+          venue_id:
+            type: string
+  changed_paths:
+    $ref: "#/$defs/string_list"
+  mutation_classes:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction]
+  risk_tier:
+    type: string
+    enum: [low, medium, high, privileged]
+  candidate_generation:
+    type: object
+    required: [sources, ownership_only, git_history_scoring, candidates, ranking_method, broad_team_fallback]
+    additionalProperties: false
+    properties:
+      sources:
+        $ref: "#/$defs/string_list"
+      ownership_only:
+        type: boolean
+        const: true
+      git_history_scoring:
+        type: boolean
+        const: false
+      candidates:
+        $ref: "#/$defs/string_list"
+      ranking_method:
+        type: string
+        const: lexicographic_reviewer_id
+      broad_team_fallback:
+        type: ["string", "null"]
+  eligibility_results:
+    type: array
+    items:
+      $ref: "#/$defs/result"
+  availability_results:
+    type: array
+    items:
+      type: object
+      required: [reviewer_id, available, reasons]
+      additionalProperties: false
+      properties:
+        reviewer_id:
+          $ref: "#/$defs/non_empty_string"
+        available:
+          type: boolean
+        reasons:
+          $ref: "#/$defs/string_list"
+  assignment:
+    type: object
+    required: [selected_reviewers, selected_identity_refs, review_request_action, venue_dispatch_ref, envelope_ref, broad_team_fallback]
+    additionalProperties: false
+    properties:
+      selected_reviewers:
+        $ref: "#/$defs/string_list"
+      selected_identity_refs:
+        $ref: "#/$defs/string_list"
+      review_request_action:
+        type: string
+        enum: [request_review, none, degraded_team_fallback]
+      venue_dispatch_ref:
+        type: ["string", "null"]
+      envelope_ref:
+        type: ["string", "null"]
+      broad_team_fallback:
+        type: ["string", "null"]
+  escalation:
+    type: object
+    required: [status, reason]
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+        enum: [none, queued, operator, spawned-reviewer, waiver-request]
+      reason:
+        type: string
+  non_authority_statement:
+    type: string
+    const: "Reviewer triage assigns review only; it does not approve, ratify, merge, or waive policy."
+$defs:
+  non_empty_string:
+    type: string
+    minLength: 1
+  string_list:
+    type: array
+    items:
+      $ref: "#/$defs/non_empty_string"
+  result:
+    type: object
+    required: [reviewer_id, eligible, reasons, identity_ref, human_id]
+    additionalProperties: false
+    properties:
+      reviewer_id:
+        $ref: "#/$defs/non_empty_string"
+      eligible:
+        type: boolean
+      reasons:
+        $ref: "#/$defs/string_list"
+      identity_ref:
+        type: string
+      human_id:
+        type: string

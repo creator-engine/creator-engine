@@ -66,6 +66,7 @@ from . import (
     lane_runtime,
     launch_runtime,
     pcl_runtime,
+    reviewer_triage,
     seat_lifecycle,
     side_effect_ledger_runtime,
     transcript_archive,
@@ -578,6 +579,38 @@ def _build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--payload", default=None, help="path to a JSON request-body file (optional)")
     cs.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="write API base URL")
     cs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce reviewer-triage — ce-ops#120 Phase 1-2 plan-only reviewer assignment.
+    # This surface consumes explicit PR facts + tracked local policy and emits a
+    # decision record. It performs no source-host mutation: no review request,
+    # no reviewer venue spawn, no envelope minting.
+    reviewer = groups.add_parser(
+        "reviewer-triage",
+        help="plan-only reviewer assignment decision (no source-host mutation)",
+    )
+    reviewer_sub = reviewer.add_subparsers(dest="reviewer_triage_cmd")
+    rp = reviewer_sub.add_parser("plan", help="emit a reviewer-triage decision record")
+    rp.add_argument("--pr", required=True, type=int, dest="pr_number", help="pull request number")
+    rp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    rp.add_argument("--repo-root", default=".", help="repo root for tracked policy inputs")
+    rp.add_argument("--repo", default=None, help="owner/name repo id (default: derived from origin URL)")
+    rp.add_argument("--head-sha", default=None, help="PR head SHA (default: local HEAD)")
+    rp.add_argument("--expected-head-sha", default=None, help="fail closed unless it matches --head-sha")
+    rp.add_argument("--author-run-id", default=None, help="author run id for the decision work_ref")
+    rp.add_argument("--author-login", default=None, help="author source-host login")
+    rp.add_argument("--author-human-id", default=None, help="resolved author human id")
+    rp.add_argument("--author-controller-id", default=None, help="author controller id")
+    rp.add_argument("--author-venue-id", default=None, help="author venue id")
+    rp.add_argument("--last-pusher-login", default=None, help="last pusher source-host login")
+    rp.add_argument("--last-pusher-human-id", default=None, help="resolved last-pusher human id")
+    rp.add_argument("--changed-path", action="append", dest="changed_paths", default=None)
+    rp.add_argument("--mutation-class", action="append", dest="mutation_classes", default=None)
+    rp.add_argument("--risk-tier", default="medium")
+    rp.add_argument("--registry", default=None, help="reviewer registry YAML (default: .ce/reviewer-registry.yml if present)")
+    rp.add_argument("--coordination-policy", default=None, help="coordination policy YAML (default: .ce/coordination.yml)")
+    rp.add_argument("--codeowners", default=None, help="CODEOWNERS path (default: .github/CODEOWNERS)")
+    rp.add_argument("--codeowners-text", default=None, help="inline CODEOWNERS text for tests/offline probes")
+    rp.add_argument("--required-team", action="append", dest="required_teams", default=None)
 
     # ce check — umbrella wrapper over the retained creator-engine-validator
     # conformance checks (DP-1 = A: ce wraps the validator subcommands).
@@ -1543,6 +1576,79 @@ def _connector_submit(args) -> int:
     return 0
 
 
+def _default_repo_name(repo_root) -> str:
+    remote = reviewer_triage.git_value(repo_root, "remote", "get-url", "origin")
+    if not remote:
+        return "unknown/unknown"
+    remote = remote.rstrip("/")
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    if remote.startswith("git@") and ":" in remote:
+        return remote.split(":", 1)[1]
+    if "github.com/" in remote:
+        return remote.split("github.com/", 1)[1]
+    return remote.rsplit("/", 2)[-2] + "/" + remote.rsplit("/", 1)[-1] if "/" in remote else remote
+
+
+def _reviewer_triage_plan(args) -> int:
+    from pathlib import Path
+
+    repo_root = Path(args.repo_root)
+    repo = args.repo or _default_repo_name(repo_root)
+    head_sha = args.head_sha or reviewer_triage.git_value(repo_root, "rev-parse", "HEAD") or "0" * 40
+    changed_paths = list(args.changed_paths or reviewer_triage.git_changed_paths(repo_root))
+    mutation_classes = list(args.mutation_classes or reviewer_triage.infer_mutation_classes(changed_paths))
+    registry_path = Path(args.registry) if args.registry else repo_root / ".ce" / "reviewer-registry.yml"
+    coordination_path = (
+        Path(args.coordination_policy)
+        if args.coordination_policy
+        else repo_root / ".ce" / "coordination.yml"
+    )
+    codeowners_text = args.codeowners_text
+    if codeowners_text is None:
+        codeowners_path = Path(args.codeowners) if args.codeowners else repo_root / ".github" / "CODEOWNERS"
+        codeowners_text = reviewer_triage.read_text_if_exists(codeowners_path)
+
+    last_pusher = None
+    if args.last_pusher_login or args.last_pusher_human_id:
+        last_pusher = {
+            "login": args.last_pusher_login or "",
+            "human_id": args.last_pusher_human_id or "",
+        }
+
+    decision = reviewer_triage.plan_reviewer_triage(
+        repo=repo,
+        pr_number=args.pr_number,
+        head_sha=head_sha,
+        expected_head_sha=args.expected_head_sha or head_sha,
+        author_run_id=args.author_run_id or f"pr-{args.pr_number}",
+        author_identity={
+            "login": args.author_login or "",
+            "human_id": args.author_human_id or "",
+            "controller_id": args.author_controller_id or "",
+            "venue_id": args.author_venue_id or "",
+        },
+        last_pusher=last_pusher,
+        changed_paths=changed_paths,
+        mutation_classes=mutation_classes,
+        risk_tier=args.risk_tier,
+        codeowners_text=codeowners_text,
+        coordination_policy=reviewer_triage.load_optional_yaml(coordination_path),
+        registry=reviewer_triage.load_optional_yaml(registry_path),
+        ruleset_required_teams=list(args.required_teams or []),
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(decision, indent=2, sort_keys=True))
+    else:
+        selected = decision["assignment"]["selected_reviewers"]
+        if selected:
+            print(f"ce reviewer-triage plan: selected {', '.join(selected)}")
+        else:
+            esc = decision["escalation"]
+            print(f"ce reviewer-triage plan: no assignment ({esc['status']}:{esc['reason']})")
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -1864,6 +1970,10 @@ _CONNECTOR_DISPATCH = {
     "submit": _connector_submit,
 }
 
+_REVIEWER_TRIAGE_DISPATCH = {
+    "plan": _reviewer_triage_plan,
+}
+
 _CLAIM_DISPATCH = {
     "acquire": _claim_acquire,
     "release": _claim_release,
@@ -1929,6 +2039,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _CONNECTOR_DISPATCH.get(connector_cmd)
         if handler is None:
             parser.parse_args(["connector", "--help"])  # prints connector help, exits
+            return 2
+        return handler(args)
+    if args.group == "reviewer-triage":
+        reviewer_triage_cmd = getattr(args, "reviewer_triage_cmd", None)
+        handler = _REVIEWER_TRIAGE_DISPATCH.get(reviewer_triage_cmd)
+        if handler is None:
+            parser.parse_args(["reviewer-triage", "--help"])  # prints reviewer-triage help, exits
             return 2
         return handler(args)
     if args.group == "claim":

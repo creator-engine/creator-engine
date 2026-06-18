@@ -1,0 +1,161 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/reviewer-registry.schema.yaml"
+title: "Creator Engine reviewer registry"
+description: >-
+  Governed reviewer registry for dynamic reviewer triage. This registry is
+  governance/identity-classed data: changes require ratification. It is not a
+  live availability scratchpad; availability is durable declared status only.
+type: object
+required: [kind, schema_version, mutation_class, reviewers]
+additionalProperties: false
+properties:
+  kind:
+    type: string
+    const: reviewer-registry
+  schema_version:
+    type: string
+    enum: ["1"]
+  mutation_class:
+    type: string
+    const: governance
+  reviewers:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/reviewer"
+$defs:
+  non_empty_string:
+    type: string
+    minLength: 1
+  string_list:
+    type: array
+    items:
+      $ref: "#/$defs/non_empty_string"
+  reviewer:
+    type: object
+    required:
+      - reviewer_id
+      - human_id
+      - controller_id
+      - venue_kind
+      - allowed_harnesses
+      - source_host_identities
+      - identity_ref
+      - allowed_repositories
+      - capabilities
+      - ownership
+      - availability
+      - policy_refs
+    additionalProperties: false
+    properties:
+      reviewer_id:
+        $ref: "#/$defs/non_empty_string"
+      human_id:
+        $ref: "#/$defs/non_empty_string"
+      controller_id:
+        $ref: "#/$defs/non_empty_string"
+      venue_kind:
+        type: string
+        enum: [human, agentic, managed-team]
+      allowed_harnesses:
+        type: array
+        minItems: 1
+        items:
+          type: string
+          enum: [codex, claude, human, none]
+      source_host_identities:
+        type: object
+        required: [logins, teams, app_installation_ids, bot_slugs]
+        additionalProperties: false
+        properties:
+          logins:
+            $ref: "#/$defs/string_list"
+          teams:
+            $ref: "#/$defs/string_list"
+          app_installation_ids:
+            $ref: "#/$defs/string_list"
+          bot_slugs:
+            $ref: "#/$defs/string_list"
+      identity_ref:
+        $ref: "#/$defs/non_empty_string"
+      allowed_repositories:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/non_empty_string"
+      capabilities:
+        type: object
+        required:
+          - languages
+          - mutation_classes
+          - risk_tiers
+          - security
+          - deploy
+          - schema
+          - readability
+        additionalProperties: false
+        properties:
+          languages:
+            $ref: "#/$defs/string_list"
+          mutation_classes:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction]
+          risk_tiers:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              enum: [low, medium, high, privileged]
+          security:
+            type: boolean
+            description: "Declared, ratified-not-certified capability flag."
+          deploy:
+            type: boolean
+            description: "Declared, ratified-not-certified capability flag."
+          schema:
+            type: boolean
+            description: "Declared, ratified-not-certified capability flag."
+          readability:
+            type: boolean
+            description: "Declared, ratified-not-certified capability flag."
+      ownership:
+        type: object
+        required: [codeowners, teams, path_globs, area_owner_refs]
+        additionalProperties: false
+        properties:
+          codeowners:
+            $ref: "#/$defs/string_list"
+          teams:
+            $ref: "#/$defs/string_list"
+          path_globs:
+            $ref: "#/$defs/string_list"
+          area_owner_refs:
+            $ref: "#/$defs/string_list"
+      availability:
+        type: object
+        required: [status, time_zone, working_hours, max_active_reviews, active_reviews, backup_reviewer_ids]
+        additionalProperties: false
+        properties:
+          status:
+            type: string
+            enum: [available, busy, retired, unavailable]
+          time_zone:
+            $ref: "#/$defs/non_empty_string"
+          working_hours:
+            $ref: "#/$defs/non_empty_string"
+          max_active_reviews:
+            type: integer
+            minimum: 0
+          active_reviews:
+            type: integer
+            minimum: 0
+          backup_reviewer_ids:
+            $ref: "#/$defs/string_list"
+      policy_refs:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/non_empty_string"
