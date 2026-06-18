@@ -9,7 +9,7 @@ Usage:
 
 Environment:
   CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
-  CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy)
+  CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy-ptrace)
   CE_DGX_DOCKER_NETWORK     Optional Docker --network value (default: unset)
   CE_DGX_NETWORK            Deprecated alias for CE_DGX_DOCKER_NETWORK
   CE_DGX_REPO               Host repo path (default: current directory)
@@ -23,6 +23,8 @@ Environment:
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
   CE_DGX_DRY_RUN            Print docker argv instead of executing when set to 1
   CE_DGX_ALLOW_PLAIN_RUNSC  Allow CE_DGX_RUNTIME=runsc despite DGX root-netns failure (default: 0)
+  CE_DGX_ALLOW_SYSTRAP_CODEX
+                            Allow CE_DGX_RUNTIME=runsc-gvproxy despite Codex guard-page panic (default: 0)
   CE_DGX_ALLOW_DOCKER_NETWORK
                             Allow Docker --network despite DGX root-netns failure (default: 0)
 EOF
@@ -45,7 +47,7 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
 fi
 
 CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}"
-CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy}"
+CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
@@ -70,9 +72,22 @@ Refusing CE_DGX_RUNTIME=runsc on this DGX.
 
 Plain Docker runsc uses Docker's bridge/none network namespace path here, which
 fails in the nested DGX root network namespace. Register and use the Stage-1
-gvproxy-backed runtime instead:
+gvproxy-backed ptrace runtime instead:
 
-  CE_DGX_RUNTIME=runsc-gvproxy
+  CE_DGX_RUNTIME=runsc-gvproxy-ptrace
+EOF
+  exit 2
+fi
+
+if [ "${CE_DGX_RUNTIME}" = "runsc-gvproxy" ] && [ "${CE_DGX_ALLOW_SYSTRAP_CODEX:-0}" != "1" ]; then
+  cat >&2 <<'EOF'
+Refusing CE_DGX_RUNTIME=runsc-gvproxy for Codex on this DGX.
+
+The Systrap gvproxy runtime works for a basic HTTPS container here, but Codex
+panics during Rust alternate signal stack guard-page setup. Use the ptrace
+runtime for Codex:
+
+  CE_DGX_RUNTIME=runsc-gvproxy-ptrace
 EOF
   exit 2
 fi
@@ -82,7 +97,7 @@ if [ -n "${CE_DGX_DOCKER_NETWORK}" ] && [ "${CE_DGX_ALLOW_DOCKER_NETWORK:-0}" !=
 Refusing Docker --network=${CE_DGX_DOCKER_NETWORK}.
 
 Do not ask Docker for bridge/none/host networking on the nested DGX. The
-runsc-gvproxy runtime owns networking and routes egress through the DGX
+runsc-gvproxy-ptrace runtime owns networking and routes egress through the DGX
 gvproxy/gvisor-tap-vsock path. Set CE_DGX_ALLOW_DOCKER_NETWORK=1 only for an
 operator-directed diagnostic.
 EOF

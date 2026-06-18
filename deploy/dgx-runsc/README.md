@@ -18,6 +18,20 @@ runtime policy to a gVisor Systrap plan with mediated egress, and the DGX
 Stage-1 deployment provides that mediation through the existing
 `gvproxy`/`gvisor-tap-vsock` network path.
 
+The first DGX pass confirmed that `runsc --platform=systrap --network=host`
+fixes networking for a basic container, but Codex itself panics at startup in
+Rust's alternate signal stack setup:
+
+```text
+failed to set up alternative stack guard page: Out of memory (os error 12)
+```
+
+That panic is raised after Rust allocates an alternate signal stack and calls
+`mprotect(..., PROT_NONE)` on the guard page. For Codex on this DGX, prefer the
+gVisor `ptrace` platform over `systrap`: it keeps the process contained by
+`runsc` and preserves the working `gvproxy` egress route, while avoiding the
+systrap signal/page-fault path that trips the Rust guard-page setup.
+
 ## Runner Network Model
 
 The local runner evidence is in
@@ -33,11 +47,12 @@ The local runner evidence is in
   a deployment overlay. There is no in-repo `gvproxy` process launch.
 
 On the DGX, mirror that deployment shape by registering a dedicated Docker
-runtime named `runsc-gvproxy`. That runtime keeps the process under `runsc`,
-but tells `runsc` to use the DGX host network stack. On this host, that stack is
-already the Stage-1 `gvproxy`/`gvisor-tap-vsock` egress path. The wrapper does
-not pass Docker `--network` by default and refuses the old plain `runsc` runtime
-unless the operator explicitly overrides it for diagnostics.
+runtime named `runsc-gvproxy-ptrace`. That runtime keeps the process under
+`runsc`, uses `ptrace` for Codex compatibility, and tells `runsc` to use the DGX
+host network stack. On this host, that stack is already the Stage-1
+`gvproxy`/`gvisor-tap-vsock` egress path. The wrapper does not pass Docker
+`--network` by default and refuses the old plain `runsc` runtime unless the
+operator explicitly overrides it for diagnostics.
 
 ## Apply Steps On The DGX
 
@@ -51,10 +66,10 @@ unless the operator explicitly overrides it for diagnostics.
    test -f /home/cedev4/.codex/config.toml
    ```
 
-2. Register the dedicated `runsc-gvproxy` Docker runtime:
+2. Register the dedicated `runsc-gvproxy-ptrace` Docker runtime:
 
    ```bash
-   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy"'
+   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy-ptrace"'
    ```
 
    If missing, merge this entry into `/etc/docker/daemon.json`:
@@ -62,10 +77,10 @@ unless the operator explicitly overrides it for diagnostics.
    ```json
    {
      "runtimes": {
-       "runsc-gvproxy": {
+       "runsc-gvproxy-ptrace": {
          "path": "/usr/bin/runsc",
          "runtimeArgs": [
-           "--platform=systrap",
+           "--platform=ptrace",
            "--network=host"
          ]
        }
@@ -77,7 +92,7 @@ unless the operator explicitly overrides it for diagnostics.
 
    ```bash
    sudo systemctl reload docker || sudo systemctl restart docker
-   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy"'
+   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy-ptrace"'
    ```
 
 3. Build the seat-matched image from the repo root:
@@ -97,13 +112,13 @@ unless the operator explicitly overrides it for diagnostics.
    `gvproxy`/`gvisor-tap-vsock` path:
 
    ```bash
-   docker run --rm --runtime=runsc-gvproxy \
+   docker run --rm --runtime=runsc-gvproxy-ptrace \
      creator-engine/codex-runsc:0.141.0-aarch64 \
      sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
    ```
 
    If this fails with the root-netns error, stop and re-check that Docker is
-   using the `runsc-gvproxy` runtime and that the runtime has
+   using the `runsc-gvproxy-ptrace` runtime and that the runtime has
    `--network=host` in `runtimeArgs`.
 
 5. Check the runner arguments without launching Codex:
@@ -114,7 +129,7 @@ unless the operator explicitly overrides it for diagnostics.
      ./deploy/dgx-runsc/run-codex-runsc.sh exec "print working tree status"
    ```
 
-   The printed argv must include `docker run`, `--runtime=runsc-gvproxy`, the
+   The printed argv must include `docker run`, `--runtime=runsc-gvproxy-ptrace`, the
    repo bind mount, the `.codex` bind mount, the Codex binary bind mount, and
    `codex exec`. It must not include a Docker `--network=` flag.
 
@@ -137,7 +152,7 @@ The script is parameterized through environment variables:
 
 ```text
 CE_DGX_IMAGE=creator-engine/codex-runsc:0.141.0-aarch64
-CE_DGX_RUNTIME=runsc-gvproxy
+CE_DGX_RUNTIME=runsc-gvproxy-ptrace
 CE_DGX_DOCKER_NETWORK=
 CE_DGX_REPO=$(pwd)
 CE_DGX_CODEX_HOME=/home/cedev4/.codex
@@ -151,6 +166,17 @@ Leave both unset on the nested DGX. The wrapper refuses any Docker network value
 unless `CE_DGX_ALLOW_DOCKER_NETWORK=1` is set for an operator-directed
 diagnostic.
 
+The wrapper also refuses `CE_DGX_RUNTIME=runsc-gvproxy` by default because that
+name is the previously tested Systrap runtime that triggers Codex's Rust
+guard-page panic. Set `CE_DGX_ALLOW_SYSTRAP_CODEX=1` only to rerun that failure
+path intentionally.
+
+`RUST_MIN_STACK` is not set by default. It changes the stack size for Rust
+spawned threads; it does not disable Rust's alternate signal stack guard-page
+setup, which is the panic observed on DGX. Docker memory flags are also not set
+by default because this wrapper was not imposing a memory cap; adding a cap here
+would be more likely to reduce available memory than fix the guard-page failure.
+
 Set `CE_DGX_CODEX_HOME_MODE=ro` only after confirming Codex does not need to
 write session state. The default is `rw` because the TUI commonly records local
 session data under `~/.codex`.
@@ -161,7 +187,7 @@ Local authoring checks:
 
 ```bash
 bash -n deploy/dgx-runsc/run-codex-runsc.sh
-CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--runtime=runsc-gvproxy'
+CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--runtime=runsc-gvproxy-ptrace'
 ! CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--network='
 command -v hadolint >/dev/null && hadolint deploy/dgx-runsc/Dockerfile || true
 ```
@@ -170,8 +196,9 @@ DGX apply checks:
 
 ```bash
 docker build -f deploy/dgx-runsc/Dockerfile -t creator-engine/codex-runsc:0.141.0-aarch64 deploy/dgx-runsc
-docker run --rm --runtime=runsc-gvproxy creator-engine/codex-runsc:0.141.0-aarch64 \
+docker run --rm --runtime=runsc-gvproxy-ptrace creator-engine/codex-runsc:0.141.0-aarch64 \
   sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
+CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --dry-run exec --version
 CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 ```
 
@@ -180,8 +207,12 @@ CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 - Run the interactive form from a real TTY, including inside tmux. If a caller
   is non-interactive, set `CE_DGX_TTY_FLAGS=-i` or use the dry-run check.
 - Do not use Docker bridge, Docker none, or the plain `runsc` runtime on the
-  nested DGX. The `runsc-gvproxy` runtime owns networking, and egress should
-  prove out with the HTTPS `git ls-remote` check above.
+  nested DGX. The `runsc-gvproxy-ptrace` runtime owns networking, and egress
+  should prove out with the HTTPS `git ls-remote` check above.
+- Keep the earlier `runsc-gvproxy` Systrap runtime only as a basic-container
+  diagnostic. Codex should use `runsc-gvproxy-ptrace` unless the DGX test proves
+  the Rust guard-page panic is fixed upstream; the wrapper requires
+  `CE_DGX_ALLOW_SYSTRAP_CODEX=1` to use that old runtime.
 - This wrapper does not grant GPU access and does not touch NVIDIA runtime
   plumbing. It is only for containing the Codex controller process.
 - Auth and config stay on the host and enter the container only through the

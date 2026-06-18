@@ -12,16 +12,20 @@ Ratified:
 Controller relay for ce-ops#128 on 2026-06-18: author DGX-side runsc/gVisor
 Codex containment artifacts, then revise the wrapper to avoid the nested DGX
 root-netns failure by mirroring CE runner networking through the Stage-1
-`gvproxy`/`gvisor-tap-vsock` path.
+`gvproxy`/`gvisor-tap-vsock` path. Follow-up DGX testing confirmed that
+`runsc --platform=systrap --network=host` fixed networking for a basic
+container but Codex panicked in Rust alternate signal stack guard-page setup, so
+the Codex runtime default moves to the `ptrace` platform.
 
 The changes:
-- The DGX wrapper defaults to a dedicated `runsc-gvproxy` Docker runtime rather
-  than the plain `runsc` runtime.
+- The DGX wrapper defaults to a dedicated `runsc-gvproxy-ptrace` Docker runtime
+  rather than the plain `runsc` runtime.
 - The wrapper does not pass Docker `--network` by default and refuses the old
   plain `runsc` / Docker network path unless explicitly overridden for
   diagnostics.
-- The README documents the CE runner evidence (`runsc`, Systrap, mediated
-  egress), the required DGX runtime registration, and an HTTPS egress check.
+- The README documents the CE runner evidence (`runsc`, mediated egress), the
+  required DGX runtime registration, the ptrace-over-systrap rationale for
+  Codex, and an HTTPS egress check.
 - The image remains a minimal seat-matched runtime with CA certificates, `git`,
   and no baked Codex auth/config/binary.
 
