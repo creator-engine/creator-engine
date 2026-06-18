@@ -1731,6 +1731,7 @@ def _run_adoption_leg(
                 "head_sha": action.get("head_sha"),
                 "scaffold_paths": list(scaffold_paths),
                 "workflow_sha256": CE_WORKFLOW_SHA256,
+                **({"forge_identity": action["forge_identity"]} if action.get("forge_identity") else {}),
             },
             rollback={"automatic": "delete only the local adoption checkout/branch this run created"},
             mutated=not bool(action.get("already")),

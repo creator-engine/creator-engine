@@ -1066,6 +1066,8 @@ class _AdoptionForge:
         commit_err: str = "",
         committed_paths: list[str] | None = None,
         workflow_blob: str | None = None,
+        expected_commit_login: str | None = None,
+        ambient_git_login: str = "chmod735",
     ):
         self.calls: list[dict[str, Any]] = []
         self.mint_perms: list[dict[str, str]] = []
@@ -1078,6 +1080,14 @@ class _AdoptionForge:
         self.commit_err = commit_err
         self.committed_paths = committed_paths
         self.workflow_blob = workflow_blob if workflow_blob is not None else onboard_apply.CE_WORKFLOW_CONTENT
+        self.expected_commit_login = expected_commit_login
+        self.expected_commit_email = (
+            f"{expected_commit_login}@users.noreply.github.com"
+            if expected_commit_login
+            else None
+        )
+        self.ambient_git_login = ambient_git_login
+        self.git_config: dict[str, str] = {}
         self._posted = False  # once a PR is POSTed, the re-read GET must reflect it (verify)
         self.repo_json = _fx("repo.json")
         self.protection_json = protection_out if protection_out is not None else _fx("protection.json")
@@ -1127,6 +1137,21 @@ class _AdoptionForge:
             dest = Path(argv[4])
             (dest / ".git").mkdir(parents=True, exist_ok=True)
             return self._done(argv, 0)
+        if "config" in argv:
+            key = str(argv[-2]) if len(argv) >= 2 and "--get" not in argv else str(argv[-1])
+            if "--get" in argv:
+                if "--local" in argv:
+                    value = self.git_config.get(key)
+                    return self._done(argv, 0, f"{value}\n") if value is not None else self._done(argv, 1)
+                if key == "user.name":
+                    return self._done(argv, 0, f"{self.ambient_git_login}\n")
+                if key == "user.email":
+                    return self._done(argv, 0, f"{self.ambient_git_login}@users.noreply.github.com\n")
+                return self._done(argv, 1)
+            if "--local" in argv and len(argv) >= 2:
+                self.git_config[str(argv[-2])] = str(argv[-1])
+                return self._done(argv, 0)
+            return self._done(argv, 1)
         if "ls-remote" in argv:
             # empty → branch absent on remote (a clean create push); else a non-ancestor sha.
             return self._done(argv, 0, "" if self.fast_forward else ("9" * 40 + "\trefs/heads/ce/adopt-governance"))
@@ -1135,7 +1160,23 @@ class _AdoptionForge:
         if "rev-parse" in argv:
             return self._done(argv, 0, "f" * 40)
         if "commit" in argv:
+            if self.expected_commit_login:
+                if (
+                    self.git_config.get("user.name") != self.expected_commit_login
+                    or self.git_config.get("user.email") != self.expected_commit_email
+                    or self.git_config.get("user.useConfigOnly") != "true"
+                ):
+                    return self._done(
+                        argv,
+                        128,
+                        "",
+                        f"ambient git identity {self.ambient_git_login} refused",
+                    )
             return self._done(argv, self.commit_rc, self.commit_out, self.commit_err)
+        if "log" in argv and "--format=%an%x00%ae" in argv:
+            name = self.git_config.get("user.name", self.ambient_git_login)
+            email = self.git_config.get("user.email", f"{self.ambient_git_login}@users.noreply.github.com")
+            return self._done(argv, 0, f"{name}\0{email}\n")
         if "ls-tree" in argv:
             paths = self.committed_paths
             if paths is None:
@@ -1173,6 +1214,7 @@ def _adoption_driver(forge: _AdoptionForge) -> onboard_apply_live.LiveForgeAdopt
         transport=forge.transport,
         spawn=forge.spawn,
         git_spawn=forge.git_spawn,
+        forge_actor_login="ce-dev-3",
     )
     return onboard_apply_live.LiveForgeAdoptionDriver(config)
 
@@ -1339,6 +1381,60 @@ def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revok
     assert _WRITE_TOKEN not in repr(driver) and _READ_TOKEN not in repr(driver)
     driver.close()
     _sh.rmtree(workspace, ignore_errors=True)
+
+
+def test_adoption_scaffold_binds_commit_identity_to_install_time_forge_actor(tmp_path):
+    # ce-ops#127: the local adoption commit must be authored as the per-dev install identity
+    # (from onboard/App/PAT config), never the ambient shared git config on the host.
+    forge = _AdoptionForge(expected_commit_login="ce-dev-3", ambient_git_login="chmod735")
+    driver = _adoption_driver(forge)
+    build = driver.build_adoption_scaffold(
+        repo=_REPO,
+        base="main",
+        branch="ce/adopt-governance",
+        workspace_root=tmp_path,
+        artifacts=_sample_scaffold(),
+    )
+    assert build["ok"] is True
+    assert build["forge_identity"] == {
+        "login": "ce-dev-3",
+        "name": "ce-dev-3",
+        "email": "ce-dev-3@users.noreply.github.com",
+        "source": "install_config",
+    }
+    assert forge.git_config["user.name"] == "ce-dev-3"
+    assert forge.git_config["user.email"] == "ce-dev-3@users.noreply.github.com"
+    assert forge.git_config["user.useConfigOnly"] == "true"
+    assert forge.git_config["user.name"] != forge.ambient_git_login
+    driver.close()
+
+
+def test_adoption_scaffold_refuses_unresolved_forge_identity_before_commit(tmp_path):
+    forge = _AdoptionForge(ambient_git_login="chmod735")
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        transport=forge.transport,
+        spawn=forge.spawn,
+        git_spawn=forge.git_spawn,
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.build_adoption_scaffold(
+            repo=_REPO,
+            base="main",
+            branch="ce/adopt-governance",
+            workspace_root=tmp_path,
+            artifacts=_sample_scaffold(),
+        )
+    assert exc.value.code == "forge_identity_unresolved"
+    joined_calls = "\n".join(" ".join(c["argv"]) for c in forge.calls)
+    assert " commit " not in joined_calls
+    driver.close()
 
 
 def test_adoption_scaffold_commit_failure_raises_before_push(tmp_path):
