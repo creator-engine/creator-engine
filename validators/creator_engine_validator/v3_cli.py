@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -2589,20 +2590,64 @@ def _cmd_session(args: argparse.Namespace) -> int:
     )
 
 
-def _onboard_apply_driver() -> onboard_apply.ApplyDriver:
+def _onboard_apply_driver(
+    *,
+    merged: "v3_installer.MergeResult | None" = None,
+    policy_sha: str | None = None,
+    adoption: bool = False,
+) -> onboard_apply.ApplyDriver:
     """Seam (ce-ops#85): the side-effect driver for ``onboard --apply``.
 
-    The default base driver has no live GitHub legs (every verify fails-closed),
-    so plain-join detection naturally DEFERS in production until a live forge
-    driver is wired. Tests monkeypatch this to inject a fake driver that
-    exercises the plain-join apply path end-to-end.
+    With no context this returns the conservative base driver. With the merged
+    install answers and verified policy digest, this is the production live-forge
+    selection point:
 
-    ce-ops#88: the live-vs-base selection is NOT here — it is the
-    ``onboard_apply_live.live_forge_select`` factory the call sites delegate to,
-    so this seam's zero-arg signature stays unchanged and the FakeDriver
-    monkeypatch keeps working (the factory is a pass-through when live-forge is OFF).
+    * read/plain-join mode returns a live read driver only when explicitly
+      authorized/configured; otherwise it fail-closes to the base driver.
+    * adoption mode returns the E3 brownfield adoption driver only under the
+      dual live-forge + adoption-write escalation; otherwise it delegates to the
+      read/plain-join selector.
+
+    The zero-arg form stays available for legacy tests and conservative fakes.
     """
-    return onboard_apply.ApplyDriver()
+    base = onboard_apply.ApplyDriver()
+    if merged is None or not policy_sha:
+        return base
+    if adoption:
+        return onboard_apply_live.adoption_forge_select(
+            base, merged=merged, policy_sha=policy_sha
+        )
+    return onboard_apply_live.live_forge_select(base, merged=merged, policy_sha=policy_sha)
+
+
+def _factory_accepts_onboard_context(factory: Any) -> bool:
+    try:
+        params = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        return False
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return True
+    allowed_kinds = {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
+    return all(
+        name in params and params[name].kind in allowed_kinds
+        for name in ("merged", "policy_sha", "adoption")
+    )
+
+
+def _select_onboard_apply_driver(
+    *,
+    merged: "v3_installer.MergeResult",
+    policy_sha: str,
+    adoption: bool,
+) -> onboard_apply.ApplyDriver:
+    """Call the production driver seam while preserving old zero-arg monkeypatch fakes."""
+    factory = _onboard_apply_driver
+    if _factory_accepts_onboard_context(factory):
+        return factory(merged=merged, policy_sha=policy_sha, adoption=adoption)
+    return factory()
 
 
 def _close_apply_driver(driver: Any) -> None:
@@ -2934,16 +2979,13 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             # (existing + NOT already-CE) keeps the UNCHANGED E3 refuse below. The
             # default driver has no live forge legs, so production defers until a
             # live driver is wired (detection returns False → the same E3 refuse).
-            # ce-ops#88 — the zero-arg seam still returns the base/monkeypatched driver; the
-            # live-forge factory wraps it (default OFF → pass-through, so the FakeDriver
-            # monkeypatch is untouched). A live driver mints a token during detection, so it
-            # is tracked in ``live_candidate`` and revoked (``close``) on every exit path.
-            # ce-ops#85 — the adoption selector returns the E3 adoption driver ONLY under the
-            # DUAL escalation (CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE); otherwise it
-            # delegates to the read-only live driver (or the base), so an unauthorized run keeps
-            # the unchanged brownfield_deferred status quo. The driver still serves detection.
-            candidate_driver = onboard_apply_live.adoption_forge_select(
-                _onboard_apply_driver(), merged=merged, policy_sha=_install_spec_digest
+            # ce-ops#88 — _onboard_apply_driver is the production live-driver seam. It returns
+            # the E3 adoption driver ONLY under the DUAL escalation (CE_FORGE_LIVE_FORGE +
+            # CE_FORGE_ADOPTION_WRITE); otherwise it delegates to the read-only live driver
+            # (or the base), so an unauthorized run keeps the unchanged brownfield_deferred
+            # status quo. The driver still serves detection and is revoked on every exit path.
+            candidate_driver = _select_onboard_apply_driver(
+                merged=merged, policy_sha=_install_spec_digest, adoption=True
             )
             live_candidate = candidate_driver
             target_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
@@ -3149,10 +3191,10 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         # Detection needs live forge reads, which the dry-run driver lacks — so the
         # already-CE verdict is HONESTLY deferred to apply, where the live driver
         # verifies the workflow digest + protection floor before converging.
-        # ce-ops#88 — same fail-closed live-forge selection as the apply path (default OFF →
+        # ce-ops#88 — same fail-closed live-forge seam as the apply path (default OFF →
         # the base dry-run driver, so --plan stays honest); revoke after the read-only probe.
-        _plan_driver = onboard_apply_live.live_forge_select(
-            _onboard_apply_driver(), merged=merged, policy_sha=_install_spec_digest
+        _plan_driver = _select_onboard_apply_driver(
+            merged=merged, policy_sha=_install_spec_digest, adoption=False
         )
         try:
             already_ce = onboard_apply.repo_is_already_ce_governed(
