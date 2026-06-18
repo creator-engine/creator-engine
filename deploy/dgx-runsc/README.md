@@ -4,10 +4,40 @@ This directory authors the DGX-side container wrapper for running the Codex CLI
 controller inside Docker with the `runsc` gVisor runtime. It is authoring only:
 the Controller applies these steps on the DGX.
 
-The image contains only OS runtime basics: Debian slim, CA certificates for
-HTTPS model API egress, `git` for repo inspection, and a non-root seat user.
-It does not bake Codex auth, config, or the Codex binary. The runner bind-mounts
-the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
+The nested DGX must not use the plain Docker networking path:
+
+```bash
+docker run --runtime=runsc --network=bridge ...
+docker run --runtime=runsc --network=none ...
+```
+
+Both forms can hand `runsc` the DGX root network namespace and fail with
+`cannot run with network enabled in root network namespace`. CE's own runner
+does not rely on Docker bridge networking for this posture. It translates the
+runtime policy to a gVisor Systrap plan with mediated egress, and the DGX
+Stage-1 deployment provides that mediation through the existing
+`gvproxy`/`gvisor-tap-vsock` network path.
+
+## Runner Network Model
+
+The local runner evidence is in
+`validators/creator_engine_validator/runner/gvisor_proxy_backend.py`:
+
+- `translate_to_runsc_plan()` selects `runtime="runsc"` and
+  `platform="systrap"`.
+- A policy with egress is rendered as `network="proxy"` in the CE plan, not as
+  Docker bridge networking.
+- The same plan enables read-only root, `no_new_privileges`, and dropped
+  capabilities.
+- `SubprocessContainerRunner.egress_enforceable()` treats the concrete proxy as
+  a deployment overlay. There is no in-repo `gvproxy` process launch.
+
+On the DGX, mirror that deployment shape by registering a dedicated Docker
+runtime named `runsc-gvproxy`. That runtime keeps the process under `runsc`,
+but tells `runsc` to use the DGX host network stack. On this host, that stack is
+already the Stage-1 `gvproxy`/`gvisor-tap-vsock` egress path. The wrapper does
+not pass Docker `--network` by default and refuses the old plain `runsc` runtime
+unless the operator explicitly overrides it for diagnostics.
 
 ## Apply Steps On The DGX
 
@@ -21,10 +51,10 @@ the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
    test -f /home/cedev4/.codex/config.toml
    ```
 
-2. Register `runsc` as a Docker runtime if Docker does not already list it:
+2. Register the dedicated `runsc-gvproxy` Docker runtime:
 
    ```bash
-   docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy"'
    ```
 
    If missing, merge this entry into `/etc/docker/daemon.json`:
@@ -32,8 +62,12 @@ the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
    ```json
    {
      "runtimes": {
-       "runsc": {
-         "path": "/usr/bin/runsc"
+       "runsc-gvproxy": {
+         "path": "/usr/bin/runsc",
+         "runtimeArgs": [
+           "--platform=systrap",
+           "--network=host"
+         ]
        }
      }
    }
@@ -43,7 +77,7 @@ the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
 
    ```bash
    sudo systemctl reload docker || sudo systemctl restart docker
-   docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+   docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy"'
    ```
 
 3. Build the seat-matched image from the repo root:
@@ -59,17 +93,18 @@ the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
      deploy/dgx-runsc
    ```
 
-4. Verify the runtime is actually `runsc`:
+4. Verify the runtime is actually `runsc` and HTTPS egress follows the DGX
+   `gvproxy`/`gvisor-tap-vsock` path:
 
    ```bash
-   docker run --rm --runtime=runsc creator-engine/codex-runsc:0.141.0-aarch64 uname -a
-   docker run --rm --runtime=runsc creator-engine/codex-runsc:0.141.0-aarch64 \
-     sh -lc 'cat /proc/version; (dmesg 2>/dev/null || true) | head -40'
+   docker run --rm --runtime=runsc-gvproxy \
+     creator-engine/codex-runsc:0.141.0-aarch64 \
+     sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
    ```
 
-   Confirm the output shows the gVisor/runsc kernel signature, commonly via
-   `gVisor` in `dmesg` or a gVisor-style `/proc/version`/kernel string. If the
-   signature is absent, stop and re-check Docker runtime registration.
+   If this fails with the root-netns error, stop and re-check that Docker is
+   using the `runsc-gvproxy` runtime and that the runtime has
+   `--network=host` in `runtimeArgs`.
 
 5. Check the runner arguments without launching Codex:
 
@@ -79,8 +114,9 @@ the repo, `~/.codex`, and the standalone Codex binary from the DGX host.
      ./deploy/dgx-runsc/run-codex-runsc.sh exec "print working tree status"
    ```
 
-   The printed argv must include `docker run`, `--runtime=runsc`, the repo bind
-   mount, the `.codex` bind mount, the Codex binary bind mount, and `codex exec`.
+   The printed argv must include `docker run`, `--runtime=runsc-gvproxy`, the
+   repo bind mount, the `.codex` bind mount, the Codex binary bind mount, and
+   `codex exec`. It must not include a Docker `--network=` flag.
 
 6. Start the interactive Codex TUI in the repo:
 
@@ -101,14 +137,19 @@ The script is parameterized through environment variables:
 
 ```text
 CE_DGX_IMAGE=creator-engine/codex-runsc:0.141.0-aarch64
-CE_DGX_RUNTIME=runsc
-CE_DGX_NETWORK=bridge
+CE_DGX_RUNTIME=runsc-gvproxy
+CE_DGX_DOCKER_NETWORK=
 CE_DGX_REPO=$(pwd)
 CE_DGX_CODEX_HOME=/home/cedev4/.codex
 CE_DGX_CODEX_HOME_MODE=rw
 CE_DGX_CODEX_BIN=/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
 CE_DGX_TTY_FLAGS=-it
 ```
+
+`CE_DGX_NETWORK` remains as a deprecated alias for `CE_DGX_DOCKER_NETWORK`.
+Leave both unset on the nested DGX. The wrapper refuses any Docker network value
+unless `CE_DGX_ALLOW_DOCKER_NETWORK=1` is set for an operator-directed
+diagnostic.
 
 Set `CE_DGX_CODEX_HOME_MODE=ro` only after confirming Codex does not need to
 write session state. The default is `rw` because the TUI commonly records local
@@ -120,7 +161,8 @@ Local authoring checks:
 
 ```bash
 bash -n deploy/dgx-runsc/run-codex-runsc.sh
-CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--runtime=runsc'
+CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--runtime=runsc-gvproxy'
+! CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--network='
 command -v hadolint >/dev/null && hadolint deploy/dgx-runsc/Dockerfile || true
 ```
 
@@ -128,7 +170,8 @@ DGX apply checks:
 
 ```bash
 docker build -f deploy/dgx-runsc/Dockerfile -t creator-engine/codex-runsc:0.141.0-aarch64 deploy/dgx-runsc
-docker run --rm --runtime=runsc creator-engine/codex-runsc:0.141.0-aarch64 uname -a
+docker run --rm --runtime=runsc-gvproxy creator-engine/codex-runsc:0.141.0-aarch64 \
+  sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
 CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 ```
 
@@ -136,8 +179,9 @@ CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 
 - Run the interactive form from a real TTY, including inside tmux. If a caller
   is non-interactive, set `CE_DGX_TTY_FLAGS=-i` or use the dry-run check.
-- Docker bridge networking must allow HTTPS egress to the model API. If egress
-  fails, inspect Docker networking and any `gvproxy`/host firewall policy.
+- Do not use Docker bridge, Docker none, or the plain `runsc` runtime on the
+  nested DGX. The `runsc-gvproxy` runtime owns networking, and egress should
+  prove out with the HTTPS `git ls-remote` check above.
 - This wrapper does not grant GPU access and does not touch NVIDIA runtime
   plumbing. It is only for containing the Codex controller process.
 - Auth and config stay on the host and enter the container only through the

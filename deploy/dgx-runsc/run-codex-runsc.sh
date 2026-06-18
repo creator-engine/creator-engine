@@ -9,8 +9,9 @@ Usage:
 
 Environment:
   CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
-  CE_DGX_RUNTIME            Docker runtime (default: runsc)
-  CE_DGX_NETWORK            Docker network mode (default: bridge)
+  CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy)
+  CE_DGX_DOCKER_NETWORK     Optional Docker --network value (default: unset)
+  CE_DGX_NETWORK            Deprecated alias for CE_DGX_DOCKER_NETWORK
   CE_DGX_REPO               Host repo path (default: current directory)
   CE_DGX_CODEX_HOME         Host codex home (default: /home/cedev4/.codex)
   CE_DGX_CODEX_HOME_MODE    Mount mode for codex home: rw or ro (default: rw)
@@ -21,6 +22,9 @@ Environment:
   CE_DGX_GID                Container gid (default: id -g)
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
   CE_DGX_DRY_RUN            Print docker argv instead of executing when set to 1
+  CE_DGX_ALLOW_PLAIN_RUNSC  Allow CE_DGX_RUNTIME=runsc despite DGX root-netns failure (default: 0)
+  CE_DGX_ALLOW_DOCKER_NETWORK
+                            Allow Docker --network despite DGX root-netns failure (default: 0)
 EOF
 }
 
@@ -41,8 +45,8 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
 fi
 
 CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}"
-CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc}"
-CE_DGX_NETWORK="${CE_DGX_NETWORK:-bridge}"
+CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy}"
+CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
 CE_DGX_CODEX_HOME_MODE="${CE_DGX_CODEX_HOME_MODE:-rw}"
@@ -60,8 +64,37 @@ if [ "${CE_DGX_CODEX_HOME_MODE}" != "rw" ] && [ "${CE_DGX_CODEX_HOME_MODE}" != "
   exit 2
 fi
 
+if [ "${CE_DGX_RUNTIME}" = "runsc" ] && [ "${CE_DGX_ALLOW_PLAIN_RUNSC:-0}" != "1" ]; then
+  cat >&2 <<'EOF'
+Refusing CE_DGX_RUNTIME=runsc on this DGX.
+
+Plain Docker runsc uses Docker's bridge/none network namespace path here, which
+fails in the nested DGX root network namespace. Register and use the Stage-1
+gvproxy-backed runtime instead:
+
+  CE_DGX_RUNTIME=runsc-gvproxy
+EOF
+  exit 2
+fi
+
+if [ -n "${CE_DGX_DOCKER_NETWORK}" ] && [ "${CE_DGX_ALLOW_DOCKER_NETWORK:-0}" != "1" ]; then
+  cat >&2 <<EOF
+Refusing Docker --network=${CE_DGX_DOCKER_NETWORK}.
+
+Do not ask Docker for bridge/none/host networking on the nested DGX. The
+runsc-gvproxy runtime owns networking and routes egress through the DGX
+gvproxy/gvisor-tap-vsock path. Set CE_DGX_ALLOW_DOCKER_NETWORK=1 only for an
+operator-directed diagnostic.
+EOF
+  exit 2
+fi
+
 if [ "${dry_run}" != "1" ]; then
   command -v docker >/dev/null 2>&1 || { printf 'docker not found\n' >&2; exit 127; }
+  docker info --format '{{json .Runtimes}}' | grep -q "\"${CE_DGX_RUNTIME}\"" || {
+    printf 'docker runtime not registered: %s\n' "${CE_DGX_RUNTIME}" >&2
+    exit 66
+  }
   [ -d "${CE_DGX_REPO}" ] || { printf 'repo path not found: %s\n' "${CE_DGX_REPO}" >&2; exit 66; }
   [ -d "${CE_DGX_CODEX_HOME}" ] || { printf 'codex home not found: %s\n' "${CE_DGX_CODEX_HOME}" >&2; exit 66; }
   [ -x "${CE_DGX_CODEX_BIN}" ] || { printf 'codex binary not executable: %s\n' "${CE_DGX_CODEX_BIN}" >&2; exit 66; }
@@ -88,7 +121,6 @@ codex_bin_mount="type=bind,source=${CE_DGX_CODEX_BIN},target=/usr/local/bin/code
 docker_cmd=(
   docker run --rm
   "--runtime=${CE_DGX_RUNTIME}"
-  "--network=${CE_DGX_NETWORK}"
   --security-opt=no-new-privileges
   --cap-drop=ALL
   --user "${CE_DGX_UID}:${CE_DGX_GID}"
@@ -100,6 +132,10 @@ docker_cmd=(
   --mount "${codex_home_mount}"
   --mount "${codex_bin_mount}"
 )
+
+if [ -n "${CE_DGX_DOCKER_NETWORK}" ]; then
+  docker_cmd+=("--network=${CE_DGX_DOCKER_NETWORK}")
+fi
 
 docker_cmd+=("${tty_flags[@]}")
 docker_cmd+=("${CE_DGX_IMAGE}")
