@@ -601,6 +601,9 @@ def _build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--author-human-id", default=None, help="resolved author human id")
     rp.add_argument("--author-controller-id", default=None, help="author controller id")
     rp.add_argument("--author-venue-id", default=None, help="author venue id")
+    rp.add_argument("--author-credential-domain-ref", default=None, help="author credential-domain ref")
+    rp.add_argument("--author-os-user-ref", default=None, help="author OS-user-domain ref")
+    rp.add_argument("--author-host-ref", default=None, help="author host ref")
     rp.add_argument("--last-pusher-login", default=None, help="last pusher source-host login")
     rp.add_argument("--last-pusher-human-id", default=None, help="resolved last-pusher human id")
     rp.add_argument("--changed-path", action="append", dest="changed_paths", default=None)
@@ -1627,6 +1630,9 @@ def _reviewer_triage_plan(args) -> int:
             "human_id": args.author_human_id or "",
             "controller_id": args.author_controller_id or "",
             "venue_id": args.author_venue_id or "",
+            "credential_domain_ref": args.author_credential_domain_ref or "",
+            "os_user_ref": args.author_os_user_ref or "",
+            "host_ref": args.author_host_ref or "",
         },
         last_pusher=last_pusher,
         changed_paths=changed_paths,

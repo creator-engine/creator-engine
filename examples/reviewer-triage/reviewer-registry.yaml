@@ -34,4 +34,16 @@ reviewers:
       max_active_reviews: 2
       active_reviews: 0
       backup_reviewer_ids: []
+    isolation_domain_attestation:
+      forge_principal: reviewer-a
+      credential_domain_ref: credential-reviewer-a
+      os_user_ref: os-user-reviewer-a
+      controller_principal_ref: ce-reviewer-a
+      execution_sandbox_ref: sandbox-reviewer-a
+      containment_ref: containment-reviewer-a
+      host_ref: ce-pilot-1
+      computed_tier: tier-2
+      containment_status: enforced
+      evidence_timestamp: "2026-06-18T00:00:00Z"
+      source: reviewer-registry-example
     policy_refs: [ce-ops#120]

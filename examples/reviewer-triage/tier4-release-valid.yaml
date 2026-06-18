@@ -2,9 +2,9 @@ kind: reviewer-triage-decision
 schema_version: "1"
 work_ref:
   repo: creator-engine/creator-engine
-  pr_number: 122
-  head_sha: cccccccccccccccccccccccccccccccccccccccc
-  author_run_id: run-author-122
+  pr_number: 129
+  head_sha: "4444444444444444444444444444444444444444"
+  author_run_id: run-author-129
   author_identity:
     login: chmod735
     human_id: peer-operator
@@ -14,47 +14,47 @@ work_ref:
     os_user_ref: os-user-author
     host_ref: ce-pilot-1
 changed_paths:
-  - schemas/reviewer-registry.schema.yaml
-mutation_classes: [schema]
-risk_tier: high
+  - validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
+mutation_classes: [release]
+risk_tier: privileged
 candidate_generation:
   sources: [CODEOWNERS, .ce/coordination.yml, reviewer-registry]
   ownership_only: true
   git_history_scoring: false
-  candidates: [reviewer-no-access]
+  candidates: [tier4-reviewer]
   ranking_method: lexicographic_reviewer_id
   broad_team_fallback: null
 eligibility_results:
-  - reviewer_id: reviewer-no-access
-    eligible: false
-    reasons: [missing_source_host_review_counting_permission]
-    identity_ref: tenants/creator-engine/reviewers/reviewer-no-access.yml
-    human_id: human-reviewer-no-access
+  - reviewer_id: tier4-reviewer
+    eligible: true
+    reasons: []
+    identity_ref: tenants/creator-engine/reviewers/tier4-reviewer.yml
+    human_id: human-tier4-reviewer
     isolation_domain_attestation:
-      forge_principal: reviewer-no-access
-      credential_domain_ref: credential-reviewer-no-access
-      os_user_ref: os-user-reviewer-no-access
-      controller_principal_ref: ce-reviewer-no-access
-      execution_sandbox_ref: sandbox-reviewer-no-access
-      containment_ref: containment-reviewer-no-access
+      forge_principal: tier4-reviewer
+      credential_domain_ref: credential-tier4-reviewer
+      os_user_ref: os-user-tier4-reviewer
+      controller_principal_ref: ce-reviewer-tier4
+      execution_sandbox_ref: sandbox-tier4-reviewer
+      containment_ref: containment-tier4-reviewer
       host_ref: ce-pilot-1
-      computed_tier: tier-2
+      computed_tier: tier-4
       containment_status: enforced
       evidence_timestamp: "2026-06-18T00:00:00Z"
       source: reviewer-registry-example
     containment_status: enforced
 availability_results:
-  - reviewer_id: reviewer-no-access
+  - reviewer_id: tier4-reviewer
     available: true
     reasons: []
 assignment:
-  selected_reviewers: []
-  selected_identity_refs: []
-  review_request_action: none
+  selected_reviewers: [tier4-reviewer]
+  selected_identity_refs: [tenants/creator-engine/reviewers/tier4-reviewer.yml]
+  review_request_action: request_review
   venue_dispatch_ref: null
   envelope_ref: null
   broad_team_fallback: null
 escalation:
-  status: operator
-  reason: no_eligible_available_reviewer
+  status: none
+  reason: none
 non_authority_statement: "Reviewer triage assigns review only; it does not approve, ratify, merge, or waive policy."

@@ -2,9 +2,9 @@ kind: reviewer-triage-decision
 schema_version: "1"
 work_ref:
   repo: creator-engine/creator-engine
-  pr_number: 122
-  head_sha: cccccccccccccccccccccccccccccccccccccccc
-  author_run_id: run-author-122
+  pr_number: 126
+  head_sha: "1111111111111111111111111111111111111111"
+  author_run_id: run-author-126
   author_identity:
     login: chmod735
     human_id: peer-operator
@@ -14,37 +14,37 @@ work_ref:
     os_user_ref: os-user-author
     host_ref: ce-pilot-1
 changed_paths:
-  - schemas/reviewer-registry.schema.yaml
-mutation_classes: [schema]
-risk_tier: high
+  - validators/creator_engine_validator/reviewer_triage.py
+mutation_classes: [code]
+risk_tier: medium
 candidate_generation:
   sources: [CODEOWNERS, .ce/coordination.yml, reviewer-registry]
   ownership_only: true
   git_history_scoring: false
-  candidates: [reviewer-no-access]
+  candidates: [same-controller]
   ranking_method: lexicographic_reviewer_id
   broad_team_fallback: null
 eligibility_results:
-  - reviewer_id: reviewer-no-access
+  - reviewer_id: same-controller
     eligible: false
-    reasons: [missing_source_host_review_counting_permission]
-    identity_ref: tenants/creator-engine/reviewers/reviewer-no-access.yml
-    human_id: human-reviewer-no-access
+    reasons: [same_controller_as_author, isolation_tier_below_floor]
+    identity_ref: tenants/creator-engine/reviewers/same-controller.yml
+    human_id: human-same-controller
     isolation_domain_attestation:
-      forge_principal: reviewer-no-access
-      credential_domain_ref: credential-reviewer-no-access
-      os_user_ref: os-user-reviewer-no-access
-      controller_principal_ref: ce-reviewer-no-access
-      execution_sandbox_ref: sandbox-reviewer-no-access
-      containment_ref: containment-reviewer-no-access
+      forge_principal: reviewer-different-login
+      credential_domain_ref: credential-same-controller
+      os_user_ref: os-user-same-controller
+      controller_principal_ref: ce-dev-1
+      execution_sandbox_ref: sandbox-same-controller
+      containment_ref: containment-same-controller
       host_ref: ce-pilot-1
-      computed_tier: tier-2
+      computed_tier: tier-1
       containment_status: enforced
       evidence_timestamp: "2026-06-18T00:00:00Z"
       source: reviewer-registry-example
     containment_status: enforced
 availability_results:
-  - reviewer_id: reviewer-no-access
+  - reviewer_id: same-controller
     available: true
     reasons: []
 assignment:

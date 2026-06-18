@@ -25,6 +25,12 @@ The distinct-controller-review rule referenced by this ADR is canonically record
 ce-ops `decision-records/ADR-0003-reviewer-independence-isolation-domain.md`. This
 in-repo ADR remains the Creator Engine anchor for reviewer-venue authority; readers resolving
 "per ADR-0003" should follow that ce-ops decision record for the isolation-domain rule.
+The contained-runtime requirement referenced by reviewer dispatch is canonically recorded in
+ce-ops `decision-records/ADR-0004-agent-containment-eligibility.md`; reviewer triage composes
+with that record by treating uncontained/noop/advisory/off reviewer venues as ineligible before
+any reviewer-authority envelope can matter. The CE58 live-identity guard remains separate:
+registry actor/login fields are expected identities only, and no token, token-hash, or token-ref
+fields are introduced by reviewer triage.
 
 Key decisions:
 

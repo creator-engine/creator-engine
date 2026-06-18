@@ -15,12 +15,18 @@ Operator-ratified ce-ops#120 reviewer-triage Phase 0-2 build, relayed by the
 CE-DEV-2 Controller on 2026-06-18. Branch `ce120-reviewer-triage`; plan-only,
 no source-host mutation, commit-local and no push.
 
-Per-file purpose (closed path-set - 20 paths):
+Amendment:
+Operator-ratified ce-ops#120 amendment on 2026-06-18. The additive delta composes
+reviewer triage with ce-ops ADR-0003 isolation-domain tiers, ce-ops ADR-0004
+containment eligibility, CE58 live-identity guard preservation, and #34
+ticket-triage separation.
+
+Per-file purpose (closed path-set - 25 paths):
 - **`.ce/pr-manifests/ce120-reviewer-triage.md`** *(A)* - this carrier.
 - **`.ce/changelog/ce120-reviewer-triage.md`** *(A)* - per-PR changelog fragment.
 - **`schemas/reviewer-registry.schema.yaml`** *(A)* - governed reviewer registry schema.
 - **`schemas/reviewer-triage-decision.schema.yaml`** *(A)* - auditable triage decision schema with required non-authority statement.
-- **`examples/reviewer-triage/*`** *(A, 6 files)* - five decision examples plus a registry example.
+- **`examples/reviewer-triage/*`** *(A, 11 files)* - ten decision examples plus a registry example.
 - **`validators/creator_engine_validator/reviewer_triage.py`** *(A)* - offline ownership-only plan engine.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - `ce reviewer-triage plan` parser and dispatch.
 - **`validators/tests/unit/test_reviewer_triage_plan.py`** *(A)* - TDD planner and CLI coverage.
@@ -35,9 +41,9 @@ Per-file purpose (closed path-set - 20 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=20
+AUTHORIZED_PATHS_COUNT=25
 
-AUTHORIZED_PATHS_SHA256=c62f17613a665d7ed877d023156b2da7bac5089fbe7cc66d949df25230b71666
+AUTHORIZED_PATHS_SHA256=3d2c4e33a269273fc3d7c3b1a0c8cc7c8447020ecd441674929f390a5ef73994
 
 ```text
 .ce/changelog/ce120-reviewer-triage.md
@@ -49,7 +55,12 @@ examples/reviewer-triage/missing-access.yaml
 examples/reviewer-triage/no-available-reviewer.yaml
 examples/reviewer-triage/privileged-requires-source.yaml
 examples/reviewer-triage/reviewer-registry.yaml
+examples/reviewer-triage/same-controller-tier1-reject.yaml
+examples/reviewer-triage/same-host-tier2-valid.yaml
 examples/reviewer-triage/same-human-reject.yaml
+examples/reviewer-triage/tier4-release-valid.yaml
+examples/reviewer-triage/uncontained-reject.yaml
+examples/reviewer-triage/unresolved-identity-reject.yaml
 schemas/reviewer-registry.schema.yaml
 schemas/reviewer-triage-decision.schema.yaml
 specs/v2/adrs/ADR-V2-009-reviewer-venue-authority.md

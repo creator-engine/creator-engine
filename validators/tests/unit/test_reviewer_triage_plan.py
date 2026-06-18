@@ -27,6 +27,11 @@ def _reviewer(
     paths: list[str] | None = None,
     mutation_classes: list[str] | None = None,
     risk_tiers: list[str] | None = None,
+    isolation_tier: str = "tier-2",
+    containment_status: str = "enforced",
+    credential_domain_ref: str | None = None,
+    os_user_ref: str | None = None,
+    host_ref: str = "ce-pilot-1",
 ) -> dict:
     login = login or reviewer_id
     human_id = human_id or f"human-{reviewer_id}"
@@ -69,6 +74,19 @@ def _reviewer(
             "active_reviews": active_reviews,
             "backup_reviewer_ids": [],
         },
+        "isolation_domain_attestation": {
+            "forge_principal": login,
+            "credential_domain_ref": credential_domain_ref or f"credential-{reviewer_id}",
+            "os_user_ref": os_user_ref or f"os-user-{reviewer_id}",
+            "controller_principal_ref": controller_id,
+            "execution_sandbox_ref": f"sandbox-{reviewer_id}",
+            "containment_ref": f"containment-{reviewer_id}",
+            "host_ref": host_ref,
+            "computed_tier": isolation_tier,
+            "containment_status": containment_status,
+            "evidence_timestamp": "2026-06-18T00:00:00Z",
+            "source": "unit-test",
+        },
         "policy_refs": ["ce-ops#120"],
     }
 
@@ -94,6 +112,9 @@ def _base_kwargs(**overrides):
             "human_id": "peer-operator",
             "controller_id": "ce-dev-1",
             "venue_id": "author-venue",
+            "credential_domain_ref": "credential-author",
+            "os_user_ref": "os-user-author",
+            "host_ref": "ce-pilot-1",
         },
         "last_pusher": {"login": "chmod735", "human_id": "peer-operator"},
         "changed_paths": ["validators/creator_engine_validator/ce_cli.py"],
@@ -123,6 +144,90 @@ def test_deterministic_ranking_selects_concrete_reviewer_identity():
     assert first["assignment"]["review_request_action"] == "request_review"
     assert first["non_authority_statement"] == NON_AUTHORITY
     assert first["candidate_generation"]["git_history_scoring"] is False
+    assert first["eligibility_results"][0]["isolation_domain_attestation"]["computed_tier"] == "tier-2"
+    assert first["eligibility_results"][0]["containment_status"] == "enforced"
+
+
+def test_same_host_tier2_peer_is_valid_when_domains_are_disjoint():
+    registry = _registry([
+        _reviewer("same-host-peer", login="reviewer-a", host_ref="ce-pilot-1"),
+    ])
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(registry=registry, codeowners_text="* @reviewer-a\n")
+    )
+
+    assert decision["assignment"]["selected_reviewers"] == ["same-host-peer"]
+    result = decision["eligibility_results"][0]
+    assert result["eligible"] is True
+    assert result["isolation_domain_attestation"]["host_ref"] == "ce-pilot-1"
+    assert result["isolation_domain_attestation"]["computed_tier"] == "tier-2"
+
+
+def test_same_user_and_same_controller_with_different_login_is_tier1_invalid():
+    registry = _registry([
+        _reviewer(
+            "same-controller",
+            login="reviewer-a",
+            human_id="peer-operator",
+            controller_id="ce-dev-1",
+            isolation_tier="tier-1",
+        ),
+    ])
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(registry=registry, codeowners_text="* @reviewer-a\n")
+    )
+
+    assert decision["assignment"]["selected_reviewers"] == []
+    reasons = set(decision["eligibility_results"][0]["reasons"])
+    assert "same_human_as_author" in reasons
+    assert "same_controller_as_author" in reasons
+    assert "isolation_tier_below_floor" in reasons
+
+
+def test_unresolved_controller_mapping_fails_closed():
+    reviewer = _reviewer("unresolved-controller", login="reviewer-a")
+    reviewer["controller_id"] = ""
+    reviewer["isolation_domain_attestation"]["controller_principal_ref"] = ""
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(registry=_registry([reviewer]), codeowners_text="* @reviewer-a\n")
+    )
+
+    assert decision["assignment"]["selected_reviewers"] == []
+    assert "unresolved_controller_identity" in decision["eligibility_results"][0]["reasons"]
+
+
+def test_uncontained_real_reviewer_venue_is_ineligible():
+    registry = _registry([
+        _reviewer("uncontained", login="reviewer-a", containment_status="uncontained"),
+    ])
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(registry=registry, codeowners_text="* @reviewer-a\n")
+    )
+
+    assert decision["assignment"]["selected_reviewers"] == []
+    assert "runtime_uncontained" in decision["eligibility_results"][0]["reasons"]
+
+
+def test_tier4_reviewer_can_be_selected_for_high_consequence_release_class():
+    registry = _registry([
+        _reviewer(
+            "tier4-reviewer",
+            login="reviewer-a",
+            isolation_tier="tier-4",
+            mutation_classes=["code", "release", "root-key", "signing"],
+        )
+    ])
+    decision = rt.plan_reviewer_triage(
+        **_base_kwargs(
+            registry=registry,
+            codeowners_text="* @reviewer-a\n",
+            mutation_classes=["release"],
+            risk_tier="privileged",
+        )
+    )
+
+    assert decision["assignment"]["selected_reviewers"] == ["tier4-reviewer"]
+    assert decision["eligibility_results"][0]["isolation_domain_attestation"]["computed_tier"] == "tier-4"
 
 
 def test_unresolved_identity_fails_closed_for_codeowners_candidate():
@@ -226,6 +331,14 @@ def test_cli_plan_outputs_json_decision(tmp_path, capsys):
         "chmod735",
         "--author-human-id",
         "peer-operator",
+        "--author-controller-id",
+        "ce-dev-1",
+        "--author-credential-domain-ref",
+        "credential-author",
+        "--author-os-user-ref",
+        "os-user-author",
+        "--author-host-ref",
+        "ce-pilot-1",
         "--changed-path",
         "validators/creator_engine_validator/ce_cli.py",
         "--mutation-class",

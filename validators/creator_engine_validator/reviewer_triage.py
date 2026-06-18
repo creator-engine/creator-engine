@@ -26,6 +26,15 @@ PRIVILEGED_MUTATION_CLASSES = frozenset({
     "attestation",
     "redaction",
 })
+HIGH_CONSEQUENCE_MUTATION_CLASSES = frozenset({"release", "root-key", "signing"})
+MIN_ORDINARY_ISOLATION_TIER = 2
+MIN_HIGH_CONSEQUENCE_ISOLATION_TIER = 4
+UNCONTAINED_STATUSES = frozenset({"uncontained", "noop", "advisory", "off"})
+CONTAINMENT_STATUSES = frozenset({
+    "enforced",
+    "required_but_pending_enforcement",
+    *UNCONTAINED_STATUSES,
+})
 
 
 def dump_yaml(data: Any) -> str:
@@ -181,6 +190,100 @@ def _capability_allows(reviewer: dict[str, Any], mutation_classes: list[str], ri
     return reasons
 
 
+def _isolation_attestation(reviewer: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(reviewer, dict):
+        return None
+    attestation = reviewer.get("isolation_domain_attestation")
+    return attestation if isinstance(attestation, dict) else None
+
+
+def _tier_value(tier: Any) -> int:
+    raw = str(tier or "").strip().lower()
+    if raw.startswith("tier-"):
+        raw = raw.split("-", 1)[1]
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _required_isolation_tier(mutation_classes: list[str], risk_tier: str) -> int:
+    if HIGH_CONSEQUENCE_MUTATION_CLASSES.intersection(mutation_classes):
+        return MIN_HIGH_CONSEQUENCE_ISOLATION_TIER
+    return MIN_ORDINARY_ISOLATION_TIER
+
+
+def _same_non_empty(left: Any, right: Any) -> bool:
+    return bool(left) and bool(right) and str(left) == str(right)
+
+
+def _isolation_domain_reasons(
+    reviewer: dict[str, Any] | None,
+    author_identity: dict[str, Any],
+    mutation_classes: list[str],
+    risk_tier: str,
+) -> list[str]:
+    if reviewer is None:
+        return []
+    reasons: list[str] = []
+    attestation = _isolation_attestation(reviewer)
+    required_fields = (
+        "forge_principal",
+        "credential_domain_ref",
+        "os_user_ref",
+        "controller_principal_ref",
+        "execution_sandbox_ref",
+        "containment_ref",
+        "host_ref",
+        "computed_tier",
+        "evidence_timestamp",
+        "source",
+    )
+    if attestation is None:
+        return ["missing_isolation_domain_attestation"]
+    missing = [field for field in required_fields if not attestation.get(field)]
+    if missing:
+        reasons.append("missing_isolation_domain_attestation")
+    if not reviewer.get("controller_id") or not attestation.get("controller_principal_ref"):
+        reasons.append("unresolved_controller_identity")
+
+    required_tier = _required_isolation_tier(mutation_classes, risk_tier)
+    if _tier_value(attestation.get("computed_tier")) < required_tier:
+        reasons.append("isolation_tier_below_floor")
+
+    if _same_non_empty(attestation.get("forge_principal"), author_identity.get("login")):
+        reasons.append("same_forge_principal_as_author")
+    if _same_non_empty(attestation.get("credential_domain_ref"), author_identity.get("credential_domain_ref")):
+        reasons.append("same_credential_domain_as_author")
+    if _same_non_empty(attestation.get("os_user_ref"), author_identity.get("os_user_ref")):
+        reasons.append("same_os_user_as_author")
+    author_controller = author_identity.get("controller_principal_ref") or author_identity.get("controller_id")
+    if _same_non_empty(attestation.get("controller_principal_ref"), author_controller):
+        reasons.append("same_controller_as_author")
+    return _dedupe(reasons)
+
+
+def _containment_status(reviewer: dict[str, Any] | None) -> str | None:
+    attestation = _isolation_attestation(reviewer)
+    if attestation is None:
+        return None
+    status = attestation.get("containment_status")
+    return str(status) if status is not None else None
+
+
+def _containment_reasons(reviewer: dict[str, Any] | None) -> list[str]:
+    if reviewer is None:
+        return []
+    status = _containment_status(reviewer)
+    if not status:
+        return ["missing_containment_status"]
+    if status not in CONTAINMENT_STATUSES:
+        return ["invalid_containment_status"]
+    if status in UNCONTAINED_STATUSES:
+        return ["runtime_uncontained"]
+    return []
+
+
 def _availability(reviewer: dict[str, Any] | None, reviewer_id: str) -> dict[str, Any]:
     if reviewer is None:
         return {"reviewer_id": reviewer_id, "available": False, "reasons": ["missing_reviewer_registry_record"]}
@@ -281,12 +384,18 @@ def plan_reviewer_triage(
                 reasons.append("same_controller_as_author")
             if author_venue and author_venue == reviewer.get("venue_id"):
                 reasons.append("same_venue_as_author")
+            reasons.extend(_isolation_domain_reasons(reviewer, author_identity, mutation_classes, risk_tier))
+            reasons.extend(_containment_reasons(reviewer))
+        attestation = _isolation_attestation(reviewer)
+        containment_status = _containment_status(reviewer)
         eligibility_results.append({
             "reviewer_id": reviewer_id,
             "eligible": not reasons,
-            "reasons": reasons,
+            "reasons": _dedupe(reasons),
             "identity_ref": identity_ref,
             "human_id": human_id,
+            "isolation_domain_attestation": attestation,
+            "containment_status": containment_status,
         })
         availability_results.append(_availability(reviewer, reviewer_id))
 
@@ -300,7 +409,9 @@ def plan_reviewer_triage(
     if expected_head_sha and expected_head_sha != head_sha:
         escalation_status = "operator"
         escalation_reason = "head_sha_mismatch"
-    elif risk_tier == "privileged" or PRIVILEGED_MUTATION_CLASSES.intersection(mutation_classes):
+    elif (
+        risk_tier == "privileged" or PRIVILEGED_MUTATION_CLASSES.intersection(mutation_classes)
+    ) and not HIGH_CONSEQUENCE_MUTATION_CLASSES.intersection(mutation_classes):
         escalation_status = "operator"
         escalation_reason = "privileged_requires_source"
     else:

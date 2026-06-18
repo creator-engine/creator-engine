@@ -21,6 +21,11 @@ REGISTRY_SCHEMA = "schemas/reviewer-registry.schema.yaml"
         "missing-access.yaml",
         "no-available-reviewer.yaml",
         "privileged-requires-source.yaml",
+        "same-host-tier2-valid.yaml",
+        "same-controller-tier1-reject.yaml",
+        "unresolved-identity-reject.yaml",
+        "uncontained-reject.yaml",
+        "tier4-release-valid.yaml",
     ],
 )
 def test_reviewer_triage_examples_validate(name: str):
