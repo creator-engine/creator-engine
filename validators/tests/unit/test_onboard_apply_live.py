@@ -278,11 +278,46 @@ def test_probe_bootstrap_token_maps_oauth_scopes_to_ce_permissions():
     assert set(v3_installer.REQUIRED_BOOTSTRAP_SCOPES).issubset(set(result["scopes"]))
 
 
-def test_probe_bootstrap_token_finegrained_passes_without_oauth_scopes():
+def _fine_grained_permission_response(permission: str, *, granted: bool = True) -> subprocess.CompletedProcess:
+    status = "422 Unprocessable Entity" if granted else "403 Forbidden"
+    body = '{"message":"Validation Failed"}' if granted else '{"message":"Resource not accessible by personal access token"}'
+    text = (
+        f"HTTP/2.0 {status}\n"
+        "Content-Type: application/json; charset=utf-8\n"
+        f"X-Accepted-Github-Permissions: {permission.replace(':', '=')}\n"
+        "\n"
+        f"{body}\n"
+    )
+    return subprocess.CompletedProcess(["gh", "api"], 1, stdout=text, stderr="")
+
+
+class _FineGrainedPermissionForge(_ModeBForge):
+    def __init__(self, *, denied: str | None = None):
+        super().__init__(user_response=_fx("user_response_finegrained.txt"))
+        self.denied = denied
+
+    def spawn(self, argv, input_text, env):
+        joined = " ".join(argv)
+        self.calls.append({"argv": list(argv), "env_token": env.get("GH_TOKEN")})
+        assert _BOOTSTRAP_PAT_FG not in joined
+        probes = {
+            "/actions/permissions": "administration:write",
+            "/dispatches": "contents:write",
+            "/actions/oidc/customization/sub": "actions:write",
+            "/contents/.github/workflows/ce-fine-grained-permission-probe.yml": "workflows:write",
+        }
+        for marker, permission in probes.items():
+            if marker in joined:
+                return _fine_grained_permission_response(permission, granted=permission != self.denied)
+        return super().spawn(argv, input_text, env)
+
+
+def test_probe_bootstrap_token_finegrained_validates_write_permissions_without_oauth_scopes():
     # ce-ops#94: a fine-grained PAT emits NO X-Oauth-Scopes. The probe must classify it by prefix,
-    # report a valid identity, and NOT fabricate an empty (= "missing everything") scope set.
+    # report a valid identity, and validate the fine-grained repository write permissions via
+    # permission-specific GitHub endpoints instead of fabricating a classic scope set.
     # Fixture = VERBATIM capture from ce-dev-3's real fine-grained PAT (see CAPTURE.md).
-    forge = _ModeBForge(user_response=_fx("user_response_finegrained.txt"))
+    forge = _FineGrainedPermissionForge()
     result = _driver(forge).probe_bootstrap_token(
         token=_BOOTSTRAP_PAT_FG, repo=_REPO, org_create_needed=False
     )
@@ -290,6 +325,17 @@ def test_probe_bootstrap_token_finegrained_passes_without_oauth_scopes():
     assert result["token_type"] == "fine_grained"
     assert result["login"] == "ce-dev-3"
     assert "scopes" not in result  # no classic-scope set is invented for a fine-grained token
+    assert set(result["permissions"]) == set(v3_installer.REQUIRED_BOOTSTRAP_SCOPES)
+
+
+def test_probe_bootstrap_token_finegrained_reports_missing_permission():
+    forge = _FineGrainedPermissionForge(denied="workflows:write")
+    result = _driver(forge).probe_bootstrap_token(
+        token=_BOOTSTRAP_PAT_FG, repo=_REPO, org_create_needed=False
+    )
+    assert result["ok"] is True
+    assert result["token_type"] == "fine_grained"
+    assert "workflows:write" not in result["permissions"]
 
 
 def test_detect_token_type_by_prefix_and_header_fallback():

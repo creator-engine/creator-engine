@@ -174,6 +174,7 @@ SCANNER_ENV_KEYS: dict[str, tuple[str, str, str]] = {
     "gitleaks": (ENV_GITLEAKS_URL, ENV_GITLEAKS_SHA256, ENV_GITLEAKS_VERSION),
     "trufflehog": (ENV_TRUFFLEHOG_URL, ENV_TRUFFLEHOG_SHA256, ENV_TRUFFLEHOG_VERSION),
 }
+FINE_GRAINED_PERMISSION_PROBE_PATH = ".github/workflows/ce-fine-grained-permission-probe.yml"
 #: OPTIONAL offline FALLBACK for the apply-time userspace-dep install. Design A's DEFAULT path
 #: fetches the pinned ``uv`` wheel from CE's mirror; if this env points at a directory that
 #: already holds the pinned wheel (sha256-verified), the driver uses it instead of fetching —
@@ -343,6 +344,39 @@ def _parse_oauth_scopes_header(raw_response: str) -> set[str]:
     return scopes
 
 
+def _parse_http_status(raw_response: str) -> int | None:
+    for line in raw_response.splitlines():
+        if line.startswith("HTTP/"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1])
+    return None
+
+
+def _parse_accepted_github_permissions(raw_response: str) -> dict[str, set[str]]:
+    """Parse GitHub's fine-grained ``X-Accepted-GitHub-Permissions`` header."""
+    permissions: dict[str, set[str]] = {}
+    for line in raw_response.splitlines():
+        if not line.strip():
+            break
+        if not line.lower().startswith("x-accepted-github-permissions:"):
+            continue
+        _, _, value = line.partition(":")
+        for entry in value.replace(",", ";").split(";"):
+            name, sep, level = entry.strip().partition("=")
+            if sep and name and level:
+                permissions.setdefault(name.strip().lower(), set()).add(level.strip().lower())
+    return permissions
+
+
+def _accepted_permissions_include(raw_response: str, permission: str) -> bool:
+    name, sep, level = permission.partition(":")
+    if not sep:
+        return False
+    accepted = _parse_accepted_github_permissions(raw_response)
+    return level.lower() in accepted.get(name.lower(), set())
+
+
 def _bootstrap_scopes_from_oauth(oauth_scopes: set[str], *, org_create_needed: bool) -> list[str]:
     """Map a bootstrap PAT's classic OAuth scopes to CE's bootstrap-permission names.
 
@@ -388,6 +422,64 @@ def _detect_token_type(token: str, *, oauth_header_present: bool) -> str:
     if oauth_header_present:
         return "classic"
     return "unknown"
+
+
+def _fine_grained_permission_probe_argv(repo: str, permission: str) -> list[str]:
+    """Invalid-body probes: authorization must pass, but the request must not mutate."""
+    if permission == "administration:write":
+        return ["gh", "api", "-i", "-X", "PUT", f"repos/{repo}/actions/permissions"]
+    if permission == "contents:write":
+        return ["gh", "api", "-i", "-X", "POST", f"repos/{repo}/dispatches"]
+    if permission == "actions:write":
+        return ["gh", "api", "-i", "-X", "PUT", f"repos/{repo}/actions/oidc/customization/sub"]
+    if permission == "workflows:write":
+        return [
+            "gh",
+            "api",
+            "-i",
+            "-X",
+            "PUT",
+            f"repos/{repo}/contents/{FINE_GRAINED_PERMISSION_PROBE_PATH}",
+        ]
+    if permission == v3_installer.ORG_CREATE_SCOPE:
+        owner = repo.split("/", 1)[0]
+        return ["gh", "api", "-i", "-X", "POST", f"orgs/{owner}/repos"]
+    return ["gh", "api", "-i", "user"]
+
+
+def _fine_grained_permission_header(permission: str) -> str:
+    if permission == v3_installer.ORG_CREATE_SCOPE:
+        return "administration:write"
+    return permission
+
+
+def _fine_grained_permission_granted(proc: subprocess.CompletedProcess, permission: str) -> bool:
+    raw = "\n".join(part for part in (proc.stdout or "", proc.stderr or "") if part)
+    status = _parse_http_status(raw)
+    # The probe requests intentionally omit required bodies. A 400/422 with the expected
+    # fine-grained permission header means GitHub reached request validation after accepting
+    # the token's permission. Any 2xx is refused: the probe must never mutate.
+    return (
+        status in {400, 422}
+        and _accepted_permissions_include(raw, _fine_grained_permission_header(permission))
+    )
+
+
+def _probe_fine_grained_bootstrap_permissions(
+    runner: GhRunner, *, repo: str, org_create_needed: bool
+) -> list[str]:
+    required = list(v3_installer.REQUIRED_BOOTSTRAP_SCOPES)
+    if org_create_needed:
+        required.append(v3_installer.ORG_CREATE_SCOPE)
+    granted: list[str] = []
+    for permission in required:
+        try:
+            proc = runner(_fine_grained_permission_probe_argv(repo, permission), None)
+        except Exception:  # noqa: BLE001 — fail closed by omitting the permission
+            continue
+        if _fine_grained_permission_granted(proc, permission):
+            granted.append(permission)
+    return sorted(set(granted))
 
 
 class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
@@ -546,9 +638,8 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         Authenticates AS the bootstrap token (value in the child ``GH_TOKEN`` env only, never argv)
         and reports its login + ``token_type`` (ce-ops#94). For a CLASSIC token it also reports the
         CE bootstrap permissions implied by its ``X-OAuth-Scopes``. A FINE-GRAINED PAT emits no
-        ``X-OAuth-Scopes`` and is not permission-introspectable, so NO ``scopes`` set is fabricated
-        here (an empty list would falsely read as "missing everything"); its write-capability is
-        enforced fail-closed at the greenfield write legs. The capability gate lives in the leg.
+        ``X-OAuth-Scopes``, so the driver probes GitHub's fine-grained permission endpoints and
+        reports CE permission names in ``permissions``; no classic ``scopes`` set is fabricated.
         """
         try:
             holder = ScopedToken(
@@ -580,10 +671,15 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         result: dict[str, Any] = {"ok": True, "login": login, "token_type": token_type}
         if token_type == "classic":
             # Only classic/OAuth actors expose capability via X-OAuth-Scopes (ce-ops#94). Fine-grained
-            # PATs emit none and are not introspectable — capability is enforced at the write legs,
-            # never fabricated here as an empty (= "missing everything") scope set.
+            # PATs emit none, so classic scopes are never fabricated for them.
             result["scopes"] = _bootstrap_scopes_from_oauth(
                 _parse_oauth_scopes_header(raw), org_create_needed=org_create_needed
+            )
+        elif token_type == "fine_grained":
+            result["permissions"] = _probe_fine_grained_bootstrap_permissions(
+                runner,
+                repo=repo,
+                org_create_needed=org_create_needed,
             )
         return result
 
