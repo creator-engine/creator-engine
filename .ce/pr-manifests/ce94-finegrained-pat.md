@@ -1,8 +1,8 @@
 # PR path manifest - ce94-finegrained-pat - fine-grained PAT bootstrap probe
 
-Root closed-manifest carrier for ce-ops#94. CI/path review should compare this
-branch's `base..HEAD` diff to the authorized path set below. This carrier lists
-itself.
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention).
+CI/path review should compare this branch's `base..HEAD` diff to the authorized
+path set below. This carrier lists itself.
 
 Ratified:
 Controller relay for ce-ops#94 on 2026-06-18: fix `onboard --apply`
@@ -21,10 +21,14 @@ The changes:
 - Plain-join stays identity-only because the bootstrap PAT performs no writes.
 - Tests cover fine-grained accepted, missing-permission refused, unknown-token
   fail-closed, and classic-PAT continuity.
+- The validator app wheel is rebuilt from the current branch source and
+  `validators/wheelhouse/SHA256SUMS` is refreshed; the signed Pages mirror under
+  `docs/downloads/0.2.0/` is intentionally untouched.
 
-Per-file purpose (the closed path-set - 6 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 8 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce94-finegrained-pat.md`** *(A)* - changelog fragment.
-- **`.ce/pr-path-manifest.md`** *(A)* - this root closed-manifest carrier.
+- **`.ce/pr-manifests/ce94-finegrained-pat.md`** *(A)* - this per-PR
+  closed-manifest carrier.
 - **`validators/creator_engine_validator/onboard_apply.py`** *(M)* -
   gate fine-grained bootstrap permissions before greenfield write legs.
 - **`validators/creator_engine_validator/onboard_apply_live.py`** *(M)* -
@@ -34,19 +38,25 @@ Per-file purpose (the closed path-set - 6 paths; `(A)` add, `(M)` modify):
   refusal.
 - **`validators/tests/unit/test_onboard_apply_live.py`** *(M)* -
   live-driver probe coverage for fine-grained permission reporting.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - refreshed dev wheelhouse
+  digest manifest for the rebuilt validator app wheel.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`**
+  *(M)* - rebuilt validator app wheel matching this branch's source.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=1056091650bc02c50e276ac4be7fc5c16a9988bea2d5c1bf17ad8fa7eeee2cb4
+AUTHORIZED_PATHS_SHA256=3835c7f4a7aeb5fb6cb44ed797a26a3086892dce05275d3ecc9b0cff453a24e6
 
 ```text
 .ce/changelog/ce94-finegrained-pat.md
-.ce/pr-path-manifest.md
+.ce/pr-manifests/ce94-finegrained-pat.md
 validators/creator_engine_validator/onboard_apply.py
 validators/creator_engine_validator/onboard_apply_live.py
 validators/tests/unit/test_onboard_apply.py
 validators/tests/unit/test_onboard_apply_live.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
