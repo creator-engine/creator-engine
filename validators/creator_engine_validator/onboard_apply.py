@@ -1240,6 +1240,13 @@ def _run_leg(
         if not login or login == bot or reviewer == bot:
             raise ApplyRefused("bootstrap_token_identity_refused", "bootstrap/reviewer identity must differ from App bot")
         # 3) Capability, right-sized to the operation (ce-ops#94), fail-closed on the unverifiable.
+        if token_type not in {"classic", "fine_grained"}:
+            # Unknown token type AND no recognized PAT prefix -> cannot verify or safely defer
+            # capability. Refuse even for plain-join so identity-only never masks ambiguity.
+            raise ApplyRefused(
+                "bootstrap_token_unverifiable",
+                f"unrecognized bootstrap token type; cannot verify {list(required)}",
+            )
         if not required:
             # plain-join: identity-only (the PAT writes nothing; the App token is the real ceiling).
             capability: dict[str, Any] = {"verified": True, "mode": "identity_only_plain_join"}
@@ -1248,24 +1255,14 @@ def _run_leg(
             if not table["ok"]:
                 raise ApplyRefused("bootstrap_token_scope_refused", f"missing bootstrap scopes: {table['missing']}")
             capability = {"verified": True, "mode": "classic_scopes", "scope_rows": table["rows"]}
-        elif token_type == "fine_grained":
-            table = v3_installer.bootstrap_scope_table(probe.get("permissions"), required=required)
-            if not table["ok"]:
-                raise ApplyRefused(
-                    "bootstrap_token_permission_refused",
-                    f"missing fine-grained bootstrap permissions: {table['missing']}",
-                )
+        else:
+            # Fine-grained PATs emit no X-OAuth-Scopes and have no safe permission-introspection
+            # endpoint. The probe proves identity only; greenfield write legs remain fail-closed.
             capability = {
                 "verified": True,
-                "mode": "fine_grained_permissions",
-                "permission_rows": table["rows"],
+                "mode": "fine_grained_identity_only_write_legs_fail_closed",
+                "required_at_write_legs": list(required),
             }
-        else:
-            # Unknown token type AND no X-OAuth-Scopes → cannot verify the required capability. Refuse.
-            raise ApplyRefused(
-                "bootstrap_token_unverifiable",
-                f"unrecognized bootstrap token type; cannot verify {list(required)}",
-            )
         return LegOutcome(
             leg_id,
             "already_satisfied",

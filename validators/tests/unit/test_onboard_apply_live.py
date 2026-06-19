@@ -278,46 +278,11 @@ def test_probe_bootstrap_token_maps_oauth_scopes_to_ce_permissions():
     assert set(v3_installer.REQUIRED_BOOTSTRAP_SCOPES).issubset(set(result["scopes"]))
 
 
-def _fine_grained_permission_response(permission: str, *, granted: bool = True) -> subprocess.CompletedProcess:
-    status = "422 Unprocessable Entity" if granted else "403 Forbidden"
-    body = '{"message":"Validation Failed"}' if granted else '{"message":"Resource not accessible by personal access token"}'
-    text = (
-        f"HTTP/2.0 {status}\n"
-        "Content-Type: application/json; charset=utf-8\n"
-        f"X-Accepted-Github-Permissions: {permission.replace(':', '=')}\n"
-        "\n"
-        f"{body}\n"
-    )
-    return subprocess.CompletedProcess(["gh", "api"], 1, stdout=text, stderr="")
-
-
-class _FineGrainedPermissionForge(_ModeBForge):
-    def __init__(self, *, denied: str | None = None):
-        super().__init__(user_response=_fx("user_response_finegrained.txt"))
-        self.denied = denied
-
-    def spawn(self, argv, input_text, env):
-        joined = " ".join(argv)
-        self.calls.append({"argv": list(argv), "env_token": env.get("GH_TOKEN")})
-        assert _BOOTSTRAP_PAT_FG not in joined
-        probes = {
-            "/actions/permissions": "administration:write",
-            "/dispatches": "contents:write",
-            "/actions/oidc/customization/sub": "actions:write",
-            "/contents/.github/workflows/ce-fine-grained-permission-probe.yml": "workflows:write",
-        }
-        for marker, permission in probes.items():
-            if marker in joined:
-                return _fine_grained_permission_response(permission, granted=permission != self.denied)
-        return super().spawn(argv, input_text, env)
-
-
-def test_probe_bootstrap_token_finegrained_validates_write_permissions_without_oauth_scopes():
+def test_probe_bootstrap_token_finegrained_is_identity_only_without_oauth_scopes():
     # ce-ops#94: a fine-grained PAT emits NO X-Oauth-Scopes. The probe must classify it by prefix,
-    # report a valid identity, and validate the fine-grained repository write permissions via
-    # permission-specific GitHub endpoints instead of fabricating a classic scope set.
+    # report a valid identity, and avoid unsafe/illusory fine-grained permission introspection.
     # Fixture = VERBATIM capture from ce-dev-3's real fine-grained PAT (see CAPTURE.md).
-    forge = _FineGrainedPermissionForge()
+    forge = _ModeBForge(user_response=_fx("user_response_finegrained.txt"))
     result = _driver(forge).probe_bootstrap_token(
         token=_BOOTSTRAP_PAT_FG, repo=_REPO, org_create_needed=False
     )
@@ -325,28 +290,16 @@ def test_probe_bootstrap_token_finegrained_validates_write_permissions_without_o
     assert result["token_type"] == "fine_grained"
     assert result["login"] == "ce-dev-3"
     assert "scopes" not in result  # no classic-scope set is invented for a fine-grained token
-    assert set(result["permissions"]) == set(v3_installer.REQUIRED_BOOTSTRAP_SCOPES)
+    assert "permissions" not in result
+    assert [c["argv"] for c in forge.calls] == [["gh", "api", "-i", "user"]]
 
 
-def test_probe_bootstrap_token_finegrained_reports_missing_permission():
-    forge = _FineGrainedPermissionForge(denied="workflows:write")
-    result = _driver(forge).probe_bootstrap_token(
-        token=_BOOTSTRAP_PAT_FG, repo=_REPO, org_create_needed=False
-    )
-    assert result["ok"] is True
-    assert result["token_type"] == "fine_grained"
-    assert "workflows:write" not in result["permissions"]
-
-
-def test_detect_token_type_by_prefix_and_header_fallback():
+def test_detect_token_type_by_prefix_and_unknown_fail_closed():
     detect = onboard_apply_live._detect_token_type
     assert detect(_BOOTSTRAP_PAT_FG, oauth_header_present=False) == "fine_grained"
     assert detect("ghp_classic", oauth_header_present=False) == "classic"
-    assert detect("gho_oauth", oauth_header_present=False) == "classic"
-    assert detect("ghu_appuser", oauth_header_present=False) == "classic"
-    # unknown prefix but the classic X-Oauth-Scopes header IS present -> classic (corroborating)
-    assert detect("legacy-opaque-value", oauth_header_present=True) == "classic"
-    # unknown prefix AND no classic header -> fail-closed unknown
+    # unknown prefixes refuse even when a response has a classic X-Oauth-Scopes header.
+    assert detect("legacy-opaque-value", oauth_header_present=True) == "unknown"
     assert detect("legacy-opaque-value", oauth_header_present=False) == "unknown"
 
 
@@ -1171,6 +1124,7 @@ class _AdoptionForge:
         commit_err: str = "",
         committed_paths: list[str] | None = None,
         workflow_blob: str | None = None,
+        user_response: str | None = None,
         expected_commit_login: str | None = None,
         ambient_git_login: str = "chmod735",
     ):
@@ -1185,6 +1139,7 @@ class _AdoptionForge:
         self.commit_err = commit_err
         self.committed_paths = committed_paths
         self.workflow_blob = workflow_blob if workflow_blob is not None else onboard_apply.CE_WORKFLOW_CONTENT
+        self.user_response = user_response if user_response is not None else _fx("user_response_finegrained.txt")
         self.expected_commit_login = expected_commit_login
         self.expected_commit_email = (
             f"{expected_commit_login}@users.noreply.github.com"
@@ -1216,6 +1171,8 @@ class _AdoptionForge:
         joined = " ".join(argv)
         if "-X" in argv and "DELETE" in argv and "installation/token" in joined:
             return self._done(argv, 0)  # revoke
+        if "-i" in argv and argv[-1] == "user":
+            return self._done(argv, 0, self.user_response)  # bootstrap token identity probe
         if "/branches/main/protection" in joined:
             return self._done(argv, self.protection_rc, self.protection_json, self.protection_err)
         if "installation/repositories" in joined:
@@ -1319,9 +1276,17 @@ def _adoption_driver(forge: _AdoptionForge) -> onboard_apply_live.LiveForgeAdopt
         transport=forge.transport,
         spawn=forge.spawn,
         git_spawn=forge.git_spawn,
-        forge_actor_login="ce-dev-3",
     )
     return onboard_apply_live.LiveForgeAdoptionDriver(config)
+
+
+def _bind_bootstrap_identity(driver: onboard_apply_live.LiveForgeAdoptionDriver) -> None:
+    result = driver.probe_bootstrap_token(
+        token=_BOOTSTRAP_PAT_FG,
+        repo=_REPO,
+        org_create_needed=False,
+    )
+    assert result["ok"] is True and result["login"] == "ce-dev-3"
 
 
 def _sample_scaffold() -> list[dict[str, str]]:
@@ -1457,6 +1422,7 @@ def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revok
     workspace = Path("/tmp/ce85_adoption_two_token")
     import shutil as _sh
     _sh.rmtree(workspace, ignore_errors=True)
+    _bind_bootstrap_identity(driver)
     build = driver.build_adoption_scaffold(
         repo=_REPO, base="main", branch="ce/adopt-governance",
         workspace_root=workspace, artifacts=scaffold,
@@ -1490,9 +1456,10 @@ def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revok
 
 def test_adoption_scaffold_binds_commit_identity_to_install_time_forge_actor(tmp_path):
     # ce-ops#127: the local adoption commit must be authored as the per-dev install identity
-    # (from onboard/App/PAT config), never the ambient shared git config on the host.
+    # (from the install-configured token's authenticated GET /user), never ambient git/gh config.
     forge = _AdoptionForge(expected_commit_login="ce-dev-3", ambient_git_login="chmod735")
     driver = _adoption_driver(forge)
+    _bind_bootstrap_identity(driver)
     build = driver.build_adoption_scaffold(
         repo=_REPO,
         base="main",
@@ -1505,7 +1472,7 @@ def test_adoption_scaffold_binds_commit_identity_to_install_time_forge_actor(tmp
         "login": "ce-dev-3",
         "name": "ce-dev-3",
         "email": "ce-dev-3@users.noreply.github.com",
-        "source": "install_config",
+        "source": "bootstrap_token_get_user",
     }
     assert forge.git_config["user.name"] == "ce-dev-3"
     assert forge.git_config["user.email"] == "ce-dev-3@users.noreply.github.com"
@@ -1546,6 +1513,7 @@ def test_adoption_scaffold_commit_failure_raises_before_push(tmp_path):
     # BLOCKER-2 regression: a real git commit failure is not "ok"; it stops before push/PR.
     forge = _AdoptionForge(commit_rc=128, commit_err="Author identity unknown")
     driver = _adoption_driver(forge)
+    _bind_bootstrap_identity(driver)
     with pytest.raises(onboard_apply.ApplyFailed) as exc:
         driver.build_adoption_scaffold(
             repo=_REPO,
@@ -1565,6 +1533,7 @@ def test_adoption_scaffold_committed_tree_missing_workflow_refuses(tmp_path):
     # driver-returned path list. Missing workflow/.ce paths in HEAD refuse before push.
     forge = _AdoptionForge(committed_paths=[".ce/skills/project-conventions.md"])
     driver = _adoption_driver(forge)
+    _bind_bootstrap_identity(driver)
     with pytest.raises(onboard_apply.ApplyFailed) as exc:
         driver.build_adoption_scaffold(
             repo=_REPO,
