@@ -1,0 +1,45 @@
+kind: controller-runtime-contract
+schema_version: "1"
+description: Well-formed contained Controller Runtime Contract for the DGX posture.
+role: controller
+controller_seat:
+  authority_locality: contained
+  seat: controller
+  containment:
+    isolation_backend: gvisor-proxy
+    forbidden_surfaces:
+      - host-home
+      - host-tmux-socket
+      - host-ssh-agent
+      - host-git-push
+      - acp-host-transport
+      - raw-host-tui
+      - docker-socket
+      - podman-socket
+      - containerd-socket
+      - openbao-root-token
+      - ce-root-v1-private-key
+      - github-app-private-key
+    credential_handles:
+      max_auth: max-auth-via-setup-token
+      ce_root_v1: ce-root-v1-via-openbao
+      ce_root_v1_signing: ce-root-v1-signing-request
+      github_app: github-app-installation-token
+harness:
+  name: claude-code
+authority_boundary:
+  in_seat_harnesses:
+    - hermes
+    - claude-code
+    - codex
+  seam_harnesses:
+    - openclaw
+  unauthorized_authorities:
+    - hosted-service
+    - saas
+    - github-connector
+state_boundary:
+  state_root: .ce/state/
+  durable_account_authority: none
+  provider_authority: none
+record_timestamp: "2026-06-19T00:00:00Z"

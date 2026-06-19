@@ -1,6 +1,7 @@
 kind: controller-runtime-contract
 schema_version: "1"
 description: Minimal well-formed Controller Runtime Contract for the v1.0 local governed kernel.
+role: controller
 controller_seat:
   authority_locality: host-local
   seat: controller

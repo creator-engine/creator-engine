@@ -1,15 +1,18 @@
 """Controller Runtime Contract validation (RV1-020, PCO v1 Gate 2).
 
 Validates Controller Runtime Contract records against
-``schemas/controller-runtime-contract.schema.yaml`` plus the authority-boundary
-and redaction-safe predicates that the schema alone cannot express.
+``schemas/controller-runtime-contract.schema.yaml`` plus the authority-boundary,
+containment, and redaction-safe predicates that the schema alone cannot express.
 
 Gate 2 scope is substrate/validator-only. This check:
 
 * validates one declarative record at a time;
-* classifies the Controller seat (host-local) and the harness authority
-  boundary (Hermes/Claude Code/Codex ``IN``; OpenClaw ``SEAM``; hosted
-  service/SaaS/GitHub connector not authorized for v1.0 kernel authority);
+* classifies the Controller role and seat (host-local legacy posture or
+  contained posture) and the harness authority boundary (Hermes/Claude
+  Code/Codex ``IN``; OpenClaw ``SEAM``; hosted service/SaaS/GitHub connector
+  not authorized for v1.0 kernel authority);
+* for contained Controller records, enforces the contained state root, hard
+  forbidden-surface floor, and non-private-key request/handle names;
 * refuses any secret or provider-authority value in any field;
 * MUST NOT launch a pane, call Claude, call GitHub, call network APIs, or
   mutate runtime state.
@@ -38,15 +41,40 @@ KIND_VALUE = "controller-runtime-contract"
 
 CODE_SCHEMA = "RV1-020"
 CODE_AUTHORITY = "RV1-020-AUTH"
+CODE_CONTAINMENT = "RV1-020-CONTAINMENT"
 CODE_SECRET = "RV1-020-SECRET"
 CODE_INVALID = "controller_runtime_contract_invalid_record"
 
-# Harnesses that operate inside the host-local Controller seat for the v1.0 kernel.
+# Harnesses that operate inside the Controller seat for the v1.0 kernel.
 IN_SEAT_HARNESSES = frozenset({"hermes", "claude-code", "codex"})
 # OpenClaw remains a seam, not an in-seat harness.
 SEAM_HARNESSES = frozenset({"openclaw"})
 # Hosted authorities never hold v1.0 kernel authority.
 UNAUTHORIZED_AUTHORITIES = frozenset({"hosted-service", "saas", "github-connector"})
+
+CONTAINED_STATE_ROOT = ".ce/state/"
+CONTAINED_FORBIDDEN_SURFACES = frozenset(
+    {
+        "host-home",
+        "host-tmux-socket",
+        "host-ssh-agent",
+        "host-git-push",
+        "acp-host-transport",
+        "raw-host-tui",
+        "docker-socket",
+        "podman-socket",
+        "containerd-socket",
+        "openbao-root-token",
+        "ce-root-v1-private-key",
+        "github-app-private-key",
+    }
+)
+CONTAINED_CREDENTIAL_HANDLES = {
+    "max_auth": "max-auth-via-setup-token",
+    "ce_root_v1": "ce-root-v1-via-openbao",
+    "ce_root_v1_signing": "ce-root-v1-signing-request",
+    "github_app": "github-app-installation-token",
+}
 
 # Exact key names that must never appear; substring matching is avoided so that
 # structural keys such as ``state_boundary`` are not false-positives.
@@ -249,6 +277,109 @@ def _authority_errors(record: dict[str, Any], path: Path) -> list[ValidationErro
     return errors
 
 
+def _containment_errors(record: dict[str, Any], path: Path) -> list[ValidationError]:
+    controller_seat = record.get("controller_seat")
+    if not isinstance(controller_seat, dict):
+        return []
+
+    authority_locality = controller_seat.get("authority_locality")
+    containment = controller_seat.get("containment")
+    errors: list[ValidationError] = []
+
+    if authority_locality == "host-local":
+        if containment is not None:
+            errors.append(
+                make_error(
+                    CODE_CONTAINMENT,
+                    path,
+                    "/controller_seat/containment",
+                    "host-local Controller records must not declare contained runtime posture",
+                    CONTRACT,
+                )
+            )
+        return errors
+
+    if authority_locality != "contained":
+        return errors
+
+    state_boundary = record.get("state_boundary")
+    state_root = state_boundary.get("state_root") if isinstance(state_boundary, dict) else None
+    if state_root != CONTAINED_STATE_ROOT:
+        errors.append(
+            make_error(
+                CODE_CONTAINMENT,
+                path,
+                "/state_boundary/state_root",
+                f"contained Controller records must use state_root {CONTAINED_STATE_ROOT}",
+                CONTRACT,
+            )
+        )
+
+    if not isinstance(containment, dict):
+        errors.append(
+            make_error(
+                CODE_CONTAINMENT,
+                path,
+                "/controller_seat/containment",
+                "contained Controller records must declare a containment object",
+                CONTRACT,
+            )
+        )
+        return errors
+
+    surfaces = containment.get("forbidden_surfaces")
+    if not isinstance(surfaces, list):
+        errors.append(
+            make_error(
+                CODE_CONTAINMENT,
+                path,
+                "/controller_seat/containment/forbidden_surfaces",
+                "contained Controller records must declare forbidden_surfaces",
+                CONTRACT,
+            )
+        )
+    else:
+        surface_set = {surface for surface in surfaces if isinstance(surface, str)}
+        missing = sorted(CONTAINED_FORBIDDEN_SURFACES - surface_set)
+        if missing:
+            errors.append(
+                make_error(
+                    CODE_CONTAINMENT,
+                    path,
+                    "/controller_seat/containment/forbidden_surfaces",
+                    "contained Controller forbidden_surfaces missing required surfaces: "
+                    + ", ".join(missing),
+                    CONTRACT,
+                )
+            )
+
+    handles = containment.get("credential_handles")
+    if not isinstance(handles, dict):
+        errors.append(
+            make_error(
+                CODE_CONTAINMENT,
+                path,
+                "/controller_seat/containment/credential_handles",
+                "contained Controller records must declare non-private-key credential_handles",
+                CONTRACT,
+            )
+        )
+    else:
+        for key, expected in CONTAINED_CREDENTIAL_HANDLES.items():
+            if handles.get(key) != expected:
+                errors.append(
+                    make_error(
+                        CODE_CONTAINMENT,
+                        path,
+                        f"/controller_seat/containment/credential_handles/{key}",
+                        f"contained Controller credential handle must be {expected}",
+                        CONTRACT,
+                    )
+                )
+
+    return errors
+
+
 def validate_controller_runtime_contract_record(record: dict[str, Any], path: Path) -> list[ValidationError]:
     """Validate one Controller Runtime Contract record against RV1-020."""
     errors = list(
@@ -256,10 +387,11 @@ def validate_controller_runtime_contract_record(record: dict[str, Any], path: Pa
     )
     errors.extend(_secret_errors(record, path))
     errors.extend(_authority_errors(record, path))
+    errors.extend(_containment_errors(record, path))
     return errors
 
 
-@register(CHECK_NAME, [CODE_SCHEMA, CODE_AUTHORITY, CODE_SECRET])
+@register(CHECK_NAME, [CODE_SCHEMA, CODE_AUTHORITY, CODE_CONTAINMENT, CODE_SECRET])
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
     for record_path in iter_controller_runtime_contract_records(paths):

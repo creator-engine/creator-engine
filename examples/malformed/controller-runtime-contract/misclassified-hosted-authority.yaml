@@ -4,6 +4,7 @@ description: >-
   Malformed: classifies the hosted GitHub connector as an in-seat Controller
   harness. The v1.0 kernel never authorizes hosted/SaaS/GitHub-connector
   authority as a Controller seat. Expected refusal: RV1-020-AUTH.
+role: controller
 controller_seat:
   authority_locality: host-local
   seat: controller

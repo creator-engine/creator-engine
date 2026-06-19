@@ -2,19 +2,22 @@
 
 **Requirement**: RV1-020 (PCO v1 Gate 2 — Controller Runtime Contract + State Boundary).
 **Type**: SVC (schema + validator + CLI). Strict TDD.
-**Status**: Substrate/validator authored. Runtime lane-launch (G3), worker
-runtime (G5), packaging/launcher (G6), and fan-in (G7) remain later gates.
+**Status**: Substrate/validator authored for host-local legacy and contained
+Controller posture. Runtime supervisor (G3), worker runtime (G5),
+packaging/launcher (G6), and fan-in (G7) remain later gates.
 
 ---
 
 ## 1. Purpose
 
 A **Controller Runtime Contract** is a declarative record that classifies the
-Controller seat and the harness authority boundary for the Creator Engine v1.0
-**local governed runtime kernel**. It answers two questions without granting
-any authority itself:
+Controller role, Controller seat, containment posture, and harness authority
+boundary for the Creator Engine v1.0 **governed runtime kernel**. It answers
+three questions without granting any authority itself:
 
-- *Where does Controller authority live?* — host-local, not hosted.
+- *What role is being classified?* — always `role: controller`.
+- *Where does Controller authority live?* — legacy `host-local` or contained
+  runtime posture, never hosted.
 - *Which harnesses operate inside the Controller seat, which are seam, and which
   are never authorized for v1.0 kernel authority?*
 
@@ -35,13 +38,52 @@ Required fields:
 |---|---|
 | `kind` | Always `controller-runtime-contract`. |
 | `schema_version` | Starts at `"1"`. |
-| `controller_seat` | `{ authority_locality: host-local, seat: controller }` — explicitly host-local Controller authority. |
+| `role` | Always `controller`. |
+| `controller_seat` | `{ authority_locality: host-local\|contained, seat: controller }`. Contained records also carry `containment`. |
 | `harness` | `{ name: <hermes\|claude-code\|codex> }` — the harness class the contract is recorded under. |
 | `authority_boundary` | Seat↔harness classification (see §3). |
-| `state_boundary` | `{ state_root: .hermes/, durable_account_authority: none, provider_authority: none }`. |
+| `state_boundary` | Host-local records use `.hermes/`; contained records use `.ce/state/`. Durable account and provider authority are always `none`. |
 | `record_timestamp` | ISO-8601 / `commit:` / `source-controlled:` timestamp. |
 
 Unknown top-level fields are refused (strict `unevaluatedProperties: false`).
+
+Contained Controller records extend `controller_seat`:
+
+```yaml
+controller_seat:
+  authority_locality: contained
+  seat: controller
+  containment:
+    isolation_backend: gvisor-proxy
+    forbidden_surfaces:
+      - host-home
+      - host-tmux-socket
+      - host-ssh-agent
+      - host-git-push
+      - acp-host-transport
+      - raw-host-tui
+      - docker-socket
+      - podman-socket
+      - containerd-socket
+      - openbao-root-token
+      - ce-root-v1-private-key
+      - github-app-private-key
+    credential_handles:
+      max_auth: max-auth-via-setup-token
+      ce_root_v1: ce-root-v1-via-openbao
+      ce_root_v1_signing: ce-root-v1-signing-request
+      github_app: github-app-installation-token
+```
+
+The forbidden-surface floor makes the DGX Controller posture explicit:
+contained Controller records must not depend on host home, host tmux socket,
+host SSH agent, host `git push`, ACP host transport, raw host TUI authority,
+container runtime sockets, OpenBao root token, `ce-root-v1` private key, or
+GitHub App private key. Max authentication is represented only by the
+`max-auth-via-setup-token` request handle, and `ce-root-v1` signing is
+represented only by the `ce-root-v1-via-openbao` request handle. The
+`ce-root-v1-signing-request` and `github-app-installation-token` strings are
+non-private-key request/handle names, not embedded secret values.
 
 ## 3. Authority boundary classification
 
@@ -49,8 +91,7 @@ Unknown top-level fields are refused (strict `unevaluatedProperties: false`).
 enforces beyond the schema:
 
 - `in_seat_harnesses` **must be exactly** `{hermes, claude-code, codex}`. These
-  are the harnesses that may operate inside the host-local Controller seat for
-  v1.0.
+  are the harnesses that may operate inside the Controller seat for v1.0.
 - `seam_harnesses` **must include** `openclaw`. OpenClaw is a seam, never an
   in-seat harness.
 - `unauthorized_authorities` **must include** `hosted-service`, `saas`, and
@@ -87,6 +128,7 @@ Validation codes:
 |---|---|
 | `RV1-020` | Schema violation (missing/unknown field, bad const/enum, bad timestamp). |
 | `RV1-020-AUTH` | Authority-boundary misclassification. |
+| `RV1-020-CONTAINMENT` | Contained Controller posture is incomplete or mismatched. |
 | `RV1-020-SECRET` | Secret or provider-authority value present in a field. |
 
 ## 6. Scope boundary
