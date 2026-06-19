@@ -22,24 +22,62 @@ import shutil
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 
 import pytest
 
 from creator_engine_validator import resource_bound_spec as rbs
 
+_LIVE_TEST_ENV = "CE_RUN_RESOURCE_BOUND_SYSTEMD_TESTS"
+_DESKTOP_ENV_VARS = ("DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION")
+
+
+def _truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _live_systemd_test_gate(environ: Mapping[str, str] | None = None) -> tuple[bool, str]:
+    """Refuse live resource-bound tests in desktop sessions.
+
+    The OOM-kill proof intentionally starts transient user ``systemd`` scopes
+    and kills one of them. On GNOME dogfood desktops that can surface
+    application-stopped/OOM notifications to the human desktop. Keep the live
+    proof to CI or an explicit non-interactive host opt-in; pure tests and the
+    recorded evidence fixture cover ordinary local runs.
+    """
+    env = os.environ if environ is None else environ
+    desktop_vars = [name for name in _DESKTOP_ENV_VARS if env.get(name)]
+    if desktop_vars:
+        return (
+            False,
+            "interactive desktop session detected "
+            f"({', '.join(desktop_vars)} set); live OOM systemd tests are disabled",
+        )
+    if _truthy_env(env.get("CI")) or _truthy_env(env.get(_LIVE_TEST_ENV)):
+        return True, "live resource-bound systemd tests enabled"
+    return (
+        False,
+        f"set CI=1 or {_LIVE_TEST_ENV}=1 on a non-desktop host to run live "
+        "resource-bound systemd tests",
+    )
+
 
 def _bounding_available() -> tuple[bool, str]:
+    allowed, reason = _live_systemd_test_gate()
+    if not allowed:
+        return False, reason
     if shutil.which("systemd-run") is None or shutil.which("systemctl") is None:
         return False, "systemd-run/systemctl not on PATH"
     return rbs.probe_user_bounding()
 
 _AVAILABLE, _REASON = _bounding_available()
 
+live_systemd = pytest.mark.skipif(
+    not _AVAILABLE,
+    reason=f"live resource-bound systemd tests disabled/unavailable: {_REASON}",
+)
+
 pytestmark = [
-    pytest.mark.skipif(
-        not _AVAILABLE,
-        reason=f"no user-level cgroup delegation on this host/runner: {_REASON}",
-    ),
     pytest.mark.xdist_group("user-systemd"),
 ]
 
@@ -61,6 +99,39 @@ def _bound(unit: str, **overrides) -> rbs.ResourceBound:
     return rbs.ResourceBound(**values)
 
 
+def test_live_systemd_gate_refuses_desktop_sessions():
+    ok, reason = _live_systemd_test_gate(
+        {"CI": "1", "DISPLAY": ":0", "XDG_CURRENT_DESKTOP": "GNOME"}
+    )
+    assert ok is False
+    assert "interactive desktop session detected" in reason
+    assert "DISPLAY" in reason
+
+
+def test_live_systemd_gate_requires_ci_or_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("CI", "1")
+    ok, reason = _live_systemd_test_gate({})
+    assert ok is False
+    assert _LIVE_TEST_ENV in reason
+
+
+def test_live_systemd_gate_uses_ambient_environment_when_not_injected(monkeypatch):
+    for name in _DESKTOP_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CI", "1")
+    ok, reason = _live_systemd_test_gate()
+    assert ok is True
+    assert "enabled" in reason
+
+
+@pytest.mark.parametrize("env", [{"CI": "true"}, {_LIVE_TEST_ENV: "1"}])
+def test_live_systemd_gate_accepts_headless_ci_or_explicit_opt_in(env):
+    ok, reason = _live_systemd_test_gate(env)
+    assert ok is True
+    assert "enabled" in reason
+
+
+@live_systemd
 def test_wrapped_command_lands_in_fleet_slice_with_limits():
     """O6/O10: the wrap places the command in its scope with the limits live."""
     unit = _unique_unit("limits")
@@ -80,6 +151,7 @@ def test_wrapped_command_lands_in_fleet_slice_with_limits():
     assert pids_max == "16"
 
 
+@live_systemd
 def test_oom_group_write_and_fleet_cap_on_live_scope():
     """The launch-confirm edges against a real, briefly-lived seat scope."""
     unit = _unique_unit("confirm")
@@ -104,6 +176,7 @@ def test_oom_group_write_and_fleet_cap_on_live_scope():
         )
 
 
+@live_systemd
 def test_isolated_kill_at_memory_max():
     """O9: a 64M-capped runaway dies ALONE — exit 137, this process unharmed.
 
