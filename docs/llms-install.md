@@ -11,8 +11,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRHRsTS9RVmt3MVZZUHhrTjlHSTJ0ckZRMTlZZWZjaldUa0NBZzE1SzN0a1RtQnFPTVU2M1ZTNEEKelgzTHoxaEdxMklpaGRhbitCSXpQQ2diT2tBbHdCCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 2d2d4ef30da2371e3a5f78cbe23a401386658cc28dd9247e5c932b57bc6d59df
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQTJLcjJvQ3VKeG45bTkrRWwvY1Q2UUVrR0ZiUkRIckNac0NTNXBjL2JjVEs2RnpEL3NXZDI0NjQKdHNpc1lSbVBnOEZKN05NcGlvSDNHV3BVY25JVklBCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: d5d2a0e32e227ba925ca97354dbc70659d3e7e210b1e1766151255c29351f0ad
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -21,7 +21,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: e6460c09e925576bfe39ae9465fea1e589df182e318b520d6867be0cb145f86c
+  sha256s_sha256: 0c152c812a9b40ccc4393f66ec809aa0cb83d06f8b31ed8836cfea04d1a79555
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
