@@ -16,31 +16,32 @@ only; no push. Build the availability + eligibility triage wiring per the
 ratified plan, preserving the plan-only/non-authority boundary.
 
 Research sidecar:
-The requested ce-ops#39 current merge-throughput prior-art note is written under
-ignored local state at `.ce/state/research/DESIGN_ce39_merge_throughput_20260619T032314Z.md`
-and is intentionally not part of this tracked path manifest.
+The requested ce-ops#39 current merge-throughput prior-art note is written at
+`.ce/state/research/DESIGN_ce39_merge_throughput_20260619T032314Z.md`.
+Wave 3 addendum folded ce-ops#131 merger-agent analysis into that note and
+forced it into this local commit despite `.ce/state/` normally being ignored.
 
-Per-file purpose (closed path-set - 18 paths):
+Per-file purpose (closed path-set - 17 paths):
 - **`.ce/changelog/ce120-wave3-reviewer-triage-wiring.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce120-wave3-reviewer-triage-wiring.md`** *(A)* - this carrier.
+- **`.ce/state/research/DESIGN_ce39_merge_throughput_20260619T032314Z.md`** *(A)* - ce-ops#39 current prior-art note plus ce-ops#131 merger-agent addendum.
 - **`docs/operations/REVIEWER_TRIAGE.md`** *(M)* - documents the advisory `triage_results` routing view.
 - **`examples/reviewer-triage/*.yaml`** *(M, 10 files)* - examples include schema-valid combined triage rows.
 - **`schemas/reviewer-triage-decision.schema.yaml`** *(M)* - adds required `triage_results` contract.
 - **`validators/creator_engine_validator/reviewer_triage.py`** *(M)* - emits combined per-candidate triage results.
 - **`validators/tests/unit/test_reviewer_triage_plan.py`** *(M)* - TDD coverage for selected/selectable/ineligible/unavailable routing.
-- **`validators/wheelhouse/SHA256SUMS`** *(M)* - app-wheel digest re-pinned.
-- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* - rebuilt app wheel from this branch source.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=18
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=06df93e47e537b60264b9bced00934718700215f38123f95d6ae5ce99699fffa
+AUTHORIZED_PATHS_SHA256=903b1482e93767259964ba7176065c4b5ff10119052a72473ba7856eeba9ef65
 
 ```text
 .ce/changelog/ce120-wave3-reviewer-triage-wiring.md
 .ce/pr-manifests/ce120-wave3-reviewer-triage-wiring.md
+.ce/state/research/DESIGN_ce39_merge_throughput_20260619T032314Z.md
 docs/operations/REVIEWER_TRIAGE.md
 examples/reviewer-triage/eligible.yaml
 examples/reviewer-triage/missing-access.yaml
@@ -55,6 +56,4 @@ examples/reviewer-triage/unresolved-identity-reject.yaml
 schemas/reviewer-triage-decision.schema.yaml
 validators/creator_engine_validator/reviewer_triage.py
 validators/tests/unit/test_reviewer_triage_plan.py
-validators/wheelhouse/SHA256SUMS
-validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
