@@ -57,19 +57,20 @@ from textual.widgets import DataTable, Footer, Header, Static, TabPane, TabbedCo
 APP_TITLE = "◆ CE Cockpit"
 
 # ---------------------------------------------------------------------------
-# v3.5-B.6 — Control-Room Violet (the live site tokens, VERBATIM)
+# v8 "The Factory Floor" — the live site tokens, VERBATIM
 # ---------------------------------------------------------------------------
-#: docs/index.html:35-41, hex-for-hex. READ from the design — the site lane is
-#: separate and its files never appear in this gate's diff.
+#: docs/index.html :root, hex-for-hex. READ from the design — the site lane is
+#: separate and its files never appear in this gate's diff. Re-pinned from
+#: Control-Room Violet to the v8 warm-factory palette when the site shipped v8.
 THEME = {
-    "ink-900": "#08090F",
-    "ink-850": "#0B0D15",
-    "ink-800": "#0F1220",
-    "fg": "#E9EAF5",
+    "ink-900": "#0C0B0A",
+    "ink-850": "#16140F",
+    "ink-800": "#191712",
+    "fg": "#FAF8F1",
     "violet": "#A06BFF",
-    "spark": "#9BE34F",
-    "gate": "#FF4D6D",
-    "amber": "#F4B740",
+    "spark": "#7FB069",
+    "gate": "#E0605C",
+    "amber": "#E08B4C",
 }
 
 #: The semantic mapping over the L2 styling HINTS (palette names carried in
