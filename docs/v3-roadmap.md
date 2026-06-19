@@ -1,5 +1,10 @@
 # Creator Engine v3 — Roadmap
 
+> **Historical gate-map.** v3 is done (v3.1 "pilot-ready" reached). Forward
+> program planning — workstreams, waves, and the path to the NVIDIA pitch — now
+> lives in [`v3.5-roadmap.md`](v3.5-roadmap.md). This file is retained as the v3
+> gate history.
+
 Durable, in-repo roadmap for the Creator Engine **v3** evolution. This is the
 shareable source for *where we are* and *what's next* — kept derivable from
 `git log --oneline main` rather than from any one person's notes. Update the
