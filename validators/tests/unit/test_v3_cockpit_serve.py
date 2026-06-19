@@ -36,17 +36,18 @@ SITE_FILE = REPO_ROOT / "docs" / "index.html"
 _HAS_TEXTUAL = importlib.util.find_spec("textual") is not None
 _HAS_SERVE = importlib.util.find_spec("textual_serve") is not None
 
-#: The live site tokens, verbatim (docs/index.html:35-41) — the test pins the
+#: The live site tokens, verbatim (docs/index.html :root) — the test pins the
 #: exact hexes so any drift in EITHER direction (theme or site) is loud.
+#: Re-pinned to the v8 "The Factory Floor" palette when the site shipped v8.
 SITE_HEX = {
-    "ink-900": "#08090F",
-    "ink-850": "#0B0D15",
-    "ink-800": "#0F1220",
-    "fg": "#E9EAF5",
+    "ink-900": "#0C0B0A",
+    "ink-850": "#16140F",
+    "ink-800": "#191712",
+    "fg": "#FAF8F1",
     "violet": "#A06BFF",
-    "spark": "#9BE34F",
-    "gate": "#FF4D6D",
-    "amber": "#F4B740",
+    "spark": "#7FB069",
+    "gate": "#E0605C",
+    "amber": "#E08B4C",
 }
 
 GOOD_TOKEN = "t" * 43  # token_urlsafe(32)-shaped
