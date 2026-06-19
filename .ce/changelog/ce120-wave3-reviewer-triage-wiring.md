@@ -14,3 +14,6 @@ statuses.
 The planner remains plan-only and non-authoritative: it still does not request
 reviews, spawn reviewer venues, mint envelopes, approve, ratify, merge, or waive
 policy.
+
+Rebuilt the validator app wheel and refreshed the app-wheel checksum so the
+offline packaging checks include `creator_engine_validator/reviewer_triage.py`.

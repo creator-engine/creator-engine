@@ -21,7 +21,7 @@ The requested ce-ops#39 current merge-throughput prior-art note is written at
 Wave 3 addendum folded ce-ops#131 merger-agent analysis into that note and
 forced it into this local commit despite `.ce/state/` normally being ignored.
 
-Per-file purpose (closed path-set - 17 paths):
+Per-file purpose (closed path-set - 19 paths):
 - **`.ce/changelog/ce120-wave3-reviewer-triage-wiring.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce120-wave3-reviewer-triage-wiring.md`** *(A)* - this carrier.
 - **`.ce/state/research/DESIGN_ce39_merge_throughput_20260619T032314Z.md`** *(A)* - ce-ops#39 current prior-art note plus ce-ops#131 merger-agent addendum.
@@ -30,13 +30,15 @@ Per-file purpose (closed path-set - 17 paths):
 - **`schemas/reviewer-triage-decision.schema.yaml`** *(M)* - adds required `triage_results` contract.
 - **`validators/creator_engine_validator/reviewer_triage.py`** *(M)* - emits combined per-candidate triage results.
 - **`validators/tests/unit/test_reviewer_triage_plan.py`** *(M)* - TDD coverage for selected/selectable/ineligible/unavailable routing.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - app-wheel digest re-pinned after rebuilding the validator wheel.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* - rebuilt app wheel from this branch source so `reviewer_triage.py` is packaged.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=19
 
-AUTHORIZED_PATHS_SHA256=903b1482e93767259964ba7176065c4b5ff10119052a72473ba7856eeba9ef65
+AUTHORIZED_PATHS_SHA256=89b2f225ddb383d946314f49d5eb5cce3adad9da4364299c1fdf6b3889756c4b
 
 ```text
 .ce/changelog/ce120-wave3-reviewer-triage-wiring.md
@@ -56,4 +58,6 @@ examples/reviewer-triage/unresolved-identity-reject.yaml
 schemas/reviewer-triage-decision.schema.yaml
 validators/creator_engine_validator/reviewer_triage.py
 validators/tests/unit/test_reviewer_triage_plan.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
