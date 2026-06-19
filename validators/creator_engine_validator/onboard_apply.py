@@ -928,7 +928,7 @@ def _prepare(
         )
     # ce-ops#71 Edit B+C: resolve the runtime backend from the profile
     # (solo-pilot → os-native; team/absent → gvisor-proxy, back-compat) and make
-    # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/gvproxy pairing
+    # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/proxy pairing
     # is planned ONLY for gvisor-proxy, so the governance-only path needs no sudo.
     isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
@@ -1138,7 +1138,7 @@ def _run_leg(
                 raise ApplyFailed("host_dependency_install_failed", str(result.get("reason", "install failed")))
             raise ApplyRefused("host_dependency_install_refused", str(result.get("reason", "install refused")))
         # ce-ops#71 Edit B: verify the SELECTED backend's dep set (not the flat
-        # Tier-2 set) — an os-native install must not be failed for absent runsc/gvproxy.
+        # Tier-2 set) — an os-native install must not be failed for absent runsc/proxy.
         verified = {
             tool: driver.verify_tool(tool)
             for tool in v3_installer.BACKEND_DEPS[prepared.isolation_backend]

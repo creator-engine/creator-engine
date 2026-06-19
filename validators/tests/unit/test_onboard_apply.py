@@ -70,7 +70,7 @@ def _answers(tmp_path: Path, *, mode: str = "new", repo: str = "octo/greenfield"
     return {
         "answers_version": 1,
         "host": {
-            "sudo_grant": ["git", "python", "runsc", "gvproxy"],
+            "sudo_grant": ["git", "python", "runsc", "proxy"],
             "userspace_install": True,
             "workspace_root": str(tmp_path / "workspaces"),
         },
@@ -164,7 +164,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
     def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
         self.calls.append("verify_runtime")
         self.verified_backend = backend
-        # Delegate to the real dispatch so the os-native path (no runsc/gvproxy) and
+        # Delegate to the real dispatch so the os-native path (no runsc/proxy) and
         # the gvisor-proxy path are both exercised honestly against the live tools.
         result = super().verify_runtime(
             state_root=state_root, workspace_root=workspace_root, provider=provider, backend=backend
@@ -331,7 +331,7 @@ def test_sudo_grant_hole_refuses_before_mutation(tmp_path):
     answers = _answers(tmp_path)
     answers["host"]["sudo_grant"] = ["runsc"]
     probes = {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES}
-    probes["gvproxy"] = False
+    probes["proxy"] = False
     with pytest.raises(onboard_apply.ApplyRefused) as exc:
         onboard_apply.apply_onboard(
             _request(tmp_path, answers=answers, probes=probes),
@@ -401,15 +401,15 @@ def test_runtime_posture_failure_stops_before_github(tmp_path):
 # ---------------------------------------------------------------------------
 # ce-ops#71 Edits A+C — the solo-pilot leak fix. The governance-only profile
 # materializes the unprivileged os-native backend and stops dragging gVisor:
-# NO runsc/gvproxy in the dependency plan or the runtime-posture verification,
-# and it SUCCEEDS with an EMPTY sudo grant on a host without runsc/gvproxy.
+# NO runsc/proxy in the dependency plan or the runtime-posture verification,
+# and it SUCCEEDS with an EMPTY sudo grant on a host without runsc/proxy.
 # ---------------------------------------------------------------------------
-def test_solo_pilot_materializes_os_native_with_no_runsc_or_gvproxy(tmp_path):
+def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
     answers = _answers(tmp_path)
     answers["profile"] = "solo-pilot"
     answers["host"]["sudo_grant"] = []  # governance-only: zero privileged installs
     # a host WITHOUT the gVisor pairing — os-native must not need it
-    probes = {"git": True, "python": True, "uv": True, "runsc": False, "gvproxy": False}
+    probes = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
     driver = FakeDriver()
     summary = _apply(tmp_path, driver, answers=answers, probes=probes)
 
@@ -445,7 +445,7 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_gvproxy(tmp_path):
     # — distinct from the no-sudo installable deps plan, which has neither.
     assert set(verification["held_mechanism_prerequisites"]) == {"bwrap", "proxy"}
 
-    # the host-dependency plan is backend-driven: NO privileged runsc/gvproxy step
+    # the host-dependency plan is backend-driven: NO privileged runsc/proxy step
     host_leg = _leg(summary, "host_dependencies")
     assert host_leg["status"] == "already_satisfied"
     assert "install_dependencies" not in driver.calls

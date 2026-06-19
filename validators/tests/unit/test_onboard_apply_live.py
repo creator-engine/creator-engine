@@ -548,7 +548,7 @@ def _live_apply(tmp_path: Path, forge: _ModeBForge):
     spec = canonical.replace("VALUE", "c2ln").replace("DIGEST", digest).encode("utf-8")
     answers = {
         "answers_version": 1,
-        "host": {"sudo_grant": ["git", "python", "runsc", "gvproxy"], "userspace_install": True,
+        "host": {"sudo_grant": ["git", "python", "runsc", "proxy"], "userspace_install": True,
                  "workspace_root": str(tmp_path / "ws")},
         "provider": {"harness": "codex"},
         "github": {"mode": "existing", "repo": _REPO, "bootstrap_token": "env://CE_BOOTSTRAP",
@@ -789,13 +789,13 @@ def test_install_dependencies_empty_is_noop():
     assert calls["fetch"] == [] and calls["pip"] == []
 
 
-def test_install_dependencies_refuses_unpinned_sudo_tools():
+def test_install_dependencies_refuses_sudo_tools_no_host_installer():
     driver, calls = _deps_driver()
-    result = driver.install_dependencies(["iptables"], sudo_tools=["iptables"], userspace_tools=[])
+    result = driver.install_dependencies(["runsc"], sudo_tools=["runsc"], userspace_tools=[])
     assert result["ok"] is False
-    assert result["reason"] == "no_pinned_system_tool"
+    assert result["reason"] == "no_host_package_installer_configured"
     assert result["manual_rollback_required"] is True
-    assert result["tool"] == "iptables"
+    assert result["package_names"] == ["runsc"]
     assert calls["fetch"] == [] and calls["pip"] == []  # no fetch/pip on the sudo path
 
 

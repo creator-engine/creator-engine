@@ -907,24 +907,24 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         (``MIRROR_USERSPACE_WHEELS``, bound to the SIGNED ``required_wheels`` entry) BEFORE
         install, then installed OFFLINE via ``pip install --no-index --find-links <dir> <tool>``;
         ``verify_tool`` must pass after. A pre-seeded ``CE_FORGE_WHEELHOUSE`` dir is honored as an
-        offline FALLBACK (no fetch) when it already holds the pinned wheel.
-
-        For the selected ``gvisor-proxy`` backend, the privileged runtime tools are concrete,
-        pinned host binaries: ``runsc`` and ``gvproxy``. They are fetched from upstream release
-        URLs, hash-verified before install, installed to ``CE_FORGE_RUNTIME_BIN_DIR`` or
-        ``/usr/local/bin``, and version-verified after install. Any unknown sudo tool, unsupported
-        architecture, fetch/hash/install/version failure refuses closed.
+        offline FALLBACK (no fetch) when it already holds the pinned wheel. ``sudo_tools`` keep
+        the base refusal (a §7 governed seat has no host package installer); the concrete
+        ``runsc``/``gvproxy`` runtime binaries are installed by ``provision_runtime``. Fail CLOSED
+        on every fetch / hash-mismatch / install / verify failure; the staged temp dir is always
+        cleaned.
         """
         if not tools:
             return {"ok": True, "installed": []}
+        if sudo_tools:
+            return {
+                "ok": False,
+                "reason": "no_host_package_installer_configured",
+                "manual_rollback_required": True,
+                "package_names": list(sudo_tools),
+            }
         installed: list[str] = []
         staged_tmpdirs: list[Path] = []
         try:
-            if sudo_tools:
-                runtime_install = self._ensure_pinned_system_tools(sudo_tools)
-                if not runtime_install.get("ok"):
-                    return runtime_install
-                installed.extend(runtime_install.get("installed", []))
             for tool in userspace_tools:
                 pin = MIRROR_USERSPACE_WHEELS.get(tool)
                 if pin is None:

@@ -44,7 +44,7 @@ or answer interactively as each journey step batches its asks. The agent loop:
 # the one-liner runs this once with verified absolute paths:
 <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
-# sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, gvproxy])
+# sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
 ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --plan
 ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --apply --non-interactive
 ```

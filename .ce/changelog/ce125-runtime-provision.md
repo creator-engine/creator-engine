@@ -15,6 +15,7 @@ sha256/sha512 digests before installation, installs only the known pinned tools,
 and fail-closes on unsupported architecture, fetch failure, digest mismatch,
 install failure, or post-install version mismatch.
 
-Updated the install answer schema and planner/test fixtures from the placeholder
-`proxy` sudo tool to the concrete `gvproxy` binary. Rebuilt the checked-in
+Kept the signed install answer schema's existing `proxy` sudo-grant enum intact;
+the concrete `gvproxy` install is handled inside runtime provisioning instead
+of changing the trust-root-pinned answer contract. Rebuilt the checked-in
 validator wheelhouse and refreshed `validators/wheelhouse/SHA256SUMS`.
