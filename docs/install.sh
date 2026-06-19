@@ -342,6 +342,43 @@ write_state() {
   mv "$tmp_state" "$STATE_FILE"
 }
 
+install_cli_shim() {
+  name="$1"
+  target="$2"
+  shim="${LOCAL_BIN}/${name}"
+  tmp_shim="${shim}.tmp.$$"
+
+  [ -x "$target" ] \
+    || fail entrypoint_missing "cannot expose $name: target $target is absent or not executable"
+  if [ -e "$shim" ] && [ ! -L "$shim" ]; then
+    fail cli_exposure_failed "refusing to overwrite non-symlink CLI path $shim"
+  fi
+  rm -f "$tmp_shim"
+  ln -s "$target" "$tmp_shim" \
+    || fail cli_exposure_failed "failed to prepare CLI shim $tmp_shim -> $target"
+  if ! mv -Tf "$tmp_shim" "$shim"; then
+    rm -f "$tmp_shim"
+    fail cli_exposure_failed "failed to install CLI shim $shim -> $target"
+  fi
+  [ -x "$shim" ] \
+    || fail cli_exposure_failed "CLI shim $shim does not resolve to executable $target"
+}
+
+install_cli_shims() {
+  [ -n "${HOME:-}" ] || fail cli_exposure_failed "HOME is not set; cannot create ~/.local/bin CLI shims"
+  LOCAL_BIN="${HOME}/.local/bin"
+  mkdir -p "$LOCAL_BIN" \
+    || fail cli_exposure_failed "failed to create user-local bin directory $LOCAL_BIN"
+
+  install_cli_shim cev3 "${VENV_DIR}/bin/cev3"
+  install_cli_shim ce "${VENV_DIR}/bin/ce"
+  say "exposed CLI shims: ${LOCAL_BIN}/cev3 and ${LOCAL_BIN}/ce"
+  case ":${PATH:-}:" in
+    *":${LOCAL_BIN}:"*) ;;
+    *) say "warning: ${LOCAL_BIN} is not on PATH; add it to run ce/cev3 without an absolute path" ;;
+  esac
+}
+
 TMPDIR_CE="$(mktemp -d)"
 chmod 700 "$TMPDIR_CE"
 SPEC_FILE="$TMPDIR_CE/llms-install.md"
@@ -564,6 +601,7 @@ fi
 
 "${VENV_DIR}/bin/cev3" --help >/dev/null 2>&1 \
   || fail entrypoint_missing "verified venv exists but cev3 no longer runs"
+install_cli_shims
 write_state
 
 ONBOARD_ARGS=(

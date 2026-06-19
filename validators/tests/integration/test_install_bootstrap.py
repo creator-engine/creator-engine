@@ -187,13 +187,26 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
     rows = {row["key"]: row for row in payload["inventory"]}
     assert rows["profile"]["status"] == "answered:solo-pilot"
     assert (install_root / "venv" / "bin" / "cev3").is_file()
+    local_bin = tmp_path / "home" / ".local" / "bin"
+    for command in ("cev3", "ce"):
+        shim = local_bin / command
+        target = install_root / "venv" / "bin" / command
+        assert shim.is_symlink()
+        assert shim.resolve() == target.resolve()
     assert not (install_root / "install.lock").exists()
     assert "installed=1" in first.stderr
+    assert f"warning: {local_bin} is not on PATH" in first.stderr
 
     second = _run_install(tmp_path, repo_root, site=site, install_root=install_root, answers=answers)
     assert second.returncode == 0, second.stderr
     assert json.loads(second.stdout)["action"] == "onboard_inventory"
     assert "skipped_already_current=1" in second.stderr
+    assert f"warning: {local_bin} is not on PATH" in second.stderr
+    for command in ("cev3", "ce"):
+        shim = local_bin / command
+        target = install_root / "venv" / "bin" / command
+        assert shim.is_symlink()
+        assert shim.resolve() == target.resolve()
 
 
 def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path, repo_root: Path):

@@ -375,19 +375,29 @@ perform the privileged fix; missing `runsc`/`proxy` surface as inventory facts.
 ## The `ce` exposure (Operator-ratified user-facing-name directive)
 
 The wheel installs both `ce` and `cev3`. E1 invokes the internal `cev3` by
-absolute venv path for the authenticated bootstrap handoff. A durable user
-`ce` exposure remains a user-local later step (`ce_exposure_plan`) and is never a
-system-wide symlink in E1. A version-stamped user command (`cev3`/`cev4`) remains
-the anti-pattern this avoids.
+absolute venv path for the authenticated bootstrap handoff, then creates or
+repairs durable user-local shims:
+
+- `~/.local/bin/cev3` → `<verified-venv>/bin/cev3`
+- `~/.local/bin/ce` → `<verified-venv>/bin/ce`
+
+The shim step is idempotent and never creates a system-wide symlink. It refuses
+to overwrite a non-symlink at either user-local command path, updates stale
+symlinks to the current verified venv, and warns when `~/.local/bin` is not on
+`PATH` because the installer cannot permanently mutate the parent shell's
+environment. `ce` remains the user-facing command; the `cev3` shim is retained
+for bootstrap/internal compatibility. A future version-stamped user command
+(`cev4`, etc.) remains the anti-pattern this avoids.
 
 ## Boundary (pure planner; live executor seam)
 
 CI-pure: parser/canonicalization · artifact-manifest validation · dependency
 planner · profile/opt-out · answers/inventory engine · decomposed GitHub-leg
 planners · the `ce` exposure plan. Live E1 shell work is confined to
-`docs/install.sh`: network fetches, hash checks, venv creation, and authenticated
-inventory. The E2 live executor remains the composition seam for
-host/runtime/GitHub/workspace actions and verifies each leg before proceeding.
+`docs/install.sh`: network fetches, hash checks, venv creation, user-local CLI
+shim creation, and authenticated inventory. The E2 live executor remains the
+composition seam for host/runtime/GitHub/workspace actions and verifies each leg
+before proceeding.
 The read-only *detection* remains live; the privileged *fix* is explicit
 `--apply`.
 
