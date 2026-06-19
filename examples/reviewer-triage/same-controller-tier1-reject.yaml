@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: same-controller
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: same-controller
+    eligible: false
+    available: true
+    selectable: false
+    selected: false
+    routing_status: ineligible
+    eligibility_reasons: [same_controller_as_author, isolation_tier_below_floor]
+    availability_reasons: []
 assignment:
   selected_reviewers: []
   selected_identity_refs: []

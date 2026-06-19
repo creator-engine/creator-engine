@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: reviewer-a
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: reviewer-a
+    eligible: true
+    available: true
+    selectable: true
+    selected: true
+    routing_status: selected
+    eligibility_reasons: []
+    availability_reasons: []
 assignment:
   selected_reviewers: [reviewer-a]
   selected_identity_refs: [tenants/creator-engine/reviewers/reviewer-a.yml]

@@ -3,9 +3,10 @@ $id: "https://creator-engine.local/schemas/reviewer-triage-decision.schema.yaml"
 title: "Creator Engine reviewer triage decision"
 description: >-
   Auditable plan-only reviewer assignment decision. It records candidate
-  generation, eligibility, availability, assignment, and escalation facts. It
-  never grants approval, ratification, merge, waiver, review-request apply,
-  reviewer-venue launch, or reviewer-authority-envelope minting authority.
+  generation, eligibility, availability, triage routing, assignment, and
+  escalation facts. It never grants approval, ratification, merge, waiver,
+  review-request apply, reviewer-venue launch, or reviewer-authority-envelope
+  minting authority.
 type: object
 required:
   - kind
@@ -17,6 +18,7 @@ required:
   - candidate_generation
   - eligibility_results
   - availability_results
+  - triage_results
   - assignment
   - escalation
   - non_authority_statement
@@ -110,6 +112,10 @@ properties:
           type: boolean
         reasons:
           $ref: "#/$defs/string_list"
+  triage_results:
+    type: array
+    items:
+      $ref: "#/$defs/triage_result"
   assignment:
     type: object
     required: [selected_reviewers, selected_identity_refs, review_request_action, venue_dispatch_ref, envelope_ref, broad_team_fallback]
@@ -178,6 +184,36 @@ $defs:
       containment_status:
         type: ["string", "null"]
         enum: [enforced, required_but_pending_enforcement, uncontained, noop, advisory, off, null]
+  triage_result:
+    type: object
+    required:
+      - reviewer_id
+      - eligible
+      - available
+      - selectable
+      - selected
+      - routing_status
+      - eligibility_reasons
+      - availability_reasons
+    additionalProperties: false
+    properties:
+      reviewer_id:
+        $ref: "#/$defs/non_empty_string"
+      eligible:
+        type: boolean
+      available:
+        type: boolean
+      selectable:
+        type: boolean
+      selected:
+        type: boolean
+      routing_status:
+        type: string
+        enum: [selected, selectable, ineligible, unavailable]
+      eligibility_reasons:
+        $ref: "#/$defs/string_list"
+      availability_reasons:
+        $ref: "#/$defs/string_list"
   isolation_domain_attestation:
     type: object
     required:

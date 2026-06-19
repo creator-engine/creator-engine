@@ -19,6 +19,15 @@ registry, filters fail-closed eligibility, applies deterministic ranking, and
 emits the decision record. Candidate generation is ownership-only; git-history
 scoring is not used.
 
+The decision carries both source facts and a downstream routing view. The
+`eligibility_results` and `availability_results` sections preserve the separate
+policy and durable-status checks. The `triage_results` section joins them per
+candidate as `selected`, `selectable`, `ineligible`, or `unavailable` so a later
+review-venue leg can consume one advisory routing table without re-deriving
+policy reasons. This combined view is still non-authoritative; `assignment`
+remains a plan, and every live reviewer-side act still requires the reviewer
+authority path.
+
 The eligibility model composes with the private ce-ops governance records
 value-free: ce-ops ADR-0003 defines reviewer independence as isolation-domain
 disjointness, and ce-ops ADR-0004 requires contained agent runtime posture. The

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator import reviewer_triage as rt
+from creator_engine_validator.schema import validate_with_schema
 
 
 HEAD = "a" * 40
 NON_AUTHORITY = (
     "Reviewer triage assigns review only; it does not approve, ratify, merge, or waive policy."
 )
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _reviewer(
@@ -146,6 +149,19 @@ def test_deterministic_ranking_selects_concrete_reviewer_identity():
     assert first["candidate_generation"]["git_history_scoring"] is False
     assert first["eligibility_results"][0]["isolation_domain_attestation"]["computed_tier"] == "tier-2"
     assert first["eligibility_results"][0]["containment_status"] == "enforced"
+    triage = {r["reviewer_id"]: r for r in first["triage_results"]}
+    assert triage["reviewer-a"] == {
+        "reviewer_id": "reviewer-a",
+        "eligible": True,
+        "available": True,
+        "selectable": True,
+        "selected": True,
+        "routing_status": "selected",
+        "eligibility_reasons": [],
+        "availability_reasons": [],
+    }
+    assert triage["reviewer-z"]["routing_status"] == "selectable"
+    assert triage["reviewer-z"]["selected"] is False
 
 
 def test_same_host_tier2_peer_is_valid_when_domains_are_disjoint():
@@ -270,6 +286,12 @@ def test_retired_and_busy_reviewers_are_not_available():
     availability = {r["reviewer_id"]: set(r["reasons"]) for r in decision["availability_results"]}
     assert "availability_status_retired" in availability["retired"]
     assert "max_active_reviews_reached" in availability["busy"]
+    triage = {r["reviewer_id"]: r for r in decision["triage_results"]}
+    assert triage["retired"]["routing_status"] == "unavailable"
+    assert triage["retired"]["eligibility_reasons"] == []
+    assert triage["retired"]["availability_reasons"] == ["availability_status_retired"]
+    assert triage["busy"]["routing_status"] == "unavailable"
+    assert triage["busy"]["availability_reasons"] == ["max_active_reviews_reached"]
     assert decision["assignment"]["selected_reviewers"] == []
 
 
@@ -283,7 +305,26 @@ def test_codeowners_path_and_ruleset_team_match_are_required():
     reasons = {r["reviewer_id"]: set(r["reasons"]) for r in decision["eligibility_results"]}
     assert "not_owner_for_changed_paths" in reasons["wrong-path"]
     assert "missing_required_ruleset_team" in reasons["wrong-team"]
+    triage = {r["reviewer_id"]: r for r in decision["triage_results"]}
+    assert triage["wrong-path"]["routing_status"] == "ineligible"
+    assert triage["wrong-path"]["availability_reasons"] == []
+    assert "not_owner_for_changed_paths" in triage["wrong-path"]["eligibility_reasons"]
+    assert triage["wrong-team"]["routing_status"] == "ineligible"
+    assert "missing_required_ruleset_team" in triage["wrong-team"]["eligibility_reasons"]
     assert decision["assignment"]["selected_reviewers"] == []
+
+
+def test_planner_output_validates_against_decision_schema():
+    decision = rt.plan_reviewer_triage(**_base_kwargs())
+
+    errors = validate_with_schema(
+        decision,
+        "schemas/reviewer-triage-decision.schema.yaml",
+        REPO_ROOT / "generated-reviewer-triage-decision.yaml",
+        code="VAL-REVIEWER-TRIAGE-SCHEMA",
+        contract="schemas/reviewer-triage-decision.schema.yaml",
+    )
+    assert errors == []
 
 
 def test_registry_path_glob_owner_is_valid_without_codeowners_entry():

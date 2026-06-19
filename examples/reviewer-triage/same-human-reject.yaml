@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: ubuntuaws745-cmyk
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: ubuntuaws745-cmyk
+    eligible: false
+    available: true
+    selectable: false
+    selected: false
+    routing_status: ineligible
+    eligibility_reasons: [same_human_as_author]
+    availability_reasons: []
 assignment:
   selected_reviewers: []
   selected_identity_refs: []
