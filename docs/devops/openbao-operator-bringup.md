@@ -45,25 +45,33 @@ bao status
 Do not enable auto-unseal for this go-live. Auto-unseal remains a later,
 separately ratified change.
 
-## 3. Enable Policy And AppRole
+## 3. Enable Per-Dev Policy And AppRole
 
 Use the initial root token only for setup. Then revoke it.
 
 ```bash
 export BAO_TOKEN='<initial-root-token>'
 bao secrets enable -path=ce-kv kv-v2
-bao policy write ce-broker docs/devops/openbao/ce-broker-policy.hcl
 bao auth enable approle
-bao write auth/approle/role/ce-dev-1 \
-  token_policies=ce-broker \
+
+export CE_DEV_ID='dev-1'
+export CE_APPROLE_NAME="ce-${CE_DEV_ID}"
+export CE_POLICY_NAME="ce-${CE_DEV_ID}-runtime"
+docs/devops/openbao/render-dev-policy.sh > "/tmp/${CE_POLICY_NAME}.hcl"
+bao policy write "$CE_POLICY_NAME" "/tmp/${CE_POLICY_NAME}.hcl"
+rm -f "/tmp/${CE_POLICY_NAME}.hcl"
+
+bao write "auth/approle/role/${CE_APPROLE_NAME}" \
+  "token_policies=${CE_POLICY_NAME}" \
   token_ttl=10m \
   token_max_ttl=30m \
   secret_id_ttl=10m \
   secret_id_num_uses=1
 ```
 
-Repeat role creation per approved dev identity (`ce-dev-1`, `ce-dev-2`, and so
-on), keeping each role scoped to that identity's allowed secret paths.
+Repeat policy rendering and role creation per approved dev identity (`dev-1`,
+`dev-2`, and so on). Each AppRole gets exactly one per-dev runtime policy. Do
+not bind multiple dev roles to one shared wildcard policy.
 
 ## 4. Mint Short-TTL Response-Wrapped Secret-Zero
 

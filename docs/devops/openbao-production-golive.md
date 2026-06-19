@@ -25,9 +25,11 @@ reachable only on the tailnet. Do not expose OpenBao on a public listener.
 - `openbao/restore-drill-openbao.sh` restores an encrypted snapshot into an
   explicit throwaway OpenBao instance and writes a proof JSON after reading a
   canary from the restored state.
+- `openbao/render-dev-policy.sh` renders one policy per dev identity so each
+  AppRole is bound only to its own `ce-kv/devs/<dev-id>/runtime/*` paths.
 - `openbao/emergency-revoke-openbao.sh` provides tested plan/execute commands
   for lease revocation, lease-prefix revocation, AppRole SecretID/token accessor
-  revocation, and emergency seal.
+  revocation, and emergency seal, using the same per-dev role/policy naming.
 
 ## Host Provisioning
 

@@ -17,7 +17,8 @@ GO_LIVE_ARTIFACTS = (
     "docs/devops/openbao/snapshot-openbao.sh",
     "docs/devops/openbao/restore-drill-openbao.sh",
     "docs/devops/openbao/emergency-revoke-openbao.sh",
-    "docs/devops/openbao/ce-broker-policy.hcl",
+    "docs/devops/openbao/ce-dev-policy.hcl.tmpl",
+    "docs/devops/openbao/render-dev-policy.sh",
     "docs/devops/openbao-production-golive.md",
     "docs/devops/openbao-operator-bringup.md",
 )
@@ -142,9 +143,46 @@ def validate_emergency_revoke_script(script: str) -> list[str]:
         "lease)": "script must support lease revocation",
         "lease-prefix)": "script must support lease-prefix revocation",
         "approle)": "script must support AppRole accessor destruction",
+        "OPENBAO_APPROLE_POLICY": "script must name the per-dev AppRole policy",
         "seal)": "script must support emergency seal",
         "operator seal": "script must wire the emergency seal command",
         "--execute": "script must require explicit execution",
+    }
+    for snippet, message in required_snippets.items():
+        if snippet not in script:
+            violations.append(message)
+    return violations
+
+
+def validate_per_dev_policy_template(policy: str) -> list[str]:
+    """Return violations for the per-dev OpenBao policy template."""
+
+    violations: list[str] = []
+    required_snippets = {
+        "ce-kv/data/devs/__CE_DEV_ID__/runtime/*": "data path must be scoped to the rendered dev id",
+        "ce-kv/metadata/devs/__CE_DEV_ID__/runtime/*": "metadata path must be scoped to the rendered dev id",
+        'capabilities = ["read"]': "data path must be read-only",
+        'capabilities = ["read", "list"]': "metadata path must allow read/list only",
+    }
+    for snippet, message in required_snippets.items():
+        if snippet not in policy:
+            violations.append(message)
+    forbidden = ("devs/+/runtime", "devs/*/runtime")
+    for snippet in forbidden:
+        if snippet in policy:
+            violations.append(f"cross-dev wildcard present: {snippet}")
+    return violations
+
+
+def validate_policy_renderer(script: str) -> list[str]:
+    """Return violations for the per-dev policy renderer script."""
+
+    violations: list[str] = []
+    required_snippets = {
+        "CE_DEV_ID": "renderer must require a dev id",
+        "^dev-[A-Za-z0-9_-]+$": "renderer must constrain dev id shape",
+        "__CE_DEV_ID__": "renderer must substitute the dev id placeholder",
+        "refusing unsafe CE_DEV_ID path component": "renderer must reject unsafe path components",
     }
     for snippet, message in required_snippets.items():
         if snippet not in script:

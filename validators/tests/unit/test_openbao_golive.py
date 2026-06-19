@@ -10,6 +10,8 @@ from creator_engine_validator.openbao_golive import (
     GO_LIVE_ARTIFACTS,
     read_go_live_artifact,
     validate_emergency_revoke_script,
+    validate_per_dev_policy_template,
+    validate_policy_renderer,
     validate_provision_script,
     validate_snapshot_restore_scripts,
     validate_systemd_unit,
@@ -60,6 +62,65 @@ def test_openbao_emergency_revoke_script_covers_per_dev_actions(repo_root: Path)
     script = read_go_live_artifact(repo_root, "docs/devops/openbao/emergency-revoke-openbao.sh")
 
     assert validate_emergency_revoke_script(script) == []
+
+
+def test_openbao_per_dev_policy_template_has_no_cross_dev_wildcard(repo_root: Path):
+    policy = read_go_live_artifact(repo_root, "docs/devops/openbao/ce-dev-policy.hcl.tmpl")
+    renderer = read_go_live_artifact(repo_root, "docs/devops/openbao/render-dev-policy.sh")
+
+    assert validate_per_dev_policy_template(policy) == []
+    assert validate_policy_renderer(renderer) == []
+    assert "devs/+/runtime" not in policy
+    assert "devs/*/runtime" not in policy
+    assert "ce-kv/data/devs/__CE_DEV_ID__/runtime/*" in policy
+    assert "ce-kv/metadata/devs/__CE_DEV_ID__/runtime/*" in policy
+
+
+def test_openbao_policy_renderer_scopes_one_dev(repo_root: Path):
+    renderer = repo_root / "docs/devops/openbao/render-dev-policy.sh"
+
+    completed = subprocess.run(
+        [str(renderer)],
+        env={**os.environ, "CE_DEV_ID": "dev-1"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    assert 'path "ce-kv/data/devs/dev-1/runtime/*"' in completed.stdout
+    assert 'path "ce-kv/metadata/devs/dev-1/runtime/*"' in completed.stdout
+    assert "devs/+/runtime" not in completed.stdout
+    assert "__CE_DEV_ID__" not in completed.stdout
+
+
+def test_openbao_policy_renderer_rejects_unsafe_dev_id(repo_root: Path):
+    renderer = repo_root / "docs/devops/openbao/render-dev-policy.sh"
+
+    for dev_id in ("dev-1/../../dev-2", "dev-1$", "operator-1"):
+        completed = subprocess.run(
+            [str(renderer)],
+            env={**os.environ, "CE_DEV_ID": dev_id},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        assert completed.returncode == 78
+        assert "refusing invalid CE_DEV_ID" in completed.stderr
+
+
+def test_operator_bringup_binds_each_approle_to_per_dev_policy(repo_root: Path):
+    runbook = read_go_live_artifact(repo_root, "docs/devops/openbao-operator-bringup.md")
+
+    assert "render-dev-policy.sh" in runbook
+    assert "CE_POLICY_NAME=\"ce-${CE_DEV_ID}-runtime\"" in runbook
+    assert "bao policy write \"$CE_POLICY_NAME\"" in runbook
+    assert '"token_policies=${CE_POLICY_NAME}"' in runbook
+    assert "token_policies=ce-broker" not in runbook
+    assert "bao policy write ce-broker" not in runbook
+    assert "devs/+/runtime" not in runbook
 
 
 def test_provision_plan_refuses_public_listener(repo_root: Path):
@@ -259,7 +320,7 @@ echo "$@" >> {tmp_path / "bao.log"}
         "OPENBAO_TOKEN_ACCESSOR": "token-accessor",
     }
 
-    subprocess.run(
+    completed = subprocess.run(
         [str(repo_root / "docs/devops/openbao/emergency-revoke-openbao.sh"), "--execute", "approle"],
         env=env,
         text=True,
@@ -269,5 +330,6 @@ echo "$@" >> {tmp_path / "bao.log"}
     )
 
     calls = (tmp_path / "bao.log").read_text(encoding="utf-8")
+    assert "approle_role=ce-dev-1 approle_policy=ce-dev-1-runtime" in completed.stdout
     assert "write auth/approle/role/ce-dev-1/secret-id-accessor/destroy secret_id_accessor=secret-accessor" in calls
     assert "token revoke -accessor token-accessor" in calls

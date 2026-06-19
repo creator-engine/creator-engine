@@ -15,7 +15,9 @@ Required common environment:
 Action-specific environment:
   lease:        OPENBAO_LEASE_ID
   lease-prefix: OPENBAO_LEASE_PREFIX
-  approle:      OPENBAO_APPROLE_ROLE (default ce-${CE_DEV_ID}), OPENBAO_SECRET_ID_ACCESSOR, optional OPENBAO_TOKEN_ACCESSOR
+  approle:      OPENBAO_APPROLE_ROLE (default ce-${CE_DEV_ID}), OPENBAO_APPROLE_POLICY
+                (default ce-${CE_DEV_ID}-runtime), OPENBAO_SECRET_ID_ACCESSOR,
+                optional OPENBAO_TOKEN_ACCESSOR
   seal:         OPENBAO_EMERGENCY_REASON
 EOF
 }
@@ -53,7 +55,9 @@ case "$ACTION" in
     ;;
   approle)
     OPENBAO_APPROLE_ROLE="${OPENBAO_APPROLE_ROLE:-ce-${CE_DEV_ID}}"
+    OPENBAO_APPROLE_POLICY="${OPENBAO_APPROLE_POLICY:-ce-${CE_DEV_ID}-runtime}"
     : "${OPENBAO_SECRET_ID_ACCESSOR:?set OPENBAO_SECRET_ID_ACCESSOR}"
+    echo "approle_role=$OPENBAO_APPROLE_ROLE approle_policy=$OPENBAO_APPROLE_POLICY"
     run "$BAO_BIN" write "auth/approle/role/$OPENBAO_APPROLE_ROLE/secret-id-accessor/destroy" "secret_id_accessor=$OPENBAO_SECRET_ID_ACCESSOR"
     if [[ -n "${OPENBAO_TOKEN_ACCESSOR:-}" ]]; then
       run "$BAO_BIN" token revoke -accessor "$OPENBAO_TOKEN_ACCESSOR"

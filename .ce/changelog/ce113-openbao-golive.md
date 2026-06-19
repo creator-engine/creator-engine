@@ -11,3 +11,7 @@ deployment: hardened raft/TLS/audit config, systemd/provisioning scripts,
 encrypted off-host snapshot and restore-drill tooling, emergency revocation
 automation, Operator bringup runbooks, and validator tests including an opt-in
 throwaway raft restore drill.
+
+Review fix: replaced the shared wildcard broker policy with a per-dev policy
+template and renderer, so each AppRole is bound to only its own
+`ce-kv/devs/<dev-id>/runtime/*` paths.

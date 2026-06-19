@@ -15,16 +15,17 @@ Operator-ratified Hetzner VPS, logically segregated and tailnet-only OpenBao
 topology. This PR does not initialize or unseal production, does not inject real
 secret-zero, and does not migrate live secrets.
 
-Per-file purpose (closed path-set - 16 paths):
+Per-file purpose (closed path-set - 17 paths):
 - **`.ce/changelog/ce113-openbao-golive.md`** *(A)* - changelog fragment for go-live artifacts.
 - **`.ce/pr-manifests/ce113-openbao-golive.md`** *(A)* - this closed carrier.
 - **`docs/devops/openbao-operator-bringup.md`** *(A)* - Operator-only init/unseal/root-token/AppRole/secret-zero bringup runbook.
 - **`docs/devops/openbao-production-golive.md`** *(A)* - production go-live operating runbook and held Operator actions.
-- **`docs/devops/openbao/ce-broker-policy.hcl`** *(A)* - least-privilege CE broker policy template.
+- **`docs/devops/openbao/ce-dev-policy.hcl.tmpl`** *(A)* - per-dev least-privilege policy template with no cross-dev wildcard.
 - **`docs/devops/openbao/emergency-revoke-openbao.sh`** *(A)* - per-dev lease/AppRole/emergency-seal revocation script.
 - **`docs/devops/openbao/openbao.hcl.tmpl`** *(A)* - raft storage, tailnet-only TLS listener, and audit fail-closed HCL template.
 - **`docs/devops/openbao/openbao.service`** *(A)* - hardened dedicated-user systemd unit.
 - **`docs/devops/openbao/provision-openbao.sh`** *(A)* - idempotent plan/apply host provisioning script.
+- **`docs/devops/openbao/render-dev-policy.sh`** *(A)* - safe renderer for per-dev policy files.
 - **`docs/devops/openbao/restore-drill-openbao.sh`** *(A)* - encrypted snapshot restore-drill script for a throwaway instance.
 - **`docs/devops/openbao/snapshot-openbao.sh`** *(A)* - encrypted off-host raft snapshot script.
 - **`validators/creator_engine_validator/openbao_golive.py`** *(A)* - value-free artifact validation helpers.
@@ -36,20 +37,21 @@ Per-file purpose (closed path-set - 16 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=2896620141e1f1710efc5ad88d1da6e3217c28098025bbff89e86dcbe86a5e52
+AUTHORIZED_PATHS_SHA256=0381b204326e5eee4ea44e33b0257816536cc5d3e72d93caae77f9b9d363a6b3
 
 ```text
 .ce/changelog/ce113-openbao-golive.md
 .ce/pr-manifests/ce113-openbao-golive.md
 docs/devops/openbao-operator-bringup.md
 docs/devops/openbao-production-golive.md
-docs/devops/openbao/ce-broker-policy.hcl
+docs/devops/openbao/ce-dev-policy.hcl.tmpl
 docs/devops/openbao/emergency-revoke-openbao.sh
 docs/devops/openbao/openbao.hcl.tmpl
 docs/devops/openbao/openbao.service
 docs/devops/openbao/provision-openbao.sh
+docs/devops/openbao/render-dev-policy.sh
 docs/devops/openbao/restore-drill-openbao.sh
 docs/devops/openbao/snapshot-openbao.sh
 validators/creator_engine_validator/openbao_golive.py
