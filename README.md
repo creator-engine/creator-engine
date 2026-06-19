@@ -1,295 +1,243 @@
 # Creator Engine
 
-## Status and stability
+Creator Engine (CE) is a governed-SDLC automation layer for agent-authored
+software work. It turns coding agents into auditable participants in a software
+delivery loop: scoped work, explicit identity, contained runtime execution,
+evidence capture, independent review, and human-ratified privileged gates.
 
-Creator Engine's v1.0 governed runtime is **runtime-complete and
-pre-release** — landed on `main` but not yet cut or tagged (version
-`0.1.0`; the G0–G9 delivery gates are ready for Operator ratification).
-The v0.1 file-only substrate (see "v0.1 scope" below) composes beneath
-it, and v1.0 remains the integration target: an end-to-end governed
-agentic SDLC loop with every privileged gate human-ratified.
-Spec/plan/tasks artifacts, schemas, templates, and the offline validator
-may change without backward-compatibility guarantees until v1.0 is
-released. Privileged operations (deploys, governance amendments,
-identity/security/attestation/redaction changes, repo settings, branch
-protection, visibility flips) remain Operator-ratified regardless of
-release stage — see [`GOVERNANCE.md`](./GOVERNANCE.md).
+The current direction is v3.5: make CE usable by solo and small teams while
+moving toward the "every agent contained" security posture for the NVIDIA pitch
+arc. The forward plan lives in
+[`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md). The historical v3 gate map is
+kept in [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
 
-Release surface pointers: `v0.1.0` is the first public product tag direction,
-with `creator-engine-validator` kept at `0.1.0` for the initial public cut. See
-[`CHANGELOG.md`](./CHANGELOG.md) and
-[`docs/delivery/VERSIONING_AND_RELEASE_POLICY.md`](./docs/delivery/VERSIONING_AND_RELEASE_POLICY.md)
-for the changelog and versioning policy. G2.* identifiers remain internal gate
-numbers, and draft v2 substrate remains roadmap material rather than shipped v2
-runtime.
+## Current Status
 
-LIMITLESS is the named public dogfood tenant; generic paths in the
-substrate must not hardcode it (enforced by the offline validator's
-`scan-no-limitless` check).
+As of June 19, 2026:
 
-## What Creator Engine is
+- v3.1 is pilot-ready: the repo contains the v3 Scope-to-PR-to-review-to-merge
+  substrate, the product CLI surface, cockpit/read-model work, and the two-mode
+  installer substrate.
+- v3.5 is the active program plan. Its critical workstreams are containment,
+  team-mode throughput, install/pilot readiness, secret and identity custody,
+  release integrity, and documentation/product surface currency.
+- The package artifacts are at `creator-engine-validator` version `0.2.0`.
+  There is no public product tag or GitHub release yet; release publication is
+  still a separate governed workstream. See
+  [`docs/delivery/VERSIONING_AND_RELEASE_POLICY.md`](./docs/delivery/VERSIONING_AND_RELEASE_POLICY.md).
+- Linux x86_64 and aarch64 cp314 wheelhouses are in-tree for the runtime and
+  developer/test dependency sets. This unblocks DGX/Grace class hosts for the
+  offline validator/test path.
+- The v8 "Factory Floor" website is live at `creator-engine.dev`; this README is
+  the repo orientation, not the website source.
 
-Creator Engine is a repo-native agentic SDLC governance substrate. It
-makes agent-authored software work auditable, spec-driven,
-identity-aware, mutation-class governed, verified by evidence, and
-ratified by explicit authority rules. The **Operator** — the apex human
-authority — ratifies every privileged gate; review, CI, fan-in, and
-harness output inform the Operator but never ratify on the Operator's
-behalf. v1.0 is the integration target: an end-to-end governed agentic
-SDLC loop with every privileged gate human-ratified.
+## What CE Does
 
-## Versions: v1.0 and v3.x coexist
+CE coordinates agentic development around these invariants:
 
-Creator Engine v1.0 and v3.x **coexist** in this repository on a shared
-governance base — v1.0 is a shipped, working system and the substrate we
-operate on to build v3.x; it is retained, not replaced. The two **execution
-runtimes** are kept independently-operable: the v1.0 coordination/launch
-runtime (the `ce` launcher, lane/PCO/tmux/hook pack) and the v3.x agent-native
-execution runtime (orchestrator, forge adapters, runner backends) do not import
-each other. Both entry points are retained — `ce` is the v1 launcher; the v3
-CLI arrives as a *distinct* entry point at G-7, never by mutating `ce`. The
-boundary is declared in `creator_engine_validator/_versions.py` and enforced by
-the `version_boundary` check; see
-[`docs/architecture/VERSION_BOUNDARY.md`](./docs/architecture/VERSION_BOUNDARY.md).
+- **Scope before work.** Work is framed as explicit Scopes and governed
+  manifests. PRs carry per-branch path-manifest carriers under
+  `.ce/pr-manifests/`; CI checks that the diff matches the declared closed set.
+- **Identity before authority.** Agent, developer, reviewer, controller, and
+  forge identities are explicit records or install-time bindings, not ambient
+  assumptions.
+- **Containment before autonomy.** Runtime policies, gVisor/runsc wrappers,
+  worker-container records, and Controller runtime contracts define what a seat
+  may access before it performs work.
+- **Evidence before claims.** Runs emit structured evidence: runtime policy,
+  spend, action decisions, run outcomes, change refs, review/merge state, and
+  completion reports.
+- **Human ratification for privileged gates.** Agents can propose, author,
+  inspect, and attest; privileged classes such as deploy, governance, identity,
+  security, release, and trust-root changes still require the Operator or another
+  ratified human authority.
 
-## v1.0 command-line runtime (`ce`)
+The highest-authority governance text is
+[`.specify/memory/constitution.md`](./.specify/memory/constitution.md).
+Operational governance is summarized in [`GOVERNANCE.md`](./GOVERNANCE.md).
 
-v1.0 adds a daemonless, repo-native, local command-line runtime, `ce`. It runs
-on demand against repository-local `.hermes/` state and tracked substrate
-artifacts, then exits — no long-running daemon and no web server. `ce` does not
-rename or replace the validator distribution: it is added as a second console
-script to `creator-engine-validator` (DP-1 = A), and `ce check` wraps the
-retained `creator-engine-validator` conformance checks.
+## The Runtime Surfaces
 
-The as-built v1.0 `ce` command surface is exactly these groups:
+The repository intentionally carries more than one runtime surface while the
+platform evolves:
 
-| Command | Purpose |
-|---|---|
-| `ce check` | run the `creator-engine-validator` conformance checks (wraps the validator) |
-| `ce doctor` | governed-environment guard preflight; refuses ungoverned host drift (DP-3 = B) |
-| `ce init` | idempotently initialize local `.hermes/` kernel state; refuses ungoverned state |
-| `ce launch` | open/attach the visible Controller-seat tmux launcher (DP-2 = B) |
-| `ce hud` | alias/seam label for `ce launch` — **not** a CE-native TUI |
-| `ce lane` | governed visible lane-launch primitive (`launch`/`status`/`verify`/`archive`) |
-| `ce worker` | worker isolation runtime over rootless Podman + credential broker |
-| `ce ledger` | Side-Effect Ledger runtime (append-only hash chain: `record`/`verify`) |
-| `ce fanin` | build/inspect a local read-only evidence fan-in packet (no authority) |
-| `ce queue` | Integration Queue **dry-run** landing preview (`dry-run`/`inspect`); no authority |
-| `ce event` | CE-event runtime: local append-only signed-block chains (`append`/`verify`/`sign`/`replay`/`index`); no authority |
-| `ce pcl` | PCL runtime: tracked per-repo coordination ledgers (`append`/`verify`/`replay`/`index`/`merge`); records tracked, cache ignored; no authority |
-| `ce connector` | connector runtime: **read-only** (`verify`/`plan`/`fetch --provider github\|jira\|gitlab`) + **strict-mode write** (`write-plan`/`submit`, GitHub, bounded to the `tracker_mirror` set); credential by reference, offline fails closed; no authority |
-| `ce reviewer-triage` | plan-only PR-review assignment (`plan --pr <n> --json`); emits an auditable isolation/containment-aware decision record and performs no source-host mutation |
-| `ce claim` | work-claim locks (ce-ops#38): hub-visible per-ticket compose/dispatch claims (`acquire`/`release`/`status`); the claim is a forge-native issue comment; advisory (re-read + drift-check, no force overwrite); no authority |
+- **`ce`** is the retained v1 command-line runtime. It wraps the validator and
+  provides local repo-native operations such as `check`, `doctor`, `init`,
+  `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
+  `connector`, `reviewer-triage`, and `claim`.
+  The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
+  `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
+  `ce queue`, `ce event`, `ce pcl`, `ce connector`, `ce reviewer-triage`, and
+  `ce claim`. `ce hud` is an alias for the visible `ce launch` Controller-seat
+  tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
+  v1.
+- **`cev3`** is the v3 work-driving entry point in this repository. It covers the
+  v3 product surface: session framing, Scope/drive/review/merge flows,
+  onboard/install planning, cockpit/read-model commands, notification feed, and
+  pilot-facing guide/report surfaces.
+- **The validator** is the offline conformance tool shipped as the
+  `creator-engine-validator` package. It enforces schema, protocol, packaging,
+  terminology, version-boundary, path-manifest, runtime-policy, and other
+  substrate checks.
 
-`ce launch` opens or attaches a visible Controller seat through the chosen
-Controller harness; the active agent occupying that seat is the Controller
-agent. The launcher is part of the Controller harness surface and is not a
-CE-native TUI (see
-[`docs/governance/V1_CANONICAL_TERMINOLOGY.md`](./docs/governance/V1_CANONICAL_TERMINOLOGY.md)
-for the Controller agent / Controller harness distinction).
+The v1/v3 boundary is intentional and checked by
+[`docs/architecture/VERSION_BOUNDARY.md`](./docs/architecture/VERSION_BOUNDARY.md)
+and the `version_boundary` validator check.
 
-There is **no `ce dev` command in v1.0**. The `ce dev …` namespace is reserved
-for the deferred project-dev container (`ce dev shell` / `ce dev run`), which is
-a v1.1 / post-v1 seam — deferred, not rejected (see
-[`docs/governance/V1_DEV_CONTAINER_SEAM_CONTRACT.md`](./docs/governance/V1_DEV_CONTAINER_SEAM_CONTRACT.md)).
-The Integration Queue is a local serialized **dry-run** landing preview only in
-v1.0; live landing is POST-V1 (see
-[`docs/operations/INTEGRATION_QUEUE_DRY_RUN.md`](./docs/operations/INTEGRATION_QUEUE_DRY_RUN.md)).
+## Install Story
 
-The v1.0 `ce` runtime is **runtime-complete and pre-release**: every gate
-(G0–G9) is landed on `main` and ready for Operator ratification, but no
-release has been cut or tagged. The pinned package version is `0.1.0`.
+CE currently has two supported install paths, both documented by
+[`docs/contracts/installer.md`](./docs/contracts/installer.md).
 
-### Install (Option B packaging)
+1. **Public one-liner.**
 
-v1.0 targets **Python `>=3.14`** (target 3.14.x). The install surface is a source
-checkout (`git clone`) plus an **offline, uv-first** install with a pip
-`--no-index` fallback against the checked-in cp314 wheelhouse — the `uvx`
-one-line operator install is POST-V1 (B3). `validators/uv.lock` is the primary
-lock; `validators/requirements.txt` is the lockstep `uv export` fallback;
-runtime dependencies are pinned at **PyYAML 6.0.3** and **jsonschema 4.26.0**.
-See [`validators/README.md`](./validators/README.md) for the full offline
-install and the `ce` / validator quickstart.
+   ```bash
+   curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
+   ```
 
-## v0.1 scope
+   The script fetches the signed agent-native spec, verifies it against the
+   pinned `ce-root-v1` OpenSSH trust root, verifies the wheelhouse manifest and
+   every artifact hash, obtains Python 3.14 through the pinned `uv` artifact if
+   needed, installs `creator-engine-validator==0.2.0` offline, proves `cev3`,
+   and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
+   automate the GitHub App click, mutate branch protection, or create/adopt a
+   project.
 
-v0.1 ships only files inside a git repository. Two layers compose it:
+2. **Clone plus offline wheelhouse.**
 
-- **Feature 001 — governance substrate** (merged). Identity schema,
-  mutation-class taxonomy with nine baseline classes, reserved-action
-  vocabulary, authority matrix, attestation / ratification / redaction
-  record formats, Spec Kit wrapper sidecars, Definition of Ready and
-  Definition of Done, redaction gate policy, and an offline validator
-  runnable from a fresh `git clone`.
-- **Feature 002 — operating model**. The 25-state SDLC machine with
-  24 transitions, the Assignment Envelope contract, the
-  `/speckit-implement` policy, the actor/tool ownership matrix, the
-  parallel-agent development model, the conflict taxonomy, and the
-  Phase 1 / Phase 2 boundary. Feature 002 specifies the canonical
-  document set; the bodies below are authored in Sprint 0 Execution
-  Slice A.
+   ```bash
+   git clone https://github.com/creator-engine/creator-engine.git
+   cd creator-engine
+   python3.14 -m venv .venv
+   . .venv/bin/activate
+   pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+   PYTHONPATH=validators python -m creator_engine_validator --list-checks
+   ```
 
-Phase 2 autonomy (low-risk auto-merge, autonomous batch-pulling) and
-v1.0 end-to-end automation are integration targets, not v0.1
-deliverables.
+   The runtime wheelhouse is cp314 and dual-arch for Linux x86_64/aarch64 where
+   native wheels are needed. Developer/test dependencies live separately under
+   `validators/wheelhouse-dev/`. See
+   [`validators/README.md`](./validators/README.md) for the full offline runtime
+   and test install commands.
 
-## Next horizon: v2.0 foundation substrate (Draft, spec-only)
+The agent-native install spec is served as
+[`docs/llms-install.md`](./docs/llms-install.md) and must be verified before
+execution. That file and the served installer are trust-root surfaces; ordinary
+documentation edits must not mutate them.
 
-Work has begun on the **Creator Engine v2.0 foundation substrate**. It is
-currently a **Draft, spec-authoring-only direction** — tracked specification,
-schema, and governance documentation with **no v2 runtime shipped**. It does
-not change the v1.0 `ce` runtime described above. The foundation spec
-([`specs/v2/001-v2-foundation-substrate/spec.md`](./specs/v2/001-v2-foundation-substrate/spec.md),
-its [`spec.ce.yml`](./specs/v2/001-v2-foundation-substrate/spec.ce.yml) sidecar,
-the [`specs/v2/_crosswalk.yml`](./specs/v2/_crosswalk.yml) register, and
-[`ADR-V2-001`](./specs/v2/adrs/ADR-V2-001-v2-foundation-substrate.md)) frames a
-clean v2 foundation:
+## Identity Model
 
-- a canonical `.ce/` active-state and governance namespace with an enforceable
-  tracked-vs-instance boundary, replacing wholesale-ignored `.hermes/` for v2
-  flows;
-- a hard `.hermes/` write-freeze for v2 flows (`.hermes/` stays readable only as
-  legacy/import/archive context);
-- a **read-only**, dry-run-capable v1→v2 importer contract that never mutates
-  `.hermes/`;
-- the authoritative v1→v2 crosswalk register;
-- operating modes `strict` / `auto` / `transcendence`, with migrated v1 tenants
-  defaulting to `strict`;
-- an `agent_reviewer` role (active, advisory/evidence-bearing, non-ratifying)
-  and an `agent_ratifier` role (reserved-inactive, validator-rejected for any
-  active authority binding).
+CE does not treat a shell account, local `git config`, or ambient `gh auth`
+state as an authority source.
 
-The **Operator-only privileged floor is preserved in every v2 mode**:
-privileged-class ratification and emergency governed override route only to the
-Operator, never to any agent role. v2 introduces no destructive removal of v1
-artifacts; legacy `source` values and `.hermes/` material remain readable for
-import, crosswalk, archive, and history. Treat v2 as the next horizon, not as
-shipped runtime.
+- A local adoption commit made during install/apply is bound to the
+  install-time forge identity resolved from the bootstrap token's `GET /user`.
+  The installer writes local-only `user.name`, `user.email`, and
+  `user.useConfigOnly=true`, then verifies the committed author. See
+  [`docs/contracts/installer.md`](./docs/contracts/installer.md#the-github-leg-decomposed-pure-planners-injected-probes).
+- Review identity is independent from author identity. Reviewer records and
+  reviewer authority are evidence-authoring authority, not ratification
+  authority. See
+  [`docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md`](./docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md)
+  and [`docs/operations/REVIEWER_TRIAGE.md`](./docs/operations/REVIEWER_TRIAGE.md).
+- Controller identities have their own controller-key protocol for lease
+  signatures and must not carry private keys or raw credentials in tracked
+  records. See
+  [`docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md`](./docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md).
+- Per-developer identity custody is moving into the governed secret plane. The
+  OpenBao decision record is
+  [`docs/decisions/0005-openbao-secret-identity-backend.md`](./docs/decisions/0005-openbao-secret-identity-backend.md).
 
-## Repository layout
+## Containment Direction
 
-- `.specify/memory/constitution.md` — highest-authority governance
-  document.
-- `specs/` — Spec Kit feature specifications, including Feature 001
-  (governance substrate), Feature 002 (canonical docs and operating
-  model), the Sprint 0 minimum viable delivery system note, and the
-  `specs/v2/` v2.0 foundation specifications (Draft).
-- `docs/contracts/` — Feature 001 governance contract documents.
-- `docs/adr/` — architecture decision records, including
-  `ADR-0002-operator-terminology-reconciliation.md` (Operator
-  terminology policy).
-- `docs/product/`, `docs/architecture/`, `docs/governance/`,
-  `docs/quality/`, `docs/devops/`, `docs/security/` — the canonical
-  Creator Engine document set indexed below.
-- `docs/operations/` — operational protocol documentation (e.g.,
-  `docs/operations/session-continuity-protocol.md`). These are
-  operational protocols, not part of the 17-document canonical set
-  indexed below.
-- `schemas/`, `templates/`, `validators/`, `examples/`, `tenants/` —
-  Feature 001 substrate artifacts and tenant fixtures.
-- `.hermes/` — Session continuity protocol and state for the Operator.
-- `validators/README.md` — substrate validator quickstart.
+The v3.5 north star is "every agent contained", including the Controller. The
+repo already contains the substrate and DGX-side artifacts for that direction,
+but not every live supervisor piece is complete.
 
-See [`validators/README.md`](./validators/README.md) for the offline
-install and validator quickstart.
+- Runtime policy and evidence contracts live in
+  [`docs/contracts/runtime-policy.md`](./docs/contracts/runtime-policy.md) and
+  [`docs/contracts/runtime-evidence.md`](./docs/contracts/runtime-evidence.md).
+- Worker-container policy and container-instance records define worker isolation
+  shape and refusal predicates. See
+  [`docs/operations/WORKER_CONTAINER_PROTOCOL.md`](./docs/operations/WORKER_CONTAINER_PROTOCOL.md).
+- Controller runtime contracts classify `role: controller`, containment posture,
+  forbidden host surfaces, and credential-handle names. See
+  [`docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md`](./docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md).
+- DGX runsc/gVisor wrappers live under
+  [`deploy/dgx-runsc/`](./deploy/dgx-runsc/README.md) for Codex seats and
+  [`deploy/dgx-controller-runsc/`](./deploy/dgx-controller-runsc/README.md) for
+  Controller seats. The Controller wrapper is a Gate 2 artifact; the Gate 3
+  Controller Supervisor/OpenShell work remains a later containment workstream.
 
-## Canonical document index
+The current concrete posture is gVisor/runsc on DGX where available, with
+OpenShell targeted behind the same adapter direction.
 
-The canonical document index — the canonical Creator Engine document
-set — is exactly these 17 documents (Feature 002 FR-022):
+## Repository Map
 
-1. [`README.md`](./README.md) — this orientation document.
-2. [`docs/product/PRD.md`](./docs/product/PRD.md) — product vision,
-   target tenants, problem statement, value proposition, primary use
-   cases, non-goals, success metrics, version-scope summaries.
-3. [`docs/product/ROADMAP.md`](./docs/product/ROADMAP.md) — Features
-   001–006 scope summaries and v1.0 integration target.
-4. [`docs/product/REQUIREMENTS.md`](./docs/product/REQUIREMENTS.md) —
-   product requirements catalog with traceability to Feature 001/002.
-5. [`docs/architecture/SAD.md`](./docs/architecture/SAD.md) — system
-   architecture: components, data flows, storage, trust boundaries,
-   extension points.
-6. [`docs/architecture/agentic-sdlc-operating-model.md`](./docs/architecture/agentic-sdlc-operating-model.md)
-   — the 25-state SDLC machine, transition matrix, Phase 1/2 boundary,
-   `/speckit-implement` policy, and Assignment Envelope linkage.
-7. [`docs/architecture/integration-map.md`](./docs/architecture/integration-map.md)
-   — boundaries with Spec Kit, GitHub, CI, and trackers.
-8. [`docs/architecture/agent-interaction-model.md`](./docs/architecture/agent-interaction-model.md)
-   — actor-to-actor interaction patterns, envelope handoff sequence,
-   escalation paths.
-9. [`docs/architecture/parallel-agent-development-model.md`](./docs/architecture/parallel-agent-development-model.md)
-   — one-driver-per-worktree rule, parallel-pair pattern, conflict
-   taxonomy.
-10. [`docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](./docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md)
-    — authority matrix summary, ratifier taxonomy, SDLC transition →
-    ratifier link table.
-11. [`docs/governance/MUTATION_CLASS_MODEL.md`](./docs/governance/MUTATION_CLASS_MODEL.md)
-    — baseline classes, reserved-action vocabulary, privileged-class
-    rules.
-12. [`docs/governance/ATTESTATION_MODEL.md`](./docs/governance/ATTESTATION_MODEL.md)
-    — attestation record fields, storage, SDLC linkage, bootstrap
-    grandfathering.
-13. [`docs/quality/QA_STRATEGY.md`](./docs/quality/QA_STRATEGY.md) —
-    testing levels per mutation class; QA agent role; deferrals.
-14. [`docs/quality/TESTING_STRATEGY.md`](./docs/quality/TESTING_STRATEGY.md)
-    — engineering testing practices, validator self-tests, evidence
-    capture, self-claim rejection invariant.
-15. [`docs/devops/CI_CD_STRATEGY.md`](./docs/devops/CI_CD_STRATEGY.md)
-    — verifies-not-ratifies invariant, required CI checks, branch
-    protection policy summary, Feature 003 deferral.
-16. [`docs/devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](./docs/devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md)
-    — environment taxonomy, deploy-as-privileged-class rule, rollback
-    evidence, Feature 006 deferral.
-17. [`docs/security/SECURITY_MODEL.md`](./docs/security/SECURITY_MODEL.md)
-    — security as design constraint, redaction gate summary, secrets
-    and rotation policy, escalation paths.
+- `.ce/` - CE state namespace, per-PR manifests, changelog fragments, and
+  research/design records committed when they are durable repo artifacts.
+- `.specify/` and `specs/` - Spec Kit substrate and historical feature specs.
+- `docs/` - product, architecture, governance, operations, contracts, install,
+  and roadmap documentation. Served trust-root files under `docs/` are handled
+  by explicit release/install gates only.
+- `schemas/` - JSON/YAML schemas for identity, runtime policy, Scope, evidence,
+  install answers, controller contracts, worker containers, and related records.
+- `validators/` - the Python package, CLI surfaces, tests, requirements, and
+  offline wheelhouses.
+- `deploy/` - DGX runsc/gVisor deployment wrappers and image notes.
+- `examples/`, `templates/`, `tenants/` - validator examples, reusable templates,
+  and tenant fixtures.
 
-## Source of truth notice
+## Running Local Gates
 
-The constitution at
-[`.specify/memory/constitution.md`](./.specify/memory/constitution.md)
-is the highest-authority document for agent-authored work.
+Use Python 3.14. For normal runtime validation:
 
-The
-[Feature 002 source-of-truth hierarchy](./specs/002-canonical-docs-and-operating-model/spec.md#fr-019)
-(FR-019) is:
-constitution > Feature 001 governance substrate (ratified) >
-Feature 002 canonical docs (above) > tenant fixtures
-(`tenants/<name>/`) > working notes and handoffs.
+```bash
+PYTHONPATH=validators python -m creator_engine_validator --list-checks
+PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators python -m creator_engine_validator check-examples
+```
 
-Amendments to the constitution, the Feature 001 substrate, or the
-Feature 002 operating model are themselves Creator-Engine-governed
-mutations: a spec/plan/tasks triple under explicit Operator approval,
-versioned per the constitution's Governance section.
+For the full validator test suite, install both runtime and dev/test
+wheelhouses, then run:
 
-## License
+```bash
+PYTHONPATH=validators python -m pytest validators/tests/ -q
+```
 
-Creator Engine is licensed under the Apache License, Version 2.0.
-The full text is in [`LICENSE`](./LICENSE); attribution and vendored
-wheelhouse notices are in [`NOTICE`](./NOTICE).
+CI also enforces per-PR path-manifest fidelity. New PRs should include a carrier
+under `.ce/pr-manifests/<branch-slug>.md` whose path list exactly matches
+`base..HEAD`.
 
-## Community and contribution
+## Roadmaps and Canonical Docs
 
-- Contribution workflow and local validation commands:
+- Forward v3.5 program plan:
+  [`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md).
+- Historical v3 gate map:
+  [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
+- Architecture index:
+  [`docs/architecture/README.md`](./docs/architecture/README.md).
+- Installer contract:
+  [`docs/contracts/installer.md`](./docs/contracts/installer.md).
+- Pilot runbook:
+  [`docs/guide/pilot-runbook.md`](./docs/guide/pilot-runbook.md).
+- Contribution workflow:
   [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-- Governance, authority, and ratification on-ramp:
+- Governance overview:
   [`GOVERNANCE.md`](./GOVERNANCE.md).
-- Security policy and private vulnerability reporting:
+- Security policy:
   [`SECURITY.md`](./SECURITY.md).
-- Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
 
-## Contact
+## Community and Contact
 
-For general, non-security, non-conduct project, community, or
-governance inquiries, email
-[`ubuntuaws745@gmail.com`](mailto:ubuntuaws745@gmail.com). This is the
-primary public contact for general project correspondence only; it
-does not replace the dedicated reporting channels above:
+Creator Engine is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
 
-- Vulnerabilities and other security-sensitive reports must go
-  privately to
-  [`ubuntuaws745+security@gmail.com`](mailto:ubuntuaws745+security@gmail.com)
-  per [`SECURITY.md`](./SECURITY.md).
-- Code of conduct reports must go privately to
-  [`ubuntuaws745+conduct@gmail.com`](mailto:ubuntuaws745+conduct@gmail.com)
-  per [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
+For general, non-security, non-conduct project or governance inquiries, email
+[`ubuntuaws745@gmail.com`](mailto:ubuntuaws745@gmail.com).
+
+Security-sensitive reports go to
+[`ubuntuaws745+security@gmail.com`](mailto:ubuntuaws745+security@gmail.com) per
+[`SECURITY.md`](./SECURITY.md). Code of conduct reports go to
+[`ubuntuaws745+conduct@gmail.com`](mailto:ubuntuaws745+conduct@gmail.com) per
+[`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
