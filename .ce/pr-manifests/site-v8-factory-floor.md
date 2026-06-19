@@ -7,11 +7,12 @@ to `site-archive/index-v7-the-choice.html` + promotes v8 in the archive ledger
 cockpit theme to the v8 palette (`v3_cockpit.py` THEME + the serve test) to keep
 the site↔cockpit single-source-of-truth invariant. Rebuilds the validator app
 wheel from branch source and re-pins the wheelhouse checksum so packaged cockpit
-theme bytes match source.
+theme bytes match source. Re-bakes the generated build identity to the branch
+merge-parent so the packaging contract is clean in full local clones.
 
-AUTHORIZED_PATHS_COUNT=10
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=abb3b68f5beaa12037fe07c8da568e2e9adc6b8e6a7269098e0c8b79245a62a8
+AUTHORIZED_PATHS_SHA256=1a969e5d047b8bd5154f44ca203031e41c37c14ad0dacb25ac9bc2a31f7018b9
 
 ```text
 .ce/changelog/site-v8-factory-floor.md
@@ -20,6 +21,7 @@ docs/assets/ce-logo-v2-weldarm-transparent.svg
 docs/index.html
 site-archive/README.md
 site-archive/index-v7-the-choice.html
+validators/creator_engine_validator/_version.py
 validators/creator_engine_validator/v3_cockpit.py
 validators/tests/unit/test_v3_cockpit_serve.py
 validators/wheelhouse/SHA256SUMS

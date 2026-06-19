@@ -8,4 +8,4 @@ is the gate's merge-parent HEAD — the baked fallback a no-git wheel install us
 """
 
 SEMVER = "0.2.0"
-BUILD_GIT_SHA = "ac513c4f746ca09846d4b0a68e4810aa03ed441d"
+BUILD_GIT_SHA = "7492013b505c6d889b29b02aa76c4d7fdabef7ce"
