@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: reviewer-uncontained
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: reviewer-uncontained
+    eligible: false
+    available: true
+    selectable: false
+    selected: false
+    routing_status: ineligible
+    eligibility_reasons: [runtime_uncontained]
+    availability_reasons: []
 assignment:
   selected_reviewers: []
   selected_identity_refs: []

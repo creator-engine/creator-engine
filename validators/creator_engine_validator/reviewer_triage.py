@@ -304,6 +304,45 @@ def _availability(reviewer: dict[str, Any] | None, reviewer_id: str) -> dict[str
     return {"reviewer_id": reviewer_id, "available": not reasons, "reasons": reasons}
 
 
+def _triage_results(
+    eligibility_results: list[dict[str, Any]],
+    availability_results: list[dict[str, Any]],
+    selected: list[str],
+) -> list[dict[str, Any]]:
+    availability_by_id = {result["reviewer_id"]: result for result in availability_results}
+    selected_ids = set(selected)
+    results: list[dict[str, Any]] = []
+    for eligibility in eligibility_results:
+        reviewer_id = eligibility["reviewer_id"]
+        availability = availability_by_id.get(
+            reviewer_id,
+            {"available": False, "reasons": ["missing_availability_result"]},
+        )
+        eligible = bool(eligibility["eligible"])
+        available = bool(availability["available"])
+        selectable = eligible and available
+        is_selected = reviewer_id in selected_ids
+        if is_selected:
+            routing_status = "selected"
+        elif not eligible:
+            routing_status = "ineligible"
+        elif not available:
+            routing_status = "unavailable"
+        else:
+            routing_status = "selectable"
+        results.append({
+            "reviewer_id": reviewer_id,
+            "eligible": eligible,
+            "available": available,
+            "selectable": selectable,
+            "selected": is_selected,
+            "routing_status": routing_status,
+            "eligibility_reasons": list(eligibility.get("reasons") or []),
+            "availability_reasons": list(availability.get("reasons") or []),
+        })
+    return results
+
+
 def _dedupe(values: list[str]) -> list[str]:
     out: list[str] = []
     for value in values:
@@ -450,6 +489,7 @@ def plan_reviewer_triage(
         },
         "eligibility_results": eligibility_results,
         "availability_results": availability_results,
+        "triage_results": _triage_results(eligibility_results, availability_results, selected),
         "assignment": {
             "selected_reviewers": selected,
             "selected_identity_refs": selected_refs,

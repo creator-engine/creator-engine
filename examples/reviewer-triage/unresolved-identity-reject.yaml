@@ -36,6 +36,15 @@ availability_results:
   - reviewer_id: reviewer-unresolved
     available: false
     reasons: [missing_reviewer_registry_record]
+triage_results:
+  - reviewer_id: reviewer-unresolved
+    eligible: false
+    available: false
+    selectable: false
+    selected: false
+    routing_status: ineligible
+    eligibility_reasons: [missing_ratified_reviewer_identity]
+    availability_reasons: [missing_reviewer_registry_record]
 assignment:
   selected_reviewers: []
   selected_identity_refs: []

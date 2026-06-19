@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: reviewer-no-access
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: reviewer-no-access
+    eligible: false
+    available: true
+    selectable: false
+    selected: false
+    routing_status: ineligible
+    eligibility_reasons: [missing_source_host_review_counting_permission]
+    availability_reasons: []
 assignment:
   selected_reviewers: []
   selected_identity_refs: []

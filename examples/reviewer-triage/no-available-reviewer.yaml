@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: reviewer-busy
     available: false
     reasons: [max_active_reviews_reached]
+triage_results:
+  - reviewer_id: reviewer-busy
+    eligible: true
+    available: false
+    selectable: false
+    selected: false
+    routing_status: unavailable
+    eligibility_reasons: []
+    availability_reasons: [max_active_reviews_reached]
 assignment:
   selected_reviewers: []
   selected_identity_refs: []

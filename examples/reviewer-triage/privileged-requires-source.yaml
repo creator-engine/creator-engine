@@ -47,6 +47,15 @@ availability_results:
   - reviewer_id: reviewer-a
     available: true
     reasons: []
+triage_results:
+  - reviewer_id: reviewer-a
+    eligible: true
+    available: true
+    selectable: true
+    selected: false
+    routing_status: selectable
+    eligibility_reasons: []
+    availability_reasons: []
 assignment:
   selected_reviewers: []
   selected_identity_refs: []
