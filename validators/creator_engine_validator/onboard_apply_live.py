@@ -228,7 +228,6 @@ SCANNER_ENV_KEYS: dict[str, tuple[str, str, str]] = {
     "gitleaks": (ENV_GITLEAKS_URL, ENV_GITLEAKS_SHA256, ENV_GITLEAKS_VERSION),
     "trufflehog": (ENV_TRUFFLEHOG_URL, ENV_TRUFFLEHOG_SHA256, ENV_TRUFFLEHOG_VERSION),
 }
-FINE_GRAINED_PERMISSION_PROBE_PATH = ".github/workflows/ce-fine-grained-permission-probe.yml"
 #: OPTIONAL offline FALLBACK for the apply-time userspace-dep install. Design A's DEFAULT path
 #: fetches the pinned ``uv`` wheel from CE's mirror; if this env points at a directory that
 #: already holds the pinned wheel (sha256-verified), the driver uses it instead of fetching —
@@ -420,12 +419,6 @@ class LiveForgeConfig:
     #: them from host env; absent pins use the commissioned mirror defaults, while incomplete pins
     #: still fail closed before any unverified scanner binary can execute.
     brownfield_scanners: Mapping[str, BrownfieldScanner] | None = None
-    #: Install-time forge actor login resolved from the onboard/GitHub identity config. Local
-    #: adoption commits MUST bind to this identity and MUST NOT inherit ambient host git config.
-    forge_actor_login: str | None = None
-    #: Optional explicit author email for the forge actor. Absent -> GitHub noreply from login.
-    forge_actor_email: str | None = None
-
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
     """``gh api <path>`` through an authenticated runner; never raises. ``(code, json|None, stderr)``."""
@@ -517,39 +510,6 @@ def _parse_oauth_scopes_header(raw_response: str) -> set[str]:
     return scopes
 
 
-def _parse_http_status(raw_response: str) -> int | None:
-    for line in raw_response.splitlines():
-        if line.startswith("HTTP/"):
-            parts = line.split()
-            if len(parts) >= 2 and parts[1].isdigit():
-                return int(parts[1])
-    return None
-
-
-def _parse_accepted_github_permissions(raw_response: str) -> dict[str, set[str]]:
-    """Parse GitHub's fine-grained ``X-Accepted-GitHub-Permissions`` header."""
-    permissions: dict[str, set[str]] = {}
-    for line in raw_response.splitlines():
-        if not line.strip():
-            break
-        if not line.lower().startswith("x-accepted-github-permissions:"):
-            continue
-        _, _, value = line.partition(":")
-        for entry in value.replace(",", ";").split(";"):
-            name, sep, level = entry.strip().partition("=")
-            if sep and name and level:
-                permissions.setdefault(name.strip().lower(), set()).add(level.strip().lower())
-    return permissions
-
-
-def _accepted_permissions_include(raw_response: str, permission: str) -> bool:
-    name, sep, level = permission.partition(":")
-    if not sep:
-        return False
-    accepted = _parse_accepted_github_permissions(raw_response)
-    return level.lower() in accepted.get(name.lower(), set())
-
-
 def _bootstrap_scopes_from_oauth(oauth_scopes: set[str], *, org_create_needed: bool) -> list[str]:
     """Map a bootstrap PAT's classic OAuth scopes to CE's bootstrap-permission names.
 
@@ -579,80 +539,18 @@ def _has_oauth_scopes_header(raw_response: str) -> bool:
 
 
 def _detect_token_type(token: str, *, oauth_header_present: bool) -> str:
-    """Classify the bootstrap PAT by prefix (ce-ops#94); header-presence as a fallback.
+    """Classify the bootstrap PAT by prefix (ce-ops#94).
 
-    Grounded in GitHub's documented token-format scheme: ``github_pat_`` = fine-grained PAT (emits
-    NO ``X-OAuth-Scopes`` and exposes no permission introspection); ``ghp_`` = classic PAT,
-    ``gho_`` = OAuth, ``ghu_`` = App user-to-server — all coarse-grained actors that DO emit
-    ``X-OAuth-Scopes``. An unrecognized prefix that nonetheless carries the classic header is
-    treated as ``classic``; anything else is ``unknown`` so the caller can fail closed.
+    Grounded in GitHub's documented PAT prefixes: ``github_pat_`` = fine-grained PAT (emits
+    NO ``X-OAuth-Scopes`` and exposes no permission introspection); ``ghp_`` = classic PAT.
+    Unknown prefixes refuse fail-closed even if a response happens to carry classic-scope headers.
     """
     t = (token or "").strip()
     if t.startswith("github_pat_"):
         return "fine_grained"
-    if t.startswith(("ghp_", "gho_", "ghu_")):
-        return "classic"
-    if oauth_header_present:
+    if t.startswith("ghp_"):
         return "classic"
     return "unknown"
-
-
-def _fine_grained_permission_probe_argv(repo: str, permission: str) -> list[str]:
-    """Invalid-body probes: authorization must pass, but the request must not mutate."""
-    if permission == "administration:write":
-        return ["gh", "api", "-i", "-X", "PUT", f"repos/{repo}/actions/permissions"]
-    if permission == "contents:write":
-        return ["gh", "api", "-i", "-X", "POST", f"repos/{repo}/dispatches"]
-    if permission == "actions:write":
-        return ["gh", "api", "-i", "-X", "PUT", f"repos/{repo}/actions/oidc/customization/sub"]
-    if permission == "workflows:write":
-        return [
-            "gh",
-            "api",
-            "-i",
-            "-X",
-            "PUT",
-            f"repos/{repo}/contents/{FINE_GRAINED_PERMISSION_PROBE_PATH}",
-        ]
-    if permission == v3_installer.ORG_CREATE_SCOPE:
-        owner = repo.split("/", 1)[0]
-        return ["gh", "api", "-i", "-X", "POST", f"orgs/{owner}/repos"]
-    return ["gh", "api", "-i", "user"]
-
-
-def _fine_grained_permission_header(permission: str) -> str:
-    if permission == v3_installer.ORG_CREATE_SCOPE:
-        return "administration:write"
-    return permission
-
-
-def _fine_grained_permission_granted(proc: subprocess.CompletedProcess, permission: str) -> bool:
-    raw = "\n".join(part for part in (proc.stdout or "", proc.stderr or "") if part)
-    status = _parse_http_status(raw)
-    # The probe requests intentionally omit required bodies. A 400/422 with the expected
-    # fine-grained permission header means GitHub reached request validation after accepting
-    # the token's permission. Any 2xx is refused: the probe must never mutate.
-    return (
-        status in {400, 422}
-        and _accepted_permissions_include(raw, _fine_grained_permission_header(permission))
-    )
-
-
-def _probe_fine_grained_bootstrap_permissions(
-    runner: GhRunner, *, repo: str, org_create_needed: bool
-) -> list[str]:
-    required = list(v3_installer.REQUIRED_BOOTSTRAP_SCOPES)
-    if org_create_needed:
-        required.append(v3_installer.ORG_CREATE_SCOPE)
-    granted: list[str] = []
-    for permission in required:
-        try:
-            proc = runner(_fine_grained_permission_probe_argv(repo, permission), None)
-        except Exception:  # noqa: BLE001 — fail closed by omitting the permission
-            continue
-        if _fine_grained_permission_granted(proc, permission):
-            granted.append(permission)
-    return sorted(set(granted))
 
 
 def _app_installation_zero_repos_error(*, installation_id: int, repo: str) -> dict[str, Any]:
@@ -678,11 +576,11 @@ def _forge_noreply_email(login: str) -> str:
     return f"{login}@users.noreply.github.com"
 
 
-def _resolved_forge_identity(login: Any, email: Any = None) -> dict[str, str]:
-    """Resolve the local git author identity from install-time forge config only.
+def _resolved_forge_identity(login: Any) -> dict[str, str]:
+    """Resolve the local git author identity from the bootstrap token's ``GET /user`` login.
 
-    Empty/invalid input refuses; callers must never fall back to ambient git config because that
-    can bind a dev install to a shared controller identity.
+    Empty/invalid input refuses; callers must never fall back to ambient git or ``gh`` config
+    because that can bind a dev install to a shared controller identity.
     """
     resolved_login = str(login or "").strip()
     if not resolved_login or any(ch.isspace() for ch in resolved_login):
@@ -690,17 +588,12 @@ def _resolved_forge_identity(login: Any, email: Any = None) -> dict[str, str]:
             "forge_identity_unresolved",
             "forge actor identity is unresolved; refusing ambient git author fallback",
         )
-    resolved_email = str(email or "").strip() or _forge_noreply_email(resolved_login)
-    if not resolved_email or any(ch.isspace() for ch in resolved_email) or "@" not in resolved_email:
-        raise onboard_apply.ApplyRefused(
-            "forge_identity_unresolved",
-            "forge actor email is unresolved; refusing ambient git author fallback",
-        )
+    resolved_email = _forge_noreply_email(resolved_login)
     return {
         "login": resolved_login,
         "name": resolved_login,
         "email": resolved_email,
-        "source": "install_config",
+        "source": "bootstrap_token_get_user",
     }
 
 
@@ -717,6 +610,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         self._cfg = config
         self._token: ScopedToken | None = None
         self._read_runner: GhRunner | None = None
+        self._bootstrap_forge_identity: dict[str, str] | None = None
 
     # -- credential lifecycle (mint -> use -> revoke) ----------------------------------------
     def _reader(self) -> GhRunner:
@@ -860,9 +754,10 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         Authenticates AS the bootstrap token (value in the child ``GH_TOKEN`` env only, never argv)
         and reports its login + ``token_type`` (ce-ops#94). For a CLASSIC token it also reports the
         CE bootstrap permissions implied by its ``X-OAuth-Scopes``. A FINE-GRAINED PAT emits no
-        ``X-OAuth-Scopes``, so the driver probes GitHub's fine-grained permission endpoints and
-        reports CE permission names in ``permissions``; no classic ``scopes`` set is fabricated.
+        ``X-OAuth-Scopes`` and exposes no non-mutating permission introspection, so the probe is
+        identity-only and greenfield write legs remain the fail-closed capability check.
         """
+        self._bootstrap_forge_identity = None
         try:
             holder = ScopedToken(
                 run_id=self._cfg.run_id,
@@ -890,18 +785,14 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         if not login:
             return {"ok": False, "reason": "bootstrap_probe_no_identity"}
         token_type = _detect_token_type(token, oauth_header_present=_has_oauth_scopes_header(raw))
+        if token_type in {"classic", "fine_grained"}:
+            self._bootstrap_forge_identity = _resolved_forge_identity(login)
         result: dict[str, Any] = {"ok": True, "login": login, "token_type": token_type}
         if token_type == "classic":
-            # Only classic/OAuth actors expose capability via X-OAuth-Scopes (ce-ops#94). Fine-grained
+            # Only classic PATs expose capability via X-OAuth-Scopes (ce-ops#94). Fine-grained
             # PATs emit none, so classic scopes are never fabricated for them.
             result["scopes"] = _bootstrap_scopes_from_oauth(
                 _parse_oauth_scopes_header(raw), org_create_needed=org_create_needed
-            )
-        elif token_type == "fine_grained":
-            result["permissions"] = _probe_fine_grained_bootstrap_permissions(
-                runner,
-                repo=repo,
-                org_create_needed=org_create_needed,
             )
         return result
 
@@ -1653,10 +1544,12 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
         # stable adoption branch from base (``-B`` resets to base head → idempotent re-run).
         if self._git(["checkout", "-B", branch], cwd=repo_dir).returncode != 0:
             return {"ok": False, "reason": "adoption_branch_checkout_failed"}
-        identity = _resolved_forge_identity(
-            self._cfg.forge_actor_login,
-            self._cfg.forge_actor_email,
-        )
+        identity = self._bootstrap_forge_identity
+        if identity is None:
+            raise onboard_apply.ApplyRefused(
+                "forge_identity_unresolved",
+                "forge actor identity was not resolved from bootstrap token GET /user; refusing ambient git author fallback",
+            )
         self._bind_git_commit_identity(repo_dir, identity)
         written: list[str] = []
         for artifact in artifacts:
@@ -1973,7 +1866,6 @@ def resolve_live_config(
         policy_sha=policy_sha,
         run_id=f"onboard-live-forge:{repo}",
         brownfield_scanners=_scanner_pins_from_env(env),
-        forge_actor_login=str(merged.value("github.reviewer") or "").strip() or None,
     )
 
 
