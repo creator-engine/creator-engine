@@ -52,7 +52,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import onboard_apply, v3_installer
-from .forge.app_jwt_runner import Signer, app_jwt_gh_runner
+from .forge.app_jwt_runner import Signer, app_jwt_gh_runner, build_app_jwt
 from .forge.change import open_change
 from .forge.change_push import PushRefused, push_change
 from .forge.credential_runner import authenticated_gh_runner
@@ -234,6 +234,9 @@ SCANNER_ENV_KEYS: dict[str, tuple[str, str, str]] = {
 #: a no-egress fallback for air-gapped / pre-seeded hosts. Absent → mirror-fetch (the default).
 ENV_WHEELHOUSE = "CE_FORGE_WHEELHOUSE"
 ENV_RUNTIME_BIN_DIR = "CE_FORGE_RUNTIME_BIN_DIR"
+_GITHUB_API_ROOT = "https://api.github.com"
+_GITHUB_API_VERSION = "2022-11-28"
+_GITHUB_ACCEPT = "application/vnd.github+json"
 
 
 @dataclass(frozen=True)
@@ -431,6 +434,28 @@ def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
         except (json.JSONDecodeError, ValueError):
             parsed = None
     return proc.returncode, parsed, proc.stderr or ""
+
+
+def _app_jwt_get(config: LiveForgeConfig, path: str) -> tuple[int, object, str]:
+    """GET a GitHub App endpoint with App-JWT auth through the injected HTTPS transport."""
+    jwt = build_app_jwt(config.app_client_id, signer=config.signer)
+    headers = {
+        "Authorization": f"Bearer {jwt}",
+        "Accept": _GITHUB_ACCEPT,
+        "X-GitHub-Api-Version": _GITHUB_API_VERSION,
+    }
+    try:
+        status, body = config.transport("GET", f"{_GITHUB_API_ROOT}/{path}", headers, None)
+    except Exception as exc:  # noqa: BLE001 — fail closed; never expose bearer/JWT details.
+        return 1, None, f"app installation read failed: {exc.__class__.__name__}"
+    parsed: object = None
+    text = (body or "").strip()
+    if text:
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+    return (0 if 200 <= status < 300 else 1), parsed, "" if 200 <= status < 300 else text
 
 
 def _protection_contexts(protection: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -799,34 +824,20 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
     def verify_app_installation(
         self, *, installation_id: int, repo: str, bot_identity: str
     ) -> dict[str, Any]:
-        """Phase-1 read-only App-installation COVERAGE GET (ce-ops#88 amendment, Operator-ratified).
+        """Phase-1 read-only App-installation COVERAGE GET (ce-ops#88/#126).
 
-        Confirms the ALREADY-installed App covers ``repo`` — NO install click, NO mutation. Lists
-        the installation's repositories via the minted installation token (``Metadata:read``,
-        within the Phase-1 ceiling) and checks the target repo is covered. The bot identity is the
-        App the installation token was minted under (implicit in the credential), reported back.
+        Confirms the ALREADY-installed App covers ``repo`` — NO install click, NO mutation.
+        The primary check is scoped to the configured target repo via App-JWT auth, before
+        any installation token is minted. If the target lookup fails, a bounded installation
+        repository-count read distinguishes "zero accessible repositories" from a normal
+        not-covered result so the operator gets an actionable remediation.
         The install *click* / greenfield ``wait_for_app_installation`` stay Phase-2 (inherited).
-        Pagination: checks the first ``per_page=100`` page — sufficient for the plain-join target;
-        the live Mode-A VPS rehearsal is the full-coverage proof.
         """
-        try:
-            code, parsed, _ = _gh_get(self._reader(), "installation/repositories?per_page=100")
-        except Exception:  # noqa: BLE001
-            return {"ok": False, "reason": "app_installation_read_failed"}
-        if code != 0 or not isinstance(parsed, dict):
-            return {"ok": False, "reason": "app_installation_read_failed"}
-        repos = parsed.get("repositories") or []
-        if not repos and parsed.get("total_count") == 0:
-            return _app_installation_zero_repos_error(installation_id=installation_id, repo=repo)
-        covered = any(
-            isinstance(r, Mapping) and r.get("full_name") == repo for r in repos
-        )
-        if not covered:
-            return {
-                "ok": False,
-                "reason": "app_installation_repo_not_covered",
-                "installation_id": installation_id,
-            }
+        coverage = self._installation_repo_coverage(repo, installation_id=installation_id)
+        if not coverage.get("ok"):
+            result = dict(coverage)
+            result.setdefault("installation_id", installation_id)
+            return result
         return {
             "ok": True,
             "installation_id": installation_id,
@@ -1167,25 +1178,42 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         """True iff the configured App installation's repositories include ``repo`` (read-only GET)."""
         return bool(self._installation_repo_coverage(repo).get("ok"))
 
-    def _installation_repo_coverage(self, repo: str) -> dict[str, Any]:
-        """Read the configured App installation repo list and classify target coverage."""
-        try:
-            code, parsed, _ = _gh_get(self._reader(), "installation/repositories?per_page=100")
-        except Exception:  # noqa: BLE001 — fail-closed: any read error → not confirmable
-            return {"ok": False, "reason": "app_installation_read_failed"}
-        if code != 0 or not isinstance(parsed, dict):
-            return {"ok": False, "reason": "app_installation_read_failed"}
-        repos = parsed.get("repositories") or []
-        if not repos and parsed.get("total_count") == 0:
+    def _installation_repo_coverage(
+        self, repo: str, *, installation_id: int | None = None
+    ) -> dict[str, Any]:
+        """Confirm the configured installation is attached to the target repo."""
+        expected_installation_id = installation_id or self._cfg.installation_id
+        code, parsed, _ = _app_jwt_get(self._cfg, f"repos/{repo}/installation")
+        if code == 0 and isinstance(parsed, Mapping):
+            target_installation_id = parsed.get("id")
+            if int(target_installation_id or 0) == int(expected_installation_id):
+                return {"ok": True, "covered": True, "installation_id": expected_installation_id}
+            return {
+                "ok": False,
+                "reason": "app_installation_repo_not_covered",
+                "installation_id": expected_installation_id,
+                "repo": repo,
+                "target_installation_id": target_installation_id,
+            }
+
+        count_code, count_parsed, _ = _app_jwt_get(
+            self._cfg,
+            f"app/installations/{expected_installation_id}/repositories?per_page=1",
+        )
+        if count_code != 0 or not isinstance(count_parsed, Mapping):
+            return {"ok": False, "reason": "app_installation_read_failed", "repo": repo}
+        repos = count_parsed.get("repositories") or []
+        if not repos and count_parsed.get("total_count") == 0:
             return _app_installation_zero_repos_error(
-                installation_id=self._cfg.installation_id,
+                installation_id=expected_installation_id,
                 repo=repo,
             )
         if any(isinstance(r, Mapping) and r.get("full_name") == repo for r in repos):
-            return {"ok": True, "covered": True}
+            return {"ok": True, "covered": True, "installation_id": expected_installation_id}
         return {
             "ok": False,
             "reason": "app_installation_repo_not_covered",
+            "installation_id": expected_installation_id,
             "repo": repo,
         }
 
