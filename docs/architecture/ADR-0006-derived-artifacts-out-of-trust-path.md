@@ -4,7 +4,7 @@ record_type: adr
 schema_version: "1"
 id: ADR-0006-derived-artifacts-out-of-trust-path
 title: "Derived Artifacts Out Of The Trust Path"
-status: proposed
+status: accepted
 date: "2026-06-19"
 decision_makers: [dev-3]
 consulted: [ce-ops#133, ce-ops#91, ce-ops#65]
@@ -41,9 +41,20 @@ crosswalk:
     - ce-ops#133
     - ce-ops#91
     - ce-ops#65
+ratification:
+  ratified_by: neckar
+  ratified_at: "2026-06-19"
+  ratification_prompt_sha: bb69016797062f5b53f3f5a79164f495b59c885d19172828b87a1407904d9366
 ---
 
 # Derived Artifacts Out Of The Trust Path
+
+## Ratification
+
+Operator neckar ratified this ADR on 2026-06-19 as Gate-1 design acceptance.
+Gates 2-3 remain separate future ratified gates. This record remains
+design-only and does not authorize code, workflow, trust-root, or release
+artifact changes.
 
 ## Context and Problem Statement
 
@@ -62,7 +73,7 @@ recurring merge conflicts, path-manifest widening, large binary diffs, and
 source-review noise. Worse, it tempts reviewers to treat a rebuilt wheel as
 authority rather than as evidence that source can be reproducibly built.
 
-This proposed ADR decides the target architecture only. It does not authorize
+This accepted ADR decides the target architecture only. It does not authorize
 removing the committed wheel, changing install trust roots, editing workflows,
 or altering branch protection. Those are future implementation gates that
 require separate Operator ratification.
@@ -110,7 +121,7 @@ Chosen option: **Option 3 — un-commit the CE app wheel, build it in CI as a
 signed release artifact, keep vendored dependencies reproducible, and require
 merge-queue wheel/source verification.**
 
-The proposed target state has three separated artifact classes:
+The accepted target state has three separated artifact classes:
 
 1. **Authored source and policy artifacts in git.**
    Python source, schemas, tests, docs, lockfiles, release metadata, and
@@ -340,9 +351,9 @@ manifests.
 - Bad: reproducible-build rigor may expose nondeterminism in generated metadata
   that current committed-wheel workflows hide.
 
-## Non-Ratification Statement
+## Gate Boundary Statement
 
-This proposed ADR is a design artifact for Operator ratification. It does not
-remove any wheel from git, change install scripts, change signed manifests,
-publish release artifacts, alter CI workflows, or change branch protection. Any
-binding implementation requires a later ratified gate.
+This accepted ADR records Gate-1 design acceptance only. It does not remove any
+wheel from git, change install scripts, change signed manifests, publish release
+artifacts, alter CI workflows, or change branch protection. Any binding
+implementation requires a later ratified gate.
