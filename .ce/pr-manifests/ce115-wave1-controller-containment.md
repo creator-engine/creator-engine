@@ -10,8 +10,8 @@ set below. This carrier lists itself.
 
 Ratified:
 Wave 1 scope for ce-ops#115 Controller containment on 2026-06-19. Build exactly
-Gates 1 and 2 of the adopted `cedev2 -> DGX` containment blueprint, based on
-`origin/main` `3820abb3a89f60642a10cd1e1b4b76b66bed4e2f`, and exclude Gates
+Gates 1 and 2 of the adopted `cedev2 -> DGX` containment blueprint, rebased on
+`origin/main` `83242b984067e0c6f45e072550fdbf589004e64e`, and exclude Gates
 3-7. Gate 1 updates schema/protocol/validator enforcement for
 `role: controller`, contained Controller posture, and forbidden-surface
 predicates. Gate 2 adds `deploy/dgx-controller-runsc` as a sibling of merged
@@ -27,10 +27,13 @@ The changes:
   predicates beyond the schema.
 - The DGX Controller runsc artifact adds an image, wrapper, dry-run argv tests,
   refusal behavior for known-bad DGX runtime/network paths, and build docs.
+- The packaged validator app wheel is rebuilt on the rebased source so it
+  includes both the merged ce-ops#120 `reviewer_triage.py` source and this PR's
+  `controller_runtime_contract.py` source.
 - The ratified design doc is retained in-branch as implementation context.
 - Gates 3-7 supervisor/runtime/fan-in work is not implemented.
 
-Per-file purpose (the closed path-set - 15 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 17 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce115-wave1-controller-containment.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce115-wave1-controller-containment.md`** *(A)* - this carrier.
 - **`.ce/state/research/DESIGN_ce115_controller_containment_20260619T043931Z.md`** *(A)* - adopted design blueprint retained in branch.
@@ -46,13 +49,15 @@ Per-file purpose (the closed path-set - 15 paths; `(A)` add, `(M)` modify):
 - **`validators/creator_engine_validator/checks/controller_runtime_contract.py`** *(M)* - containment predicate enforcement.
 - **`validators/tests/unit/test_controller_runtime_contract.py`** *(M)* - Gate 1 TDD coverage.
 - **`validators/tests/unit/test_dgx_controller_runsc.py`** *(A)* - Gate 2 dry-run argv/refusal coverage.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - refresh only the app-wheel checksum line.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* - rebuilt validator app wheel from rebased source.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=cc4ea9222832aa33da8ac1329fd02018cd9713261adaf1bd6450c6d9ccdef996
+AUTHORIZED_PATHS_SHA256=6125ceb513a57c825a3cbe4355d2648d60efed3b22ea9bd7f42f2cf7dd06b785
 
 ```text
 .ce/changelog/ce115-wave1-controller-containment.md
@@ -70,4 +75,6 @@ schemas/controller-runtime-contract.schema.yaml
 validators/creator_engine_validator/checks/controller_runtime_contract.py
 validators/tests/unit/test_controller_runtime_contract.py
 validators/tests/unit/test_dgx_controller_runsc.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
