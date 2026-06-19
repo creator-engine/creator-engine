@@ -122,6 +122,41 @@ def test_accepted_with_ratification_passes():
     assert _codes(rec) == []
 
 
+def test_accepted_with_generic_ratifier_placeholder_rejected():
+    for ratified_by in ("the Operator", "operator", "Source", "ratifier", "TBD"):
+        rec = _record(
+            status="accepted",
+            ratification={
+                "ratified_by": ratified_by, "ratified_at": "2026-06-02",
+                "ratification_prompt_sha": "a" * 64,
+            },
+        )
+        assert chk.CODE_RATIFIER_PLACEHOLDER in _codes(rec), ratified_by
+
+
+def test_accepted_ratifier_handle_allows_real_source_host_style_ids():
+    for ratified_by in ("neckar", "chmod735", "bob-work-gh", "dev_1"):
+        rec = _record(
+            status="accepted",
+            ratification={
+                "ratified_by": ratified_by, "ratified_at": "2026-06-02",
+                "ratification_prompt_sha": "a" * 64,
+            },
+        )
+        assert chk.CODE_RATIFIER_PLACEHOLDER not in _codes(rec), ratified_by
+
+
+def test_accepted_ratifier_handle_rejects_non_handle_shape():
+    rec = _record(
+        status="accepted",
+        ratification={
+            "ratified_by": "neckar operator", "ratified_at": "2026-06-02",
+            "ratification_prompt_sha": "a" * 64,
+        },
+    )
+    assert chk.CODE_RATIFIER_PLACEHOLDER in _codes(rec)
+
+
 def test_privileged_self_ratification_rejected_for_every_privileged_class():
     for cls in sorted(PRIVILEGED_NAMES):
         rec = _record(

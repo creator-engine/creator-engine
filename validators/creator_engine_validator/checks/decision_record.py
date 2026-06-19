@@ -10,6 +10,9 @@ cross-field governance invariants:
   `ratification` block. Nothing in this check (or anywhere in CE) promotes a
   record to `accepted` — that transition is a human ratification event; this
   check only validates its recorded shape.
+- **ratifier-is-concrete:** accepted records MUST name the concrete ratifier
+  handle in `ratification.ratified_by`; role labels such as "the Operator" are
+  placeholders and are rejected.
 - **no privileged self-ratification:** for a privileged `mutation_class`
   (`PRIVILEGED_NAMES`), `ratification.ratified_by` MUST differ from every
   `decision_makers` entry (the ratifier is the *other* peer, never the owner).
@@ -58,6 +61,7 @@ CODE_SELF_RATIFIED = "VAL-DR-SELF-RATIFIED"
 CODE_SUPERSEDED_UNRESOLVED = "VAL-DR-SUPERSEDED-UNRESOLVED"
 CODE_RATIFICATION_MISSING = "VAL-DR-RATIFICATION-MISSING"
 CODE_FCP_OPEN_CONCERN = "VAL-DR-FCP-OPEN-CONCERN"
+CODE_RATIFIER_PLACEHOLDER = "VAL-DR-RATIFIER-PLACEHOLDER"
 # N=1 carve-out: local SHAPE guard for the honest `quorum: n1_solo` marker (the
 # map-sensitive auto-expiry/laundered-quorum checks live in `peer_authority`,
 # which owns the coordination-policy identity map). NEW failure class on the
@@ -71,6 +75,23 @@ _N1_SOLO = "n1_solo"
 # error surfaced instead of being silently skipped.
 _RECORD_FILENAME_RE = re.compile(r"^(ADR|RFC)-[0-9]{4}")
 _TEMPLATE_SUFFIX = "-template.md"
+_RATIFIER_HANDLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_GENERIC_RATIFIER_LABELS = frozenset({
+    "operator",
+    "the operator",
+    "source",
+    "the source",
+    "ratifier",
+    "human",
+    "placeholder",
+    "unknown",
+    "tbd",
+    "todo",
+    "n/a",
+    "na",
+    "none",
+    "null",
+})
 
 
 def _is_template(path: Path) -> bool:
@@ -177,6 +198,31 @@ def _check_ratification_presence(record: dict[str, Any], path: Path) -> list[Val
         "human-ratification event, never an agent promotion",
         CONTRACT,
     )]
+
+
+def _check_concrete_ratifier(record: dict[str, Any], path: Path) -> list[ValidationError]:
+    """Accepted records name the actual ratifier handle, not a generic role."""
+    if record.get("status") != "accepted":
+        return []
+    ratification = record.get("ratification")
+    if not isinstance(ratification, dict):
+        return []
+    ratified_by = ratification.get("ratified_by")
+    if not isinstance(ratified_by, str):
+        return []
+    normalized = " ".join(ratified_by.strip().lower().split())
+    if (
+        normalized in _GENERIC_RATIFIER_LABELS
+        or not _RATIFIER_HANDLE_RE.match(ratified_by.strip())
+    ):
+        return [make_error(
+            CODE_RATIFIER_PLACEHOLDER, path, "ratification/ratified_by",
+            "accepted Decision Records MUST record the concrete ratifier handle "
+            "in ratification.ratified_by; generic role labels/placeholders such "
+            f"as {ratified_by!r} are not stable enough for multi-operator audit",
+            CONTRACT,
+        )]
+    return []
 
 
 def _check_self_ratification(record: dict[str, Any], path: Path) -> list[ValidationError]:
@@ -291,6 +337,7 @@ def validate_decision_record(
     errors: list[ValidationError] = []
     errors.extend(validate_with_schema(record, SCHEMA, path, code=CODE_SCHEMA, contract=CONTRACT))
     errors.extend(_check_ratification_presence(record, path))
+    errors.extend(_check_concrete_ratifier(record, path))
     errors.extend(_check_self_ratification(record, path))
     errors.extend(_check_superseded_link(record, path, known_ids))
     errors.extend(_check_fcp_concerns(record, path))
@@ -301,7 +348,8 @@ def validate_decision_record(
 @register(
     CHECK_NAME,
     [CODE_SCHEMA, CODE_INVALID, CODE_SELF_RATIFIED, CODE_SUPERSEDED_UNRESOLVED,
-     CODE_RATIFICATION_MISSING, CODE_FCP_OPEN_CONCERN, CODE_N1_SOLO_MISUSED],
+     CODE_RATIFICATION_MISSING, CODE_FCP_OPEN_CONCERN,
+     CODE_RATIFIER_PLACEHOLDER, CODE_N1_SOLO_MISUSED],
 )
 def run(paths: Iterable[Path]) -> CheckResult:
     records, errors = iter_decision_records([Path(p) for p in paths])
