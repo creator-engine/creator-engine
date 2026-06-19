@@ -116,6 +116,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_runtime_policy.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    openbao_p3 = sub.add_parser(
+        "openbao-p3-plan",
+        help="render the value-free OpenBao Phase 3 deployment plan; executes no production steps",
+    )
+    openbao_p3.add_argument(
+        "--profile",
+        choices=["local-ephemeral", "controller-pilot"],
+        required=True,
+        help="P3 target profile to render",
+    )
+    openbao_p3.add_argument(
+        "--host-ref",
+        default=None,
+        help="value-free host reference; required for controller-pilot",
+    )
+    openbao_p3.add_argument("--address", required=True, help="OpenBao service address")
+    openbao_p3.add_argument(
+        "--ca-bundle-ref",
+        default=None,
+        help="value-free CA bundle reference; required for controller-pilot",
+    )
+
     verify_attribution = sub.add_parser(
         "verify-attribution",
         help="role_boundary_attribution check in --base mode (compares <base>..HEAD against active .hermes/handoffs manifests)",
@@ -456,6 +478,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.ce_runtime_policy import run as _run_runtime_policy
         result = _run_runtime_policy([Path(args.path)])
         return _emit_results([result], args.json_output)
+    if subcommand == "openbao-p3-plan":
+        return _openbao_p3_plan(args)
     if subcommand == "verify-attribution":
         from .checks.role_boundary_attribution import run_with_base as _run_attribution
         result = _run_attribution([Path(p) for p in args.paths], args.base)
@@ -491,6 +515,50 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.print_usage(sys.stderr)
     return 2
+
+
+def _openbao_p3_plan(args) -> int:
+    from .openbao_p3 import OpenBaoDeploymentConfig, build_p3_deployment_plan
+
+    if args.profile == "local-ephemeral":
+        config = OpenBaoDeploymentConfig.local_ephemeral(
+            address=args.address,
+            allowed_secret_refs=(),
+        )
+    else:
+        if not args.host_ref or not args.ca_bundle_ref:
+            print(
+                "ERROR: openbao-p3-plan: controller-pilot requires --host-ref and --ca-bundle-ref",
+                file=sys.stderr,
+            )
+            return 2
+        config = OpenBaoDeploymentConfig.controller_pilot(
+            host_ref=args.host_ref,
+            address=args.address,
+            ca_bundle_ref=args.ca_bundle_ref,
+            allowed_secret_refs=(),
+        )
+    plan = build_p3_deployment_plan(config)
+    payload = {
+        "ok": True,
+        "profile": plan.profile,
+        "ready_for_local_execution": plan.ready_for_local_execution,
+        "automated_steps": list(plan.automated_steps),
+        "operator_required_steps": list(plan.operator_required_steps),
+        "record": dict(plan.record),
+    }
+    if args.json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"OpenBao P3 profile: {plan.profile}")
+        print(f"ready_for_local_execution: {str(plan.ready_for_local_execution).lower()}")
+        print("automated_steps:")
+        for step in plan.automated_steps:
+            print(f"- {step}")
+        print("operator_required_steps:")
+        for step in plan.operator_required_steps:
+            print(f"- {step}")
+    return 0
 
 
 def _hook_check(args) -> int:
