@@ -14,7 +14,8 @@ integration-test desktop notification leaks on dogfood GNOME desktops. Do not
 touch trust-root, served install, or public download paths.
 
 Base:
-`d2d22b0e3a52a551ec8fbc79571ab3e806353b40` (`origin/main` at branch creation).
+`84f755a44a07168038acf1d1a85cda727f3adba9` (`origin/main` after the
+ce130 ratifier-identity merge).
 
 The changes:
 - `test_resource_bound_systemd.py` no longer runs live `systemd-run` OOM tests
