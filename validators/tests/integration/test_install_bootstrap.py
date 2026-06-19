@@ -214,13 +214,25 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     assert "ssh-keygen" in proc.stderr
 
 
+@pytest.mark.parametrize("extra_env", [{"CE_TEST_UNAME_S": "Darwin"}, {"CE_TEST_UNAME_M": "sparc64"}])
+def test_install_sh_refuses_uname_test_overrides_without_test_mode(
+    tmp_path: Path, repo_root: Path, extra_env: dict[str, str]
+):
+    site = _make_site(tmp_path, repo_root)
+    proc = _run_install(tmp_path, repo_root, site=site, extra_env=extra_env)
+    assert proc.returncode != 0
+    assert "test_override_refused" in proc.stderr
+    assert "CE_INSTALLER_TEST_MODE=1" in proc.stderr
+    assert _curl_urls(tmp_path / "curl.log") == []
+
+
 def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     unsupported = _run_install(
         tmp_path,
         repo_root,
         site=site,
-        extra_env={"CE_TEST_UNAME_S": "Darwin", "CE_TEST_UNAME_M": "arm64"},
+        extra_env={"CE_INSTALLER_TEST_MODE": "1", "CE_TEST_UNAME_S": "Darwin", "CE_TEST_UNAME_M": "arm64"},
     )
     assert unsupported.returncode != 0
     assert "unsupported_platform" in unsupported.stderr
@@ -253,6 +265,7 @@ def test_install_sh_accepts_linux_aarch64_and_selects_arm_wheelhouse(tmp_path: P
         repo_root,
         site=site,
         extra_env={
+            "CE_INSTALLER_TEST_MODE": "1",
             "CE_TEST_UNAME_S": "Linux",
             "CE_TEST_UNAME_M": "aarch64",
             "FAKE_BAD_WHEEL": arm_pyyaml,

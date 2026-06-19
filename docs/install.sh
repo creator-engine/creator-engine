@@ -87,6 +87,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if { [ -n "${CE_TEST_UNAME_S:-}" ] || [ -n "${CE_TEST_UNAME_M:-}" ]; } \
+  && [ "${CE_INSTALLER_TEST_MODE:-}" != "1" ]; then
+  fail test_override_refused "CE_TEST_UNAME_S/CE_TEST_UNAME_M require CE_INSTALLER_TEST_MODE=1; refusing test platform override in real install"
+fi
+
 SPEC_URL="${CE_SITE}/llms-install.md"
 TRUST_ROOT_URL="${CE_SITE}/keys/ce-root-v1"
 CURL_FLAGS=(--proto '=https' --tlsv1.2 -fsSL)
@@ -398,8 +403,13 @@ APP_WHEEL="$(manifest_value app_wheel)"
 [ "$PYTHON_REQUIRES" = ">=3.14" ] || fail signature_refused "unexpected python_requires $PYTHON_REQUIRES"
 [ -n "$ARTIFACT_BASE_URL" ] || fail signature_refused "artifact_base_url missing"
 
-OS_NAME="${CE_TEST_UNAME_S:-$(uname -s)}"
-MACHINE="${CE_TEST_UNAME_M:-$(uname -m)}"
+if [ "${CE_INSTALLER_TEST_MODE:-}" = "1" ]; then
+  OS_NAME="${CE_TEST_UNAME_S:-$(uname -s)}"
+  MACHINE="${CE_TEST_UNAME_M:-$(uname -m)}"
+else
+  OS_NAME="$(uname -s)"
+  MACHINE="$(uname -m)"
+fi
 case "${OS_NAME}/${MACHINE}" in
   Linux/x86_64|Linux/amd64)
     PLATFORM_TAG="linux-x86_64-cp314"
