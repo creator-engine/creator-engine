@@ -1147,6 +1147,7 @@ from creator_engine_validator.forge.scoped_token import (  # noqa: E402
 
 _READ_TOKEN = "ghs_read_token_value"
 _WRITE_TOKEN = "ghs_write_token_value"
+_SCANNER_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.2.0" / "scanners"
 
 
 class _AdoptionForge:
@@ -1606,11 +1607,147 @@ def test_adoption_open_pr_claims_existing_no_duplicate():
     driver.close()
 
 
-def test_adoption_scrub_default_is_fail_closed_until_pinned():
-    # MAJOR-2 — the live scrub default fail-closes (ran=False) until the scanner binary pins are
-    # commissioned at the VPS rehearsal; no unverified binary is ever executed.
+def test_brownfield_scanner_pins_resolve_for_linux_x86_64_and_arm64():
+    x86 = onboard_apply_live._scanner_pins_for_platform("linux/x86_64")
+    arm64 = onboard_apply_live._scanner_pins_for_platform("linux/arm64")
+    assert set(x86) == set(onboard_apply_live.REQUIRED_SCRUB_SCANNERS)
+    assert set(arm64) == set(onboard_apply_live.REQUIRED_SCRUB_SCANNERS)
+    for pin in [*x86.values(), *arm64.values()]:
+        assert pin.platform in {"linux/x86_64", "linux/arm64"}
+        assert onboard_apply_live._valid_sha256(pin.sha256)
+        assert pin.url.startswith("https://creator-engine.dev/downloads/0.2.0/scanners/")
+
+
+def test_brownfield_scanner_manifest_fragment_matches_staged_artifact_hashes():
+    fragment = yaml.safe_load(
+        (_SCANNER_MIRROR_DIR / "scanner-mirror.fragment.yaml").read_text(encoding="utf-8")
+    )
+    entries = fragment["scanner_manifest"]["entries"]
+    code_pins = {
+        (pin.tool, pin.platform): pin
+        for pin in onboard_apply_live.BROWNFIELD_SCANNER_MIRROR
+    }
+    assert set(code_pins) == {
+        ("gitleaks", "linux/x86_64"),
+        ("gitleaks", "linux/arm64"),
+        ("trufflehog", "linux/x86_64"),
+        ("trufflehog", "linux/arm64"),
+    }
+    assert {(entry["name"], entry["platform"]) for entry in entries} == set(code_pins)
+    for entry in entries:
+        pin = code_pins[(entry["name"], entry["platform"])]
+        assert entry["version"] == pin.version
+        assert entry["url"] == pin.url
+        assert entry["sha256"] == pin.sha256
+        artifact = _SCANNER_MIRROR_DIR / Path(pin.url).name
+        assert artifact.is_file(), f"missing scanner mirror artifact: {artifact}"
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == pin.sha256
+
+
+def test_adoption_scrub_x86_pinned_fetch_runs_two_scanner_clean(tmp_path):
+    scan_root = tmp_path / "repo"
+    scan_root.mkdir()
+    (scan_root / "README.md").write_text("clean project\n", encoding="utf-8")
+    scanners = onboard_apply_live._scanner_pins_for_platform("linux/x86_64")
+
+    def mirror_fetch(url):
+        return (_SCANNER_MIRROR_DIR / Path(url).name).read_bytes()
+
+    def scanner_spawn(argv):
+        tool = Path(argv[0]).name.split("-", 1)[0]
+        stdout = "[]" if tool == "gitleaks" else ""
+        return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        mirror_fetch=mirror_fetch,
+        pip_spawn=scanner_spawn,
+        brownfield_scanners=scanners,
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
+    result = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=[])
+    assert result["scanners"]["gitleaks"]["ran"] is True
+    assert result["scanners"]["trufflehog"]["ran"] is True
+    assert onboard_apply._evaluate_scrub_result(result, waived_ids=set()) == {"findings": [], "waived": []}
+    driver.close()
+
+
+def test_adoption_scrub_sha256_mismatch_is_refused(tmp_path):
+    scan_root = tmp_path / "repo"
+    scan_root.mkdir()
+    scanners = onboard_apply_live._scanner_pins_for_platform("linux/x86_64")
+
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        mirror_fetch=lambda _url: b"tampered-scanner-bytes",
+        pip_spawn=lambda argv: subprocess.CompletedProcess(list(argv), 0, stdout="", stderr=""),
+        brownfield_scanners=scanners,
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
+    result = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=[])
+    assert "sha256 mismatch" in result["scanners"]["gitleaks"]["error"]
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(result, waived_ids=set())
+    assert exc.value.code == "brownfield_secret_scanner_unavailable"
+    driver.close()
+
+
+def test_adoption_scrub_fetch_404_is_fail_closed(tmp_path):
+    scan_root = tmp_path / "repo"
+    scan_root.mkdir()
+
+    def mirror_fetch(_url):
+        raise OSError("404 Not Found")
+
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        mirror_fetch=mirror_fetch,
+        pip_spawn=lambda argv: subprocess.CompletedProcess(list(argv), 0, stdout="", stderr=""),
+        brownfield_scanners=onboard_apply_live._scanner_pins_for_platform("linux/x86_64"),
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
+    result = driver.secret_preflight_scan(scan_root=str(scan_root), scaffold=[])
+    assert "fetch failed" in result["scanners"]["gitleaks"]["error"]
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply._evaluate_scrub_result(result, waived_ids=set())
+    assert exc.value.code == "brownfield_secret_scanner_unavailable"
+    driver.close()
+
+
+def test_adoption_scrub_unpinned_override_is_fail_closed():
+    # MAJOR-2 — an explicit unpinned override stays fail-closed; no unverified binary executes.
     forge = _AdoptionForge()
-    driver = _adoption_driver(forge)
+    config = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO,
+        installation_id=140271364,
+        app_client_id="Iv1.testclient",
+        signer=lambda signing_input: b"fake-rs256-signature",
+        policy_sha="a" * 64,
+        run_id="onboard-adoption-test",
+        transport=forge.transport,
+        spawn=forge.spawn,
+        git_spawn=forge.git_spawn,
+        brownfield_scanners={
+            "gitleaks": onboard_apply_live.BrownfieldScanner("gitleaks", "", "", ""),
+            "trufflehog": onboard_apply_live.BrownfieldScanner("trufflehog", "", "", ""),
+        },
+    )
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(config)
     result = driver.secret_preflight_scan(scan_root=".", scaffold=[])
     for name in onboard_apply_live.REQUIRED_SCRUB_SCANNERS:
         assert result["scanners"][name]["ran"] is False
