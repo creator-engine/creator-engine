@@ -11,7 +11,7 @@ wire the live brownfield secret-preflight verifier, commit locally only, and do
 not push, sign, or publish the mirror.
 
 Base:
-`4b62822fcb23b50f05b1e80d5cc1f1e7d3bc2084` (`origin/main` after #255/#256 merge rebase).
+`8cc07222a8051b2c3e6804d92036680711928472` (`origin/main` after #265 OpenBao P1 merge rebase).
 
 The changes:
 - Four extracted scanner binaries are staged under the 0.2.0 Pages mirror path:
@@ -26,6 +26,15 @@ The changes:
   `validators/wheelhouse/SHA256SUMS` is refreshed; the signed Pages mirror
   release files outside this PR's scanner staging set are intentionally
   untouched.
+
+Pinned scanner artifact sha256 values:
+
+| Scanner | Version | Platform | sha256 |
+|---|---:|---|---|
+| Gitleaks | 8.30.1 | linux/x86_64 | `88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509` |
+| Gitleaks | 8.30.1 | linux/arm64 | `00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b` |
+| TruffleHog | 3.95.6 | linux/x86_64 | `d4414128597485471941f9d03c2aecf072141d84aa5d728b31dfbfe79d64d2b9` |
+| TruffleHog | 3.95.6 | linux/arm64 | `c2c5117f305b214f4e07d215d070e51e33479bae87e365c641ba3d9e8b2af0eb` |
 
 Per-file purpose (the closed path-set - 11 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce123-scanner-mirror.md`** *(A)* - changelog fragment.

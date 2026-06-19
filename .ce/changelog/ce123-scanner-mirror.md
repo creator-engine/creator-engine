@@ -4,7 +4,7 @@ date: 2026-06-18
 kind: fixed
 scope: brownfield secret preflight
 issue: ce-ops#123
-base: 8d2a83be700d9337aeaaa7b704e6306da79744c8
+base: 8cc07222a8051b2c3e6804d92036680711928472
 ---
 
 Commissions sha256-pinned Gitleaks and TruffleHog mirror artifacts for the
