@@ -3,12 +3,13 @@ $id: "https://creator-engine.local/schemas/controller-runtime-contract.schema.ya
 title: "Creator Engine Controller Runtime Contract"
 description: |
   RV1-020 Controller Runtime Contract record for the Creator Engine v1.0
-  local governed runtime kernel (PCO v1 Gate 2).
+  governed runtime kernel (PCO v1 Gate 2).
 
   Prose contract:
   `docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md`.
 
-  The record classifies the Controller seat and harness boundary. It is
+  The record classifies the Controller role, seat, containment posture, and
+  harness boundary. It is
   declarative and validated only: it does not launch a pane, call Claude,
   call GitHub, call network APIs, or mutate runtime state, and it must never
   embed local secrets or durable account/provider authority.
@@ -16,6 +17,7 @@ type: object
 required:
   - kind
   - schema_version
+  - role
   - controller_seat
   - harness
   - authority_boundary
@@ -29,6 +31,9 @@ properties:
   schema_version:
     type: string
     const: "1"
+  role:
+    type: string
+    const: controller
   description:
     type: string
     maxLength: 2048
@@ -39,9 +44,43 @@ properties:
       - seat
     properties:
       authority_locality:
-        const: host-local
+        enum: [host-local, contained]
       seat:
         const: controller
+      containment:
+        type: object
+        required:
+          - isolation_backend
+          - forbidden_surfaces
+          - credential_handles
+        properties:
+          isolation_backend:
+            type: string
+            enum: [gvisor-proxy, openshell]
+          forbidden_surfaces:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              $ref: "#/$defs/controller_forbidden_surface"
+          credential_handles:
+            type: object
+            required:
+              - max_auth
+              - ce_root_v1
+              - ce_root_v1_signing
+              - github_app
+            properties:
+              max_auth:
+                const: max-auth-via-setup-token
+              ce_root_v1:
+                const: ce-root-v1-via-openbao
+              ce_root_v1_signing:
+                const: ce-root-v1-signing-request
+              github_app:
+                const: github-app-installation-token
+            unevaluatedProperties: false
+        unevaluatedProperties: false
     unevaluatedProperties: false
   harness:
     type: object
@@ -80,7 +119,7 @@ properties:
       - provider_authority
     properties:
       state_root:
-        const: .hermes/
+        enum: [.hermes/, .ce/state/]
       durable_account_authority:
         const: none
       provider_authority:
@@ -89,6 +128,21 @@ properties:
   record_timestamp:
     $ref: "#/$defs/timestamp"
 $defs:
+  controller_forbidden_surface:
+    type: string
+    enum:
+      - host-home
+      - host-tmux-socket
+      - host-ssh-agent
+      - host-git-push
+      - acp-host-transport
+      - raw-host-tui
+      - docker-socket
+      - podman-socket
+      - containerd-socket
+      - openbao-root-token
+      - ce-root-v1-private-key
+      - github-app-private-key
   authority_class:
     type: string
     enum:
