@@ -77,12 +77,20 @@ class _ModeBForge:
         self.installation_repos = json.dumps(
             {"total_count": 1, "repositories": [json.loads(self.repo_json)]}
         )
+        self.repo_installation_status = 200
+        self.repo_installation_json = json.dumps({"id": 140271364, "app_slug": "creator-engine"})
+        self.transport_calls: list[dict[str, Any]] = []
         self.calls: list[dict[str, Any]] = []  # {"argv", "env_token"}
 
     # the app-JWT HTTPS transport (mint POST)
     def transport(self, method: str, url: str, headers: dict[str, str], body: str | None):
+        self.transport_calls.append({"method": method, "url": url, "body": body})
         assert headers.get("Authorization", "").startswith("Bearer "), "App auth must be Bearer JWT"
         assert _MINTED not in (body or ""), "the minted value must never be the mint request body"
+        if method == "GET" and url.endswith(f"/repos/{_REPO}/installation"):
+            return self.repo_installation_status, self.repo_installation_json
+        if method == "GET" and "/app/installations/" in url and "/repositories" in url:
+            return 200, self.installation_repos
         return 201, json.dumps(
             {
                 "token": _MINTED,
@@ -344,8 +352,8 @@ def test_token_value_never_appears_in_argv_or_driver_repr():
 
 
 def test_verify_app_installation_coverage_get_confirms_repo_no_mutation():
-    # ce-ops#88 amendment: read-only coverage GET — the installation covers the repo (the
-    # captured repo object appears in /installation/repositories). No install click, no write.
+    # ce-ops#126: coverage is checked against the configured target repo before any broad
+    # installation repository list or installation-token mint.
     forge = _ModeBForge()
     result = _driver(forge).verify_app_installation(
         installation_id=140271364, repo=_REPO, bot_identity="creator-engine[bot]"
@@ -354,6 +362,8 @@ def test_verify_app_installation_coverage_get_confirms_repo_no_mutation():
     assert result["covered"] is True
     assert result["installation_id"] == 140271364
     assert forge.write_argvs() == []  # pure read
+    assert any(c["url"].endswith(f"/repos/{_REPO}/installation") for c in forge.transport_calls)
+    assert not any("installation/repositories" in " ".join(c["argv"]) for c in forge.calls)
 
 
 def test_verify_app_installation_fails_closed_when_repo_not_covered():
@@ -365,6 +375,8 @@ def test_verify_app_installation_fails_closed_when_repo_not_covered():
     class _NoCover(_ModeBForge):
         def __init__(self):
             super().__init__()
+            self.repo_installation_status = 404
+            self.repo_installation_json = json.dumps({"message": "Not Found"})
             self.installation_repos = not_covering
 
     result = _driver(_NoCover()).verify_app_installation(
@@ -378,9 +390,12 @@ def test_verify_app_installation_zero_repos_reports_actionable_scope_error():
     class _ZeroRepos(_ModeBForge):
         def __init__(self):
             super().__init__()
+            self.repo_installation_status = 404
+            self.repo_installation_json = json.dumps({"message": "Not Found"})
             self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
 
-    result = _driver(_ZeroRepos()).verify_app_installation(
+    forge = _ZeroRepos()
+    result = _driver(forge).verify_app_installation(
         installation_id=141102698,
         repo=_REPO,
         bot_identity="ce-forge-dev4[bot]",
@@ -393,6 +408,7 @@ def test_verify_app_installation_zero_repos_reports_actionable_scope_error():
     assert "zero accessible repositories" in result["message"]
     assert "install or reconfigure" in result["action"]
     assert _REPO in result["action"]
+    assert any("/app/installations/141102698/repositories" in c["url"] for c in forge.transport_calls)
 
 
 # ---------------------------------------------------------------------------
@@ -922,19 +938,22 @@ def test_uv_pin_matches_served_mirror_wheel_and_signed_manifest():
 
 # -- wait_for_app_installation: detect + fail-closed -------------------------
 def test_wait_for_app_installation_detects_already_installed_app_read_only():
-    forge = _ModeBForge()  # /installation/repositories covers the repo (captured envelope)
+    forge = _ModeBForge()
     driver = _driver(forge)
     result = driver.wait_for_app_installation(app_plan={"bot_identity": "creator-engine[bot]"}, repo=_REPO)
     driver.close()
     assert result["ok"] is True and result["detected"] is True
     assert result["installation_id"] == 140271364
     assert forge.write_argvs() == []  # pure read, no click, no mutation
+    assert any(c["url"].endswith(f"/repos/{_REPO}/installation") for c in forge.transport_calls)
 
 
 def test_wait_for_app_installation_fails_closed_when_repo_not_covered():
     class _NoCover(_ModeBForge):
         def __init__(self):
             super().__init__()
+            self.repo_installation_status = 404
+            self.repo_installation_json = json.dumps({"message": "Not Found"})
             self.installation_repos = json.dumps({
                 "total_count": 1,
                 "repositories": [{"full_name": "elsewhere/not-the-target"}],
@@ -951,6 +970,8 @@ def test_wait_for_app_installation_zero_repos_reports_actionable_scope_error():
     class _ZeroRepos(_ModeBForge):
         def __init__(self):
             super().__init__()
+            self.repo_installation_status = 404
+            self.repo_installation_json = json.dumps({"message": "Not Found"})
             self.installation_repos = json.dumps({"total_count": 0, "repositories": []})
 
     forge = _ZeroRepos()
