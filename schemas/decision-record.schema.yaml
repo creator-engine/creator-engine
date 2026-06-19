@@ -151,9 +151,10 @@ properties:
         type: string
         minLength: 1
         description: |
-          The HUMAN ratifier's actor label. For privileged `mutation_class`
-          this MUST differ from every entry in `decision_makers` (enforced by
-          the check).
+          The HUMAN ratifier's concrete actor handle (for example the ratifier's
+          source-host handle), not a role placeholder such as `the Operator`.
+          For privileged `mutation_class` this MUST differ from every entry in
+          `decision_makers` (enforced by the check).
       ratified_at:
         type: string
         pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9:.+Z-]+)?$"
