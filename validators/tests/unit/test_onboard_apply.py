@@ -171,7 +171,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         )
         if backend == "gvisor-proxy":
             # The fake host has the gVisor tools; preserve the historical green path.
-            return {"ok": self.runtime_ok, "backend": backend, "runsc": True, "proxy": True, "provider_transport": provider == "codex"}
+            return {"ok": self.runtime_ok, "backend": backend, "runsc": True, "gvproxy": True, "provider_transport": provider == "codex"}
         return result
 
     def expose_cli(self, *, state_root, command, via):

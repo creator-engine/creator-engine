@@ -326,17 +326,17 @@ class ApplyDriver:
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
         # ce-ops#71 Edit A: dispatch the SELECTED backend's OWN availability check —
-        # no longer the hardwired ``runsc`` AND ``proxy`` gate. Unknown backends
+        # no longer the hardwired ``runsc`` AND ``gvproxy`` gate. Unknown backends
         # fail-closed (req-5): a selected-but-uncheckable backend never reports ok.
         blocked_state_dirs = {"." + "her" + "mes", "." + "cla" + "ude"}
         if any(part in blocked_state_dirs for part in state_root.parts):
             return {"ok": False, "reason": "state_root_bound_to_harness"}
         if backend == "gvisor-proxy":
             return {
-                "ok": self.verify_tool("runsc") and self.verify_tool("proxy"),
+                "ok": self.verify_tool("runsc") and self.verify_tool("gvproxy"),
                 "backend": backend,
                 "runsc": self.verify_tool("runsc"),
-                "proxy": self.verify_tool("proxy"),
+                "gvproxy": self.verify_tool("gvproxy"),
                 "provider_transport": provider is not None,
             }
         if backend in {"os-native", "openshell"}:

@@ -520,7 +520,7 @@ class _HostFakedLiveDriver(onboard_apply_live.LiveForgeApplyDriver):
     def install_dependencies(self, tools, *, sudo_tools, userspace_tools):
         return {"ok": True, "installed": []}
     def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
-        return {"ok": True, "backend": backend, "runsc": True, "proxy": True, "provider_transport": True}
+        return {"ok": True, "backend": backend, "runsc": True, "gvproxy": True, "provider_transport": True}
     def expose_cli(self, *, state_root, command, via):
         return {"ok": True, "created": True, "path": str(state_root / "onboard" / "bin" / command)}
     def verify_cli(self, *, state_root, command):
@@ -797,6 +797,110 @@ def test_install_dependencies_refuses_sudo_tools_no_host_installer():
     assert result["manual_rollback_required"] is True
     assert result["package_names"] == ["runsc"]
     assert calls["fetch"] == [] and calls["pip"] == []  # no fetch/pip on the sudo path
+
+
+def test_provision_runtime_auto_installs_pinned_runsc_and_gvproxy_versions(tmp_path):
+    class _RuntimeProvisionDriver(onboard_apply_live.LiveForgeApplyDriver):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self.installed_versions: dict[str, str] = {}
+
+        def _install_pinned_system_tool(self, pin):
+            self.installed_versions[pin.tool] = pin.version
+            return {"ok": True, "tool": pin.tool, "version": pin.version, "path": f"/fake/{pin.tool}"}
+
+        def _pinned_system_tool_version_output(self, pin):
+            version = self.installed_versions.get(pin.tool)
+            return f"{pin.tool} version {version}" if version else None
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-provision",
+    )
+    driver = _RuntimeProvisionDriver(cfg)
+
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend="gvisor-proxy",
+    )
+
+    assert result["ok"] is True
+    assert driver.installed_versions == {"runsc": "20260608.0", "gvproxy": "v0.8.9"}
+    assert result["runtime_tools"] == {"runsc": "20260608.0", "gvproxy": "v0.8.9"}
+    assert driver.verify_tool("runsc") is True
+    assert driver.verify_tool("gvproxy") is True
+
+
+def test_verify_pinned_runtime_tool_checks_runtime_dir_after_stale_path_binary(tmp_path, monkeypatch):
+    stale_dir = tmp_path / "stale"
+    runtime_dir = tmp_path / "runtime"
+    stale_dir.mkdir()
+    runtime_dir.mkdir()
+    stale = stale_dir / "runsc"
+    pinned = runtime_dir / "runsc"
+    stale.write_text("#!/bin/sh\necho 'runsc version 20240101.0'\n", encoding="utf-8")
+    pinned.write_text("#!/bin/sh\necho 'runsc version 20260608.0'\n", encoding="utf-8")
+    stale.chmod(0o755)
+    pinned.chmod(0o755)
+    monkeypatch.setattr(onboard_apply_live.shutil, "which", lambda tool: str(stale) if tool == "runsc" else None)
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-stale-path",
+        runtime_bin_dir=str(runtime_dir),
+    )
+    driver = onboard_apply_live.LiveForgeApplyDriver(cfg)
+    pin = onboard_apply_live._pinned_system_tool("runsc", machine="x86_64")
+
+    assert driver._verify_pinned_system_tool(pin) is True
+
+
+def test_install_pinned_runtime_tool_fails_closed_on_digest_mismatch():
+    calls: dict[str, list] = {"system": []}
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-digest",
+        mirror_fetch=lambda _url: b"tampered-runtime-binary",
+        system_spawn=lambda argv: calls["system"].append(list(argv)),
+    )
+    driver = onboard_apply_live.LiveForgeApplyDriver(cfg)
+
+    result = driver._install_pinned_system_tool(
+        onboard_apply_live._pinned_system_tool("gvproxy", machine="x86_64")
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "system_tool_digest_mismatch"
+    assert result["tool"] == "gvproxy"
+    assert calls["system"] == []
+
+
+def test_provision_runtime_fails_closed_when_pinned_version_verify_fails(tmp_path):
+    class _BadVersionDriver(onboard_apply_live.LiveForgeApplyDriver):
+        def _install_pinned_system_tool(self, pin):
+            return {"ok": True, "tool": pin.tool, "version": pin.version, "path": f"/fake/{pin.tool}"}
+
+        def _pinned_system_tool_version_output(self, pin):
+            return f"{pin.tool} version 0.0.0"
+
+    cfg = onboard_apply_live.LiveForgeConfig(
+        repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
+        signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-bad-version",
+    )
+    result = _BadVersionDriver(cfg).provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend="gvisor-proxy",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "system_tool_verify_failed"
+    assert result["tool"] == "runsc"
+    assert result["expected_version"] == "20260608.0"
 
 
 def test_install_dependencies_fails_closed_on_pip_failure():
