@@ -124,6 +124,54 @@ def test_wheelhouse_covers_runtime_dependencies(validators_dir: Path):
 
 
 # ---------------------------------------------------------------------------
+# wheelhouse-dev: cp314 dual-arch native wheels for offline dev/test installs
+# ---------------------------------------------------------------------------
+
+
+DEV_NATIVE_DUAL_ARCH_PINS = {
+    "aiohttp": "3.14.1",
+    "frozenlist": "1.8.0",
+    "markupsafe": "3.0.3",
+    "multidict": "6.7.1",
+    "propcache": "0.5.2",
+    "watchfiles": "1.2.0",
+    "yarl": "1.24.2",
+}
+
+
+def _dev_wheels_by_distribution(validators_dir: Path) -> dict[str, list[str]]:
+    wheels: dict[str, list[str]] = {}
+    for wheel in pkg.wheelhouse_wheels(validators_dir / "wheelhouse-dev"):
+        parts = wheel.removesuffix(".whl").split("-")
+        if len(parts) < 5:
+            continue
+        wheels.setdefault(pkg.normalize_name(parts[0]), []).append(wheel)
+    return wheels
+
+
+def test_wheelhouse_dev_has_no_stale_non_cp314_abi_wheels(validators_dir: Path):
+    wheels = pkg.wheelhouse_wheels(validators_dir / "wheelhouse-dev")
+    offenders = [w for w in wheels if any(tag in w for tag in pkg.FORBIDDEN_ABI_TAGS)]
+    assert offenders == [], f"non-cp314 dev ABI wheels must be removed: {offenders}"
+
+
+def test_wheelhouse_dev_contains_linux_x86_64_and_aarch64_native_wheels(
+    validators_dir: Path,
+):
+    wheels_by_dist = _dev_wheels_by_distribution(validators_dir)
+    for distribution, version in DEV_NATIVE_DUAL_ARCH_PINS.items():
+        wheels = wheels_by_dist.get(distribution, [])
+        assert wheels, f"wheelhouse-dev missing offline wheel for {distribution}"
+        for arch in ("x86_64", "aarch64"):
+            assert any(
+                f"-{version}-cp314-cp314-" in wheel
+                and "manylinux" in wheel
+                and arch in wheel
+                for wheel in wheels
+            ), f"wheelhouse-dev missing {distribution}=={version} cp314 manylinux {arch} wheel: {wheels}"
+
+
+# ---------------------------------------------------------------------------
 # uv.lock primary + requirements.txt lockstep export
 # ---------------------------------------------------------------------------
 
