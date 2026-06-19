@@ -68,19 +68,19 @@ INTERNAL_ENTRY = "cev3"
 
 #: Tier-scoped dependency sets — the planner selects one by isolation tier
 #: (ce-ops#71 §A.1; the gVisor→opt-in demotion). The flat Tier-2 set *was* the
-#: only set; Tier 0/1 are subsets that exclude the privileged ``runsc``/``proxy``
+#: only set; Tier 0/1 are subsets that exclude the privileged ``runsc``/``gvproxy``
 #: pairing. ``git``/``python``/``uv`` are user-level in every tier.
 #:   Tier 0 — governance-only, no sandbox (zero root).
 #:   Tier 1 — governance + unprivileged OS-native sandbox (bwrap/seccomp/Landlock
 #:     on Linux, Seatbelt on macOS). The sandbox primitives are PROBE-ONLY (never
 #:     auto-sudo-installed — that is what keeps Tier 1 "zero root"); they are NOT
 #:     planned as dep steps here, only surfaced as documented prerequisites.
-#:   Tier 2 — governance + gVisor ``runsc`` + egress proxy (the heavy, privileged
+#:   Tier 2 — governance + gVisor ``runsc`` + ``gvproxy`` (the heavy, privileged
 #:     opt-in; the only tier that drags sudo tools into the plan).
 TIER_DEPS: dict[int, tuple[str, ...]] = {
     0: ("git", "python", "uv"),
     1: ("git", "python", "uv"),                       # + sandbox primitives via the probe-only path
-    2: ("git", "python", "uv", "runsc", "proxy"),
+    2: ("git", "python", "uv", "runsc", "gvproxy"),
 }
 #: The default tier preserves TODAY's behavior (the heavy gVisor pairing). The
 #: default-flip to Tier 1, the ``--sandbox`` selector, and ``solo-pilot→tier1``
@@ -91,8 +91,8 @@ DEFAULT_ISOLATION_TIER = 2
 REQUIRED_DEPENDENCIES = TIER_DEPS[DEFAULT_ISOLATION_TIER]
 #: Only the gVisor pairing is privileged. ``git``/``python``/``uv`` become
 #: user-level ALWAYS (ce-ops#71 §A.1) — so a plan needs sudo iff a Tier-2 plan is
-#: selected and its ``runsc``/``proxy`` are not already present.
-_SUDO_TOOLS = frozenset({"runsc", "proxy"})
+#: selected and its ``runsc``/``gvproxy`` are not already present.
+_SUDO_TOOLS = frozenset({"runsc", "gvproxy"})
 
 #: Backend-KEYED dependency sets — the #71-CORE re-frame of the numeric
 #: :data:`TIER_DEPS` so deps follow the SELECTED RunnerBackend (the neutral
@@ -102,14 +102,14 @@ _SUDO_TOOLS = frozenset({"runsc", "proxy"})
 #:     sandbox primitives are PROBE-ONLY documented prerequisites, never planned
 #:     as auto-sudo dep steps — what keeps it zero-root). == TIER_DEPS[0/1].
 #:   ``gvisor-proxy`` — the heavy single-host opt-in; the only key that drags the
-#:     privileged ``runsc``/``proxy`` pairing into the plan. == TIER_DEPS[2].
+#:     privileged ``runsc``/``gvproxy`` pairing into the plan. == TIER_DEPS[2].
 #:   ``openshell``    — the gateway tier delegates ENFORCEMENT to a container
 #:     engine (Docker/Podman/VM), provisioned out-of-band by the gateway, not by
 #:     this installer; the installer's own dep floor is the core no-sudo set.
 #: ``git``/``python``/``uv`` are user-level in every backend.
 BACKEND_DEPS: dict[str, tuple[str, ...]] = {
     "os-native": ("git", "python", "uv"),
-    "gvisor-proxy": ("git", "python", "uv", "runsc", "proxy"),
+    "gvisor-proxy": ("git", "python", "uv", "runsc", "gvproxy"),
     "openshell": ("git", "python", "uv"),
 }
 #: The schema-level default backend (``schemas/runtime-policy.schema.yaml``
@@ -860,7 +860,7 @@ def plan_dependencies(
         surface: deps follow the SELECTED backend (unknown key ⇒ fail-closed).
       * an **isolation tier** (``int`` ``0|1|2``) resolves to :data:`TIER_DEPS`
         (the G71.2 numeric surface; Tier 0/1 exclude the privileged
-        ``runsc``/``proxy`` pairing).
+        ``runsc``/``gvproxy`` pairing).
       * an explicit **iterable** of dependency names (the pre-tier flat call) —
         for back-compatible callers.
     Default is the heavy Tier 2, preserving today's behavior.
@@ -868,7 +868,7 @@ def plan_dependencies(
     ``probe`` maps a tool → present? (the live read-only ``which`` detection is
     done by the CLI and injected here). Present → skip; missing → a
     permission-gated install step (idempotent; ``_SUDO_TOOLS`` need sudo, batched
-    — and only ``runsc``/``proxy`` are in that set, so a plan needs sudo iff a
+    — and only ``runsc``/``gvproxy`` are in that set, so a plan needs sudo iff a
     Tier-2 plan is selected). Never fail-on-missing — it plans, the human approves.
     """
     if isinstance(tier, str):
@@ -1029,7 +1029,7 @@ def build_install_plan(
     ``tier`` (ce-ops#71 §A.1) selects the isolation tier (default Tier 2 = today's
     heavy behavior). The plan stays attestable via ``profile.isolation_tier``, and
     the gVisor runtime-backend deferred seam is emitted **only for Tier 2** — Tier
-    0/1 are zero-root and do not provision ``runsc``/``proxy``.
+    0/1 are zero-root and do not provision ``runsc``/``gvproxy``.
     """
     verified = require_verified(spec_bytes, signature, pinned_keys=pinned_keys, verifier=verifier)
     deps = plan_dependencies(tier, probe)

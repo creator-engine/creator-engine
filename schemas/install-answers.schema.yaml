@@ -80,7 +80,7 @@ properties:
         type: array
         items:
           type: string
-          enum: [git, python, runsc, proxy]
+          enum: [git, python, runsc, gvproxy]
         uniqueItems: true
         x-ce-step: 1
         x-ce-sensitivity: consent

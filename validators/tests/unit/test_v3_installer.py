@@ -40,7 +40,7 @@ GOOD_ANSWERS = {
     "answers_version": 1,
     "profile": "solo-pilot",
     "host": {
-        "sudo_grant": ["runsc", "proxy"],
+        "sudo_grant": ["runsc", "gvproxy"],
         "workspace_root": "~/ce-workspaces",
     },
     "cost": {"profile": "default"},
@@ -413,9 +413,9 @@ def test_e2e_real_sshsig_through_require_verified_positive_and_tampered():
 # detect-don't-assume dependency planning
 # ---------------------------------------------------------------------------
 def test_plan_present_skips_missing_installs():
-    probe = {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True}
+    probe = {"git": True, "python": True, "runsc": False, "gvproxy": False, "uv": True}
     plan = inst.plan_dependencies(inst.REQUIRED_DEPENDENCIES, probe)
-    assert set(plan.to_install) == {"runsc", "proxy"}
+    assert set(plan.to_install) == {"runsc", "gvproxy"}
     assert {s.name for s in plan.steps if s.action == "skip"} == {"git", "python", "uv"}
 
 
@@ -474,7 +474,7 @@ def test_ce_exposure_targets_ce():
 
 def test_build_plan_verifies_first_then_plans():
     sig = inst.sign_spec(SPEC, key_id=KEY)
-    probe = {"git": True, "python": True, "runsc": False, "proxy": True, "uv": True}
+    probe = {"git": True, "python": True, "runsc": False, "gvproxy": True, "uv": True}
     plan = inst.build_install_plan(SPEC, sig, pinned_keys=PINNED, probe=probe)
     assert plan["verified"]["ok"] is True
     assert plan["dependencies"]["install"] == ["runsc"]
@@ -767,27 +767,27 @@ def test_require_complete_refuses_with_the_exact_list():
 def test_sudo_grant_diff_scoped_grant_covers_planned_installs():
     plan = inst.plan_dependencies(
         inst.REQUIRED_DEPENDENCIES,
-        {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True},
+        {"git": True, "python": True, "runsc": False, "gvproxy": False, "uv": True},
     )
-    diff = inst.sudo_grant_diff(["runsc", "proxy"], plan)
-    assert diff.converged and set(diff.covered) == {"runsc", "proxy"}
+    diff = inst.sudo_grant_diff(["runsc", "gvproxy"], plan)
+    assert diff.converged and set(diff.covered) == {"runsc", "gvproxy"}
 
 
 def test_sudo_grant_diff_refuses_drift_outside_the_grant():
-    # ce-ops#71 §A.1: only runsc/proxy are privileged now (git/python/uv are
+    # ce-ops#71 §A.1: only runsc/gvproxy are privileged now (git/python/uv are
     # user-level ALWAYS); a privileged install OUTSIDE the grant → refuse.
     plan = inst.plan_dependencies(
         2,
-        {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True},
+        {"git": True, "python": True, "runsc": False, "gvproxy": False, "uv": True},
     )
-    diff = inst.sudo_grant_diff(["runsc"], plan)   # proxy drifted outside the grant
-    assert not diff.converged and diff.uncovered == ("proxy",)
+    diff = inst.sudo_grant_diff(["runsc"], plan)   # gvproxy drifted outside the grant
+    assert not diff.converged and diff.uncovered == ("gvproxy",)
     # no grant at all → every privileged install needs the ask
     diff = inst.sudo_grant_diff(None, plan)
-    assert set(diff.uncovered) == {"runsc", "proxy"}
+    assert set(diff.uncovered) == {"runsc", "gvproxy"}
     # git/python/uv missing is now user-level → never a sudo install, converges
     user_level = inst.plan_dependencies(
-        2, {"git": False, "python": False, "runsc": True, "proxy": True, "uv": False}
+        2, {"git": False, "python": False, "runsc": True, "gvproxy": True, "uv": False}
     )
     assert inst.sudo_grant_diff([], user_level).converged
 
@@ -800,9 +800,9 @@ def test_sudo_grant_diff_refuses_drift_outside_the_grant():
 def test_tier_deps_shape_and_sudo_set():
     assert inst.TIER_DEPS[0] == ("git", "python", "uv")
     assert inst.TIER_DEPS[1] == ("git", "python", "uv")
-    assert inst.TIER_DEPS[2] == ("git", "python", "uv", "runsc", "proxy")
+    assert inst.TIER_DEPS[2] == ("git", "python", "uv", "runsc", "gvproxy")
     # only the gVisor pairing is privileged; git/python/uv are user-level always
-    assert inst._SUDO_TOOLS == frozenset({"runsc", "proxy"})
+    assert inst._SUDO_TOOLS == frozenset({"runsc", "gvproxy"})
     # the flat default name still points at the heavy Tier-2 set (back-compat)
     assert inst.REQUIRED_DEPENDENCIES == inst.TIER_DEPS[2]
     assert inst.DEFAULT_ISOLATION_TIER == 2
@@ -810,7 +810,7 @@ def test_tier_deps_shape_and_sudo_set():
 
 def test_plan_dependencies_default_tier_preserves_today():
     # no tier arg == the flat Tier-2 set, preserving today's plan
-    probe = {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True}
+    probe = {"git": True, "python": True, "runsc": False, "gvproxy": False, "uv": True}
     assert (
         inst.plan_dependencies(probe=probe).to_install
         == inst.plan_dependencies(2, probe).to_install
@@ -833,7 +833,7 @@ def test_tier0_converges_with_empty_grant():
     plan = inst.plan_dependencies(0, {"git": False, "python": False, "uv": False})
     assert plan.needs_sudo is False
     assert "runsc" not in {s.name for s in plan.steps}
-    assert "proxy" not in {s.name for s in plan.steps}
+    assert "gvproxy" not in {s.name for s in plan.steps}
     diff = inst.sudo_grant_diff([], plan)
     assert diff.converged and diff.uncovered == ()
 
@@ -845,24 +845,24 @@ def test_tier1_converges_with_empty_grant_zero_root():
     assert plan.needs_sudo is False
     # the privileged pairing is NEVER in a Tier-1 plan
     assert "runsc" not in {s.name for s in plan.steps}
-    assert "proxy" not in {s.name for s in plan.steps}
+    assert "gvproxy" not in {s.name for s in plan.steps}
     assert inst.sudo_grant_diff([], plan).converged
 
 
 def test_tier2_fails_closed_with_empty_grant():
-    # the heavy opt-in: runsc/proxy missing → privileged installs → NOT converged
-    probe = {"git": True, "python": True, "runsc": False, "proxy": False, "uv": True}
+    # the heavy opt-in: runsc/gvproxy missing → privileged installs → NOT converged
+    probe = {"git": True, "python": True, "runsc": False, "gvproxy": False, "uv": True}
     plan = inst.plan_dependencies(2, probe)
     assert plan.needs_sudo is True
     diff = inst.sudo_grant_diff([], plan)
-    assert not diff.converged and set(diff.uncovered) == {"runsc", "proxy"}
+    assert not diff.converged and set(diff.uncovered) == {"runsc", "gvproxy"}
     # Tier 2 still requires the explicit grant — unchanged from today
-    assert inst.sudo_grant_diff(["runsc", "proxy"], plan).converged
+    assert inst.sudo_grant_diff(["runsc", "gvproxy"], plan).converged
 
 
 def test_build_install_plan_seam_and_tier_are_tier_conditional():
     sig = inst.sign_spec(SPEC, key_id=KEY)
-    probe = {"git": True, "python": True, "runsc": True, "proxy": True, "uv": True}
+    probe = {"git": True, "python": True, "runsc": True, "gvproxy": True, "uv": True}
     gvisor = "the runtime backend provisioning (gVisor runsc + egress proxy)"
     # Tier 2 (default) emits the gVisor seam + carries the tier
     p2 = inst.build_install_plan(SPEC, sig, pinned_keys=PINNED, probe=probe)
@@ -895,12 +895,12 @@ def test_build_profile_carries_isolation_tier():
 # ---------------------------------------------------------------------------
 def test_backend_deps_shape_and_no_sudo_default():
     assert inst.BACKEND_DEPS["os-native"] == ("git", "python", "uv")
-    assert inst.BACKEND_DEPS["gvisor-proxy"] == ("git", "python", "uv", "runsc", "proxy")
+    assert inst.BACKEND_DEPS["gvisor-proxy"] == ("git", "python", "uv", "runsc", "gvproxy")
     assert inst.BACKEND_DEPS["openshell"] == ("git", "python", "uv")
     # only the gvisor pairing is privileged across every backend
     for backend, deps in inst.BACKEND_DEPS.items():
         privileged = set(deps) & inst._SUDO_TOOLS
-        assert privileged == ({"runsc", "proxy"} if backend == "gvisor-proxy" else set())
+        assert privileged == ({"runsc", "gvproxy"} if backend == "gvisor-proxy" else set())
     # the schema-level default stays gvisor-proxy (req-4 back-compat gate)
     assert inst.DEFAULT_ISOLATION_BACKEND == "gvisor-proxy"
 
@@ -920,16 +920,16 @@ def test_resolve_isolation_backend_precedence():
 
 
 def test_plan_dependencies_by_backend_key():
-    probe_present = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
-    # os-native plans NO privileged installs (zero-root) even with runsc/proxy absent
+    probe_present = {"git": True, "python": True, "uv": True, "runsc": False, "gvproxy": False}
+    # os-native plans NO privileged installs (zero-root) even with runsc/gvproxy absent
     p_osn = inst.plan_dependencies("os-native", probe_present)
     assert p_osn.needs_sudo is False
     assert "runsc" not in {s.name for s in p_osn.steps}
-    assert "proxy" not in {s.name for s in p_osn.steps}
+    assert "gvproxy" not in {s.name for s in p_osn.steps}
     # gvisor-proxy plans the privileged pairing → needs sudo
     p_gv = inst.plan_dependencies("gvisor-proxy", probe_present)
     assert p_gv.needs_sudo is True
-    assert set(p_gv.to_install) == {"runsc", "proxy"}
+    assert set(p_gv.to_install) == {"runsc", "gvproxy"}
     # unknown backend key → fail-closed
     with pytest.raises(inst.InstallRefused):
         inst.plan_dependencies("bogus-backend")
@@ -960,7 +960,7 @@ def test_build_install_plan_tier_matches_resolved_backend():
     assert gvisor not in osn["deferred_live_seams"]
     gv = inst.build_install_plan(
         SPEC, sig, pinned_keys=PINNED,
-        probe={"git": True, "python": True, "uv": True, "runsc": True, "proxy": True},
+        probe={"git": True, "python": True, "uv": True, "runsc": True, "gvproxy": True},
         tier=inst.tier_for_backend("gvisor-proxy"),
     )
     assert gv["profile"]["isolation_tier"] == 2
@@ -970,7 +970,7 @@ def test_build_install_plan_tier_matches_resolved_backend():
 def test_os_native_converges_with_empty_sudo_grant():
     # the #71 headline: the governance-only default succeeds with NO sudo grant,
     # through the SAME sudo_grant_diff path the tiers use.
-    probe = {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False}
+    probe = {"git": True, "python": True, "uv": True, "runsc": False, "gvproxy": False}
     plan = inst.plan_dependencies("os-native", probe)
     diff = inst.sudo_grant_diff([], plan)
     assert diff.converged and diff.uncovered == ()

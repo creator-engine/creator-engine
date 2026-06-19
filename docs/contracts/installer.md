@@ -345,12 +345,12 @@ published hash, and E1 takes no privileged action.
 ## Dependency resolution — detect-don't-assume, fix-with-permission
 
 `v3_installer.plan_dependencies` plans, never fail-on-missing: it **detects** each
-of `git · python · runsc · proxy · uv` (a **read-only** probe — the CLI does it
+of `git · python · runsc · gvproxy · uv` (a **read-only** probe — the CLI does it
 live via `shutil.which`; the planner is pure), then for the missing ones plans a
-**permission-gated, idempotent** install (`runsc`/`proxy`/`git`/`python` need
-sudo, **batched** into a single ask; `uv` is user-space). Present tools are
-skipped (idempotent); the operator may gracefully decline. E1 itself does not
-perform the privileged fix; missing `runsc`/`proxy` surface as inventory facts.
+**permission-gated, idempotent** install (`runsc`/`gvproxy` need sudo, batched
+into a single ask; `uv` is user-space). Present tools are skipped (idempotent);
+the operator may gracefully decline. E1 itself does not perform the privileged
+fix; missing `runsc`/`gvproxy` surface as inventory facts.
 
 ## The Default-vs-Custom profile + the cost opt-out
 

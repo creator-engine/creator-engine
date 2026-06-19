@@ -23,7 +23,7 @@ GOOD = """\
 answers_version: 1
 profile: solo-pilot
 host:
-  sudo_grant: [runsc, proxy]
+  sudo_grant: [runsc, gvproxy]
 cost:
   profile: default
 provider:

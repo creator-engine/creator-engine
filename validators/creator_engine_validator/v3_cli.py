@@ -2900,7 +2900,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # SAME way apply does (mirror ``onboard_apply._prepare``), and drive the probe /
     # dep-plan / sudo-grant diff off the BACKEND-AWARE deps — NOT the flat Tier-2
     # ``REQUIRED_DEPENDENCIES``. Otherwise a solo-pilot → ``os-native`` install on a
-    # host without runsc/proxy is falsely REFUSED at this CLI gate even though the
+    # host without runsc/gvproxy is falsely REFUSED at this CLI gate even though the
     # fixed, backend-driven apply never needs them. ``gvisor-proxy`` is unchanged.
     isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]

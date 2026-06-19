@@ -326,17 +326,17 @@ class ApplyDriver:
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
         # ce-ops#71 Edit A: dispatch the SELECTED backend's OWN availability check —
-        # no longer the hardwired ``runsc`` AND ``proxy`` gate. Unknown backends
+        # no longer the hardwired ``runsc`` AND ``gvproxy`` gate. Unknown backends
         # fail-closed (req-5): a selected-but-uncheckable backend never reports ok.
         blocked_state_dirs = {"." + "her" + "mes", "." + "cla" + "ude"}
         if any(part in blocked_state_dirs for part in state_root.parts):
             return {"ok": False, "reason": "state_root_bound_to_harness"}
         if backend == "gvisor-proxy":
             return {
-                "ok": self.verify_tool("runsc") and self.verify_tool("proxy"),
+                "ok": self.verify_tool("runsc") and self.verify_tool("gvproxy"),
                 "backend": backend,
                 "runsc": self.verify_tool("runsc"),
-                "proxy": self.verify_tool("proxy"),
+                "gvproxy": self.verify_tool("gvproxy"),
                 "provider_transport": provider is not None,
             }
         if backend in {"os-native", "openshell"}:
@@ -928,7 +928,7 @@ def _prepare(
         )
     # ce-ops#71 Edit B+C: resolve the runtime backend from the profile
     # (solo-pilot → os-native; team/absent → gvisor-proxy, back-compat) and make
-    # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/proxy pairing
+    # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/gvproxy pairing
     # is planned ONLY for gvisor-proxy, so the governance-only path needs no sudo.
     isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
@@ -1138,7 +1138,7 @@ def _run_leg(
                 raise ApplyFailed("host_dependency_install_failed", str(result.get("reason", "install failed")))
             raise ApplyRefused("host_dependency_install_refused", str(result.get("reason", "install refused")))
         # ce-ops#71 Edit B: verify the SELECTED backend's dep set (not the flat
-        # Tier-2 set) — an os-native install must not be failed for absent runsc/proxy.
+        # Tier-2 set) — an os-native install must not be failed for absent runsc/gvproxy.
         verified = {
             tool: driver.verify_tool(tool)
             for tool in v3_installer.BACKEND_DEPS[prepared.isolation_backend]

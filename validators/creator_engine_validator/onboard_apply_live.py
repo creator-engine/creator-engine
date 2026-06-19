@@ -41,6 +41,7 @@ import contextlib
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -180,6 +181,7 @@ FINE_GRAINED_PERMISSION_PROBE_PATH = ".github/workflows/ce-fine-grained-permissi
 #: already holds the pinned wheel (sha256-verified), the driver uses it instead of fetching —
 #: a no-egress fallback for air-gapped / pre-seeded hosts. Absent → mirror-fetch (the default).
 ENV_WHEELHOUSE = "CE_FORGE_WHEELHOUSE"
+ENV_RUNTIME_BIN_DIR = "CE_FORGE_RUNTIME_BIN_DIR"
 
 
 @dataclass(frozen=True)
@@ -222,9 +224,90 @@ MIRROR_USERSPACE_WHEELS: dict[str, MirrorUserspaceWheel] = {
 }
 
 
+@dataclass(frozen=True)
+class PinnedSystemTool:
+    """A sha-pinned host runtime binary installed during gVisor runtime provisioning."""
+
+    tool: str
+    version: str
+    filename: str
+    url: str
+    digest: str
+    digest_algo: str
+    version_args: tuple[str, ...] = ("--version",)
+
+
+GVISOR_RUNSC_VERSION = "20260608.0"
+GVISOR_GVPROXY_VERSION = "v0.8.9"
+GVISOR_RUNTIME_TOOLS: tuple[str, ...] = ("runsc", "gvproxy")
+PINNED_SYSTEM_TOOLS: dict[str, dict[str, PinnedSystemTool]] = {
+    "runsc": {
+        "x86_64": PinnedSystemTool(
+            tool="runsc",
+            version=GVISOR_RUNSC_VERSION,
+            filename="runsc",
+            url=(
+                "https://storage.googleapis.com/gvisor/releases/release/"
+                f"{GVISOR_RUNSC_VERSION}/x86_64/runsc"
+            ),
+            digest=(
+                "8ecbf845e50880ab65573153756aea01da2823d05a61bce23c6c24f4446d064a"
+                "b5a253e7ee6a8b619c5934c373ea74487c7c2ab2754dfb1e0b27860c6e0d2014"
+            ),
+            digest_algo="sha512",
+        ),
+        "aarch64": PinnedSystemTool(
+            tool="runsc",
+            version=GVISOR_RUNSC_VERSION,
+            filename="runsc",
+            url=(
+                "https://storage.googleapis.com/gvisor/releases/release/"
+                f"{GVISOR_RUNSC_VERSION}/aarch64/runsc"
+            ),
+            digest=(
+                "9c7c74453b3a08c6663d72680355edb56a86e9b1ef6637b0ab5942b576d47"
+                "eaf2ab6b448a0f8e9408757c6ffed116ff95d2885e6ed8cc0bd3b27036af5b27450"
+            ),
+            digest_algo="sha512",
+        ),
+    },
+    "gvproxy": {
+        "x86_64": PinnedSystemTool(
+            tool="gvproxy",
+            version=GVISOR_GVPROXY_VERSION,
+            filename="gvproxy-linux-amd64",
+            url=(
+                "https://github.com/containers/gvisor-tap-vsock/releases/download/"
+                f"{GVISOR_GVPROXY_VERSION}/gvproxy-linux-amd64"
+            ),
+            digest="3011c5629c9138d2050fb23c510e09ae53e30ec52e6a9ab85632bc1550e8ef63",
+            digest_algo="sha256",
+        ),
+        "aarch64": PinnedSystemTool(
+            tool="gvproxy",
+            version=GVISOR_GVPROXY_VERSION,
+            filename="gvproxy-linux-arm64",
+            url=(
+                "https://github.com/containers/gvisor-tap-vsock/releases/download/"
+                f"{GVISOR_GVPROXY_VERSION}/gvproxy-linux-arm64"
+            ),
+            digest="6ecca02839254c9a0cc184bba7aac63755a22d7ed10d455b852528a99d7f7d4b",
+            digest_algo="sha256",
+        ),
+    },
+}
+
+
 def _default_pip_spawn(argv: Sequence[str]) -> subprocess.CompletedProcess:
     """Run an offline ``pip`` install in this interpreter; injectable so tests do ZERO pip."""
     return subprocess.run(  # noqa: S603 — fixed argv built from a pinned tool name + local dir
+        list(argv), check=False, capture_output=True, text=True, timeout=300
+    )
+
+
+def _default_system_spawn(argv: Sequence[str]) -> subprocess.CompletedProcess:
+    """Run a host install/version helper command; injectable so tests do ZERO sudo."""
+    return subprocess.run(  # noqa: S603 — fixed argv from pinned artifacts and install paths
         list(argv), check=False, capture_output=True, text=True, timeout=300
     )
 
@@ -266,6 +349,12 @@ class LiveForgeConfig:
     mirror_fetch: Any = None
     #: Injectable ``pip`` spawn seam (argv -> CompletedProcess); tests inject a fake → ZERO pip.
     pip_spawn: Any = None
+    #: Injectable host-system spawn seam for pinned runtime binary install commands. Tests inject
+    #: fakes; live defaults to ``subprocess.run`` and fails closed on any non-zero return.
+    system_spawn: Any = None
+    #: Override for the runtime binary install dir. None -> ``CE_FORGE_RUNTIME_BIN_DIR`` or
+    #: ``/usr/local/bin``. Tests use this to avoid host mutation.
+    runtime_bin_dir: str | None = None
     #: Override for the venv scripts dir the userspace-tool verify probes (ce-ops#90 verify-fix).
     #: None → the running interpreter's scripts dir (where ``pip install`` placed the console
     #: script); tests inject a temp dir holding a fake binary. NOT a PATH search.
@@ -316,6 +405,30 @@ def _looks_like_branch_not_protected(parsed: object, stderr: str) -> bool:
 
 def _valid_sha256(value: str) -> bool:
     return len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
+def _host_machine() -> str:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        return "x86_64"
+    if machine in {"aarch64", "arm64"}:
+        return "aarch64"
+    return machine
+
+
+def _digest_bytes(data: bytes, algo: str) -> str:
+    if algo == "sha256":
+        return hashlib.sha256(data).hexdigest()
+    if algo == "sha512":
+        return hashlib.sha512(data).hexdigest()
+    raise ValueError(f"unsupported digest algorithm: {algo}")
+
+
+def _pinned_system_tool(name: str, *, machine: str | None = None) -> PinnedSystemTool | None:
+    pins = PINNED_SYSTEM_TOOLS.get(name)
+    if not pins:
+        return None
+    return pins.get(machine or _host_machine())
 
 
 def _scanner_pins_from_env(env: Mapping[str, str]) -> Mapping[str, BrownfieldScanner] | None:
@@ -794,23 +907,24 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         (``MIRROR_USERSPACE_WHEELS``, bound to the SIGNED ``required_wheels`` entry) BEFORE
         install, then installed OFFLINE via ``pip install --no-index --find-links <dir> <tool>``;
         ``verify_tool`` must pass after. A pre-seeded ``CE_FORGE_WHEELHOUSE`` dir is honored as an
-        offline FALLBACK (no fetch) when it already holds the pinned wheel. ``sudo_tools`` keep
-        the base refusal (a §7 governed seat has no host package installer). Fail CLOSED on every
-        fetch / hash-mismatch / install / verify failure; the staged temp dir is always cleaned.
+        offline FALLBACK (no fetch) when it already holds the pinned wheel.
+
+        For the selected ``gvisor-proxy`` backend, the privileged runtime tools are concrete,
+        pinned host binaries: ``runsc`` and ``gvproxy``. They are fetched from upstream release
+        URLs, hash-verified before install, installed to ``CE_FORGE_RUNTIME_BIN_DIR`` or
+        ``/usr/local/bin``, and version-verified after install. Any unknown sudo tool, unsupported
+        architecture, fetch/hash/install/version failure refuses closed.
         """
         if not tools:
             return {"ok": True, "installed": []}
-        if sudo_tools:
-            # governed seat: no host package installer, no sudo (base posture, unchanged).
-            return {
-                "ok": False,
-                "reason": "no_host_package_installer_configured",
-                "manual_rollback_required": True,
-                "package_names": list(sudo_tools),
-            }
         installed: list[str] = []
         staged_tmpdirs: list[Path] = []
         try:
+            if sudo_tools:
+                runtime_install = self._ensure_pinned_system_tools(sudo_tools)
+                if not runtime_install.get("ok"):
+                    return runtime_install
+                installed.extend(runtime_install.get("installed", []))
             for tool in userspace_tools:
                 pin = MIRROR_USERSPACE_WHEELS.get(tool)
                 if pin is None:
@@ -853,6 +967,32 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             return result
         return {"ok": True, "installation_id": installation_id, "detected": True}
 
+    def provision_runtime(
+        self,
+        *,
+        state_root: Path,
+        workspace_root: Path,
+        provider: str | None,
+        backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
+    ) -> dict[str, Any]:
+        """Provision the runtime posture and, for gVisor, the concrete pinned host binaries."""
+        runtime_tools: dict[str, str] = {}
+        if backend == "gvisor-proxy":
+            ensured = self._ensure_pinned_system_tools(GVISOR_RUNTIME_TOOLS)
+            if not ensured.get("ok"):
+                return ensured
+            runtime_tools = dict(ensured.get("runtime_tools") or {})
+        result = super().provision_runtime(
+            state_root=state_root,
+            workspace_root=workspace_root,
+            provider=provider,
+            backend=backend,
+        )
+        if runtime_tools:
+            result = dict(result)
+            result["runtime_tools"] = runtime_tools
+        return result
+
     def verify_tool(self, name: str) -> bool:
         """Verify a dep is installed — BRANCHED by tool class (ce-ops#90 verify-fix, dev-3).
 
@@ -862,12 +1002,16 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         ``userspace_tool_verify_failed`` even though the install succeeded (the #244 defect dev-3
         hit on a live ``--apply``). For a userspace tool we probe the ACTUAL install location
         (the absolute ``<scripts>/<tool>``) and run its ``--version`` there — NOT a PATH search.
-        System tools (``git``/``python``/``runsc``/``proxy``) are correctly on PATH, so they keep
-        the inherited base probe UNCHANGED. Fail-closed (missing / non-runnable / wrong version →
-        ``False``), so a broken install still refuses.
+        The gVisor runtime tools (``runsc``/``gvproxy``) are also version-pinned and verified by
+        running their version command. Other system tools (``git``/``python``) keep the inherited
+        base PATH probe. Fail-closed (missing / non-runnable / wrong version → ``False``), so a
+        broken install still refuses.
         """
         if name in MIRROR_USERSPACE_WHEELS:
             return self._verify_userspace_tool(name)
+        pin = _pinned_system_tool(name)
+        if pin is not None:
+            return self._verify_pinned_system_tool(pin)
         return super().verify_tool(name)
 
     def expose_cli(self, *, state_root: Path, command: str, via: str) -> dict[str, Any]:
@@ -922,6 +1066,131 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             if not pin.version or pin.version in output:
                 return True
         return False
+
+    def _ensure_pinned_system_tools(self, tools: Sequence[str]) -> dict[str, Any]:
+        """Ensure every requested pinned host binary is installed at the expected version."""
+        installed: list[str] = []
+        versions: dict[str, str] = {}
+        for tool in tools:
+            pin = _pinned_system_tool(tool)
+            if pin is None:
+                return {
+                    "ok": False,
+                    "reason": "no_pinned_system_tool",
+                    "tool": tool,
+                    "machine": _host_machine(),
+                    "manual_rollback_required": True,
+                }
+            if not self.verify_tool(pin.tool):
+                result = self._install_pinned_system_tool(pin)
+                if not result.get("ok"):
+                    return result
+                if not self.verify_tool(pin.tool):
+                    return {
+                        "ok": False,
+                        "reason": "system_tool_verify_failed",
+                        "tool": pin.tool,
+                        "expected_version": pin.version,
+                        "manual_rollback_required": True,
+                    }
+                installed.append(pin.tool)
+            versions[pin.tool] = pin.version
+        return {"ok": True, "installed": installed, "runtime_tools": versions}
+
+    def _verify_pinned_system_tool(self, pin: PinnedSystemTool) -> bool:
+        output = self._pinned_system_tool_version_output(pin)
+        return bool(output and pin.version in output)
+
+    def _pinned_system_tool_version_output(self, pin: PinnedSystemTool) -> str | None:
+        candidates: list[Path] = []
+        resolved = shutil.which(pin.tool)
+        if resolved:
+            candidates.append(Path(resolved))
+        candidates.append(self._runtime_bin_dir() / pin.tool)
+        seen: set[str] = set()
+        first_output: str | None = None
+        for candidate in candidates:
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not candidate.is_file():
+                continue
+            try:
+                proc = subprocess.run(  # noqa: S603 — candidate is a resolved local binary path
+                    [str(candidate), *pin.version_args],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except Exception:  # noqa: BLE001 — not runnable means not verified
+                continue
+            if proc.returncode == 0:
+                output = (proc.stdout or "") + (proc.stderr or "")
+                if pin.version in output:
+                    return output
+                first_output = first_output or output
+        return first_output
+
+    def _install_pinned_system_tool(self, pin: PinnedSystemTool) -> dict[str, Any]:
+        tmpdir = Path(tempfile.mkdtemp(prefix="ce-runtime-tool-"))
+        staged = tmpdir / pin.filename
+        try:
+            try:
+                data = self._mirror_fetch(pin.url)
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "reason": "system_tool_fetch_failed", "tool": pin.tool, "url": pin.url}
+            actual = _digest_bytes(data, pin.digest_algo)
+            if actual != pin.digest:
+                return {
+                    "ok": False,
+                    "reason": "system_tool_digest_mismatch",
+                    "tool": pin.tool,
+                    "algo": pin.digest_algo,
+                    "expected": pin.digest,
+                    "actual": actual,
+                }
+            staged.write_bytes(data)
+            staged.chmod(0o755)
+            dest_dir = self._runtime_bin_dir()
+            dest = dest_dir / pin.tool
+            if self._copy_system_tool_without_sudo(staged, dest):
+                return {"ok": True, "tool": pin.tool, "version": pin.version, "path": str(dest)}
+            proc = self._system_spawn(["sudo", "install", "-m", "0755", str(staged), str(dest)])
+            if getattr(proc, "returncode", 1) != 0:
+                return {
+                    "ok": False,
+                    "reason": "system_tool_install_failed",
+                    "tool": pin.tool,
+                    "path": str(dest),
+                    "manual_rollback_required": True,
+                }
+            return {"ok": True, "tool": pin.tool, "version": pin.version, "path": str(dest)}
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def _copy_system_tool_without_sudo(self, staged: Path, dest: Path) -> bool:
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not os.access(dest.parent, os.W_OK):
+                return False
+            shutil.copy2(staged, dest)
+            dest.chmod(0o755)
+            return True
+        except OSError:
+            return False
+
+    def _runtime_bin_dir(self) -> Path:
+        override = self._cfg.runtime_bin_dir or os.environ.get(ENV_RUNTIME_BIN_DIR)
+        return Path(override or "/usr/local/bin")
+
+    def _system_spawn(self, argv: Sequence[str]) -> subprocess.CompletedProcess:
+        spawn = self._cfg.system_spawn or _default_system_spawn
+        try:
+            return spawn(argv)
+        except Exception:  # noqa: BLE001 — fail-closed; caller maps non-zero to refusal
+            return subprocess.CompletedProcess(list(argv), 1)
 
     def _userspace_scripts_dirs(self) -> list[Path]:
         """The candidate scripts dirs the userspace verify probes (NOT a PATH search).
