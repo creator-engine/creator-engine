@@ -45,7 +45,7 @@ def _live_systemd_test_gate(environ: Mapping[str, str] | None = None) -> tuple[b
     proof to CI or an explicit non-interactive host opt-in; pure tests and the
     recorded evidence fixture cover ordinary local runs.
     """
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     desktop_vars = [name for name in _DESKTOP_ENV_VARS if env.get(name)]
     if desktop_vars:
         return (
@@ -108,10 +108,20 @@ def test_live_systemd_gate_refuses_desktop_sessions():
     assert "DISPLAY" in reason
 
 
-def test_live_systemd_gate_requires_ci_or_explicit_opt_in():
+def test_live_systemd_gate_requires_ci_or_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("CI", "1")
     ok, reason = _live_systemd_test_gate({})
     assert ok is False
     assert _LIVE_TEST_ENV in reason
+
+
+def test_live_systemd_gate_uses_ambient_environment_when_not_injected(monkeypatch):
+    for name in _DESKTOP_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CI", "1")
+    ok, reason = _live_systemd_test_gate()
+    assert ok is True
+    assert "enabled" in reason
 
 
 @pytest.mark.parametrize("env", [{"CI": "true"}, {_LIVE_TEST_ENV: "1"}])
