@@ -43,6 +43,9 @@ A Decision Record is a Markdown file whose YAML front-matter carries
 - `ratification` — the human-ratification attestation
   `{ratified_by, ratified_at, ratification_prompt_sha}`, plus the optional
   `quorum: n1_solo` solo-mode marker (see N=1 native mode below).
+  `ratified_by` records the concrete ratifier handle (for example the ratifier's
+  source-host handle), not a role placeholder such as `the Operator`; this keeps
+  records auditable as CE moves toward multi-operator mode.
 - `crosswalk` — `supersedes` / `superseded_by` / `informs` links.
 
 ## N=1 native mode — `ratification.quorum: n1_solo`
@@ -72,6 +75,7 @@ record leans on the sole human without it (`VAL-PA-N1-SOLO-REQUIRED`).
 | `VAL-DR-SCHEMA` | front-matter validates against the schema (required fields, enums, evidence tags, ADRs carry no RFC-only fields). |
 | `VAL-DR-INVALID` | a file naming itself a record (`ADR-NNNN`/`RFC-NNNN` filename) parses as one. |
 | `VAL-DR-RATIFICATION-MISSING` | `status: accepted` carries the `ratification` block. **`accepted` is a human-ratification event** — no agent, check, or code path promotes a record to `accepted`; the check validates the recorded shape only. |
+| `VAL-DR-RATIFIER-PLACEHOLDER` | `ratification.ratified_by` on an accepted record names the actual ratifier handle, not a generic role label or placeholder such as `the Operator`, `source`, `ratifier`, or `TBD`. |
 | `VAL-DR-SELF-RATIFIED` | for privileged `mutation_class` (`PRIVILEGED_NAMES`), `ratified_by` differs from every `decision_makers` entry — the ratifier is the *other* peer (design §A.5), never the owner. |
 | `VAL-DR-SUPERSEDED-UNRESOLVED` | `status: superseded` links a `crosswalk.superseded_by` id that resolves to a record discovered in the same scan (supersede-don't-delete). |
 | `VAL-DR-FCP-OPEN-CONCERN` | an `accepted` RFC has no `open` FCP concern (the FCP cannot complete while a blocking concern is open — Rust model). |
