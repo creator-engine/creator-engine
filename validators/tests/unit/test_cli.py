@@ -75,3 +75,35 @@ def test_pco_release_help_exits_zero(capsys):
     assert exc_info.value.code == 0
     out = capsys.readouterr().out
     assert "--lane-id" in out
+
+
+def test_openbao_p3_plan_help_exits_zero(capsys):
+    """OpenBao P3 plan subcommand must be registered and non-executing."""
+    import pytest
+    with pytest.raises(SystemExit) as exc_info:
+        main(["openbao-p3-plan", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--profile" in out
+    assert "--address" in out
+
+
+def test_openbao_p3_controller_plan_json_flags_operator_steps(capsys):
+    assert main(
+        [
+            "--json",
+            "openbao-p3-plan",
+            "--profile",
+            "controller-pilot",
+            "--host-ref",
+            "controller-vps:ce-pilot-1",
+            "--address",
+            "https://openbao.internal.example",
+            "--ca-bundle-ref",
+            "secret-ref:openbao-ca",
+        ]
+    ) == 0
+    out = capsys.readouterr().out
+    assert "operator-provision-controller-vps" in out
+    assert "operator-inject-wrapping-token" in out
+    assert "root_token" not in out
