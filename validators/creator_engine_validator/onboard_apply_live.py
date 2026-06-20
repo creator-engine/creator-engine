@@ -62,6 +62,12 @@ from .forge.github_repo_config import (
     ForgeConfigRefused,
     GhRunner,
 )
+from .forge.ruleset import (
+    CE_PROTECTION_RULESET_NAME,
+    RulesetPolicy,
+    find_ruleset,
+    ruleset_satisfies_policy,
+)
 from .forge.scoped_token import (
     ScopedToken,
     TokenRequest,
@@ -466,6 +472,45 @@ def _protection_contexts(protection: Mapping[str, Any] | None) -> tuple[str, ...
     return tuple(str(c) for c in (contexts or ()))
 
 
+def _ruleset_policy_for_branch(policy: BranchProtectionPolicy, *, branch: str) -> RulesetPolicy:
+    return RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        branch=branch,
+        required_status_check_contexts=policy.required_status_check_contexts,
+        strict_required_status_checks_policy=policy.strict,
+        required_approving_review_count=max(1, policy.required_approving_review_count),
+        dismiss_stale_reviews_on_push=policy.dismiss_stale_reviews,
+        require_last_push_approval=policy.require_last_push_approval,
+        required_review_thread_resolution=policy.required_conversation_resolution,
+        bypass_actors=(),
+    )
+
+
+def _ruleset_required_contexts(ruleset: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not isinstance(ruleset, Mapping):
+        return ()
+    for rule in ruleset.get("rules") or []:
+        if not isinstance(rule, Mapping) or rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters") if isinstance(rule.get("parameters"), Mapping) else {}
+        checks = params.get("required_status_checks") if isinstance(params, Mapping) else []
+        return tuple(
+            str(item.get("context"))
+            for item in checks
+            if isinstance(item, Mapping) and item.get("context")
+        )
+    return ()
+
+
+def _merge_settings(parsed: Mapping[str, Any] | None) -> dict[str, bool]:
+    parsed = parsed or {}
+    return {
+        "allow_squash_merge": bool(parsed.get("allow_squash_merge", False)),
+        "allow_merge_commit": bool(parsed.get("allow_merge_commit", False)),
+        "allow_rebase_merge": bool(parsed.get("allow_rebase_merge", False)),
+    }
+
+
 def _looks_like_branch_not_protected(parsed: object, stderr: str) -> bool:
     """True only for GitHub's branch-protection-absent signal, not generic API failure."""
     message = ""
@@ -750,13 +795,28 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             )
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "protection_read_failed"}
-        if code != 0 or not isinstance(parsed, dict):
+        if code == 0 and isinstance(parsed, dict):
+            live = set(_protection_contexts(parsed))
+            floor = set(policy.required_status_check_contexts)
+            # The floor's required checks must ALL be present (a repo with MORE checks still
+            # satisfies the floor); a missing CE check fails detection → brownfield defer upstream.
+            return {"ok": floor.issubset(live), "contexts": sorted(live), "source": "classic"}
+        try:
+            ruleset = find_ruleset(
+                repo,
+                CE_PROTECTION_RULESET_NAME,
+                gh_runner=self._reader(),
+            )
+        except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "protection_read_failed"}
-        live = set(_protection_contexts(parsed))
+        ruleset_policy = _ruleset_policy_for_branch(policy, branch=branch)
+        live = set(_ruleset_required_contexts(ruleset))
         floor = set(policy.required_status_check_contexts)
-        # The floor's required checks must ALL be present (a repo with MORE checks still
-        # satisfies the floor); a missing CE check fails detection → brownfield defer upstream.
-        return {"ok": floor.issubset(live), "contexts": sorted(live)}
+        return {
+            "ok": ruleset_satisfies_policy(ruleset, ruleset_policy) and floor.issubset(live),
+            "contexts": sorted(live),
+            "source": "ruleset",
+        }
 
     def existing_branch_protection_contexts(
         self, *, repo: str, branch: str
@@ -767,9 +827,31 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             )
         except Exception:  # noqa: BLE001 — fail-closed: report no live contexts known
             return ()
-        if code != 0 or not isinstance(parsed, dict):
-            return ()
-        return _protection_contexts(parsed)
+        if code == 0 and isinstance(parsed, dict):
+            return _protection_contexts(parsed)
+        with contextlib.suppress(Exception):
+            ruleset = find_ruleset(
+                repo,
+                CE_PROTECTION_RULESET_NAME,
+                gh_runner=self._reader(),
+            )
+            return _ruleset_required_contexts(ruleset)
+        return ()
+
+    def verify_merge_settings(self, *, repo: str, squash_only: bool) -> dict[str, Any]:
+        try:
+            code, parsed, _ = _gh_get(self._reader(), f"repos/{repo}")
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "reason": "repo_merge_settings_read_failed"}
+        if code != 0 or not isinstance(parsed, Mapping):
+            return {"ok": False, "reason": "repo_merge_settings_read_failed"}
+        observed = _merge_settings(parsed)
+        desired = {
+            "allow_squash_merge": bool(squash_only),
+            "allow_merge_commit": not bool(squash_only),
+            "allow_rebase_merge": not bool(squash_only),
+        }
+        return {"ok": observed == desired, "settings": observed}
 
     def probe_bootstrap_token(
         self, *, token: str, repo: str, org_create_needed: bool
@@ -1303,9 +1385,23 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             )
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "protection_read_failed_no_write"}
-        if code != 0 or not isinstance(parsed, dict):
-            return {"ok": False, "reason": "protection_read_failed_no_write"}
-        live = set(_protection_contexts(parsed))
+        source = "classic"
+        if code == 0 and isinstance(parsed, dict):
+            live = set(_protection_contexts(parsed))
+        else:
+            try:
+                ruleset = find_ruleset(
+                    repo,
+                    CE_PROTECTION_RULESET_NAME,
+                    gh_runner=self._reader(),
+                )
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "reason": "protection_read_failed_no_write"}
+            ruleset_policy = _ruleset_policy_for_branch(policy, branch=branch)
+            if not ruleset_satisfies_policy(ruleset, ruleset_policy):
+                return {"ok": False, "reason": "branch_protection_ruleset_missing_no_write"}
+            live = set(_ruleset_required_contexts(ruleset))
+            source = "ruleset"
         would_add = set(policy.required_status_check_contexts) - live
         if would_add:
             # A real protection mutation would be required → defer, do NOT write.
@@ -1314,7 +1410,19 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 "reason": "branch_protection_mutation_deferred",
                 "would_add": sorted(would_add),
             }
-        return {"ok": True, "already": True, "mutated": False, "contexts": sorted(live)}
+        return {"ok": True, "already": True, "mutated": False, "contexts": sorted(live), "source": source}
+
+    def configure_merge_settings(self, *, repo: str, squash_only: bool, token: str) -> dict[str, Any]:
+        """VERIFY-FIRST, defer-not-mutate for Phase 1 repo merge settings."""
+        result = self.verify_merge_settings(repo=repo, squash_only=squash_only)
+        if result.get("ok"):
+            return {"ok": True, "already": True, "mutated": False, **result}
+        return {
+            "ok": False,
+            "reason": "merge_settings_mutation_deferred",
+            "desired_squash_only": squash_only,
+            **result,
+        }
 
     def checkout_workspace(
         self, *, repo: str, branch: str, workspace_root: Path

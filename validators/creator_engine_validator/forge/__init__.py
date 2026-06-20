@@ -56,6 +56,7 @@ from .github_repo_config import (
     ForgeConfigRefused,
     GhRunner,
     allow_auto_merge,
+    configure_squash_only,
     configure_repo,
     install_required_checks,
     set_codeowners,
@@ -65,6 +66,7 @@ from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
 from .review_submit import ReviewResult, ReviewSubmitRefused, submit_review
 from .ruleset import (
+    CE_PROTECTION_RULESET_NAME,
     RulesetBypassActor,
     RulesetPolicy,
     RulesetRefused,
@@ -84,6 +86,7 @@ __all__ = [
     "DEFAULT_MAIN_PROTECTION",
     "ApprovalQuery",
     "BranchProtectionPolicy",
+    "CE_PROTECTION_RULESET_NAME",
     "ChangeRef",
     "ChangeStatusRefused",
     "ChecksState",
@@ -112,6 +115,7 @@ __all__ = [
     "allow_auto_merge",
     "change_conflicts",
     "checks_state",
+    "configure_squash_only",
     "configure_repo",
     "delete_ruleset",
     "enable_auto_merge",

@@ -518,6 +518,15 @@ class ApplyDriver:
     ) -> dict[str, Any]:
         return {"ok": False, "reason": "no_branch_protection_driver"}
 
+    def configure_merge_settings(
+        self,
+        *,
+        repo: str,
+        squash_only: bool,
+        token: str,
+    ) -> dict[str, Any]:
+        return {"ok": False, "reason": "no_merge_settings_driver"}
+
     def verify_branch_protection(
         self,
         *,
@@ -526,6 +535,14 @@ class ApplyDriver:
         policy: BranchProtectionPolicy,
     ) -> dict[str, Any]:
         return {"ok": False, "reason": "no_branch_protection_verify_driver"}
+
+    def verify_merge_settings(
+        self,
+        *,
+        repo: str,
+        squash_only: bool,
+    ) -> dict[str, Any]:
+        return {"ok": False, "reason": "no_merge_settings_verify_driver"}
 
     def existing_branch_protection_contexts(
         self,
@@ -1072,7 +1089,14 @@ def repo_is_already_ce_governed(
             branch=branch,
             policy=policy,
         )
-        return bool(protection.get("ok"))
+        if not protection.get("ok"):
+            return False
+        desired = v3_installer.effective_protections("reference", floor=floor)
+        if bool(desired.get("squash_only", True)):
+            merge_settings = driver.verify_merge_settings(repo=repo, squash_only=True)
+            if not merge_settings.get("ok"):
+                return False
+        return True
     except Exception:  # noqa: BLE001 — fail-closed: any probe error → NOT already-CE
         return False
 
@@ -1476,13 +1500,34 @@ def _run_leg(
         )
         if not verify.get("ok"):
             raise ApplyFailed("branch_protection_verify_failed", str(verify))
+        merge_action: dict[str, Any] = {"ok": True, "already": True}
+        merge_verify: dict[str, Any] = {"ok": True}
+        if bool(desired.get("squash_only", True)):
+            merge_action = driver.configure_merge_settings(
+                repo=prepared.target_repo,
+                squash_only=True,
+                token=token,
+            )
+            if not merge_action.get("ok"):
+                raise ApplyFailed(
+                    "merge_settings_failed",
+                    str(merge_action.get("reason", "merge settings failed")),
+                )
+            merge_verify = driver.verify_merge_settings(
+                repo=prepared.target_repo,
+                squash_only=True,
+            )
+            if not merge_verify.get("ok"):
+                raise ApplyFailed("merge_settings_verify_failed", str(merge_verify))
         return LegOutcome(
             leg_id,
-            "already_satisfied" if action.get("already") else "applied",
+            "already_satisfied"
+            if action.get("already") and merge_action.get("already")
+            else "applied",
             "configure_branch_protection",
-            verification={"ok": True, **verify},
+            verification={"ok": True, **verify, "merge_settings": merge_verify},
             rollback={"automatic": "restore captured preimage only if it does not weaken live state"},
-            mutated=not bool(action.get("already")),
+            mutated=not bool(action.get("already")) or not bool(merge_action.get("already")),
         )
     if leg_id == "workspace_checkout":
         action = driver.checkout_workspace(

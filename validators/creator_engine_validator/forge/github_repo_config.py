@@ -5,18 +5,22 @@ orchestrator calls to make GitHub the coordination/review/merge plane for a
 repository (Brief plane A; architect report §5/§7). They encode, as code, the
 hardening CE owns so the user never touches it:
 
-* ``configure_repo(repo, policy, ...)`` — bring a branch's *classic* protection
+* ``configure_repo(repo, policy, ...)`` — bring a branch's protection floor
   to a desired ``BranchProtectionPolicy`` (require a PR + ≥1 non-author review,
   dismiss-stale, require last-push approval, require Code Owner review, required
   status checks, strict/up-to-date, linear history, ``enforce_admins`` on so no
-  admin/bypass actor can merge past the gate, force-push/deletions off) and the
-  squash-only repo merge setting.
+  admin/bypass actor can merge past the gate, force-push/deletions off). It
+  prefers classic branch protection and falls back to a repository Ruleset when
+  GitHub rejects classic protection for repository plan/capability reasons.
 * ``install_required_checks(repo, contexts, ...)`` — register status-check
   contexts as *required* (non-destructively unioned with any already present).
+* ``configure_squash_only(repo, ...)`` — apply the repository merge-method
+  setting that leaves squash merge as the only enabled merge method.
 
-Why classic branch protection (not rulesets): it is what ``main`` already uses
-and what PR #112 merged through; ``enforce_admins=true`` removes any bypass-list
-concern. A rulesets migration is a deliberate later gate.
+Why classic branch protection first: it is what ``main`` already uses and what
+PR #112 merged through. The fallback exists for Free-plan private repositories,
+where classic protection returns a plan/capability 403 while repository Rulesets
+can still enforce the CE floor.
 
 Authority note (architect, OD-04′): branch confinement and "cannot self-merge"
 are **ruleset/branch-protection facts, not credential facts** — there is no
@@ -40,6 +44,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 
 from ._redact import redact_gh_stderr
+
+_SQUASH_ONLY = {
+    "allow_squash_merge": True,
+    "allow_merge_commit": False,
+    "allow_rebase_merge": False,
+}
 
 # A GhRunner runs a ``gh`` invocation (argv including the leading "gh") with an
 # optional stdin body and returns the completed process. Mirrors the repo's
@@ -258,6 +268,63 @@ def _read_protection(runner: GhRunner, repo: str, branch: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _api_error_text(parsed: object, stderr: str) -> str:
+    parts: list[str] = []
+    if isinstance(parsed, dict):
+        message = parsed.get("message")
+        if message:
+            parts.append(str(message))
+        errors = parsed.get("errors")
+        if isinstance(errors, list):
+            for item in errors:
+                if isinstance(item, dict):
+                    item_message = item.get("message") or item.get("code")
+                    if item_message:
+                        parts.append(str(item_message))
+                elif item:
+                    parts.append(str(item))
+    if stderr:
+        parts.append(stderr)
+    return " ".join(parts)
+
+
+def _classic_protection_plan_unsupported(parsed: object, stderr: str) -> bool:
+    text = _api_error_text(parsed, stderr).lower()
+    if not text:
+        return False
+    unsupported_markers = (
+        "protected branches are not available",
+        "branch protection rules are not available",
+        "branch protection is not available",
+        "protected branches are available",
+        "upgrade",
+    )
+    plan_markers = ("http 403", "forbidden", "private repositories", "this plan")
+    return any(marker in text for marker in unsupported_markers) and any(
+        marker in text for marker in plan_markers
+    )
+
+
+def _ruleset_policy_from_branch_protection(policy: BranchProtectionPolicy, *, branch: str):
+    from .ruleset import CE_PROTECTION_RULESET_NAME, RulesetPolicy
+
+    return RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        branch=branch,
+        required_status_check_contexts=policy.required_status_check_contexts,
+        strict_required_status_checks_policy=policy.strict,
+        required_approving_review_count=max(1, policy.required_approving_review_count),
+        dismiss_stale_reviews_on_push=policy.dismiss_stale_reviews,
+        require_last_push_approval=policy.require_last_push_approval,
+        required_review_thread_resolution=policy.required_conversation_resolution,
+        bypass_actors=(),
+    )
+
+
+def _repo_merge_settings(parsed: dict) -> dict:
+    return {key: bool(parsed.get(key, False)) for key in _SQUASH_ONLY}
+
+
 # --------------------------------------------------------------------------
 # Operations
 # --------------------------------------------------------------------------
@@ -377,13 +444,47 @@ def configure_repo(
             actions=actions,
         )
 
-    pcode, _, pstderr = _gh_api(
+    pcode, pparsed, pstderr = _gh_api(
         runner,
         f"repos/{repo}/branches/{branch}/protection",
         method="PUT",
         body=effective.to_put_payload(),
     )
     if pcode != 0:
+        if _classic_protection_plan_unsupported(pparsed, pstderr):
+            from .ruleset import upsert_ruleset
+
+            ruleset_policy = _ruleset_policy_from_branch_protection(effective, branch=branch)
+            actions.append(
+                "classic branch protection unsupported for this repository/plan; "
+                f"applying repository Ruleset fallback {ruleset_policy.name!r}"
+            )
+            try:
+                ruleset = upsert_ruleset(
+                    repo,
+                    ruleset_policy,
+                    apply=True,
+                    gh_runner=runner,
+                )
+            except ForgeConfigError as exc:
+                raise ForgeConfigError(
+                    "classic branch protection is unsupported for this repository/plan, "
+                    f"and the repository Ruleset fallback failed: {exc}"
+                ) from exc
+            actions.extend(ruleset.actions)
+            if not ruleset.verified:
+                actions.append("VERIFY MISMATCH: repository Ruleset fallback did not verify")
+            return ConfigResult(
+                repo=repo,
+                branch=branch,
+                operation="configure_repo",
+                changed=ruleset.changed,
+                applied=ruleset.applied,
+                verified=ruleset.verified,
+                before=observed,
+                after={"classic_policy": desired, "ruleset": ruleset.after},
+                actions=actions,
+            )
         raise ForgeConfigError(
             f"PUT protection for {repo}@{branch} failed: {redact_gh_stderr(pstderr) or 'unknown error'}"
         )
@@ -450,6 +551,57 @@ def allow_auto_merge(
         actions.append(f"VERIFY MISMATCH: live={vparsed} desired={after}")
     return ConfigResult(
         repo=repo, branch="", operation="allow_auto_merge",
+        changed=True, applied=True, verified=verified, before=before, after=after,
+        actions=actions,
+    )
+
+
+def configure_squash_only(
+    repo: str,
+    *,
+    apply: bool = False,
+    gh_runner: GhRunner | None = None,
+) -> ConfigResult:
+    """Ensure squash merge is the only enabled repository merge method."""
+    runner = gh_runner or _default_gh_runner
+    code, parsed, stderr = _gh_api(runner, f"repos/{repo}")
+    if code != 0 or not isinstance(parsed, dict):
+        raise ForgeConfigError(
+            f"could not read repository merge settings for {repo}: "
+            f"{redact_gh_stderr(stderr) or 'unknown error'}"
+        )
+    before = _repo_merge_settings(parsed)
+    after = dict(_SQUASH_ONLY)
+    actions: list[str] = []
+    if before == after:
+        actions.append("repo merge settings already squash-only")
+        return ConfigResult(
+            repo=repo, branch="", operation="configure_squash_only",
+            changed=False, applied=False, verified=True, before=before, after=after,
+            actions=actions,
+        )
+    if not apply:
+        actions.append("PLAN: would configure repo merge settings to squash-only")
+        return ConfigResult(
+            repo=repo, branch="", operation="configure_squash_only",
+            changed=True, applied=False, verified=False, before=before, after=after,
+            actions=actions,
+        )
+    pcode, _pparsed, pstderr = _gh_api(
+        runner, f"repos/{repo}", method="PATCH", body=after
+    )
+    if pcode != 0:
+        raise ForgeConfigError(
+            f"PATCH squash-only merge settings for {repo} failed: "
+            f"{redact_gh_stderr(pstderr) or 'unknown error'}"
+        )
+    actions.append("APPLIED: configured repo merge settings to squash-only")
+    vcode, vparsed, _ = _gh_api(runner, f"repos/{repo}")
+    verified = vcode == 0 and isinstance(vparsed, dict) and _repo_merge_settings(vparsed) == after
+    if not verified:
+        actions.append(f"VERIFY MISMATCH: live={vparsed} desired={after}")
+    return ConfigResult(
+        repo=repo, branch="", operation="configure_squash_only",
         changed=True, applied=True, verified=verified, before=before, after=after,
         actions=actions,
     )
