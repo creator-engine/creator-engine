@@ -201,6 +201,18 @@ JOURNEY_STAGE_LABELS = {
     "Ship": "Shipping — delivering the finished work",
 }
 
+#: A fuller plain-language sentence per canon stage (the one-screen "how CE works"
+#: picture on the journey face — ce-ops#45). Distinct from the short label above;
+#: a non-engineer reads these as the five steps every piece of work moves through.
+#: Plain by construction (no blocked governance term).
+JOURNEY_STAGE_DESCRIPTIONS = {
+    "Frame": "Decide what to build and why it matters, before any work starts.",
+    "Shape": "Agree what a good result looks like and how much effort it is worth.",
+    "Build": "CE does the work for you while you watch it happen.",
+    "Review": "Check the finished work against what you said you wanted.",
+    "Ship": "Deliver the finished work so it is live and done.",
+}
+
 #: The deterministic where-am-I bases (machine key + the plain phrase L3 may
 #: render verbatim). No model text — every phrase is fixed here.
 JOURNEY_BASIS_LABELS = {
@@ -550,8 +562,47 @@ def _fold_journey(
     else:
         now["active_note"] = None
 
+    # --- the full visual development-arc / roadmap (ce-ops#45) ---------------
+    # The one-screen picture of the CE process: the five canon stages as lanes,
+    # each with a plain description and the project's scopes sitting in it (the
+    # "project arc"), the current stage marked. The process picture is a constant
+    # (always the five lanes); the scopes flowing through it are the live data.
+    current_stage = now.get("stage")
+    lanes: list[dict[str, Any]] = []
+    for phase in coordination.COGNITIVE_PHASES:
+        lane_scopes = [
+            {
+                "scope_id": scope.get("scope_id"),
+                "goal": scope.get("goal"),
+                "ready": bool(scope.get("ready")),
+                "needs_attention": bool(scope.get("needs_attention")),
+            }
+            for scope in scopes
+            if scope.get("stage") == phase
+        ]
+        lanes.append(
+            {
+                "stage": phase,
+                "label": JOURNEY_STAGE_LABELS[phase],
+                "description": JOURNEY_STAGE_DESCRIPTIONS[phase],
+                "count": len(lane_scopes),
+                "is_current": bool(current_stage) and phase == current_stage,
+                "scopes": lane_scopes,
+            }
+        )
+    # The honest "where you are" position on the five-stage arc: the index of the
+    # current stage (None when there is no current stage or the source is absent).
+    phase_order = list(coordination.COGNITIVE_PHASES)
+    position = {
+        "stage": current_stage,
+        "index": phase_order.index(current_stage) if current_stage in phase_order else None,
+        "total": len(phase_order),
+        "basis": now.get("basis"),
+    }
+
     # --- the plain-copy audit over EVERY CEO-facing string we produced -------
     ceo_texts: list[Any] = list(JOURNEY_STAGE_LABELS.values())
+    ceo_texts.extend(JOURNEY_STAGE_DESCRIPTIONS.values())
     ceo_texts.extend(JOURNEY_BASIS_LABELS.values())
     ceo_texts.append(NEEDS_EMPTY_MESSAGE)
     ceo_texts.append(NEEDS_UNAVAILABLE_MESSAGE)
@@ -586,6 +637,7 @@ def _fold_journey(
     counters = {
         "journey_scope_count": len(scopes),
         "journey_stage_counts": dict(stage_counts),
+        "journey_lane_count": len(lanes),
         "needs_source": needs_source,
         "needs_open": open_count,
         "needs_translated": needs_translated,
@@ -597,7 +649,10 @@ def _fold_journey(
         "arc": {
             "stages": list(coordination.COGNITIVE_PHASES),
             "stage_labels": dict(JOURNEY_STAGE_LABELS),
+            "stage_descriptions": dict(JOURNEY_STAGE_DESCRIPTIONS),
             "stage_counts": dict(stage_counts),
+            "lanes": lanes,
+            "position": position,
             "availability": arc_availability,
         },
         "now": now,

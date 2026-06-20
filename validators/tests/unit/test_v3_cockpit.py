@@ -73,6 +73,35 @@ def test_cockpit_json_live_runs_without_textual(tmp_path):
     assert snapshot["source"]["demo"] is False
 
 
+# --- ce-ops#45: the TUI composition root reads + persists the persona --------
+
+@pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed (minimal local env)")
+def test_cockpit_tui_path_reads_and_persists_the_persona(tmp_path, monkeypatch):
+    from creator_engine_validator import v3_cli, v3_cockpit
+    from creator_engine_validator.runner import cockpit_prefs
+
+    captured: dict = {}
+
+    def fake_run_app(snapshot, *, reload=None, watch_paths=(), persona="ceo", on_persona_change=None):
+        captured["persona"] = persona
+        # simulate the founder toggling to the Dev face inside the TUI
+        if on_persona_change is not None:
+            on_persona_change("dev")
+        return 0
+
+    monkeypatch.setattr(v3_cockpit, "run_app", fake_run_app)
+
+    # first launch: no preference yet -> the default founder (ceo) face; the
+    # in-TUI toggle persists the Dev choice through the injected callback.
+    assert v3_cli.main(["cockpit", "--root", str(tmp_path)]) == 0
+    assert captured["persona"] == "ceo"
+    assert cockpit_prefs.load_persona(tmp_path) == "dev"
+
+    # second launch: the persisted Dev preference is read back and injected.
+    assert v3_cli.main(["cockpit", "--root", str(tmp_path)]) == 0
+    assert captured["persona"] == "dev"
+
+
 # --- non-cockpit import paths stay textual-free (cluster §0.5) ---------------
 
 def test_list_checks_imports_no_textual():
@@ -266,9 +295,13 @@ def test_app_constructs_and_renders_watermark_and_board():
 
     async def go() -> tuple[str, int]:
         app = v3_cockpit.CockpitApp(snapshot)
-        async with app.run_test() as _pilot:
-            watermark = app.query_one("#watermark").render()
-            table = app.query_one("#board")
+        async with app.run_test() as pilot:
+            # the persistent DEMO watermark renders on the default (journey) face
+            watermark = app.screen.query_one("#watermark").render()
+            # the expert board is the demoted Dev face — switch to it
+            await pilot.press("d")
+            await pilot.pause()
+            table = app.screen.query_one("#board")
             return str(watermark), table.row_count
 
     watermark_text, row_count = asyncio.run(go())
@@ -288,6 +321,6 @@ def test_app_live_mode_has_no_watermark_widget():
     async def go() -> int:
         app = v3_cockpit.CockpitApp(snapshot)
         async with app.run_test() as _pilot:
-            return len(app.query("#watermark"))
+            return len(app.screen.query("#watermark"))
 
     assert asyncio.run(go()) == 0

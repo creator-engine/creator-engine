@@ -200,22 +200,32 @@ external gate; only **escalations + bet-ratifications + reviews** surface to
 the human. The Operator is a mission controller working a queue — not a
 babysitter watching panes.
 
-## The CEO-mode journey surface (ce-ops#45 minimum)
+## The CEO-mode journey surface (ce-ops#45 — the DEFAULT face)
 
-The **journey** is the solo-founder read of the SAME L2 snapshot: a one-screen
-`Frame → Shape → Build → Review → Ship` arc, an honest "where am I now" marker, a
-plain-language "what needs me" feed, and a click/focus → plain detail for every
-item. It is the CEO-mode *surface* of the journey board — **not** a mode-switching
-framework: there is no persisted persona, no default change, no DEV/CEO/strangeLoop
-switcher, no program roadmap, and no model-generated text. It is read-only — it
-approves, resolves, syncs, dispatches, merges, pushes, and writes nothing.
+The **journey** is the solo-founder read of the SAME L2 snapshot and is now the
+**default cockpit face**; the expert ops board is demoted to a **Dev** face you
+switch to (the ce-ops#45 elevation, superseding the PR #230 minimum). It shows the
+FULL visual development-arc / roadmap (a one-screen picture of the CE process, a
+visual "where you are", and the project's work flowing through the five stages),
+an honest "what needs me" decision-inbox as a first-class surface, and a
+click/focus → plain detail for every item. It stays read-only — it approves,
+resolves, syncs, dispatches, merges, pushes, and writes nothing. (The interactive
+write-seam is a separate, governance-reviewed slice — see ce-ops#45 Slice 2.)
 
 **L2 — `snapshot["journey"]` (all computation).** The pure fold
 (`_fold_journey`, folded inside `fold_snapshot`) reuses the canon stage skin and
 the already-built facts — it derives no new lifecycle:
 
-- `arc` — the canon `COGNITIVE_PHASES` stages, a plain one-liner per stage, the
-  per-stage counts, and an `availability` flag.
+- `arc` — the canon `COGNITIVE_PHASES` stages, a plain one-liner per stage
+  (`stage_labels`) and a fuller plain description (`stage_descriptions`), the
+  per-stage counts, an `availability` flag, plus the FULL roadmap data:
+  - `lanes` — one lane per canon stage (in order), each carrying its plain label
+    and description, its count, an `is_current` marker, and the project's work
+    sitting in it (`scopes`: `scope_id`/`goal`/`ready`/`needs_attention`). This is
+    the visual "project arc" — the scopes flowing left→right through the stages.
+  - `position` — the honest "where you are" on the five-stage arc: the current
+    `stage`, its `index` (None when there is no current stage or the source is
+    absent), the `total` (5), and the `basis` (mirrors `now.basis`).
 - `now` — the "you are here" marker, computed with an explicit, honest priority:
   (1) the oldest open needs-attention item, (2) a live/in-progress Scope, (3) the
   first non-done visible Scope by stable ordering, (4) none, (5) unavailable when
@@ -236,29 +246,41 @@ the already-built facts — it derives no new lifecycle:
   keyed off the item's own value-free text; an unknown class falls back to a
   conservative generic line. No model-generated explanation ships in this slice.
 - `counters` — `journey_scope_count`, `journey_stage_counts` (sum equals the scope
-  count), `needs_source`, `needs_open`, `needs_translated` (equals `needs_open`
-  when the source is ok), `details_available` (equals `needs_translated`), and
-  `plain_copy_findings` (must be **0**).
+  count), `journey_lane_count` (5), `needs_source`, `needs_open`, `needs_translated`
+  (equals `needs_open` when the source is ok), `details_available` (equals
+  `needs_translated`), and `plain_copy_findings` (must be **0**).
 
-**Plain-language law.** CEO-facing text — the arc, the needs feed, every detail
-field, and the L3-rendered journey strings — carries **none** of the blocked
-governance terms (escalation, the AWAITING-OPERATOR marker, Operator,
-mutation_class, ratification, envelope, spine, refusal-chain, the layer labels,
-schema, governance). Value-free source text is scrubbed to plain equivalents
-before it reaches a CEO-facing field, so the `plain_copy_findings` counter is 0
-by construction. Machine JSON keys keep conserved names; the detail's
-technical-source footer may carry a ref, but the item is understandable without
-it.
+**Plain-language law.** CEO-facing text — the arc, the stage descriptions, the
+roadmap lanes, the needs feed, every detail field, and the L3-rendered journey
+strings — carries **none** of the blocked governance terms (escalation, the
+AWAITING-OPERATOR marker, Operator, mutation_class, ratification, envelope, spine,
+refusal-chain, the layer labels, schema, governance). Value-free source text is
+scrubbed to plain equivalents before it reaches a CEO-facing field, so the
+`plain_copy_findings` counter is 0 by construction. Machine JSON keys keep
+conserved names; the detail's technical-source footer may carry a ref, but the
+item is understandable without it.
 
-**L3 — the journey screen (view only).** A dedicated `JourneyScreen` (Textual
-`Screen`) is reachable by the `j` key binding and pushed *on top of* the board —
-the existing expert ops board stays the **default** screen (un-demoted, no default
-change, no persisted preference). The screen renders the arc, the you-are-here
-marker, the plain scope cards, and the needs list; selecting any needs item
-(click / Enter) opens a `JourneyDetailScreen` modal that shows the precomputed
-`need_details[detail_ref]`. The view binds these structures and renders — it
-parses no source ref, derives no stage, classifies no need, and calls no loader
-(the source-level L3 guard test covers the journey code too).
+**L3 — the two faces (view only).** `CockpitApp` installs the persona's face:
+`JourneyScreen` (the default `ceo` face) renders the progress strip, the roadmap
+lanes, the you-are-here line, and the first-class decision-inbox (a bordered,
+titled panel whose accent turns gate-red when work needs the founder, spark-green
+when the queue is clear); `BoardScreen` (the `dev` face) is the full expert ops
+board. The CEO ↔ Dev switch (`d` / `c`) flips a persisted persona; selecting any
+needs item (click / Enter) opens a `JourneyDetailScreen` modal showing the
+precomputed `need_details[detail_ref]`. The view binds these structures and
+renders — it parses no source ref, derives no stage, classifies no need, and calls
+no loader (the source-level L3 guard test covers the journey code too).
+
+**Persona persistence (a UI preference, not governance state).** Which face you
+land on is a small per-instance preference, owned by the cockpit composition root
+(`v3_cli._cmd_cockpit`) via `runner/cockpit_prefs.py` (a pure normalize/fold core
+plus a tolerant I/O edge at `<root>/cockpit/prefs.json`). The composition root
+reads the persona at launch and injects it — plus an `on_persona_change` callback —
+into the App; the view performs **no** file I/O of its own, so the L3 source guard
+stays green. The persona is deliberately **not** part of `fold_snapshot` (the
+snapshot stays a pure read-model of governance state, and `ce cockpit --json` is
+unchanged by it). A missing or malformed preference degrades honestly to the
+default founder face.
 
 ## Pairs with CEO mode (still later)
 

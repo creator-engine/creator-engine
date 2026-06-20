@@ -222,6 +222,9 @@ def _all_ceo_text(journey: dict) -> list:
     texts: list = []
     arc = journey["arc"]
     texts += list(arc.get("stage_labels", {}).values())
+    texts += list(arc.get("stage_descriptions", {}).values())
+    for lane in arc.get("lanes", []):
+        texts += [lane.get("label"), lane.get("description")]
     now = journey["now"]
     texts += [now.get("label"), now.get("active_note")]
     needs = journey["needs_attention"]
@@ -311,6 +314,98 @@ def test_detail_understandable_without_technical_source():
     assert detail["technical_source"] is None
     assert detail["what_this_means"]
     assert detail["why_ce_paused"]
+
+
+# --- ce-ops#45 elevation: the FULL visual development-arc / roadmap ----------
+# The journey is no longer a single arc line; it carries a one-screen picture of
+# the CE process: a plain description per stage, the project arc (the scopes
+# sitting in each stage), and an honest "where you are" position marker. ALL of
+# this is computed in L2 (the L3 view binds and renders only).
+
+
+def test_arc_carries_a_plain_description_per_canon_stage():
+    arc = _fold(scopes=[_scope("s-1")], escalations=[])["journey"]["arc"]
+    descriptions = arc["stage_descriptions"]
+    assert set(descriptions) == set(coordination.COGNITIVE_PHASES)
+    for stage in coordination.COGNITIVE_PHASES:
+        assert descriptions[stage], stage
+        # the description is distinct from the short label (a fuller explanation)
+        assert descriptions[stage] != arc["stage_labels"][stage]
+    # the process picture is plain — zero blocked jargon
+    findings = cockpit_readmodel.plain_text_findings(*descriptions.values())
+    assert findings == [], findings
+
+
+def test_arc_lanes_cover_all_canon_stages_in_order():
+    arc = _fold(scopes=[_scope("s-1")], escalations=[])["journey"]["arc"]
+    lanes = arc["lanes"]
+    assert [lane["stage"] for lane in lanes] == list(coordination.COGNITIVE_PHASES)
+    for lane in lanes:
+        for field in ("stage", "label", "description", "count", "is_current", "scopes"):
+            assert field in lane, field
+        # the lane label/description reuse the canon plain copy (no third vocab)
+        assert lane["label"] == arc["stage_labels"][lane["stage"]]
+        assert lane["description"] == arc["stage_descriptions"][lane["stage"]]
+
+
+def test_arc_lanes_group_scopes_by_stage_as_the_project_arc():
+    # s-ready (DoR-valid) -> Shape; s-draft (no intent) -> draft -> Frame.
+    scopes = [_scope("s-ready"), _scope("s-draft", intent="")]
+    journey = _fold(scopes=scopes, escalations=[])["journey"]
+    lanes = {lane["stage"]: lane for lane in journey["arc"]["lanes"]}
+    stage_by_scope = {js["scope_id"]: js["stage"] for js in journey["scopes"]}
+    # every scope appears in EXACTLY the lane matching its stage, once
+    placed: list[str] = []
+    for stage, lane in lanes.items():
+        assert lane["count"] == len(lane["scopes"]) == journey["arc"]["stage_counts"][stage]
+        for lanescope in lane["scopes"]:
+            assert stage_by_scope[lanescope["scope_id"]] == stage
+            for field in ("scope_id", "goal", "ready", "needs_attention"):
+                assert field in lanescope, field
+            placed.append(lanescope["scope_id"])
+    assert sorted(placed) == ["s-draft", "s-ready"]
+    assert sum(lane["count"] for lane in lanes.values()) == journey["counters"]["journey_scope_count"]
+
+
+def test_arc_position_marks_where_you_are_on_the_five_stage_arc():
+    # one in_progress scope, no open needs -> live_scope basis -> Build (index 2)
+    journey = _fold(
+        scopes=[_scope("s-1")], scope_signals={"s-1": {"dispatched": True}}, escalations=[]
+    )["journey"]
+    position = journey["arc"]["position"]
+    assert position["stage"] == "Build"
+    assert position["index"] == list(coordination.COGNITIVE_PHASES).index("Build") == 2
+    assert position["total"] == len(coordination.COGNITIVE_PHASES) == 5
+    assert position["basis"] == journey["now"]["basis"] == "live_scope"
+    # exactly the Build lane is the current one
+    for lane in journey["arc"]["lanes"]:
+        assert lane["is_current"] == (lane["stage"] == "Build")
+
+
+def test_arc_position_is_unavailable_when_board_source_absent():
+    journey = _fold(scopes=None, escalations=[])["journey"]
+    arc = journey["arc"]
+    assert arc["availability"] == "unavailable"
+    assert arc["position"]["index"] is None
+    assert arc["position"]["stage"] is None
+    assert arc["position"]["basis"] == "unavailable"
+    # the process picture is still shown (the CE process is a constant), with no
+    # current marker and zero counts — honest, never a fabricated position.
+    assert [lane["stage"] for lane in arc["lanes"]] == list(coordination.COGNITIVE_PHASES)
+    for lane in arc["lanes"]:
+        assert lane["is_current"] is False
+        assert lane["count"] == 0
+        assert lane["scopes"] == []
+
+
+def test_arc_additions_keep_the_journey_json_round_trippable():
+    journey = _fold(
+        scopes=[_scope("s-1"), _scope("s-2", intent="")],
+        scope_signals={"s-1": {"dispatched": True}},
+        escalations=[_escalation("e1e1e1e1e1e1", title="t", created_at="2026-06-01T00:00:00Z")],
+    )["journey"]
+    assert json.loads(json.dumps(journey)) == journey
+    assert journey["counters"]["journey_lane_count"] == 5
 
 
 # --- read-only: the fold mutates no inputs -----------------------------------

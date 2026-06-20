@@ -115,6 +115,16 @@ _COST_TOP_N = 6
 
 SnapshotLoader = Callable[[], dict[str, Any]]
 
+#: The two cockpit faces (ce-ops#45): ``ceo`` is the solo-founder journey (the
+#: DEFAULT face), ``dev`` is the expert ops board. Mirrored here as plain literals
+#: so the view imports no loader — the canonical definitions, normalization, and
+#: persistence live in ``runner.cockpit_prefs``; the composition root resolves the
+#: persona and injects it (plus an ``on_persona_change`` callback) into the App.
+_PERSONA_CEO = "ceo"
+_PERSONA_DEV = "dev"
+_PERSONAS = (_PERSONA_CEO, _PERSONA_DEV)
+_DEFAULT_PERSONA = _PERSONA_CEO
+
 
 def _mark(flag: Any) -> str:
     return "✓" if flag else "—"
@@ -490,13 +500,17 @@ def _claims_band_lines(snapshot: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# ce-ops#45 — the CEO-mode JOURNEY view (L3, render-only).
+# ce-ops#45 — the CEO-mode JOURNEY view (L3, render-only). THE DEFAULT FACE.
 #
-# A second SCREEN over the SAME L2 snapshot, reachable by a key binding — the
-# expert ops board stays the DEFAULT screen (un-demoted, no product mode
-# switcher, no persisted preference). Every string below is read straight from
-# ``snapshot["journey"]``; this view parses nothing, derives nothing, classifies
-# nothing, and calls no loader. The detail comes only from the precomputed
+# The journey is the solo-founder's DEFAULT cockpit face; the expert ops board is
+# demoted to the Dev face you switch to (``CockpitApp`` installs the persona's
+# screen, persisting the choice through an injected callback — the view performs
+# no I/O). This face shows the FULL visual development-arc / roadmap (a one-screen
+# picture of the CE process, a visual "where you are", and the project's work
+# flowing through the five stages) plus the first-class decision-inbox ("what
+# needs you"). Every string is read straight from ``snapshot["journey"]``; this
+# view parses nothing, derives nothing, classifies nothing, and calls no loader.
+# The detail comes only from the precomputed
 # ``snapshot["journey"]["need_details"][detail_ref]``.
 # ---------------------------------------------------------------------------
 
@@ -506,7 +520,11 @@ _JOURNEY_NEEDS_COLUMNS = ("#", "What needs you", "Your decision", "Suggested nex
 
 
 def _journey_arc_text(journey: dict[str, Any]) -> str:
-    """Render the five-stage arc with the 'you are here' marker (render-only)."""
+    """Render the compact five-stage progress strip with the 'you are here' marker.
+
+    Render-only: the stages, counts, current marker, and step position are all
+    precomputed in ``snapshot["journey"]["arc"]``.
+    """
     arc = journey.get("arc") or {}
     now = journey.get("now") or {}
     stages = list(arc.get("stages") or [])
@@ -520,7 +538,53 @@ def _journey_arc_text(journey: dict[str, Any]) -> str:
         count = counts.get(stage, 0)
         hex_color = SEMANTIC_HEX["violet"] if stage == here else THEME["fg"]
         cells.append(f"[{hex_color}]{marker}{stage} ({count})[/]")
-    return "   ".join(cells)
+    strip = "   ".join(cells)
+    position = arc.get("position") or {}
+    index = position.get("index")
+    total = position.get("total")
+    if index is not None and total:
+        # A plain "Step 3 of 5" so a non-engineer reads the progress at a glance.
+        strip += f"      [{SEMANTIC_HEX['violet']}]Step {index + 1} of {total}[/]"
+    return strip
+
+
+def _journey_lane_scope_line(scope: dict[str, Any]) -> str:
+    """Render ONE scope inside a roadmap lane (plain Goal · Ready, render-only)."""
+    ready = "ready" if scope.get("ready") else "in progress"
+    attention = ""
+    if scope.get("needs_attention"):
+        attention = f" [{SEMANTIC_HEX['gate']}]· needs you[/]"
+    return f"  • {scope.get('goal', '—')} [{THEME['fg']}]· {ready}[/]{attention}"
+
+
+def _journey_roadmap_text(journey: dict[str, Any]) -> str:
+    """Render the FULL visual development-arc — one lane per canon stage (render-only).
+
+    The one-screen picture of the CE process: each of the five stages is a lane
+    carrying its plain description and the project's work currently sitting in it
+    (the "project arc"); the current stage is marked. Binds ``arc["lanes"]`` only
+    — it derives no stage and classifies no scope.
+    """
+    arc = journey.get("arc") or {}
+    if (arc.get("availability") or "ok") == "unavailable":
+        return "I cannot show where the work stands right now."
+    blocks: list[str] = []
+    for lane in arc.get("lanes") or []:
+        current = lane.get("is_current")
+        marker = "▶ " if current else "  "
+        head_hex = SEMANTIC_HEX["violet"] if current else THEME["fg"]
+        heading = (
+            f"[{head_hex}]{marker}{lane.get('stage', '—')} "
+            f"— {lane.get('label', '—')} ({lane.get('count', 0)})[/]"
+        )
+        lines = [heading, f"    [{THEME['fg']}]{lane.get('description', '')}[/]"]
+        lane_scopes = lane.get("scopes") or []
+        if lane_scopes:
+            lines += [_journey_lane_scope_line(scope) for scope in lane_scopes]
+        else:
+            lines.append(f"  [{THEME['fg']}]—[/]")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def _journey_now_text(journey: dict[str, Any]) -> str:
@@ -534,26 +598,6 @@ def _journey_now_text(journey: dict[str, Any]) -> str:
     if note:
         lines.append(f"  [{SEMANTIC_HEX['amber']}]{note}[/]")
     return "\n".join(lines)
-
-
-def _journey_scope_line(scope: dict[str, Any]) -> str:
-    """Render ONE scope card with plain Goal/Stage/Ready labels (render-only)."""
-    ready = "Ready" if scope.get("ready") else "not ready"
-    attention = ""
-    if scope.get("needs_attention"):
-        attention = f" [{SEMANTIC_HEX['gate']}]· needs you[/]"
-    return (
-        f"[{SEMANTIC_HEX['violet']}]Goal:[/] {scope.get('goal', '—')}\n"
-        f"  {scope.get('stage', '—')} · {ready}{attention}"
-    )
-
-
-def _journey_scopes_text(journey: dict[str, Any]) -> str:
-    """Render the scope-card list (render-only)."""
-    scopes = journey.get("scopes") or []
-    if not scopes:
-        return "No work to show yet."
-    return "\n".join(_journey_scope_line(scope) for scope in scopes)
 
 
 def _journey_needs_header_text(journey: dict[str, Any]) -> str:
@@ -650,17 +694,19 @@ class JourneyDetailScreen(ModalScreen[None]):
 
 
 class JourneyScreen(Screen[None]):
-    """The CEO-mode journey: arc · you-are-here · scopes · what-needs-you (render-only).
+    """The CEO-mode journey — the DEFAULT cockpit face (render-only).
 
-    Binds the precomputed ``snapshot["journey"]`` structures only. Selecting a
-    needs-attention row opens the precomputed detail (looked up by ``detail_ref``
-    in ``need_details``) — no parsing, no classification, no loader.
+    The solo-founder's one-screen picture: a five-stage progress strip, the FULL
+    visual development-arc / roadmap (a lane per stage with its plain description
+    and the project's work flowing through it), an honest "you are here" line, and
+    the first-class decision-inbox ("what needs you"). Binds the precomputed
+    ``snapshot["journey"]`` structures only; selecting a needs-attention row opens
+    the precomputed detail (``need_details[detail_ref]``) — no parsing, no
+    classification, no loader. Press ``d`` to switch to the expert Dev board.
     """
 
     BINDINGS = [
-        Binding("escape", "back", "Board"),
-        Binding("b", "back", "Board"),
-        Binding("q", "back", "Board"),
+        Binding("d", "switch_persona('dev')", "Developer view"),
     ]
     CSS = f"""
     JourneyScreen {{
@@ -668,7 +714,6 @@ class JourneyScreen(Screen[None]):
         color: {THEME["fg"]};
     }}
     #journey-arc {{
-        dock: top;
         height: auto;
         background: {THEME["ink-800"]};
         border-bottom: solid {THEME["violet"]};
@@ -676,16 +721,23 @@ class JourneyScreen(Screen[None]):
     }}
     #journey-now {{
         height: auto;
-        padding: 0 1;
+        padding: 1 1 0 1;
     }}
-    #journey-scopes {{
+    #journey-roadmap {{
         height: 1fr;
         padding: 0 1;
         border-top: solid {THEME["violet"]};
     }}
-    #journey-needs-header {{
-        height: auto;
+    #journey-inbox {{
+        dock: bottom;
+        height: 14;
+        margin: 0 1 0 1;
+        border: round {THEME["violet"]};
+        background: {THEME["ink-850"]};
         padding: 0 1;
+    }}
+    #journey-inbox-header {{
+        height: auto;
     }}
     #journey-needs {{
         height: 1fr;
@@ -699,31 +751,51 @@ class JourneyScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        watermark = (self._snapshot.get("source") or {}).get("watermark")
+        if watermark:
+            yield Static(str(watermark), id="watermark")
         yield Static("", id="journey-arc")
         yield Static("", id="journey-now")
-        yield VerticalScroll(Static("", id="journey-scopes-text"), id="journey-scopes")
-        yield Static("", id="journey-needs-header")
-        yield DataTable(id="journey-needs")
+        yield VerticalScroll(Static("", id="journey-roadmap-text"), id="journey-roadmap")
+        with Vertical(id="journey-inbox"):
+            yield Static("", id="journey-inbox-header")
+            yield DataTable(id="journey-needs")
         yield Footer()
 
     def on_mount(self) -> None:
+        inbox = self.query_one("#journey-inbox", Vertical)
+        # The decision-inbox is a FIRST-CLASS, titled surface — not a sub-panel.
+        inbox.border_title = "What needs you"
         table = self.query_one("#journey-needs", DataTable)
         table.add_columns(*_JOURNEY_NEEDS_COLUMNS)
         table.cursor_type = "row"
+        self._bind_journey()
+        # Draw the founder to the inbox when something actually needs them.
+        if self._need_rows:
+            table.focus()
+
+    def rebind(self, snapshot: dict[str, Any]) -> None:
+        """Re-bind to a freshly-folded snapshot (the live tail / refresh path)."""
+        self._snapshot = snapshot
         self._bind_journey()
 
     def _bind_journey(self) -> None:
         journey = self._snapshot.get("journey") or {}
         self.query_one("#journey-arc", Static).update(_journey_arc_text(journey))
         self.query_one("#journey-now", Static).update(_journey_now_text(journey))
-        self.query_one("#journey-scopes-text", Static).update(_journey_scopes_text(journey))
-        self.query_one("#journey-needs-header", Static).update(
+        self.query_one("#journey-roadmap-text", Static).update(_journey_roadmap_text(journey))
+        self.query_one("#journey-inbox-header", Static).update(
             _journey_needs_header_text(journey)
         )
+        # The inbox border turns gate-red when work needs the founder, spark-green
+        # when the queue is clear — the decision-inbox announces itself.
+        needs = journey.get("needs_attention") or {}
+        accent = SEMANTIC_HEX["gate"] if needs.get("open_count") else SEMANTIC_HEX["spark"]
+        self.query_one("#journey-inbox", Vertical).styles.border = ("round", accent)
         table = self.query_one("#journey-needs", DataTable)
         table.clear()
         self._need_rows = []
-        for item in (journey.get("needs_attention") or {}).get("items", []):
+        for item in needs.get("items", []):
             table.add_row(*_journey_need_row(item))
             # Carry ONLY the precomputed detail_ref — the L3 binds it, never
             # parses it (spec 3.7).
@@ -741,48 +813,29 @@ class JourneyScreen(Screen[None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self._open_detail(event.cursor_row)
 
-    def action_back(self) -> None:
-        self.app.pop_screen()
+    def action_switch_persona(self, persona: str) -> None:
+        # Delegate to the App, which owns the persona + persistence edge.
+        self.app.action_switch_persona(persona)
 
 
-class CockpitApp(App[None]):
-    """The read-only Cockpit TUI — one view bound to one L2 snapshot."""
+class BoardScreen(Screen[None]):
+    """The expert ops board — the Dev cockpit face (render-only).
 
-    TITLE = APP_TITLE
+    The full fleet board: left fleet-nav rail · the Scope board + seat-detail tabs
+    · the governance/authority rail · the meter strip. Demoted from the default to
+    a face you switch to with ``c`` (the founder journey is the default). Binds the
+    precomputed snapshot only; all board/refusal/meter computation lives in L2.
+    """
+
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("r", "refresh_snapshot", "Refresh"),
+        Binding("c", "switch_persona('ceo')", "Founder view"),
         Binding("a", "filter('all')", "All"),
         Binding("m", "filter('mine')", "Mine"),
         Binding("l", "filter('live')", "Live"),
-        # ce-ops#45: open the CEO-mode journey screen ON TOP of the board (the
-        # board stays the DEFAULT screen — no product mode switcher, no default
-        # change, no persisted preference).
-        Binding("j", "journey", "Journey"),
+        # Back-compat alias: the old "journey" key now lands on the founder face.
+        Binding("j", "switch_persona('ceo')", "Founder view", show=False),
     ]
-    # Control-Room Violet (B.6): surfaces ink-900/850/800 · text fg · violet =
-    # governance/authority/brand chrome · amber = the DEMO watermark. The
-    # refusal/verified/pending colors ride the text markup (SEMANTIC_HEX).
     CSS = f"""
-    Screen {{
-        background: {THEME["ink-900"]};
-        color: {THEME["fg"]};
-    }}
-    Header {{
-        background: {THEME["ink-800"]};
-        color: {THEME["violet"]};
-    }}
-    Footer {{
-        background: {THEME["ink-800"]};
-    }}
-    #watermark {{
-        dock: top;
-        height: 1;
-        text-align: center;
-        text-style: bold;
-        background: {THEME["amber"]};
-        color: {THEME["ink-900"]};
-    }}
     #left-rail {{
         width: 32;
         background: {THEME["ink-850"]};
@@ -816,28 +869,12 @@ class CockpitApp(App[None]):
     }}
     """
 
-    def __init__(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        reload: SnapshotLoader | None = None,
-        watch_paths: Sequence[str] = (),
-    ) -> None:
+    def __init__(self, snapshot: dict[str, Any]) -> None:
         super().__init__()
-        # ce-ops#25: render the CE version token in the L3 header — title from
-        # ``snapshot["source"]["ce_version"]`` with ``APP_TITLE`` as the
-        # prefix/fallback (the token is data the L2 fold already carries).
-        ce_ver = (snapshot.get("source") or {}).get("ce_version")
-        if ce_ver:
-            self.title = f"{APP_TITLE} · {ce_ver}"
         self._snapshot = snapshot
-        self._reload = reload
-        self._watch_paths = list(watch_paths)
-        self._watch_task: asyncio.Task[None] | None = None
         self._active_filter = "all"
         self._row_lanes: list[str | None] = []
 
-    # -- compose / bind -------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header()
         watermark = (self._snapshot.get("source") or {}).get("watermark")
@@ -867,8 +904,11 @@ class CockpitApp(App[None]):
         table.add_columns(*_BOARD_COLUMNS)
         table.cursor_type = "row"
         self._bind_snapshot()
-        if self._watch_paths and self._reload is not None:
-            self._watch_task = asyncio.create_task(self._watch_loop())
+
+    def rebind(self, snapshot: dict[str, Any]) -> None:
+        """Re-bind to a freshly-folded snapshot (the live tail / refresh path)."""
+        self._snapshot = snapshot
+        self._bind_snapshot()
 
     def _bind_snapshot(self) -> None:
         """Re-bind every widget to the CURRENT snapshot (no computation).
@@ -909,20 +949,126 @@ class CockpitApp(App[None]):
         if 0 <= index < len(self._row_lanes):
             self._bind_detail(self._row_lanes[index])
 
-    # -- refresh / filters / live tail ----------------------------------------
-    def action_refresh_snapshot(self) -> None:
-        if self._reload is not None:
-            self._snapshot = self._reload()
-            self._bind_snapshot()
-
     def action_filter(self, name: str) -> None:
         if name in _FILTER_KEYS:
             self._active_filter = name
             self._bind_snapshot()
 
-    def action_journey(self) -> None:
-        """Open the CEO-mode journey screen over the board (the board stays default)."""
-        self.push_screen(JourneyScreen(self._snapshot))
+    def action_switch_persona(self, persona: str) -> None:
+        # Delegate to the App, which owns the persona + persistence edge.
+        self.app.action_switch_persona(persona)
+
+
+class CockpitApp(App[None]):
+    """The read-only Cockpit TUI — two faces over ONE L2 snapshot.
+
+    The solo-founder **journey** is the default face; the expert ops **board** is
+    the Dev face you switch to. Which face you land on is a persisted preference,
+    read by the composition root and injected here as ``persona`` plus an
+    ``on_persona_change`` callback — the view performs NO file I/O of its own (the
+    L3 source guard stays green). The snapshot fold + live tail stay on the App;
+    the active screen re-binds in place.
+    """
+
+    TITLE = APP_TITLE
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("r", "refresh_snapshot", "Refresh"),
+    ]
+    # Control-Room Violet (B.6): surfaces ink-900/850/800 · text fg · violet =
+    # governance/authority/brand chrome · amber = the DEMO watermark. The
+    # refusal/verified/pending colors ride the text markup (SEMANTIC_HEX).
+    CSS = f"""
+    Screen {{
+        background: {THEME["ink-900"]};
+        color: {THEME["fg"]};
+    }}
+    Header {{
+        background: {THEME["ink-800"]};
+        color: {THEME["violet"]};
+    }}
+    Footer {{
+        background: {THEME["ink-800"]};
+    }}
+    #watermark {{
+        dock: top;
+        height: 1;
+        text-align: center;
+        text-style: bold;
+        background: {THEME["amber"]};
+        color: {THEME["ink-900"]};
+    }}
+    """
+
+    def __init__(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        reload: SnapshotLoader | None = None,
+        watch_paths: Sequence[str] = (),
+        persona: str = "ceo",
+        on_persona_change: Callable[[str], None] | None = None,
+    ) -> None:
+        super().__init__()
+        # ce-ops#25: render the CE version token in the L3 header — title from
+        # ``snapshot["source"]["ce_version"]`` with ``APP_TITLE`` as the
+        # prefix/fallback (the token is data the L2 fold already carries).
+        ce_ver = (snapshot.get("source") or {}).get("ce_version")
+        if ce_ver:
+            self.title = f"{APP_TITLE} · {ce_ver}"
+        self._snapshot = snapshot
+        self._reload = reload
+        self._watch_paths = list(watch_paths)
+        self._watch_task: asyncio.Task[None] | None = None
+        # The two faces; ``ceo`` (the journey) is the default. An unknown injected
+        # value falls back to the default face (the view never trusts junk).
+        self._persona = persona if persona in _PERSONAS else _DEFAULT_PERSONA
+        self._on_persona_change = on_persona_change
+
+    @property
+    def persona(self) -> str:
+        return self._persona
+
+    def _make_screen(self, persona: str) -> Screen[None]:
+        if persona == _PERSONA_DEV:
+            return BoardScreen(self._snapshot)
+        return JourneyScreen(self._snapshot)
+
+    async def on_mount(self) -> None:
+        # Each face is a Textual MODE with its OWN screen stack, so switching is a
+        # clean swap (never a base-screen pop). The factory closes over the App's
+        # current snapshot; refreshes re-bind the active screen in place.
+        self.add_mode(_PERSONA_CEO, lambda: self._make_screen(_PERSONA_CEO))
+        self.add_mode(_PERSONA_DEV, lambda: self._make_screen(_PERSONA_DEV))
+        await self.switch_mode(self._persona)
+        if self._watch_paths and self._reload is not None:
+            self._watch_task = asyncio.create_task(self._watch_loop())
+
+    # -- persona / refresh / live tail ----------------------------------------
+    def action_switch_persona(self, persona: str) -> None:
+        """Switch the cockpit face and persist the choice (via the injected edge)."""
+        target = persona if persona in _PERSONAS else self._persona
+        if target == self._persona:
+            return
+        self._persona = target
+        if self._on_persona_change is not None:
+            # The ONLY persistence the cockpit does — and it happens in the
+            # injected composition-root callback, never in this view module.
+            self._on_persona_change(target)
+        self.switch_mode(target)
+        # Re-bind the (possibly previously-built) target face to the current
+        # snapshot once it is the active screen.
+        self.call_after_refresh(self._rebind_active)
+
+    def _rebind_active(self) -> None:
+        rebind = getattr(self.screen, "rebind", None)
+        if callable(rebind):
+            rebind(self._snapshot)
+
+    def action_refresh_snapshot(self) -> None:
+        if self._reload is not None:
+            self._snapshot = self._reload()
+            self._rebind_active()
 
     async def _watch_loop(self) -> None:
         """Tail the L1 roots and re-bind on change (the fold runs in L2 via reload)."""
@@ -931,7 +1077,7 @@ class CockpitApp(App[None]):
         assert self._reload is not None
         async for _changes in awatch(*self._watch_paths):
             self._snapshot = self._reload()
-            self._bind_snapshot()
+            self._rebind_active()
 
 
 def run_app(
@@ -939,9 +1085,17 @@ def run_app(
     *,
     reload: SnapshotLoader | None = None,
     watch_paths: Sequence[str] = (),
+    persona: str = "ceo",
+    on_persona_change: Callable[[str], None] | None = None,
 ) -> int:
     """Run the Cockpit TUI over a prepared L2 snapshot; return a CLI exit code."""
-    CockpitApp(snapshot, reload=reload, watch_paths=watch_paths).run()
+    CockpitApp(
+        snapshot,
+        reload=reload,
+        watch_paths=watch_paths,
+        persona=persona,
+        on_persona_change=on_persona_change,
+    ).run()
     return 0
 
 

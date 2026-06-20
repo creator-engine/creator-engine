@@ -3322,7 +3322,23 @@ def _cmd_cockpit(args: argparse.Namespace) -> int:
         return 0
     from . import v3_cockpit  # LAZY: textual loads ONLY on the TUI path
 
-    return v3_cockpit.run_app(snapshot, reload=_load, watch_paths=watch)
+    # ce-ops#45: the cockpit opens on the persisted FACE — the solo-founder
+    # journey by default, the expert Dev board if last chosen. The preference is
+    # read/written HERE (the composition root); the view never does file I/O.
+    from .runner import cockpit_prefs  # textual-free persona persistence edge
+
+    persona = cockpit_prefs.load_persona(root)
+
+    def _persist_persona(choice: str) -> None:
+        cockpit_prefs.save_persona(root, choice)
+
+    return v3_cockpit.run_app(
+        snapshot,
+        reload=_load,
+        watch_paths=watch,
+        persona=persona,
+        on_persona_change=_persist_persona,
+    )
 
 
 def _cmd_guide(args: argparse.Namespace) -> int:
