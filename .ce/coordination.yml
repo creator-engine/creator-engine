@@ -26,7 +26,7 @@ ratification_authority:
 # The {actor → human} resolver (the §11.5 identity-resolution gap, shipped
 # HONESTLY): quorums count humans, not accounts. Today this repo has ONE
 # resolved human — the Operator — holding both GitHub accounts (the authoring
-# `chmod735` and the reviewer-venue `ubuntuaws745-cmyk`): token/account
+# `ce-overwatch` and the reviewer-venue `ce-dev-2`): token/account
 # separation alone is NOT sufficient (CE's own rule), so both logins map to
 # the same human_id and can never sum to a privileged quorum of 2. This is
 # §A.5's N=1 special case (constrained-BDFL): privileged ratification is the
@@ -42,6 +42,10 @@ ratification_authority:
 identity_map:
   humans:
     - human_id: peer-operator
-      github_logins: [chmod735, ubuntuaws745-cmyk]
+      # current logins first; the trailing two are pre-2026-06-20-rename aliases
+      # (SAME account ids) kept so historical ratifiers still resolve — e.g.
+      # ADR-0001 `ratified_by: chmod735` (history is not rewritten). All map to
+      # the one human, so they can never sum to a privileged quorum of 2.
+      github_logins: [ce-overwatch, ce-dev-2, chmod735, ubuntuaws745-cmyk]
       seats: []
       app_installations: []
