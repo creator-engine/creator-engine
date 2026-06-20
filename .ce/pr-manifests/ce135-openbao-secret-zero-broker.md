@@ -10,11 +10,12 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized path-se
 below. The carrier lists itself.
 
 Scope:
-Design and implement the ce-ops#135 OpenBao broker / secret-zero wiring behind
+Design and implement the ce-ops#144 W3 OpenBao broker / secret-zero wiring behind
 the `SecretIdentityBackend` seam. This PR adds value-free broker minting of
 short-TTL response-wrapped per-dev AppRole SecretIDs plus seat-side unwrap/login
 helpers for dev tokens. It does not execute production init, unseal, root-token,
-real SecretID, PEM import, or live secret migration actions.
+real SecretID, PEM import, live secret migration, or ce-ops#135 dedicated
+micro-unit physical segregation actions.
 
 Per-file purpose (closed path-set - 12 paths):
 - **`.ce/changelog/ce135-openbao-secret-zero-broker.md`** *(A)* - changelog fragment for the broker wiring.

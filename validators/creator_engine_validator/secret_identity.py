@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 
 class SecretIdentityError(Exception):
@@ -137,6 +138,7 @@ class SecretZeroRequest:
     """Request for a one-use wrapped AppRole SecretID for one dev seat."""
 
     run_id: str
+    requester_seat_id: str
     seat_id: str
     role_name: str
     delivery_ref: str
@@ -150,6 +152,7 @@ class SecretZeroRequest:
     def to_record(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
+            "requester_seat_id": self.requester_seat_id,
             "seat_id": self.seat_id,
             "role_name": self.role_name,
             "delivery_ref": self.delivery_ref,
@@ -168,6 +171,7 @@ class SecretZeroGrant:
 
     grant_id: str
     run_id: str
+    requester_seat_id: str
     seat_id: str
     role_name: str
     auth_mount: str
@@ -183,6 +187,7 @@ class SecretZeroGrant:
         return {
             "grant_id": self.grant_id,
             "run_id": self.run_id,
+            "requester_seat_id": self.requester_seat_id,
             "seat_id": self.seat_id,
             "role_name": self.role_name,
             "auth_mount": self.auth_mount,
@@ -201,6 +206,7 @@ class SecretZeroPayload:
     """In-memory secret-zero payload handed to an injected delivery channel."""
 
     seat_id: str
+    requester_seat_id: str
     role_name: str
     auth_mount: str
     role_id: str = field(repr=False)
@@ -211,6 +217,7 @@ class SecretZeroPayload:
     def to_record(self) -> dict[str, Any]:
         return {
             "seat_id": self.seat_id,
+            "requester_seat_id": self.requester_seat_id,
             "role_name": self.role_name,
             "auth_mount": self.auth_mount,
             "role_id_ref": f"openbao-role-id:{self.auth_mount}:{self.role_name}",
@@ -353,7 +360,7 @@ _DELIVERY_MODES = frozenset({"file", "env", "socket", "none"})
 _DEFAULT_ALLOWED_CAPABILITIES = frozenset({"read"})
 _MAX_SECRET_ZERO_TTL_SECONDS = 600
 _SECRET_ZERO_DELIVERY_MODES = frozenset({"broker-channel", "unix-socket", "stdin-once", "memory"})
-_SECRET_ZERO_FORBIDDEN_REF_RE = re.compile(r"^(env|file|prompt)://")
+_SECRET_ZERO_FORBIDDEN_REF_SCHEMES = frozenset({"env", "file", "prompt"})
 _SEAT_ID_RE = re.compile(r"^dev-[1-9][0-9]*$")
 _APPROLE_MOUNT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
@@ -447,6 +454,15 @@ def _validate_secret_zero_common(seat_id: str, role_name: str, auth_mount: str) 
         raise SecretIdentityRefused(f"auth_mount {auth_mount!r} is not a simple AppRole mount")
 
 
+def _normalize_secret_zero_delivery_ref(delivery_ref: str) -> str:
+    return delivery_ref.strip()
+
+
+def _secret_zero_ref_uses_forbidden_surface(delivery_ref: str) -> bool:
+    scheme = urlsplit(_normalize_secret_zero_delivery_ref(delivery_ref)).scheme.lower()
+    return scheme in _SECRET_ZERO_FORBIDDEN_REF_SCHEMES
+
+
 def _validate_secret_zero_request(
     request: SecretZeroRequest,
     *,
@@ -454,7 +470,16 @@ def _validate_secret_zero_request(
 ) -> None:
     if not request.run_id.strip():
         raise SecretIdentityRefused("run_id must not be empty")
+    if not _SEAT_ID_RE.fullmatch(request.requester_seat_id):
+        raise SecretIdentityRefused(
+            f"requester_seat_id {request.requester_seat_id!r} is not a concrete dev seat"
+        )
     _validate_secret_zero_common(request.seat_id, request.role_name, request.auth_mount)
+    if request.requester_seat_id != request.seat_id:
+        raise SecretIdentityRefused(
+            f"requester_seat_id {request.requester_seat_id!r} is not authorized "
+            f"for requested seat {request.seat_id!r}"
+        )
     if request.seat_id not in allowed_seats:
         allowed = ", ".join(sorted(allowed_seats)) or "(none)"
         raise SecretIdentityRefused(
@@ -462,9 +487,10 @@ def _validate_secret_zero_request(
         )
     if request.delivery not in _SECRET_ZERO_DELIVERY_MODES:
         raise SecretIdentityRefused(f"unsupported secret-zero delivery mode {request.delivery!r}")
-    if not request.delivery_ref.strip():
+    delivery_ref = _normalize_secret_zero_delivery_ref(request.delivery_ref)
+    if not delivery_ref:
         raise SecretIdentityRefused("delivery_ref must not be empty")
-    if _SECRET_ZERO_FORBIDDEN_REF_RE.search(request.delivery_ref):
+    if _secret_zero_ref_uses_forbidden_surface(delivery_ref):
         raise SecretIdentityRefused("secret-zero delivery_ref must not target env, file, or prompt surfaces")
     if request.wrap_ttl_seconds <= 0 or request.wrap_ttl_seconds > _MAX_SECRET_ZERO_TTL_SECONDS:
         raise SecretIdentityRefused(
@@ -623,12 +649,13 @@ class FakeSecretIdentityBackend:
         grant = SecretZeroGrant(
             grant_id=f"fake-secret-zero-{request.run_id}-{self._counter:03d}",
             run_id=request.run_id,
+            requester_seat_id=request.requester_seat_id,
             seat_id=request.seat_id,
             role_name=request.role_name,
             auth_mount=request.auth_mount,
             issued_at=_iso(now),
             expires_at=_iso(now + timedelta(seconds=request.wrap_ttl_seconds)),
-            delivery_ref=request.delivery_ref,
+            delivery_ref=_normalize_secret_zero_delivery_ref(request.delivery_ref),
             wrap_accessor_ref=None,
             wrapped_accessor_ref=None,
             audit_ref=f"fake-secret-zero-audit:{request.run_id}:{self._counter:03d}",
@@ -637,6 +664,7 @@ class FakeSecretIdentityBackend:
             "backend": self.backend_key,
             "grant_id": grant.grant_id,
             "audit_ref": grant.audit_ref,
+            "requester_seat_id": request.requester_seat_id,
             "seat_id": request.seat_id,
         }
         return grant
@@ -854,10 +882,13 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             role_id=role_id,
             now=now,
         )
-        delivery_ref = self._deliver_secret_zero(request.delivery_ref, payload)
+        delivery_ref = self._deliver_secret_zero(
+            _normalize_secret_zero_delivery_ref(request.delivery_ref), payload
+        )
         grant = SecretZeroGrant(
             grant_id=f"openbao-secret-zero:{request.run_id}:{request.seat_id}",
             run_id=request.run_id,
+            requester_seat_id=request.requester_seat_id,
             seat_id=request.seat_id,
             role_name=request.role_name,
             auth_mount=request.auth_mount,
@@ -872,6 +903,7 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             "backend": self.backend_key,
             "grant_id": grant.grant_id,
             "audit_ref": grant.audit_ref,
+            "requester_seat_id": request.requester_seat_id,
             "seat_id": request.seat_id,
             "role_name": request.role_name,
         }
@@ -1005,6 +1037,7 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
                 "num_uses": request.secret_id_num_uses,
                 "metadata": {
                     "run_id": request.run_id,
+                    "requester_seat_id": request.requester_seat_id,
                     "seat_id": request.seat_id,
                     "broker": "creator-engine",
                 },
@@ -1023,6 +1056,7 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
         return (
             SecretZeroPayload(
                 seat_id=request.seat_id,
+                requester_seat_id=request.requester_seat_id,
                 role_name=request.role_name,
                 auth_mount=request.auth_mount,
                 role_id=role_id,
@@ -1041,10 +1075,13 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             raise SecretMaterializationError(
                 "secret-zero delivery failed; payload value redacted"
             ) from None
-        if not isinstance(delivery_ref, str) or not delivery_ref.strip():
+        if not isinstance(delivery_ref, str):
+            raise SecretMaterializationError("secret-zero deliverer returned an empty delivery ref")
+        delivery_ref = _normalize_secret_zero_delivery_ref(delivery_ref)
+        if not delivery_ref:
             raise SecretMaterializationError("secret-zero deliverer returned an empty delivery ref")
         if delivery_ref in {payload.role_id, payload.wrapping_token}:
             raise SecretMaterializationError("secret-zero deliverer returned a raw credential as delivery ref")
-        if _SECRET_ZERO_FORBIDDEN_REF_RE.search(delivery_ref):
+        if _secret_zero_ref_uses_forbidden_surface(delivery_ref):
             raise SecretMaterializationError("secret-zero deliverer returned a forbidden disk/env ref")
         return delivery_ref

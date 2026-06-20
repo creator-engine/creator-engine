@@ -64,6 +64,7 @@ def _secret_request(**overrides) -> SecretRequest:
 def _secret_zero_request(**overrides) -> SecretZeroRequest:
     values = {
         "run_id": "run-123",
+        "requester_seat_id": "dev-3",
         "seat_id": "dev-3",
         "role_name": "ce-dev-3",
         "delivery_ref": "broker-channel:dev-3:run-123",
@@ -72,7 +73,7 @@ def _secret_zero_request(**overrides) -> SecretZeroRequest:
         "secret_id_num_uses": 1,
         "delivery": "broker-channel",
         "auth_mount": "approle",
-        "audit_context": {"ticket": "ce-ops#135"},
+        "audit_context": {"ticket": "ce-ops#144"},
     }
     values.update(overrides)
     return SecretZeroRequest(**values)
@@ -131,6 +132,7 @@ def test_secret_ref_and_grant_schemas_reject_values(repo_root):
     secret_zero_grant = SecretZeroGrant(
         grant_id="openbao-secret-zero:run-123:dev-3",
         run_id="run-123",
+        requester_seat_id="dev-3",
         seat_id="dev-3",
         role_name="ce-dev-3",
         auth_mount="approle",
@@ -147,6 +149,18 @@ def test_secret_ref_and_grant_schemas_reject_values(repo_root):
         Draft202012Validator(secret_zero_schema).validate(
             secret_zero_grant.to_record() | {"wrapping_token": "wrapped-token-value"}
         )
+    for forbidden_ref in (
+        "file:///tmp/wrap",
+        "FILE:///tmp/wrap",
+        "file:/tmp/wrap",
+        " File:///tmp/wrap",
+        "env:CE_WRAP",
+        "prompt://wrap",
+    ):
+        with pytest.raises(JsonSchemaError):
+            Draft202012Validator(secret_zero_schema).validate(
+                secret_zero_grant.to_record() | {"delivery_ref": forbidden_ref}
+            )
 
 
 def test_openbao_response_repr_str_and_json_repr_redact_raw_values():
@@ -479,6 +493,7 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
             assert request.wrap_ttl_seconds == 300
             assert request.json["ttl"] == "300s"
             assert request.json["num_uses"] == 1
+            assert request.json["metadata"]["requester_seat_id"] == "dev-3"
             assert request.json["metadata"]["seat_id"] == "dev-3"
             return OpenBaoResponse(
                 status=200,
@@ -505,6 +520,7 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
     grant = backend.issue_secret_zero(_secret_zero_request())
 
     assert grant.seat_id == "dev-3"
+    assert grant.requester_seat_id == "dev-3"
     assert grant.role_name == "ce-dev-3"
     assert grant.delivery_ref == "broker-channel-delivered:dev-3"
     assert grant.wrap_accessor_ref == "wrap-accessor"
@@ -512,6 +528,7 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
     assert "wrapping-token-value" not in repr(grant)
     assert "role-id-value" not in repr(grant.to_record())
     assert delivered[0][0] == "broker-channel:dev-3:run-123"
+    assert delivered[0][1].requester_seat_id == "dev-3"
     assert delivered[0][1].role_id == "role-id-value"
     assert delivered[0][1].wrapping_token == "wrapping-token-value"
     assert "role-id-value" not in repr(delivered[0][1])
@@ -529,11 +546,22 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
     "secret_zero_request",
     [
         _secret_zero_request(role_name="ce-dev-4"),
+        _secret_zero_request(
+            requester_seat_id="dev-3",
+            seat_id="dev-4",
+            role_name="ce-dev-4",
+            delivery_ref="broker-channel:dev-4:run-123",
+        ),
         _secret_zero_request(seat_id="dev-9", role_name="ce-dev-9"),
         _secret_zero_request(wrap_ttl_seconds=601),
         _secret_zero_request(secret_id_ttl_seconds=601),
         _secret_zero_request(secret_id_num_uses=2),
         _secret_zero_request(delivery_ref="file:///tmp/wrap"),
+        _secret_zero_request(delivery_ref="FILE:///tmp/wrap"),
+        _secret_zero_request(delivery_ref="file:/tmp/wrap"),
+        _secret_zero_request(delivery_ref=" File:///tmp/wrap"),
+        _secret_zero_request(delivery_ref="env:CE_WRAP"),
+        _secret_zero_request(delivery_ref="prompt://wrap"),
     ],
 )
 def test_openbao_secret_zero_refuses_bad_request_before_any_io(secret_zero_request):
@@ -610,6 +638,44 @@ def test_openbao_secret_zero_deliverer_must_not_record_raw_values():
 
     assert "wrapping-token-value" not in str(exc.value)
     assert exc.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "delivery_ref",
+    [
+        "FILE:///tmp/wrap",
+        "file:/tmp/wrap",
+        " File:///tmp/wrap",
+        "env:CE_WRAP",
+        "prompt://wrap",
+    ],
+)
+def test_openbao_secret_zero_deliverer_refuses_forbidden_refs_after_normalization(delivery_ref):
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/role-id":
+            return OpenBaoResponse(status=200, json={"data": {"role_id": "role-id-value"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/secret-id":
+            return OpenBaoResponse(
+                status=200,
+                json={"wrap_info": {"token": "wrapping-token-value"}},
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=runner,
+        secret_zero_deliverer=lambda _target, _payload: delivery_ref,
+    )
+
+    with pytest.raises(SecretIdentityError):
+        backend.issue_secret_zero(_secret_zero_request())
 
 
 def test_redeem_wrapped_secret_zero_returns_in_memory_openbao_session():

@@ -1,7 +1,8 @@
-# DESIGN - ce-ops#135 OpenBao Secret-Zero Broker
+# DESIGN - ce-ops#144 W3 OpenBao Secret-Zero Broker
 
 Date: 2026-06-20
-Scope: ce-ops#135 / ce-ops#144 W3
+Scope: ce-ops#144 W3 broker wiring. ce-ops#135 dedicated micro-unit physical
+segregation is a deferred fast-follow and is not implemented here.
 Mutation class: security
 
 ## Context
@@ -35,9 +36,10 @@ the same value-free request/grant contract.
 
 The broker flow is:
 
-1. Seat asks the broker for secret-zero for its own `seat_id`.
-2. Broker validates that `seat_id` is in the allowed dev set and that
-   `role_name == "ce-${seat_id}"`.
+1. Seat asks the broker for secret-zero as `requester_seat_id` for its own
+   `seat_id`.
+2. Broker validates that `requester_seat_id == seat_id`, that `seat_id` is in
+   the allowed dev set, and that `role_name == "ce-${seat_id}"`.
 3. Broker performs the same audit preflight as ordinary secret grants.
 4. Broker reads the AppRole RoleID through OpenBao, using its own broker token.
 5. Broker creates a wrapped SecretID for that role using `X-Vault-Wrap-TTL`,
@@ -63,8 +65,9 @@ pipe, or in-process memory for tests.
   redacted.
 - Broker SecretID issuance fails closed unless the OpenBao audit preflight
   succeeds.
-- Dev secret-zero issuance is bound to the concrete dev role, preventing a seat
-  from requesting another seat's AppRole.
+- Dev secret-zero issuance is bound to the authenticated requester, concrete
+  dev seat, and concrete dev role, preventing a seat from requesting another
+  seat's AppRole.
 - Wrapping TTL and SecretID TTL are capped at 10 minutes.
 - SecretID `num_uses` is fixed at 1.
 - Returned delivery refs are checked so the injected delivery layer cannot

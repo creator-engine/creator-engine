@@ -9,6 +9,7 @@ per-dev OpenBao secret-zero. It extends the ADR-0005
 Input:
 
 - `run_id`: governed run or seat-start identifier.
+- `requester_seat_id`: authenticated requester seat; must equal `seat_id`.
 - `seat_id`: concrete dev seat, currently `dev-1` through `dev-4`.
 - `role_name`: must equal `ce-${seat_id}`.
 - `auth_mount`: OpenBao AppRole auth mount, default `approle`.
@@ -17,11 +18,13 @@ Input:
 - `secret_id_num_uses`: exactly 1.
 - `delivery`: one of `broker-channel`, `unix-socket`, `stdin-once`, or `memory`.
 - `delivery_ref`: value-free delivery channel reference; must not be a file,
-  env, prompt, or raw credential value.
+  env, prompt, or raw credential value. The scheme check is performed after
+  trimming and is case-insensitive, including single-slash URI forms such as
+  `file:/path`.
 
 Broker behavior:
 
-1. Validate the request before OpenBao I/O.
+1. Validate the requester/seat/role binding before OpenBao I/O.
 2. Run OpenBao health/audit preflight and fail closed if audit is unavailable.
 3. Read the dev AppRole RoleID.
 4. Create a response-wrapped SecretID using the wrapping TTL header.
