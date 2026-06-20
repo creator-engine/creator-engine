@@ -16,10 +16,10 @@ evidence_refs:
     ref: "ce-ops#128 — every-agent-contained program (controllers under governed substrate)"
     tag: containment-program
   - kind: issue
-    ref: "ce-ops#135 — OpenBao broker / secret-zero wiring (W3); the secret-side twin"
+    ref: "ce-ops#135 — OpenBao dedicated secret-store micro-unit (physical segregation fast-follow); the secret-zero broker (W3) landed against it as PR #281. The secret-side twin."
     tag: secret-broker
   - kind: adr
-    ref: "docs/decisions/ADR-0005-openbao-secret-identity-backend.md (SecretIdentityBackend)"
+    ref: "docs/decisions/0005-openbao-secret-identity-backend.md (SecretIdentityBackend)"
     tag: openbao-backend
   - kind: doc
     ref: "Session 2026-06-20: commit-and-signal via uncontained dev-2 courier; PR #280; dev-3 ce-ops credential-scope finding (#137)"
