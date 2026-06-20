@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import json
+
 import pytest
 
 from creator_engine_validator import fs_mediation as fm
@@ -12,9 +15,9 @@ from creator_engine_validator.runner import (
     ProvisionRequest,
     RunRequest,
 )
+from creator_engine_validator.runner import openshell_backend as ob
 from creator_engine_validator.runner.ring1_tool_guard import (
     DEFAULT_EVIDENCE_ROOT,
-    DEFAULT_SHIM_DIR,
     Ring1ToolGuardConfig,
 )
 
@@ -22,9 +25,19 @@ _POLICY_SHA = "a" * 64
 _IMAGE_SHA = "sha256:" + "b" * 64
 
 
+def _install_payload(script: str) -> dict:
+    marker = "PAYLOAD = json.loads("
+    start = script.index(marker) + len(marker)
+    end = script.index(")\n\n\n", start)
+    return json.loads(ast.literal_eval(script[start:end]))
+
+
 @pytest.fixture(autouse=True)
-def _landlock_available(monkeypatch):
+def _ring1_test_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    shim_parent = tmp_path / "ring1-shim-parent"
+    shim_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(ob, "DEFAULT_RING1_SHIM_DIR", str(shim_parent / "shim"))
 
 
 def valid_policy() -> dict:
@@ -60,11 +73,14 @@ def test_provision_installs_guard_after_sandbox_create():
     sandbox_id, command = fake.exec_calls[0]
     assert sandbox_id == "openshell-sandbox-1"
     assert command[:2] == ("sh", "-c")
-    assert f"cat > {DEFAULT_SHIM_DIR}/git" in command[2]
-    assert f"cat > {DEFAULT_SHIM_DIR}/gh" in command[2]
-    assert '"posture": "governed"' in command[2]
-    assert '"posture_root": "/runtime/worktree"' in command[2]
-    assert '"ledger_root": ""' in command[2]
+    payload = _install_payload(command[2])
+    shim_by_tool = {tool: content for tool, content in payload["shims"]}
+    assert payload["target_dir"] == ob.DEFAULT_RING1_SHIM_DIR
+    assert set(shim_by_tool) == {"git", "gh"}
+    assert "O_EXCL" in command[2]
+    assert '"posture": "governed"' in shim_by_tool["git"]
+    assert '"posture_root": "/runtime/worktree"' in shim_by_tool["git"]
+    assert '"ledger_root": ""' in shim_by_tool["git"]
     assert fake.exec_environments == [None]
 
 
@@ -81,7 +97,7 @@ def test_run_injects_guard_path_environment():
     assert fake.exec_calls[-1] == ("openshell-sandbox-ring1", ("codex", "exec"))
     env = fake.exec_environments[-1]
     assert env is not None
-    assert env["PATH"] == f"{DEFAULT_SHIM_DIR}:/usr/bin:/bin"
+    assert env["PATH"] == f"{ob.DEFAULT_RING1_SHIM_DIR}:/usr/bin:/bin"
     assert env["CE_RING1_POSTURE"] == "governed"
     assert env["CE_RING1_EVIDENCE_ROOT"] == DEFAULT_EVIDENCE_ROOT
     assert fake.exec_preexec_fns[-1] is not None
@@ -97,8 +113,13 @@ def test_default_guard_honors_backend_pinned_root_overrides():
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-ring1"))
 
     install = fake.exec_calls[0][1][2]
-    assert '"posture_root": "/runtime/worktree"' in install
-    assert '"ledger_root": "/runtime/worktree/.hermes/active-work-ledger"' in install
+    payload = _install_payload(install)
+    shim_by_tool = {tool: content for tool, content in payload["shims"]}
+    assert '"posture_root": "/runtime/worktree"' in shim_by_tool["git"]
+    assert (
+        '"ledger_root": "/runtime/worktree/.hermes/active-work-ledger"'
+        in shim_by_tool["git"]
+    )
 
     backend.run(handle, RunRequest(command=("codex", "exec")))
     env = fake.exec_environments[-1]

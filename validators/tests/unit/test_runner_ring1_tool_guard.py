@@ -15,6 +15,8 @@ from creator_engine_validator.runner.ring1_tool_guard import (
     DENY_EXIT_CODE,
     DEFAULT_EVIDENCE_ROOT,
     DEFAULT_SHIM_DIR,
+    DEFAULT_SHIM_PARENT,
+    Ring1ShimRootError,
     Ring1ToolGuardConfig,
     build_runtime,
     guarded_env,
@@ -302,10 +304,10 @@ def test_guarded_env_puts_shim_dir_first():
 
 
 def test_default_shim_dir_is_process_scoped():
-    assert DEFAULT_SHIM_DIR.startswith("/tmp/ce-ring1-tool-guard-")
+    assert DEFAULT_SHIM_DIR == f"{DEFAULT_SHIM_PARENT}/shim"
     if hasattr(os, "getuid"):
-        assert f"-{os.getuid()}-" in DEFAULT_SHIM_DIR
-    assert DEFAULT_SHIM_DIR.endswith(f"-{os.getpid()}")
+        assert f"-{os.getuid()}-" in DEFAULT_SHIM_PARENT
+    assert DEFAULT_SHIM_PARENT.endswith(f"-{os.getpid()}")
 
 
 def test_guarded_env_includes_backend_pinned_roots():
@@ -323,6 +325,7 @@ def test_build_runtime_carries_required_landlock_preexec(monkeypatch, tmp_path):
     monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
     work = tmp_path / "worktree"
     runtime_code = tmp_path / "validator-code"
+    shim_dir = tmp_path / "guard"
     work.mkdir()
     runtime_code.mkdir()
     config = Ring1ToolGuardConfig(
@@ -331,25 +334,74 @@ def test_build_runtime_carries_required_landlock_preexec(monkeypatch, tmp_path):
         extra_read_roots=(str(runtime_code),),
     )
 
-    runtime = build_runtime(config, "/tmp/guard")
+    runtime = build_runtime(config, str(shim_dir))
 
-    assert runtime.env["PATH"] == "/tmp/guard:/usr/bin"
+    assert runtime.env["PATH"] == f"{shim_dir}:/usr/bin"
     assert runtime.fs_capability.sandbox_fs_enforced is True
     assert runtime.fs_capability.mechanism == fm.MECHANISM_LANDLOCK
     assert str(work) in runtime.fs_capability.allow_read_roots
-    assert "/tmp/guard" in runtime.fs_capability.allow_read_roots
+    assert str(shim_dir) in runtime.fs_capability.allow_read_roots
     assert str(runtime_code) in runtime.fs_capability.allow_read_roots
     assert runtime.fs_preexec_fn is not None
+
+
+def test_build_runtime_uses_resolved_private_shim_root_for_landlock(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    work = tmp_path / "worktree"
+    parent = tmp_path / "private"
+    work.mkdir()
+    parent.mkdir(mode=0o700)
+    raw_shim = parent / ".." / "private" / "guard"
+    resolved_shim = str((parent / "guard").resolve())
+    config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
+
+    runtime = build_runtime(config, str(raw_shim))
+
+    assert runtime.shim_dir == resolved_shim
+    assert runtime.env["PATH"] == f"{resolved_shim}:/usr/bin"
+    assert resolved_shim in runtime.fs_capability.allow_read_roots
+    assert str(raw_shim) not in runtime.fs_capability.allow_read_roots
+
+
+def test_build_runtime_rejects_symlinked_shim_root_before_landlock_allowlist(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    work = tmp_path / "worktree"
+    secrets = tmp_path / "secrets"
+    work.mkdir()
+    (secrets / ".ssh").mkdir(parents=True)
+    (secrets / ".ssh" / "id_rsa").write_text("SECRET\n", encoding="utf-8")
+    shim_link = tmp_path / "shim-link"
+    shim_link.symlink_to(secrets, target_is_directory=True)
+    config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
+
+    with pytest.raises(Ring1ShimRootError, match="symlink"):
+        build_runtime(config, str(shim_link))
+
+
+def test_build_runtime_rejects_unsafe_existing_shim_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    work = tmp_path / "worktree"
+    shim_dir = tmp_path / "guard"
+    work.mkdir()
+    shim_dir.mkdir()
+    shim_dir.chmod(0o777)
+    config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
+
+    with pytest.raises(Ring1ShimRootError, match="not private"):
+        build_runtime(config, str(shim_dir))
 
 
 def test_build_runtime_fails_closed_when_required_landlock_unavailable(monkeypatch, tmp_path):
     monkeypatch.setattr(fm, "landlock_abi_version", lambda: None)
     work = tmp_path / "worktree"
+    shim_dir = tmp_path / "guard"
     work.mkdir()
     config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
 
     with pytest.raises(fm.FsMediationUnavailable, match="fail-closed"):
-        build_runtime(config, "/tmp/guard")
+        build_runtime(config, str(shim_dir))
 
 
 @pytest.mark.parametrize("posture", ["auto", "ungoverned"])
