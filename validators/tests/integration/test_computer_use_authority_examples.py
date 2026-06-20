@@ -39,6 +39,7 @@ def test_valid_examples_pass(name):
         ("invalid-missing-dor.ce.yml", "VAL-CUA-DOR-INCOMPLETE"),
         ("invalid-ratification-binding.ce.yml", "VAL-CUA-RATIFICATION"),
         ("invalid-secret-value.ce.yml", "VAL-CUA-SECRET"),
+        ("invalid-secret-value-numeric.ce.yml", "VAL-CUA-SECRET"),
     ],
 )
 def test_invalid_examples_emit_expected_code(name, code):

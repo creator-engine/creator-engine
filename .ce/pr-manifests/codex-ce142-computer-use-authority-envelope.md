@@ -19,7 +19,7 @@ and examples. Live Ring-2 hook honoring is deferred to Phase 2.
 Base:
 `a42c0aa2a567a6debf61eb81fc1f197a86cdee42` (`origin/main` at branch creation).
 
-Per-file purpose (closed path-set - 28 paths):
+Per-file purpose (closed path-set - 29 paths):
 - **`.ce/changelog/ce142-computer-use-authority-envelope.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/codex-ce142-computer-use-authority-envelope.md`** *(A)* - this carrier.
 - **`docs/contracts/README.md`** *(M)* - index the two new computer-use contracts.
@@ -33,6 +33,7 @@ Per-file purpose (closed path-set - 28 paths):
 - **`validators/examples/computer-use-authority-envelope/invalid-open-target.ce.yml`** *(A)* - closed target fixture.
 - **`validators/examples/computer-use-authority-envelope/invalid-ratification-binding.ce.yml`** *(A)* - ratified-prompt binding fixture.
 - **`validators/examples/computer-use-authority-envelope/invalid-secret-value.ce.yml`** *(A)* - token/2FA boundary fixture.
+- **`validators/examples/computer-use-authority-envelope/invalid-secret-value-numeric.ce.yml`** *(A)* - unquoted numeric OTP/2FA boundary fixture.
 - **`validators/examples/computer-use-authority-envelope/valid-account-rename.ce.yml`** *(A)* - valid account rename fixture.
 - **`validators/examples/computer-use-authority-envelope/valid-app-rename.ce.yml`** *(A)* - valid app rename fixture.
 - **`validators/examples/computer-use-authority-envelope/valid-console-setting.ce.yml`** *(A)* - valid console setting fixture.
@@ -52,9 +53,9 @@ Per-file purpose (closed path-set - 28 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=28
+AUTHORIZED_PATHS_COUNT=29
 
-AUTHORIZED_PATHS_SHA256=ca73a679c9064230b1d97e9c67d6e82e6dda594dea3c19595ddcb4ae2a45cd14
+AUTHORIZED_PATHS_SHA256=fd74bf71ae50f809c97b3b6f726f812dd8bd7f624cdf07c780117e12e7e7d18c
 
 ```text
 .ce/changelog/ce142-computer-use-authority-envelope.md
@@ -69,6 +70,7 @@ validators/examples/computer-use-authority-envelope/invalid-mechanic-target.ce.y
 validators/examples/computer-use-authority-envelope/invalid-missing-dor.ce.yml
 validators/examples/computer-use-authority-envelope/invalid-open-target.ce.yml
 validators/examples/computer-use-authority-envelope/invalid-ratification-binding.ce.yml
+validators/examples/computer-use-authority-envelope/invalid-secret-value-numeric.ce.yml
 validators/examples/computer-use-authority-envelope/invalid-secret-value.ce.yml
 validators/examples/computer-use-authority-envelope/valid-account-rename.ce.yml
 validators/examples/computer-use-authority-envelope/valid-app-rename.ce.yml

@@ -150,12 +150,30 @@ def _validate_markdown(path: Path) -> list[ValidationError]:
     return errors
 
 
+def _scalar_text(value: Any) -> str | None:
+    if value is None or isinstance(value, (dict, list)):
+        return None
+    return str(value)
+
+
+def _contains_nonempty_scalar(value: Any) -> bool:
+    text = _scalar_text(value)
+    if text is not None:
+        return bool(text.strip())
+    if isinstance(value, dict):
+        return any(_contains_nonempty_scalar(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_nonempty_scalar(child) for child in value)
+    return False
+
+
 def _contains_forbidden_ui_secret(value: Any) -> bool:
-    if isinstance(value, str):
-        return bool(_TOKEN_VALUE_RE.search(value) or _UI_SECRET_TEXT_RE.search(value))
+    text = _scalar_text(value)
+    if text is not None:
+        return bool(_TOKEN_VALUE_RE.search(text) or _UI_SECRET_TEXT_RE.search(text))
     if isinstance(value, dict):
         for key, child in value.items():
-            if _normalize_token(key) in FORBIDDEN_UI_SECRET_KEYS and isinstance(child, str) and child.strip():
+            if _normalize_token(key) in FORBIDDEN_UI_SECRET_KEYS and _contains_nonempty_scalar(child):
                 return True
             if _contains_forbidden_ui_secret(child):
                 return True
