@@ -42,6 +42,10 @@ ratification_authority:
 identity_map:
   humans:
     - human_id: peer-operator
-      github_logins: [ce-overwatch, ce-dev-2]
+      # current logins first; the trailing two are pre-2026-06-20-rename aliases
+      # (SAME account ids) kept so historical ratifiers still resolve — e.g.
+      # ADR-0001 `ratified_by: chmod735` (history is not rewritten). All map to
+      # the one human, so they can never sum to a privileged quorum of 2.
+      github_logins: [ce-overwatch, ce-dev-2, chmod735, ubuntuaws745-cmyk]
       seats: []
       app_installations: []
