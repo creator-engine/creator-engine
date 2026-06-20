@@ -91,6 +91,15 @@ def test_launch_and_hud_help_reachable(argv):
     assert exc.value.code == 0
 
 
+def test_launch_help_names_ce_state_not_hermes(capsys):
+    with pytest.raises(SystemExit) as exc:
+        ce_cli.main(["launch", "--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert ".ce/state" in out
+    assert ".hermes" not in out
+
+
 def test_launch_dry_run_json(use_fake_tmux, capsys):
     ret = ce_cli.main(["launch", "--dry-run", "--json"])
     assert ret == 0
@@ -217,7 +226,7 @@ def test_cli_launch_pins_governed_command(use_fake_tmux, monkeypatch):
     use_fake_tmux(adapter)
     monkeypatch.setattr(ce_cli.launch_runtime, "_confirm_pack", lambda r: True)
     ret = ce_cli.main(
-        ["launch", "--harness", "claude", "--mcp-config", ".hermes/s/mcp/ce-mcp.json"]
+        ["launch", "--harness", "claude", "--mcp-config", ".ce/state/launch/s/mcp/ce-mcp.json"]
     )
     assert ret == 0
     (_sess, _win, cmd) = adapter.spawned[-1]

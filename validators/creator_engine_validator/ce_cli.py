@@ -721,7 +721,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "--mcp-config",
             dest="mcp_config",
             default=None,
-            help="CE-owned MCP config path inside the repo / .hermes (pins --strict-mcp-config)",
+            help="CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config)",
         )
         p.add_argument(
             "--completion-report-ref",
@@ -755,7 +755,7 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--ledger-root",
             default=None,
-            help="path to .hermes/active-work-ledger for lifecycle registration",
+            help="path to .ce/state/active-work-ledger for lifecycle registration",
         )
         p.add_argument(
             "--controller-id",
