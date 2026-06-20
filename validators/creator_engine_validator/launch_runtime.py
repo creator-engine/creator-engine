@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import (
+    _versions,
     claude_launch_spec,
     codex_launch_spec,
     hermes_launch_spec,
@@ -117,7 +118,7 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
 
 def _default_mcp_config_path(session: str) -> str:
     """CE-owned, repo-relative MCP config path for a Controller-seat launch."""
-    return f".hermes/launch/{session}/mcp/ce-mcp.json"
+    return f"{_versions.V3_LOCAL_STATE_ROOT}/launch/{session}/mcp/ce-mcp.json"
 
 
 @dataclass(frozen=True)
@@ -567,7 +568,7 @@ def launch(
     seat_lifecycle_state: str | None = None
     resolved_repo_root = Path(repo_root or ".")
     resolved_ledger_root = Path(ledger_root) if ledger_root is not None else (
-        resolved_repo_root / ".hermes" / "active-work-ledger"
+        resolved_repo_root / _versions.V3_LOCAL_STATE_ROOT / "active-work-ledger"
     )
     state_root = (
         seat_dir.parent.parent

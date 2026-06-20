@@ -77,6 +77,23 @@ def test_residue_in_non_v3_module_does_not_fire(tmp_path, monkeypatch):
     assert errors == []
 
 
+def test_residue_in_launch_surface_fires_even_though_v1_is_frozen(tmp_path, monkeypatch):
+    root = tmp_path
+    launch_file = root / "validators" / "creator_engine_validator" / "launch_runtime.py"
+    cli_file = root / "validators" / "creator_engine_validator" / "ce_cli.py"
+    launch_file.parent.mkdir(parents=True)
+    launch_file.write_text("MCP = '.hermes/launch/s/mcp/ce-mcp.json'\n", encoding="utf-8")
+    cli_file.write_text("HELP = 'path to .ce/state/active-work-ledger'\n", encoding="utf-8")
+    monkeypatch.setattr(h, "_repo_root", lambda: root)
+    monkeypatch.setattr(h, "discover_modules", lambda pkg: {})
+    monkeypatch.setattr(ver, "V3_SCHEMAS", frozenset())
+
+    errors, _ = h.evaluate()
+
+    assert any(e.code == h.CODE_RESIDUE for e in errors)
+    assert "launch_runtime.py" in _fmt(errors)
+
+
 # --- adapter-name safety: legit transport/runtime names are NOT residue ----
 def test_legit_adapter_names_do_not_fire(tmp_path, monkeypatch):
     f = tmp_path / "fake_v3_adapter.py"

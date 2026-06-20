@@ -31,6 +31,11 @@ layout), and the grandfathered legacy corpus. Those — plus the v1
 ``.hermes/``→``.ce/`` rename — migrate in a separate, post-pilot, ratifiable
 terminology/naming gate; they are NOT this check's concern.
 
+Exception to that exclusion: the load-bearing ``ce launch`` surface is now the
+live v3 governed-seat spawn path. It is still version-classified as v1 for
+coexistence, but its state-emitting launch defaults must not point at the
+reserved ``.hermes/`` root.
+
 Contract: ``docs/contracts/v3-naming-hygiene.md``.
 """
 
@@ -55,6 +60,11 @@ CODE_STALE = "VAL-V3NAME-STALE-ALLOW"        # allowlist entry whose residue is 
 #: The CE bootstrapping-harness residue tokens (case-insensitive). ``.hermes`` is a
 #: subset of the ``hermes`` substring, so ``hermes`` covers the path token too.
 _RESIDUE_RE = re.compile(r"hermes|nefarious", re.IGNORECASE)
+_HERMES_PATH_RE = re.compile(r"\.hermes", re.IGNORECASE)
+_LAUNCH_SURFACE_REL_PATHS = (
+    "validators/creator_engine_validator/launch_runtime.py",
+    "validators/creator_engine_validator/ce_cli.py",
+)
 
 
 def _repo_root() -> Path:
@@ -80,6 +90,40 @@ def _scan(text: str) -> dict[str, list[int]]:
             if lineno not in found[token]:
                 found[token].append(lineno)
     return found
+
+
+def _scan_hermes_path(text: str) -> dict[str, list[int]]:
+    """Map launch-surface ``.hermes`` path residue to 1-based line numbers."""
+    found: dict[str, list[int]] = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if _HERMES_PATH_RE.search(line):
+            found.setdefault(".hermes", []).append(lineno)
+    return found
+
+
+def _between_markers(text: str, start: str, end: str) -> str:
+    start_idx = text.find(start)
+    if start_idx == -1:
+        return ""
+    end_idx = text.find(end, start_idx)
+    if end_idx == -1:
+        return text[start_idx:]
+    return text[start_idx:end_idx]
+
+
+def _launch_surface_text(rel_path: str, text: str) -> str:
+    if rel_path.endswith("launch_runtime.py"):
+        return text
+    if rel_path.endswith("ce_cli.py"):
+        return "\n".join(
+            part
+            for part in (
+                _between_markers(text, "# ce launch / ce hud", "def _lane_launch"),
+                _between_markers(text, "def _launch(", "def _acquire_launch_claim"),
+            )
+            if part
+        )
+    return ""
 
 
 def evaluate() -> tuple[list[ValidationError], list[ValidationError]]:
@@ -110,11 +154,32 @@ def evaluate() -> tuple[list[ValidationError], list[ValidationError]]:
                 )
             )
 
+    def _check_launch_file(rel_path: str, text: str) -> None:
+        for token, lines in sorted(_scan_hermes_path(_launch_surface_text(rel_path, text)).items()):
+            line_list = ", ".join(str(n) for n in lines)
+            errors.append(
+                make_error(
+                    CODE_RESIDUE,
+                    rel_path,
+                    f"token:{token}@L{line_list}",
+                    f"ce launch emits v3 governed-seat state and must not point at "
+                    f"{token!r} (line(s) {line_list}); use _versions.V3_LOCAL_STATE_ROOT "
+                    "and .ce/state launch paths instead.",
+                    CONTRACT,
+                )
+            )
+
     # v3 CODE surface (modules classified v3 by the _versions taxonomy).
     for dotted, path in sorted(discover_modules(_package_dir()).items()):
         if ver.classify(_rel(dotted)) != ver.V3:
             continue
         _check_file(_relpath(path, repo_root), path.read_text(encoding="utf-8"))
+
+    # Load-bearing ce launch surface: v1-classified, but emits v3 governed-seat state.
+    for rel_path in _LAUNCH_SURFACE_REL_PATHS:
+        launch_path = repo_root / rel_path
+        if launch_path.is_file():
+            _check_launch_file(rel_path, launch_path.read_text(encoding="utf-8"))
 
     # v3 SCHEMA surface (declared list).
     for schema_rel in sorted(ver.V3_SCHEMAS):

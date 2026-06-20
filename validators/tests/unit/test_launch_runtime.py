@@ -91,6 +91,13 @@ def test_hud_is_an_alias_of_launch_not_a_native_tui():
     assert hud_plan.visibility == "operator_visible"
 
 
+def test_default_mcp_config_path_uses_ce_state_root():
+    assert (
+        launch_runtime._default_mcp_config_path("ce-controller")
+        == ".ce/state/launch/ce-controller/mcp/ce-mcp.json"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Dry-run: no side effects, proves alias without a provider login
 # ---------------------------------------------------------------------------
@@ -227,6 +234,27 @@ def test_launch_writes_seat_lifecycle_record_and_event(tmp_path):
     }]
 
 
+def test_launch_defaults_lifecycle_ledger_to_ce_state(tmp_path):
+    adapter = FakeAdapter()
+    result = launch_runtime.launch(
+        harness="claude",
+        session="ce-controller",
+        window="controller",
+        repo_root=tmp_path,
+        owner_controller_id="ce-dev-1",
+        host_id="ce-dev-1",
+        purpose="creator-engine/ce-ops#149",
+        tmux_adapter=adapter,
+    )
+
+    expected = tmp_path / ".ce" / "state" / "active-work-ledger"
+    assert result.seat_record_ref is not None
+    assert Path(result.seat_record_ref) == (
+        expected / "seats" / "ce-dev-1" / "ce-controller--controller.yaml"
+    )
+    assert (expected / "seat-events" / "ce-dev-1" / "ce-controller--controller.ndjson").is_file()
+
+
 def test_launch_registration_failure_warns_escalates_and_returns_ungoverned(
     tmp_path, monkeypatch, capsys
 ):
@@ -304,7 +332,7 @@ def test_claude_launch_pins_setting_sources_and_strict_mcp(monkeypatch):
         harness="claude",
         session="s",
         tmux_adapter=adapter,
-        mcp_config_path=".hermes/s/mcp/ce-mcp.json",
+        mcp_config_path=".ce/state/launch/s/mcp/ce-mcp.json",
     )
     (_sess, _win, cmd) = adapter.spawned[-1]
     # ce-ops#26: the pane runs the sentinel wrapper; the governed argv is INSIDE it.
@@ -322,7 +350,7 @@ def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
         session="s",
         extra_args=["--dangerously-skip-permissions"],
         tmux_adapter=adapter,
-        mcp_config_path=".hermes/s/mcp/ce-mcp.json",
+        mcp_config_path=".ce/state/launch/s/mcp/ce-mcp.json",
     )
     inner = _inner_argv(result)
     assert "--dangerously-skip-permissions" in inner
@@ -429,7 +457,7 @@ def test_claude_launch_provisions_mcp_config_before_spawn(tmp_path, monkeypatch)
     # defect-a: a non-dry-run claude launch writes the strict MCP config into the
     # seat cwd (repo_root) BEFORE ensure_pane, so the governed seat can bind.
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
-    mcp_rel = ".hermes/launch/ce-controller/mcp/ce-mcp.json"
+    mcp_rel = ".ce/state/launch/ce-controller/mcp/ce-mcp.json"
     mcp_abs = tmp_path / mcp_rel
     adapter = _McpProbingAdapter(mcp_abs)
     assert not mcp_abs.exists()
@@ -449,7 +477,7 @@ def test_claude_launch_provisions_mcp_config_before_spawn(tmp_path, monkeypatch)
 def test_claude_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypatch):
     # An Operator/launcher-supplied MCP config is never clobbered by provisioning.
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
-    mcp_rel = ".hermes/launch/s/mcp/ce-mcp.json"
+    mcp_rel = ".ce/state/launch/s/mcp/ce-mcp.json"
     mcp_abs = tmp_path / mcp_rel
     mcp_abs.parent.mkdir(parents=True)
     preexisting = '{"mcpServers": {"keep": {"command": "x"}}}\n'
@@ -467,7 +495,7 @@ def test_claude_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypa
 def test_claude_launch_refuses_nonfile_mcp_target_before_spawn(tmp_path, monkeypatch):
     # A non-regular-file at the MCP target is a fail-closed LaunchRefused (no spawn).
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
-    mcp_rel = ".hermes/launch/s/mcp/ce-mcp.json"
+    mcp_rel = ".ce/state/launch/s/mcp/ce-mcp.json"
     (tmp_path / mcp_rel).mkdir(parents=True)  # a DIRECTORY where the file must go
     adapter = FakeAdapter()
     with pytest.raises(launch_runtime.LaunchRefused):

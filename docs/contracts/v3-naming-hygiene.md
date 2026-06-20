@@ -56,6 +56,13 @@ harness, nothing else.
 - the **grandfathered legacy corpus** (`specs/001`/`002` + the docs mirroring
   them).
 
+**Scoped exception to the v1 exclusion:** the load-bearing `ce launch` surface is
+now the live spawn path for v3 governed seats. Its MCP config and lifecycle
+ledger defaults are scanned for `.hermes/` path residue and must use
+`_versions.V3_LOCAL_STATE_ROOT` (`.ce/state`) instead. This does not authorize a
+full v1 rename; lane/PCO/worker/fan-in surfaces remain under the deferred v1
+freeze until a separate ratified migration.
+
 ## Neutral v3 local-state convention
 
 All v3 / v3.1 instance-local state writes go under the neutral, CE-namespaced
