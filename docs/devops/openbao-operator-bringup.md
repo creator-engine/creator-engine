@@ -86,18 +86,27 @@ Repeat policy rendering and role creation per approved dev identity (`dev-1`,
 `dev-2`, and so on). Each AppRole gets exactly one per-dev runtime policy. Do
 not bind multiple dev roles to one shared wildcard policy.
 
-## 4. Mint Short-TTL Response-Wrapped Secret-Zero
+## 4. Broker-Minted Short-TTL Secret-Zero
 
-Operator action:
+After the per-dev AppRoles exist, steady-state dev seat bootstrap is brokered
+through the `SecretIdentityBackend` adapter. The broker, not the dev seat,
+requests a response-wrapped SecretID for the concrete role (`ce-dev-1`,
+`ce-dev-2`, and so on), using a short wrapping TTL and `secret_id_num_uses=1`.
+The broker delivers only an in-memory RoleID/wrapping-token payload through the
+approved one-use seat channel and records only value-free accessors/refs.
+
+Operator reference command for a manual break-glass mint, not agent automation:
 
 ```bash
 bao read -field=role_id auth/approle/role/ce-dev-1/role-id
 bao write -wrap-ttl=10m -f auth/approle/role/ce-dev-1/secret-id
 ```
 
-Hand off only the wrapping token through the approved secret-zero channel. The
-broker unwraps once, logs value-free accessors, and never stores the SecretID in
-steady state.
+Hand off only through the approved secret-zero channel. Do not store RoleIDs,
+SecretIDs, wrapping tokens, PEMs, or resulting OpenBao tokens on disk. The seat
+unwraps once, logs in through AppRole, and uses the resulting short-lived token
+through `SecretIdentityBackend` for its own
+`ce-kv/data/devs/<dev>/runtime/*` paths.
 
 ## 5. Revoke Initial Root Token
 

@@ -12,15 +12,21 @@ from creator_engine_validator.secret_identity import (
     OpenBaoConfig,
     OpenBaoRequest,
     OpenBaoResponse,
+    OpenBaoAppRoleSession,
     OpenBaoSecretIdentityBackend,
     SecretGrant,
     SecretIdentityError,
     SecretIdentityRefused,
     SecretRef,
     SecretRequest,
+    SecretZeroGrant,
+    SecretZeroPayload,
+    SecretZeroRequest,
     UnknownBackend,
+    WrappedSecretZeroRetrieval,
     available_backends,
     get_backend,
+    redeem_wrapped_secret_zero,
     register_backend,
 )
 
@@ -55,6 +61,23 @@ def _secret_request(**overrides) -> SecretRequest:
     return SecretRequest(**values)
 
 
+def _secret_zero_request(**overrides) -> SecretZeroRequest:
+    values = {
+        "run_id": "run-123",
+        "seat_id": "dev-3",
+        "role_name": "ce-dev-3",
+        "delivery_ref": "broker-channel:dev-3:run-123",
+        "wrap_ttl_seconds": 300,
+        "secret_id_ttl_seconds": 300,
+        "secret_id_num_uses": 1,
+        "delivery": "broker-channel",
+        "auth_mount": "approle",
+        "audit_context": {"ticket": "ce-ops#135"},
+    }
+    values.update(overrides)
+    return SecretZeroRequest(**values)
+
+
 def _openbao_backend(runner, **overrides) -> OpenBaoSecretIdentityBackend:
     values = {
         "config": OpenBaoConfig(
@@ -82,6 +105,7 @@ def test_secret_identity_value_objects_are_frozen_and_value_free():
 def test_secret_ref_and_grant_schemas_reject_values(repo_root):
     ref_schema = load_schema(repo_root / "schemas/secret-ref.schema.yaml")
     grant_schema = load_schema(repo_root / "schemas/secret-grant.schema.yaml")
+    secret_zero_schema = load_schema(repo_root / "schemas/secret-zero-grant.schema.yaml")
 
     Draft202012Validator(ref_schema).validate(_secret_ref().to_record())
     with pytest.raises(JsonSchemaError):
@@ -103,6 +127,26 @@ def test_secret_ref_and_grant_schemas_reject_values(repo_root):
     Draft202012Validator(grant_schema).validate(grant.to_record())
     with pytest.raises(JsonSchemaError):
         Draft202012Validator(grant_schema).validate(grant.to_record() | {"secret_value": "leak"})
+
+    secret_zero_grant = SecretZeroGrant(
+        grant_id="openbao-secret-zero:run-123:dev-3",
+        run_id="run-123",
+        seat_id="dev-3",
+        role_name="ce-dev-3",
+        auth_mount="approle",
+        issued_at="2026-06-20T03:00:00Z",
+        expires_at="2026-06-20T03:05:00Z",
+        delivery_ref="broker-channel:dev-3:run-123",
+        wrap_accessor_ref="wrap-accessor",
+        wrapped_accessor_ref="secret-id-accessor",
+        audit_ref="openbao-secret-zero:run-123:approle/ce-dev-3",
+        revoked_at=None,
+    )
+    Draft202012Validator(secret_zero_schema).validate(secret_zero_grant.to_record())
+    with pytest.raises(JsonSchemaError):
+        Draft202012Validator(secret_zero_schema).validate(
+            secret_zero_grant.to_record() | {"wrapping_token": "wrapped-token-value"}
+        )
 
 
 def test_openbao_response_repr_str_and_json_repr_redact_raw_values():
@@ -162,6 +206,18 @@ def test_fake_backend_issues_materializes_and_revokes_value_free_grants():
     revoked = backend.revoke(materialized)
     assert revoked.revoked_at is not None
     assert backend.collect_audit(revoked)["grant_id"] == grant.grant_id
+
+
+def test_fake_backend_issues_value_free_secret_zero_grant():
+    backend = FakeSecretIdentityBackend()
+
+    grant = backend.issue_secret_zero(_secret_zero_request())
+
+    assert grant.seat_id == "dev-3"
+    assert grant.role_name == "ce-dev-3"
+    assert grant.delivery_ref == "broker-channel:dev-3:run-123"
+    assert "wrapping-token" not in repr(grant.to_record())
+    assert backend.collect_audit(grant)["backend"] == "fake"
 
 
 def test_fake_backend_refuses_unlisted_secret_before_grant():
@@ -405,3 +461,192 @@ def test_openbao_materialize_scrubs_materializer_exception_values():
     assert "live-secret-value" not in str(exc.value)
     assert exc.value.__cause__ is None
     assert exc.value.__context__ is None
+
+
+def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
+    calls: list[OpenBaoRequest] = []
+    delivered: list[tuple[str, SecretZeroPayload]] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/role-id":
+            return OpenBaoResponse(status=200, json={"data": {"role_id": "role-id-value"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/secret-id":
+            assert request.wrap_ttl_seconds == 300
+            assert request.json["ttl"] == "300s"
+            assert request.json["num_uses"] == 1
+            assert request.json["metadata"]["seat_id"] == "dev-3"
+            return OpenBaoResponse(
+                status=200,
+                json={
+                    "wrap_info": {
+                        "token": "wrapping-token-value",
+                        "accessor": "wrap-accessor",
+                        "wrapped_accessor": "secret-id-accessor",
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=runner,
+        secret_zero_deliverer=lambda target, payload: delivered.append((target, payload))
+        or f"broker-channel-delivered:{payload.seat_id}",
+    )
+
+    grant = backend.issue_secret_zero(_secret_zero_request())
+
+    assert grant.seat_id == "dev-3"
+    assert grant.role_name == "ce-dev-3"
+    assert grant.delivery_ref == "broker-channel-delivered:dev-3"
+    assert grant.wrap_accessor_ref == "wrap-accessor"
+    assert grant.wrapped_accessor_ref == "secret-id-accessor"
+    assert "wrapping-token-value" not in repr(grant)
+    assert "role-id-value" not in repr(grant.to_record())
+    assert delivered[0][0] == "broker-channel:dev-3:run-123"
+    assert delivered[0][1].role_id == "role-id-value"
+    assert delivered[0][1].wrapping_token == "wrapping-token-value"
+    assert "role-id-value" not in repr(delivered[0][1])
+    assert "wrapping-token-value" not in repr(delivered[0][1])
+    assert [call.path for call in calls] == [
+        "/v1/sys/health",
+        "/v1/sys/audit",
+        "/v1/auth/approle/role/ce-dev-3/role-id",
+        "/v1/auth/approle/role/ce-dev-3/secret-id",
+    ]
+    assert all("wrapping-token-value" not in repr(call) for call in calls)
+
+
+@pytest.mark.parametrize(
+    "secret_zero_request",
+    [
+        _secret_zero_request(role_name="ce-dev-4"),
+        _secret_zero_request(seat_id="dev-9", role_name="ce-dev-9"),
+        _secret_zero_request(wrap_ttl_seconds=601),
+        _secret_zero_request(secret_id_ttl_seconds=601),
+        _secret_zero_request(secret_id_num_uses=2),
+        _secret_zero_request(delivery_ref="file:///tmp/wrap"),
+    ],
+)
+def test_openbao_secret_zero_refuses_bad_request_before_any_io(secret_zero_request):
+    calls: list[OpenBaoRequest] = []
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=lambda request: calls.append(request) or OpenBaoResponse(status=200),
+        secret_zero_deliverer=lambda _target, _payload: "broker-channel:dev-3",
+    )
+
+    with pytest.raises(SecretIdentityRefused):
+        backend.issue_secret_zero(secret_zero_request)
+
+    assert calls == []
+
+
+def test_openbao_secret_zero_refuses_unwrapped_secret_id_response():
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/role-id":
+            return OpenBaoResponse(status=200, json={"data": {"role_id": "role-id-value"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/secret-id":
+            return OpenBaoResponse(status=200, json={"data": {"secret_id": "secret-id-value"}})
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=runner,
+        secret_zero_deliverer=lambda _target, _payload: "broker-channel:dev-3",
+    )
+
+    with pytest.raises(SecretIdentityRefused) as exc:
+        backend.issue_secret_zero(_secret_zero_request())
+
+    assert "unwrapped SecretID" in str(exc.value)
+    assert "secret-id-value" not in str(exc.value)
+
+
+def test_openbao_secret_zero_deliverer_must_not_record_raw_values():
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/role-id":
+            return OpenBaoResponse(status=200, json={"data": {"role_id": "role-id-value"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/secret-id":
+            return OpenBaoResponse(
+                status=200,
+                json={"wrap_info": {"token": "wrapping-token-value"}},
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=runner,
+        secret_zero_deliverer=lambda _target, payload: payload.wrapping_token,
+    )
+
+    with pytest.raises(SecretIdentityError) as exc:
+        backend.issue_secret_zero(_secret_zero_request())
+
+    assert "wrapping-token-value" not in str(exc.value)
+    assert exc.value.__cause__ is None
+
+
+def test_redeem_wrapped_secret_zero_returns_in_memory_openbao_session():
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/wrapping/unwrap":
+            assert request.token == "wrapping-token-value"
+            return OpenBaoResponse(
+                status=200,
+                json={"data": {"secret_id": "secret-id-value", "secret_id_accessor": "sid-accessor"}},
+            )
+        if request.path == "/v1/auth/approle/login":
+            assert request.json["role_id"] == "role-id-value"
+            assert request.json["secret_id"] == "secret-id-value"
+            return OpenBaoResponse(
+                status=200,
+                json={"auth": {"client_token": "seat-token-value", "accessor": "token-accessor", "lease_duration": 600}},
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    session = redeem_wrapped_secret_zero(
+        WrappedSecretZeroRetrieval(
+            seat_id="dev-3",
+            role_name="ce-dev-3",
+            role_id_supplier=lambda: "role-id-value",
+            wrapping_token_supplier=lambda: "wrapping-token-value",
+        ),
+        runner=runner,
+    )
+
+    assert isinstance(session, OpenBaoAppRoleSession)
+    assert session.token_supplier() == "seat-token-value"
+    assert session.token_accessor_ref == "token-accessor"
+    assert session.secret_id_accessor_ref == "sid-accessor"
+    assert session.as_openbao_config(address="https://bao.example").token_supplier() == "seat-token-value"
+    assert "seat-token-value" not in repr(session)
+    assert "secret-id-value" not in repr(session)
+    assert all("secret-id-value" not in repr(call) for call in calls)

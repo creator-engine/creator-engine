@@ -205,6 +205,40 @@ def test_http_runner_uses_headers_and_redacts_errors():
     assert captured["timeout"] == 3
 
 
+def test_http_runner_emits_openbao_wrap_ttl_header():
+    captured = {}
+
+    def transport(method, url, headers, body, timeout, ssl_context):
+        captured.update(
+            {
+                "method": method,
+                "url": url,
+                "headers": dict(headers),
+                "body": body,
+                "timeout": timeout,
+                "ssl_context": ssl_context,
+            }
+        )
+        return 200, b'{"wrap_info":{"token":"wrapped"}}'
+
+    runner = make_openbao_http_runner(
+        OpenBaoHttpConfig(address="https://bao.example", timeout_seconds=3),
+        transport=transport,
+    )
+    response = runner(
+        OpenBaoRequest(
+            method="POST",
+            path="/v1/auth/approle/role/ce-dev-3/secret-id",
+            token="broker-token",
+            json={"num_uses": 1},
+            wrap_ttl_seconds=300,
+        )
+    )
+
+    assert response.status == 200
+    assert captured["headers"]["X-Vault-Wrap-TTL"] == "300s"
+
+
 def test_http_runner_scrubs_url_errors():
     def transport(_method, _url, _headers, _body, _timeout, _ssl_context):
         raise urllib.error.URLError("offline broker-token")
