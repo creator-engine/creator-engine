@@ -15,7 +15,7 @@ Operator-ratified Hetzner VPS, logically segregated and tailnet-only OpenBao
 topology. This PR does not initialize or unseal production, does not inject real
 secret-zero, and does not migrate live secrets.
 
-Per-file purpose (closed path-set - 17 paths):
+Per-file purpose (closed path-set - 19 paths):
 - **`.ce/changelog/ce113-openbao-golive.md`** *(A)* - changelog fragment for go-live artifacts.
 - **`.ce/pr-manifests/ce113-openbao-golive.md`** *(A)* - this closed carrier.
 - **`docs/devops/openbao-operator-bringup.md`** *(A)* - Operator-only init/unseal/root-token/AppRole/secret-zero bringup runbook.
@@ -28,7 +28,9 @@ Per-file purpose (closed path-set - 17 paths):
 - **`docs/devops/openbao/render-dev-policy.sh`** *(A)* - safe renderer for per-dev policy files.
 - **`docs/devops/openbao/restore-drill-openbao.sh`** *(A)* - encrypted snapshot restore-drill script for a throwaway instance.
 - **`docs/devops/openbao/snapshot-openbao.sh`** *(A)* - encrypted off-host raft snapshot script.
+- **`docs/devops/openbao/verify-production-config-openbao-2.5.5.sh`** *(A)* - opt-in smoke that downloads/verifies OpenBao 2.5.5 and loads the rendered production config.
 - **`validators/creator_engine_validator/openbao_golive.py`** *(A)* - value-free artifact validation helpers.
+- **`validators/tests/integration/test_openbao_golive_production_config_live.py`** *(A)* - opt-in live regression for OpenBao 2.5.5 production config acceptance.
 - **`validators/tests/integration/test_openbao_golive_restore_drill_live.py`** *(A)* - opt-in local OpenBao raft restore-drill proof.
 - **`validators/tests/unit/test_openbao_golive.py`** *(A)* - unit coverage for artifacts and scripts.
 - **`validators/wheelhouse/SHA256SUMS`** *(M)* - re-pinned app wheel digest only.
@@ -37,9 +39,9 @@ Per-file purpose (closed path-set - 17 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=19
 
-AUTHORIZED_PATHS_SHA256=0381b204326e5eee4ea44e33b0257816536cc5d3e72d93caae77f9b9d363a6b3
+AUTHORIZED_PATHS_SHA256=87be8f4bd02de0256c1f6f5d654f0df40d1a825b280d48f12f594d415472ff9d
 
 ```text
 .ce/changelog/ce113-openbao-golive.md
@@ -54,7 +56,9 @@ docs/devops/openbao/provision-openbao.sh
 docs/devops/openbao/render-dev-policy.sh
 docs/devops/openbao/restore-drill-openbao.sh
 docs/devops/openbao/snapshot-openbao.sh
+docs/devops/openbao/verify-production-config-openbao-2.5.5.sh
 validators/creator_engine_validator/openbao_golive.py
+validators/tests/integration/test_openbao_golive_production_config_live.py
 validators/tests/integration/test_openbao_golive_restore_drill_live.py
 validators/tests/unit/test_openbao_golive.py
 validators/wheelhouse/SHA256SUMS

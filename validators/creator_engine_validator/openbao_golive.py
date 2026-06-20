@@ -19,6 +19,7 @@ GO_LIVE_ARTIFACTS = (
     "docs/devops/openbao/emergency-revoke-openbao.sh",
     "docs/devops/openbao/ce-dev-policy.hcl.tmpl",
     "docs/devops/openbao/render-dev-policy.sh",
+    "docs/devops/openbao/verify-production-config-openbao-2.5.5.sh",
     "docs/devops/openbao-production-golive.md",
     "docs/devops/openbao-operator-bringup.md",
 )
@@ -44,8 +45,8 @@ def validate_tailnet_tls_hcl(hcl: str) -> list[str]:
     required_snippets = {
         'storage "raft"': "missing integrated raft storage",
         'listener "tcp"': "missing tcp listener",
-        'address         = "${OPENBAO_TAILNET_BIND_ADDR}:8200"': "listener is not parameterized to the tailnet bind address",
-        'cluster_address = "${OPENBAO_TAILNET_BIND_ADDR}:8201"': "cluster listener is not tailnet-bound",
+        'address         = "${OPENBAO_TAILNET_BIND_ADDR}:${OPENBAO_API_PORT}"': "listener is not parameterized to the tailnet bind address",
+        'cluster_address = "${OPENBAO_TAILNET_BIND_ADDR}:${OPENBAO_CLUSTER_PORT}"': "cluster listener is not tailnet-bound",
         "tls_disable      = false": "TLS is not enforced",
         'tls_cert_file    = "${OPENBAO_TLS_CERT_FILE}"': "TLS certificate path is not parameterized",
         'tls_key_file     = "${OPENBAO_TLS_KEY_FILE}"': "TLS key path is not parameterized",
@@ -58,6 +59,8 @@ def validate_tailnet_tls_hcl(hcl: str) -> list[str]:
     for marker in PUBLIC_BIND_MARKERS:
         if marker in hcl:
             violations.append(f"public listener marker present: {marker}")
+    if "disable_mlock" in hcl:
+        violations.append("OpenBao 2.5.5 no longer accepts disable_mlock in server config")
     return violations
 
 
@@ -72,11 +75,19 @@ def validate_systemd_unit(unit: str) -> list[str]:
         "ProtectSystem=strict": "ProtectSystem=strict must be enabled",
         "ProtectHome=true": "ProtectHome=true must be enabled",
         "PrivateTmp=true": "PrivateTmp must be enabled",
-        "CapabilityBoundingSet=CAP_IPC_LOCK": "capabilities must be bounded to IPC lock",
+        "MemoryDenyWriteExecute=true": "MemoryDenyWriteExecute must remain enabled",
         "ReadWritePaths=/var/lib/openbao /var/log/openbao /run/openbao": "write paths must be explicitly scoped",
     }
     for snippet, message in required_snippets.items():
         if snippet not in unit:
+            violations.append(message)
+    forbidden_snippets = {
+        "AmbientCapabilities=CAP_IPC_LOCK": "OpenBao 2.5.5 removed mlock support; CAP_IPC_LOCK must not be granted",
+        "CapabilityBoundingSet=CAP_IPC_LOCK": "OpenBao 2.5.5 removed mlock support; CAP_IPC_LOCK must not be granted",
+        "LimitMEMLOCK=": "OpenBao 2.5.5 removed mlock support; memlock limits are moot",
+    }
+    for snippet, message in forbidden_snippets.items():
+        if snippet in unit:
             violations.append(message)
     if "User=root" in unit:
         violations.append("service must not run as root")
@@ -93,12 +104,13 @@ def validate_provision_script(script: str) -> list[str]:
         "install -d -o \"$OPENBAO_USER\" -g \"$OPENBAO_GROUP\" -m 0700": "data directories must be owner-scoped 0700",
         "require_tailnet_bind": "script must reject non-tailnet bind addresses",
         "--apply": "script must separate planning from privileged apply",
+        "--render-config": "script must expose a pure rendered-config mode for live config validation",
         "systemctl daemon-reload": "script must reload systemd on apply",
     }
     for snippet, message in required_snippets.items():
         if snippet not in script:
             violations.append(message)
-    forbidden = ("operator init", "operator unseal", "root_token")
+    forbidden = ("operator init", "operator unseal", "root_token", "disable_mlock")
     for snippet in forbidden:
         if snippet in script:
             violations.append(f"provision script must not perform Operator trust-root action: {snippet}")

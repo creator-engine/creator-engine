@@ -15,3 +15,8 @@ throwaway raft restore drill.
 Review fix: replaced the shared wildcard broker policy with a per-dev policy
 template and renderer, so each AppRole is bound to only its own
 `ce-kv/devs/<dev-id>/runtime/*` paths.
+
+Review fix: removed OpenBao 2.5.5-incompatible mlock settings from the
+production HCL render and systemd unit, and added an opt-in live smoke that
+downloads, verifies, and starts OpenBao 2.5.5 against the rendered production
+config.

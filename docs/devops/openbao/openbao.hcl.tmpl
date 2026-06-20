@@ -2,11 +2,10 @@
 # Rendered by provision-openbao.sh with Operator-supplied host values.
 
 ui = false
-disable_mlock = false
 cluster_name = "${OPENBAO_CLUSTER_NAME}"
 
-api_addr = "https://${OPENBAO_TAILNET_HOSTNAME}:8200"
-cluster_addr = "https://${OPENBAO_TAILNET_HOSTNAME}:8201"
+api_addr = "https://${OPENBAO_TAILNET_HOSTNAME}:${OPENBAO_API_PORT}"
+cluster_addr = "https://${OPENBAO_TAILNET_HOSTNAME}:${OPENBAO_CLUSTER_PORT}"
 
 storage "raft" {
   path    = "${OPENBAO_RAFT_PATH}"
@@ -14,8 +13,8 @@ storage "raft" {
 }
 
 listener "tcp" {
-  address         = "${OPENBAO_TAILNET_BIND_ADDR}:8200"
-  cluster_address = "${OPENBAO_TAILNET_BIND_ADDR}:8201"
+  address         = "${OPENBAO_TAILNET_BIND_ADDR}:${OPENBAO_API_PORT}"
+  cluster_address = "${OPENBAO_TAILNET_BIND_ADDR}:${OPENBAO_CLUSTER_PORT}"
 
   tls_disable      = false
   tls_cert_file    = "${OPENBAO_TLS_CERT_FILE}"

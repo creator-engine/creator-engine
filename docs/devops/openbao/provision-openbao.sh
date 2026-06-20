@@ -2,8 +2,8 @@
 set -euo pipefail
 
 MODE="${1:---plan}"
-if [[ "$MODE" != "--plan" && "$MODE" != "--apply" ]]; then
-  echo "usage: $0 [--plan|--apply]" >&2
+if [[ "$MODE" != "--plan" && "$MODE" != "--apply" && "$MODE" != "--render-config" ]]; then
+  echo "usage: $0 [--plan|--apply|--render-config]" >&2
   exit 64
 fi
 
@@ -22,6 +22,8 @@ OPENBAO_TLS_KEY_FILE="${OPENBAO_TLS_KEY_FILE:-/etc/openbao/tls/openbao.key}"
 OPENBAO_TLS_CLIENT_CA_FILE="${OPENBAO_TLS_CLIENT_CA_FILE:-/etc/openbao/tls/ca.crt}"
 OPENBAO_TAILNET_HOSTNAME="${OPENBAO_TAILNET_HOSTNAME:?set the tailnet DNS name, for example openbao.<tailnet>.ts.net}"
 OPENBAO_TAILNET_BIND_ADDR="${OPENBAO_TAILNET_BIND_ADDR:?set the Tailscale bind address, for example 100.x.y.z}"
+OPENBAO_API_PORT="${OPENBAO_API_PORT:-8200}"
+OPENBAO_CLUSTER_PORT="${OPENBAO_CLUSTER_PORT:-8201}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_TEMPLATE="${SERVICE_TEMPLATE:-$ROOT_DIR/openbao.service}"
@@ -65,11 +67,10 @@ require_apply_root() {
 render_config() {
   cat <<EOF
 ui = false
-disable_mlock = false
 cluster_name = "$OPENBAO_CLUSTER_NAME"
 
-api_addr = "https://$OPENBAO_TAILNET_HOSTNAME:8200"
-cluster_addr = "https://$OPENBAO_TAILNET_HOSTNAME:8201"
+api_addr = "https://$OPENBAO_TAILNET_HOSTNAME:$OPENBAO_API_PORT"
+cluster_addr = "https://$OPENBAO_TAILNET_HOSTNAME:$OPENBAO_CLUSTER_PORT"
 
 storage "raft" {
   path    = "$OPENBAO_RAFT_PATH"
@@ -77,8 +78,8 @@ storage "raft" {
 }
 
 listener "tcp" {
-  address         = "$OPENBAO_TAILNET_BIND_ADDR:8200"
-  cluster_address = "$OPENBAO_TAILNET_BIND_ADDR:8201"
+  address         = "$OPENBAO_TAILNET_BIND_ADDR:$OPENBAO_API_PORT"
+  cluster_address = "$OPENBAO_TAILNET_BIND_ADDR:$OPENBAO_CLUSTER_PORT"
 
   tls_disable      = false
   tls_cert_file    = "$OPENBAO_TLS_CERT_FILE"
@@ -98,6 +99,10 @@ EOF
 }
 
 require_tailnet_bind
+if [[ "$MODE" == "--render-config" ]]; then
+  render_config
+  exit 0
+fi
 require_apply_root
 
 if ! id -u "$OPENBAO_USER" >/dev/null 2>&1; then

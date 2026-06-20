@@ -35,6 +35,7 @@ def test_openbao_hcl_is_raft_tailnet_tls_and_audit_fail_closed(repo_root: Path):
 
     assert validate_tailnet_tls_hcl(hcl) == []
     assert "0.0.0.0" not in hcl
+    assert "disable_mlock" not in hcl
     assert "tls_disable = true" not in hcl
 
 
@@ -43,6 +44,9 @@ def test_openbao_systemd_unit_uses_dedicated_user_and_hardening(repo_root: Path)
 
     assert validate_systemd_unit(unit) == []
     assert "User=root" not in unit
+    assert "MemoryDenyWriteExecute=true" in unit
+    assert "CAP_IPC_LOCK" not in unit
+    assert "LimitMEMLOCK" not in unit
 
 
 def test_openbao_provision_script_is_idempotent_and_not_trust_root(repo_root: Path):
@@ -164,9 +168,34 @@ def test_provision_plan_renders_tailnet_bound_config(repo_root: Path):
     assert 'storage "raft"' in completed.stdout
     assert 'address         = "100.64.10.20:8200"' in completed.stdout
     assert "tls_disable      = false" in completed.stdout
+    assert "disable_mlock" not in completed.stdout
     assert 'audit "file" "ce_audit"' in completed.stdout
     assert "operator init" not in completed.stdout
     assert "operator unseal" not in completed.stdout
+
+
+def test_provision_render_config_outputs_loadable_hcl_only(repo_root: Path):
+    script = repo_root / "docs/devops/openbao/provision-openbao.sh"
+    env = {
+        **os.environ,
+        "OPENBAO_TAILNET_HOSTNAME": "openbao.example.ts.net",
+        "OPENBAO_TAILNET_BIND_ADDR": "100.64.10.20",
+    }
+
+    completed = subprocess.run(
+        [str(script), "--render-config"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    assert completed.stdout.startswith("ui = false\n")
+    assert "+ install" not in completed.stdout
+    assert "# plan only:" not in completed.stdout
+    assert "disable_mlock" not in completed.stdout
+    assert 'address         = "100.64.10.20:8200"' in completed.stdout
 
 
 def test_snapshot_script_encrypts_and_copies_offhost_for_local_drill(

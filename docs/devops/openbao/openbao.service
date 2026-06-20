@@ -15,10 +15,7 @@ KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
-LimitMEMLOCK=infinity
 
-AmbientCapabilities=CAP_IPC_LOCK
-CapabilityBoundingSet=CAP_IPC_LOCK
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
