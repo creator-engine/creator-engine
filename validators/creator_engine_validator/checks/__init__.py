@@ -90,3 +90,4 @@ from . import peer_authority as peer_authority  # noqa: E402,F401
 from . import forge_claim_dedup as forge_claim_dedup  # noqa: E402,F401
 from . import install_answers as install_answers  # noqa: E402,F401
 from . import seat_event as seat_event  # noqa: E402,F401
+from . import ce_playbook_format as ce_playbook_format  # noqa: E402,F401

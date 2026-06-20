@@ -30,7 +30,8 @@ def test_registered_in_check_surface():
     # check: 50 -> 51. v3.5-E.3 E3-G1 added the install_answers check
     # (declared in-gate): 51 -> 52. ce-ops#26 added seat_event: 52 -> 53.
     # ce-ops#142 added ce_computer_use_authority_envelope: 53 -> 54.
-    assert len(reg) == 54
+    # ce-ops#145 added ce_playbook_format: 54 -> 55.
+    assert len(reg) == 55
 
 
 def test_green_on_real_package(version_boundary_real_run):

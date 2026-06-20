@@ -1,0 +1,172 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/playbook.schema.yaml"
+title: "Creator Engine playbook workflow"
+description: >-
+  Machine-checkable workflow descriptor for one CE playbook directory under
+  playbooks/. The descriptor binds a human README, dispatch envelope template,
+  governed briefs, and harness contract into one reusable operating flow.
+type: object
+required:
+  - kind
+  - schema_version
+  - playbook
+  - preconditions
+  - outputs
+  - dispatch
+  - gates
+  - stages
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce-playbook
+  schema_version:
+    type: string
+    const: "1"
+  playbook:
+    type: object
+    required: [name, title, type, owner_issue, status]
+    unevaluatedProperties: false
+    properties:
+      name:
+        $ref: "#/$defs/slug"
+      title:
+        $ref: "#/$defs/non_empty_string"
+      type:
+        type: string
+        enum: [workflow, role-action]
+      owner_issue:
+        type: string
+        pattern: "^ce-ops#[0-9]+$"
+      folds:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          pattern: "^ce-ops#[0-9]+$"
+      status:
+        type: string
+        enum: [active, draft, deprecated]
+      summary:
+        type: string
+        maxLength: 2048
+  preconditions:
+    $ref: "#/$defs/non_empty_steps"
+  outputs:
+    $ref: "#/$defs/non_empty_steps"
+  dispatch:
+    type: object
+    required: [default_target, authority_envelope]
+    unevaluatedProperties: false
+    properties:
+      default_target:
+        $ref: "#/$defs/dispatch_target"
+      authority_envelope:
+        type: string
+        const: envelope.template.yml
+      work_claim_required:
+        type: boolean
+      review_required:
+        type: boolean
+  gates:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: object
+      required: [id, type, description, required]
+      unevaluatedProperties: false
+      properties:
+        id:
+          $ref: "#/$defs/slug"
+        type:
+          type: string
+          enum: [dor, dod, halt, evidence, human, ci, ratification, review, sunset]
+        description:
+          $ref: "#/$defs/non_empty_string"
+        required:
+          type: boolean
+  stages:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, title, brief, dispatch_target, gates]
+      unevaluatedProperties: false
+      properties:
+        id:
+          $ref: "#/$defs/slug"
+        title:
+          $ref: "#/$defs/non_empty_string"
+        brief:
+          type: string
+          pattern: "^briefs/[a-z0-9][a-z0-9-]*\\.md$"
+        dispatch_target:
+          $ref: "#/$defs/dispatch_target"
+        gates:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/$defs/slug"
+        ratified_flow_hooks:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/$defs/hook"
+  ratified_flow_hooks:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/hook"
+  references:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      $ref: "#/$defs/non_empty_string"
+  metadata:
+    type: object
+    additionalProperties: true
+$defs:
+  slug:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]{1,96}$"
+  non_empty_string:
+    type: string
+    minLength: 1
+    pattern: "\\S"
+  dispatch_target:
+    type: string
+    enum:
+      - governed-seat
+      - reviewer-seat
+      - author-seat
+      - controller-seat
+      - human-operator
+      - uncontained-courier
+      - forge-courier
+      - ci
+  non_empty_steps:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, description]
+      unevaluatedProperties: false
+      properties:
+        id:
+          $ref: "#/$defs/slug"
+        description:
+          $ref: "#/$defs/non_empty_string"
+  hook:
+    type: object
+    required: [id, trigger, action]
+    unevaluatedProperties: false
+    properties:
+      id:
+        $ref: "#/$defs/slug"
+      trigger:
+        $ref: "#/$defs/non_empty_string"
+      action:
+        $ref: "#/$defs/non_empty_string"

@@ -1,0 +1,65 @@
+kind: ce-playbook
+schema_version: "1"
+playbook:
+  name: reviewer
+  title: "Reviewer"
+  type: role-action
+  owner_issue: ce-ops#145
+  folds:
+    - ce-ops#151
+  status: active
+  summary: "Full PR reviews and reason-scoped re-reviews."
+preconditions:
+  - id: peer-reviewer
+    description: "Reviewer is distinct from the PR author."
+  - id: refreshed-context
+    description: "Low-context reviewer is save-clear-resume refreshed before dispatch."
+outputs:
+  - id: github-review
+    description: "Reviewer submits a GitHub review with grounded findings or approval."
+  - id: scope-evidence
+    description: "Evidence names the inspected range or scoped findings."
+dispatch:
+  default_target: reviewer-seat
+  authority_envelope: envelope.template.yml
+  work_claim_required: true
+  review_required: false
+gates:
+  - id: reviewer-refreshed
+    type: dor
+    description: "Reviewer starts from a fresh brief after save-clear-resume."
+    required: true
+  - id: reason-bound
+    type: dor
+    description: "Re-review reason is one of base-only-rebase, scoped-content-change, or full."
+    required: true
+  - id: review-submitted
+    type: dod
+    description: "GitHub review is submitted with evidence."
+    required: true
+stages:
+  - id: refresh-seat
+    title: "Refresh Seat"
+    brief: briefs/refresh-seat.md
+    dispatch_target: reviewer-seat
+    gates: [reviewer-refreshed]
+  - id: review
+    title: "Full Review"
+    brief: briefs/review.md
+    dispatch_target: reviewer-seat
+    gates: [review-submitted]
+  - id: re-review
+    title: "Re-review"
+    brief: briefs/re-review.md
+    dispatch_target: reviewer-seat
+    gates: [reason-bound, review-submitted]
+ratified_flow_hooks:
+  - id: base-only-fast-confirm
+    trigger: "reason: base-only-rebase"
+    action: "Use git range-diff <old>..<new> and confirm no non-base content changed."
+  - id: scoped-finding-only
+    trigger: "reason: scoped-content-change"
+    action: "Verify only the named prior findings."
+references:
+  - ce-ops#145
+  - ce-ops#151

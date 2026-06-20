@@ -1,0 +1,73 @@
+kind: ce-playbook
+schema_version: "1"
+playbook:
+  name: computer-use-ticket
+  title: "Computer-use ticket"
+  type: workflow
+  owner_issue: ce-ops#145
+  status: active
+  summary: "Authenticated-browser loop for bounded UI ticket execution."
+preconditions:
+  - id: ticket-scoped
+    description: "Ticket names a closed UI target, desired state, and authority envelope."
+  - id: live-browser
+    description: "Live authenticated Chrome is reachable through chrome-devtools-mcp --autoConnect."
+outputs:
+  - id: screenshot-evidence
+    description: "Screenshot evidence captures the final UI state."
+  - id: machine-recheck
+    description: "Machine-readable recheck is captured when the UI exposes one."
+  - id: closed-set-report
+    description: "Closeout uses only done, blocked-human, blocked-substrate, or no-op."
+dispatch:
+  default_target: governed-seat
+  authority_envelope: envelope.template.yml
+  work_claim_required: true
+  review_required: false
+gates:
+  - id: dor-authority
+    type: dor
+    description: "Authority envelope is filled, bounded, and non-secret."
+    required: true
+  - id: halt-human-auth
+    type: halt
+    description: "Sudo, 2FA/MFA, password, or recovery-code prompts halt for human action."
+    required: true
+  - id: evidence-closed-set
+    type: evidence
+    description: "Screenshot, machine recheck, and closed-set report are recorded."
+    required: true
+stages:
+  - id: prepare-ticket
+    title: "Prepare Ticket"
+    brief: briefs/prepare-ticket.md
+    dispatch_target: governed-seat
+    gates: [dor-authority]
+  - id: connect-browser
+    title: "Connect Browser"
+    brief: briefs/connect-browser.md
+    dispatch_target: governed-seat
+    gates: [dor-authority]
+  - id: execute-change
+    title: "Execute Change"
+    brief: briefs/execute-change.md
+    dispatch_target: governed-seat
+    gates: [halt-human-auth]
+  - id: capture-evidence
+    title: "Capture Evidence"
+    brief: briefs/capture-evidence.md
+    dispatch_target: governed-seat
+    gates: [evidence-closed-set]
+  - id: closeout
+    title: "Close Out"
+    brief: briefs/closeout.md
+    dispatch_target: governed-seat
+    gates: [evidence-closed-set]
+ratified_flow_hooks:
+  - id: identity-alias
+    trigger: "identity-rename"
+    action: "Preserve old logins as historical aliases in the closeout."
+references:
+  - ce-ops#145
+  - docs/contracts/computer-use-worker-harness.md
+  - docs/contracts/computer-use-authority-envelope.md

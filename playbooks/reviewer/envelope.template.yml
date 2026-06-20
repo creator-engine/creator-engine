@@ -1,0 +1,20 @@
+scope:
+  issue: ce-ops#145
+  playbook: reviewer
+  pull_request: ""
+  reason: ""
+  named_findings: []
+authority:
+  dispatch_target: reviewer-seat
+  allowed_actions:
+    - inspect-diff
+    - run-readonly-tests
+    - submit-github-review
+  forbidden_actions:
+    - self-review
+    - merge
+    - expand-scoped-review-without-full-reason
+evidence:
+  required:
+    - inspected-range
+    - review-verdict

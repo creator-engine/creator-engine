@@ -22,6 +22,7 @@ Planned contract set and source FR coverage:
 - `verification-spec/` and `verification-spec.md` — FR-030, FR-031.
 - `computer-use-authority-envelope.md` — ce-ops#142 Phase 1 computer-use UI side-effect authority envelope.
 - `computer-use-worker-harness.md` — ce-ops#142 Phase 1 authenticated-browser worker harness contract.
+- `playbook-format.md` — ce-ops#145 playbook scaffold and `workflow.ce.yml` format contract.
 
 The authoritative source for generated work remains the feature plan until each contract document is authored in its story phase.
 
