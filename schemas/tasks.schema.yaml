@@ -1,0 +1,328 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/tasks.schema.yaml"
+title: "Creator Engine Ratified Tasks Handoff"
+description: |
+  Reference schema for `tasks.ce.yml`, the ratified-tasks to worker handoff
+  contract. This schema defines the design-pass shape only; semantic digest
+  recomputation and runtime enforcement require a later Operator-ratified
+  validator/runtime implementation.
+type: object
+required:
+  - kind
+  - schema_version
+  - source
+  - ratification
+  - sha_binding
+  - tasks
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: tasks-handoff
+  schema_version:
+    type: string
+    enum: ["1"]
+  source:
+    $ref: "#/$defs/source_refs"
+  ratification:
+    $ref: "#/$defs/ratification"
+  sha_binding:
+    $ref: "#/$defs/task_set_sha_binding"
+  tasks:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/task"
+
+$defs:
+  source_refs:
+    type: object
+    required:
+      - spec_ref
+      - plan_ref
+      - tasks_ref
+    unevaluatedProperties: false
+    properties:
+      spec_ref:
+        $ref: "#/$defs/repo_path"
+      spec_sidecar_ref:
+        $ref: "#/$defs/repo_path"
+      plan_ref:
+        $ref: "#/$defs/repo_path"
+      plan_sidecar_ref:
+        $ref: "#/$defs/repo_path"
+      tasks_ref:
+        $ref: "#/$defs/repo_path"
+      legacy_tasks_sidecar_ref:
+        $ref: "#/$defs/repo_path"
+
+  ratification:
+    type: object
+    required:
+      - ratifier_ref
+      - ratified_task_set_sha256
+      - ratified_at
+      - authority_basis
+    unevaluatedProperties: false
+    properties:
+      ratifier_ref:
+        $ref: "#/$defs/hex64"
+        description: "Opaque ratifier digest; never a raw account."
+      ratified_task_set_sha256:
+        $ref: "#/$defs/hex64"
+      ratified_at:
+        type: string
+        minLength: 1
+      ratification_record_ref:
+        $ref: "#/$defs/repo_path"
+      authority_basis:
+        type: string
+        enum:
+          - operator
+          - delegated-human
+
+  task_set_sha_binding:
+    type: object
+    required:
+      - algorithm
+      - canonicalization
+      - task_set_sha256
+      - source_artifacts
+    unevaluatedProperties: false
+    properties:
+      algorithm:
+        type: string
+        const: sha256
+      canonicalization:
+        type: string
+        const: ce-tasks-handoff-v1
+      task_set_sha256:
+        $ref: "#/$defs/hex64"
+      source_artifacts:
+        type: object
+        required:
+          - spec_sha256
+          - plan_sha256
+          - tasks_sha256
+        unevaluatedProperties: false
+        properties:
+          spec_sha256:
+            $ref: "#/$defs/hex64"
+          spec_sidecar_sha256:
+            $ref: "#/$defs/hex64"
+          plan_sha256:
+            $ref: "#/$defs/hex64"
+          plan_sidecar_sha256:
+            $ref: "#/$defs/hex64"
+          tasks_sha256:
+            $ref: "#/$defs/hex64"
+          legacy_tasks_sidecar_sha256:
+            $ref: "#/$defs/hex64"
+
+  task:
+    type: object
+    required:
+      - id
+      - goal
+      - done_when
+      - mutation_class
+      - permitted_actions
+      - scope
+      - verification
+      - sha_binding
+      - do_not_replan
+      - harness
+    unevaluatedProperties: false
+    properties:
+      id:
+        type: string
+        pattern: "^T[0-9]{3,4}[A-Za-z0-9_.-]*$"
+      source_task_ref:
+        type: string
+        minLength: 1
+        description: "Human-readable pointer into tasks.md, such as line anchor or task id."
+      goal:
+        type: string
+        minLength: 1
+      done_when:
+        type: array
+        minItems: 1
+        items:
+          type: string
+          minLength: 1
+      mutation_class:
+        type: string
+        enum:
+          - docs
+          - code
+          - schema
+          - deploy
+          - governance
+          - identity
+          - security
+          - attestation
+          - redaction
+          - none
+      permitted_actions:
+        type: array
+        minItems: 1
+        items:
+          type: string
+          minLength: 1
+      scope:
+        $ref: "#/$defs/task_scope"
+      verification:
+        $ref: "#/$defs/verification"
+      sha_binding:
+        $ref: "#/$defs/task_sha_binding"
+      do_not_replan:
+        type: boolean
+        const: true
+      harness:
+        $ref: "#/$defs/harness_contract"
+
+  task_scope:
+    type: object
+    required:
+      - allowed_paths
+    anyOf:
+      - properties:
+          allowed_paths:
+            type: array
+            minItems: 1
+      - required:
+          - no_file_change
+        properties:
+          no_file_change:
+            type: boolean
+            const: true
+    unevaluatedProperties: false
+    properties:
+      allowed_paths:
+        type: array
+        items:
+          $ref: "#/$defs/allowed_scope_path"
+      prohibited_paths:
+        type: array
+        items:
+          $ref: "#/$defs/exact_repo_path"
+      no_file_change:
+        type: boolean
+        default: false
+        description: "True only for research/evidence tasks that intentionally mutate no repo files."
+
+  verification:
+    type: object
+    required:
+      - required_commands
+      - evidence_refs
+    unevaluatedProperties: false
+    properties:
+      required_commands:
+        type: array
+        items:
+          type: string
+          minLength: 1
+      evidence_refs:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/repo_path_or_glob"
+
+  task_sha_binding:
+    type: object
+    required:
+      - algorithm
+      - canonicalization
+      - task_spec_sha256
+    unevaluatedProperties: false
+    properties:
+      algorithm:
+        type: string
+        const: sha256
+      canonicalization:
+        type: string
+        const: ce-tasks-handoff-v1
+      task_spec_sha256:
+        $ref: "#/$defs/hex64"
+
+  harness_contract:
+    type: object
+    required:
+      - role
+      - allowed_harnesses
+      - requires_containment
+      - stop_conditions
+    unevaluatedProperties: false
+    properties:
+      role:
+        type: string
+        enum:
+          - implementer
+          - reviewer
+          - security
+          - release
+      allowed_harnesses:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          enum:
+            - claude
+            - codex
+      requires_containment:
+        type: boolean
+      runtime_policy_ref:
+        $ref: "#/$defs/repo_path"
+      stop_conditions:
+        type: array
+        minItems: 1
+        items:
+          type: string
+          enum:
+            - task_sha_drift
+            - scope_boundary_pressure
+            - missing_authority
+            - required_validation_failed
+            - blocked_needs_replan
+            - secret_or_credential_request
+
+  repo_path:
+    type: string
+    minLength: 1
+    not:
+      pattern: "^/"
+    description: "Repo-relative path; absolute paths are refused."
+
+  exact_repo_path:
+    allOf:
+      - $ref: "#/$defs/repo_path"
+      - not:
+          pattern: "[*?\\[\\]]"
+    description: "Exact repo-relative path; glob characters are refused."
+
+  allowed_scope_path:
+    description: |
+      Exact repo-relative path, or a limited glob anchored under a named
+      directory. Recursive `**`, root-level bare globs, and unanchored globs are
+      refused. Examples: `docs/x.md` and `src/foo/*.py` pass; `**` and `*.py`
+      fail.
+    anyOf:
+      - $ref: "#/$defs/exact_repo_path"
+      - allOf:
+          - $ref: "#/$defs/repo_path_or_glob"
+          - pattern: "^[^/*?\\[]+/.+[*?\\[].*$"
+          - not:
+              pattern: "\\*\\*"
+
+  repo_path_or_glob:
+    type: string
+    minLength: 1
+    not:
+      pattern: "^/"
+    description: "Repo-relative path or limited glob; absolute paths are refused."
+
+  hex64:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
