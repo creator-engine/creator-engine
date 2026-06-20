@@ -282,6 +282,38 @@ snapshot stays a pure read-model of governance state, and `ce cockpit --json` is
 unchanged by it). A missing or malformed preference degrades honestly to the
 default founder face.
 
+**The interactive resolve seam (ce-ops#45 Slice 2 — the one governed write).**
+The decision-inbox can RESOLVE a decision, but **only by actuating the existing
+canonical escalation-resolve gate** — the cockpit becomes *another rendering of
+ratification*, never a new authority and never a bypass
+([[ce-authority-attaches-to-form]]). The mechanics:
+
+- **The gate is a reusable seam.** `v3_cli.resolve_escalation(root, id, resolution=…)`
+  is the canonical gate exposed as a callable: it loads the record, stamps
+  `resolved_at` (+ a value-free provenance note), re-validates against
+  `schemas/escalation-record.schema.yaml` — the modality-independent **FORM gate**:
+  a garbled cockpit click fails closed here exactly like a typo'd CLI arg — and
+  only then writes through the same `_write_escalation` edge. **Both** renderings
+  of the gate actuate this ONE function: the `cev3 escalation resolve` CLI and the
+  cockpit inbox.
+- **The view writes nothing.** The composition root (`v3_cli._cmd_cockpit`) injects
+  an `on_resolve` callback into the App **in live mode only** (the seeded demo stays
+  read-only). On confirm, L3 calls `on_resolve(need_id)`; the write happens inside
+  the canonical gate, never in `v3_cockpit.py` (a source-level guard asserts the
+  view never calls `resolve_escalation(`, never imports `v3_cli`, and never touches
+  the escalation store). `need_id` is the same `escalation_id` the L2 fold already
+  carries, so `ce cockpit --json` needs no new datum — a future GUI actuates the
+  identical gate with the identical key.
+- **Form-echo before binding.** Selecting an inbox item opens the read-only plain
+  detail; pressing `r` opens a `ResolveConfirmScreen` that echoes the plain form of
+  what will be recorded and requires a deliberate `y`. The form-echo is a **fidelity
+  affordance, not the authority gate** — the authority is the gate's schema
+  form-match. After the gate runs, the snapshot is re-folded so the resolved item
+  drops out of the inbox.
+
+This deliberately breaks the cockpit's no-governance-write law for this ONE seam,
+so it ships as a separate slice with its own governance review.
+
 ## Pairs with CEO mode (still later)
 
 The Cockpit remains the natural home of **CEO mode** (a fleet over a ratified

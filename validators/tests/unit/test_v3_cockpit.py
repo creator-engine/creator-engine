@@ -82,7 +82,8 @@ def test_cockpit_tui_path_reads_and_persists_the_persona(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def fake_run_app(snapshot, *, reload=None, watch_paths=(), persona="ceo", on_persona_change=None):
+    def fake_run_app(snapshot, *, reload=None, watch_paths=(), persona="ceo",
+                     on_persona_change=None, on_resolve=None):
         captured["persona"] = persona
         # simulate the founder toggling to the Dev face inside the TUI
         if on_persona_change is not None:

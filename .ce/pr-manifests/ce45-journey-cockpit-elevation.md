@@ -1,4 +1,4 @@
-# PR path manifest — ce-ops#45 (journey-cockpit elevation; full + Slice 1)
+# PR path manifest — ce-ops#45 (journey-cockpit elevation; Slice 1 + Slice 2)
 
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21). CI runs:
 
@@ -14,41 +14,49 @@ Ratified scope:
 **`/home/cedev2/ce-briefs/ce45-journey-cockpit-elevation.md`** (SHA256
 `5bc70c04e0a012d6334448d7b6eb8191959b0bc01eb247e28bbcd54474038aa9`), ce-ops#45 —
 the journey-cockpit **elevation**, superseding the PR #230 "ratified minimum". This
-carrier covers **Slice 1 only** (read-only elevation): the solo-founder journey
-becomes the DEFAULT face, the expert ops board is demoted to a Dev face, a
-persisted CEO ↔ Dev persona switch is added, the full visual development-arc /
-roadmap is built, and the decision-inbox becomes a first-class surface. Slice 2
-(the interactive governance write-seam) is a SEPARATE, governance-reviewed PR and
-is **not** in this set.
+branch carries TWO ratified slices, each a SEPARATE commit with its own review:
 
-L2/L3 hard law honored: all new computation is additive pure data on
-`snapshot["journey"]["arc"]` (`stage_descriptions` / `lanes` / `position` /
-`journey_lane_count`) in `runner/cockpit_readmodel.py`; `v3_cockpit.py` is
-view-only (the L3 source guard stays green — no loader, no file I/O). The persona
-is a UI preference (not governance state, not in the snapshot): a new textual-free
-`runner/cockpit_prefs.py` (pure normalize/fold + a tolerant I/O edge) read by the
-composition root (`v3_cli._cmd_cockpit`) and injected into the view with an
-`on_persona_change` callback. Read-only surface — no approve/resolve/sync/dispatch/
-merge/push/write path. No new schema or check.
+- **Slice 1 (read-only elevation)** — the solo-founder journey becomes the DEFAULT
+  face; the expert ops board is demoted to a Dev face; a persisted CEO ↔ Dev persona
+  switch is added; the full visual development-arc / roadmap is built; the
+  decision-inbox becomes a first-class surface. Visual checkpoint **approved by the
+  Operator**.
+- **Slice 2 (the interactive write-seam)** — the decision-inbox can RESOLVE a
+  decision, but ONLY by actuating the existing canonical escalation-resolve gate
+  (`v3_cli.resolve_escalation`) with a form-echo confirmation
+  ([[ce-authority-attaches-to-form]]). The cockpit becomes another *rendering* of the
+  gate — it writes no governance state itself and bypasses nothing. Gets a governance
+  review distinct from the Slice 1 visual one.
+
+Hard laws honored across both: L1/L2/L3 separation (Slice 1's new data is additive
+pure L2 on `snapshot["journey"]["arc"]`; Slice 2's write goes through the canonical
+gate, never the view); `cev3 cockpit --json` parity (Slice 1 datums all carried;
+Slice 2 adds NO new datum — `need_id` == the `escalation_id` the read-model already
+carries); plain-language guard (`plain_copy_findings == 0`, incl. the form-echo).
+The persona + resolve seams are both injected by the composition root, so
+`v3_cockpit.py` does no file I/O and the L3 source guard stays green.
 
 Base:
 fresh `origin/main` (this branch `ce45-journey-cockpit-elevation` off `main`).
 
-Per-file purpose (the closed path-set — 12 authored paths):
-- **`.ce/changelog/ce45-journey-cockpit-elevation.md`** *(A)* — changelog fragment.
+Per-file purpose (the closed path-set — 15 authored paths):
+- **`.ce/changelog/ce45-journey-cockpit-elevation.md`** *(A)* — Slice 1 changelog fragment.
+- **`.ce/changelog/ce45-journey-cockpit-elevation-slice2.md`** *(A)* — Slice 2 changelog fragment.
 - **`.ce/pr-manifests/ce45-journey-cockpit-elevation.md`** *(A)* — this carrier (self-inclusive).
-- **`docs/architecture/cockpit.md`** *(M)* — journey-as-default-face + roadmap + persona-persistence architecture.
-- **`docs/v3.5-roadmap.md`** *(M)* — WS-6: re-sequence #45 from DEFER (Slice 1 in progress).
+- **`docs/architecture/cockpit.md`** *(M)* — journey-as-default-face + roadmap + persona persistence (Slice 1) + the interactive resolve seam (Slice 2).
+- **`docs/v3.5-roadmap.md`** *(M)* — WS-6: re-sequence #45 from DEFER.
 - **`validators/creator_engine_validator/runner/cockpit_prefs.py`** *(A)* — the persona preference (pure core + tolerant I/O edge); textual-free.
-- **`validators/creator_engine_validator/runner/cockpit_readmodel.py`** *(M)* — L2: enrich `_fold_journey` with the full arc/roadmap (`stage_descriptions`, `lanes`, `position`, `journey_lane_count`).
-- **`validators/creator_engine_validator/v3_cli.py`** *(M)* — `_cmd_cockpit`: load/persist the persona via `cockpit_prefs`, inject into `run_app`.
-- **`validators/creator_engine_validator/v3_cockpit.py`** *(M)* — L3: `JourneyScreen` (default face) + `BoardScreen` (Dev face) + persona mode switch + first-class decision-inbox; binds snapshot only.
-- **`validators/tests/unit/test_cockpit_journey.py`** *(M)* — L2 journey/roadmap tests (arc lanes, descriptions, position).
+- **`validators/creator_engine_validator/runner/cockpit_readmodel.py`** *(M)* — L2: full arc/roadmap (`stage_descriptions`, `lanes`, `position`, `journey_lane_count`).
+- **`validators/creator_engine_validator/v3_cli.py`** *(M)* — `_cmd_cockpit` persona load/persist + the LIVE-mode `on_resolve` wiring; the reusable `resolve_escalation` gate seam (delegated from `_cmd_escalation_resolve`).
+- **`validators/creator_engine_validator/v3_cockpit.py`** *(M)* — L3: `JourneyScreen`/`BoardScreen` + persona switch + first-class inbox (Slice 1); `ResolveConfirmScreen` form-echo + injected resolve actuation (Slice 2). Binds snapshot only; writes nothing.
+- **`validators/tests/unit/test_cockpit_journey.py`** *(M)* — L2 journey/roadmap tests.
 - **`validators/tests/unit/test_cockpit_prefs.py`** *(A)* — persona preference tests.
-- **`validators/tests/unit/test_v3_cockpit.py`** *(M)* — L3 source-guard + board smoke + CLI persona-wiring test.
-- **`validators/tests/unit/test_v3_cockpit_journey.py`** *(M)* — L3 journey-face tests (default face, mode switch, persistence callback, roadmap render, first-class inbox).
+- **`validators/tests/unit/test_v3_cli.py`** *(M)* — the `resolve_escalation` seam + CLI-delegation tests.
+- **`validators/tests/unit/test_v3_cockpit.py`** *(M)* — L3 source/journey guards + board smoke + CLI persona-wiring test.
+- **`validators/tests/unit/test_v3_cockpit_journey.py`** *(M)* — L3 journey-face tests (default face, mode switch, persistence, roadmap, inbox).
+- **`validators/tests/unit/test_v3_cockpit_resolve.py`** *(A)* — Slice 2 tests: form-echo, canonical-gate actuation, cancel, demo read-only, view-never-writes guard, CLI seam wiring.
 
-WHEELHOUSE FOLLOW-UP (controller / release step — **amend this manifest +2 → 14 at that time**):
+WHEELHOUSE FOLLOW-UP (controller / release step — **amend this manifest +2 → 17 at that time**):
 editing `cockpit_readmodel.py` / `v3_cli.py` / `v3_cockpit.py` and adding
 `runner/cockpit_prefs.py` (all shipped in the app wheel) drifts the packaging
 contract (`verify_wheel_matches_source`), exactly as the #230 lane manifest noted.
@@ -66,11 +74,12 @@ red on this branch; every source/logic test is green.
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=ef7846e13878c8bb6858caba5a1e6b832997657331a0d7c77e7a7768a8de3d3c
+AUTHORIZED_PATHS_SHA256=9a56f5ccf339ffbfe62222cde552688f4d7f46859f7424afc97977c3756e2cd4
 
 ```text
+.ce/changelog/ce45-journey-cockpit-elevation-slice2.md
 .ce/changelog/ce45-journey-cockpit-elevation.md
 .ce/pr-manifests/ce45-journey-cockpit-elevation.md
 docs/architecture/cockpit.md
@@ -81,6 +90,8 @@ validators/creator_engine_validator/v3_cli.py
 validators/creator_engine_validator/v3_cockpit.py
 validators/tests/unit/test_cockpit_journey.py
 validators/tests/unit/test_cockpit_prefs.py
+validators/tests/unit/test_v3_cli.py
 validators/tests/unit/test_v3_cockpit.py
 validators/tests/unit/test_v3_cockpit_journey.py
+validators/tests/unit/test_v3_cockpit_resolve.py
 ```

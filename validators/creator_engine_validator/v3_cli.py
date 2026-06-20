@@ -1099,33 +1099,76 @@ def _cmd_escalation_open(args: argparse.Namespace) -> int:
     )
 
 
+#: The value-free provenance note the cockpit records when the founder resolves a
+#: decision from the inbox (ce-ops#45 Slice 2). The substantive decision content
+#: already lives in the escalation record (decision_needed/recommendation); this
+#: only marks WHERE the resolve was actuated — no governance jargon, no free text.
+COCKPIT_RESOLUTION_NOTE = "Recorded by the founder from the cockpit"
+
+
+def resolve_escalation(
+    root: Path | str, escalation_id: str, *, resolution: str | None = None
+) -> dict[str, Any]:
+    """The canonical escalation-resolve GATE, as a reusable seam (ce-ops#45 Slice 2).
+
+    BOTH renderings of the gate actuate THIS one function — the ``cev3 escalation
+    resolve`` CLI and the read-only cockpit's decision-inbox — so the cockpit
+    becomes "just another rendering" of ratification ([[ce-authority-attaches-to-form]])
+    rather than a second, bypassing write path. It loads the record, stamps
+    ``resolved_at`` (+ an optional value-free ``resolution``), re-validates the
+    result against the escalation-record schema (the modality-independent FORM
+    gate — a garbled cockpit click fails closed here exactly like a typo'd CLI
+    arg), and only then writes through the same ``_write_escalation`` edge. It
+    NEVER performs a direct/parallel write and NEVER bypasses the schema gate.
+
+    Returns a result mapping: ``{"ok": True, "escalation_id", "path"}`` on success,
+    or ``{"ok": False, "error", ...}`` on a bad id / missing record / schema
+    failure (fail-closed; no partial write).
+    """
+    base = Path(root)
+    if not _ESCALATION_ID_RE.match(escalation_id or ""):
+        return {"ok": False, "error": "invalid_escalation_id"}
+    try:
+        record = _load_escalation(base, escalation_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    record["resolved_at"] = _utc_now_iso()
+    if resolution:
+        record["resolution"] = resolution
+    path = _escalation_path(base, escalation_id)
+    errors = _escalation_schema_errors(record, path)
+    if errors:
+        return {"ok": False, "error": "schema_invalid", "detail": errors}
+    written = _write_escalation(base, record)
+    return {"ok": True, "escalation_id": escalation_id, "path": str(written)}
+
+
 def _cmd_escalation_resolve(args: argparse.Namespace) -> int:
-    root = Path(args.root)
     invalid = _require_valid_escalation_id(args, args.escalation_id)
     if invalid is not None:
         return invalid
-    try:
-        record = _load_escalation(root, args.escalation_id)
-    except (FileNotFoundError, ValueError) as exc:
-        return _emit(args, 2, [f"{_BRAND} · escalation resolve refused: {exc}"], {"error": str(exc)})
-    record["resolved_at"] = _utc_now_iso()
-    if args.resolution:
-        record["resolution"] = args.resolution
-    path = _escalation_path(root, args.escalation_id)
-    errors = _escalation_schema_errors(record, path)
-    if errors:
+    result = resolve_escalation(args.root, args.escalation_id, resolution=args.resolution)
+    if not result["ok"]:
+        if result["error"] == "schema_invalid":
+            detail = result.get("detail", [])
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · escalation resolve refused: schema-invalid", *detail],
+                {"error": "schema_invalid", "detail": detail},
+            )
         return _emit(
             args,
             2,
-            [f"{_BRAND} · escalation resolve refused: schema-invalid", *errors],
-            {"error": "schema_invalid", "detail": errors},
+            [f"{_BRAND} · escalation resolve refused: {result['error']}"],
+            {"error": result["error"]},
         )
-    written = _write_escalation(root, record)
+    written = result["path"]
     return _emit(
         args,
         0,
         [f"{_BRAND} · resolved escalation {args.escalation_id!r} → {written}"],
-        {"action": "escalation_resolved", "escalation_id": args.escalation_id, "path": str(written)},
+        {"action": "escalation_resolved", "escalation_id": args.escalation_id, "path": written},
     )
 
 
@@ -3332,12 +3375,23 @@ def _cmd_cockpit(args: argparse.Namespace) -> int:
     def _persist_persona(choice: str) -> None:
         cockpit_prefs.save_persona(root, choice)
 
+    # ce-ops#45 Slice 2: in LIVE mode, wire the decision-inbox to the canonical
+    # escalation-resolve gate (with a form-echo confirmation in the view). The
+    # cockpit becomes another RENDERING of the gate — it never writes governance
+    # state itself. The seeded demo stays read-only (no resolve seam).
+    on_resolve = None
+    if not demo:
+
+        def on_resolve(need_id: str) -> dict[str, Any]:
+            return resolve_escalation(root, need_id, resolution=COCKPIT_RESOLUTION_NOTE)
+
     return v3_cockpit.run_app(
         snapshot,
         reload=_load,
         watch_paths=watch,
         persona=persona,
         on_persona_change=_persist_persona,
+        on_resolve=on_resolve,
     )
 
 

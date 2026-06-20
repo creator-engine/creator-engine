@@ -659,10 +659,47 @@ def _journey_detail_text(detail: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _journey_resolve_form_text(detail: dict[str, Any]) -> str:
+    """Render the FORM-ECHO shown before the binding act (ce-ops#45 Slice 2).
+
+    The form-echo is a *fidelity affordance*, not the authority gate
+    ([[ce-authority-attaches-to-form]]): it echoes, in plain language, the
+    decision being recorded so the founder confirms the canonical FORM — the
+    binding act then actuates the canonical resolve gate (which schema-validates
+    the form). Render-only: reads the precomputed detail fields; writes nothing.
+    """
+    violet = SEMANTIC_HEX["violet"]
+    spark = SEMANTIC_HEX["spark"]
+    gate = SEMANTIC_HEX["gate"]
+    return "\n".join(
+        [
+            f"[{violet}]Record your decision[/]",
+            "",
+            f"[{violet}]What you are deciding[/]",
+            f"  {detail.get('title', '—')}",
+            "",
+            f"[{spark}]Recommended next step[/]",
+            f"  {detail.get('recommendation', '—')}",
+            "",
+            f"[{gate}]If you confirm[/], this is marked decided and clears from your inbox.",
+            "  CE records only that you made this call — it changes nothing else by itself.",
+            "",
+            f"[{violet}]Confirm (y)[/]    ·    Cancel (esc)",
+        ]
+    )
+
+
 class JourneyDetailScreen(ModalScreen[None]):
-    """A modal that shows ONE precomputed plain detail record (render-only)."""
+    """A modal that shows ONE precomputed plain detail record (render-only).
+
+    ce-ops#45 Slice 2: when a resolve seam is wired (live mode), pressing ``r``
+    opens the form-echo confirmation and — only on confirm — actuates the
+    canonical escalation-resolve gate through the App's injected callback. This
+    view still writes nothing itself.
+    """
 
     BINDINGS = [
+        Binding("r", "record_decision", "Record my decision"),
         Binding("escape", "dismiss", "Close"),
         Binding("q", "dismiss", "Close"),
     ]
@@ -679,6 +716,11 @@ class JourneyDetailScreen(ModalScreen[None]):
         border: solid {THEME["violet"]};
         padding: 1 2;
     }}
+    #journey-detail-hint {{
+        height: auto;
+        color: {THEME["fg"]};
+        margin-top: 1;
+    }}
     """
 
     def __init__(self, detail: dict[str, Any]) -> None:
@@ -688,9 +730,93 @@ class JourneyDetailScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="journey-detail-box"):
             yield Static(_journey_detail_text(self._detail), id="journey-detail-text")
+            yield Static("", id="journey-detail-hint")
+
+    def on_mount(self) -> None:
+        can_resolve = bool(getattr(self.app, "resolve_enabled", False)) and bool(
+            self._detail.get("need_id")
+        )
+        hint = (
+            "Press r to record your decision    ·    esc to close"
+            if can_resolve
+            else "Press esc to close"
+        )
+        self.query_one("#journey-detail-hint", Static).update(hint)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "record_decision":
+            # Only offer the binding act when a resolve seam is wired AND this
+            # item carries the machine id the canonical gate needs.
+            return bool(getattr(self.app, "resolve_enabled", False)) and bool(
+                self._detail.get("need_id")
+            )
+        return True
+
+    def action_record_decision(self) -> None:
+        if not getattr(self.app, "resolve_enabled", False):
+            return
+        need_id = self._detail.get("need_id")
+        if not need_id:
+            return
+
+        def _after_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                # The binding act: actuate the canonical gate via the injected
+                # callback, then close this detail so the founder lands back on
+                # the (now-updated) inbox.
+                self.app.action_resolve_need(str(need_id))
+                self.dismiss(None)
+
+        self.app.push_screen(ResolveConfirmScreen(self._detail), _after_confirm)
 
     def action_dismiss(self, result: None = None) -> None:
         self.dismiss(None)
+
+
+class ResolveConfirmScreen(ModalScreen[bool]):
+    """The FORM-ECHO confirmation before the binding act (ce-ops#45 Slice 2).
+
+    A fidelity affordance, NOT the authority gate ([[ce-authority-attaches-to-form]]):
+    it echoes the plain form of the decision being recorded and requires a
+    deliberate ``y`` confirm. The binding act itself actuates the canonical
+    escalation-resolve gate (which schema-validates the form) via the App's
+    injected callback — this view writes nothing. Returns ``True`` on confirm,
+    ``False`` on cancel.
+    """
+
+    BINDINGS = [
+        Binding("y", "confirm", "Confirm"),
+        Binding("n", "cancel", "Cancel"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+    CSS = f"""
+    ResolveConfirmScreen {{
+        align: center middle;
+    }}
+    #journey-resolve-box {{
+        width: 70%;
+        max-width: 90;
+        height: auto;
+        max-height: 70%;
+        background: {THEME["ink-850"]};
+        border: round {THEME["gate"]};
+        padding: 1 2;
+    }}
+    """
+
+    def __init__(self, detail: dict[str, Any]) -> None:
+        super().__init__()
+        self._detail = detail or {}
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="journey-resolve-box"):
+            yield Static(_journey_resolve_form_text(self._detail), id="journey-resolve-text")
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class JourneyScreen(Screen[None]):
@@ -777,6 +903,17 @@ class JourneyScreen(Screen[None]):
     def rebind(self, snapshot: dict[str, Any]) -> None:
         """Re-bind to a freshly-folded snapshot (the live tail / refresh path)."""
         self._snapshot = snapshot
+        self._bind_journey()
+
+    def on_screen_resume(self) -> None:
+        """Re-bind from the App's latest snapshot when a modal (detail/confirm) closes.
+
+        After a decision is recorded, the App re-folds; resuming here drops the
+        just-resolved item out of the inbox without any cross-modal rebind timing.
+        """
+        latest = getattr(self.app, "snapshot", None)
+        if isinstance(latest, dict):
+            self._snapshot = latest
         self._bind_journey()
 
     def _bind_journey(self) -> None:
@@ -968,6 +1105,13 @@ class CockpitApp(App[None]):
     ``on_persona_change`` callback — the view performs NO file I/O of its own (the
     L3 source guard stays green). The snapshot fold + live tail stay on the App;
     the active screen re-binds in place.
+
+    ce-ops#45 Slice 2: an optional ``on_resolve`` callback lets the decision-inbox
+    actuate the canonical escalation-resolve gate (with a form-echo confirmation).
+    The callback is wired by the composition root to ``v3_cli.resolve_escalation``;
+    the cockpit NEVER writes governance state itself and never bypasses the gate.
+    When ``on_resolve`` is absent (e.g. the seeded demo) the resolve affordance is
+    hidden — the cockpit stays read-only.
     """
 
     TITLE = APP_TITLE
@@ -1008,6 +1152,7 @@ class CockpitApp(App[None]):
         watch_paths: Sequence[str] = (),
         persona: str = "ceo",
         on_persona_change: Callable[[str], None] | None = None,
+        on_resolve: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__()
         # ce-ops#25: render the CE version token in the L3 header — title from
@@ -1024,10 +1169,22 @@ class CockpitApp(App[None]):
         # value falls back to the default face (the view never trusts junk).
         self._persona = persona if persona in _PERSONAS else _DEFAULT_PERSONA
         self._on_persona_change = on_persona_change
+        # The canonical resolve gate, injected (Slice 2). Absent ⇒ read-only.
+        self._on_resolve = on_resolve
 
     @property
     def persona(self) -> str:
         return self._persona
+
+    @property
+    def snapshot(self) -> dict[str, Any]:
+        """The App's current (authoritative) L2 snapshot — screens re-bind from it."""
+        return self._snapshot
+
+    @property
+    def resolve_enabled(self) -> bool:
+        """True iff a canonical resolve seam is wired (live mode) — Slice 2."""
+        return self._on_resolve is not None
 
     def _make_screen(self, persona: str) -> Screen[None]:
         if persona == _PERSONA_DEV:
@@ -1070,6 +1227,34 @@ class CockpitApp(App[None]):
             self._snapshot = self._reload()
             self._rebind_active()
 
+    def action_resolve_need(self, need_id: str) -> None:
+        """Actuate the canonical resolve gate for ONE decision, then re-fold (Slice 2).
+
+        The cockpit writes NOTHING here: it calls the injected ``on_resolve``
+        callback, which the composition root wires to the canonical
+        ``v3_cli.resolve_escalation`` gate (schema-validated, fail-closed). After
+        the gate runs, the snapshot is re-folded so the inbox reflects reality —
+        the resolved item drops out of the open queue. Robust to a refusal: a
+        plain message, never a crash.
+        """
+        if self._on_resolve is None or not need_id:
+            return
+        try:
+            result = self._on_resolve(str(need_id))
+        except Exception:  # never let a gate hiccup crash the read-only view
+            result = {"ok": False}
+        if isinstance(result, dict) and result.get("ok"):
+            self.notify("Decision recorded — cleared from your inbox.")
+        else:
+            self.notify(
+                "I could not record that — it may already be done.",
+                severity="warning",
+            )
+        # Reflect reality either way (a re-fold re-reads the live records).
+        if self._reload is not None:
+            self._snapshot = self._reload()
+            self._rebind_active()
+
     async def _watch_loop(self) -> None:
         """Tail the L1 roots and re-bind on change (the fold runs in L2 via reload)."""
         from watchfiles import awatch  # lazy: only the live-tail path needs it
@@ -1087,6 +1272,7 @@ def run_app(
     watch_paths: Sequence[str] = (),
     persona: str = "ceo",
     on_persona_change: Callable[[str], None] | None = None,
+    on_resolve: Callable[[str], dict[str, Any]] | None = None,
 ) -> int:
     """Run the Cockpit TUI over a prepared L2 snapshot; return a CLI exit code."""
     CockpitApp(
@@ -1095,6 +1281,7 @@ def run_app(
         watch_paths=watch_paths,
         persona=persona,
         on_persona_change=on_persona_change,
+        on_resolve=on_resolve,
     ).run()
     return 0
 

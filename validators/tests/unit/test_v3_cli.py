@@ -759,6 +759,64 @@ def test_escalation_resolve_stamps_resolved_at(tmp_path, capsys, monkeypatch):
     _assert_escalation_schema(record)
 
 
+# --- ce-ops#45 Slice 2: the canonical resolve seam (CLI + cockpit both actuate) ---
+
+def _open_escalation(tmp_path, esc_id="operator-call"):
+    assert v3_cli.main([
+        "escalation", "open", "--id", esc_id, "--title", "Operator call",
+        "--decision", "Choose", "--recommend", "Go", "--root", str(tmp_path),
+    ]) == 0
+
+
+def test_resolve_escalation_seam_stamps_and_schema_validates(tmp_path, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: "2026-07-01T09:05:00+00:00")
+    _open_escalation(tmp_path)
+    result = v3_cli.resolve_escalation(
+        tmp_path, "operator-call", resolution="Recorded by the founder from the cockpit"
+    )
+    assert result["ok"] is True
+    assert result["escalation_id"] == "operator-call"
+    record = _escalation_on_disk(tmp_path, "operator-call")
+    assert record["resolved_at"] == "2026-07-01T09:05:00+00:00"
+    assert record["resolution"] == "Recorded by the founder from the cockpit"
+    _assert_escalation_schema(record)  # the FORM gate held (modality-independent)
+
+
+def test_resolve_escalation_seam_refuses_unknown_id_without_writing(tmp_path):
+    # the gate fails closed on a missing record — never a direct/parallel write
+    result = v3_cli.resolve_escalation(tmp_path, "does-not-exist")
+    assert result["ok"] is False
+    assert not (tmp_path / v3_cli.ESCALATIONS_SUBDIR / "does-not-exist.yaml").exists()
+
+
+def test_resolve_escalation_seam_rejects_invalid_id():
+    result = v3_cli.resolve_escalation("/tmp/whatever", "BAD ID!!")
+    assert result["ok"] is False
+    assert result["error"] == "invalid_escalation_id"
+
+
+def test_cli_escalation_resolve_delegates_to_the_seam(tmp_path, capsys, monkeypatch):
+    # the CLI rendering and the cockpit rendering actuate the SAME seam
+    monkeypatch.setattr(v3_cli, "_utc_now_iso", lambda: "2026-07-01T09:05:00+00:00")
+    _open_escalation(tmp_path)
+    capsys.readouterr()
+    seen = {}
+    real = v3_cli.resolve_escalation
+
+    def spy(root, escalation_id, *, resolution=None):
+        seen["called"] = (str(root), escalation_id, resolution)
+        return real(root, escalation_id, resolution=resolution)
+
+    monkeypatch.setattr(v3_cli, "resolve_escalation", spy)
+    code = v3_cli.main([
+        "escalation", "resolve", "operator-call", "--resolution", "ok", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 0
+    assert seen["called"] == (str(tmp_path), "operator-call", "ok")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "escalation_resolved"
+
+
 class _GhCompleted:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
