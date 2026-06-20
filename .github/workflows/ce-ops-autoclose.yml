@@ -1,0 +1,37 @@
+name: CE Ops Autoclose
+
+# Cross-repo issue closure for creator-engine/ce-ops.
+# Required repository secret:
+#   CE_OPS_TOKEN: fine-grained token or GitHub App installation token with
+#   issues:write on creator-engine/ce-ops only.
+# Do not use GITHUB_TOKEN here; it is scoped to this repository and cannot close
+# creator-engine/ce-ops issues. Only explicit closing refs are honored:
+# `Closes ce-ops#N`, `Fixes ce-ops#N`, or `Resolves ce-ops#N` (ce-ops#154,
+# authoring convention tracked toward ce-ops#65).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  close-ce-ops:
+    name: Close referenced ce-ops issues
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout workflow scripts
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Close ce-ops issues from explicit refs
+        continue-on-error: true
+        env:
+          CE_OPS_TOKEN: ${{ secrets.CE_OPS_TOKEN }}
+        run: |
+          python3 .github/scripts/ceops_autoclose.py
