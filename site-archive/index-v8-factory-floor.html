@@ -30,8 +30,8 @@
 
   /* ===== SECTION 1 — THE CONVEYOR (placeholder — high-fidelity assembly line in design) ===== */
   .hero{padding:62px 0 30px;text-align:center}
-  .hero h1{font-size:clamp(32px,5.6vw,60px);text-transform:uppercase;letter-spacing:.02em;line-height:1.08;text-wrap:balance}
-  .hero h1 em{display:block;font-style:normal;color:var(--violet)}
+  .hero h1{font-size:clamp(34px,6vw,62px)}
+  .hero h1 em{font-style:normal;color:var(--violet)}
   .hero p.sub{color:var(--muted);font-size:clamp(15px,2vw,19px);max-width:620px;margin:20px auto 0}
   .factory{margin:46px auto 0;max-width:1100px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:18px;padding:34px 26px 26px;position:relative;overflow:hidden}
   .factory::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 80% at 50% -10%,var(--violet-soft),transparent 60%);pointer-events:none}
@@ -46,6 +46,8 @@
   .station .post{width:2px;height:46px;background:var(--line);margin:6px auto 0}
   .station.active .post{background:var(--violet)}
   .anim-note{position:absolute;top:12px;right:16px;font-family:var(--mono);font-size:10px;color:var(--oxide);letter-spacing:.06em;border:1px dashed rgba(224,139,76,.4);border-radius:6px;padding:4px 8px}
+  .caption{margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.04em}
+  .caption b{color:var(--paper);font-weight:600}
 
   /* ===== SECTION — PRODUCTION LINE (moved below install) ===== */
   .lineviz{padding:18px 0 46px}
@@ -123,6 +125,7 @@
   .plate h3{margin:8px 0 6px;font-weight:700;font-size:19px;color:var(--paper)}
   .plate p{margin:0;font-size:14px;color:var(--muted);line-height:1.55}
   .plus{align-self:center;font-size:24px;color:var(--muted)}
+  .honest{margin-top:18px;padding-left:14px;border-left:2px solid var(--oxide);font-family:var(--mono);font-size:12.5px;color:var(--muted);max-width:74ch;line-height:1.6}
   .safe{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media (max-width:820px){.safe{grid-template-columns:1fr}}
   .srow{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
@@ -176,7 +179,7 @@
   <header class="hero">
     <div class="wrap">
       <div class="eyebrow">The dark software factory</div>
-      <h1 style="margin-top:18px"><em>FULL AUTOMATION:</em> FROM IDEA TO WORKING APP</h1>
+      <h1 style="margin-top:18px">An idea goes in.<br/>A <em>shipped app</em> comes out.</h1>
       <p class="sub">Creator Engine turns your computer into a governed software factory. You frame the idea and ratify one gate — agents do the work, an external grader checks the evidence, station by station.</p>
     </div>
   </header>
@@ -545,6 +548,7 @@
           </g>
         </svg>
       </div>
+      <div class="caption">An <b>idea</b> comes in &rarr; a <b>working App</b> comes out.</div>
     </div>
   </section>
 
@@ -610,6 +614,7 @@
         <div class="plus">+</div>
         <div class="plate ce"><div class="k">The work — Creator Engine</div><h3>Governs &amp; proves</h3><p>Bounds the task, caps the spend, routes risk to a human gate, grades the result from outside the agent, lands a repo-visible record.</p></div>
       </div>
+      <p class="honest">Honesty check: NVIDIA OpenShell is real open-source software and CE's sandbox layer is built to target it. OpenShell-native consumer hardware is announced for fall 2026, not shipped; today CE runs on Linux and macOS, open-source and independent.</p>
     </div>
   </section>
 
