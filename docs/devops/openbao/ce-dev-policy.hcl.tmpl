@@ -1,0 +1,22 @@
+# Per-dev least-privilege policy template for a CE OpenBao AppRole.
+# Render with render-dev-policy.sh; do not apply this template directly.
+
+path "sys/audit" {
+  capabilities = ["read", "sudo"]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+
+path "ce-kv/data/devs/__CE_DEV_ID__/runtime/*" {
+  capabilities = ["read"]
+}
+
+path "ce-kv/metadata/devs/__CE_DEV_ID__/runtime/*" {
+  capabilities = ["read", "list"]
+}

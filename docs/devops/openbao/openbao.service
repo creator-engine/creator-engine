@@ -1,0 +1,42 @@
+[Unit]
+Description=OpenBao secret broker for Creator Engine
+Documentation=https://openbao.org/docs/
+After=network-online.target tailscaled.service
+Wants=network-online.target
+ConditionPathExists=/etc/openbao/openbao.hcl
+
+[Service]
+Type=notify
+User=openbao
+Group=openbao
+ExecStart=/usr/local/bin/bao server -config=/etc/openbao/openbao.hcl
+ExecReload=/bin/kill --signal HUP $MAINPID
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectClock=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/openbao /var/log/openbao /run/openbao
+ReadOnlyPaths=/etc/openbao
+StateDirectory=openbao
+StateDirectoryMode=0700
+LogsDirectory=openbao
+LogsDirectoryMode=0700
+RuntimeDirectory=openbao
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
