@@ -29,7 +29,8 @@ from ..fs_mediation import (
 )
 
 
-DEFAULT_SHIM_DIR = "/tmp/ce-ring1-tool-guard"
+_DEFAULT_SHIM_OWNER = str(os.getuid()) if hasattr(os, "getuid") else "nouid"
+DEFAULT_SHIM_DIR = f"/tmp/ce-ring1-tool-guard-{_DEFAULT_SHIM_OWNER}-{os.getpid()}"
 DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"
 DEFAULT_POSTURE = "governed"

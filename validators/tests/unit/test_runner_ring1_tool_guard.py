@@ -14,6 +14,7 @@ from creator_engine_validator import fs_mediation as fm
 from creator_engine_validator.runner.ring1_tool_guard import (
     DENY_EXIT_CODE,
     DEFAULT_EVIDENCE_ROOT,
+    DEFAULT_SHIM_DIR,
     Ring1ToolGuardConfig,
     build_runtime,
     guarded_env,
@@ -298,6 +299,13 @@ def test_guarded_env_puts_shim_dir_first():
     assert env["PATH"] == "/tmp/guard:/usr/bin"
     assert env["CE_RING1_POSTURE"] == "governed"
     assert env["CE_RING1_EVIDENCE_ROOT"] == DEFAULT_EVIDENCE_ROOT
+
+
+def test_default_shim_dir_is_process_scoped():
+    assert DEFAULT_SHIM_DIR.startswith("/tmp/ce-ring1-tool-guard-")
+    if hasattr(os, "getuid"):
+        assert f"-{os.getuid()}-" in DEFAULT_SHIM_DIR
+    assert DEFAULT_SHIM_DIR.endswith(f"-{os.getpid()}")
 
 
 def test_guarded_env_includes_backend_pinned_roots():
