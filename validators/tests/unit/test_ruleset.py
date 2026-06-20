@@ -7,6 +7,7 @@ import subprocess
 import pytest
 
 from creator_engine_validator.forge import (
+    CE_PROTECTION_RULESET_NAME,
     ForgeConfigError,
     RulesetBypassActor,
     RulesetPolicy,
@@ -84,10 +85,30 @@ def test_ruleset_payload_uses_required_review_count_without_code_owner_review():
     payload = _policy().to_put_payload()
     params = payload["rules"][0]["parameters"]
     assert params["required_approving_review_count"] == 1
-    assert "require_code_owner_review" not in params
+    assert params["require_code_owner_review"] is False
     assert payload["bypass_actors"] == [
         {"actor_id": 4070181, "actor_type": "Integration", "bypass_mode": "pull_request"}
     ]
+
+
+def test_reference_floor_ruleset_payload_has_required_check_strict_reviews_and_no_bypass():
+    payload = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        required_approving_review_count=1,
+        dismiss_stale_reviews_on_push=True,
+        bypass_actors=(),
+    ).to_put_payload()
+    assert payload["bypass_actors"] == []
+    status = next(rule for rule in payload["rules"] if rule["type"] == "required_status_checks")
+    assert status["parameters"]["strict_required_status_checks_policy"] is True
+    assert status["parameters"]["required_status_checks"] == [
+        {"context": "Validate governance artifacts"}
+    ]
+    pull = next(rule for rule in payload["rules"] if rule["type"] == "pull_request")
+    assert pull["parameters"]["required_approving_review_count"] == 1
+    assert pull["parameters"]["dismiss_stale_reviews_on_push"] is True
+    assert pull["parameters"]["require_code_owner_review"] is False
 
 
 def test_ruleset_plan_does_not_mutate():

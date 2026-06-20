@@ -28,9 +28,11 @@ from creator_engine_validator.forge.github_repo_config import (
     ForgeConfigRefused,
     allow_auto_merge,
     configure_repo,
+    configure_squash_only,
     install_required_checks,
     set_codeowners,
 )
+from creator_engine_validator.forge.ruleset import CE_PROTECTION_RULESET_NAME
 
 REPO = "creator-engine/creator-engine"
 
@@ -82,7 +84,13 @@ class FakeGh:
         codeowners: str | None = None,
     ):
         self.protection = protection
-        self.repo_settings = {"allow_auto_merge": False, **(repo_settings or {})}
+        self.repo_settings = {
+            "allow_auto_merge": False,
+            "allow_squash_merge": True,
+            "allow_merge_commit": True,
+            "allow_rebase_merge": True,
+            **(repo_settings or {}),
+        }
         self.codeowners = codeowners
         self.codeowners_sha = "codeowners-sha"
         self.calls: list[tuple[list[str], str | None]] = []
@@ -172,6 +180,48 @@ class FakeGh:
 
     def methods(self) -> list[str]:
         return [self._parse(argv)[0] for argv, _ in self.calls]
+
+
+class FreePrivateGh(FakeGh):
+    """Free private repo behavior: classic protection rejects, repo rulesets work."""
+
+    def __init__(self):
+        super().__init__(None)
+        self.rulesets: list[dict] = []
+        self.next_id = 100
+
+    def __call__(self, argv, input_text=None):
+        method, path = self._parse(argv)
+        body = json.loads(input_text) if input_text else None
+        if path == f"repos/{REPO}/branches/main/protection" and method == "PUT":
+            self.calls.append((list(argv), input_text))
+            payload = {
+                "message": (
+                    "Branch protection rules are not available for private repositories "
+                    "on this plan. Upgrade to GitHub Team or use repository rulesets."
+                )
+            }
+            return subprocess.CompletedProcess(
+                argv,
+                1,
+                stdout=json.dumps(payload),
+                stderr="HTTP 403: Forbidden",
+            )
+        if path == f"repos/{REPO}/rulesets" and method == "GET":
+            self.calls.append((list(argv), input_text))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.rulesets), stderr="")
+        if path == f"repos/{REPO}/rulesets" and method == "POST":
+            self.calls.append((list(argv), input_text))
+            created = {"id": self.next_id, **body}
+            self.rulesets.append(created)
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(created), stderr="")
+        if path and path.startswith(f"repos/{REPO}/rulesets/") and method == "PUT":
+            self.calls.append((list(argv), input_text))
+            rid = int(path.rsplit("/", 1)[1])
+            updated = {"id": rid, **body}
+            self.rulesets = [updated if r.get("id") == rid else r for r in self.rulesets]
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(updated), stderr="")
+        return super().__call__(argv, input_text)
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +363,21 @@ def test_configure_repo_reports_verify_mismatch():
     assert any("VERIFY MISMATCH" in line for line in res.actions)
 
 
+def test_configure_repo_falls_back_to_ruleset_when_classic_is_plan_unsupported():
+    fake = FreePrivateGh()
+    res = configure_repo(REPO, apply=True, gh_runner=fake)
+    assert res.verified is True
+    assert res.applied is True
+    assert any("classic branch protection unsupported" in line for line in res.actions)
+    assert fake.rulesets and fake.rulesets[0]["name"] == CE_PROTECTION_RULESET_NAME
+    assert fake.rulesets[0]["bypass_actors"] == []
+    status = next(rule for rule in fake.rulesets[0]["rules"] if rule["type"] == "required_status_checks")
+    assert status["parameters"]["strict_required_status_checks_policy"] is True
+    assert status["parameters"]["required_status_checks"] == [
+        {"context": "Validate governance artifacts"}
+    ]
+
+
 # --------------------------------------------------------------------------
 # allow_auto_merge
 # --------------------------------------------------------------------------
@@ -339,6 +404,62 @@ def test_allow_auto_merge_apply_patches_and_verifies():
     assert res.changed is True and res.applied is True and res.verified is True
     patch_bodies = [body for (argv, body) in fake.calls if "--method" in argv and "PATCH" in argv]
     assert json.loads(patch_bodies[0]) == {"allow_auto_merge": True}
+
+
+# --------------------------------------------------------------------------
+# configure_squash_only
+# --------------------------------------------------------------------------
+def test_configure_squash_only_idempotent_no_patch():
+    fake = FakeGh(
+        _get_shape(),
+        repo_settings={
+            "allow_squash_merge": True,
+            "allow_merge_commit": False,
+            "allow_rebase_merge": False,
+        },
+    )
+    res = configure_squash_only(REPO, apply=True, gh_runner=fake)
+    assert res.changed is False
+    assert res.verified is True
+    assert "PATCH" not in fake.methods()
+
+
+def test_configure_squash_only_plan_does_not_patch():
+    fake = FakeGh(
+        _get_shape(),
+        repo_settings={
+            "allow_squash_merge": True,
+            "allow_merge_commit": True,
+            "allow_rebase_merge": True,
+        },
+    )
+    res = configure_squash_only(REPO, apply=False, gh_runner=fake)
+    assert res.changed is True
+    assert res.after == {
+        "allow_squash_merge": True,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+    }
+    assert "PATCH" not in fake.methods()
+
+
+def test_configure_squash_only_apply_patches_and_verifies():
+    fake = FakeGh(
+        _get_shape(),
+        repo_settings={
+            "allow_squash_merge": True,
+            "allow_merge_commit": True,
+            "allow_rebase_merge": True,
+        },
+    )
+    res = configure_squash_only(REPO, apply=True, gh_runner=fake)
+    assert res.changed is True and res.applied is True and res.verified is True
+    patch_bodies = [body for (argv, body) in fake.calls if "--method" in argv and "PATCH" in argv]
+    assert json.loads(patch_bodies[0]) == {
+        "allow_squash_merge": True,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+    }
 
 
 # --------------------------------------------------------------------------

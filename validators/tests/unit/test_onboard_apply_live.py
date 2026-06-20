@@ -25,6 +25,7 @@ import yaml
 
 from creator_engine_validator import onboard_apply, onboard_apply_live, v3_installer
 from creator_engine_validator.forge.github_repo_config import DEFAULT_MAIN_PROTECTION
+from creator_engine_validator.forge.ruleset import CE_PROTECTION_RULESET_NAME, RulesetPolicy
 
 _FX = Path(__file__).parent / "fixtures" / "ce88_live_forge"
 _REPO = "creator-engine/creator-engine"
@@ -54,11 +55,15 @@ class _ModeBForge:
         *,
         contents: str | None = None,
         protection: str | None = None,
+        protection_status: int = 0,
+        rulesets: str | None = None,
         user_response: str | None = None,
         contents_by_path: dict[str, str] | None = None,
     ):
         self.repo_json = _fx("repo.json")
+        self.protection_status = protection_status
         self.protection_json = protection if protection is not None else _fx("protection.json")
+        self.rulesets_json = rulesets if rulesets is not None else "[]"
         self.contents_json = contents if contents is not None else _fx(
             "contents_ce_validate_yml_already_ce.json"
         )
@@ -118,7 +123,11 @@ class _ModeBForge:
             return done(0, self.user_response)  # bootstrap PAT probe
         if "installation/repositories" in joined:
             return done(0, self.installation_repos)  # App-installation coverage
+        if f"repos/{_REPO}/rulesets" in joined:
+            return done(0, self.rulesets_json)
         if "/branches/main/protection" in joined:
+            if self.protection_status != 0:
+                return done(self.protection_status)
             return done(0, self.protection_json)
         if "/contents/" in joined:
             if self.contents_by_path is not None:
@@ -232,6 +241,33 @@ def test_verify_branch_protection_floor_present_true():
     result = _driver(forge).verify_branch_protection(repo=_REPO, branch="main", policy=policy)
     assert result["ok"] is True
     assert "Validate governance artifacts" in result["contexts"]
+
+
+def test_verify_branch_protection_accepts_ruleset_floor_when_classic_unavailable():
+    policy = DEFAULT_MAIN_PROTECTION.with_contexts(("Validate governance artifacts",))
+    ruleset = {
+        "id": 44,
+        **RulesetPolicy(
+            name=CE_PROTECTION_RULESET_NAME,
+            required_status_check_contexts=("Validate governance artifacts",),
+            bypass_actors=(),
+        ).to_put_payload(),
+    }
+    forge = _ModeBForge(protection_status=1, rulesets=json.dumps([ruleset]))
+    driver = _driver(forge)
+    result = driver.verify_branch_protection(repo=_REPO, branch="main", policy=policy)
+    assert result["ok"] is True
+    assert result["source"] == "ruleset"
+    assert "Validate governance artifacts" in result["contexts"]
+    assert "Validate governance artifacts" in driver.existing_branch_protection_contexts(
+        repo=_REPO, branch="main"
+    )
+    configured = driver.configure_branch_protection(
+        repo=_REPO, branch="main", policy=policy, token=_BOOTSTRAP_PAT
+    )
+    assert configured["ok"] is True
+    assert configured["source"] == "ruleset"
+    assert forge.write_argvs() == []
 
 
 def test_existing_branch_protection_contexts_reads_live():

@@ -87,6 +87,7 @@ from .forge import (
     RulesetPolicy,
     allow_auto_merge,
     configure_repo,
+    configure_squash_only,
     delete_ruleset,
     upsert_ruleset,
 )
@@ -1995,6 +1996,8 @@ def _cmd_configure_repo(args: argparse.Namespace) -> int:
         def op(runner):
             if args.allow_auto_merge:
                 return allow_auto_merge(app_config.repo, apply=args.apply, gh_runner=runner)
+            if args.squash_only:
+                return configure_squash_only(app_config.repo, apply=args.apply, gh_runner=runner)
             return configure_repo(app_config.repo, branch=args.branch, apply=args.apply, gh_runner=runner)
 
         result = _run_scoped_cli_op(
@@ -2004,6 +2007,7 @@ def _cmd_configure_repo(args: argparse.Namespace) -> int:
                 "branch": args.branch,
                 "apply": bool(args.apply),
                 "allow_auto_merge": bool(args.allow_auto_merge),
+                "squash_only": bool(args.squash_only),
             },
             permissions=v3_forge_join.REPO_ADMIN_TOKEN_PERMISSIONS,
             secret_name=v3_forge_join.REPO_ADMIN_SECRET_NAME,
@@ -3545,9 +3549,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="REQUIRED path to the host GitHub-App config JSON — no default",
     )
     p_configure_repo.add_argument("--branch", default="main", help="branch to protect (default: main)")
-    p_configure_repo.add_argument(
+    setting_group = p_configure_repo.add_mutually_exclusive_group()
+    setting_group.add_argument(
         "--allow-auto-merge", action="store_true", dest="allow_auto_merge",
         help="toggle the repository-level allow_auto_merge setting instead of branch protection",
+    )
+    setting_group.add_argument(
+        "--squash-only", action="store_true", dest="squash_only",
+        help="toggle repository merge methods to squash-only instead of branch protection",
     )
     p_configure_repo.add_argument("--apply", action="store_true",
                                   help="apply the repo configuration (default: plan-only)")

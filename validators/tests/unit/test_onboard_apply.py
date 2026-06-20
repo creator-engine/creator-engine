@@ -133,6 +133,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.branch_protection_ok = branch_protection_ok
         self.existing_protection_contexts = existing_protection_contexts
         self.captured_policy = None
+        self.captured_merge_settings = None
 
     def probe_tool(self, name: str) -> bool:
         self.calls.append(f"probe_tool:{name}")
@@ -240,9 +241,18 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.captured_policy = policy
         return {"ok": True}
 
+    def configure_merge_settings(self, *, repo, squash_only, token):
+        self.calls.append("configure_merge_settings")
+        self.captured_merge_settings = {"squash_only": squash_only}
+        return {"ok": True}
+
     def verify_branch_protection(self, *, repo, branch, policy):
         self.calls.append("verify_branch_protection")
         return {"ok": self.branch_protection_ok, "contexts": list(policy.required_status_check_contexts)}
+
+    def verify_merge_settings(self, *, repo, squash_only):
+        self.calls.append("verify_merge_settings")
+        return {"ok": True, "settings": {"squash_only": squash_only}}
 
     def existing_branch_protection_contexts(self, *, repo, branch):
         self.calls.append("existing_branch_protection_contexts")
@@ -579,6 +589,7 @@ def test_branch_protection_uses_reference_check_floor(tmp_path):
     assert summary["failed"] == 0
     assert driver.captured_policy is not None
     assert "Validate governance artifacts" in driver.captured_policy.required_status_check_contexts
+    assert driver.captured_merge_settings == {"squash_only": True}
 
 
 def test_workflow_install_verifies_digest(tmp_path):
