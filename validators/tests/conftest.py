@@ -11,6 +11,14 @@ VALIDATORS_ROOT = REPO_ROOT / "validators"
 if str(VALIDATORS_ROOT) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_ROOT))
 
+# ADR-0007 egress broker (host-side, non-agent operational tooling under
+# ``tools/egress-broker/``) is exercised by the CI-collected suite here. It is
+# deliberately NOT part of the installable validator package (it is host
+# operations, not validator logic), so its import root is added explicitly.
+EGRESS_BROKER_ROOT = REPO_ROOT / "tools" / "egress-broker"
+if str(EGRESS_BROKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(EGRESS_BROKER_ROOT))
+
 
 def pytest_configure(config):
     config.addinivalue_line(
