@@ -1,0 +1,15 @@
+# Rejected: repository is not in the closed target set.
+computer_use_authority_envelope:
+  envelope_id: cua-bad-open-target
+  mechanic: console_setting
+  target:
+    target_type: repository
+    repo: creator-engine/creator-engine
+  mutation_class: security
+  acceptance_criteria:
+    - The console setting target is bounded.
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:34:00Z'

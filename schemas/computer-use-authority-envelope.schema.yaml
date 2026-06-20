@@ -1,0 +1,131 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/computer-use-authority-envelope.schema.yaml"
+title: "Creator Engine computer-use UI side-effect authority envelope"
+description: >-
+  Phase 1 schema for a bounded, auditable authority envelope that authorizes
+  exactly one UI side-effect mechanic on exactly one closed target class. This
+  generalizes the reviewer-authority-envelope pattern beyond mechanic:pr_review
+  to computer-use/browser-mediated UI actions while remaining value-free for
+  secrets: account logins and opaque setting refs are permitted, but tokens,
+  passwords, 2FA/MFA/OTP values, recovery codes, and credential material are
+  never permitted.
+type: object
+oneOf:
+  - required: [computer_use_authority_envelope]
+properties:
+  computer_use_authority_envelope:
+    $ref: "#/$defs/computer_use_authority_envelope"
+additionalProperties: false
+$defs:
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  login:
+    type: string
+    pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+  non_empty_string:
+    type: string
+    minLength: 1
+    pattern: "\\S"
+  mutation_class:
+    type: string
+    enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction, none]
+    description: >-
+      Reuses the scope.schema.yaml planning-layer taxonomy exactly, including
+      none for no repository mutation.
+  account_target:
+    type: object
+    required: [target_type, current_login, desired_login]
+    additionalProperties: false
+    properties:
+      target_type:
+        type: string
+        const: account
+      current_login:
+        $ref: "#/$defs/login"
+      desired_login:
+        $ref: "#/$defs/login"
+  app_target:
+    type: object
+    required: [target_type, app_slug, desired_app_name]
+    additionalProperties: false
+    properties:
+      target_type:
+        type: string
+        const: app
+      app_slug:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,95}$"
+      desired_app_name:
+        $ref: "#/$defs/non_empty_string"
+  console_setting_target:
+    type: object
+    required: [target_type, console_surface, setting_key, desired_state_ref]
+    additionalProperties: false
+    properties:
+      target_type:
+        type: string
+        const: console_setting
+      console_surface:
+        type: string
+        enum: [github_account_settings, github_app_settings, github_repository_settings, provider_console_setting]
+      setting_key:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$"
+      desired_state_ref:
+        $ref: "#/$defs/non_empty_string"
+  closed_target:
+    oneOf:
+      - $ref: "#/$defs/account_target"
+      - $ref: "#/$defs/app_target"
+      - $ref: "#/$defs/console_setting_target"
+  computer_use_authority_envelope:
+    type: object
+    required:
+      - envelope_id
+      - mechanic
+      - target
+      - mutation_class
+      - ratified_prompt_sha
+      - emitting_role
+      - ratifier_role
+      - operating_mode
+      - recorded_at
+    additionalProperties: false
+    properties:
+      envelope_id:
+        type: string
+        pattern: "^cua-[a-z0-9][a-z0-9-]{3,96}$"
+      mechanic:
+        type: string
+        enum: [account_rename, app_rename, console_setting]
+      target:
+        $ref: "#/$defs/closed_target"
+      mutation_class:
+        $ref: "#/$defs/mutation_class"
+      acceptance_criteria:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/non_empty_string"
+      ratified_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      emitting_role:
+        type: string
+        enum: [operator, controller, architect, implementer, reviewer, verification, agent_reviewer]
+      ratifier_role:
+        type: string
+        enum: [operator, source, ratifier]
+        description: >-
+          Human-in-loop ratifier role class for the grant. Agents may emit
+          envelopes through a non-ratifying emitting_role, but may not satisfy
+          this field.
+      operating_mode:
+        type: string
+        enum: [strict, auto, transcendence]
+      recorded_at:
+        $ref: "#/$defs/timestamp"
+      metadata:
+        type: object
+        additionalProperties: true

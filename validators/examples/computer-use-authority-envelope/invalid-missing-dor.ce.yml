@@ -1,0 +1,15 @@
+# Rejected: missing acceptance_criteria, the DoR test-first oracle.
+computer_use_authority_envelope:
+  envelope_id: cua-missing-dor
+  mechanic: console_setting
+  target:
+    target_type: console_setting
+    console_surface: github_repository_settings
+    setting_key: actions.workflow_permissions
+    desired_state_ref: read_only
+  mutation_class: security
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:35:00Z'

@@ -123,6 +123,10 @@ def _run_install(
         "FAKE_SITE": str(site),
         "FAKE_CURL_LOG": str(curl_log),
     }
+    # The bootstrap contract being tested is the signed wheel install. CI runs
+    # pytest with PYTHONPATH=validators, but leaking that into the subprocess
+    # makes the venv entry points import checkout source instead of the wheel.
+    env.pop("PYTHONPATH", None)
     env.update(extra_env or {})
     argv = [
         shutil.which("bash") or "bash",

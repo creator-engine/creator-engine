@@ -20,6 +20,8 @@ Planned contract set and source FR coverage:
 - `redaction-record.md` — FR-020, FR-020a, FR-021.
 - `validator-cli.md` — FR-025, FR-026, FR-027, FR-027a.
 - `verification-spec/` and `verification-spec.md` — FR-030, FR-031.
+- `computer-use-authority-envelope.md` — ce-ops#142 Phase 1 computer-use UI side-effect authority envelope.
+- `computer-use-worker-harness.md` — ce-ops#142 Phase 1 authenticated-browser worker harness contract.
 
 The authoritative source for generated work remains the feature plan until each contract document is authored in its story phase.
 

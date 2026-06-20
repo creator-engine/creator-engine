@@ -298,5 +298,5 @@ def test_zero_live_filesystem_write(monkeypatch):
 
 
 def test_purity_unchanged():
-    assert len(registered_checks()) == 53  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup; v3.5-E.3 E3-G1 added install_answers; ce-ops#26 added seat_event
+    assert len(registered_checks()) == 54  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup; v3.5-E.3 E3-G1 added install_answers; ce-ops#26 added seat_event; ce-ops#142 added ce_computer_use_authority_envelope
     assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a)

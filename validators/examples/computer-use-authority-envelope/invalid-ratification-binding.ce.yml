@@ -1,0 +1,16 @@
+# Rejected: ratified_prompt_sha must be a lowercase 64-hex digest.
+computer_use_authority_envelope:
+  envelope_id: cua-bad-ratification
+  mechanic: app_rename
+  target:
+    target_type: app
+    app_slug: creator-engine-app
+    desired_app_name: Creator Engine App
+  mutation_class: identity
+  acceptance_criteria:
+    - The app rename is pinned to a ratified prompt.
+  ratified_prompt_sha: not-a-digest
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:36:00Z'

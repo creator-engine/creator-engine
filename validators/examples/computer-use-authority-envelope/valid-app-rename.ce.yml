@@ -1,0 +1,17 @@
+# Authorizes exactly one app rename target.
+computer_use_authority_envelope:
+  envelope_id: cua-app-rename
+  mechanic: app_rename
+  target:
+    target_type: app
+    app_slug: creator-engine-app
+    desired_app_name: Creator Engine App
+  mutation_class: identity
+  acceptance_criteria:
+    - The app settings UI shows the desired display name.
+    - A machine recheck confirms the app name after save.
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:31:00Z'
