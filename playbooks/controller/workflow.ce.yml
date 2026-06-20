@@ -1,0 +1,73 @@
+kind: ce-playbook
+schema_version: "1"
+playbook:
+  name: controller
+  title: "Controller"
+  type: role-action
+  owner_issue: ce-ops#145
+  status: active
+  summary: "Controller dispatch, merge, refresh, and courier forge operation actions."
+preconditions:
+  - id: authority-bound
+    description: "Controller action has an explicit ticket, PR, or operation target."
+  - id: claim-visible
+    description: "Work claim or dispatch ownership is visible before side effects."
+outputs:
+  - id: dispatch-record
+    description: "Dispatch, merge, refresh, or courier evidence is recorded."
+  - id: ratified-closeout
+    description: "Privileged closeout names independent review, green checks, and ratification."
+dispatch:
+  default_target: controller-seat
+  authority_envelope: envelope.template.yml
+  work_claim_required: true
+  review_required: true
+gates:
+  - id: work-claim
+    type: dor
+    description: "Work claim and dispatch target are recorded."
+    required: true
+  - id: independent-review
+    type: review
+    description: "Merge gate has independent review."
+    required: true
+  - id: green-validation
+    type: ci
+    description: "Required checks are green."
+    required: true
+  - id: ratified-merge
+    type: ratification
+    description: "Merge is ratified before execution."
+    required: true
+  - id: courier-sunset
+    type: sunset
+    description: "Courier-forge-op sunsets when the egress gateway lands."
+    required: true
+stages:
+  - id: dispatch
+    title: "Dispatch"
+    brief: briefs/dispatch.md
+    dispatch_target: controller-seat
+    gates: [work-claim]
+  - id: merge-gate
+    title: "Merge Gate"
+    brief: briefs/merge-gate.md
+    dispatch_target: controller-seat
+    gates: [independent-review, green-validation, ratified-merge]
+  - id: seat-refresh
+    title: "Seat Refresh"
+    brief: briefs/seat-refresh.md
+    dispatch_target: controller-seat
+    gates: [work-claim]
+  - id: courier-forge-op
+    title: "Courier Forge Operation"
+    brief: briefs/courier-forge-op.md
+    dispatch_target: uncontained-courier
+    gates: [work-claim, courier-sunset]
+ratified_flow_hooks:
+  - id: adr0007-model-b
+    trigger: "contained-seat-needs-forge-op"
+    action: "Contained seat drafts a forge op, signals it, and uncontained courier executes as the seat identity via the held token."
+references:
+  - ce-ops#145
+  - docs/decisions/ADR-0007-egress-gateway-publish-broker.md

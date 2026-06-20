@@ -1,0 +1,20 @@
+scope:
+  issue: ce-ops#145
+  playbook: author
+  pull_request: ""
+  action: ""
+authority:
+  dispatch_target: author-seat
+  allowed_actions:
+    - rebase
+    - re-pin
+    - run-validation
+    - edit-owned-pr-branch
+    - push-owned-pr-branch
+  microauth:
+    base_only_refresh: ce-base-only-refresh-microauth
+evidence:
+  required:
+    - git-range
+    - validation-output
+    - review-finding-map

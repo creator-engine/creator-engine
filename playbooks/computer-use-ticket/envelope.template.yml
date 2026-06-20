@@ -1,0 +1,26 @@
+scope:
+  issue: ce-ops#145
+  playbook: computer-use-ticket
+  target:
+    surface: ""
+    desired_state: ""
+authority:
+  dispatch_target: governed-seat
+  allowed_browser_transport: chrome-devtools-mcp --autoConnect
+  forbidden_auth_surfaces:
+    - sudo
+    - 2fa
+    - mfa
+    - password-entry
+    - recovery-code
+evidence:
+  required:
+    - screenshot
+    - machine-recheck
+    - closed-set-report
+closeout:
+  allowed_results:
+    - done
+    - blocked-human
+    - blocked-substrate
+    - no-op

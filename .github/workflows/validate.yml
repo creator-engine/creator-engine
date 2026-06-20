@@ -66,7 +66,7 @@ jobs:
           python - <<'PYEOF'
           import sys, pathlib, yaml
           errors = []
-          dirs = ["schemas", "templates", "docs/contracts", "examples"]
+          dirs = ["schemas", "templates", "docs/contracts", "examples", "playbooks"]
           for d in dirs:
               for ext in ("*.yml", "*.yaml"):
                   for p in sorted(pathlib.Path(d).rglob(ext)):
@@ -83,6 +83,10 @@ jobs:
       - name: Creator Engine validator — well-formed examples
         run: |
           PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
+
+      - name: Creator Engine validator — ce_playbook_format gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator check playbooks/
 
       - name: Creator Engine validator — malformed examples (expect failures)
         run: |

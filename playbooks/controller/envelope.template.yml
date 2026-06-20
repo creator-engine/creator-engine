@@ -1,0 +1,21 @@
+scope:
+  issue: ce-ops#145
+  playbook: controller
+  action: ""
+  target_ref: ""
+authority:
+  dispatch_target: controller-seat
+  allowed_actions:
+    - dispatch
+    - merge-gate
+    - seat-refresh
+    - courier-forge-op
+  courier_identity_rule: "Courier executes as the contained seat identity via the held token."
+evidence:
+  required:
+    - work-claim
+    - dispatch-brief
+    - validation-or-signal
+    - closeout-report
+sunset:
+  courier-forge-op: "Sunset when the ADR-0007 egress gateway lands."

@@ -1,0 +1,54 @@
+kind: ce-playbook
+schema_version: "1"
+playbook:
+  name: author
+  title: "Author"
+  type: role-action
+  owner_issue: ce-ops#145
+  status: active
+  summary: "Author-side base refresh and review response actions."
+preconditions:
+  - id: branch-owned
+    description: "The dispatched branch belongs to the authoring seat."
+  - id: action-named
+    description: "Dispatch names base-only-refresh or address-review."
+outputs:
+  - id: branch-pushed
+    description: "Updated branch is pushed with validation evidence."
+  - id: findings-mapped
+    description: "Review findings are mapped to fixes or explicit non-fixes."
+dispatch:
+  default_target: author-seat
+  authority_envelope: envelope.template.yml
+  work_claim_required: true
+  review_required: true
+gates:
+  - id: microauth-bound
+    type: dor
+    description: "Base-only refresh is bound to ce-base-only-refresh-microauth."
+    required: true
+  - id: tests-green
+    type: ci
+    description: "Relevant tests are green before push."
+    required: true
+  - id: review-addressed
+    type: dod
+    description: "Each actionable review finding is addressed or explicitly rejected with rationale."
+    required: true
+stages:
+  - id: base-only-refresh
+    title: "Base-only Refresh"
+    brief: briefs/base-only-refresh.md
+    dispatch_target: author-seat
+    gates: [microauth-bound, tests-green]
+  - id: address-review
+    title: "Address Review"
+    brief: briefs/address-review.md
+    dispatch_target: author-seat
+    gates: [review-addressed, tests-green]
+ratified_flow_hooks:
+  - id: no-fresh-ratification
+    trigger: "base-only-refresh"
+    action: "Rebase, re-pin, validate, and push under ce-base-only-refresh-microauth without fresh ratification."
+references:
+  - ce-ops#145
