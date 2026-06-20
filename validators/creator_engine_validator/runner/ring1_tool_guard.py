@@ -18,8 +18,10 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..fs_mediation import (
     FsMediationCapability,
@@ -27,9 +29,12 @@ from ..fs_mediation import (
     build_runner_fs_capability,
     landlock_preexec,
 )
+from ..secret_paths import is_secret_path
 
 
-DEFAULT_SHIM_DIR = "/tmp/ce-ring1-tool-guard"
+_DEFAULT_SHIM_OWNER = str(os.getuid()) if hasattr(os, "getuid") else "nouid"
+DEFAULT_SHIM_PARENT = f"/tmp/ce-ring1-tool-guard-{_DEFAULT_SHIM_OWNER}-{os.getpid()}"
+DEFAULT_SHIM_DIR = f"{DEFAULT_SHIM_PARENT}/shim"
 DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"
 DEFAULT_POSTURE = "governed"
@@ -40,6 +45,10 @@ DEFAULT_REAL_BINARIES = (("git", "/usr/bin/git"), ("gh", "/usr/bin/gh"))
 # real exec failure would emit. Observability only — the deny semantics are
 # unchanged; only the emitted code value differs.
 DENY_EXIT_CODE = 121
+
+
+class Ring1ShimRootError(RuntimeError):
+    """The Ring-1 shim root is unsafe and must not be allow-listed."""
 
 
 @dataclass(frozen=True)
@@ -116,6 +125,100 @@ class Ring1GuardRuntime:
 
 def _real_binary_for(tool: str, config: Ring1ToolGuardConfig) -> str:
     return dict(config.real_binaries)[tool]
+
+
+def _current_uid() -> int | None:
+    return os.getuid() if hasattr(os, "getuid") else None
+
+
+def _iter_existing_components(path: Path) -> list[Path]:
+    """Return existing path components from root to ``path`` for lstat checks."""
+
+    if not path.is_absolute():
+        raise Ring1ShimRootError(f"Ring-1 shim root must be absolute: {path}")
+    current = Path(path.anchor)
+    components: list[Path] = []
+    for part in path.parts[1:]:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            components.append(current)
+    return components
+
+
+def _reject_symlink_components(path: Path) -> None:
+    for component in _iter_existing_components(path):
+        try:
+            st = os.lstat(component)
+        except OSError as exc:
+            raise Ring1ShimRootError(
+                f"failed to inspect Ring-1 shim path component {component}: {exc}"
+            ) from exc
+        if stat.S_ISLNK(st.st_mode):
+            raise Ring1ShimRootError(
+                f"refusing unsafe Ring-1 shim root {path}: path component "
+                f"{component} is a symlink"
+            )
+
+
+def _validate_owned_private_dir(path: Path, *, label: str) -> None:
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        raise Ring1ShimRootError(f"failed to inspect Ring-1 {label} {path}: {exc}") from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise Ring1ShimRootError(f"refusing Ring-1 {label} {path}: it is a symlink")
+    if not stat.S_ISDIR(st.st_mode):
+        raise Ring1ShimRootError(f"refusing Ring-1 {label} {path}: it is not a directory")
+    uid = _current_uid()
+    if uid is not None and st.st_uid != uid:
+        raise Ring1ShimRootError(
+            f"refusing Ring-1 {label} {path}: owner uid {st.st_uid} != current uid {uid}"
+        )
+    if stat.S_IMODE(st.st_mode) & 0o077:
+        raise Ring1ShimRootError(
+            f"refusing Ring-1 {label} {path}: mode {stat.S_IMODE(st.st_mode):04o} "
+            "is not private"
+        )
+
+
+def prepare_shim_root(shim_dir: str) -> str:
+    """Create and validate the Ring-1 shim root, returning its real path.
+
+    The returned path is the only shim root allowed into Landlock read roots.
+    This closes the symlink-TOCTOU gap where a predictable ``/tmp`` path could be
+    pre-created as a symlink to a credential-bearing directory before Landlock
+    opened the configured root.
+    """
+
+    raw = Path(shim_dir)
+    if not raw.is_absolute():
+        raise Ring1ShimRootError(f"Ring-1 shim root must be absolute: {shim_dir!r}")
+    _reject_symlink_components(raw)
+
+    parent = raw.parent
+    if not parent.exists():
+        parent.mkdir(mode=0o700, parents=True, exist_ok=False)
+    _reject_symlink_components(raw)
+    _validate_owned_private_dir(parent, label="shim parent")
+
+    if raw.exists() or raw.is_symlink():
+        _validate_owned_private_dir(raw, label="shim root")
+    else:
+        try:
+            raw.mkdir(mode=0o700)
+        except FileExistsError:
+            _validate_owned_private_dir(raw, label="shim root")
+    _reject_symlink_components(raw)
+    _validate_owned_private_dir(raw, label="shim root")
+
+    resolved = Path(os.path.realpath(raw))
+    label = is_secret_path(str(resolved))
+    if label is not None:
+        raise Ring1ShimRootError(
+            f"refusing Ring-1 shim root {raw}: resolved path {resolved} is "
+            f"credential-shaped (matched rule: {label})"
+        )
+    return str(resolved)
 
 
 def render_posix_tool_shim(
@@ -260,28 +363,110 @@ PY
 def render_install_script(config: Ring1ToolGuardConfig, target_dir: str) -> str:
     """Render a POSIX install script that writes all configured tool shims."""
 
-    lines = [
-        "#!/usr/bin/env sh",
-        "set -eu",
-        f"mkdir -p {shlex.quote(target_dir)}",
-        f"chmod 0755 {shlex.quote(target_dir)}",
-    ]
+    shims: list[tuple[str, str]] = []
     for tool in config.tools:
         shim = render_posix_tool_shim(tool, _real_binary_for(tool, config), config)
-        delimiter = f"__CE_RING1_{tool.upper()}_SHIM__"
-        if delimiter in shim:
-            raise ValueError(f"rendered shim for {tool!r} contains heredoc delimiter")
-        target = f"{target_dir.rstrip('/')}/{tool}"
-        lines.extend(
-            [
-                f"rm -f {shlex.quote(target)}",
-                f"cat > {shlex.quote(target)} <<'{delimiter}'",
-                shim.rstrip("\n"),
-                delimiter,
-                f"chmod 0555 {shlex.quote(target)}",
-            ]
+        shims.append((tool, shim))
+    payload = json.dumps({"target_dir": target_dir, "shims": shims}, sort_keys=True)
+    return f"""#!/usr/bin/env sh
+set -eu
+
+if command -v python3 >/dev/null 2>&1; then
+    _ce_ring1_python=$(command -v python3)
+elif command -v python >/dev/null 2>&1; then
+    _ce_ring1_python=$(command -v python)
+else
+    echo "CE Ring-1 guard install: python is required to install shims" >&2
+    exit 1
+fi
+
+exec "$_ce_ring1_python" - <<'PY'
+import json
+import os
+import stat
+import sys
+
+PAYLOAD = json.loads({payload!r})
+
+
+def fail(message):
+    print(f"CE Ring-1 guard install: {{message}}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def reject_symlink_components(path):
+    current = os.path.abspath(os.sep)
+    for part in os.path.abspath(path).split(os.sep)[1:]:
+        current = os.path.join(current, part)
+        if os.path.lexists(current):
+            st = os.lstat(current)
+            if stat.S_ISLNK(st.st_mode):
+                fail(f"refusing unsafe shim path {{path}}: component {{current}} is a symlink")
+
+
+def validate_private_dir(path, label):
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        fail(f"failed to inspect {{label}} {{path}}: {{exc}}")
+    if stat.S_ISLNK(st.st_mode):
+        fail(f"refusing {{label}} {{path}}: it is a symlink")
+    if not stat.S_ISDIR(st.st_mode):
+        fail(f"refusing {{label}} {{path}}: it is not a directory")
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        fail(f"refusing {{label}} {{path}}: not owned by current uid")
+    if stat.S_IMODE(st.st_mode) & 0o077:
+        fail(f"refusing {{label}} {{path}}: mode {{stat.S_IMODE(st.st_mode):04o}} is not private")
+
+
+target_dir = PAYLOAD["target_dir"]
+if not os.path.isabs(target_dir):
+    fail(f"shim directory must be absolute: {{target_dir!r}}")
+reject_symlink_components(target_dir)
+parent = os.path.dirname(target_dir)
+if not os.path.exists(parent):
+    os.makedirs(parent, mode=0o700, exist_ok=False)
+reject_symlink_components(target_dir)
+validate_private_dir(parent, "shim parent")
+if os.path.lexists(target_dir):
+    validate_private_dir(target_dir, "shim directory")
+else:
+    os.mkdir(target_dir, 0o700)
+validate_private_dir(target_dir, "shim directory")
+
+for tool, content in PAYLOAD["shims"]:
+    if not tool or os.path.sep in tool or tool in (".", ".."):
+        fail(f"invalid shim name {{tool!r}}")
+    target = os.path.join(target_dir, tool)
+    if os.path.lexists(target):
+        st = os.lstat(target)
+        if stat.S_ISLNK(st.st_mode):
+            fail(f"refusing to replace symlink shim {{target}}")
+        os.unlink(target)
+    tmp = os.path.join(target_dir, f".{{tool}}.{{os.getpid()}}.tmp")
+    try:
+        fd = os.open(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+            0o500,
         )
-    return "\n".join(lines) + "\n"
+    except FileExistsError:
+        fail(f"exclusive shim temp already exists: {{tmp}}")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            if not content.endswith("\\n"):
+                fh.write("\\n")
+        os.replace(tmp, target)
+        os.chmod(target, 0o500)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+PY
+"""
 
 
 def guarded_env(config: Ring1ToolGuardConfig, shim_dir: str) -> dict[str, str]:
@@ -317,16 +502,17 @@ def build_runtime(
 ) -> Ring1GuardRuntime:
     """Build the runtime descriptor for an installed guard directory."""
 
+    resolved_shim_dir = prepare_shim_root(shim_dir)
     confinement = RunnerFsConfinement(
-        workspace_read_roots=_workspace_read_roots(config, shim_dir)
+        workspace_read_roots=_workspace_read_roots(config, resolved_shim_dir)
     )
     capability = build_runner_fs_capability(
         confinement, require_enforcement=require_fs_enforcement
     )
     fs_preexec_fn = landlock_preexec(confinement) if capability.sandbox_fs_enforced else None
     return Ring1GuardRuntime(
-        shim_dir=shim_dir,
-        env=guarded_env(config, shim_dir),
+        shim_dir=resolved_shim_dir,
+        env=guarded_env(config, resolved_shim_dir),
         fs_confinement=confinement,
         fs_capability=capability,
         fs_preexec_fn=fs_preexec_fn,

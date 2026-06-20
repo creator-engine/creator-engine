@@ -26,6 +26,11 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import fs_mediation as fm
+from creator_engine_validator.runner.ring1_tool_guard import (
+    Ring1ShimRootError,
+    Ring1ToolGuardConfig,
+    build_runtime,
+)
 
 pytestmark = pytest.mark.skipif(
     not fm.fs_mediation_available(),
@@ -131,6 +136,31 @@ def test_deny_ssh_private_key(tmp_path):
 def test_deny_aws_credentials(tmp_path):
     work, secrets = _make_workspace(tmp_path)
     assert _run_probe(work, secrets / ".aws" / "credentials") == "DENIED"
+
+
+def test_ring1_rejects_symlinked_shim_root_before_landlock_allowlist(tmp_path):
+    work, secrets = _make_workspace(tmp_path)
+    shim_link = tmp_path / "shim-link"
+    shim_link.symlink_to(secrets, target_is_directory=True)
+    config = Ring1ToolGuardConfig(base_path="/usr/bin", posture_root=str(work))
+
+    with pytest.raises(Ring1ShimRootError, match="symlink"):
+        build_runtime(config, str(shim_link))
+
+    shim_parent = tmp_path / "private-shim-parent"
+    shim_parent.mkdir(mode=0o700)
+    runtime = build_runtime(config, str(shim_parent / "shim"))
+    result = fm.run_confined(
+        [sys.executable, "-c", _read_probe(str(secrets / ".ssh" / "id_rsa"))],
+        runtime.fs_confinement,
+        require_enforcement=True,
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "DENIED"
 
 
 # --- ALLOW regression --------------------------------------------------------
