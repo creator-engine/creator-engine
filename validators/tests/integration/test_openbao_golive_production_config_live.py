@@ -32,4 +32,7 @@ def test_openbao_255_accepts_rendered_production_config(
         timeout=120,
     )
 
-    assert "PASS openbao 2.5.5 accepted rendered production config" in completed.stdout
+    assert (
+        "PASS openbao 2.5.5 accepted rendered production config and activated file audit after reload"
+        in completed.stdout
+    )

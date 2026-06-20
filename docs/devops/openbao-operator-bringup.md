@@ -45,6 +45,19 @@ bao status
 Do not enable auto-unseal for this go-live. Auto-unseal remains a later,
 separately ratified change.
 
+## 2a. Activate Declarative Audit Device
+
+OpenBao 2.5.x reads declarative audit devices only after a reload, not on the
+first service start. After unseal, force the systemd reload path before any
+secret-zero or AppRole work:
+
+```bash
+sudo systemctl reload openbao.service
+bao audit list
+```
+
+`bao audit list` must show the configured file audit device before continuing.
+
 ## 3. Enable Per-Dev Policy And AppRole
 
 Use the initial root token only for setup. Then revoke it.
@@ -103,7 +116,8 @@ least-privilege Operator tokens or response-wrapped AppRole flows.
 Operator records value-free evidence for:
 
 - `bao status` shows initialized and unsealed.
-- `bao audit list` includes the configured file audit device.
+- `sudo systemctl reload openbao.service` has been run after unseal, and
+  `bao audit list` includes the configured file audit device.
 - Audit fail-closed probe blocks serving when the sink is unavailable.
 - Encrypted off-host snapshot completes.
 - Restore drill into a throwaway instance passes and writes proof JSON.

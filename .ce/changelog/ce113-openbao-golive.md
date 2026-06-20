@@ -20,3 +20,8 @@ Review fix: removed OpenBao 2.5.5-incompatible mlock settings from the
 production HCL render and systemd unit, and added an opt-in live smoke that
 downloads, verifies, and starts OpenBao 2.5.5 against the rendered production
 config.
+
+Follow-on fix: changed the audit stanza to OpenBao 2.5.x's required
+`options = { ... }` map syntax, made provision/apply and Operator bringup
+reload the service so declarative audit devices activate, and extended the
+2.5.5 smoke to prove `bao audit list` shows the file audit device after reload.

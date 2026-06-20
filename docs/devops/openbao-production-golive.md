@@ -49,11 +49,14 @@ tailnet TLS material:
 
 ```bash
 sudo -E docs/devops/openbao/provision-openbao.sh --apply
-sudo systemctl start openbao.service
 ```
 
 The apply step needs root/sudo for system user, directory ownership, `/etc`, and
-systemd writes. This repository does not perform that VPS step.
+systemd writes. It also starts `openbao.service` and issues a reload so the
+OpenBao 2.5.x declarative audit-device path is exercised; after Operator unseal,
+repeat `sudo systemctl reload openbao.service` and confirm `bao audit list`
+shows the file audit device before creating AppRoles or minting secret-zero.
+This repository does not perform that VPS step.
 
 The provision script intentionally does not run `operator init`, `operator
 unseal`, or any secret-zero injection.
@@ -128,8 +131,12 @@ docs/devops/openbao/emergency-revoke-openbao.sh --execute seal
 
 ## Audit Fail-Closed
 
-The HCL enables a file audit device at `${OPENBAO_AUDIT_LOG}`. The go-live test
-must prove that OpenBao stops serving requests when that sink cannot accept
+The HCL declares a file audit device at `${OPENBAO_AUDIT_LOG}` using OpenBao
+2.5.x's required `options = { ... }` map syntax. OpenBao 2.5.x does not activate
+that declarative audit device on first boot; it activates after reload. The
+go-live sequence therefore starts the service, reloads it, and after unseal
+reloads it again before `bao audit list` evidence is accepted. The go-live test
+must also prove that OpenBao stops serving requests when the sink cannot accept
 writes. The validator integration suite contains the local fail-closed smoke
 against an ephemeral OpenBao process; production cutover must repeat the same
 class of probe against the VPS after Operator bringup and before migration.

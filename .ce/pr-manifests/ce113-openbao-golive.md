@@ -28,7 +28,7 @@ Per-file purpose (closed path-set - 19 paths):
 - **`docs/devops/openbao/render-dev-policy.sh`** *(A)* - safe renderer for per-dev policy files.
 - **`docs/devops/openbao/restore-drill-openbao.sh`** *(A)* - encrypted snapshot restore-drill script for a throwaway instance.
 - **`docs/devops/openbao/snapshot-openbao.sh`** *(A)* - encrypted off-host raft snapshot script.
-- **`docs/devops/openbao/verify-production-config-openbao-2.5.5.sh`** *(A)* - opt-in smoke that downloads/verifies OpenBao 2.5.5 and loads the rendered production config.
+- **`docs/devops/openbao/verify-production-config-openbao-2.5.5.sh`** *(A)* - opt-in smoke that downloads/verifies OpenBao 2.5.5, loads the rendered production config, reloads it, and proves the file audit device activates.
 - **`validators/creator_engine_validator/openbao_golive.py`** *(A)* - value-free artifact validation helpers.
 - **`validators/tests/integration/test_openbao_golive_production_config_live.py`** *(A)* - opt-in live regression for OpenBao 2.5.5 production config acceptance.
 - **`validators/tests/integration/test_openbao_golive_restore_drill_live.py`** *(A)* - opt-in local OpenBao raft restore-drill proof.

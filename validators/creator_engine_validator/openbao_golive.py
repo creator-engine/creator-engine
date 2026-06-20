@@ -51,6 +51,7 @@ def validate_tailnet_tls_hcl(hcl: str) -> list[str]:
         'tls_cert_file    = "${OPENBAO_TLS_CERT_FILE}"': "TLS certificate path is not parameterized",
         'tls_key_file     = "${OPENBAO_TLS_KEY_FILE}"': "TLS key path is not parameterized",
         'audit "file" "ce_audit"': "file audit device is not configured",
+        "options = {": "audit options must use OpenBao 2.5.x map syntax",
         'file_path = "${OPENBAO_AUDIT_LOG}"': "audit sink path is not parameterized",
     }
     for snippet, message in required_snippets.items():
@@ -61,6 +62,8 @@ def validate_tailnet_tls_hcl(hcl: str) -> list[str]:
             violations.append(f"public listener marker present: {marker}")
     if "disable_mlock" in hcl:
         violations.append("OpenBao 2.5.5 no longer accepts disable_mlock in server config")
+    if "options {" in hcl:
+        violations.append("OpenBao 2.5.5 audit options must be a map, not a block")
     return violations
 
 
@@ -106,11 +109,13 @@ def validate_provision_script(script: str) -> list[str]:
         "--apply": "script must separate planning from privileged apply",
         "--render-config": "script must expose a pure rendered-config mode for live config validation",
         "systemctl daemon-reload": "script must reload systemd on apply",
+        "systemctl restart openbao.service": "script must start/restart OpenBao on apply",
+        "systemctl reload openbao.service": "script must issue the audit-activation reload on apply",
     }
     for snippet, message in required_snippets.items():
         if snippet not in script:
             violations.append(message)
-    forbidden = ("operator init", "operator unseal", "root_token", "disable_mlock")
+    forbidden = ("operator init", "operator unseal", "root_token", "disable_mlock", "options {")
     for snippet in forbidden:
         if snippet in script:
             violations.append(f"provision script must not perform Operator trust-root action: {snippet}")

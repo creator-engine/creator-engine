@@ -36,6 +36,8 @@ def test_openbao_hcl_is_raft_tailnet_tls_and_audit_fail_closed(repo_root: Path):
     assert validate_tailnet_tls_hcl(hcl) == []
     assert "0.0.0.0" not in hcl
     assert "disable_mlock" not in hcl
+    assert "options = {" in hcl
+    assert "options {" not in hcl
     assert "tls_disable = true" not in hcl
 
 
@@ -127,6 +129,15 @@ def test_operator_bringup_binds_each_approle_to_per_dev_policy(repo_root: Path):
     assert "devs/+/runtime" not in runbook
 
 
+def test_operator_bringup_requires_post_unseal_audit_reload(repo_root: Path):
+    runbook = read_go_live_artifact(repo_root, "docs/devops/openbao-operator-bringup.md")
+
+    assert "Activate Declarative Audit Device" in runbook
+    assert "sudo systemctl reload openbao.service" in runbook
+    assert "bao audit list" in runbook
+    assert "before continuing" in runbook
+
+
 def test_provision_plan_refuses_public_listener(repo_root: Path):
     script = repo_root / "docs/devops/openbao/provision-openbao.sh"
     env = {
@@ -169,6 +180,8 @@ def test_provision_plan_renders_tailnet_bound_config(repo_root: Path):
     assert 'address         = "100.64.10.20:8200"' in completed.stdout
     assert "tls_disable      = false" in completed.stdout
     assert "disable_mlock" not in completed.stdout
+    assert "options = {" in completed.stdout
+    assert "options {" not in completed.stdout
     assert 'audit "file" "ce_audit"' in completed.stdout
     assert "operator init" not in completed.stdout
     assert "operator unseal" not in completed.stdout
@@ -195,6 +208,8 @@ def test_provision_render_config_outputs_loadable_hcl_only(repo_root: Path):
     assert "+ install" not in completed.stdout
     assert "# plan only:" not in completed.stdout
     assert "disable_mlock" not in completed.stdout
+    assert "options = {" in completed.stdout
+    assert "options {" not in completed.stdout
     assert 'address         = "100.64.10.20:8200"' in completed.stdout
 
 

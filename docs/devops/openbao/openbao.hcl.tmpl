@@ -24,7 +24,7 @@ listener "tcp" {
 
 audit "file" "ce_audit" {
   description = "Creator Engine production audit sink; OpenBao must fail closed if writes fail"
-  options {
+  options = {
     file_path = "${OPENBAO_AUDIT_LOG}"
     mode      = "0600"
     format    = "json"

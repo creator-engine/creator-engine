@@ -87,6 +87,52 @@ PY
   return 1
 }
 
+bao() {
+  BAO_ADDR="https://127.0.0.1:$API_PORT" \
+  BAO_CACERT="$TLS_DIR/openbao.crt" \
+    "$BAO_BIN" "$@"
+}
+
+json_field() {
+  "$PYTHON_BIN" - "$1" "$2" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+value = payload
+for part in sys.argv[2].split("."):
+    if part.endswith("]"):
+        key, index = part[:-1].split("[", 1)
+        value = value[key][int(index)]
+    else:
+        value = value[part]
+print(value)
+PY
+}
+
+wait_audit_device() {
+  for _ in $(seq 1 80); do
+    audit_json="$(BAO_TOKEN="$ROOT_TOKEN" bao audit list -format=json 2>/dev/null || true)"
+    if "$PYTHON_BIN" - "$audit_json" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+payload = json.loads(sys.argv[1] or "{}")
+if any(device.get("type") == "file" for device in payload.values() if isinstance(device, dict)):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "OpenBao did not activate the configured file audit device after reload" >&2
+  BAO_TOKEN="$ROOT_TOKEN" bao audit list -format=json >&2 || true
+  cat "$LOG_PATH" >&2
+  return 1
+}
+
 require_tool curl
 require_tool openssl
 require_tool sha256sum
@@ -142,6 +188,14 @@ if grep -q "disable_mlock" "$CONFIG_PATH"; then
   echo "rendered production config still contains unsupported disable_mlock" >&2
   exit 1
 fi
+if grep -q "options[[:space:]]*{" "$CONFIG_PATH"; then
+  echo "rendered production config uses unsupported audit options block syntax" >&2
+  exit 1
+fi
+if ! grep -q "options[[:space:]]*=" "$CONFIG_PATH"; then
+  echo "rendered production config does not use audit options map syntax" >&2
+  exit 1
+fi
 
 "$BAO_BIN" server -config="$CONFIG_PATH" > "$LOG_PATH" 2>&1 &
 SERVER_PID="$!"
@@ -153,8 +207,15 @@ if grep -qi "disable_mlock" "$LOG_PATH"; then
   exit 1
 fi
 
+INIT_JSON="$(bao operator init -key-shares=1 -key-threshold=1 -format=json)"
+UNSEAL_KEY="$(json_field "$INIT_JSON" "unseal_keys_b64[0]")"
+ROOT_TOKEN="$(json_field "$INIT_JSON" "root_token")"
+bao operator unseal "$UNSEAL_KEY" >/dev/null
+kill -HUP "$SERVER_PID"
+wait_audit_device
+
 kill "$SERVER_PID"
 wait "$SERVER_PID" 2>/dev/null || true
 SERVER_PID=""
 
-echo "PASS openbao $VERSION accepted rendered production config"
+echo "PASS openbao $VERSION accepted rendered production config and activated file audit after reload"

@@ -89,7 +89,7 @@ listener "tcp" {
 
 audit "file" "ce_audit" {
   description = "Creator Engine production audit sink; OpenBao must fail closed if writes fail"
-  options {
+  options = {
     file_path = "$OPENBAO_AUDIT_LOG"
     mode      = "0600"
     format    = "json"
@@ -121,9 +121,11 @@ if [[ "$MODE" == "--apply" ]]; then
   install -o root -g root -m 0644 "$SERVICE_TEMPLATE" "$OPENBAO_SERVICE_PATH"
   systemctl daemon-reload
   systemctl enable openbao.service
+  systemctl restart openbao.service
+  systemctl reload openbao.service
 else
   render_config
-  echo "# plan only: rerun with --apply under sudo/root on the VPS to write $OPENBAO_CONFIG_PATH and $OPENBAO_SERVICE_PATH"
+  echo "# plan only: rerun with --apply under sudo/root on the VPS to write $OPENBAO_CONFIG_PATH, install the unit, start OpenBao, and issue the audit-activation reload"
 fi
 
 echo "OpenBao host artifacts staged. Operator init/unseal and secret-zero injection are intentionally not performed by this script."
