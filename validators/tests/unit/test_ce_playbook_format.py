@@ -140,6 +140,23 @@ def test_stage_brief_reference_must_exist(valid_scaffold: Path):
     assert p.CODE_BRIEF_REF in _codes(result)
 
 
+def test_stage_brief_reference_must_match_stage_id(valid_scaffold: Path):
+    playbook = valid_scaffold / "alpha"
+    (playbook / "briefs" / "closeout.md").write_text("# Closeout\n", encoding="utf-8")
+    workflow = (playbook / "workflow.ce.yml").read_text(encoding="utf-8")
+    (playbook / "workflow.ce.yml").write_text(
+        workflow.replace("brief: briefs/prepare.md", "brief: briefs/closeout.md"),
+        encoding="utf-8",
+    )
+
+    result = p.run([valid_scaffold])
+
+    assert p.CODE_BRIEF_REF in _codes(result)
+    assert "stage 'prepare' brief must be briefs/prepare.md" in "\n".join(
+        error.format() for error in result.errors
+    )
+
+
 def test_index_must_list_every_playbook(valid_scaffold: Path):
     _write_index(valid_scaffold, ["alpha"])
 

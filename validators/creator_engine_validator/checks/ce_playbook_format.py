@@ -162,6 +162,7 @@ def _validate_workflow_semantics(playbook_dir: Path, data: Any) -> list[Validati
     for index, stage in enumerate(stages):
         if not isinstance(stage, dict):
             continue
+        stage_id = stage.get("id")
         brief = stage.get("brief")
         if isinstance(brief, str):
             brief_path = Path(brief)
@@ -177,6 +178,17 @@ def _validate_workflow_semantics(playbook_dir: Path, data: Any) -> list[Validati
                         playbook_dir / WORKFLOW_FILE,
                         _pointer(("stages", index, "brief")),
                         "stage brief must be a relative briefs/<stage>.md path",
+                        CONTRACT,
+                    )
+                )
+            elif isinstance(stage_id, str) and brief != f"briefs/{stage_id}.md":
+                expected = f"briefs/{stage_id}.md"
+                errors.append(
+                    make_error(
+                        CODE_BRIEF_REF,
+                        playbook_dir / WORKFLOW_FILE,
+                        _pointer(("stages", index, "brief")),
+                        f"stage {stage_id!r} brief must be {expected}; got {brief}",
                         CONTRACT,
                     )
                 )
