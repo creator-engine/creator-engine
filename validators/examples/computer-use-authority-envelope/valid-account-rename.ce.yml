@@ -1,0 +1,20 @@
+# Authorizes exactly one account rename target. Logins are target identifiers,
+# not credentials.
+computer_use_authority_envelope:
+  envelope_id: cua-account-rename
+  mechanic: account_rename
+  target:
+    target_type: account
+    current_login: old-handle
+    desired_login: new-handle
+  mutation_class: identity
+  acceptance_criteria:
+    - The account login is shown as new-handle after the UI save.
+    - A machine recheck confirms the account login value.
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:30:00Z'
+  metadata:
+    summary: Computer-use authority for one account rename.

@@ -1,0 +1,16 @@
+# Rejected: account_rename cannot target an app.
+computer_use_authority_envelope:
+  envelope_id: cua-bad-mechanic-target
+  mechanic: account_rename
+  target:
+    target_type: app
+    app_slug: creator-engine-app
+    desired_app_name: Creator Engine App
+  mutation_class: identity
+  acceptance_criteria:
+    - The account rename target is bounded.
+  ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
+  emitting_role: controller
+  ratifier_role: operator
+  operating_mode: strict
+  recorded_at: '2026-06-20T05:33:00Z'
