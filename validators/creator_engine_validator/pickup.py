@@ -531,3 +531,171 @@ def make_gh_runner(token: str) -> GhRunner:
             input=input_text, env=env, timeout=60,
         )
     return runner
+
+
+# ===========================================================================
+# S3 — `ce lane launch` wiring (canary, gated behind --enable-launch).
+# ===========================================================================
+
+import hashlib  # noqa: E402  (kept local to the S3 leg)
+
+#: The spawn seam: ``(argv) -> CompletedProcess``. Defaults to a real subprocess
+#: ``ce lane launch`` (the v1→v1 SUBPROCESS + DATA cross to the launcher — keeps
+#: ALL tmux coupling behind the lane primitive, the one seam). Tests inject a fake.
+Spawn = Callable[[Sequence[str]], "subprocess.CompletedProcess"]
+
+#: Work-item ``kind`` → the governed lane ``--role`` / ``--lane-kind``. A review
+#: request drives a reviewer/review lane; everything else an implementer lane.
+_KIND_TO_ROLE = {"review_requested": "reviewer"}
+_KIND_TO_LANE_KIND = {"review_requested": "review"}
+_DEFAULT_ROLE = "implementer"
+_DEFAULT_LANE_KIND = "implementation"
+
+#: The lane-launch sentinel that confirms the seat is live (the lane runtime's
+#: registered lifecycle state). The notification thread is marked read ONLY after
+#: this is observed — never on a mere spawn-exit-0.
+LAUNCHED_STATE = "launched"
+
+
+@dataclass(frozen=True)
+class Seed:
+    """A written seed file + its byte-level SHA256 (the SHA-binding pointer shape)."""
+
+    path: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    """The outcome of an S3 lane launch (PURE value)."""
+
+    launched: bool
+    seed_path: str | None = None
+    lane_id: str | None = None
+    note: str | None = None
+
+
+def _default_spawn(argv: Sequence[str]) -> subprocess.CompletedProcess:  # pragma: no cover - live subprocess shell
+    return subprocess.run(list(argv), check=False, capture_output=True, text=True, timeout=120)
+
+
+def _lane_id(item: Mapping[str, Any], run_id: str) -> str:
+    repo = str(item.get("repo") or "").replace("/", "-")
+    return f"pickup-{repo}-{item.get('number')}-{run_id}"
+
+
+def build_seed(
+    item: Mapping[str, Any], *, identity: str, run_id: str, claim_id: str | None,
+    seed_root: Path | str,
+) -> Seed:
+    """Write a per-item seed file and return its path + byte-level SHA256 (the
+    do_not_replan SHA-binding pointer shape; [[ce-seat-dispatch-prompt-pointer-sha]]).
+
+    The seed is a self-contained brief (it must not reference a private ticket a
+    contained seat cannot read; [[ce-no-egress-seat-self-contained-briefs]]) — it
+    embeds the work-item the lane is to act on.
+    """
+    root = Path(seed_root)
+    root.mkdir(parents=True, exist_ok=True)
+    role = _KIND_TO_ROLE.get(str(item.get("kind")), _DEFAULT_ROLE)
+    body = (
+        f"# CE work-pickup seed — {item.get('repo')}#{item.get('number')}\n\n"
+        f"You are picking up auto-detected forge work as **{identity}** ({role} lane).\n\n"
+        f"- repo: {item.get('repo')}\n"
+        f"- item: #{item.get('number')} ({item.get('subject_type')})\n"
+        f"- kind: {item.get('kind')} (notification reason: {item.get('reason')})\n"
+        f"- url: {item.get('url')}\n"
+        f"- title: {item.get('title')}\n"
+        f"- claim_id: {claim_id}\n"
+        f"- run_id: {run_id}\n\n"
+        f"The work-claim lock is already held by this identity. Do the {role} work "
+        f"for the item above; reach green, commit locally, then hand off push/merge "
+        f"to the controller (a §7-governed seat cannot push).\n"
+    )
+    path = root / f"{_lane_id(item, run_id)}.seed.md"
+    path.write_text(body, encoding="utf-8")
+    return Seed(path=str(path), sha256=hashlib.sha256(body.encode("utf-8")).hexdigest())
+
+
+def build_lane_argv(
+    item: Mapping[str, Any], *, identity: str, run_id: str, harness: str,
+    seed: Seed, repo_root: str, ledger_root: str,
+) -> list[str]:
+    """Build the ``ce lane launch`` argv binding the seed as the prompt pointer + SHA (PURE).
+
+    The seed file IS the ``--prompt`` pointer and its SHA the ``--prompt-sha`` (the
+    lane primitive's existing SHA-binding gate). The harness rides ``--command``
+    (the lane runtime's harness seam); a review item launches a ``reviewer`` lane.
+    """
+    role = _KIND_TO_ROLE.get(str(item.get("kind")), _DEFAULT_ROLE)
+    lane_kind = _KIND_TO_LANE_KIND.get(str(item.get("kind")), _DEFAULT_LANE_KIND)
+    return [
+        "ce", "lane", "launch",
+        "--controller-id", identity,
+        "--lane-id", _lane_id(item, run_id),
+        "--role", role,
+        "--lane-kind", lane_kind,
+        "--prompt", seed.path,
+        "--prompt-sha", seed.sha256,
+        "--repo-root", repo_root,
+        "--ledger-root", ledger_root,
+        "--command", harness,
+        "--json",
+    ]
+
+
+def launch_lane(
+    item: Mapping[str, Any], *, identity: str, run_id: str, claim_id: str | None,
+    harness: str, seed_root: Path | str, repo_root: str, ledger_root: str,
+    spawn: Spawn | None = None,
+) -> LaunchResult:
+    """Write a seed and spawn a fresh governed ``ce lane launch`` for a claimed item.
+
+    Returns ``launched=True`` ONLY when the spawn exits 0 AND its JSON reports the
+    lane's :data:`LAUNCHED_STATE` sentinel — the caller marks the notification
+    thread read only on that confirmation, never on a bare exit-0.
+    """
+    runner = spawn or _default_spawn
+    seed = build_seed(item, identity=identity, run_id=run_id, claim_id=claim_id, seed_root=seed_root)
+    argv = build_lane_argv(
+        item, identity=identity, run_id=run_id, harness=harness,
+        seed=seed, repo_root=repo_root, ledger_root=ledger_root,
+    )
+    try:
+        proc = runner(argv)
+    except Exception as exc:
+        return LaunchResult(launched=False, seed_path=seed.path, note=f"spawn error: {exc}")
+    if getattr(proc, "returncode", 1) != 0:
+        return LaunchResult(launched=False, seed_path=seed.path,
+                            note=f"lane launch exited {getattr(proc, 'returncode', '?')}")
+    state = None
+    out = (getattr(proc, "stdout", "") or "").strip()
+    if out:
+        try:
+            state = json.loads(out).get("seat_lifecycle_state")
+        except (ValueError, TypeError, AttributeError):
+            state = None
+    launched = state == LAUNCHED_STATE
+    return LaunchResult(
+        launched=launched, seed_path=seed.path, lane_id=_lane_id(item, run_id),
+        note=None if launched else f"lane did not confirm '{LAUNCHED_STATE}' (state={state!r})",
+    )
+
+
+def mark_thread_read(thread_id: str, *, gh_runner: GhRunner) -> bool:
+    """Mark a notification thread read (``PATCH /notifications/threads/{id}``).
+
+    Called ONLY after a launch confirms :data:`LAUNCHED_STATE` — so an item the
+    poller could not actually pick up stays unread and is retried next tick.
+    Best-effort: a failure leaves the thread unread (a benign re-pickup that the
+    dedup ledger + forge-arbitrated acquire then short-circuit). Never raises.
+    """
+    if not thread_id:
+        return False
+    try:
+        proc = gh_runner(
+            ["gh", "api", "--method", "PATCH", f"notifications/threads/{thread_id}"], None
+        )
+    except Exception:
+        return False
+    return getattr(proc, "returncode", 1) == 0

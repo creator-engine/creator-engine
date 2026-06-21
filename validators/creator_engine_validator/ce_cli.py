@@ -778,6 +778,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="harness for the spawned governed lane (S3)")
     pp.add_argument("--seed-root", default=None, dest="seed_root",
                     help="directory for per-item seed files (S3; default: <ledger-root>/seeds)")
+    pp.add_argument("--repo-root", default=".", dest="pickup_repo_root",
+                    help="repo root for the spawned governed lane (S3)")
+    pp.add_argument("--lane-ledger-root", default=None, dest="lane_ledger_root",
+                    help="active-work-ledger root for the spawned lane (S3; default: <repo-root>/.ce/state/active-work-ledger)")
     pp.add_argument("--backoff-seconds", type=float, default=1.0, dest="backoff_seconds",
                     help="re-read backoff for the fail-closed acquire race (default: 1.0)")
     pp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
@@ -2085,6 +2089,16 @@ def _make_pickup_gh_runner(identity: str):
     return _pickup.make_gh_runner(token)
 
 
+def _make_pickup_lane_spawn():
+    """Factory for the pickup→lane spawn seam (monkeypatchable in tests).
+
+    The lane is launched as a SUBPROCESS (`ce lane launch`) — the v1→v1 cross to
+    the launcher that keeps ALL tmux coupling behind the lane primitive.
+    """
+    from . import pickup as _pickup
+    return _pickup._default_spawn
+
+
 def _pickup_poll(args) -> int:
     from . import pickup
 
@@ -2200,10 +2214,40 @@ def _pickup_claim_and_launch(args, pickup, result) -> int:
 def _pickup_launch_for_outcome(args, pickup, outcome, gh_runner, record) -> dict:
     """S3: write a seed file + spawn a governed lane for a successfully-claimed item.
 
-    Wired in slice S3 (gated behind --enable-launch). Until then a claim with the
-    flag set still records launched=False (no spawn).
+    Gated behind --enable-launch (the per-seat canary, default OFF). Marks the
+    notification thread read ONLY after the lane confirms the `launched` sentinel
+    — never on a bare spawn-exit-0; an item that did not actually launch stays
+    unread and is retried next tick.
     """
-    raise NotImplementedError("pickup --enable-launch is wired in slice S3")
+    import os as _os
+
+    item = outcome.item
+    repo_root = getattr(args, "pickup_repo_root", ".")
+    lane_ledger_root = getattr(args, "lane_ledger_root", None) or _os.path.join(
+        repo_root, ".ce", "state", "active-work-ledger"
+    )
+    seed_root = getattr(args, "seed_root", None) or _os.path.join(
+        args.pickup_ledger_root or _os.path.join(_versions.V3_LOCAL_STATE_ROOT, "pickup"),
+        "seeds",
+    )
+    run_id = args.pickup_run_id or f"pickup-{args.identity}"
+
+    launch = pickup.launch_lane(
+        item, identity=args.identity, run_id=run_id, claim_id=outcome.claim_id,
+        harness=args.harness, seed_root=seed_root, repo_root=repo_root,
+        ledger_root=lane_ledger_root, spawn=_make_pickup_lane_spawn(),
+    )
+    record["launched"] = launch.launched
+    record["would_launch"] = False
+    record["seed_path"] = launch.seed_path
+    if launch.launched:
+        # Mark the thread read ONLY after the launched sentinel is confirmed.
+        pickup.mark_thread_read(item["thread_id"], gh_runner=gh_runner)
+        record["thread_marked_read"] = True
+    else:
+        record["note"] = launch.note
+        record["thread_marked_read"] = False
+    return record
 
 
 def _emit_pickup(args, code: int, message: str, payload) -> int:

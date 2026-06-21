@@ -242,9 +242,12 @@ class _FakeForge:
         self._next_id = 1
         self.assignees: list[str] = []
         self.pr_author = pr_author
+        self.raw_calls: list[list[str]] = []
+        self.read_threads: list[str] = []
 
     def runner(self, identity):
         def gh(argv, input_text=None):
+            self.raw_calls.append(list(argv))
             return self._dispatch(list(argv), input_text, identity)
         return gh
 
@@ -282,6 +285,9 @@ class _FakeForge:
                 if a not in self.assignees:
                     self.assignees.append(a)
             return self._ok({"assignees": [{"login": a} for a in self.assignees]})
+        if path.startswith("notifications/threads/") and method in ("PATCH", "DELETE"):
+            self.read_threads.append(path.rsplit("/", 1)[-1])
+            return self._ok({})
         return self._ok({})
 
     @staticmethod
@@ -378,6 +384,148 @@ def test_ledger_key_uses_server_fields_not_wall_clock():
     # the dedup key is (thread_id, item_id, action) — no clock term.
     k = pickup.ledger_key("t1", "10", "claim")
     assert k == ("t1", "10", "claim")
+
+
+# ===========================================================================
+# S3 — `ce lane launch` wiring (canary, gated behind --enable-launch).
+# ===========================================================================
+
+
+def test_build_seed_writes_file_and_returns_sha(tmp_path):
+    seed_dir = tmp_path / "seeds"
+    seed = pickup.build_seed(_item(kind="assigned"), identity="ce-dev-2",
+                             run_id="r1", claim_id="wclaim-abc", seed_root=seed_dir)
+    assert Path(seed.path).is_file()
+    body = Path(seed.path).read_text(encoding="utf-8")
+    assert "o/r" in body and "#10" in body
+    # the SHA matches the file bytes (the do_not_replan SHA-binding shape).
+    import hashlib
+    assert seed.sha256 == hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
+    calls = []
+
+    def fake_spawn(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched",
+                               "pane_path": "/x", "record": {}}),
+            stderr="",
+        )
+
+    result = pickup.launch_lane(
+        _item(kind="review_requested"), identity="ce-dev-2", run_id="r1",
+        claim_id="wclaim-abc", harness="claude",
+        seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
+        ledger_root=str(tmp_path / "awl"), spawn=fake_spawn,
+    )
+    assert result.launched is True
+    argv = calls[0]
+    # invokes `ce lane launch` with the seed as the prompt pointer + its sha.
+    assert "lane" in argv and "launch" in argv
+    assert "--prompt" in argv and "--prompt-sha" in argv
+    # review_requested → a reviewer role lane; the harness rides --command.
+    role_idx = argv.index("--role")
+    assert argv[role_idx + 1] == "reviewer"
+    cmd_idx = argv.index("--command")
+    assert argv[cmd_idx + 1] == "claude"
+
+
+def test_launch_lane_failure_does_not_mark_launched(tmp_path):
+    def fake_spawn(argv):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+
+    result = pickup.launch_lane(
+        _item(kind="assigned"), identity="ce-dev-2", run_id="r1", claim_id="c",
+        harness="codex", seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(tmp_path / "awl"), spawn=fake_spawn,
+    )
+    assert result.launched is False
+
+
+def test_mark_thread_read_only_after_launched(tmp_path):
+    forge = _FakeForge()
+    calls = []
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+    pickup.mark_thread_read("t1", gh_runner=gh)
+    # marks the notification thread read (PATCH /notifications/threads/t1).
+    assert any("notifications/threads/t1" in a for c in calls for a in c)
+
+
+def test_cli_enable_launch_marks_read_after_sentinel(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    forge = _FakeForge()
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_t\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    body = json.dumps([_notif("t9", "assign", repo="o/r", number=21,
+                              url="https://api.github.com/repos/o/r/issues/21")])
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport",
+                        lambda: _fake_transport([(200, {}, body)]))
+    monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
+
+    launched_argvs = []
+
+    def fake_spawn(argv):
+        launched_argvs.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    monkeypatch.setattr(ce_cli, "_make_pickup_lane_spawn", lambda: fake_spawn)
+
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),
+        "--claim", "--enable-launch", "--harness", "codex",
+        "--ledger-root", str(tmp_path / "pickup"),
+        "--repo-root", str(tmp_path), "--lane-ledger-root", str(tmp_path / "awl"),
+        "--run-id", "run-z", "--backoff-seconds", "0", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    claim = out["claims"][0]
+    assert claim["claimed"] is True
+    assert claim["launched"] is True
+    assert claim["would_launch"] is False
+    assert launched_argvs  # the lane primitive was invoked
+    # the thread was marked read (a PATCH on the notification thread) AFTER launch.
+    assert "t9" in forge.read_threads
+
+
+def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    forge = _FakeForge()
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_t\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    body = json.dumps([_notif("t1", "assign", repo="o/r", number=11,
+                              url="https://api.github.com/repos/o/r/issues/11")])
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport",
+                        lambda: _fake_transport([(200, {}, body)]))
+    monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
+
+    spawned = []
+    monkeypatch.setattr(ce_cli, "_make_pickup_lane_spawn",
+                        lambda: (lambda argv: spawned.append(argv)))
+
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),
+        "--claim", "--ledger-root", str(tmp_path / "pickup"),
+        "--run-id", "run-x", "--backoff-seconds", "0", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["claims"][0]["would_launch"] is True
+    assert out["claims"][0]["launched"] is False
+    assert spawned == []  # flag OFF → no lane spawn at all
 
 
 def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
