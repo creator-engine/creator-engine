@@ -1,10 +1,10 @@
-"""Unit tests for the ce-ops#55 autonomous forge work-pickup poller.
+"""Unit tests for the ce-ops#55/#182 autonomous forge work-pickup poller.
 
-``creator_engine_validator.pickup`` is a per-seat READ-ONLY poller over the GitHub Notifications API
-(``GET /notifications``) with conditional ``If-Modified-Since``/``Last-Modified`` and
-``X-Poll-Interval`` honored; a 304 is a free no-op. It resolves each notification thread
-into a normalized work-item ``{repo, kind, number, url, reason}`` and filters out
-non-actionable reasons (``subscribed``/``comment``).
+``creator_engine_validator.pickup`` is a per-seat READ-ONLY poller over the
+GitHub Search API (``GET /search/issues``). It resolves Search hits into a
+normalized work-item ``{repo, kind, number, url, reason, thread_id}``, using a
+stable synthetic ``search:{reason}:{repo}:{kind}:{number}`` thread id because
+Search has no notification thread id.
 
 Per the CE Ring-0 launch refusals (CC-D-2 / CDX-D-1), the poller is read-only and NEVER
 authors; actual work runs as a fresh governed lane via ``ce lane launch``. These tests
@@ -15,6 +15,8 @@ behind a per-seat enable flag (canary, default OFF).
 """
 
 import json
+import subprocess
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -23,21 +25,31 @@ from creator_engine_validator import pickup
 
 
 # ---------------------------------------------------------------------------
-# Fake notifications transport — records every (method, url, headers) call and
+# Fake Search API transport — records every (method, url, headers) call and
 # returns a scripted (status, headers, body) per call. Mirrors the app_jwt seam.
 # ---------------------------------------------------------------------------
 
 
-def _notif(thread_id, reason, *, subject_type="PullRequest", repo="creator-engine/ce-ops",
-           number=42, url=None, title="x"):
-    api = url or f"https://api.github.com/repos/{repo}/issues/{number}"
-    return {
-        "id": str(thread_id),
-        "reason": reason,
-        "repository": {"full_name": repo},
-        "subject": {"title": title, "type": subject_type, "url": api},
+def _hit(*, repo="creator-engine/ce-ops", number=42, pr=True, title="x"):
+    web_kind = "pull" if pr else "issues"
+    hit = {
+        "repository_url": f"https://api.github.com/repos/{repo}",
+        "html_url": f"https://github.com/{repo}/{web_kind}/{number}",
+        "number": number,
+        "title": title,
         "updated_at": "2026-06-21T00:00:00Z",
     }
+    if pr:
+        hit["pull_request"] = {"url": f"https://api.github.com/repos/{repo}/pulls/{number}"}
+    return hit
+
+
+def _body(*hits):
+    return json.dumps({"total_count": len(hits), "items": list(hits)})
+
+
+def _empty_search():
+    return (200, {}, _body())
 
 
 def _fake_transport(responses, calls=None):
@@ -53,109 +65,154 @@ def _fake_transport(responses, calls=None):
     return transport
 
 
-_ACTIONABLE_BODY = json.dumps([
-    _notif("t1", "review_requested", number=10,
-           url="https://api.github.com/repos/creator-engine/ce-ops/pulls/10"),
-    _notif("t2", "assign", number=11),
-    _notif("t3", "mention", number=12),
-    _notif("t4", "subscribed", number=13),   # filtered
-    _notif("t5", "comment", number=14),       # filtered
-])
+_ACTIONABLE_RESPONSES = [
+    (200, {}, _body(_hit(number=10, pr=True))),
+    (200, {}, _body(_hit(number=11, pr=False))),
+    (200, {}, _body(_hit(number=12, pr=False))),
+]
 
 
 # ---------------------------------------------------------------------------
-# poll() — happy path: resolves actionable threads, filters the rest.
+# poll() — Search API happy path, reason mapping, labels, rate limits.
 # ---------------------------------------------------------------------------
 
 
-def test_poll_resolves_actionable_items_and_filters_noise():
-    transport = _fake_transport([(200, {"Last-Modified": "Sat, 21 Jun 2026 00:00:00 GMT"}, _ACTIONABLE_BODY)])
+def test_build_queries_maps_reasons_scopes_and_labels():
+    specs = pickup.build_queries(labels=["team/feed", "ops,triage"], repo="o/r")
+    assert [s.reason for s in specs] == [
+        "review_requested", "assigned", "mention", "labeled", "labeled", "labeled",
+    ]
+    assert specs[0].query == "is:open review-requested:@me repo:o/r"
+    assert specs[1].query == "is:open assignee:@me repo:o/r"
+    assert specs[2].query == "is:open mentions:@me repo:o/r"
+    assert specs[3].query == 'is:open label:"team/feed" repo:o/r'
+    assert specs[4].query == 'is:open label:"ops" repo:o/r'
+    assert specs[5].query == 'is:open label:"triage" repo:o/r'
+
+
+def test_build_queries_refuses_unscoped_label():
+    with pytest.raises(pickup.PickupError) as exc:
+        pickup.build_queries(labels=["ready"])
+    assert "--label requires an explicit Search scope" in str(exc.value)
+
+
+def test_poll_resolves_search_hits_and_reason_mapping():
+    transport = _fake_transport(_ACTIONABLE_RESPONSES)
     result = pickup.poll(token="ghp_fake", transport=transport)
 
     kinds = {(i["kind"], i["number"]) for i in result.items}
     assert ("review_requested", 10) in kinds
     assert ("assigned", 11) in kinds
     assert ("mention", 12) in kinds
-    # subscribed + comment reasons are non-actionable → filtered out.
-    assert 13 not in {i["number"] for i in result.items}
-    assert 14 not in {i["number"] for i in result.items}
     assert len(result.items) == 3
+    assert result.poll_interval == 300
+    assert result.not_modified is False
 
 
-def test_poll_item_shape_is_normalized():
-    body = json.dumps([_notif("t1", "review_requested", repo="o/r", number=7,
-                              url="https://api.github.com/repos/o/r/pulls/7")])
-    transport = _fake_transport([(200, {}, body)])
+def test_poll_item_shape_is_normalized_with_synthetic_thread_id():
+    transport = _fake_transport([
+        (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
+        _empty_search(),
+        _empty_search(),
+    ])
     result = pickup.poll(token="ghp_fake", transport=transport)
     item = result.items[0]
     assert item["repo"] == "o/r"
     assert item["kind"] == "review_requested"
     assert item["number"] == 7
     assert item["reason"] == "review_requested"
-    # url is the human PR/issue url, derived from the api subject url.
     assert item["url"] == "https://github.com/o/r/pull/7"
-    assert item["thread_id"] == "t1"
+    assert item["subject_type"] == "PullRequest"
+    assert item["thread_id"] == "search:review_requested:o/r:review_requested:7"
 
 
-def test_poll_labeled_reason_maps_to_labeled_kind():
-    body = json.dumps([_notif("t1", "labeled", subject_type="Issue", number=5,
-                              url="https://api.github.com/repos/o/r/issues/5")])
-    transport = _fake_transport([(200, {}, body)])
-    result = pickup.poll(token="ghp_fake", transport=transport)
+def test_poll_label_option_maps_to_labeled_kind_and_adds_query():
+    calls = []
+    transport = _fake_transport([
+        _empty_search(),
+        _empty_search(),
+        _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=5, pr=False))),
+    ], calls=calls)
+    result = pickup.poll(token="ghp_fake", transport=transport, labels=["team/feed"], org="creator-engine")
     assert result.items[0]["kind"] == "labeled"
     assert result.items[0]["url"] == "https://github.com/o/r/issues/5"
+    label_call = calls[-1]
+    parsed = urllib.parse.urlparse(label_call["url"])
+    query = urllib.parse.parse_qs(parsed.query)["q"][0]
+    assert query == 'is:open label:"team/feed" org:creator-engine'
 
 
-# ---------------------------------------------------------------------------
-# Conditional requests — Last-Modified captured, sent back, 304 → empty no-op.
-# ---------------------------------------------------------------------------
-
-
-def test_poll_sends_if_modified_since_from_prior_last_modified():
-    last_mod = "Sat, 21 Jun 2026 00:00:00 GMT"
+def test_poll_unscoped_label_fails_before_transport_call():
     calls = []
-    transport = _fake_transport([(304, {}, "")], calls=calls)
-    result = pickup.poll(token="ghp_fake", transport=transport, last_modified=last_mod)
-    assert calls[0]["headers"].get("If-Modified-Since") == last_mod
+
+    def transport(method, url, headers, body):
+        calls.append({"method": method, "url": url, "headers": dict(headers), "body": body})
+        raise AssertionError("transport should not be called for unscoped labels")
+
+    with pytest.raises(pickup.PickupError) as exc:
+        pickup.poll(token="ghp_fake", transport=transport, labels=["ready"])
+    assert "--label requires an explicit Search scope" in str(exc.value)
+    assert calls == []
 
 
-def test_poll_304_yields_empty_items_and_preserves_last_modified():
-    last_mod = "Sat, 21 Jun 2026 00:00:00 GMT"
-    transport = _fake_transport([(304, {}, "")])
-    result = pickup.poll(token="ghp_fake", transport=transport, last_modified=last_mod)
-    assert list(result.items) == []
-    assert result.not_modified is True
-    # carry the cursor forward unchanged so the next poll stays conditional.
-    assert result.last_modified == last_mod
-
-
-def test_poll_captures_new_last_modified_and_poll_interval():
-    headers = {"Last-Modified": "Sat, 21 Jun 2026 01:00:00 GMT", "X-Poll-Interval": "120"}
-    transport = _fake_transport([(200, headers, json.dumps([]))])
+def test_poll_dedupes_overlapping_queries_by_repo_number():
+    transport = _fake_transport([
+        (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
+        (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
+        _empty_search(),
+    ])
     result = pickup.poll(token="ghp_fake", transport=transport)
-    assert result.last_modified == "Sat, 21 Jun 2026 01:00:00 GMT"
-    assert result.poll_interval == 120
+    assert len(result.items) == 1
+    assert result.items[0]["reason"] == "review_requested"
 
 
 def test_poll_default_poll_interval_when_header_absent():
-    transport = _fake_transport([(200, {}, json.dumps([]))])
+    transport = _fake_transport([_empty_search(), _empty_search(), _empty_search()])
     result = pickup.poll(token="ghp_fake", transport=transport)
     assert result.poll_interval == pickup.DEFAULT_POLL_INTERVAL
 
 
-def test_poll_sends_auth_header_and_api_version():
+def test_poll_sends_auth_header_api_version_and_search_url():
     calls = []
-    transport = _fake_transport([(200, {}, json.dumps([]))], calls=calls)
+    transport = _fake_transport([_empty_search(), _empty_search(), _empty_search()], calls=calls)
     pickup.poll(token="ghp_secret", transport=transport)
     assert calls[0]["headers"]["Authorization"] == "Bearer ghp_secret"
     assert "X-GitHub-Api-Version" in calls[0]["headers"]
-    assert calls[0]["url"].endswith("/notifications")
+    assert "/search/issues?" in calls[0]["url"]
+    parsed = urllib.parse.urlparse(calls[0]["url"])
+    assert urllib.parse.parse_qs(parsed.query)["q"][0] == "is:open review-requested:@me"
     assert calls[0]["method"] == "GET"
+
+
+def test_poll_403_rate_limit_fails_closed_with_retry_after():
+    transport = _fake_transport([(403, {"Retry-After": "120", "X-RateLimit-Reset": "1782000000"}, "{}")])
+    with pytest.raises(pickup.PickupRateLimited) as exc:
+        pickup.poll(token="ghp_fake", transport=transport)
+    assert exc.value.status == 403
+    assert exc.value.retry_after_seconds == 120
+    assert exc.value.rate_limit_reset == "1782000000"
+
+
+def test_poll_429_rate_limit_fails_closed():
+    transport = _fake_transport([(429, {"Retry-After": "60"}, "{}")])
+    with pytest.raises(pickup.PickupRateLimited) as exc:
+        pickup.poll(token="ghp_fake", transport=transport)
+    assert exc.value.status == 429
+    assert exc.value.to_payload()["retry_after_seconds"] == 60
+
+
+def test_poll_auth_error_is_fail_closed_and_redacted():
+    transport = _fake_transport([(401, {}, '{"message":"Bad credentials"}')])
+    with pytest.raises(pickup.PickupError) as exc:
+        pickup.poll(token="ghp_secret_should_not_leak", transport=transport)
+    assert "401" in str(exc.value)
+    assert "ghp_secret_should_not_leak" not in str(exc.value)
 
 
 def test_poll_requires_a_token():
     with pytest.raises(pickup.PickupError):
-        pickup.poll(token="", transport=_fake_transport([(200, {}, "[]")]))
+        pickup.poll(token="", transport=_fake_transport([_empty_search()]))
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +232,30 @@ def test_resolve_token_reads_per_identity_pat(monkeypatch, tmp_path):
     assert pickup.resolve_token(keys_dir=tmp_path, identity="ce-dev-2") == "ghp_fromfile"
 
 
+def test_resolve_token_ambient_gh_requires_opt_in(monkeypatch, tmp_path):
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.delenv("CE_PICKUP_ALLOW_AMBIENT_GH", raising=False)
+    monkeypatch.setenv("GH_TOKEN", "gho_ambient")
+    with pytest.raises(pickup.PickupError):
+        pickup.resolve_token(keys_dir=tmp_path, identity="ce-dev-9")
+
+
+def test_resolve_token_reads_ambient_gh_when_opted_in(monkeypatch, tmp_path):
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    proc = subprocess.CompletedProcess(["gh", "auth", "token"], 0, stdout="gho_ambient\n", stderr="")
+    assert pickup.resolve_token(
+        keys_dir=tmp_path,
+        identity="ce-dev-9",
+        allow_ambient_gh=True,
+        gh_token_runner=lambda: proc,
+    ) == "gho_ambient"
+
+
 def test_resolve_token_missing_raises(monkeypatch, tmp_path):
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.delenv("CE_PICKUP_ALLOW_AMBIENT_GH", raising=False)
     with pytest.raises(pickup.PickupError):
         pickup.resolve_token(keys_dir=tmp_path, identity="ce-dev-9")
 
@@ -194,7 +273,7 @@ def test_cli_pickup_poll_observe_only_emits_items(monkeypatch, tmp_path, capsys)
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     monkeypatch.setattr(
         ce_cli, "_make_pickup_transport",
-        lambda: _fake_transport([(200, {"X-Poll-Interval": "90"}, _ACTIONABLE_BODY)]),
+        lambda: _fake_transport(_ACTIONABLE_RESPONSES),
     )
     code = ce_cli.main([
         "pickup", "poll", "--identity", "ce-dev-2",
@@ -204,16 +283,99 @@ def test_cli_pickup_poll_observe_only_emits_items(monkeypatch, tmp_path, capsys)
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is True
     assert out["count"] == 3
-    assert out["poll_interval"] == 90
+    assert out["poll_interval"] == 300
     # observe-only: no claim, no launch fields.
     kinds = {i["kind"] for i in out["items"]}
     assert kinds == {"review_requested", "assigned", "mention"}
+
+
+def test_cli_pickup_poll_unscoped_label_fails_before_transport(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_clitoken\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+
+    def should_not_make_transport():
+        raise AssertionError("transport factory should not be called for unscoped labels")
+
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport", should_not_make_transport)
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2",
+        "--keys-dir", str(tmp_path), "--label", "ready", "--json",
+    ])
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert "--label requires an explicit Search scope" in out["error"]
+
+
+def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_clitoken\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_pickup_transport",
+        lambda: _fake_transport([
+            _empty_search(),
+            _empty_search(),
+            _empty_search(),
+            (200, {}, _body(_hit(repo="o/r", number=23, pr=False))),
+        ], calls=calls),
+    )
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2",
+        "--keys-dir", str(tmp_path), "--label", "ready", "--org", "creator-engine", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["items"][0]["kind"] == "labeled"
+    parsed = urllib.parse.urlparse(calls[-1]["url"])
+    assert urllib.parse.parse_qs(parsed.query)["q"][0] == 'is:open label:"ready" org:creator-engine'
+
+
+def test_cli_pickup_poll_help_mentions_search_label_and_launch(capsys):
+    from creator_engine_validator import ce_cli
+
+    with pytest.raises(SystemExit) as exc:
+        ce_cli.main(["pickup", "poll", "--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "Search API" in out
+    assert "--label" in out
+    assert "--enable-launch" in out
+
+
+def test_cli_pickup_poll_rate_limit_json_fail_closed(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_clitoken\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.setattr(
+        ce_cli, "_make_pickup_transport",
+        lambda: _fake_transport([(429, {"Retry-After": "60"}, "{}")]),
+    )
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2",
+        "--keys-dir", str(tmp_path), "--json",
+    ])
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert out["backoff"]["status"] == 429
+    assert out["backoff"]["retry_after_seconds"] == 60
 
 
 def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.delenv("CE_PICKUP_ALLOW_AMBIENT_GH", raising=False)
     code = ce_cli.main([
         "pickup", "poll", "--identity", "ce-dev-9", "--keys-dir", str(tmp_path),
     ])
@@ -223,8 +385,6 @@ def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
 # ===========================================================================
 # S2 — claim + idempotency (dry-run).
 # ===========================================================================
-
-import subprocess  # noqa: E402
 
 from creator_engine_validator import work_claims  # noqa: E402
 
@@ -469,22 +629,28 @@ def test_mark_thread_read_only_after_launched(tmp_path):
         calls.append(list(argv))
         return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
 
-    pickup.mark_thread_read("t1", gh_runner=gh)
-    # marks the notification thread read (PATCH /notifications/threads/t1).
+    assert pickup.mark_thread_read("search:assigned:o/r:assigned:1", gh_runner=gh) is False
+    assert calls == []
+
+    assert pickup.mark_thread_read("t1", gh_runner=gh) is True
+    # legacy notification ids can still be marked read.
     assert any("notifications/threads/t1" in a for c in calls for a in c)
 
 
-def test_cli_enable_launch_marks_read_after_sentinel(monkeypatch, tmp_path, capsys):
+def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
-    body = json.dumps([_notif("t9", "assign", repo="o/r", number=21,
-                              url="https://api.github.com/repos/o/r/issues/21")])
+    responses = [
+        _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=21, pr=False))),
+        _empty_search(),
+    ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
-                        lambda: _fake_transport([(200, {}, body)]))
+                        lambda: _fake_transport(responses))
     monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
 
     launched_argvs = []
@@ -511,8 +677,8 @@ def test_cli_enable_launch_marks_read_after_sentinel(monkeypatch, tmp_path, caps
     assert claim["launched"] is True
     assert claim["would_launch"] is False
     assert launched_argvs  # the lane primitive was invoked
-    # the thread was marked read (a PATCH on the notification thread) AFTER launch.
-    assert "t9" in forge.read_threads
+    assert claim["thread_marked_read"] is False
+    assert forge.read_threads == []
 
 
 def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
@@ -522,10 +688,13 @@ def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
-    body = json.dumps([_notif("t1", "assign", repo="o/r", number=11,
-                              url="https://api.github.com/repos/o/r/issues/11")])
+    responses = [
+        _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
+        _empty_search(),
+    ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
-                        lambda: _fake_transport([(200, {}, body)]))
+                        lambda: _fake_transport(responses))
     monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
 
     spawned = []
@@ -551,10 +720,13 @@ def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
-    body = json.dumps([_notif("t1", "assign", repo="o/r", number=11,
-                              url="https://api.github.com/repos/o/r/issues/11")])
+    responses = [
+        _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
+        _empty_search(),
+    ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
-                        lambda: _fake_transport([(200, {}, body)]))
+                        lambda: _fake_transport(responses))
     monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
     code = ce_cli.main([
         "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),

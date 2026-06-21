@@ -792,30 +792,32 @@ def _build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--write-cache", default=None, dest="write_cache",
                      metavar="ROOT", help="write the view-only Cockpit cache under <ROOT>/claims/claims.json")
 
-    # ce pickup poll — the ce-ops#55 autonomous forge work-pickup "conveyor belt".
-    # A per-seat READ-ONLY poller over the GitHub Notifications API; observe-only by
+    # ce pickup poll — the ce-ops#55/#182 autonomous forge work-pickup "conveyor belt".
+    # A per-seat READ-ONLY poller over the GitHub Search API; observe-only by
     # default (S1), claims via the forge + a dedup ledger (S2, dry-run by default),
     # and triggers a fresh governed `ce lane launch` ONLY when --enable-launch is set
     # (S3, canary OFF by default). The poller NEVER authors (CC-D-2 / CDX-D-1).
     pickup = groups.add_parser(
-        "pickup", help="autonomous forge work-pickup poller (read-only; ce-ops#55)"
+        "pickup", help="autonomous forge work-pickup poller (read-only; ce-ops#55/#182)"
     )
     pickup_sub = pickup.add_subparsers(dest="pickup_cmd")
-    pp = pickup_sub.add_parser("poll", help="one read-only notifications poll → work-items JSON")
+    pp = pickup_sub.add_parser("poll", help="one read-only Search API poll → work-items JSON")
     pp.add_argument("--identity", required=True,
                     help="seat identity (e.g. ce-dev-2); selects ~/.ce-keys/<identity>.pat")
     pp.add_argument("--keys-dir", default=None, dest="keys_dir",
                     help="PAT directory (default: ~/.ce-keys)")
-    pp.add_argument("--last-modified", default=None, dest="last_modified",
-                    help="prior Last-Modified cursor for the conditional If-Modified-Since request")
-    pp.add_argument("--all", action="store_true", dest="all_threads",
-                    help="include already-read threads (?all=true)")
-    pp.add_argument("--ledger-root", default=None, dest="pickup_ledger_root",
-                    help="dedup ledger root (default: <state>/pickup); enables claim + dedup (S2)")
+    pp.add_argument("--allow-ambient-gh", action="store_true", dest="allow_ambient_gh",
+                    help="allow fallback to ambient gh auth token after CE_PICKUP_TOKEN and PAT file")
+    pp.add_argument("--repo", default=None,
+                    help="restrict Search API queries and claims to one owner/name repo")
+    pp.add_argument("--org", default=None,
+                    help="restrict Search API queries to one GitHub org/user slug")
+    pp.add_argument("--label", action="append", default=[], dest="pickup_labels",
+                    help="repeatable team label to include as labeled work (comma-separated allowed)")
+    pp.add_argument("--state-root", "--ledger-root", default=None, dest="pickup_ledger_root",
+                    help="pickup state root for dedup ledger (default: <state>/pickup)")
     pp.add_argument("--claim", action="store_true", dest="pickup_claim",
                     help="S2: forge-arbitrate a claim per actionable item (else observe-only)")
-    pp.add_argument("--repo", default=None,
-                    help="restrict claims to a single owner/name repo (claim safety fence)")
     pp.add_argument("--run-id", default=None, dest="pickup_run_id",
                     help="run id stamped into the claim marker (default: derived)")
     pp.add_argument("--enable-launch", action="store_true", dest="enable_launch",
@@ -2233,20 +2235,20 @@ def _claim_status(args) -> int:
 
 
 def _make_pickup_transport():
-    """Factory for the pickup notifications HTTPS transport (monkeypatchable in tests)."""
+    """Factory for the pickup Search API HTTPS transport (monkeypatchable in tests)."""
     from . import pickup as _pickup
     return _pickup._default_transport
 
 
-def _make_pickup_gh_runner(identity: str):
+def _make_pickup_gh_runner(identity: str, token: str | None = None):
     """Factory for the per-identity pickup gh runner (monkeypatchable in tests).
 
     Resolves the seat's own PAT (the #137 identity model) and returns a runner
     that injects it into the child ``gh`` env — never ambient/overwatch auth.
     """
     from . import pickup as _pickup
-    token = _pickup.resolve_token(identity=identity)
-    return _pickup.make_gh_runner(token)
+    resolved = token if token is not None else _pickup.resolve_token(identity=identity)
+    return _pickup.make_gh_runner(resolved)
 
 
 def _make_pickup_lane_spawn():
@@ -2263,7 +2265,20 @@ def _pickup_poll(args) -> int:
     from . import pickup
 
     try:
-        token = pickup.resolve_token(keys_dir=args.keys_dir, identity=args.identity)
+        pickup.build_queries(
+            labels=getattr(args, "pickup_labels", ()) or (),
+            repo=getattr(args, "repo", None),
+            org=getattr(args, "org", None),
+        )
+    except pickup.PickupError as exc:
+        return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
+
+    try:
+        token = pickup.resolve_token(
+            keys_dir=args.keys_dir,
+            identity=args.identity,
+            allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
+        )
     except pickup.PickupError as exc:
         return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
 
@@ -2271,8 +2286,16 @@ def _pickup_poll(args) -> int:
         result = pickup.poll(
             token=token,
             transport=_make_pickup_transport(),
-            last_modified=args.last_modified,
-            all_threads=args.all_threads,
+            labels=getattr(args, "pickup_labels", ()) or (),
+            repo=getattr(args, "repo", None),
+            org=getattr(args, "org", None),
+        )
+    except pickup.PickupRateLimited as exc:
+        return _emit_pickup(
+            args,
+            2,
+            f"ce pickup poll failed closed: {exc}",
+            {"backoff": exc.to_payload()},
         )
     except pickup.PickupError as exc:
         return _emit_pickup(args, 2, f"ce pickup poll failed: {exc}", None)
@@ -2281,20 +2304,19 @@ def _pickup_poll(args) -> int:
     # a claim per actionable item (S2) and, only when --enable-launch is ALSO set,
     # spawns a fresh governed lane (S3, canary OFF by default).
     if getattr(args, "pickup_claim", False):
-        return _pickup_claim_and_launch(args, pickup, result)
+        return _pickup_claim_and_launch(args, pickup, result, token)
 
     payload = {
         "ok": True,
         "not_modified": result.not_modified,
         "last_modified": result.last_modified,
         "poll_interval": result.poll_interval,
+        "rate_limit": result.rate_limit,
         "items": list(result.items),
         "count": len(result.items),
     }
     if getattr(args, "json_output", False):
         print(json.dumps(payload, indent=2, sort_keys=True))
-    elif result.not_modified:
-        print(f"ce pickup poll: 304 not-modified (next poll >= {result.poll_interval}s)")
     else:
         print(f"ce pickup poll: {len(result.items)} actionable item(s) "
               f"(next poll >= {result.poll_interval}s)")
@@ -2303,7 +2325,7 @@ def _pickup_poll(args) -> int:
     return 0
 
 
-def _pickup_claim_and_launch(args, pickup, result) -> int:
+def _pickup_claim_and_launch(args, pickup, result, token: str) -> int:
     """S2/S3: forge-arbitrate a claim per actionable item, then (S3, gated) launch a lane.
 
     S2 wires the claim + dedup ledger (dry-run: a successful claim prints "would
@@ -2317,7 +2339,12 @@ def _pickup_claim_and_launch(args, pickup, result) -> int:
     ledger_root = args.pickup_ledger_root or _os.path.join(_versions.V3_LOCAL_STATE_ROOT, "pickup")
     ledger_path = _os.path.join(ledger_root, _pickup.DEFAULT_LEDGER_NAME)
     run_id = args.pickup_run_id or f"pickup-{args.identity}-{result.last_modified or 'init'}"
-    gh_runner = _make_pickup_gh_runner(args.identity)
+    try:
+        gh_runner = _make_pickup_gh_runner(args.identity, token)
+    except TypeError:
+        # Compatibility for tests or callers that monkeypatch the factory with
+        # the older one-argument shape.
+        gh_runner = _make_pickup_gh_runner(args.identity)
 
     repo_fence = getattr(args, "repo", None)
     enable_launch = bool(getattr(args, "enable_launch", False))
@@ -2351,6 +2378,7 @@ def _pickup_claim_and_launch(args, pickup, result) -> int:
         "not_modified": result.not_modified,
         "last_modified": result.last_modified,
         "poll_interval": result.poll_interval,
+        "rate_limit": result.rate_limit,
         "enable_launch": enable_launch,
         "claims": claims,
         "claimed_count": sum(1 for c in claims if c["claimed"]),
@@ -2374,10 +2402,10 @@ def _pickup_claim_and_launch(args, pickup, result) -> int:
 def _pickup_launch_for_outcome(args, pickup, outcome, gh_runner, record) -> dict:
     """S3: write a seed file + spawn a governed lane for a successfully-claimed item.
 
-    Gated behind --enable-launch (the per-seat canary, default OFF). Marks the
-    notification thread read ONLY after the lane confirms the `launched` sentinel
-    — never on a bare spawn-exit-0; an item that did not actually launch stays
-    unread and is retried next tick.
+    Gated behind --enable-launch (the per-seat canary, default OFF). Search API
+    items have synthetic thread ids and no read marker, so idempotency remains
+    the claim/dedup ledger. Legacy notification ids are marked read only after
+    the lane confirms the `launched` sentinel.
     """
     import os as _os
 
@@ -2401,9 +2429,7 @@ def _pickup_launch_for_outcome(args, pickup, outcome, gh_runner, record) -> dict
     record["would_launch"] = False
     record["seed_path"] = launch.seed_path
     if launch.launched:
-        # Mark the thread read ONLY after the launched sentinel is confirmed.
-        pickup.mark_thread_read(item["thread_id"], gh_runner=gh_runner)
-        record["thread_marked_read"] = True
+        record["thread_marked_read"] = pickup.mark_thread_read(item["thread_id"], gh_runner=gh_runner)
     else:
         record["note"] = launch.note
         record["thread_marked_read"] = False

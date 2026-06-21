@@ -68,8 +68,9 @@ platform evolves:
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
-  `ce reviewer-triage`, `ce claim`, and `ce pickup` (the ce-ops#55 read-only
-  autonomous forge work-pickup poller). `ce hud` is an alias for the visible `ce launch` Controller-seat
+  `ce reviewer-triage`, `ce claim`, and `ce pickup` (the ce-ops#55/#182
+  read-only, Search-API-backed autonomous forge work-pickup poller for
+  fine-grained PAT compatibility). `ce hud` is an alias for the visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
 - **`cev3`** is the v3 work-driving entry point in this repository. It covers the
