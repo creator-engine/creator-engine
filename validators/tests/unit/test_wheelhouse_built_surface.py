@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 DISTRIBUTION = "creator_engine_validator"
+pytestmark = pytest.mark.wheel_bake_gate
 
 
 @pytest.fixture()

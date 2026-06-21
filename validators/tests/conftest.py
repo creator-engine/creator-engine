@@ -40,6 +40,11 @@ def pytest_configure(config):
         "inner-loop fast lane is ``-m 'not sweep'``. NEVER use the fast lane as green-gate "
         "evidence (see validators/README.md).",
     )
+    config.addinivalue_line(
+        "markers",
+        "wheel_bake_gate: first-party app-wheel parity checks run by the "
+        "post-merge wheel bake lane, not the author-side pytest gate.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):

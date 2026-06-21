@@ -203,11 +203,13 @@ def test_requirements_has_no_stale_pins(validators_dir: Path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.wheel_bake_gate
 def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     result = pkg.verify_packaging_contract(repo_root)
     assert result.ok, f"packaging contract violations: {result.violations}"
 
 
+@pytest.mark.wheel_bake_gate
 def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
     violations = pkg.verify_wheel_matches_source(repo_root)
     assert violations == []
