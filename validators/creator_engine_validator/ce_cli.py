@@ -33,6 +33,7 @@ ce brain correct     # append a supersession marker plus corrected assertion
 ce brain ingest      # derive/update the local rebuildable recall vector store
 ce brain verify      # validate the local brain assertion ledger
 ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
+ce brain bootstrap   # emit the deterministic injection bootstrap payload
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
@@ -63,6 +64,7 @@ import sys
 from typing import Sequence
 
 from . import (
+    brain_bootstrap,
     brain_probe,
     brain_runtime,
     brain_ingest_runtime,
@@ -554,7 +556,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ce brain — local Knowledge-SSOT assertion ledger plus rebuildable recall
     # ingest. The recall store remains a derived projection of Markdown source.
     brain = groups.add_parser(
-        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/ingest/verify/probe)"
+        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/ingest/verify/probe/bootstrap)"
     )
     brain_sub = brain.add_subparsers(dest="brain_cmd")
 
@@ -631,6 +633,13 @@ def _build_parser() -> argparse.ArgumentParser:
     bp.add_argument("probe_name", nargs="?", metavar="name", help="probe name")
     bp.add_argument("--all", action="store_true", dest="all_probes", help="run all registered probes")
     bp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bb = brain_sub.add_parser("bootstrap", help="emit the deterministic brain injection bootstrap payload")
+    _add_state_root(bb)
+    _add_optional_scope(bb)
+    bb.add_argument("--role", default=brain_bootstrap.DEFAULT_ROLE, help="bootstrap role label")
+    bb.add_argument("--seat-class", default=brain_bootstrap.DEFAULT_SEAT_CLASS, help="foreman/worker; unknown fails closed to foreman")
+    bb.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce connector — GitHub connector runtime. Validates a connector descriptor +
     # Mission-Brief (G2.005.0 substrate). G2.005.1 added read-only verify/plan/fetch;
@@ -1831,6 +1840,34 @@ def _brain_ingest(args) -> int:
     return 0
 
 
+def _brain_bootstrap(args) -> int:
+    try:
+        payload = brain_bootstrap.build_bootstrap_payload(
+            state_root=args.state_root,
+            scope=_brain_scope(args, required=False),
+            role=args.role,
+            seat_class=args.seat_class,
+        )
+    except SystemExit as exc:
+        return int(exc.code)
+    except brain_bootstrap.BrainBootstrapRefused as exc:
+        print(f"ERROR: ce brain bootstrap refused [{exc.code}]: {exc}", file=sys.stderr)
+        for error in getattr(exc, "errors", ()):
+            print(f"  ERROR: {error}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        ks = payload["knowledge_ssot"]
+        print(
+            "ce brain bootstrap: "
+            f"{ks['scope_relevant_count']} assertion(s) "
+            f"from {ks['record_count']} record(s)"
+        )
+        print(f"head_content_hash: {ks['head_content_hash']}")
+    return 0
+
+
 def _connector_plan_payload(plan) -> dict:
     return {
         "connector_id": plan.connector_id,
@@ -2513,6 +2550,7 @@ _PCL_DISPATCH = {
 
 _BRAIN_DISPATCH = {
     "assert": _brain_assert,
+    "bootstrap": _brain_bootstrap,
     "check": _brain_check,
     "correct": _brain_correct,
     "ingest": _brain_ingest,
