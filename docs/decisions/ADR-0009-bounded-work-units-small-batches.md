@@ -12,12 +12,13 @@ informed: []
 review_by: 2026-12-21
 mutation_class: governance
 ratification:
-  ratified_by: neckar
+  ratified_by: ce-dev-2
   ratified_at: "2026-06-21"
   ratification_prompt_sha: "6567380f5395d586f70907749e2a62f44fffacaf2df70affe044d9abc5923983"
   quorum: n1_solo
   # N=1 native mode: this privileged, accepted governance record was ratified by
-  # the sole resolved human (neckar), with a distinct agent author
+  # the sole resolved human (the Operator, login ce-dev-2 per .ce/coordination.yml
+  # identity_map → human_id peer-operator), with a distinct agent author
   # (ce-arch-tenets) — honest solo quorum. The anchor is the sha256 of the
   # Operator-ratified ratification prompt for graduating the bounded-work-units
   # tenet (ce-ops#165).
