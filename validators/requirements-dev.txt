@@ -36,3 +36,10 @@ yarl==1.24.2
 # RED-G-6 does not read requirements-dev.txt or wheelhouse-dev/.
 pytest-xdist==3.8.0
 execnet==2.1.2
+# ADR-0010 Phase-A: wheel-bake helper tests build the first-party app wheel
+# offline with ``python -m build --wheel --no-isolation``. Test-only; the
+# runtime dependency floor remains PyYAML + jsonschema.
+build==1.3.0
+pyproject_hooks==1.2.0
+setuptools==82.0.1
+wheel==0.47.0

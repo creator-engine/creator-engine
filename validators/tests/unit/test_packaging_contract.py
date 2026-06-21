@@ -208,6 +208,7 @@ def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     assert result.ok, f"packaging contract violations: {result.violations}"
 
 
+@pytest.mark.wheel_bake_gate
 def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
     violations = pkg.verify_wheel_matches_source(repo_root)
     assert violations == []
@@ -235,6 +236,8 @@ def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
 
     violations = pkg.verify_wheel_matches_source(tmp_path)
     assert any("differs from source file drift.py" in violation for violation in violations)
+    aggregate = pkg.verify_packaging_contract(tmp_path)
+    assert not any("differs from source file drift.py" in violation for violation in aggregate.violations)
 
 
 def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):

@@ -37,12 +37,16 @@ Runtime wheelhouse (`validators/wheelhouse/`):
 
 Development wheelhouse (`validators/wheelhouse-dev/`):
 
+- build 1.3.0 — MIT License.
 - iniconfig 2.3.0 — MIT License.
 - packaging 26.2 — Apache License 2.0 OR BSD 2-Clause License
   (dual-licensed by the upstream project).
 - pluggy 1.6.0 — MIT License.
 - Pygments 2.20.0 — BSD 2-Clause License.
+- pyproject_hooks 1.2.0 — MIT License.
 - pytest 9.0.2 — MIT License.
+- setuptools 82.0.1 — MIT License.
+- wheel 0.47.0 — MIT License.
 
 These vendored wheels are included for convenience and offline
 reproducibility only. Their inclusion does not relicense them: each

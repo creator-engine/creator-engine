@@ -3,8 +3,10 @@
 This module is the single source of truth for the Source-locked Option B / 1B
 packaging contract and the read-only helpers that assert it. ``ce doctor``
 reuses :func:`verify_packaging_contract` for the dependency/wheelhouse-drift
-guard clause (RED-G-6), and the packaging tests assert the contract over the
-tracked artifacts.
+guard clause (RED-G-6), and the packaging tests assert the required author-side
+contract over the tracked artifacts. The first-party app-wheel/source parity
+attestation is exposed separately by :func:`verify_wheel_matches_source` so the
+post-merge wheel-bake lane can run it without serializing authored PRs.
 
 The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 
@@ -439,14 +441,19 @@ def verify_generated_version(repo_root: Path | str) -> list[str]:
 
 
 def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
-    """Aggregate the Option B packaging contract for the guard (RED-G-6)."""
+    """Aggregate the author-side Option B packaging contract (RED-G-6).
+
+    ADR-0010 moves first-party app-wheel/source parity to the post-merge bake
+    gate. This aggregate therefore keeps pyproject, runtime wheelhouse,
+    lockstep, and generated-version checks required, but intentionally excludes
+    :func:`verify_wheel_matches_source`.
+    """
     root = Path(repo_root)
     validators = root / "validators"
     violations: list[str] = []
     violations += pyproject_violations(validators / "pyproject.toml")
     violations += wheelhouse_violations(validators / "wheelhouse")
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
-    violations += verify_wheel_matches_source(root)
     violations += verify_generated_version(root)
     details = {
         "requires_python": REQUIRES_PYTHON,
