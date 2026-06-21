@@ -178,7 +178,7 @@ def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_p
     assert not (install_root / "venv").exists()
 
 
-def test_install_sh_refuses_matching_same_origin_anchor_before_artifacts(tmp_path: Path, repo_root: Path):
+def test_install_sh_refuses_equivalent_same_origin_anchor_before_artifacts(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
     proc = _run_install(
@@ -186,7 +186,7 @@ def test_install_sh_refuses_matching_same_origin_anchor_before_artifacts(tmp_pat
         repo_root,
         site=site,
         install_root=install_root,
-        extra_env={"CE_TRUST_ANCHOR_URL": "https://creator-engine.dev/trust/ce-root-v1.txt"},
+        extra_env={"CE_TRUST_ANCHOR_URL": "https://creator-engine.dev:443/trust/ce-root-v1.txt"},
     )
     assert proc.returncode != 0
     assert "trust_anchor_refused" in proc.stderr

@@ -1313,6 +1313,24 @@ def test_onboard_authentic_refuses_same_origin_only_trust_root(tmp_path, capsys,
     assert "same_origin_only" in payload["detail"]
 
 
+def test_onboard_authentic_refuses_same_origin_url_trust_anchor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"https://creator-engine.dev/trust/ce-root-v1.txt={_trust_anchor(tmp_path)}",
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "same_origin_anchor" in payload["detail"]
+    assert "shares origin" in payload["detail"]
+    assert "SHA256:" not in payload["detail"]
+
+
 def test_onboard_authentic_refuses_mismatched_trust_anchor(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([

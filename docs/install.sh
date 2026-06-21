@@ -125,13 +125,46 @@ hash_file() {
   fi
 }
 
-url_origin() {
-  printf '%s\n' "$1" | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://[^/?#]+).*#\1#'
+normalized_url_origin() {
+  printf '%s\n' "$1" | awk '
+    {
+      url = $0
+      if (match(url, /^[A-Za-z][A-Za-z0-9+.-]*:\/\//) == 0) {
+        print url
+        exit
+      }
+      scheme = tolower(substr(url, 1, RLENGTH - 3))
+      authority = substr(url, RLENGTH + 1)
+      sub(/[\/?#].*$/, "", authority)
+      n = split(authority, userinfo_parts, "@")
+      authority = userinfo_parts[n]
+      host = authority
+      port = ""
+      if (authority ~ /^\[[^]]+\]/) {
+        rb = index(authority, "]")
+        host = substr(authority, 1, rb)
+        suffix = substr(authority, rb + 1)
+        if (suffix ~ /^:[0-9]+$/) {
+          port = substr(suffix, 2)
+        }
+      } else if (authority ~ /:[0-9]+$/) {
+        host = authority
+        sub(/:[0-9]+$/, "", host)
+        port = authority
+        sub(/^.*:/, "", port)
+      }
+      host = tolower(host)
+      if ((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) {
+        port = ""
+      }
+      printf "%s://%s%s\n", scheme, host, port == "" ? "" : ":" port
+    }
+  '
 }
 
 refuse_same_origin_trust_anchor() {
-  site_origin="$(url_origin "$CE_SITE")"
-  anchor_origin="$(url_origin "$CE_TRUST_ANCHOR_URL")"
+  site_origin="$(normalized_url_origin "$CE_SITE")"
+  anchor_origin="$(normalized_url_origin "$CE_TRUST_ANCHOR_URL")"
   if [ "$site_origin" = "$anchor_origin" ]; then
     fail trust_anchor_refused "trust anchor URL must be out-of-band; ${CE_TRUST_ANCHOR_URL} shares origin with ${CE_SITE}"
   fi

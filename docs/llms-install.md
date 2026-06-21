@@ -13,8 +13,8 @@ signature:
   key_id: ce-dev1-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQWxCbFVvSWdWczY3TkkyK0wxOHgvWlZWNmlEdVZHa0t4d2d4UEtRZU1sQzkram5pK1hZaDhhVmgKZURLZjFXcjQ2TzZSS1Bwc0ZPTWNCcVNqTHFpQWNLCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: e0017039efe899df25fc500c926d22a9de326183c5a87f91e54133c00fad6b89
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRGpOWHRkaHllNHNncGRTYm1pVFRDei9ibDdtaUhheVZ1TWtTTTFVODNZdzJQcURkQ0d6bFJTU24KNHU0V2xUU0dWWmQzRFFLR2ppS1NlYkdDYlZod1FDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: c79079118fbfd2ebaa71feae05788715d845047f0a5c4a0efc6f03233ed8406a
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: b486c19de135ce4caa87161da5778f7dddf374626960c197930524588e6c5ab0
+  sha256s_sha256: 7b04c77cf68f12180a063d92fc92378ae3e51ee5e073fc32f24b74f8f3274cd3
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -36,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: 602fbec628165235ad844043178d48fb9e58b558634a2263ff0e05ff26b3a718
+      sha256: 5617d45c15e0528a61004d7f51650f59ea486ade993277fa00d55160612e0ec7
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
@@ -189,8 +189,9 @@ inventory (`schemas/install-answers.schema.yaml` — the single source of truth)
 Work the loop:
 
 1. **`<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root
-   <verified-trust-root> --answers-schema <verified-schema> --inventory`** (the
-   one-liner runs this once already) — emits every input with
+   <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor>
+   --answers-schema <verified-schema> --inventory`** (the one-liner runs this
+   once already) — emits every input with
    live status per key: `detected:<value>` · `default:<value>` ·
    `needed (would ask at step N)` · `secret (ref required)`. This is the
    artifact you read to prepare the operator's answers upfront.

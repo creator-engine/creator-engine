@@ -2789,6 +2789,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 verified.key_id,
                 usable_keys[verified.key_id],
                 anchor_records,
+                install_spec_source=v3_installer.PUBLISHED_INSTALL_SPEC_URL,
             )
             if not trust_anchor_evidence.ok:
                 raise v3_installer.InstallRefused(

@@ -242,6 +242,49 @@ def test_public_key_fingerprint_matches_out_of_band_anchor_record():
     assert "fingerprint" not in evidence.to_record()
 
 
+def test_same_origin_url_anchor_is_not_out_of_band_even_when_fingerprint_matches():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"ce-root-v1={fingerprint}\n",
+        source="https://creator-engine.dev/trust/ce-root-v1.txt",
+    )
+
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        line,
+        anchors,
+        install_spec_source="https://creator-engine.dev/llms-install.md",
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_anchor"
+    assert "shares origin" in evidence.reason
+    assert evidence.agreed == ()
+    assert evidence.mismatched == ()
+    assert "fingerprint" not in evidence.to_record()
+    assert "creator-engine.dev" not in str(evidence.to_record())
+
+
+def test_equivalent_default_port_same_origin_anchor_is_refused():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"ce-root-v1={fingerprint}\n",
+        source="https://creator-engine.dev:443/trust/ce-root-v1.txt",
+    )
+
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        line,
+        anchors,
+        install_spec_source="https://creator-engine.dev/llms-install.md",
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_anchor"
+
+
 def test_out_of_band_anchor_missing_is_degraded_not_verified():
     evidence = inst.verify_trust_anchors(
         "ce-root-v1",

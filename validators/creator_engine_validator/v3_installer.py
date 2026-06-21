@@ -58,6 +58,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Mapping
+from urllib.parse import urlparse
 
 from . import v3_greenfield
 
@@ -207,6 +208,9 @@ SSH_SIG_NAMESPACE = "ce-spec-v1"
 #: :func:`parse_allowed_signers` loader turns its bytes into :data:`PINNED_KEYS`;
 #: this module never reads it from disk (the CLI/tests inject the text).
 PINNED_KEY_FILE = "docs/keys/ce-root-v1"
+#: The public signed agent-native install spec origin. The CLI reads a local
+#: path, but authentic onboarding is verifying this served artifact.
+PUBLISHED_INSTALL_SPEC_URL = "https://creator-engine.dev/llms-install.md"
 #: The placeholder token a dynamic signature field carries in the CANONICAL bytes
 #: (reused byte-for-byte from E.3: the served spec's content digest covered the
 #: file with ``value:`` set to exactly this token). The canonical bytes normalize
@@ -384,17 +388,48 @@ def _unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _url_origin(value: str | None) -> tuple[str, str, int | None] | None:
+    """Return the semantic web origin for a URL-like source, else ``None``."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.rstrip(".").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None and scheme == "https":
+        port = 443
+    elif port is None and scheme == "http":
+        port = 80
+    return (scheme, host, port)
+
+
+def trust_anchor_shares_origin(anchor_source: str, install_spec_source: str | None) -> bool:
+    """Whether an anchor source is same-origin with the install spec source."""
+    anchor_origin = _url_origin(anchor_source)
+    spec_origin = _url_origin(install_spec_source)
+    return anchor_origin is not None and spec_origin is not None and anchor_origin == spec_origin
+
+
 def verify_trust_anchors(
     key_id: str,
     key_material: str,
     anchors: Iterable[TrustAnchorRecord],
+    *,
+    install_spec_source: str | None = PUBLISHED_INSTALL_SPEC_URL,
 ) -> TrustAnchorEvidence:
     """Compare the verified trust-root key to out-of-band fingerprint anchors.
 
     Authentic install mode is VERIFIED only when at least one independently
     supplied anchor agrees with the fetched trust root and no supplied anchor for
     the key disagrees. With no matching anchor, the status is intentionally
-    degraded to ``same_origin_only``.
+    degraded to ``same_origin_only``. A URL anchor from the same origin as the
+    install spec is not out-of-band and is refused before fingerprint equality is
+    considered.
     """
     fingerprint = public_key_fingerprint(key_material)
     relevant = tuple(anchor for anchor in anchors if anchor.key_id == key_id)
@@ -405,6 +440,20 @@ def verify_trust_anchors(
             reason=(
                 "no out-of-band trust anchor matched the fetched trust root; "
                 "authentic verification would rely only on same-origin repo-served material"
+            ),
+        )
+    same_origin = _unique_ordered(
+        anchor.source
+        for anchor in relevant
+        if trust_anchor_shares_origin(anchor.source, install_spec_source)
+    )
+    if same_origin:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="same_origin_anchor",
+            reason=(
+                "trust anchor source shares origin with the install spec; "
+                "authentic verification requires an out-of-band source"
             ),
         )
     agreed = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint == fingerprint)
