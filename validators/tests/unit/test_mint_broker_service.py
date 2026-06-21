@@ -22,7 +22,7 @@ import json
 
 import pytest
 
-from mint_broker.binding import BindingRefused
+from mint_broker.binding import BindingRefused, BindingTransportError
 from mint_broker.config import load_mint_broker_config
 from mint_broker.service import handle_token_request
 
@@ -108,6 +108,37 @@ def test_bound_in_ceiling_mints_a_scoped_token(tmp_path):
     rec = json.loads(lines[0])
     assert rec["decision"] == "allow"
     assert _MINTED not in json.dumps(rec)  # secret-free audit
+
+
+def test_binding_check_receives_requested_repo_before_minting(tmp_path):
+    cfg = _config(tmp_path)
+    binding_calls: list[dict] = []
+
+    def binding(caller_token, *, installation_id, repo_full_name):
+        binding_calls.append(
+            {
+                "caller_token": caller_token,
+                "installation_id": installation_id,
+                "repo_full_name": repo_full_name,
+            }
+        )
+
+    resp = handle_token_request(
+        _request(repo="victim-owner/mythos"),
+        config=cfg,
+        binding_check=binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+
+    assert resp["status"] == 200
+    assert binding_calls == [
+        {
+            "caller_token": "ghu_callerfaketoken000",
+            "installation_id": 222,
+            "repo_full_name": "victim-owner/mythos",
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +273,27 @@ def test_mint_transport_failure_is_502(tmp_path):
     )
     assert resp["status"] == 502
     assert "token" not in resp
+
+
+def test_binding_transport_failure_is_502_and_audited(tmp_path):
+    cfg = _config(tmp_path)
+    calls: list = []
+
+    def failing_binding(*_a, **_k):
+        raise BindingTransportError("github timed out")
+
+    resp = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=failing_binding,
+        signer=_signer,
+        transport=_mint_transport(calls=calls),
+    )
+    assert resp == {"status": 502, "reason": "binding_transport_error"}
+    assert calls == []
+    rec = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").strip())
+    assert rec["decision"] == "deny"
+    assert rec["reason"] == "binding_transport_error"
 
 
 def test_caller_token_never_in_response_or_audit(tmp_path):
