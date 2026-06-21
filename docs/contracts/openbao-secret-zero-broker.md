@@ -17,10 +17,14 @@ Input:
 - `secret_id_ttl_seconds`: positive, max 600.
 - `secret_id_num_uses`: exactly 1.
 - `delivery`: one of `broker-channel`, `unix-socket`, `stdin-once`, or `memory`.
-- `delivery_ref`: value-free delivery channel reference; must not be a file,
-  env, prompt, or raw credential value. The scheme check is performed after
-  trimming and is case-insensitive, including single-slash URI forms such as
-  `file:/path`.
+- `delivery_ref`: value-free delivery channel reference whose scheme is one of
+  `broker-channel`, `unix-socket`, `stdin-once`, or `memory`, and whose scheme
+  is bound to `request.delivery` by code before OpenBao I/O. The schema can
+  validate only that the scheme is on the allowlist because grant records do
+  not include `request.delivery`. The scheme check is performed after trimming
+  and is case-insensitive. Bare or local paths (`/tmp/...`, `./...`, `~/...`),
+  UNC paths, `data:` refs, unknown schemes, and raw credential values are
+  refused before OpenBao I/O.
 
 Broker behavior:
 

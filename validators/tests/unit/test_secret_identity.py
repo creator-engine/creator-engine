@@ -156,6 +156,12 @@ def test_secret_ref_and_grant_schemas_reject_values(repo_root):
         " File:///tmp/wrap",
         "env:CE_WRAP",
         "prompt://wrap",
+        "/tmp/wrap",
+        "./wrap",
+        "~/wrap",
+        r"\\host\share",
+        "data:text/plain;base64,AAAA",
+        "vault://wrap",
     ):
         with pytest.raises(JsonSchemaError):
             Draft202012Validator(secret_zero_schema).validate(
@@ -514,7 +520,7 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
         ),
         runner=runner,
         secret_zero_deliverer=lambda target, payload: delivered.append((target, payload))
-        or f"broker-channel-delivered:{payload.seat_id}",
+        or f"broker-channel:delivered:{payload.seat_id}",
     )
 
     grant = backend.issue_secret_zero(_secret_zero_request())
@@ -522,7 +528,7 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
     assert grant.seat_id == "dev-3"
     assert grant.requester_seat_id == "dev-3"
     assert grant.role_name == "ce-dev-3"
-    assert grant.delivery_ref == "broker-channel-delivered:dev-3"
+    assert grant.delivery_ref == "broker-channel:delivered:dev-3"
     assert grant.wrap_accessor_ref == "wrap-accessor"
     assert grant.wrapped_accessor_ref == "secret-id-accessor"
     assert "wrapping-token-value" not in repr(grant)
@@ -540,6 +546,61 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
         "/v1/auth/approle/role/ce-dev-3/secret-id",
     ]
     assert all("wrapping-token-value" not in repr(call) for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("delivery", "delivery_ref"),
+    [
+        ("memory", "memory:/dev/shm/wrap"),
+        ("unix-socket", "unix-socket:/run/ce/wrap.sock"),
+    ],
+)
+def test_openbao_secret_zero_accepts_matching_delivery_ref_schemes(delivery, delivery_ref):
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/role-id":
+            return OpenBaoResponse(status=200, json={"data": {"role_id": "role-id-value"}})
+        if request.path == "/v1/auth/approle/role/ce-dev-3/secret-id":
+            return OpenBaoResponse(
+                status=200,
+                json={
+                    "wrap_info": {
+                        "token": "wrapping-token-value",
+                        "accessor": "wrap-accessor",
+                        "wrapped_accessor": "secret-id-accessor",
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+        ),
+        runner=runner,
+        secret_zero_deliverer=lambda target, _payload: target,
+    )
+
+    grant = backend.issue_secret_zero(
+        _secret_zero_request(delivery=delivery, delivery_ref=delivery_ref)
+    )
+
+    assert grant.delivery_ref == delivery_ref
+    assert grant.wrap_accessor_ref == "wrap-accessor"
+    assert grant.wrapped_accessor_ref == "secret-id-accessor"
+    assert [call.path for call in calls] == [
+        "/v1/sys/health",
+        "/v1/sys/audit",
+        "/v1/auth/approle/role/ce-dev-3/role-id",
+        "/v1/auth/approle/role/ce-dev-3/secret-id",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -562,6 +623,13 @@ def test_openbao_secret_zero_broker_mints_wrapped_secret_id_value_free():
         _secret_zero_request(delivery_ref=" File:///tmp/wrap"),
         _secret_zero_request(delivery_ref="env:CE_WRAP"),
         _secret_zero_request(delivery_ref="prompt://wrap"),
+        _secret_zero_request(delivery_ref="/tmp/wrap"),
+        _secret_zero_request(delivery_ref="./wrap"),
+        _secret_zero_request(delivery_ref="~/wrap"),
+        _secret_zero_request(delivery_ref=r"\\host\share"),
+        _secret_zero_request(delivery_ref="data:text/plain;base64,AAAA"),
+        _secret_zero_request(delivery_ref="vault://wrap"),
+        _secret_zero_request(delivery="memory", delivery_ref="unix-socket:/run/x"),
     ],
 )
 def test_openbao_secret_zero_refuses_bad_request_before_any_io(secret_zero_request):
@@ -643,11 +711,19 @@ def test_openbao_secret_zero_deliverer_must_not_record_raw_values():
 @pytest.mark.parametrize(
     "delivery_ref",
     [
+        "file:///tmp/wrap",
         "FILE:///tmp/wrap",
         "file:/tmp/wrap",
         " File:///tmp/wrap",
         "env:CE_WRAP",
         "prompt://wrap",
+        "/tmp/wrap",
+        "./wrap",
+        "~/wrap",
+        r"\\host\share",
+        "data:text/plain;base64,AAAA",
+        "vault://wrap",
+        "unix-socket:/run/x",
     ],
 )
 def test_openbao_secret_zero_deliverer_refuses_forbidden_refs_after_normalization(delivery_ref):

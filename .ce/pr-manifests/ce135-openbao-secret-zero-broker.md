@@ -16,6 +16,8 @@ short-TTL response-wrapped per-dev AppRole SecretIDs plus seat-side unwrap/login
 helpers for dev tokens. It does not execute production init, unseal, root-token,
 real SecretID, PEM import, live secret migration, or ce-ops#135 dedicated
 micro-unit physical segregation actions.
+`ce135-*` is the historical branch slug; ratified scope is ce-ops#144 W3
+(ce-ops#135 deferred).
 
 Per-file purpose (closed path-set - 12 paths):
 - **`.ce/changelog/ce135-openbao-secret-zero-broker.md`** *(A)* - changelog fragment for the broker wiring.

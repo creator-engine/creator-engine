@@ -360,7 +360,6 @@ _DELIVERY_MODES = frozenset({"file", "env", "socket", "none"})
 _DEFAULT_ALLOWED_CAPABILITIES = frozenset({"read"})
 _MAX_SECRET_ZERO_TTL_SECONDS = 600
 _SECRET_ZERO_DELIVERY_MODES = frozenset({"broker-channel", "unix-socket", "stdin-once", "memory"})
-_SECRET_ZERO_FORBIDDEN_REF_SCHEMES = frozenset({"env", "file", "prompt"})
 _SEAT_ID_RE = re.compile(r"^dev-[1-9][0-9]*$")
 _APPROLE_MOUNT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
@@ -458,9 +457,9 @@ def _normalize_secret_zero_delivery_ref(delivery_ref: str) -> str:
     return delivery_ref.strip()
 
 
-def _secret_zero_ref_uses_forbidden_surface(delivery_ref: str) -> bool:
+def _secret_zero_ref_scheme_ok(delivery_ref: str, delivery: str) -> bool:
     scheme = urlsplit(_normalize_secret_zero_delivery_ref(delivery_ref)).scheme.lower()
-    return scheme in _SECRET_ZERO_FORBIDDEN_REF_SCHEMES
+    return scheme in _SECRET_ZERO_DELIVERY_MODES and scheme == delivery
 
 
 def _validate_secret_zero_request(
@@ -490,8 +489,12 @@ def _validate_secret_zero_request(
     delivery_ref = _normalize_secret_zero_delivery_ref(request.delivery_ref)
     if not delivery_ref:
         raise SecretIdentityRefused("delivery_ref must not be empty")
-    if _secret_zero_ref_uses_forbidden_surface(delivery_ref):
-        raise SecretIdentityRefused("secret-zero delivery_ref must not target env, file, or prompt surfaces")
+    if not _secret_zero_ref_scheme_ok(delivery_ref, request.delivery):
+        allowed = ", ".join(sorted(_SECRET_ZERO_DELIVERY_MODES))
+        raise SecretIdentityRefused(
+            "secret-zero delivery_ref scheme must match delivery "
+            f"and be one of: {allowed}"
+        )
     if request.wrap_ttl_seconds <= 0 or request.wrap_ttl_seconds > _MAX_SECRET_ZERO_TTL_SECONDS:
         raise SecretIdentityRefused(
             f"wrap_ttl_seconds must be between 1 and {_MAX_SECRET_ZERO_TTL_SECONDS}"
@@ -883,7 +886,9 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             now=now,
         )
         delivery_ref = self._deliver_secret_zero(
-            _normalize_secret_zero_delivery_ref(request.delivery_ref), payload
+            _normalize_secret_zero_delivery_ref(request.delivery_ref),
+            payload,
+            delivery=request.delivery,
         )
         grant = SecretZeroGrant(
             grant_id=f"openbao-secret-zero:{request.run_id}:{request.seat_id}",
@@ -1067,7 +1072,13 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             wrapped_accessor if isinstance(wrapped_accessor, str) else None,
         )
 
-    def _deliver_secret_zero(self, target_ref: str, payload: SecretZeroPayload) -> str:
+    def _deliver_secret_zero(
+        self,
+        target_ref: str,
+        payload: SecretZeroPayload,
+        *,
+        delivery: str,
+    ) -> str:
         assert self._secret_zero_deliverer is not None
         try:
             delivery_ref = self._secret_zero_deliverer(target_ref, payload)
@@ -1082,6 +1093,9 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             raise SecretMaterializationError("secret-zero deliverer returned an empty delivery ref")
         if delivery_ref in {payload.role_id, payload.wrapping_token}:
             raise SecretMaterializationError("secret-zero deliverer returned a raw credential as delivery ref")
-        if _secret_zero_ref_uses_forbidden_surface(delivery_ref):
-            raise SecretMaterializationError("secret-zero deliverer returned a forbidden disk/env ref")
+        if not _secret_zero_ref_scheme_ok(delivery_ref, delivery):
+            raise SecretMaterializationError(
+                "secret-zero deliverer returned a delivery ref whose scheme "
+                "is not allowed or does not match delivery"
+            )
         return delivery_ref
