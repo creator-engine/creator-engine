@@ -1,0 +1,80 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/brain-recall-record.schema.yaml"
+title: "Creator Engine Brain Recall Index Entry"
+description: >-
+  Schema for one derived brain-recall index entry. The source-of-truth remains
+  the repo-native Markdown file named by source_path; vector-store state is a
+  rebuildable projection and MUST NOT become the canonical record.
+type: object
+required:
+  - source_path
+  - chunk_ref
+  - content_hash
+  - as_of
+  - scope
+  - requires_egress
+additionalProperties: false
+properties:
+  kind:
+    type: string
+    const: brain-recall-index-entry
+  record_type:
+    type: string
+    const: brain_recall_index_entry
+  schema_version:
+    type: string
+    enum: ["1"]
+  source_path:
+    type: string
+    minLength: 1
+    maxLength: 4096
+    pattern: "^[A-Za-z0-9._/-]+\\.md$"
+    not:
+      anyOf:
+        - pattern: "://"
+        - pattern: "^/"
+        - pattern: "(^|/)\\.\\.(/|$)"
+    description: >-
+      Repo-relative Markdown source-of-truth file. The recall index points back
+      to this file; it does not replace it.
+  chunk_ref:
+    type: string
+    minLength: 1
+    maxLength: 512
+    description: >-
+      Stable reference to the indexed Markdown chunk within source_path, such
+      as a heading slug or line-range token.
+  content_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: >-
+      SHA256 hex digest of the canonical chunk content used to derive the
+      vector-store projection.
+  as_of:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    description: >-
+      UTC point-in-time stamp for the Markdown content snapshot this entry
+      indexes.
+  scope:
+    anyOf:
+      - type: string
+        enum: [public, internal, confidential, ce-ops]
+      - type: object
+        minProperties: 1
+        additionalProperties: true
+    description: >-
+      Privacy scope of the indexed chunk. Confidential chunks require explicit
+      consent before any egress-requiring embedder may process the content.
+  requires_egress:
+    type: boolean
+    description: >-
+      True when the embedder used for this derived entry requires network
+      egress. The privacy gate fails closed for confidential scope unless
+      explicit consent is supplied by the caller.
+  note:
+    type: string
+    maxLength: 1024
+    description: >-
+      Optional advisory note. MUST NOT contain secrets, tokens, credentials, or
+      host/account identifiers.
