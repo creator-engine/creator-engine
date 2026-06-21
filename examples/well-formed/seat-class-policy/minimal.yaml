@@ -1,0 +1,17 @@
+kind: seat-class-policy-record
+schema_version: "1"
+policy_id: seat-class-default
+policy_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+seat_class: foreman
+default_seat_class: foreman
+recursion:
+  foreman_of_foreman_allowed: true
+  max_depth: 1
+delegation_required_mutation_classes:
+  - code
+  - schema
+  - deploy
+  - governance
+  - identity
+  - security
+
