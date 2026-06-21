@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import brain_bootstrap
 from creator_engine_validator.cli import main
 
 
@@ -254,6 +255,160 @@ def test_hook_check_manifest_doc_parsing(capsys, monkeypatch):
     out_payload = json.loads(out)
     assert out_payload["decision"] == "allow"  # out-of-manifest is advisory (G-i)
     assert out_payload["advisory"] is True
+
+
+def test_hook_check_foreman_seat_class_policy_ref_warns(capsys, tmp_path, monkeypatch):
+    policy = tmp_path / "seat-class.ce.yml"
+    policy.write_text(
+        "kind: seat-class-policy-record\n"
+        'schema_version: "1"\n'
+        "policy_id: cli-foreman\n"
+        f"policy_sha: {'b' * 64}\n"
+        "seat_class: foreman\n"
+        "default_seat_class: foreman\n"
+        "recursion:\n"
+        "  foreman_of_foreman_allowed: true\n"
+        "  max_depth: 3\n"
+        "delegation_required_mutation_classes:\n"
+        "  - code\n",
+        encoding="utf-8",
+    )
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class_policy_ref": "seat-class.ce.yml",
+        },
+    }
+
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture-root", str(tmp_path)],
+        capsys,
+        json.dumps(event),
+        monkeypatch,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is True
+    assert payload["wouldHaveDenied"] is True
+    assert "worker delegation" in payload["reason"]
+
+
+def test_hook_check_worker_seat_class_policy_ref_does_not_warn(capsys, tmp_path, monkeypatch):
+    policy = tmp_path / "seat-class.ce.yml"
+    policy.write_text(
+        "kind: seat-class-policy-record\n"
+        'schema_version: "1"\n'
+        "policy_id: cli-worker\n"
+        f"policy_sha: {'c' * 64}\n"
+        "seat_class: worker\n"
+        "default_seat_class: foreman\n"
+        "recursion:\n"
+        "  foreman_of_foreman_allowed: true\n"
+        "  max_depth: 3\n"
+        "delegation_required_mutation_classes:\n"
+        "  - code\n",
+        encoding="utf-8",
+    )
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class_policy_ref": "seat-class.ce.yml",
+        },
+    }
+
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture-root", str(tmp_path)],
+        capsys,
+        json.dumps(event),
+        monkeypatch,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is False
+    assert payload["wouldHaveDenied"] is False
+
+
+def test_hook_check_launch_pinned_brain_bootstrap_seat_class_overrides_event(capsys, tmp_path, monkeypatch):
+    payload = {
+        "kind": brain_bootstrap.BOOTSTRAP_KIND,
+        "schema_version": brain_bootstrap.BOOTSTRAP_SCHEMA_VERSION,
+        "context": {"role": "implementer", "seat_class": "worker", "scope": {"seat_class": "worker"}},
+        "knowledge_ssot": {
+            "ledger_path": ".ce/state/brain/assertions.yaml",
+            "record_count": 0,
+            "active_count": 0,
+            "scope_relevant_count": 0,
+            "head_content_hash": None,
+            "assertions": [],
+        },
+    }
+    ref = tmp_path / "brain-bootstrap.json"
+    digest = brain_bootstrap.write_payload(ref, payload)
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_REF_ENV, str(ref))
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, digest)
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class": "foreman",
+        },
+    }
+
+    code, out = _run(["hook-check", "--stdin"], capsys, json.dumps(event), monkeypatch)
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is False
+    assert payload["wouldHaveDenied"] is False
+
+
+def test_hook_check_invalid_brain_bootstrap_seat_class_fails_closed(capsys, tmp_path, monkeypatch):
+    ref = tmp_path / "brain-bootstrap.json"
+    ref.write_text(
+        json.dumps({"context": {"seat_class": "worker"}}, sort_keys=True),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_REF_ENV, str(ref))
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, "0" * 64)
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class": "worker",
+        },
+    }
+
+    code, out = _run(["hook-check", "--stdin"], capsys, json.dumps(event), monkeypatch)
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is True
+    assert payload["wouldHaveDenied"] is True
+    assert "worker delegation" in payload["reason"]
 
 
 def test_hook_check_end_to_end_governed_lane(capsys, tmp_path, monkeypatch):
