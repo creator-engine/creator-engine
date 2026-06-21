@@ -33,7 +33,8 @@ def test_registered_in_check_surface():
     # ce-ops#145 added ce_playbook_format: 54 -> 55.
     # ce-ops#167 added ce_brain_assertions: 55 -> 56.
     # ce-ops#163 added seat_class_policy: 56 -> 57.
-    assert len(reg) == 57
+    # ce-ops#168 added work_sizing: 57 -> 58.
+    assert len(reg) == 58
 
 
 def test_green_on_real_package(version_boundary_real_run):

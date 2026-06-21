@@ -1,0 +1,82 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/work-sizing.schema.yaml"
+title: "Creator Engine Work-Sizing Record"
+description: |
+  CI-pure sizing record for the Frame→Shape work-sizing engine spine. The
+  record is the deterministic ceremony emitted by size_ceremony(work_class,
+  mutation_class): work_class selects decomposition depth and artifacts;
+  mutation_class selects ratification gates and ADR posture. It carries no
+  classifier, dispatch, datastore, or UX state.
+type: object
+required:
+  - kind
+  - schema_version
+  - intent_ref
+  - work_class
+  - mutation_class
+  - artifact_set
+  - decomposition_depth
+  - ratification_gates
+  - adr_required
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: sizing-record
+  schema_version:
+    type: string
+    enum: ["1"]
+  intent_ref:
+    type: string
+    minLength: 1
+    description: |
+      Value-free reference to the intake intent. The pure F1 function emits
+      `unbound` because binding to a live intake is deferred.
+  work_class:
+    type: string
+    enum: [tiny, story, feature, epic]
+  mutation_class:
+    type: string
+    enum: [none, docs, code, schema, deploy, governance, identity, security, attestation, redaction]
+  artifact_set:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      enum:
+        - scope_card
+        - intent_line
+        - scope_record
+        - inline_tasks
+        - spec.md
+        - plan.md
+        - tasks.md
+        - tasks.ce.yml
+        - prd.md
+        - per_feature_plan.md
+        - thin_slice_scope
+  decomposition_depth:
+    type: integer
+    minimum: 0
+    maximum: 3
+    description: |
+      Size-axis depth: 0=tiny/no decomposition, 1=story/tasks,
+      2=feature/stories/tasks, 3=epic/features/stories/thin slice.
+  ratification_gates:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      enum:
+        - auto_back_gate
+        - distinct_review
+        - operator_front_bet
+        - operator_human_ratifier
+        - non_delegable
+        - ring1_push_block
+        - operator_merge
+  adr_required:
+    type: boolean
+
