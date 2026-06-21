@@ -7,5 +7,6 @@
   gate using `build_app_wheel_from_source`.
 - Tightened packaging/doctor posture so `validators/wheelhouse/` is dependency
   wheelhouse only and `ce doctor --json` exposes the committed app-wheel posture.
-- Updated clone-mode docs/templates to install dependency wheels and run checkout
-  source via `PYTHONPATH=validators`; public served downloads are unchanged.
+- Updated clone-mode docs/templates to install dependency wheels before running
+  checkout source via `PYTHONPATH=validators`; public served downloads are
+  unchanged.

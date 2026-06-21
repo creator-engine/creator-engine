@@ -3,9 +3,9 @@
 # Machine-readable bootstrap contract for an agent harness preparing to run the
 # local governed runtime kernel (`ce`). It is read-only configuration consumed
 # by an agent; it grants no hosted/team-mode/GitHub authority and starts no
-# daemon. Clone-mode preflight runs the checkout source with
-# `PYTHONPATH=validators`; a non-zero preflight yields a blocked report and
-# stops (there is no hidden fallback).
+# daemon. Clone-mode installs offline runtime dependencies before running the
+# checkout source with `PYTHONPATH=validators`; a non-zero preflight yields a
+# blocked report and stops (there is no hidden fallback).
 #
 # Prose contract: docs/operations/AGENT_NATIVE_BOOTSTRAP.md
 kind: agent-native-bootstrap
@@ -26,20 +26,6 @@ authority_model:
     promote itself to a hosted/team/GitHub authority, and hands all results back
     to the Controller seat as evidence for ratification.
 
-preflight:
-  command: ["python", "-m", "creator_engine_validator.ce_cli", "doctor", "--json"]
-  env:
-    PYTHONPATH: validators
-  required: true
-  on_failure: blocked-report
-  blocked_report:
-    stop: true
-    semantics: >-
-      If the doctor preflight exits non-zero, the bootstrap MUST stop and emit
-      a blocked report that names the refused governed-environment guard clauses
-      (RED-G-1 .. RED-G-6). It MUST NOT continue, MUST NOT ratify in-flight
-      work, and MUST NOT fall back to a hidden/headless continuation.
-
 install:
   contract: source-pythonpath-with-offline-runtime-deps
   python_floor: ">=3.14"
@@ -50,6 +36,21 @@ install:
     - ["uv", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
   pip_fallback:
     - ["python", "-m", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
+
+preflight:
+  command: ["python", "-m", "creator_engine_validator.ce_cli", "doctor", "--json"]
+  env:
+    PYTHONPATH: validators
+  required: true
+  requires: [install]
+  on_failure: blocked-report
+  blocked_report:
+    stop: true
+    semantics: >-
+      If the doctor preflight exits non-zero, the bootstrap MUST stop and emit
+      a blocked report that names the refused governed-environment guard clauses
+      (RED-G-1 .. RED-G-6). It MUST NOT continue, MUST NOT ratify in-flight
+      work, and MUST NOT fall back to a hidden/headless continuation.
 
 launch:
   command: ["python", "-m", "creator_engine_validator.ce_cli", "launch", "--json"]

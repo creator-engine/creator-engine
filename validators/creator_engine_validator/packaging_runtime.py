@@ -27,13 +27,12 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
-import tempfile
 import tomllib
-import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
+from . import wheel_source_parity
 from .wheel_bake import WheelBakeError, build_app_wheel_from_source
 
 # --- Locked contract constants ---------------------------------------------
@@ -257,96 +256,13 @@ def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str)
     return v
 
 
-def _app_wheel_source_violations(root: Path, wheels: Iterable[Path]) -> list[str]:
-    validators = root / "validators"
-    source_root = validators / "creator_engine_validator"
-    v: list[str] = []
-    pyproject_version = _pyproject_version(validators / "pyproject.toml")
-    source_version = _source_declared_version(source_root / "version.py")
-    if pyproject_version is None:
-        v.append(f"missing project version in {validators / 'pyproject.toml'}")
-    if source_version is None:
-        v.append(f"missing __version__ in {source_root / 'version.py'}")
-    if pyproject_version and source_version and pyproject_version != source_version:
-        v.append(
-            f"pyproject version {pyproject_version!r} differs from "
-            f"creator_engine_validator.version.__version__ {source_version!r}"
-        )
-
-    source_files = {
-        path.relative_to(source_root).as_posix(): path
-        for path in source_root.rglob("*.py")
-        if path.is_file()
-    }
-
-    for wheel in wheels:
-        parsed = _wheel_filename_parts(wheel.name)
-        if parsed is None:
-            v.append(f"invalid app wheel filename: {wheel.name}")
-            continue
-        wheel_dist, wheel_version = parsed
-        if wheel_dist != DISTRIBUTION_NAME:
-            v.append(
-                f"app wheel {wheel.name} distribution must be {DISTRIBUTION_NAME!r}, "
-                f"got {wheel_dist!r}"
-            )
-        if pyproject_version and wheel_version != pyproject_version:
-            v.append(
-                f"app wheel {wheel.name} version {wheel_version!r} differs from "
-                f"pyproject version {pyproject_version!r}"
-            )
-        if source_version and wheel_version != source_version:
-            v.append(
-                f"app wheel {wheel.name} version {wheel_version!r} differs from "
-                f"creator_engine_validator.version.__version__ {source_version!r}"
-            )
-
-        try:
-            with zipfile.ZipFile(wheel) as zf:
-                wheel_files = {
-                    name.removeprefix("creator_engine_validator/")
-                    for name in zf.namelist()
-                    if name.startswith("creator_engine_validator/") and name.endswith(".py")
-                }
-                for rel in sorted(wheel_files - source_files.keys()):
-                    v.append(f"app wheel {wheel.name} has no source file for {rel}")
-                for rel in sorted(source_files.keys() - wheel_files):
-                    v.append(f"app wheel {wheel.name} missing source file {rel}")
-                for rel in sorted(source_files.keys() & wheel_files):
-                    wheel_bytes = zf.read(f"creator_engine_validator/{rel}")
-                    source_bytes = source_files[rel].read_bytes()
-                    if wheel_bytes != source_bytes:
-                        v.append(f"app wheel {wheel.name} differs from source file {rel}")
-        except zipfile.BadZipFile:
-            v.append(f"invalid app wheel zip archive: {wheel}")
-    return v
-
-
 def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
-    """Build the app wheel from checkout source and report wheel/source drift.
-
-    Installed end-user contexts may have only the wheel and no source checkout,
-    so this remains a no-op when ``validators/creator_engine_validator`` is
-    absent. In source-checkout contexts the gate must not silently pass just
-    because ``validators/wheelhouse`` no longer commits a first-party app wheel:
-    it builds a temporary wheel with the standard wheel-bake helper, then
-    compares that built surface against the checkout source.
-    """
-    root = Path(repo_root)
-    source_root = root / "validators" / "creator_engine_validator"
-    if not source_root.is_dir():
-        return []
-
-    with tempfile.TemporaryDirectory(prefix="ce-app-wheel-") as tmp:
-        out_dir = Path(tmp)
-        try:
-            manifest = build_app_wheel_from_source(root, out_dir)
-        except WheelBakeError as exc:
-            return [f"app wheel build from source failed: {exc}"]
-        wheel = out_dir / manifest.wheel_name
-        if not wheel.is_file():
-            return [f"app wheel build from source did not produce {wheel.name}"]
-        return _app_wheel_source_violations(root, [wheel])
+    """V1 packaging facade for the shared source-built wheel/source parity gate."""
+    return wheel_source_parity.verify_wheel_matches_source(
+        repo_root,
+        build_app_wheel=build_app_wheel_from_source,
+        wheel_bake_error=WheelBakeError,
+    )
 
 
 def _module_str_constant(path: Path | str, name: str) -> str | None:

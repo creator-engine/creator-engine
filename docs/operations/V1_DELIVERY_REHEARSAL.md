@@ -51,7 +51,8 @@ Both install PyYAML 6.0.3 / jsonschema 4.26.0 and exercise the source-backed
 `ce` command surface. The explicit wheel-bake gate builds a temporary
 first-party wheel from this same checkout and verifies the wheel surface still
 matches source, but clone-mode rehearsal no longer installs an app wheel from
-`validators/wheelhouse`.
+`validators/wheelhouse`. This dependency-install-before-source-execution order
+matches the agent-native bootstrap contract.
 
 ## 3. Dry-run-safe pipeline
 

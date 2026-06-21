@@ -33,7 +33,7 @@ Per-file purpose:
 - **`validators/creator_engine_validator/_version.py`** *(M)* - refreshes the
   baked build SHA to the rebased main merge-parent.
 - **`validators/creator_engine_validator/brain_probe.py`** *(M)* - reuses the
-  packaging runtime source-build parity checker.
+  shared source-build parity checker without importing the v1 packaging runtime.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - updates doctor
   packaging help text.
 - **`validators/creator_engine_validator/doctor_runtime.py`** *(M)* - surfaces
@@ -43,6 +43,9 @@ Per-file purpose:
 - **`validators/creator_engine_validator/packaging_runtime.py`** *(M)* - forbids
   committed app wheels in `validators/wheelhouse` and builds first-party parity
   wheels from source.
+- **`validators/creator_engine_validator/wheel_source_parity.py`** *(A)* -
+  shared source-built first-party wheel/source parity helper for packaging and
+  brain probes.
 - **`validators/tests/integration/test_ce_doctor_cli.py`** *(M)* - covers doctor
   JSON and bootstrap template posture.
 - **`validators/tests/unit/test_ce_doctor_cli.py`** *(M)* - covers doctor JSON
@@ -61,9 +64,9 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=23
+AUTHORIZED_PATHS_COUNT=24
 
-AUTHORIZED_PATHS_SHA256=cf4e1031297af06c740793df91cef7a2cb146fb78a93a78da9933119189ad7b4
+AUTHORIZED_PATHS_SHA256=7ecf4673f0d5a07a493ca46448ed1f5aff3ce62a5f1892448fe1ce03832d029d
 
 ```text
 .ce/changelog/ce133-remove-committed-app-wheel.md
@@ -82,6 +85,7 @@ validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/doctor_runtime.py
 validators/creator_engine_validator/environment_guard.py
 validators/creator_engine_validator/packaging_runtime.py
+validators/creator_engine_validator/wheel_source_parity.py
 validators/tests/integration/test_ce_doctor_cli.py
 validators/tests/unit/test_ce_doctor_cli.py
 validators/tests/unit/test_packaging_contract.py

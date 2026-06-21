@@ -14,7 +14,7 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 
 import yaml
 
-from .packaging_runtime import verify_wheel_matches_source
+from .wheel_source_parity import verify_wheel_matches_source
 
 Verdict = Literal["present", "absent", "unknown"]
 ProbeFn = Callable[["ProbeContext"], "ProbeResult"]
