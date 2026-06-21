@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -15,6 +16,8 @@ from pathlib import Path
 
 
 APP_WHEEL_GLOB = "creator_engine_validator-*.whl"
+# Fixed, version-independent timestamp for reproducible wheel zip members.
+SOURCE_DATE_EPOCH = "946684800"
 
 
 class WheelBakeError(RuntimeError):
@@ -60,11 +63,23 @@ def _source_commit(repo_root: Path) -> str:
     return commit
 
 
+def _clean_build_artifacts(validators_dir: Path) -> None:
+    for rel in ("build", "creator_engine_validator.egg-info"):
+        path = validators_dir / rel
+        if path.exists():
+            shutil.rmtree(path)
+
+
 def _build_wheel(validators_dir: Path, out_dir: Path) -> None:
     env = os.environ.copy()
-    env.setdefault("PIP_NO_INDEX", "1")
-    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-    env.setdefault("PYTHONNOUSERSITE", "1")
+    env["PIP_NO_INDEX"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONHASHSEED"] = "0"
+    env["PYTHONNOUSERSITE"] = "1"
+    env["SOURCE_DATE_EPOCH"] = SOURCE_DATE_EPOCH
+    _clean_build_artifacts(validators_dir)
+    for stale_wheel in out_dir.glob(APP_WHEEL_GLOB):
+        stale_wheel.unlink()
     cmd = [
         sys.executable,
         "-m",
@@ -76,21 +91,24 @@ def _build_wheel(validators_dir: Path, out_dir: Path) -> None:
         str(validators_dir),
     ]
     try:
-        proc = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise WheelBakeError(f"wheel build failed to start: {exc}") from exc
-    if proc.returncode != 0:
-        raise WheelBakeError(
-            "wheel build failed: "
-            + " ".join(cmd)
-            + f"\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise WheelBakeError(f"wheel build failed to start: {exc}") from exc
+        if proc.returncode != 0:
+            raise WheelBakeError(
+                "wheel build failed: "
+                + " ".join(cmd)
+                + f"\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+    finally:
+        _clean_build_artifacts(validators_dir)
 
 
 def build_app_wheel_from_source(repo_root: Path | str, out_dir: Path | str) -> WheelManifest:

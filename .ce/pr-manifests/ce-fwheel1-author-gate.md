@@ -17,10 +17,16 @@ Per-file purpose:
 - **`.github/workflows/validate.yml`** *(M)* - deselects
   `wheel_bake_gate` from the author-side offline pytest run; F-wheel-2 owns the
   post-merge bake lane.
+- **`NOTICE`** *(M)* - adds attribution for the newly vendored dev/test build
+  frontend/backend wheels.
 - **`docs/decisions/ADR-0010-take-app-wheel-out-of-authored-prs.md`** *(A)* -
   accepted decision record for the hybrid bake-now/uncommit-later sequence.
+- **`validators/creator_engine_validator/packaging_runtime.py`** *(M)* - keeps
+  the RED-G-6 aggregate packaging guard required author-side while splitting
+  first-party app-wheel/source parity into the bake gate.
 - **`validators/creator_engine_validator/wheel_bake.py`** *(A)* - typed
-  `build_app_wheel_from_source` helper and manifest dataclass.
+  `build_app_wheel_from_source` helper, manifest dataclass, deterministic
+  `SOURCE_DATE_EPOCH`, and build-artifact cleanup.
 - **`validators/requirements-dev.txt`** *(M)* - adds dev/test-only offline build
   frontend/backend pins; runtime dependency floor unchanged.
 - **`validators/tests/conftest.py`** *(M)* - registers the `wheel_bake_gate`
@@ -30,7 +36,7 @@ Per-file purpose:
   dependency wheelhouse assertions stay required.
 - **`validators/tests/unit/test_wheel_bake.py`** *(A)* - red/green coverage for
   helper manifest digest, version/source-commit, console-script surface parity,
-  deterministic surface, and typed failure.
+  byte/hash reproducibility, tracked-wheel equality, and typed failure.
 - **`validators/tests/unit/test_wheelhouse_built_surface.py`** *(M)* - marks the
   existing first-party app-wheel surface parity file as `wheel_bake_gate`.
 - **`validators/wheelhouse-dev/build-1.3.0-py3-none-any.whl`** *(A)* -
@@ -50,15 +56,17 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=18
 
-AUTHORIZED_PATHS_SHA256=5e2c7bc535dfef33c4f41bb64e3091c58c3fa1bbe764949b106fd43f79a5b2bf
+AUTHORIZED_PATHS_SHA256=a31f5b0c3da78641ef8e0cb36c6d10a9b7742a8c9043801d6efc47e559437ac4
 
 ```text
 .ce/changelog/ce164-fwheel1-author-gate.md
 .ce/pr-manifests/ce-fwheel1-author-gate.md
 .github/workflows/validate.yml
+NOTICE
 docs/decisions/ADR-0010-take-app-wheel-out-of-authored-prs.md
+validators/creator_engine_validator/packaging_runtime.py
 validators/creator_engine_validator/wheel_bake.py
 validators/requirements-dev.txt
 validators/tests/conftest.py

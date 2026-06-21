@@ -76,12 +76,28 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
 
     left_manifest = build_app_wheel_from_source(repo_root, left)
     right_manifest = build_app_wheel_from_source(repo_root, right)
+    left_wheel = left / left_manifest.wheel_name
+    right_wheel = right / right_manifest.wheel_name
 
     assert left_manifest.version == right_manifest.version
     assert left_manifest.source_commit == right_manifest.source_commit
-    assert _console_surface(repo_root, left / left_manifest.wheel_name) == _console_surface(
-        repo_root, right / right_manifest.wheel_name
-    )
+    assert left_manifest.sha256 == right_manifest.sha256
+    assert left_wheel.read_bytes() == right_wheel.read_bytes()
+    assert _console_surface(repo_root, left_wheel) == _console_surface(repo_root, right_wheel)
+    assert not (repo_root / "validators" / "build").exists()
+    assert not (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
+
+
+@pytest.mark.wheel_bake_gate
+@pytest.mark.xdist_group("wheel-build")
+def test_tracked_app_wheel_matches_fresh_deterministic_build(repo_root: Path, tmp_path: Path):
+    manifest = build_app_wheel_from_source(repo_root, tmp_path)
+    fresh = tmp_path / manifest.wheel_name
+    tracked = repo_root / "validators" / "wheelhouse" / manifest.wheel_name
+
+    assert tracked.is_file()
+    assert hashlib.sha256(tracked.read_bytes()).hexdigest() == manifest.sha256
+    assert tracked.read_bytes() == fresh.read_bytes()
 
 
 def test_build_app_wheel_from_source_raises_typed_error_on_bad_repo(tmp_path: Path):
