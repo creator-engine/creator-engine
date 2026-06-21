@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -38,6 +38,26 @@ def use_fake_tmux(monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(ce_cli, "_make_tmux_adapter", lambda: adapter)
     return adapter
+
+
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-ce-lane-cli-0001",
+        claim={"subject": "lane", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_ce_lane_cli.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _seed_brain_ledger(tmp_path):
+    _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
 def _prompt(tmp_path: Path) -> tuple[Path, str]:
@@ -171,6 +191,37 @@ def test_ce_lane_launch_refuses_tmux_unavailable_before_pane_write(tmp_path, mon
     ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha))
     assert ret != 0
     assert not _pane_path(ledger).exists()
+
+
+def test_ce_lane_launch_claim_ticket_refuses_missing_brain_before_work_claim_acquire(
+    tmp_path, monkeypatch, use_fake_tmux, capsys
+):
+    brain_runtime.ledger_path(tmp_path / ".ce" / "state").unlink()
+    calls = []
+
+    def _acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("work claim acquire must not run before brain bootstrap preflight")
+
+    monkeypatch.setattr(ce_cli.work_claims, "acquire", _acquire)
+    ledger = _ledger(tmp_path)
+    prompt, sha = _prompt(tmp_path)
+
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path,
+            ledger,
+            prompt,
+            sha,
+            claim_ticket="creator-engine/ce-ops#305",
+        )
+    )
+
+    assert ret != 0
+    assert calls == []
+    assert not _pane_path(ledger).exists()
+    assert use_fake_tmux.spawned == []
+    assert "G3-BRAIN-BOOTSTRAP-REFUSED" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

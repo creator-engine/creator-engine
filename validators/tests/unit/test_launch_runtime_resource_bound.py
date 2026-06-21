@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import launch_runtime
+from creator_engine_validator import brain_runtime, launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 OPTOUT = {"ratified_prompt_sha": "a" * 64, "approver_ref": "b" * 64}
@@ -37,6 +37,7 @@ def _isolate_default_state_root(tmp_path, monkeypatch):
     wrapper and make the stable-unit assertion observe ``-2``.
     """
     monkeypatch.chdir(tmp_path)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
 class FakeAdapter:
@@ -102,6 +103,21 @@ def _ok_probe(runner=None, **_):
 
 def _never_probe(runner=None, **_):  # pragma: no cover - failing the test IS the assert
     raise AssertionError("the support probe must not run in dry-run mode")
+
+
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-launch-bound-0001",
+        claim={"subject": "controller", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_launch_runtime_resource_bound.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
 
 
 def _write_policy(tmp_path, **overrides):

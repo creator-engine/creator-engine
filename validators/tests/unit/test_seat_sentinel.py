@@ -119,6 +119,27 @@ def test_build_wrapper_script_is_value_free():
     assert '\\"run_id\\":null' in script
 
 
+def test_build_wrapper_script_exports_launch_injection_refs():
+    argv = ["claude", "--print"]
+    digest = seat_sentinel.command_sha256(argv)
+    script = seat_sentinel.build_wrapper_script(
+        inner_argv=argv,
+        events_path="/x/events.jsonl",
+        seat_id="seat",
+        run_id=None,
+        python_exe="/p",
+        exports={
+            "CE_BRAIN_BOOTSTRAP_SHA256": "a" * 64,
+            "CE_BRAIN_BOOTSTRAP_REF": "/x/brain-bootstrap.json",
+        },
+    )
+
+    assert "export CE_BRAIN_BOOTSTRAP_REF=/x/brain-bootstrap.json" in script
+    assert f"export CE_BRAIN_BOOTSTRAP_SHA256={'a' * 64}" in script
+    assert digest in script
+    assert "claude --print\ncode=$?" in script
+
+
 def test_run_id_fragment():
     assert seat_sentinel._run_id_fragment(None) == "null"
     assert seat_sentinel._run_id_fragment("run-1") == '\\"run-1\\"'

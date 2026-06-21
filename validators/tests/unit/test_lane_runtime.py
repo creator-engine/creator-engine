@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import lane_runtime
+from creator_engine_validator import brain_runtime, lane_runtime
 from creator_engine_validator.checks.pane_registry import validate_pane_registry_record
 from creator_engine_validator.tmux_adapter import TmuxPane
 
@@ -56,6 +56,21 @@ def _write_prompt(tmp_path: Path, text: str = "governed gate prompt body\n") -> 
     prompt.write_text(text, encoding="utf-8")
     sha = hashlib.sha256(prompt.read_bytes()).hexdigest()
     return prompt, sha
+
+
+def _write_brain_ledger(state_root: Path, *, object_value: str = "ready") -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-lane-runtime-0001",
+        claim={"subject": "lane", "predicate": "bootstrap", "object": object_value},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_lane_runtime.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
 
 
 def _ledger_root(tmp_path: Path) -> Path:
@@ -116,6 +131,10 @@ def _wrapper_inner_argv(result):
 def _launch(tmp_path, **overrides):
     prompt, sha = overrides.pop("prompt_and_sha", _write_prompt(tmp_path))
     ledger = overrides.pop("ledger_root", _ledger_root(tmp_path))
+    brain_ledger = overrides.pop("brain_ledger", True)
+    state_root = Path(overrides.get("state_root", tmp_path / ".ce" / "state"))
+    if brain_ledger:
+        _write_brain_ledger(state_root)
     kwargs = dict(
         controller_id="hermes-primary",
         lane_id="gate3-lane",
@@ -343,6 +362,36 @@ def test_launch_refuses_nondir_worktree_path_before_side_effects(tmp_path):
     assert adapter.spawned == []
 
 
+def test_launch_refuses_missing_brain_ledger_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+
+    with pytest.raises(lane_runtime.BrainBootstrapLaneRefused):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter, brain_ledger=False)
+
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+    assert not (tmp_path / ".ce" / "state" / "dispatches").exists()
+
+
+def test_launch_refuses_tampered_brain_ledger_before_side_effects(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    state_root = tmp_path / ".ce" / "state"
+    _write_brain_ledger(state_root)
+    path = brain_runtime.ledger_path(state_root)
+    path.write_text(path.read_text(encoding="utf-8").replace("ready", "tampered"), encoding="utf-8")
+    adapter = FakeAdapter()
+
+    with pytest.raises(lane_runtime.BrainBootstrapLaneRefused):
+        _launch(tmp_path, ledger_root=ledger, tmux_adapter=adapter, brain_ledger=False)
+
+    _assert_no_pane(ledger)
+    assert adapter.spawned == []
+    assert not (tmp_path / ".ce" / "state" / "dispatches").exists()
+
+
 def test_launch_enforces_explicit_worktree_as_pane_cwd(tmp_path):
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
@@ -554,6 +603,34 @@ def test_lane_launch_stamps_events_ref_into_sidecar(tmp_path):
     assert json.loads(sidecar.read_text())["events_ref"] == expected
     # the pane record itself stays schema-clean (events_ref rides the sidecar only)
     assert "events_ref" not in result.record
+
+
+def test_lane_launch_injects_brain_bootstrap_ref_into_wrapper_and_sidecar(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        role="reviewer",
+        lane_kind="review",
+        command=["sh", "-c", "echo hi"],
+        tmux_adapter=FakeAdapter(),
+    )
+
+    ref = Path(result.brain_bootstrap_ref)
+    assert ref.is_file()
+    payload = json.loads(ref.read_text(encoding="utf-8"))
+    assert payload["kind"] == "brain-bootstrap-context"
+    assert payload["context"]["role"] == "reviewer"
+    assert payload["context"]["seat_class"] == "worker"
+    wrapper = (Path(result.events_ref).parent / "sentinel-wrapper.sh").read_text(encoding="utf-8")
+    assert f"export CE_BRAIN_BOOTSTRAP_REF={ref}" in wrapper
+    assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.brain_bootstrap_sha256}" in wrapper
+    sidecar = lane_runtime._governance_sidecar_path(ledger, "hermes-primary", "gate3-lane")
+    written = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert written["brain_bootstrap_ref"] == str(ref)
+    assert written["brain_bootstrap_sha256"] == result.brain_bootstrap_sha256
+    assert "brain_bootstrap_ref" not in result.record
 
 
 def test_lane_launch_refusal_precedes_any_sentinel_side_effect(tmp_path):

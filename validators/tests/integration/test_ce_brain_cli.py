@@ -334,3 +334,92 @@ def test_ce_brain_probe_rejects_name_and_all(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "specify exactly one of <name> or --all" in captured.err
+
+
+def test_ce_brain_bootstrap_surfaces_scope_relevant_assertions(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0005",
+            "--scope",
+            "global",
+            "--claim-json",
+            _claim("global"),
+            "--evidence-ref",
+            "validators/tests/integration/test_ce_brain_cli.py#global",
+        ]
+    ) == 0
+    capsys.readouterr()
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0006",
+            "--scope-json",
+            json.dumps({"project": "creator-engine", "role": "controller", "seat_class": "foreman"}),
+            "--claim-json",
+            _claim("controller"),
+            "--evidence-ref",
+            "validators/tests/integration/test_ce_brain_cli.py#controller",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    rc = ce_cli.main(
+        [
+            "brain",
+            "bootstrap",
+            "--state-root",
+            str(state_root),
+            "--scope-json",
+            json.dumps({"project": "creator-engine", "role": "controller"}),
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "brain-bootstrap-context"
+    assert payload["context"]["scope"]["seat_class"] == "foreman"
+    assert [item["id"] for item in payload["knowledge_ssot"]["assertions"]] == [
+        "brain-assertion-cli-0005",
+        "brain-assertion-cli-0006",
+    ]
+
+
+def test_ce_brain_bootstrap_refuses_tampered_ledger(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0006",
+            "--scope",
+            "global",
+            "--claim-json",
+            _claim("tamper-bootstrap"),
+            "--evidence-ref",
+            "validators/tests/integration/test_ce_brain_cli.py#tamper-bootstrap",
+        ]
+    ) == 0
+    capsys.readouterr()
+    path = state_root / "brain" / "assertions.yaml"
+    path.write_text(path.read_text(encoding="utf-8").replace("tamper-bootstrap", "mutated-bootstrap"), encoding="utf-8")
+
+    rc = ce_cli.main(["brain", "bootstrap", "--state-root", str(state_root), "--json"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "brain_assertion_content_address" in captured.err

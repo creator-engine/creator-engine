@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import lane_runtime
+from creator_engine_validator import brain_runtime, lane_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 _SECRET = "ghp_supersecret_reviewer_token_value"
@@ -88,6 +88,21 @@ def _claim(ledger_root: Path, controller_id: str, lane_id: str) -> None:
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
 
 
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-reviewer-venue-0001",
+        claim={"subject": "lane", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_lane_runtime_reviewer_venue.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
 def _envelope(**override) -> dict:
     rec = {
         "envelope_id": "rva-pr108-reviewer",
@@ -133,6 +148,7 @@ def _launch_reviewer(tmp_path, *, adapter=None, **overrides):
     prompt, sha = _prompt(tmp_path)
     ledger = _ledger(tmp_path)
     _claim(ledger, CID, LID)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
     kwargs = dict(
         controller_id=CID,
         lane_id=LID,

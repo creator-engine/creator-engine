@@ -38,10 +38,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 import yaml
 
@@ -58,6 +59,7 @@ EVENTS_FILENAME = "events.jsonl"
 WRAPPER_FILENAME = "sentinel-wrapper.sh"
 
 WRITER_LAUNCHER_WRAPPER = "launcher_wrapper"
+_EXPORT_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 EVENT_LAUNCHED = "launched"
 EVENT_EXITED = "exited"
@@ -123,6 +125,17 @@ def _run_id_fragment(run_id: str | None) -> str:
     return '\\"' + _sh_str(run_id) + '\\"'
 
 
+def _export_lines(exports: Mapping[str, str] | None) -> str:
+    if not exports:
+        return ""
+    lines = []
+    for key in sorted(exports):
+        if not _EXPORT_KEY_RE.fullmatch(str(key)):
+            raise ValueError(f"invalid seat wrapper export key: {key!r}")
+        lines.append(f"export {key}={shlex.quote(str(exports[key]))}")
+    return "\n".join(lines) + "\n"
+
+
 def build_wrapper_script(
     *,
     inner_argv: Sequence[str],
@@ -130,6 +143,7 @@ def build_wrapper_script(
     seat_id: str,
     run_id: str | None,
     python_exe: str,
+    exports: Mapping[str, str] | None = None,
 ) -> str:
     """PURE: the POSIX-sh supervisor text (deterministic; no timestamps baked in).
 
@@ -145,6 +159,7 @@ def build_wrapper_script(
     sha = command_sha256(inner_argv)
     seat_dir = str(Path(events_path).parent)
     inner = " ".join(shlex.quote(str(a)) for a in inner_argv)
+    export_block = _export_lines(exports)
 
     common = f'\\"v\\":1,\\"event\\":\\"%s\\",\\"ts\\":\\"$(now)\\",\\"seat_id\\":\\"{seat}\\",\\"run_id\\":{run},\\"writer\\":\\"{WRITER_LAUNCHER_WRAPPER}\\"'
     launched = (
@@ -165,6 +180,7 @@ on_sig() {{ emit "{exited_sig}"; exit $((128+$1)); }}
 trap 'on_sig 1' HUP
 trap 'on_sig 15' TERM
 trap 'on_sig 2' INT
+{export_block}
 {inner}
 code=$?
 emit "{exited_code}"
@@ -202,6 +218,7 @@ def prepare_seat_sentinel(
     seat_id: str,
     run_id: str | None,
     python_exe: str | None = None,
+    exports: Mapping[str, str] | None = None,
 ) -> SeatSentinel:
     """Write ``sentinel-wrapper.sh`` (0700) into ``seat_dir`` and resolve the pane cmd.
 
@@ -220,6 +237,7 @@ def prepare_seat_sentinel(
         seat_id=seat_id,
         run_id=run_id,
         python_exe=exe,
+        exports=exports,
     )
     wrapper_path.write_text(script, encoding="utf-8")
     wrapper_path.chmod(0o700)

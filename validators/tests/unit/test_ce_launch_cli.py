@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -71,6 +71,27 @@ class FakeGhRunner:
                 list(argv), 0, stdout=json.dumps({"html_url": comment["html_url"]}), stderr=""
             )
         raise AssertionError(f"unexpected gh invocation: {argv!r}")
+
+
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-ce-launch-cli-0001",
+        claim={"subject": "controller", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_ce_launch_cli.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_brain_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
 @pytest.fixture()
@@ -172,6 +193,36 @@ def test_launch_claim_ticket_binding_is_persisted_in_seat_lifecycle(
     assert claim["host"] == "ce-dev-2"
     assert claim["stale_after_seconds"] == 14400
     assert adapter.spawned
+
+
+def test_launch_claim_ticket_refuses_tampered_brain_before_work_claim_acquire(
+    tmp_path, use_fake_tmux, monkeypatch, capsys
+):
+    brain_runtime.ledger_path(tmp_path / ".ce" / "state").write_text(
+        "not a valid brain ledger\n",
+        encoding="utf-8",
+    )
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    calls = []
+
+    def _acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("work claim acquire must not run before brain bootstrap preflight")
+
+    monkeypatch.setattr(ce_cli.work_claims, "acquire", _acquire)
+
+    ret = ce_cli.main([
+        "launch",
+        "--session", "ce305",
+        "--repo-root", str(tmp_path),
+        "--claim-ticket", "creator-engine/ce-ops#305",
+    ])
+
+    assert ret != 0
+    assert calls == []
+    assert adapter.spawned == []
+    assert "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED" in capsys.readouterr().err
 
 
 def test_launch_resume_refuses_missing_session(use_fake_tmux):

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import lane_runtime
+from creator_engine_validator import brain_runtime, lane_runtime
 from creator_engine_validator.checks.pane_registry import run as pane_registry_run
 from creator_engine_validator.tmux_adapter import TmuxAdapter, TmuxPane
 
@@ -72,9 +72,25 @@ def _prompt(tmp_path: Path) -> tuple[Path, str]:
     return p, hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-lane-tmux-0001",
+        claim={"subject": "lane", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/integration/test_lane_launch_tmux.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
 def test_launch_record_passes_live_pane_registry_check(tmp_path):
     ledger = _ledger(tmp_path)
     _claim(ledger)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
     prompt, sha = _prompt(tmp_path)
     lane_runtime.launch(
         controller_id="hermes-primary",
@@ -97,6 +113,7 @@ def test_launch_record_passes_live_pane_registry_check(tmp_path):
 def test_launch_spawns_real_tmux_session(tmp_path):
     ledger = _ledger(tmp_path)
     _claim(ledger)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
     prompt, sha = _prompt(tmp_path)
     session = f"ce-gate3-test-{uuid.uuid4().hex[:8]}"
     try:
