@@ -52,6 +52,22 @@ def _empty_search():
     return (200, {}, _body())
 
 
+def _empty_searches(count):
+    return [_empty_search() for _ in range(count)]
+
+
+def _queries_from_calls(calls):
+    return [
+        urllib.parse.parse_qs(urllib.parse.urlparse(call["url"]).query)["q"][0]
+        for call in calls
+    ]
+
+
+def _assert_explicit_search_type(query):
+    terms = query.split()
+    assert sum(term in {"is:pull-request", "is:issue"} for term in terms) == 1
+
+
 def _fake_transport(responses, calls=None):
     """Yield a scripted response per call. Each response is (status, headers, body)."""
     seq = list(responses)
@@ -67,7 +83,9 @@ def _fake_transport(responses, calls=None):
 
 _ACTIONABLE_RESPONSES = [
     (200, {}, _body(_hit(number=10, pr=True))),
+    _empty_search(),
     (200, {}, _body(_hit(number=11, pr=False))),
+    _empty_search(),
     (200, {}, _body(_hit(number=12, pr=False))),
 ]
 
@@ -80,14 +98,26 @@ _ACTIONABLE_RESPONSES = [
 def test_build_queries_maps_reasons_scopes_and_labels():
     specs = pickup.build_queries(labels=["team/feed", "ops,triage"], repo="o/r")
     assert [s.reason for s in specs] == [
-        "review_requested", "assigned", "mention", "labeled", "labeled", "labeled",
+        "review_requested",
+        "assigned", "assigned",
+        "mention", "mention",
+        "labeled", "labeled",
+        "labeled", "labeled",
+        "labeled", "labeled",
     ]
-    assert specs[0].query == "is:open review-requested:@me repo:o/r"
-    assert specs[1].query == "is:open assignee:@me repo:o/r"
-    assert specs[2].query == "is:open mentions:@me repo:o/r"
-    assert specs[3].query == 'is:open label:"team/feed" repo:o/r'
-    assert specs[4].query == 'is:open label:"ops" repo:o/r'
-    assert specs[5].query == 'is:open label:"triage" repo:o/r'
+    assert specs[0].query == "is:open is:pull-request review-requested:@me repo:o/r"
+    assert specs[1].query == "is:open is:pull-request assignee:@me repo:o/r"
+    assert specs[2].query == "is:open is:issue assignee:@me repo:o/r"
+    assert specs[3].query == "is:open is:pull-request mentions:@me repo:o/r"
+    assert specs[4].query == "is:open is:issue mentions:@me repo:o/r"
+    assert specs[5].query == 'is:open is:pull-request label:"team/feed" repo:o/r'
+    assert specs[6].query == 'is:open is:issue label:"team/feed" repo:o/r'
+    assert specs[7].query == 'is:open is:pull-request label:"ops" repo:o/r'
+    assert specs[8].query == 'is:open is:issue label:"ops" repo:o/r'
+    assert specs[9].query == 'is:open is:pull-request label:"triage" repo:o/r'
+    assert specs[10].query == 'is:open is:issue label:"triage" repo:o/r'
+    for spec in specs:
+        _assert_explicit_search_type(spec.query)
 
 
 def test_build_queries_refuses_unscoped_label():
@@ -112,8 +142,7 @@ def test_poll_resolves_search_hits_and_reason_mapping():
 def test_poll_item_shape_is_normalized_with_synthetic_thread_id():
     transport = _fake_transport([
         (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
-        _empty_search(),
-        _empty_search(),
+        *_empty_searches(4),
     ])
     result = pickup.poll(token="ghp_fake", transport=transport)
     item = result.items[0]
@@ -129,18 +158,17 @@ def test_poll_item_shape_is_normalized_with_synthetic_thread_id():
 def test_poll_label_option_maps_to_labeled_kind_and_adds_query():
     calls = []
     transport = _fake_transport([
-        _empty_search(),
-        _empty_search(),
-        _empty_search(),
+        *_empty_searches(6),
         (200, {}, _body(_hit(repo="o/r", number=5, pr=False))),
     ], calls=calls)
     result = pickup.poll(token="ghp_fake", transport=transport, labels=["team/feed"], org="creator-engine")
     assert result.items[0]["kind"] == "labeled"
     assert result.items[0]["url"] == "https://github.com/o/r/issues/5"
-    label_call = calls[-1]
-    parsed = urllib.parse.urlparse(label_call["url"])
-    query = urllib.parse.parse_qs(parsed.query)["q"][0]
-    assert query == 'is:open label:"team/feed" org:creator-engine'
+    queries = _queries_from_calls(calls)
+    assert queries[-2] == 'is:open is:pull-request label:"team/feed" org:creator-engine'
+    assert queries[-1] == 'is:open is:issue label:"team/feed" org:creator-engine'
+    for query in queries:
+        _assert_explicit_search_type(query)
 
 
 def test_poll_unscoped_label_fails_before_transport_call():
@@ -160,7 +188,7 @@ def test_poll_dedupes_overlapping_queries_by_repo_number():
     transport = _fake_transport([
         (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
         (200, {}, _body(_hit(repo="o/r", number=7, pr=True))),
-        _empty_search(),
+        *_empty_searches(3),
     ])
     result = pickup.poll(token="ghp_fake", transport=transport)
     assert len(result.items) == 1
@@ -168,21 +196,23 @@ def test_poll_dedupes_overlapping_queries_by_repo_number():
 
 
 def test_poll_default_poll_interval_when_header_absent():
-    transport = _fake_transport([_empty_search(), _empty_search(), _empty_search()])
+    transport = _fake_transport(_empty_searches(5))
     result = pickup.poll(token="ghp_fake", transport=transport)
     assert result.poll_interval == pickup.DEFAULT_POLL_INTERVAL
 
 
 def test_poll_sends_auth_header_api_version_and_search_url():
     calls = []
-    transport = _fake_transport([_empty_search(), _empty_search(), _empty_search()], calls=calls)
+    transport = _fake_transport(_empty_searches(5), calls=calls)
     pickup.poll(token="ghp_secret", transport=transport)
     assert calls[0]["headers"]["Authorization"] == "Bearer ghp_secret"
     assert "X-GitHub-Api-Version" in calls[0]["headers"]
     assert "/search/issues?" in calls[0]["url"]
     parsed = urllib.parse.urlparse(calls[0]["url"])
-    assert urllib.parse.parse_qs(parsed.query)["q"][0] == "is:open review-requested:@me"
+    assert urllib.parse.parse_qs(parsed.query)["q"][0] == "is:open is:pull-request review-requested:@me"
     assert calls[0]["method"] == "GET"
+    for query in _queries_from_calls(calls):
+        _assert_explicit_search_type(query)
 
 
 def test_poll_403_rate_limit_fails_closed_with_retry_after():
@@ -321,9 +351,7 @@ def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_
         ce_cli,
         "_make_pickup_transport",
         lambda: _fake_transport([
-            _empty_search(),
-            _empty_search(),
-            _empty_search(),
+            *_empty_searches(6),
             (200, {}, _body(_hit(repo="o/r", number=23, pr=False))),
         ], calls=calls),
     )
@@ -334,8 +362,11 @@ def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_
     assert code == 0
     out = json.loads(capsys.readouterr().out)
     assert out["items"][0]["kind"] == "labeled"
-    parsed = urllib.parse.urlparse(calls[-1]["url"])
-    assert urllib.parse.parse_qs(parsed.query)["q"][0] == 'is:open label:"ready" org:creator-engine'
+    queries = _queries_from_calls(calls)
+    assert queries[-2] == 'is:open is:pull-request label:"ready" org:creator-engine'
+    assert queries[-1] == 'is:open is:issue label:"ready" org:creator-engine'
+    for query in queries:
+        _assert_explicit_search_type(query)
 
 
 def test_cli_pickup_poll_help_mentions_search_label_and_launch(capsys):
@@ -646,8 +677,9 @@ def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatc
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     responses = [
         _empty_search(),
-        (200, {}, _body(_hit(repo="o/r", number=21, pr=False))),
         _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=21, pr=False))),
+        *_empty_searches(2),
     ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
                         lambda: _fake_transport(responses))
@@ -690,8 +722,9 @@ def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     responses = [
         _empty_search(),
-        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
         _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
+        *_empty_searches(2),
     ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
                         lambda: _fake_transport(responses))
@@ -722,8 +755,9 @@ def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     responses = [
         _empty_search(),
-        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
         _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
+        *_empty_searches(2),
     ]
     monkeypatch.setattr(ce_cli, "_make_pickup_transport",
                         lambda: _fake_transport(responses))

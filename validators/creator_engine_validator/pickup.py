@@ -7,10 +7,10 @@ Adopted design (ce-ops#55, amended by ce-ops#182):
 
 * Poll the GitHub **Search API** (``GET /search/issues``) instead of
   ``GET /notifications`` so fine-grained read-only PATs can drive the feed.
-  The query set is deterministic: ``is:open review-requested:@me`` →
-  ``review_requested``, ``is:open assignee:@me`` → ``assigned``,
-  ``is:open mentions:@me`` → ``mention``, and optionally
-  ``is:open label:"…"`` → ``labeled`` for team-label pickup.
+  The query set is deterministic and explicitly typed: PR-only
+  ``is:pull-request review-requested:@me`` → ``review_requested``; PR + issue
+  ``assignee:@me`` → ``assigned``; PR + issue ``mentions:@me`` → ``mention``;
+  and optionally PR + issue ``label:"…"`` → ``labeled`` for team-label pickup.
 * Per-identity auth via ``~/.ce-keys/ce-dev-N.pat`` (or ``CE_PICKUP_TOKEN``).
   Ambient ``gh auth token`` is used only when explicitly opted into by the local
   convention (``--allow-ambient-gh`` or ``CE_PICKUP_ALLOW_AMBIENT_GH=1``).
@@ -71,6 +71,9 @@ AMBIENT_GH_TOKEN_ENV = "CE_PICKUP_ALLOW_AMBIENT_GH"
 #: minutes stays within the documented Search API budget for one seat.
 DEFAULT_POLL_INTERVAL = 300
 DEFAULT_SEARCH_PER_PAGE = 100
+
+_PR_SEARCH_TYPE = "is:pull-request"
+_ISSUE_SEARCH_TYPE = "is:issue"
 
 _REPO_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _ORG_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -242,12 +245,24 @@ def build_queries(
         scope_terms.append(f"org:{org}")
 
     specs = [
-        SearchQuery("review_requested", " ".join(["is:open", "review-requested:@me", *scope_terms])),
-        SearchQuery("assigned", " ".join(["is:open", "assignee:@me", *scope_terms])),
-        SearchQuery("mention", " ".join(["is:open", "mentions:@me", *scope_terms])),
+        SearchQuery(
+            "review_requested",
+            " ".join(["is:open", _PR_SEARCH_TYPE, "review-requested:@me", *scope_terms]),
+        ),
     ]
+    for reason, selector in (
+        ("assigned", "assignee:@me"),
+        ("mention", "mentions:@me"),
+    ):
+        specs.extend(
+            SearchQuery(reason, " ".join(["is:open", search_type, selector, *scope_terms]))
+            for search_type in (_PR_SEARCH_TYPE, _ISSUE_SEARCH_TYPE)
+        )
     for label in normalized_labels:
-        specs.append(SearchQuery("labeled", " ".join(["is:open", _label_term(label), *scope_terms])))
+        specs.extend(
+            SearchQuery("labeled", " ".join(["is:open", search_type, _label_term(label), *scope_terms]))
+            for search_type in (_PR_SEARCH_TYPE, _ISSUE_SEARCH_TYPE)
+        )
     return tuple(specs)
 
 
