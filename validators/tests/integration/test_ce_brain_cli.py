@@ -206,6 +206,20 @@ def test_ce_brain_verify_reprobes_probe_backed_assertions(tmp_path: Path, capsys
     assert any("brain_assertion_probe_disagreement" in error for error in payload["errors"])
 
 
+def test_ce_brain_verify_drift_missing_ledger_is_zero_active_assertions(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+
+    rc = ce_cli.main(["brain", "verify", "--drift", "--state-root", str(state_root), "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["record_count"] == 0
+    assert payload["active_count"] == 0
+    assert payload["errors"] == []
+    assert payload["drift"]["ok"] is True
+    assert payload["drift"]["findings"] == []
+
+
 def test_ce_brain_verify_drift_passes_matching_artifact_hash(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     state_root = tmp_path / ".ce" / "state"

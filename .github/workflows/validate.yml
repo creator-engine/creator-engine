@@ -112,19 +112,8 @@ jobs:
 
       - name: Creator Engine validator — brain drift check
         run: |
-          PYTHONPATH=validators python - <<'PYEOF'
-          import sys
-          from pathlib import Path
-          from creator_engine_validator.checks import ce_brain_drift
-          from creator_engine_validator.reporting import format_errors
-
-          result = ce_brain_drift.run([Path(".ce/state")])
-          if result.ok:
-              print(f"OK: {result.name}")
-              sys.exit(0)
-          print(format_errors(result.errors), file=sys.stderr)
-          sys.exit(1)
-          PYEOF
+          PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
+            brain verify --drift --state-root .ce/state
 
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}

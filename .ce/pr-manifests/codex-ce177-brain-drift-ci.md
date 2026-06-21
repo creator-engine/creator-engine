@@ -21,11 +21,13 @@ The changes:
 - Treats `probe:<name>` assertions through the F2 probe seam and compares
   claimed `claim.verdict` to the observed probe verdict.
 - Treats non-probe evidence as a local artifact reference; missing/unreadable
-  artifacts fail closed, and explicit hash/value claim fields are compared
-  against observed artifact bytes/text.
+  artifacts fail closed, explicit supported hash/value claim fields are
+  compared against observed artifact bytes/text, and evidence existence alone
+  is not accepted as verification.
 - Adds `ce brain verify --drift` for on-demand drift checks.
-- Adds a narrow CI invocation over `.ce/state` so the drift check runs on every
-  validation job without broadening unrelated scans.
+- Adds a narrow `ce brain verify --drift --state-root .ce/state` CI invocation
+  so CLI and CI/check semantics agree. A missing brain assertion ledger is zero
+  active assertions in drift mode; present malformed ledgers still fail closed.
 - Adds offline unit/integration coverage for pass, drift, fail-closed, and
   deterministic output behavior.
 

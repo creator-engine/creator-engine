@@ -4,3 +4,5 @@
 - Added `ce brain verify --drift` for on-demand drift verification.
 - Wired CI to run the drift check over `.ce/state` on every validation run.
 - Added offline probe and local-evidence tests for pass, drift, fail-closed, and deterministic output paths.
+- Tightened artifact evidence so active non-probe assertions require an explicit supported hash/value comparison; evidence existence alone fails closed.
+- Defined missing brain ledgers in drift mode as zero active assertions so CLI and CI/check behavior agree.

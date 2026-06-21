@@ -91,7 +91,7 @@ def test_diverged_probe_assertion_reports_structured_drift(tmp_path: Path):
     assert "observed verdict='absent'" in message
 
 
-def test_resolvable_artifact_without_hash_or_value_claim_passes(tmp_path: Path):
+def test_resolvable_artifact_without_hash_or_value_claim_fails_closed(tmp_path: Path):
     evidence = tmp_path / "evidence.txt"
     evidence.write_text("current\n", encoding="utf-8")
     path = _write_ledger(tmp_path, _ledger_text(evidence_ref="evidence.txt#section"))
@@ -104,7 +104,96 @@ def test_resolvable_artifact_without_hash_or_value_claim_passes(tmp_path: Path):
         ),
     )
 
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
+    assert "evidence file existence alone is not verification" in errors[0].message
+
+
+def test_matching_artifact_hash_passes(tmp_path: Path):
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current\n", encoding="utf-8")
+    observed = hashlib.sha256(b"current\n").hexdigest()
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "artifact",
+                "predicate": "sha256",
+                "object": "evidence",
+                "sha256": observed,
+            },
+            evidence_ref="evidence.txt",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
     assert errors == []
+
+
+def test_malformed_artifact_hash_claim_fails_closed(tmp_path: Path):
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current\n", encoding="utf-8")
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "artifact",
+                "predicate": "sha256",
+                "object": "evidence",
+                "sha256": "not-a-sha",
+            },
+            evidence_ref="evidence.txt",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
+    assert "claim.sha256 must be a sha256 hex string" in errors[0].message
+
+
+def test_unsupported_artifact_hash_claim_key_fails_closed(tmp_path: Path):
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current\n", encoding="utf-8")
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "artifact",
+                "predicate": "sha256",
+                "object": "evidence",
+                "hash": hashlib.sha256(b"current\n").hexdigest(),
+            },
+            evidence_ref="evidence.txt",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
+    assert "claim.hash is not a supported drift comparison key" in errors[0].message
+
+
+def test_malformed_artifact_value_claim_fails_closed(tmp_path: Path):
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current\n", encoding="utf-8")
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "artifact",
+                "predicate": "value",
+                "object": "evidence",
+                "value": ["not", "a", "string"],
+            },
+            evidence_ref="evidence.txt",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
+    assert "claim.value must be a string value" in errors[0].message
 
 
 def test_artifact_hash_drift_reports_claimed_and_observed(tmp_path: Path):
@@ -201,3 +290,17 @@ def test_run_registers_drift_check_and_discovers_brain_ledger(tmp_path: Path):
     assert result.name == ce_brain_drift.CHECK_NAME
     assert not result.ok
     assert any(error.code == ce_brain_drift.CODE_UNVERIFIABLE for error in result.errors)
+
+
+def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+
+    drift = ce_brain_drift.verify_state_root(state_root)
+    registered = ce_brain_drift.run([state_root])
+
+    assert drift.ok
+    assert drift.record_count == 0
+    assert drift.active_count == 0
+    assert drift.findings == ()
+    assert registered.ok
+    assert registered.errors == ()

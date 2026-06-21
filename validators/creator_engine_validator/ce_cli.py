@@ -1740,30 +1740,30 @@ def _brain_correct(args) -> int:
 
 
 def _brain_verify(args) -> int:
-    result = brain_runtime.verify_ledger(args.state_root)
-    summary = dict(result.summary)
     if getattr(args, "drift", False):
-        drift = ce_brain_drift.verify_state_root(args.state_root) if result.ok else None
-        drift_errors = list(drift.findings) if drift is not None else []
-        ok = result.ok and not drift_errors
-        errors = [*result.errors, *(error.format() for error in drift_errors)]
-        summary["drift"] = drift.to_dict() if drift is not None else {
-            "active_count": 0,
-            "findings": [],
-            "ledger_path": str(result.ledger_path),
-            "ok": False,
+        drift = ce_brain_drift.verify_state_root(args.state_root)
+        ok = drift.ok
+        errors = [error.format() for error in drift.findings]
+        summary = {
+            "active_count": drift.active_count,
+            "drift": drift.to_dict(),
+            "errors": errors,
+            "head_content_hash": drift.head_content_hash,
+            "record_count": drift.record_count,
         }
     else:
+        result = brain_runtime.verify_ledger(args.state_root)
+        summary = dict(result.summary)
         probe_errors = ce_brain_assertions.validate_file(result.ledger_path) if result.ok else []
         ok = result.ok and not probe_errors
         errors = [*result.errors, *(error.format() for error in probe_errors)]
-    summary["errors"] = errors
+        summary["errors"] = errors
     if getattr(args, "json_output", False):
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
         status = "OK" if ok else "FAIL"
         suffix = " --drift" if getattr(args, "drift", False) else ""
-        print(f"ce brain verify{suffix}: {status} ({result.summary.get('record_count', 0)} record(s))")
+        print(f"ce brain verify{suffix}: {status} ({summary.get('record_count', 0)} record(s))")
         for error in errors:
             print(f"  ERROR: {error}", file=sys.stderr)
     return 0 if ok else 1

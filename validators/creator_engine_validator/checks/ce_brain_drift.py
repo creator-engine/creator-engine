@@ -42,6 +42,8 @@ _VALUE_CLAIM_KEYS = (
     "artifact_value",
     "content_value",
 )
+_SUPPORTED_COMPARISON_KEYS = frozenset((*_HASH_CLAIM_KEYS, *_VALUE_CLAIM_KEYS))
+_HASH_LIKE_KEY_TOKENS = ("sha", "hash", "digest", "checksum")
 
 
 def _default_read_bytes(path: Path) -> bytes:  # pragma: no cover - live edge
@@ -62,15 +64,19 @@ class DriftContext:
 class DriftResult:
     ok: bool
     ledger_path: Path
+    record_count: int
     active_count: int
+    head_content_hash: str | None
     findings: tuple[ValidationError, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "active_count": self.active_count,
             "findings": [finding.to_dict() for finding in self.findings],
+            "head_content_hash": self.head_content_hash,
             "ledger_path": str(self.ledger_path),
             "ok": self.ok,
+            "record_count": self.record_count,
         }
 
 
@@ -136,6 +142,99 @@ def _claimed_values(claim: Mapping[str, Any]) -> list[tuple[str, str]]:
             if isinstance(value, str):
                 out.append((f"evidence.{key}", value))
     return out
+
+
+def _comparison_malformed_errors(claim: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], assertion_id: str) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    for key in _HASH_CLAIM_KEYS:
+        if key in claim and _normalize_claimed_hash(claim.get(key)) is None:
+            errors.append(
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    f"assertion {assertion_id}: claim.{key} must be a sha256 hex string",
+                )
+            )
+    for key in _VALUE_CLAIM_KEYS:
+        if key in claim and not isinstance(claim.get(key), str):
+            errors.append(
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    f"assertion {assertion_id}: claim.{key} must be a string value",
+                )
+            )
+    evidence = claim.get("evidence")
+    if isinstance(evidence, Mapping):
+        for key in _HASH_CLAIM_KEYS:
+            if key in evidence and _normalize_claimed_hash(evidence.get(key)) is None:
+                errors.append(
+                    _error(
+                        CODE_UNVERIFIABLE,
+                        path,
+                        pointer_prefix,
+                        "claim",
+                        f"assertion {assertion_id}: claim.evidence.{key} must be a sha256 hex string",
+                    )
+                )
+        for key in _VALUE_CLAIM_KEYS:
+            if key in evidence and not isinstance(evidence.get(key), str):
+                errors.append(
+                    _error(
+                        CODE_UNVERIFIABLE,
+                        path,
+                        pointer_prefix,
+                        "claim",
+                        f"assertion {assertion_id}: claim.evidence.{key} must be a string value",
+                    )
+                )
+    return errors
+
+
+def _looks_like_unsupported_comparison_key(key: Any) -> bool:
+    token = str(key).strip().lower().replace("-", "_")
+    if token in _SUPPORTED_COMPARISON_KEYS:
+        return False
+    return any(part in token for part in _HASH_LIKE_KEY_TOKENS) or token.endswith("_value")
+
+
+def _comparison_unsupported_errors(claim: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], assertion_id: str) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    for key in claim:
+        if _looks_like_unsupported_comparison_key(key):
+            errors.append(
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    (
+                        f"assertion {assertion_id}: claim.{key} is not a supported drift comparison key; "
+                        f"supported hash keys={sorted(_HASH_CLAIM_KEYS)}, supported value keys={sorted(_VALUE_CLAIM_KEYS)}"
+                    ),
+                )
+            )
+    evidence = claim.get("evidence")
+    if isinstance(evidence, Mapping):
+        for key in evidence:
+            if _looks_like_unsupported_comparison_key(key):
+                errors.append(
+                    _error(
+                        CODE_UNVERIFIABLE,
+                        path,
+                        pointer_prefix,
+                        "claim",
+                        (
+                            f"assertion {assertion_id}: claim.evidence.{key} is not a supported drift comparison key; "
+                            f"supported hash keys={sorted(_HASH_CLAIM_KEYS)}, supported value keys={sorted(_VALUE_CLAIM_KEYS)}"
+                        ),
+                    )
+                )
+    return errors
 
 
 def _resolve_artifact(evidence_ref: str, context: DriftContext) -> Path | None:
@@ -237,9 +336,32 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
             )
         ]
 
+    comparison_errors = [
+        *_comparison_malformed_errors(claim, path, pointer_prefix, assertion_id),
+        *_comparison_unsupported_errors(claim, path, pointer_prefix, assertion_id),
+    ]
+    if comparison_errors:
+        return comparison_errors
+
+    claimed_hashes = _claimed_hashes(claim)
+    claimed_values = _claimed_values(claim)
+    if not claimed_hashes and not claimed_values:
+        return [
+            _error(
+                CODE_UNVERIFIABLE,
+                path,
+                pointer_prefix,
+                "claim",
+                (
+                    f"assertion {assertion_id}: artifact evidence requires an explicit supported "
+                    "hash or value claim; evidence file existence alone is not verification"
+                ),
+            )
+        ]
+
     findings: list[ValidationError] = []
     observed_hash = hashlib.sha256(data).hexdigest()
-    for key, claimed_hash in _claimed_hashes(claim):
+    for key, claimed_hash in claimed_hashes:
         if claimed_hash == observed_hash:
             continue
         findings.append(
@@ -255,7 +377,6 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
             )
         )
 
-    claimed_values = _claimed_values(claim)
     if claimed_values:
         try:
             observed_value = data.decode("utf-8")
@@ -337,24 +458,29 @@ def validate_file(path: Path, *, context: DriftContext | None = None) -> list[Va
 
 def verify_state_root(state_root: Path | str, *, context: DriftContext | None = None) -> DriftResult:
     path = brain_runtime.ledger_path(state_root)
-    findings = tuple(validate_file(path, context=context)) if path.is_file() else (
-        make_error(
-            CODE_UNVERIFIABLE,
-            path,
-            "/",
-            f"no brain assertion ledger at {path}",
-            CONTRACT,
-        ),
-    )
+    findings = tuple(validate_file(path, context=context)) if path.is_file() else ()
+    record_count = 0
     active_count = 0
+    head_content_hash: str | None = None
     if path.is_file():
         try:
             data = load_yaml(path)
         except LoaderError:
             data = None
         records = data.get("records") if isinstance(data, dict) and isinstance(data.get("records"), list) else []
+        record_count = len(records)
         active_count = len(_active_record_indexes(records))
-    return DriftResult(ok=not findings, ledger_path=path, active_count=active_count, findings=findings)
+        head = records[-1] if records and isinstance(records[-1], Mapping) else None
+        if head is not None and isinstance(head.get("content_hash"), str):
+            head_content_hash = head["content_hash"]
+    return DriftResult(
+        ok=not findings,
+        ledger_path=path,
+        record_count=record_count,
+        active_count=active_count,
+        head_content_hash=head_content_hash,
+        findings=findings,
+    )
 
 
 @register(CHECK_NAME, [CODE_DRIFT, CODE_UNVERIFIABLE])
