@@ -31,7 +31,8 @@ def test_registered_in_check_surface():
     # (declared in-gate): 51 -> 52. ce-ops#26 added seat_event: 52 -> 53.
     # ce-ops#142 added ce_computer_use_authority_envelope: 53 -> 54.
     # ce-ops#145 added ce_playbook_format: 54 -> 55.
-    assert len(reg) == 55
+    # ce-ops#167 added ce_brain_assertions: 55 -> 56.
+    assert len(reg) == 56
 
 
 def test_green_on_real_package(version_boundary_real_run):

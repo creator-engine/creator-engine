@@ -1,0 +1,126 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/brain-assertion.schema.yaml"
+title: "Creator Engine Brain Assertion Ledger"
+description: >-
+  Schema for the first Knowledge-SSOT assertion ledger slice. Assertions are
+  structured records in a deterministic, append-only, content-addressed hash
+  chain. Runtime state lives under the local CE state root (.ce/state); this
+  schema is repo-native and introduces no datastore, MCP server, recall index,
+  vector store, or memory migration surface.
+type: object
+oneOf:
+  - required: [brain_assertion]
+  - required: [kind, record_type, schema_version, records]
+properties:
+  brain_assertion:
+    $ref: "#/$defs/assertion"
+  kind:
+    type: string
+    const: brain-assertion-ledger
+  record_type:
+    type: string
+    const: brain_assertion_ledger
+  schema_version:
+    type: string
+    enum: ["1"]
+  records:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/assertion"
+  note:
+    type: string
+    maxLength: 1024
+additionalProperties: false
+
+$defs:
+  hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  assertion_id:
+    type: string
+    pattern: "^brain-assertion-[a-z0-9][a-z0-9-]{3,96}$"
+  scope:
+    anyOf:
+      - type: string
+        minLength: 1
+      - type: object
+        minProperties: 1
+        additionalProperties: true
+  assertion:
+    type: object
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - id
+      - claim
+      - scope
+      - evidence_ref
+      - sequence
+      - prev_hash
+      - content_hash
+      - status
+      - superseded_by
+    properties:
+      kind:
+        type: string
+        const: brain-assertion
+      record_type:
+        type: string
+        const: brain_assertion
+      schema_version:
+        type: string
+        enum: ["1"]
+      id:
+        $ref: "#/$defs/assertion_id"
+      claim:
+        type: object
+        minProperties: 1
+        additionalProperties: true
+        description: >-
+          Structured assertion content. Free prose strings are rejected at the
+          schema boundary; callers must supply a mapping that independent
+          controllers can compare deterministically.
+      scope:
+        $ref: "#/$defs/scope"
+      evidence_ref:
+        type: string
+        minLength: 1
+        not:
+          pattern: "://"
+        description: >-
+          Required local or opaque evidence reference. URLs and live host
+          identifiers are intentionally outside this first SSOT slice.
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        $ref: "#/$defs/hash"
+      content_hash:
+        $ref: "#/$defs/hash"
+      status:
+        type: string
+        enum: [active, superseded]
+      superseded_by:
+        anyOf:
+          - $ref: "#/$defs/assertion_id"
+          - type: "null"
+    allOf:
+      - if:
+          properties:
+            status:
+              const: active
+        then:
+          properties:
+            superseded_by:
+              type: "null"
+      - if:
+          properties:
+            status:
+              const: superseded
+        then:
+          properties:
+            superseded_by:
+              $ref: "#/$defs/assertion_id"
+    additionalProperties: false
