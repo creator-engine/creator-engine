@@ -19,7 +19,14 @@ from creator_engine_validator import v3_installer
 pytestmark = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="stock ssh-keygen not available")
 
 
+def _signature_key_id(spec_text: str) -> str:
+    match = re.search(r"(?m)^  key_id: (.+)$", spec_text)
+    assert match is not None
+    return match.group(1)
+
+
 def _sign_with_test_key(spec_text: str, tmp_path: Path) -> tuple[str, str]:
+    key_id = _signature_key_id(spec_text)
     key = tmp_path / "ce-test-root"
     subprocess.run(
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key), "-C", "ce-test-root"],
@@ -39,7 +46,7 @@ def _sign_with_test_key(spec_text: str, tmp_path: Path) -> tuple[str, str]:
     signed = re.sub(r"(?m)^(  value: ).*$", rf"\g<1>{sig_value}", spec_text)
     signed = re.sub(r"(?m)^(  content_sha256: ).*$", rf"\g<1>{digest}", signed)
     pub = (tmp_path / "ce-test-root.pub").read_text(encoding="utf-8").split()
-    trust_root = f"ce-root-v1 {pub[0]} {pub[1]}\n"
+    trust_root = f"{key_id} {pub[0]} {pub[1]}\n"
     return signed, trust_root
 
 
@@ -47,13 +54,18 @@ def _make_site(tmp_path: Path, repo_root: Path, *, tamper: bool = False) -> Path
     site = tmp_path / "site"
     (site / "keys").mkdir(parents=True)
     (site / "schemas").mkdir()
+    (site / "trust").mkdir()
     shutil.copytree(repo_root / "docs" / "downloads", site / "downloads")
     shutil.copy2(repo_root / "schemas" / "install-answers.schema.yaml", site / "schemas" / "install-answers.schema.yaml")
-    signed, trust_root = _sign_with_test_key((repo_root / "docs" / "llms-install.md").read_text(encoding="utf-8"), tmp_path)
+    spec_text = (repo_root / "docs" / "llms-install.md").read_text(encoding="utf-8")
+    signed, trust_root = _sign_with_test_key(spec_text, tmp_path)
     if tamper:
         signed += "\ntamper\n"
     (site / "llms-install.md").write_text(signed, encoding="utf-8")
     (site / "keys" / "ce-root-v1").write_text(trust_root, encoding="utf-8")
+    key_id = _signature_key_id(spec_text)
+    fingerprint = v3_installer.public_key_fingerprint(trust_root)
+    (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
     return site
 
 
@@ -81,6 +93,7 @@ if [ -z "$out" ] || [ -z "$url" ]; then
 fi
 case "$url" in
   https://creator-engine.dev/*) rel="${url#https://creator-engine.dev/}" ;;
+  "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT") rel="trust/ce-root-v1.txt" ;;
   *) echo "fake curl: unsupported URL $url" >&2; exit 2 ;;
 esac
 if [ "${FAKE_404_DOWNLOAD:-}" = "1" ] && [[ "$rel" == downloads/* ]]; then
@@ -122,6 +135,7 @@ def _run_install(
         "HOME": str(tmp_path / "home"),
         "FAKE_SITE": str(site),
         "FAKE_CURL_LOG": str(curl_log),
+        "CE_TRUST_ANCHOR_SOURCE": "dns-txt:test",
     }
     # The bootstrap contract being tested is the signed wheel install. CI runs
     # pytest with PYTHONPATH=validators, but leaking that into the subprocess
@@ -164,6 +178,26 @@ def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_p
     assert not (install_root / "venv").exists()
 
 
+def test_install_sh_refuses_equivalent_same_origin_anchor_before_artifacts(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    install_root = tmp_path / "install-root"
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        install_root=install_root,
+        extra_env={"CE_TRUST_ANCHOR_URL": "https://creator-engine.dev:443/trust/ce-root-v1.txt"},
+    )
+    assert proc.returncode != 0
+    assert "trust_anchor_refused" in proc.stderr
+    assert "shares origin" in proc.stderr
+    assert _curl_urls(tmp_path / "curl.log") == [
+        "https://creator-engine.dev/llms-install.md",
+        "https://creator-engine.dev/keys/ce-root-v1",
+    ]
+    assert not (install_root / "venv").exists()
+
+
 def test_install_sh_wheelhouse_hash_gate_leaves_venv_untouched(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -188,6 +222,9 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
     assert first.returncode == 0, first.stderr
     payload = json.loads(first.stdout)
     assert payload["action"] == "onboard_inventory"
+    assert payload["verified"]["trust_anchors"]["agreed"] == ["dns-txt:test"]
+    assert "fingerprint" not in payload["verified"]["trust_anchors"]
+    assert "trust_anchor_fingerprint" not in (install_root / "install-state").read_text(encoding="utf-8")
     rows = {row["key"]: row for row in payload["inventory"]}
     assert rows["profile"]["status"] == "answered:solo-pilot"
     assert (install_root / "venv" / "bin" / "cev3").is_file()
@@ -256,6 +293,7 @@ def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Pat
     assert _curl_urls(tmp_path / "curl.log") == [
         "https://creator-engine.dev/llms-install.md",
         "https://creator-engine.dev/keys/ce-root-v1",
+        "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT",
     ]
 
     fresh = tmp_path / "fresh"

@@ -2665,6 +2665,37 @@ def _close_apply_driver(driver: Any) -> None:
         close()
 
 
+def _load_trust_anchor_records(anchor_specs: Sequence[str]) -> tuple[v3_installer.TrustAnchorRecord, ...]:
+    """Load operator-supplied out-of-band trust anchors from ``SOURCE=PATH`` specs."""
+    records: list[v3_installer.TrustAnchorRecord] = []
+    for raw_spec in anchor_specs:
+        if "=" not in raw_spec:
+            raise v3_installer.InstallRefused(
+                "--trust-anchor must be SOURCE=PATH, for example dns-txt=/tmp/ce-root-v1.txt"
+            )
+        source, path_text = raw_spec.split("=", 1)
+        source = source.strip()
+        path_text = path_text.strip()
+        if not source or not path_text:
+            raise v3_installer.InstallRefused("--trust-anchor must name both SOURCE and PATH")
+        try:
+            text = Path(path_text).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise v3_installer.InstallRefused(f"trust_anchor_unreadable: {source}: {exc}") from exc
+        records.extend(v3_installer.parse_trust_anchor_records(text, source=source))
+    return tuple(records)
+
+
+def _verified_payload(
+    verified: v3_installer.VerifyResult,
+    trust_anchor: v3_installer.TrustAnchorEvidence | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"ok": True, "key_id": verified.key_id}
+    if trust_anchor is not None:
+        payload["trust_anchors"] = trust_anchor.to_record()
+    return payload
+
+
 def _cmd_onboard(args: argparse.Namespace) -> int:
     """Two-mode install — verify the signed spec, then plan or apply.
 
@@ -2701,7 +2732,9 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     apply_mode = bool(getattr(args, "apply", False))
     apply_verifier = None
     apply_signature: dict[str, Any] | None = None
+    pinned_keys_for_plan = v3_installer.PINNED_KEYS
     spec_for_plan = spec_bytes
+    trust_anchor_evidence: v3_installer.TrustAnchorEvidence | None = None
     authentic_mode = bool(getattr(args, "require_authentic", False) or getattr(args, "trust_root", None))
     self_attested = args.sig_value is None and not apply_mode and not authentic_mode
     if authentic_mode:
@@ -2735,6 +2768,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 [f"{_BRAND} · onboard REFUSED: signature_refused: no fetched trust-root key id is pinned by this wheel"],
                 {"error": "refused", "detail": "signature_refused: no fetched trust-root key id is pinned by this wheel"},
             )
+        pinned_keys_for_plan = usable_keys
         apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
         try:
             signed = v3_installer.parse_signed_install_spec(spec_bytes)
@@ -2746,6 +2780,22 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 pinned_keys=usable_keys,
                 verifier=apply_verifier,
             )
+            if verified.key_id is None or verified.key_id not in usable_keys:
+                raise v3_installer.InstallRefused(
+                    "trust_anchor_refused: verified key id missing from fetched trust root"
+                )
+            anchor_records = _load_trust_anchor_records(getattr(args, "trust_anchor", []) or [])
+            trust_anchor_evidence = v3_installer.verify_trust_anchors(
+                verified.key_id,
+                usable_keys[verified.key_id],
+                anchor_records,
+                install_spec_source=v3_installer.PUBLISHED_INSTALL_SPEC_URL,
+            )
+            if not trust_anchor_evidence.ok:
+                raise v3_installer.InstallRefused(
+                    f"trust_anchor_refused: {trust_anchor_evidence.status}: "
+                    f"{trust_anchor_evidence.reason}"
+                )
         except v3_installer.InstallRefused as exc:
             return _emit(
                 args,
@@ -2858,9 +2908,14 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         brownfield = v3_installer.brownfield_inventory_summary(
             schema, answers=answers or None, probe=brownfield_probe
         )
+        trust_anchor_note = (
+            f"; trust anchors {', '.join(trust_anchor_evidence.agreed)}"
+            if trust_anchor_evidence is not None
+            else ""
+        )
         lines = [
             f"{_BRAND} · onboard inventory — {len(rows)} inputs "
-            f"(spec verified against pinned key {verified.key_id!r})"
+            f"(spec verified against pinned key {verified.key_id!r}{trust_anchor_note})"
         ]
         for row in rows:
             modes = "/".join(row["modes"]) or "—"
@@ -2887,7 +2942,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             )
         return _emit(args, 0, lines, {
             "action": "onboard_inventory",
-            "verified": {"ok": True, "key_id": verified.key_id},
+            "verified": _verified_payload(verified, trust_anchor_evidence),
             "self_attested": self_attested,
             "inventory": [dict(row) for row in rows],
             "brownfield": brownfield,
@@ -2956,13 +3011,16 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             opt_out, optout_ratification = True, binding
     try:
         plan = v3_installer.build_install_plan(
-            spec_for_plan, signature, pinned_keys=v3_installer.PINNED_KEYS, probe=probe,
+            spec_for_plan, signature, pinned_keys=pinned_keys_for_plan, probe=probe,
             mode=args.mode, tier=v3_installer.tier_for_backend(isolation_backend),
             opt_out=opt_out, optout_ratification=optout_ratification,
             verifier=apply_verifier,
         )
     except v3_installer.InstallRefused as exc:
         return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
+    if trust_anchor_evidence is not None:
+        plan["verified"] = dict(plan["verified"])
+        plan["verified"]["trust_anchors"] = trust_anchor_evidence.to_record()
     brownfield_plan = v3_installer.build_brownfield_adoption_plan(
         answers or {"answers_version": 1},
         schema=schema,
@@ -3795,6 +3853,9 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="canonical signed-spec digest when --sig-value is supplied out of band")
     p_onboard.add_argument("--trust-root", default=None,
                            help="OpenSSH allowed_signers trust root; implies authentic SSHSIG verification")
+    p_onboard.add_argument("--trust-anchor", action="append", default=[],
+                           metavar="SOURCE=PATH",
+                           help="out-of-band ce-root fingerprint evidence, e.g. dns-txt=/tmp/ce-root-v1.txt")
     p_onboard.add_argument("--require-authentic", action="store_true",
                            help="refuse sha256 self-attestation; require embedded SSHSIG + --trust-root")
     p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",

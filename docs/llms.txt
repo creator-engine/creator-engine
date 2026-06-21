@@ -2,13 +2,13 @@
 
 > Creator Engine (CE) is the open-source (Apache-2.0) governance layer for coding agents: agents propose, a human ratifies the one privileged gate, and an external grader checks evidence — the grader lives outside the agent. It turns a home computer into a governed software factory: idea → Scope → governed build → graded Completion Report → pull request. Runs on Linux/macOS today (v3 pilot pre-release).
 
-To install CE for an operator, fetch and follow the signed install playbook below — verify it against the pinned CE public key (`ce-root-v1`) before executing any step. Humans can instead run `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`; the bootstrap verifies the signed spec, installs the hash-pinned wheelhouse from the Pages mirror, and runs authenticated onboard inventory.
+To install CE for an operator, fetch and follow the signed install playbook below — verify it against the pinned CE public key trust root (`ce-root-v1`) and an out-of-band fingerprint anchor before executing any step. Humans can instead run `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`; the bootstrap verifies the signed spec and anchor, installs the hash-pinned wheelhouse from the Pages mirror, and runs authenticated onboard inventory.
 
 ## Install
 
 - [Agent-native install playbook](https://creator-engine.dev/llms-install.md): the signed, verify-before-execute spec an agent follows to install CE and connect it to a collaboration repo
-- [CE root trust anchor `ce-root-v1`](https://creator-engine.dev/keys/ce-root-v1): the pinned OpenSSH allowed_signers file — verify the install playbook's detached signature against it (stock `ssh-keygen -Y verify`, namespace `ce-spec-v1`) before executing any step
-- [Install bootstrap](https://creator-engine.dev/install.sh): the human one-liner; signed-spec verification before persistent mutation, offline wheel install, authenticated inventory, no sudo/apply
+- [CE root trust root `ce-root-v1`](https://creator-engine.dev/keys/ce-root-v1): the pinned OpenSSH allowed_signers file — verify the install playbook's detached signature against it (stock `ssh-keygen -Y verify`, namespace `ce-spec-v1`) and bind the signing key to an out-of-band fingerprint anchor before executing any step
+- [Install bootstrap](https://creator-engine.dev/install.sh): the human one-liner; signed-spec plus out-of-band anchor verification before persistent mutation, offline wheel install, authenticated inventory, no sudo/apply
 - [0.2.0 downloads and hashes](https://creator-engine.dev/downloads/0.2.0/SHA256SUMS): Pages mirror hashes for `install.sh` and the offline wheelhouse
 
 ## Docs

@@ -12,6 +12,8 @@ set -euo pipefail
 CE_SITE="${CE_SITE:-https://creator-engine.dev}"
 CE_ANSWERS="${CE_ANSWERS:-}"
 CE_INSTALL_ROOT="${CE_INSTALL_ROOT:-}"
+CE_TRUST_ANCHOR_URL="${CE_TRUST_ANCHOR_URL:-https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT}"
+CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-engine.dev}"
 CE_JSON=0
 CE_INVENTORY_ONLY=1
 
@@ -120,6 +122,51 @@ hash_file() {
     sha256sum "$1" | awk '{print $1}'
   else
     shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+normalized_url_origin() {
+  printf '%s\n' "$1" | awk '
+    {
+      url = $0
+      if (match(url, /^[A-Za-z][A-Za-z0-9+.-]*:\/\//) == 0) {
+        print url
+        exit
+      }
+      scheme = tolower(substr(url, 1, RLENGTH - 3))
+      authority = substr(url, RLENGTH + 1)
+      sub(/[\/?#].*$/, "", authority)
+      n = split(authority, userinfo_parts, "@")
+      authority = userinfo_parts[n]
+      host = authority
+      port = ""
+      if (authority ~ /^\[[^]]+\]/) {
+        rb = index(authority, "]")
+        host = substr(authority, 1, rb)
+        suffix = substr(authority, rb + 1)
+        if (suffix ~ /^:[0-9]+$/) {
+          port = substr(suffix, 2)
+        }
+      } else if (authority ~ /:[0-9]+$/) {
+        host = authority
+        sub(/:[0-9]+$/, "", host)
+        port = authority
+        sub(/^.*:/, "", port)
+      }
+      host = tolower(host)
+      if ((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) {
+        port = ""
+      }
+      printf "%s://%s%s\n", scheme, host, port == "" ? "" : ":" port
+    }
+  '
+}
+
+refuse_same_origin_trust_anchor() {
+  site_origin="$(normalized_url_origin "$CE_SITE")"
+  anchor_origin="$(normalized_url_origin "$CE_TRUST_ANCHOR_URL")"
+  if [ "$site_origin" = "$anchor_origin" ]; then
+    fail trust_anchor_refused "trust anchor URL must be out-of-band; ${CE_TRUST_ANCHOR_URL} shares origin with ${CE_SITE}"
   fi
 }
 
@@ -286,6 +333,47 @@ sha256s_entry() {
   ' "$SHA256S_FILE"
 }
 
+trust_root_fingerprint() {
+  key_id="$1"
+  ssh-keygen -l -f "$TRUST_ROOT_FILE" -E sha256 | awk -v key="$key_id" '
+    $3 == key {
+      print $2
+      found = 1
+      exit
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
+anchor_record() {
+  key_id="$1"
+  raw_path="$2"
+  awk -v key="$key_id" '
+    {
+      line = $0
+      gsub(/["{}\\,]/, " ", line)
+      n = split(line, fields, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        token = fields[i]
+        if (index(token, key "=") == 1) {
+          fp = substr(token, length(key) + 2)
+          if (fp ~ /^SHA256:[A-Za-z0-9+\/]{43}$/) {
+            print key "=" fp
+            found = 1
+            exit
+          }
+        }
+        if ((token == key || token == key ":") && i < n && fields[i + 1] ~ /^SHA256:[A-Za-z0-9+\/]{43}$/) {
+          print key "=" fields[i + 1]
+          found = 1
+          exit
+        }
+      }
+    }
+    END { if (!found) exit 1 }
+  ' "$raw_path"
+}
+
 compatible_python() {
   candidate="$1"
   "$candidate" - <<'PY' >/dev/null 2>&1
@@ -331,6 +419,8 @@ write_state() {
   {
     printf 'spec_canonical_sha256=%s\n' "$SPEC_CANONICAL_SHA"
     printf 'trust_root_sha256=%s\n' "$TRUST_ROOT_SHA"
+    printf 'trust_anchor_source=%s\n' "$CE_TRUST_ANCHOR_SOURCE"
+    printf 'trust_anchor_sha256=%s\n' "$TRUST_ANCHOR_SHA"
     printf 'sha256s_sha256=%s\n' "$SHA256S_SHA"
     printf 'package_version=%s\n' "$PACKAGE_VERSION"
     printf 'python_executable=%s\n' "$PYTHON_BIN"
@@ -383,6 +473,8 @@ TMPDIR_CE="$(mktemp -d)"
 chmod 700 "$TMPDIR_CE"
 SPEC_FILE="$TMPDIR_CE/llms-install.md"
 TRUST_ROOT_FILE="$TMPDIR_CE/ce-root-v1"
+TRUST_ANCHOR_RAW_FILE="$TMPDIR_CE/ce-root-v1.anchor.raw"
+TRUST_ANCHOR_FILE="$TMPDIR_CE/ce-root-v1.anchor"
 CANONICAL_FILE="$TMPDIR_CE/ce-spec.canonical"
 SIG_FILE="$TMPDIR_CE/ce-spec.sig"
 SCHEMA_FILE="$TMPDIR_CE/install-answers.schema.yaml"
@@ -422,6 +514,23 @@ fi
 verified=$((verified + 1))
 TRUST_ROOT_SHA="$(hash_file "$TRUST_ROOT_FILE")"
 say "signed spec verified: canonical sha256 ${SPEC_CANONICAL_SHA}"
+
+refuse_same_origin_trust_anchor
+say "fetching out-of-band trust anchor from ${CE_TRUST_ANCHOR_URL}"
+fetch_url "$CE_TRUST_ANCHOR_URL" "$TRUST_ANCHOR_RAW_FILE" trust_anchor_unreadable
+TRUST_ANCHOR_RECORD="$(anchor_record "$KEY_ID" "$TRUST_ANCHOR_RAW_FILE" || true)"
+[ -n "$TRUST_ANCHOR_RECORD" ] \
+  || fail trust_anchor_refused "no out-of-band anchor for $KEY_ID found at ${CE_TRUST_ANCHOR_URL}"
+TRUST_ANCHOR_FINGERPRINT="${TRUST_ANCHOR_RECORD#*=}"
+TRUST_ROOT_FINGERPRINT="$(trust_root_fingerprint "$KEY_ID" || true)"
+[ -n "$TRUST_ROOT_FINGERPRINT" ] \
+  || fail trust_anchor_refused "could not derive fingerprint for $KEY_ID from fetched trust root"
+[ "$TRUST_ANCHOR_FINGERPRINT" = "$TRUST_ROOT_FINGERPRINT" ] \
+  || fail trust_anchor_refused "out-of-band anchor mismatch for $KEY_ID"
+printf '%s\n' "$TRUST_ANCHOR_RECORD" >"$TRUST_ANCHOR_FILE"
+TRUST_ANCHOR_SHA="$(hash_file "$TRUST_ANCHOR_FILE")"
+verified=$((verified + 1))
+say "out-of-band trust anchor accepted from ${CE_TRUST_ANCHOR_SOURCE}"
 
 MANIFEST_VERSION="$(manifest_value artifact_manifest_version)"
 PACKAGE_NAME="$(manifest_value package_name)"
@@ -609,6 +718,7 @@ ONBOARD_ARGS=(
   onboard
   --spec "$SPEC_FILE"
   --trust-root "$TRUST_ROOT_FILE"
+  --trust-anchor "${CE_TRUST_ANCHOR_SOURCE}=${TRUST_ANCHOR_FILE}"
   --answers-schema "$SCHEMA_FILE"
   --inventory
 )
@@ -632,4 +742,4 @@ fi
 
 say "state file: ${STATE_FILE}"
 say "summary: downloaded=${downloaded} reused=${reused} verified=${verified} installed=${installed} skipped_already_current=${skipped_already_current} failed=${failed}"
-say "next: prepare ce-install.answers.yaml, then run ${VENV_DIR}/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers <file> --plan"
+say "next: prepare ce-install.answers.yaml, then run ${VENV_DIR}/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --answers <file> --plan"

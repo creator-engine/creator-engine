@@ -58,6 +58,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Mapping
+from urllib.parse import urlparse
 
 from . import v3_greenfield
 
@@ -192,6 +193,7 @@ EDUCATE_AT_OPTOUT = (
 )
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_OPENSSH_SHA256_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 #: The in-tree integrity-floor algorithm (a content address; not asymmetric crypto).
 CONTENT_ALGO = "sha256-content"
 #: The real asymmetric algorithm the served spec is signed with (an OpenSSH
@@ -206,6 +208,9 @@ SSH_SIG_NAMESPACE = "ce-spec-v1"
 #: :func:`parse_allowed_signers` loader turns its bytes into :data:`PINNED_KEYS`;
 #: this module never reads it from disk (the CLI/tests inject the text).
 PINNED_KEY_FILE = "docs/keys/ce-root-v1"
+#: The public signed agent-native install spec origin. The CLI reads a local
+#: path, but authentic onboarding is verifying this served artifact.
+PUBLISHED_INSTALL_SPEC_URL = "https://creator-engine.dev/llms-install.md"
 #: The placeholder token a dynamic signature field carries in the CANONICAL bytes
 #: (reused byte-for-byte from E.3: the served spec's content digest covered the
 #: file with ``value:`` set to exactly this token). The canonical bytes normalize
@@ -298,6 +303,181 @@ def parse_allowed_signers(text: str) -> dict[str, str]:
         principal = fields[0].split(",")[0]
         pinned[principal] = line
     return pinned
+
+
+def public_key_fingerprint(key_material: str) -> str:
+    """Return the OpenSSH-style SHA256 fingerprint for an ``allowed_signers`` key.
+
+    The out-of-band trust anchor publishes this fingerprint, not the key line
+    itself, so DNS TXT / GitHub profile / Sigstore evidence can be compared
+    without trusting the same-origin served ``allowed_signers`` file.
+    """
+    fields = key_material.split()
+    if len(fields) < 3:
+        raise InstallRefused("trust anchor refused: key material is not an OpenSSH public key")
+    try:
+        raw_key = base64.b64decode(fields[2].encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+        raise InstallRefused(f"trust anchor refused: malformed OpenSSH key material: {exc}") from exc
+    return "SHA256:" + base64.b64encode(hashlib.sha256(raw_key).digest()).decode("ascii").rstrip("=")
+
+
+@dataclass(frozen=True)
+class TrustAnchorRecord:
+    source: str
+    key_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class TrustAnchorEvidence:
+    ok: bool
+    status: str
+    reason: str
+    agreed: tuple[str, ...] = ()
+    mismatched: tuple[str, ...] = ()
+
+    def to_record(self) -> dict[str, Any]:
+        """JSON-serializable evidence for CLI inventory / plan output."""
+        record: dict[str, Any] = {
+            "ok": self.ok,
+            "status": self.status,
+            "reason": self.reason,
+            "agreed": list(self.agreed),
+            "mismatched": list(self.mismatched),
+        }
+        return record
+
+
+def parse_trust_anchor_records(text: str, *, source: str) -> tuple[TrustAnchorRecord, ...]:
+    """Parse out-of-band ce-root fingerprint assertions (PURE).
+
+    Supported publish forms are intentionally line-oriented so they work for DNS
+    TXT records, a GitHub org/profile field, or a Sigstore bundle annotation:
+    ``ce-root-v1=SHA256:...`` and ``ce-root-v1 SHA256:...``. Invalid or unrelated
+    lines are ignored; an empty parse later fails closed as ``same_origin_only``.
+    """
+    records: list[TrustAnchorRecord] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip('"').strip("'").strip()
+        if not line or line.startswith("#"):
+            continue
+        key_id = ""
+        fingerprint = ""
+        if "=" in line:
+            left, right = line.split("=", 1)
+            key_id = left.strip()
+            fingerprint = (right.strip().split() or [""])[0]
+        else:
+            fields = line.split()
+            if len(fields) >= 2:
+                key_id = fields[0].rstrip(":")
+                fingerprint = next((field for field in fields[1:] if field.startswith("SHA256:")), "")
+        if key_id and _OPENSSH_SHA256_FINGERPRINT_RE.fullmatch(fingerprint):
+            records.append(TrustAnchorRecord(source=source, key_id=key_id, fingerprint=fingerprint))
+    return tuple(records)
+
+
+def _unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return tuple(out)
+
+
+def _url_origin(value: str | None) -> tuple[str, str, int | None] | None:
+    """Return the semantic web origin for a URL-like source, else ``None``."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.rstrip(".").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None and scheme == "https":
+        port = 443
+    elif port is None and scheme == "http":
+        port = 80
+    return (scheme, host, port)
+
+
+def trust_anchor_shares_origin(anchor_source: str, install_spec_source: str | None) -> bool:
+    """Whether an anchor source is same-origin with the install spec source."""
+    anchor_origin = _url_origin(anchor_source)
+    spec_origin = _url_origin(install_spec_source)
+    return anchor_origin is not None and spec_origin is not None and anchor_origin == spec_origin
+
+
+def verify_trust_anchors(
+    key_id: str,
+    key_material: str,
+    anchors: Iterable[TrustAnchorRecord],
+    *,
+    install_spec_source: str | None = PUBLISHED_INSTALL_SPEC_URL,
+) -> TrustAnchorEvidence:
+    """Compare the verified trust-root key to out-of-band fingerprint anchors.
+
+    Authentic install mode is VERIFIED only when at least one independently
+    supplied anchor agrees with the fetched trust root and no supplied anchor for
+    the key disagrees. With no matching anchor, the status is intentionally
+    degraded to ``same_origin_only``. A URL anchor from the same origin as the
+    install spec is not out-of-band and is refused before fingerprint equality is
+    considered.
+    """
+    fingerprint = public_key_fingerprint(key_material)
+    relevant = tuple(anchor for anchor in anchors if anchor.key_id == key_id)
+    if not relevant:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="same_origin_only",
+            reason=(
+                "no out-of-band trust anchor matched the fetched trust root; "
+                "authentic verification would rely only on same-origin repo-served material"
+            ),
+        )
+    same_origin = _unique_ordered(
+        anchor.source
+        for anchor in relevant
+        if trust_anchor_shares_origin(anchor.source, install_spec_source)
+    )
+    if same_origin:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="same_origin_anchor",
+            reason=(
+                "trust anchor source shares origin with the install spec; "
+                "authentic verification requires an out-of-band source"
+            ),
+        )
+    agreed = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint == fingerprint)
+    mismatched = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint != fingerprint)
+    if mismatched:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="mismatch",
+            reason="out-of-band trust anchor fingerprint does not match the fetched trust root",
+            agreed=agreed,
+            mismatched=mismatched,
+        )
+    if agreed:
+        return TrustAnchorEvidence(
+            ok=True,
+            status="verified",
+            reason="out-of-band trust anchor fingerprint matches the fetched trust root",
+            agreed=agreed,
+        )
+    return TrustAnchorEvidence(
+        ok=False,
+        status="same_origin_only",
+        reason="no out-of-band trust anchor agreed with the fetched trust root",
+    )
 
 
 @dataclass(frozen=True)

@@ -225,6 +225,91 @@ def test_parse_allowed_signers_and_pinned_key_matches_served_root():
     assert inst.parse_allowed_signers("# just a comment\n\n") == {}
 
 
+def test_public_key_fingerprint_matches_out_of_band_anchor_record():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"# DNS TXT form\nce-root-v1={fingerprint}\n",
+        source="dns-txt",
+    )
+
+    evidence = inst.verify_trust_anchors("ce-root-v1", line, anchors)
+
+    assert fingerprint.startswith("SHA256:")
+    assert evidence.ok is True
+    assert evidence.status == "verified"
+    assert evidence.agreed == ("dns-txt",)
+    assert "fingerprint" not in evidence.to_record()
+
+
+def test_same_origin_url_anchor_is_not_out_of_band_even_when_fingerprint_matches():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"ce-root-v1={fingerprint}\n",
+        source="https://creator-engine.dev/trust/ce-root-v1.txt",
+    )
+
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        line,
+        anchors,
+        install_spec_source="https://creator-engine.dev/llms-install.md",
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_anchor"
+    assert "shares origin" in evidence.reason
+    assert evidence.agreed == ()
+    assert evidence.mismatched == ()
+    assert "fingerprint" not in evidence.to_record()
+    assert "creator-engine.dev" not in str(evidence.to_record())
+
+
+def test_equivalent_default_port_same_origin_anchor_is_refused():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"ce-root-v1={fingerprint}\n",
+        source="https://creator-engine.dev:443/trust/ce-root-v1.txt",
+    )
+
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        line,
+        anchors,
+        install_spec_source="https://creator-engine.dev/llms-install.md",
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_anchor"
+
+
+def test_out_of_band_anchor_missing_is_degraded_not_verified():
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        inst.PINNED_KEYS["ce-root-v1"],
+        (),
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_only"
+    assert "out-of-band" in evidence.reason
+
+
+def test_out_of_band_anchor_mismatch_is_refused():
+    anchors = inst.parse_trust_anchor_records(
+        "ce-root-v1=SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        source="github-org-profile",
+    )
+
+    evidence = inst.verify_trust_anchors("ce-root-v1", inst.PINNED_KEYS["ce-root-v1"], anchors)
+
+    assert evidence.ok is False
+    assert evidence.status == "mismatch"
+    assert evidence.mismatched == ("github-org-profile",)
+
+
 def test_canonical_spec_bytes_normalizes_dynamic_fields_and_is_idempotent():
     spec = (
         "head\n  key_id: ce-root-v1\n  value: AAAAREALbase64==\n"
@@ -382,9 +467,15 @@ def _embedded_signature_value(spec_text: str):
     return m.group(1).strip() if m else None
 
 
+def _embedded_signature_key_id(spec_text: str):
+    m = _re.search(r"(?m)^  key_id: (.+)$", spec_text)
+    return m.group(1).strip() if m else None
+
+
 _SSH_KEYGEN = _shutil.which("ssh-keygen")
 _SPEC_TEXT = _LLMS_INSTALL.read_text(encoding="utf-8") if _LLMS_INSTALL.exists() else ""
 _EMBEDDED_VALUE = _embedded_signature_value(_SPEC_TEXT)
+_EMBEDDED_KEY_ID = _embedded_signature_key_id(_SPEC_TEXT)
 _SIGNED = (
     _EMBEDDED_VALUE is not None
     and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
@@ -397,7 +488,7 @@ _SIGNED = (
 def test_e2e_real_sshsig_through_require_verified_positive_and_tampered():
     pinned = inst.parse_allowed_signers(_KEY_FILE.read_text(encoding="utf-8"))
     canonical = inst.canonical_spec_bytes(_SPEC_TEXT)
-    sig = {"key_id": "ce-root-v1", "algo": inst.SSH_ED25519_ALGO, "value": _EMBEDDED_VALUE}
+    sig = {"key_id": _EMBEDDED_KEY_ID, "algo": inst.SSH_ED25519_ALGO, "value": _EMBEDDED_VALUE}
     verifier = inst.ssh_ed25519_verifier(_real_ssh_keygen_runner)
     # positive: require_verified (the real onboard gate) accepts the signed spec
     assert inst.require_verified(canonical, sig, pinned_keys=pinned, verifier=verifier).ok

@@ -2,17 +2,19 @@
 CE agent-native install spec (G-7.4 · E.1 real installer · E.3 · E.4-fix). Served at
 creator-engine.dev/llms-install.md. This spec is SIGNED with a real detached
 OpenSSH signature (SSHSIG) over its CANONICAL bytes. An agent MUST verify it
-against the pinned CE trust root (key_id `ce-root-v1`, the allowed_signers file
-at creator-engine.dev/keys/ce-root-v1) BEFORE executing any step — using stock
-`ssh-keygen` (no CE tooling: that is what breaks the bootstrap circularity).
+against the pinned CE trust root (the allowed_signers file at
+creator-engine.dev/keys/ce-root-v1), and bind that trust root to an out-of-band
+fingerprint anchor for the signature block's `key_id`, BEFORE executing any
+step — using stock `ssh-keygen` (no CE tooling: that is what breaks the
+bootstrap circularity).
 Contract: docs/contracts/installer.md.
 
 signature:
-  key_id: ce-root-v1
+  key_id: ce-dev1-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQlBTcStlVVB2UXdlOG5BdWdxVkJXRWhIWGl4ZWY1UXIyZG1tY2ZON3F0Sy9DRW1BWjEwOGxNT3IKNVp6NGtRVE5PZWE5SGpxdzVjaVN4ZmE3U2hBVmNFCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: de474d9196518cebac64f678a4cd2521b1407bbe0121dd92c2217aa948ca4cda
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDNPenZoZlRiWGxNY1VKd3ZRcy9EajluUkp1d1FHekJVKzBPQnE0dk9rV0VIKys0ZVZrNXRML3QKYnpHajZzMm1xTS9LY0JaUTMrS3Y3cGg3RU5OWlVCCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: dda8682130a57c3774a27bcf8280dfd769d9161821cd0bee6aa97b29d4a991e6
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -21,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083
+  sha256s_sha256: e11aa9c5da012cf1f79654510651e00ef354a148434fea4c9174a36fb2ee6e74
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -34,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: 768451ab925bd9fe32d5187cec2fdb609920da81173fc42b41f482c48c112f85
+      sha256: 14cae3942d1d638a470b61f36c60ffaffdf0ad7fb0e3a8a0a18fed12e8cd1544
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
@@ -114,25 +116,37 @@ Assuming you fetched this file as `llms-install.md`:
 # 1. Fetch the pinned trust root (an OpenSSH allowed_signers file).
 curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
 
-# 2. Reconstruct the CANONICAL bytes this signature covers: this file with the
+# 2. Fetch an out-of-band fingerprint anchor for the signature key. The public
+#    bootstrap uses DNS TXT; an equivalent operator-published channel is valid
+#    only if it is independent of creator-engine.dev Pages; same-origin anchor
+#    URLs are refused before fetch.
+curl -fsSL 'https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT' \
+    -o ce-root-v1.anchor.raw
+grep -Eo 'ce-dev1-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw \
+    | sed -E 's/[[:space:]]+/=/' > ce-root-v1.anchor
+test "$(cut -d= -f2 ce-root-v1.anchor)" = "$(ssh-keygen -l -f ce-root-v1 -E sha256 \
+    | awk '$3 == "ce-dev1-root-v1" { print $2; exit }')"
+
+# 3. Reconstruct the CANONICAL bytes this signature covers: this file with the
 #    signature block's value:/content_sha256: lines reset to their placeholder.
 sed -E 's#^(  value: ).*#\1<published-with-this-spec>#; s#^(  content_sha256: ).*#\1<published-with-this-spec>#' \
     llms-install.md > ce-spec.canonical
 
-# 3. Materialize the detached signature from the block's base64 `value:` field.
+# 4. Materialize the detached signature from the block's base64 `value:` field.
 #    (Paste the single-line value from the signature block above.)
 printf '%s' '<paste the value: base64 here>' | base64 -d > ce-spec.sig
 
-# 4. Verify under the fixed namespace `ce-spec-v1`. On "Good ... signature",
+# 5. Verify under the fixed namespace `ce-spec-v1`. On "Good ... signature",
 #    continue; on ANY other output, STOP — do not execute a single step.
-ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
+ssh-keygen -Y verify -f ce-root-v1 -I ce-dev1-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
 
-# 5. (Optional in-tree floor.) The block's content_sha256 must equal:
+# 6. (Optional in-tree floor.) The block's content_sha256 must equal:
 sha256sum ce-spec.canonical
 ```
 
 A tampered byte anywhere outside the two placeholdered fields changes
-`ce-spec.canonical` and the verify FAILS — that is the gate.
+`ce-spec.canonical` and the verify FAILS. A same-origin-only trust root without
+an agreeing out-of-band fingerprint anchor also FAILS — that is the gate.
 
 ## 0.5. How `ce` arrives (the E1 bootstrap)
 
@@ -142,16 +156,17 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   Transport integrity for the script body is **TLS** plus the published
   `install.sh` hash in `https://creator-engine.dev/downloads/0.2.0/SHA256SUMS`.
   The script's first authority step is still this signed spec: it fetches
-  `llms-install.md`, fetches the trust root, reconstructs the canonical bytes,
-  verifies the SSHSIG with stock `ssh-keygen`, and stops before persistent
-  mutation on any refusal. Only after that does it fetch the signed-manifest
-  wheelhouse, `SHA256SUMS`, and answers schema, hash-verify every artifact,
-  acquire CPython 3.14 through the pinned uv artifact if needed, create/reuse a
-  user-local venv, install `creator-engine-validator==0.2.0` offline, and run
-  authenticated inventory:
+  `llms-install.md`, fetches the trust root, binds that root to an out-of-band
+  anchor for the signature key, reconstructs the canonical bytes, verifies the
+  SSHSIG with stock `ssh-keygen`, and stops before persistent mutation on any
+  refusal. Only after that does it fetch the signed-manifest wheelhouse,
+  `SHA256SUMS`, and answers schema, hash-verify every artifact, acquire CPython
+  3.14 through the pinned uv artifact if needed, create/reuse a user-local venv,
+  install `creator-engine-validator==0.2.0` offline, and run authenticated
+  inventory:
 
   ```text
-  <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
+  <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
   ```
 
   E1 does **not** run sudo, provision gVisor/proxy, automate the GitHub-App
@@ -164,7 +179,8 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   digests; the same §0 spec verification still gates the install procedure.
 
 Either way, the trust that matters for the steps below is **§0**: the agent runs a
-spec it has cryptographically verified against the pinned `ce-root-v1` trust root.
+spec it has cryptographically verified against the pinned `ce-root-v1` trust root
+and an independent fingerprint anchor for the signing key.
 
 ## 1. Prepare the answers (the agent loop: inventory → answers → plan → apply)
 
@@ -173,8 +189,9 @@ inventory (`schemas/install-answers.schema.yaml` — the single source of truth)
 Work the loop:
 
 1. **`<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root
-   <verified-trust-root> --answers-schema <verified-schema> --inventory`** (the
-   one-liner runs this once already) — emits every input with
+   <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor>
+   --answers-schema <verified-schema> --inventory`** (the one-liner runs this
+   once already) — emits every input with
    live status per key: `detected:<value>` · `default:<value>` ·
    `needed (would ask at step N)` · `secret (ref required)`. This is the
    artifact you read to prepare the operator's answers upfront.

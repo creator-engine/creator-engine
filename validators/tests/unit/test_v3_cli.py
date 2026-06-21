@@ -1156,6 +1156,12 @@ def _trust_root(tmp_path, key_material="ce-root-v1 ssh-ed25519 TESTKEY"):
     return trust
 
 
+def _trust_anchor(tmp_path, text="ce-root-v1=SHA256:mkX7cRfHNrx6mtK8Ek30CcRn6fbfIPK/SU/6KKc0AOQ"):
+    anchor = tmp_path / "ce-root-v1.anchor"
+    anchor.write_text(text + "\n", encoding="utf-8")
+    return anchor
+
+
 def _answers_file(tmp_path, content=_GOOD_ANSWERS_YAML):
     path = tmp_path / "ce-install.answers.yaml"
     path.write_text(content, encoding="utf-8")
@@ -1260,7 +1266,8 @@ def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, m
     code = v3_cli.main([
         "onboard",
         "--spec", str(_signed_spec(tmp_path)),
-        "--trust-root", str(_trust_root(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
         "--inventory",
         "--json",
     ])
@@ -1268,7 +1275,10 @@ def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, m
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "onboard_inventory"
     assert payload["self_attested"] is False
-    assert payload["verified"] == {"ok": True, "key_id": "ce-root-v1"}
+    assert payload["verified"]["ok"] is True
+    assert payload["verified"]["key_id"] == "ce-root-v1"
+    assert payload["verified"]["trust_anchors"]["agreed"] == ["dns-txt"]
+    assert "fingerprint" not in payload["verified"]["trust_anchors"]
     assert calls and calls[0]["signature"] == b"sig"
     assert calls[0]["allowed_signers"].startswith("ce-root-v1 ssh-ed25519")
     assert calls[0]["namespace"] == v3_installer.SSH_SIG_NAMESPACE
@@ -1288,6 +1298,55 @@ def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys)
     assert "signature block missing" in payload["detail"]
 
 
+def test_onboard_authentic_refuses_same_origin_only_trust_root(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "same_origin_only" in payload["detail"]
+
+
+def test_onboard_authentic_refuses_same_origin_url_trust_anchor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"https://creator-engine.dev/trust/ce-root-v1.txt={_trust_anchor(tmp_path)}",
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "same_origin_anchor" in payload["detail"]
+    assert "shares origin" in payload["detail"]
+    assert "SHA256:" not in payload["detail"]
+
+
+def test_onboard_authentic_refuses_mismatched_trust_anchor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"github-org-profile={_trust_anchor(tmp_path, 'ce-root-v1=SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')}",
+        "--inventory",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "mismatch" in payload["detail"]
+
+
 def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     spec = _signed_spec(tmp_path)
@@ -1295,7 +1354,8 @@ def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, caps
     code = v3_cli.main([
         "onboard",
         "--spec", str(spec),
-        "--trust-root", str(_trust_root(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
         "--inventory",
         "--json",
     ])
@@ -1423,6 +1483,24 @@ def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
     # unprobed live facts stay fail-closed in the dry run (the E.4 drive probes them)
     assert leg["bootstrap_token_scopes"]["probed"] is False
     assert payload["first_project"] is None
+
+
+def test_onboard_authentic_plan_trust_anchor_evidence_is_value_free(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
+        "--answers", str(_answers_file(tmp_path)),
+        "--plan",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    trust_anchors = payload["verified"]["trust_anchors"]
+    assert trust_anchors["agreed"] == ["dns-txt"]
+    assert "fingerprint" not in trust_anchors
 
 
 def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypatch):
