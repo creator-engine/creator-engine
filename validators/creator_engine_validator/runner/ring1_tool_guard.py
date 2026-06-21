@@ -19,6 +19,7 @@ import json
 import os
 import shlex
 import stat
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +34,9 @@ from ..secret_paths import is_secret_path
 
 
 _DEFAULT_SHIM_OWNER = str(os.getuid()) if hasattr(os, "getuid") else "nouid"
-DEFAULT_SHIM_PARENT = f"/tmp/ce-ring1-tool-guard-{_DEFAULT_SHIM_OWNER}-{os.getpid()}"
+DEFAULT_SHIM_PARENT = (
+    f"{tempfile.gettempdir()}/ce-ring1-tool-guard-{_DEFAULT_SHIM_OWNER}-{os.getpid()}"
+)
 DEFAULT_SHIM_DIR = f"{DEFAULT_SHIM_PARENT}/shim"
 DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"

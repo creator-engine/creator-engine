@@ -1537,45 +1537,54 @@ def test_adoption_mint_without_escalation_authority_refuses_before_forge():
     assert minted.value == "ghs_x"
 
 
-def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revoked():
+def test_adoption_two_token_split_push_pr_on_write_reads_on_read_and_write_revoked(tmp_path):
     # MAJOR-1 end-to-end on the driver: clone/read ride the READ token; push + open-PR ride the
     # WRITE token; the WRITE token is REVOKED the instant leg 5 finishes; neither value hits argv.
     forge = _AdoptionForge()
     driver = _adoption_driver(forge)
     scaffold = _sample_scaffold()
-    workspace = Path("/tmp/ce85_adoption_two_token")
-    import shutil as _sh
-    _sh.rmtree(workspace, ignore_errors=True)
+    workspace = tmp_path / "ce85_adoption_two_token"
     _bind_bootstrap_identity(driver)
-    build = driver.build_adoption_scaffold(
-        repo=_REPO, base="main", branch="ce/adopt-governance",
-        workspace_root=workspace, artifacts=scaffold,
-    )
-    assert build["ok"] is True
-    push = driver.push_adoption_branch(repo=_REPO, branch="ce/adopt-governance", source_dir=build["source_dir"])
-    assert push["ok"] is True and push["pushed"] is True
-    pr = driver.open_adoption_pr(
-        repo=_REPO, branch="ce/adopt-governance", base="main",
-        manifest_paths=[a["path"] for a in scaffold], plan_ref="a" * 64,
-    )
-    assert pr["ok"] is True and pr["verified"] is True and pr["pr_number"] == 42
+    try:
+        build = driver.build_adoption_scaffold(
+            repo=_REPO, base="main", branch="ce/adopt-governance",
+            workspace_root=workspace, artifacts=scaffold,
+        )
+        assert build["ok"] is True
+        push = driver.push_adoption_branch(repo=_REPO, branch="ce/adopt-governance", source_dir=build["source_dir"])
+        assert push["ok"] is True and push["pushed"] is True
+        pr = driver.open_adoption_pr(
+            repo=_REPO, branch="ce/adopt-governance", base="main",
+            manifest_paths=[a["path"] for a in scaffold], plan_ref="a" * 64,
+        )
+        assert pr["ok"] is True and pr["verified"] is True and pr["pr_number"] == 42
 
-    # the WRITE token authenticated the push (ls-remote/push) and the PR (pulls) calls...
-    assert forge.write_token_calls(), "push/PR must use the write token"
-    assert any("pulls" in " ".join(c["argv"]) for c in forge.write_token_calls())
-    assert any("push" in c["argv"] or "ls-remote" in c["argv"] for c in forge.write_token_calls())
-    # ...the READ token authenticated the clone (a contents read)...
-    assert any("clone" in c["argv"] for c in forge.read_token_calls())
-    # ...and the WRITE token was REVOKED immediately after leg 5 (open PR), not just at close().
-    assert len(forge.revoke_calls()) == 1
-    assert forge.revoke_calls()[0]["env_token"] == _WRITE_TOKEN
-    assert driver._write_token is None  # the write token is gone after leg 5
-    # hygiene: neither token value ever rode the argv, nor leaks in the driver repr.
-    for c in forge.calls:
-        assert _READ_TOKEN not in " ".join(c["argv"]) and _WRITE_TOKEN not in " ".join(c["argv"])
-    assert _WRITE_TOKEN not in repr(driver) and _READ_TOKEN not in repr(driver)
-    driver.close()
-    _sh.rmtree(workspace, ignore_errors=True)
+        # the WRITE token authenticated the push (ls-remote/push) and the PR (pulls) calls...
+        assert forge.write_token_calls(), "push/PR must use the write token"
+        assert any("pulls" in " ".join(c["argv"]) for c in forge.write_token_calls())
+        assert any("push" in c["argv"] or "ls-remote" in c["argv"] for c in forge.write_token_calls())
+        # ...the READ token authenticated the clone (a contents read)...
+        assert any("clone" in c["argv"] for c in forge.read_token_calls())
+        # ...and the WRITE token was REVOKED immediately after leg 5 (open PR), not just at close().
+        assert len(forge.revoke_calls()) == 1
+        assert forge.revoke_calls()[0]["env_token"] == _WRITE_TOKEN
+        assert driver._write_token is None  # the write token is gone after leg 5
+        revoke_index = forge.calls.index(forge.revoke_calls()[0])
+        assert not any(c["env_token"] == _WRITE_TOKEN for c in forge.calls[revoke_index + 1:])
+        # READ-token calls must stay read-only; adoption writes stay on the separate write token.
+        read_token_calls = forge.read_token_calls()
+        assert not any("push" in c["argv"] for c in read_token_calls)
+        assert not any(
+            "-X" in c["argv"]
+            and any(method in c["argv"] for method in ("POST", "PUT", "PATCH", "DELETE"))
+            for c in read_token_calls
+        )
+        # hygiene: neither token value ever rode the argv, nor leaks in the driver repr.
+        for c in forge.calls:
+            assert _READ_TOKEN not in " ".join(c["argv"]) and _WRITE_TOKEN not in " ".join(c["argv"])
+        assert _WRITE_TOKEN not in repr(driver) and _READ_TOKEN not in repr(driver)
+    finally:
+        driver.close()
 
 
 def test_adoption_scaffold_binds_commit_identity_to_install_time_forge_actor(tmp_path):
