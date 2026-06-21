@@ -167,6 +167,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_path_manifest.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_work_sizing_floor = sub.add_parser(
+        "verify-work-sizing-floor",
+        help="work_sizing_floor PR-diff gate (classifies git diff --numstat --no-renames <base>..HEAD against a declared work class)",
+    )
+    verify_work_sizing_floor.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_work_sizing_floor.add_argument(
+        "--declared-work-class",
+        required=True,
+        choices=["tiny", "story", "feature", "epic"],
+        help="declared work class to compare against the derived PR-diff floor",
+    )
+    verify_work_sizing_floor.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     pco_allocate = sub.add_parser(
         "pco-allocate",
         help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
@@ -504,6 +517,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.manifest,
             manifest_dir=args.manifest_dir,
             head_ref=args.head_ref,
+        )
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-work-sizing-floor":
+        from .checks.work_sizing_floor import run_with_base as _run_work_sizing_floor
+        result = _run_work_sizing_floor(
+            [Path(p) for p in args.paths],
+            args.base,
+            declared_work_class=args.declared_work_class,
         )
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
