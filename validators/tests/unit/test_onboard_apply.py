@@ -592,6 +592,26 @@ def test_branch_protection_uses_reference_check_floor(tmp_path):
     assert driver.captured_merge_settings == {"squash_only": True}
 
 
+def test_branch_protection_unenforceable_refuses_with_remediation(tmp_path):
+    class UnenforceableProtectionDriver(FakeDriver):
+        def configure_branch_protection(self, *, repo, branch, policy, token):
+            self.calls.append("configure_branch_protection")
+            return {
+                "ok": False,
+                "reason": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                "message": "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+                "remediation": onboard_apply.PROTECTION_FLOOR_REMEDIATION,
+            }
+
+    driver = UnenforceableProtectionDriver()
+    summary = _apply(tmp_path, driver)
+    leg = _leg(summary, "github_branch_protection")
+    assert leg["status"] == "refused"
+    assert leg["verification"]["code"] == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert "GitHub Team/Pro" in leg["detail"]
+    assert _leg(summary, "workspace_checkout")["status"] == "skipped"
+
+
 def test_workflow_install_verifies_digest(tmp_path):
     driver = FakeDriver(workflow_digest_ok=False)
     summary = _apply(tmp_path, driver)

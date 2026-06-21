@@ -33,6 +33,10 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import v3_installer
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
+from .forge.protection_diagnostics import (
+    PROTECTION_FLOOR_REMEDIATION,
+    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+)
 from .runner.os_native_backend import LINUX_SANDBOX_PRIMITIVES
 
 __ce_version_line__ = "v3"
@@ -1076,11 +1080,48 @@ def repo_is_already_ce_governed(
     anti-tamper guarantee. This NEVER mutates: every driver call here is a read-only
     verify/probe.
     """
+    return bool(
+        repo_ce_governance_probe(driver, repo=repo, branch=branch, schema=schema).get("ok")
+    )
+
+
+def _remember_ce_probe(driver: ApplyDriver, result: dict[str, Any]) -> dict[str, Any]:
+    with contextlib.suppress(Exception):
+        setattr(driver, "last_ce_governance_probe", result)
+    return result
+
+
+def protection_floor_unenforceable_detail(
+    *, repo: str, branch: str, diagnostic: Mapping[str, Any] | None = None
+) -> str:
+    message = ""
+    if diagnostic:
+        message = str(diagnostic.get("message") or diagnostic.get("detail") or "").strip()
+    suffix = f" GitHub said: {message}" if message else ""
+    return (
+        f"target GitHub repo {repo}@{branch} cannot enforce the CE protection floor.{suffix} "
+        f"Remediation: {PROTECTION_FLOOR_REMEDIATION}."
+    )
+
+
+def repo_ce_governance_probe(
+    driver: ApplyDriver,
+    *,
+    repo: str,
+    branch: str,
+    schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Structured read-only already-CE probe with fail-closed diagnostics."""
+    result: dict[str, Any] = {"ok": False, "repo": repo, "branch": branch}
     try:
         if not driver.repo_exists(repo):
-            return False
-        if detect_ce_workflow(driver, repo=repo, branch=branch) is None:
-            return False
+            result["reason"] = "repo_unreachable"
+            return _remember_ce_probe(driver, result)
+        identity = detect_ce_workflow(driver, repo=repo, branch=branch)
+        if identity is None:
+            result["reason"] = "workflow_not_verified"
+            return _remember_ce_probe(driver, result)
+        result["workflow_identity"] = identity.label
         floor = v3_installer.reference_protections(dict(schema))
         contexts = tuple(str(c) for c in floor.get("required_checks", ()))
         policy = DEFAULT_MAIN_PROTECTION.with_contexts(contexts)
@@ -1089,16 +1130,29 @@ def repo_is_already_ce_governed(
             branch=branch,
             policy=policy,
         )
+        result["protection"] = dict(protection)
         if not protection.get("ok"):
-            return False
+            result["reason"] = str(protection.get("reason") or "branch_protection_floor_missing")
+            if result["reason"] == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                result["remediation"] = protection.get("remediation") or PROTECTION_FLOOR_REMEDIATION
+                result["detail"] = protection_floor_unenforceable_detail(
+                    repo=repo, branch=branch, diagnostic=protection
+                )
+            return _remember_ce_probe(driver, result)
         desired = v3_installer.effective_protections("reference", floor=floor)
         if bool(desired.get("squash_only", True)):
             merge_settings = driver.verify_merge_settings(repo=repo, squash_only=True)
+            result["merge_settings"] = dict(merge_settings)
             if not merge_settings.get("ok"):
-                return False
-        return True
-    except Exception:  # noqa: BLE001 — fail-closed: any probe error → NOT already-CE
-        return False
+                result["reason"] = str(merge_settings.get("reason") or "merge_settings_floor_missing")
+                return _remember_ce_probe(driver, result)
+        result["ok"] = True
+        result["reason"] = "already_ce_governed"
+        return _remember_ce_probe(driver, result)
+    except Exception as exc:  # noqa: BLE001 — fail-closed: any probe error → NOT already-CE
+        result["reason"] = "probe_error"
+        result["detail"] = exc.__class__.__name__
+        return _remember_ce_probe(driver, result)
 
 
 def _run_leg(
@@ -1305,12 +1359,23 @@ def _run_leg(
             # ce-ops#85 — a new dev JOINING an ALREADY-CE repo is a *plain-join*:
             # detect already-CE FAIL-CLOSED and converge via verify/reconcile.
             # Genuine brownfield (existing + NOT already-CE) stays E3-deferred.
-            if repo_is_already_ce_governed(
+            ce_probe = repo_ce_governance_probe(
                 driver,
                 repo=prepared.target_repo,
                 branch=prepared.target_branch,
                 schema=request.schema,
-            ):
+            )
+            if ce_probe.get("reason") == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                prepared.summary["brownfield_deferred"] = 1
+                raise ApplyRefused(
+                    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                    str(ce_probe.get("detail") or protection_floor_unenforceable_detail(
+                        repo=prepared.target_repo,
+                        branch=prepared.target_branch,
+                        diagnostic=ce_probe.get("protection") if isinstance(ce_probe.get("protection"), Mapping) else None,
+                    )),
+                )
+            if ce_probe.get("ok"):
                 visibility = str(prepared.merged.value("github.new_repo.visibility", "private"))
                 verified = driver.verify_repo(
                     repo=prepared.target_repo,
@@ -1492,6 +1557,15 @@ def _run_leg(
             token=token,
         )
         if not action.get("ok"):
+            if action.get("reason") == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                raise ApplyRefused(
+                    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                    protection_floor_unenforceable_detail(
+                        repo=prepared.target_repo,
+                        branch=prepared.target_branch,
+                        diagnostic=action,
+                    ),
+                )
             raise ApplyFailed("branch_protection_failed", str(action.get("reason", "branch protection failed")))
         verify = driver.verify_branch_protection(
             repo=prepared.target_repo,
@@ -1499,6 +1573,15 @@ def _run_leg(
             policy=policy,
         )
         if not verify.get("ok"):
+            if verify.get("reason") == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                raise ApplyRefused(
+                    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                    protection_floor_unenforceable_detail(
+                        repo=prepared.target_repo,
+                        branch=prepared.target_branch,
+                        diagnostic=verify,
+                    ),
+                )
             raise ApplyFailed("branch_protection_verify_failed", str(verify))
         merge_action: dict[str, Any] = {"ok": True, "already": True}
         merge_verify: dict[str, Any] = {"ok": True}

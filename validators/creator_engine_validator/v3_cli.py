@@ -2665,6 +2665,71 @@ def _close_apply_driver(driver: Any) -> None:
         close()
 
 
+def _protection_enforcement_from_ce_probe(probe: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(probe, Mapping):
+        return {"state": "unprobed"}
+    protection = probe.get("protection")
+    if not isinstance(protection, Mapping):
+        if probe.get("reason") == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+            return {
+                "state": "unenforceable",
+                "code": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                "detail": probe.get("detail"),
+                "remediation": probe.get("remediation"),
+            }
+        return {"state": "unprobed"}
+    if probe.get("reason") == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+        return {
+            "state": "unenforceable",
+            "code": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+            "surface": protection.get("surface"),
+            "message": protection.get("message"),
+            "detail": probe.get("detail"),
+            "remediation": probe.get("remediation") or protection.get("remediation"),
+        }
+    source = str(protection.get("source") or "")
+    if source == "ruleset":
+        state = "verified_ruleset"
+    elif source == "classic" or protection.get("ok"):
+        state = "verified_classic"
+    else:
+        state = "unprobed"
+    result = {
+        "state": state,
+        "floor_satisfied": bool(protection.get("ok")),
+    }
+    if protection.get("classic_unavailable") is not None:
+        result["classic_unavailable"] = bool(protection.get("classic_unavailable"))
+    return result
+
+
+def _protection_floor_refusal_payload(
+    *, repo: str, branch: str, probe: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    diagnostic = probe.get("protection") if isinstance(probe, Mapping) else None
+    detail = ""
+    if isinstance(probe, Mapping):
+        detail = str(probe.get("detail") or "")
+    if not detail:
+        detail = onboard_apply.protection_floor_unenforceable_detail(
+            repo=repo,
+            branch=branch,
+            diagnostic=diagnostic if isinstance(diagnostic, Mapping) else None,
+        )
+    remediation = (
+        probe.get("remediation")
+        if isinstance(probe, Mapping)
+        else None
+    ) or onboard_apply.PROTECTION_FLOOR_REMEDIATION
+    return {
+        "error": "refused",
+        "code": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+        "detail": detail,
+        "remediation": remediation,
+        "enforcement": _protection_enforcement_from_ce_probe(probe),
+    }
+
+
 def _load_trust_anchor_records(anchor_specs: Sequence[str]) -> tuple[v3_installer.TrustAnchorRecord, ...]:
     """Load operator-supplied out-of-band trust anchors from ``SOURCE=PATH`` specs."""
     records: list[v3_installer.TrustAnchorRecord] = []
@@ -3051,13 +3116,34 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             )
             live_candidate = candidate_driver
             target_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
+            target_repo = str(merged.value("github.repo") or "")
             if onboard_apply.repo_is_already_ce_governed(
                 candidate_driver,
-                repo=str(merged.value("github.repo") or ""),
+                repo=target_repo,
                 branch=target_branch,
                 schema=schema,
             ):
                 plain_join_driver = candidate_driver
+            elif (
+                isinstance(getattr(candidate_driver, "last_ce_governance_probe", None), Mapping)
+                and getattr(candidate_driver, "last_ce_governance_probe", {}).get("reason")
+                == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+            ):
+                ce_probe = getattr(candidate_driver, "last_ce_governance_probe")
+                _close_apply_driver(live_candidate)
+                refusal = _protection_floor_refusal_payload(
+                    repo=target_repo, branch=target_branch, probe=ce_probe
+                )
+                return _emit(
+                    args,
+                    1,
+                    [
+                        f"{_BRAND} · onboard apply REFUSED "
+                        f"({onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE}): "
+                        f"{refusal['detail']}"
+                    ],
+                    refusal,
+                )
             elif brownfield_plan["blocked"]:
                 # A blocker (needs_baseline_capture / dirty tree / scanner_unavailable /
                 # unwaived findings / unratified waiver) ALWAYS refuses — even when authorized.
@@ -3131,11 +3217,18 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             else:
                 summary = onboard_apply.apply_onboard(request, verifier=apply_verifier)
         except onboard_apply.ApplyRefused as exc:
+            refused_payload = {"error": "refused", "code": exc.code, "detail": exc.detail}
+            if exc.code == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                refused_payload["remediation"] = onboard_apply.PROTECTION_FLOOR_REMEDIATION
+                refused_payload["enforcement"] = {
+                    "state": "unenforceable",
+                    "code": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                }
             return _emit(
                 args,
                 1,
                 [f"{_BRAND} · onboard apply REFUSED ({exc.code}): {exc.detail}"],
-                {"error": "refused", "code": exc.code, "detail": exc.detail},
+                refused_payload,
             )
         except onboard_apply.ApplyFailed as exc:
             return _emit(
@@ -3232,14 +3325,6 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             )
         else:
             lines.append(f"    remaining asks · none — apply-ready (run `{CE_CMD} onboard --apply`)")
-    if github_leg is not None:
-        click = "click required (first run)" if github_leg["app"]["click_required"] \
-            else f"click skipped (installation {github_leg['app']['installation_id']} detected/declared)"
-        lines.append(
-            f"    github leg · repo {github_leg['repo']['action']} · App {click} · "
-            f"protection drift {len(github_leg['branch_protection']['drift'])} · "
-            f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to onboard apply)'}"
-        )
     if first_project_plan is not None:
         lines.append(
             f"    first project · greenfield · scaffold {first_project_plan['scaffold_input']['kind']} "
@@ -3259,19 +3344,61 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             merged=merged, policy_sha=_install_spec_digest, adoption=False
         )
         try:
+            plan_repo = str(merged.value("github.repo") or "")
+            plan_branch = str(merged.value("github.new_repo.default_branch", "main") or "main")
             already_ce = onboard_apply.repo_is_already_ce_governed(
                 _plan_driver,
-                repo=str(merged.value("github.repo") or ""),
-                branch=str(merged.value("github.new_repo.default_branch", "main") or "main"),
+                repo=plan_repo,
+                branch=plan_branch,
                 schema=schema,
             )
+            ce_probe = getattr(_plan_driver, "last_ce_governance_probe", None)
         finally:
             _close_apply_driver(_plan_driver)
+        enforcement = _protection_enforcement_from_ce_probe(
+            ce_probe if isinstance(ce_probe, Mapping) else None
+        )
+        if github_leg is not None and enforcement.get("state") != "unprobed":
+            github_leg["branch_protection"] = dict(github_leg["branch_protection"])
+            github_leg["branch_protection"]["enforcement"] = enforcement
         plain_join_plan = {
             "route": "plain-join" if already_ce else "brownfield-e3-deferred",
             "already_ce_detected": already_ce,
             "detection": "verified" if already_ce else "deferred_to_apply_live_forge_read",
+            "enforcement": enforcement,
         }
+        if enforcement.get("state") == "unenforceable":
+            refusal = _protection_floor_refusal_payload(
+                repo=plan_repo,
+                branch=plan_branch,
+                probe=ce_probe if isinstance(ce_probe, Mapping) else None,
+            )
+            refusal.update({
+                "github_leg": github_leg,
+                "plain_join": plain_join_plan,
+            })
+            return _emit(
+                args,
+                1,
+                [
+                    f"{_BRAND} · onboard plan REFUSED "
+                    f"({onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE}): "
+                    f"{refusal['detail']}"
+                ],
+                refusal,
+            )
+    if github_leg is not None:
+        click = "click required (first run)" if github_leg["app"]["click_required"] \
+            else f"click skipped (installation {github_leg['app']['installation_id']} detected/declared)"
+        enforcement_state = (
+            github_leg.get("branch_protection", {}).get("enforcement", {}).get("state", "unprobed")
+        )
+        lines.append(
+            f"    github leg · repo {github_leg['repo']['action']} · App {click} · "
+            f"protection drift {len(github_leg['branch_protection']['drift'])} · "
+            f"enforcement {enforcement_state} · "
+            f"{'converged' if github_leg['converged'] else 'NOT converged (live probes deferred to onboard apply)'}"
+        )
     if args.show_plan:
         counters = brownfield_plan["counters"]
         lines.append(
@@ -3284,7 +3411,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         if plain_join_plan is not None:
             lines.append(
                 f"    plain-join · route {plain_join_plan['route']} · "
-                f"already-CE {plain_join_plan['detection']}"
+                f"already-CE {plain_join_plan['detection']} · "
+                f"protection enforcement {plain_join_plan['enforcement']['state']}"
             )
     lines += [
         f"    expose CLI · `{plan['expose_cli']['command']}` (via {plan['expose_cli']['via']})",

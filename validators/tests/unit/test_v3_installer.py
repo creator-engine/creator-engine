@@ -1531,11 +1531,30 @@ def test_protection_diff_unprotected_branch_drifts_everything():
     plan = inst.plan_branch_protection(None, "reference", floor=_floor())
     assert not plan["converged"]
     assert {d["key"] for d in plan["drift"]} == set(_floor().keys())
+    assert plan["enforcement"]["state"] == "unprobed"
 
 
 def test_protection_diff_converges_when_current_matches_floor():
     plan = inst.plan_branch_protection(dict(_floor()), "reference", floor=_floor())
     assert plan["converged"] and plan["drift"] == []
+    assert plan["enforcement"]["state"] == "verified_classic"
+
+
+def test_protection_diff_surfaces_unenforceable_probe():
+    enforcement = {
+        "state": "unenforceable",
+        "code": "protection_floor_unenforceable",
+        "remediation": "upgrade to GitHub Team/Pro or make the repository public",
+    }
+    plan = inst.plan_branch_protection(
+        dict(_floor()),
+        "reference",
+        floor=_floor(),
+        enforcement=enforcement,
+    )
+    assert not plan["converged"]
+    assert plan["drift"] == []
+    assert plan["enforcement"] == enforcement
 
 
 def test_protection_diff_plans_only_the_drift():
@@ -1626,6 +1645,7 @@ def test_github_leg_converges_on_the_fully_provisioned_repo():
     assert plan["converged"]
     assert plan["human_approves"] == []          # installation detected → no click
     assert plan["branch_protection"]["drift"] == []
+    assert plan["branch_protection"]["enforcement"]["state"] == "verified_classic"
     assert plan["reviewer"]["ok"]
 
 
