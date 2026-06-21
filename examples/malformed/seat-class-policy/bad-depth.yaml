@@ -1,0 +1,11 @@
+kind: seat-class-policy-record
+schema_version: "1"
+policy_id: seat-class-bad-depth
+policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+seat_class: foreman
+default_seat_class: foreman
+recursion:
+  foreman_of_foreman_allowed: true
+  max_depth: 0
+delegation_required_mutation_classes:
+  - code

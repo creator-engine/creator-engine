@@ -1,0 +1,20 @@
+kind: seat-class-policy-record
+schema_version: "1"
+policy_id: seat-class-worker
+policy_sha: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+seat_class: worker
+default_seat_class: foreman
+recursion:
+  foreman_of_foreman_allowed: true
+  max_depth: 2
+delegation_required_mutation_classes:
+  - code
+  - schema
+  - deploy
+  - governance
+  - identity
+  - security
+coordination_path_prefixes:
+  - .ce/state/
+  - .ce/changelog/
+

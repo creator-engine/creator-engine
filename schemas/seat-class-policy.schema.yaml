@@ -1,0 +1,70 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/seat-class-policy.schema.yaml"
+title: "Creator Engine Seat-Class Policy Record"
+description: |
+  Shape for the foreman-delegation Slice 1 policy. Every CE seat is born a
+  foreman by default; worker posture must be launch-pinned and explicit. This
+  schema is record-shape only. Live hook arming, worker spawning, action-count
+  thresholds, and line-count thresholds are intentionally deferred.
+type: object
+required:
+  - kind
+  - schema_version
+  - policy_id
+  - policy_sha
+  - seat_class
+  - default_seat_class
+  - recursion
+  - delegation_required_mutation_classes
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: seat-class-policy-record
+  schema_version:
+    type: string
+    enum: ["1"]
+  policy_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  policy_sha:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: |
+      Opaque digest of the ratified policy content. This is not a credential.
+  seat_class:
+    type: string
+    enum: [foreman, worker]
+    description: |
+      Launch-pinned class for this seat. Unknown/absent values resolve to
+      foreman in the pure resolver and later live hook wiring.
+  default_seat_class:
+    type: string
+    const: foreman
+    description: |
+      Born-a-foreman default. The record may not weaken this default.
+  recursion:
+    type: object
+    required: [foreman_of_foreman_allowed, max_depth]
+    unevaluatedProperties: false
+    properties:
+      foreman_of_foreman_allowed:
+        type: boolean
+        default: true
+      max_depth:
+        type: integer
+        minimum: 1
+  delegation_required_mutation_classes:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      enum: [docs, code, schema, deploy, governance, identity, security, attestation, redaction]
+  coordination_path_prefixes:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+
