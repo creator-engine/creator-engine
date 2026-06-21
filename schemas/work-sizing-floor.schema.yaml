@@ -1,0 +1,90 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/work-sizing-floor.schema.yaml"
+title: "Creator Engine Work-Sizing Floor Record"
+description: |
+  Deterministic F2 floor record for work-sizing. change_stats are caller-
+  supplied line/file stats, typically parsed from git diff --numstat output.
+  The validator recomputes sizing_floor from those deterministic inputs and
+  rejects records whose declared_work_class is below the derived floor.
+type: object
+required:
+  - kind
+  - schema_version
+  - intent_ref
+  - declared_work_class
+  - change_stats
+  - sizing_floor
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: work-sizing-floor-record
+  schema_version:
+    type: string
+    enum: ["1"]
+  intent_ref:
+    type: string
+    minLength: 1
+  declared_work_class:
+    type: string
+    enum: [tiny, story, feature, epic]
+  change_stats:
+    type: array
+    description: |
+      Deterministic per-path line/file stats. Generated, lockfile, and vendored
+      paths remain in this input list but are excluded from included line totals.
+    items:
+      type: object
+      required: [path, additions, deletions]
+      unevaluatedProperties: false
+      properties:
+        path:
+          type: string
+          minLength: 1
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
+        binary:
+          type: boolean
+  sizing_floor:
+    type: object
+    required:
+      - included_files
+      - included_lines
+      - excluded_files
+      - excluded_lines
+      - excluded_path_categories
+      - size_band
+      - minimum_work_class
+      - floor_met
+    unevaluatedProperties: false
+    properties:
+      included_files:
+        type: integer
+        minimum: 0
+      included_lines:
+        type: integer
+        minimum: 0
+      excluded_files:
+        type: integer
+        minimum: 0
+      excluded_lines:
+        type: integer
+        minimum: 0
+      excluded_path_categories:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          enum: [generated, lockfile, vendored]
+      size_band:
+        type: string
+        enum: [target_advisory, warn, explain_or_split, split_required]
+      minimum_work_class:
+        type: string
+        enum: [tiny, story, feature, epic]
+      floor_met:
+        type: boolean
