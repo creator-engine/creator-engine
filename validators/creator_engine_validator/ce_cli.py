@@ -748,7 +748,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--no-check-packaging",
         action="store_true",
-        help="skip the dependency/wheelhouse contract clause (RED-G-6)",
+        help="skip the dependency wheelhouse contract clause (RED-G-6)",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).

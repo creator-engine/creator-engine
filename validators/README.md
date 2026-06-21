@@ -13,8 +13,10 @@ script on this same distribution — DP-1 = A, no rename).
   is the lockstep `uv export`-derived fallback.
 - Runtime dependencies are pinned at **PyYAML 6.0.3** and **jsonschema 4.26.0**.
 - The checked-in `validators/wheelhouse/` is a **cp314**, Linux x86_64/aarch64
-  offline wheelhouse with a `SHA256SUMS` manifest. The `uvx` one-line operator install
-  is POST-V1 (B3); the v1.0 install surface is a source checkout.
+  offline dependency wheelhouse with a `SHA256SUMS` manifest. It does not carry
+  the first-party `creator-engine-validator` app wheel; clone-mode runs the
+  checkout source with `PYTHONPATH=validators`. The `uvx` one-line operator
+  install is POST-V1 (B3); the v1.0 install surface is a source checkout.
 
 ## Offline runtime install
 
@@ -25,7 +27,8 @@ checked-in cp314 wheelhouse, with no network access.
 
 ```bash
 uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators python -m creator_engine_validator --list-checks
 ```
 
 **pip fallback:**
@@ -34,9 +37,12 @@ UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/whee
 python3.14 -m venv .venv
 source .venv/bin/activate
 pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators python -m creator_engine_validator --list-checks
 ```
 
-The validator must not call external services during installation from `validators/wheelhouse/` or during validation. Runtime installs intentionally do not include pytest or other test-only dependencies.
+The validator must not call external services during dependency installation
+from `validators/wheelhouse/` or during validation. Runtime installs
+intentionally do not include pytest or other test-only dependencies.
 
 ## Offline dev/test install
 

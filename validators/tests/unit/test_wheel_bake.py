@@ -90,14 +90,16 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
 
 @pytest.mark.wheel_bake_gate
 @pytest.mark.xdist_group("wheel-build")
-def test_tracked_app_wheel_matches_fresh_deterministic_build(repo_root: Path, tmp_path: Path):
+def test_source_build_does_not_require_or_recreate_committed_app_wheel(
+    repo_root: Path, tmp_path: Path
+):
     manifest = build_app_wheel_from_source(repo_root, tmp_path)
     fresh = tmp_path / manifest.wheel_name
-    tracked = repo_root / "validators" / "wheelhouse" / manifest.wheel_name
+    committed = sorted((repo_root / "validators" / "wheelhouse").glob("creator_engine_validator-*.whl"))
 
-    assert tracked.is_file()
-    assert hashlib.sha256(tracked.read_bytes()).hexdigest() == manifest.sha256
-    assert tracked.read_bytes() == fresh.read_bytes()
+    assert fresh.is_file()
+    assert hashlib.sha256(fresh.read_bytes()).hexdigest() == manifest.sha256
+    assert committed == []
 
 
 def test_build_app_wheel_from_source_raises_typed_error_on_bad_repo(tmp_path: Path):

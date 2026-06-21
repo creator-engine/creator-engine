@@ -53,11 +53,15 @@ cd creator-engine
 git rev-parse --short=7 HEAD
 ```
 
-Install the validator using the uv-first offline path. The validator README defines Python 3.14 as the current floor, uv-first offline install, and the checked-in wheelhouse contract (`validators/README.md:7-17`):
+Install the validator runtime dependencies using the uv-first offline path. The
+validator README defines Python 3.14 as the current floor, source-checkout
+execution, and the checked-in dependency wheelhouse contract
+(`validators/README.md:7-17`):
 
 ```bash
 uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators python -m creator_engine_validator --list-checks
 ```
 
 If you need the full pytest gate, install the dev/test dependency set from the checked-in dev wheelhouse (`validators/README.md:41-55`):

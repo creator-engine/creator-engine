@@ -20,6 +20,7 @@ import hashlib
 import tomllib
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,6 +124,19 @@ def test_wheelhouse_covers_runtime_dependencies(validators_dir: Path):
         assert required in names, f"wheelhouse missing offline wheel for {required}: have {sorted(names)}"
 
 
+def test_wheelhouse_does_not_commit_first_party_app_wheel(validators_dir: Path):
+    names = {pkg.normalize_name(n) for n in pkg.wheelhouse_distribution_names(validators_dir / "wheelhouse")}
+    assert "creator-engine-validator" not in names
+
+
+def test_wheelhouse_violations_flags_first_party_app_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(b"")
+    violations = pkg.wheelhouse_violations(wheelhouse)
+    assert any("must not contain first-party app wheels" in violation for violation in violations)
+
+
 # ---------------------------------------------------------------------------
 # wheelhouse-dev: cp314 dual-arch native wheels for offline dev/test installs
 # ---------------------------------------------------------------------------
@@ -214,12 +228,12 @@ def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
     assert violations == []
 
 
-def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
+def test_verify_wheel_matches_source_flags_synthetic_drift(monkeypatch, tmp_path: Path):
     validators_dir = tmp_path / "validators"
     source_dir = validators_dir / "creator_engine_validator"
-    wheelhouse = validators_dir / "wheelhouse"
+    built_dir = tmp_path / "built-wheel"
     source_dir.mkdir(parents=True)
-    wheelhouse.mkdir()
+    built_dir.mkdir()
     (validators_dir / "pyproject.toml").write_text(
         "[project]\nname = \"creator-engine-validator\"\nversion = \"0.2.0\"\n",
         encoding="utf-8",
@@ -228,16 +242,36 @@ def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
     (source_dir / "version.py").write_text("__version__ = \"0.2.0\"\n", encoding="utf-8")
     (source_dir / "drift.py").write_text("VALUE = 'source'\n", encoding="utf-8")
 
-    wheel = wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl"
+    wheel = built_dir / "creator_engine_validator-0.2.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         zf.writestr("creator_engine_validator/__init__.py", "")
         zf.writestr("creator_engine_validator/version.py", "__version__ = \"0.2.0\"\n")
         zf.writestr("creator_engine_validator/drift.py", "VALUE = 'wheel'\n")
 
+    def fake_build(repo_root, out_dir):
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        target = out / wheel.name
+        target.write_bytes(wheel.read_bytes())
+        return SimpleNamespace(wheel_name=wheel.name)
+
+    monkeypatch.setattr(pkg, "build_app_wheel_from_source", fake_build)
     violations = pkg.verify_wheel_matches_source(tmp_path)
     assert any("differs from source file drift.py" in violation for violation in violations)
     aggregate = pkg.verify_packaging_contract(tmp_path)
     assert not any("differs from source file drift.py" in violation for violation in aggregate.violations)
+
+
+def test_verify_wheel_matches_source_flags_build_failure(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "validators" / "creator_engine_validator"
+    source_dir.mkdir(parents=True)
+
+    def fake_build(repo_root, out_dir):
+        raise pkg.WheelBakeError("build backend unavailable")
+
+    monkeypatch.setattr(pkg, "build_app_wheel_from_source", fake_build)
+    violations = pkg.verify_wheel_matches_source(tmp_path)
+    assert violations == ["app wheel build from source failed: build backend unavailable"]
 
 
 def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):
@@ -361,7 +395,7 @@ def test_pages_mirror_wheels_match_published_sha256sums(repo_root: Path):
     # mirror's INTERNAL self-consistency, NOT a byte-match against the live dev
     # validators/wheelhouse/ (which advances to 0.2.0+sha freely; the published
     # wheel only changes at a ratified release + re-sign -> 0.3.0). The dev
-    # wheel<->source contract stays covered by verify_wheel_matches_source.
+    # source-built wheel<->source contract stays covered by verify_wheel_matches_source.
     mirror = repo_root / "docs" / "downloads" / "0.2.0"
     sums = _parse_sha256sums(mirror / "SHA256SUMS")
     wheels = sorted(path.name for path in mirror.glob("*.whl"))

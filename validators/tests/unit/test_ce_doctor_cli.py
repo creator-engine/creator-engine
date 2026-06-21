@@ -56,6 +56,8 @@ def test_doctor_json_passes_on_governed_host(inject_facts, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["refused_clauses"] == []
+    assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
+    assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
 
 
 def test_doctor_refuses_out_of_contract_interpreter(inject_facts, capsys):

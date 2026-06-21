@@ -1,12 +1,12 @@
 """RV1-060 — Option B v1.0 packaging-contract introspection.
 
 This module is the single source of truth for the Source-locked Option B / 1B
-packaging contract and the read-only helpers that assert it. ``ce doctor``
-reuses :func:`verify_packaging_contract` for the dependency/wheelhouse-drift
-guard clause (RED-G-6), and the packaging tests assert the required author-side
-contract over the tracked artifacts. The first-party app-wheel/source parity
-attestation is exposed separately by :func:`verify_wheel_matches_source` so the
-post-merge wheel-bake lane can run it without serializing authored PRs.
+packaging contract. ``ce doctor`` reuses :func:`verify_packaging_contract` for
+the dependency-wheelhouse drift guard clause (RED-G-6), and the packaging tests
+assert the required author-side contract over the tracked artifacts. The
+first-party app-wheel/source parity attestation is exposed separately by
+:func:`verify_wheel_matches_source` so an explicit bake gate can build from
+source without requiring a committed app wheel.
 
 The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 
@@ -15,6 +15,7 @@ The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 * runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
     * cp314-only dual-arch Linux offline wheelhouse (no cp311/cp312/cp313 artifacts).
 * ``uv.lock`` is primary; ``requirements.txt`` is a lockstep export.
+* the first-party app wheel is not committed in ``validators/wheelhouse``.
 * build backend ``setuptools.build_meta``; distribution stays
   ``creator-engine-validator`` (DP-1 = A); both console scripts retained.
 
@@ -26,11 +27,14 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+import tempfile
 import tomllib
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from .wheel_bake import WheelBakeError, build_app_wheel_from_source
 
 # --- Locked contract constants ---------------------------------------------
 
@@ -222,6 +226,9 @@ def wheelhouse_violations(wheelhouse_dir: Path | str) -> list[str]:
     offenders = [w for w in wheels if any(tag in w for tag in FORBIDDEN_ABI_TAGS)]
     if offenders:
         v.append(f"non-cp314 ABI wheels present (must be removed): {offenders}")
+    app_wheels = [w for w in wheels if _wheel_distribution(w) == DISTRIBUTION_NAME]
+    if app_wheels:
+        v.append(f"wheelhouse must not contain first-party app wheels: {app_wheels}")
     if not any("cp314" in w for w in wheels):
         v.append("wheelhouse contains no cp314 ABI wheel; cp314 build not present")
     present = {normalize_name(n) for n in wheelhouse_distribution_names(d)}
@@ -250,23 +257,9 @@ def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str)
     return v
 
 
-def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
-    """Report app-wheel/source drift when both the repo source and wheel exist.
-
-    Installed end-user contexts may have only the wheel (or only a checkout
-    without the shipped wheelhouse), so this guard is intentionally a no-op
-    unless both sides of the fidelity comparison are present.
-    """
-    root = Path(repo_root)
+def _app_wheel_source_violations(root: Path, wheels: Iterable[Path]) -> list[str]:
     validators = root / "validators"
     source_root = validators / "creator_engine_validator"
-    wheelhouse = validators / "wheelhouse"
-    if not source_root.is_dir() or not wheelhouse.is_dir():
-        return []
-    app_wheels = sorted(wheelhouse.glob("creator_engine_validator-*.whl"))
-    if not app_wheels:
-        return []
-
     v: list[str] = []
     pyproject_version = _pyproject_version(validators / "pyproject.toml")
     source_version = _source_declared_version(source_root / "version.py")
@@ -286,7 +279,7 @@ def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
         if path.is_file()
     }
 
-    for wheel in app_wheels:
+    for wheel in wheels:
         parsed = _wheel_filename_parts(wheel.name)
         if parsed is None:
             v.append(f"invalid app wheel filename: {wheel.name}")
@@ -327,6 +320,33 @@ def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
         except zipfile.BadZipFile:
             v.append(f"invalid app wheel zip archive: {wheel}")
     return v
+
+
+def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
+    """Build the app wheel from checkout source and report wheel/source drift.
+
+    Installed end-user contexts may have only the wheel and no source checkout,
+    so this remains a no-op when ``validators/creator_engine_validator`` is
+    absent. In source-checkout contexts the gate must not silently pass just
+    because ``validators/wheelhouse`` no longer commits a first-party app wheel:
+    it builds a temporary wheel with the standard wheel-bake helper, then
+    compares that built surface against the checkout source.
+    """
+    root = Path(repo_root)
+    source_root = root / "validators" / "creator_engine_validator"
+    if not source_root.is_dir():
+        return []
+
+    with tempfile.TemporaryDirectory(prefix="ce-app-wheel-") as tmp:
+        out_dir = Path(tmp)
+        try:
+            manifest = build_app_wheel_from_source(root, out_dir)
+        except WheelBakeError as exc:
+            return [f"app wheel build from source failed: {exc}"]
+        wheel = out_dir / manifest.wheel_name
+        if not wheel.is_file():
+            return [f"app wheel build from source did not produce {wheel.name}"]
+        return _app_wheel_source_violations(root, [wheel])
 
 
 def _module_str_constant(path: Path | str, name: str) -> str | None:
@@ -443,9 +463,10 @@ def verify_generated_version(repo_root: Path | str) -> list[str]:
 def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     """Aggregate the author-side Option B packaging contract (RED-G-6).
 
-    ADR-0010 moves first-party app-wheel/source parity to the post-merge bake
-    gate. This aggregate therefore keeps pyproject, runtime wheelhouse,
-    lockstep, and generated-version checks required, but intentionally excludes
+    ADR-0010 / ADR-0006 Gate 3 moves first-party app-wheel/source parity to an
+    explicit source-build gate. This aggregate therefore keeps pyproject,
+    runtime dependency wheelhouse, lockstep, generated-version, and
+    no-committed-app-wheel checks required, but intentionally excludes
     :func:`verify_wheel_matches_source`.
     """
     root = Path(repo_root)

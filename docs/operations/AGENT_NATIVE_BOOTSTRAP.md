@@ -36,17 +36,20 @@ This is the same fail-closed posture as the governed lane-launch primitive
 (`docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md`): visible-or-refuse, no hidden
 fallback.
 
-## 3. Preflight — `ce doctor --json`
+## 3. Preflight — source `ce doctor --json`
 
 The bootstrap **MUST** run the governed-environment guard preflight first:
 
 ```bash
-ce doctor --json
+PYTHONPATH=validators python -m creator_engine_validator.ce_cli doctor --json
 ```
 
-`ce doctor` evaluates the governed-environment guard predicate (DP-3 = B,
+The source-backed `ce doctor` module invocation evaluates the governed-environment
+guard predicate (DP-3 = B,
 `docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md`) and exits
-**non-zero** on any refused clause:
+**non-zero** on any refused clause. The public/package-installed `ce doctor`
+entry point is equivalent, but clone-mode bootstrap does not require a committed
+first-party app wheel:
 
 | Clause | Refusal |
 |---|---|
@@ -55,11 +58,11 @@ ce doctor --json
 | RED-G-3 | missing rootless Podman, or rootful Podman, for worker execution (PCO-045) |
 | RED-G-4 | ungoverned `.hermes/` state-path posture (not git-ignored) |
 | RED-G-5 | unsafe hidden continuation (no visible pane / dead-pane) |
-| RED-G-6 | dependency / wheelhouse drift from the Option B contract |
+| RED-G-6 | dependency wheelhouse drift from the Option B contract |
 
 ## 4. Blocked-report semantics on failed preflight
 
-If `ce doctor --json` exits non-zero, the bootstrap **MUST**:
+If the doctor preflight exits non-zero, the bootstrap **MUST**:
 
 1. **Stop** (`preflight.blocked_report.stop: true`). Do not continue.
 2. Emit a **blocked report** naming the refused guard clauses from the
@@ -67,21 +70,24 @@ If `ce doctor --json` exits non-zero, the bootstrap **MUST**:
 3. **Not** ratify any in-flight work and **not** fall back to a hidden/headless
    continuation. There is no hidden fallback.
 
-## 5. Install — uv-first with pip fallback (offline)
+## 5. Install — offline runtime dependencies + source path
 
-The install contract is `uv-first-with-pip-fallback`, **offline** (`--no-index`),
-against the **cp314-only** offline wheelhouse. Python floor is `>=3.14`.
+The clone-mode install contract is `source-pythonpath-with-offline-runtime-deps`,
+**offline** (`--no-index`), against the **cp314-only** dependency wheelhouse.
+Python floor is `>=3.14`. The first-party validator code is loaded from the
+checkout with `PYTHONPATH=validators`; clone-mode does not install an app wheel
+from `validators/wheelhouse`.
 
 uv-first:
 
 ```bash
-uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
 pip fallback (uv-less host):
 
 ```bash
-python -m pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+python -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
 No network fetch occurs at install or runtime authority
@@ -93,11 +99,13 @@ After a PASS preflight and a successful offline install, the agent enters the
 visible Controller seat:
 
 ```bash
-ce launch --json     # ce hud --json is an alias/seam label for the same launcher
+PYTHONPATH=validators python -m creator_engine_validator.ce_cli launch --json
+# `hud` is an alias/seam label for the same launcher:
+PYTHONPATH=validators python -m creator_engine_validator.ce_cli hud --json
 ```
 
-`ce launch` opens/attaches a **visible** tmux Controller seat (DP-2 = B). It
-refuses hidden/headless continuation; `ce hud` is an **alias**, not a CE-native
+The launch command opens/attaches a **visible** tmux Controller seat (DP-2 = B).
+It refuses hidden/headless continuation; `hud` is an **alias**, not a CE-native
 HUD/TUI.
 
 ## 7. Boundaries (POST-V1 / seam-only)
