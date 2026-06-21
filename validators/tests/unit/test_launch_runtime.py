@@ -8,6 +8,7 @@ live provider login.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 from pathlib import Path
@@ -15,8 +16,23 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import launch_runtime
+from creator_engine_validator import brain_runtime, launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
+
+
+def _write_brain_ledger(state_root: Path, *, object_value: str = "ready") -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-launch-runtime-0001",
+        claim={"subject": "controller", "predicate": "bootstrap", "object": object_value},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_launch_runtime.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +49,7 @@ def _isolate_seat_state(tmp_path, monkeypatch):
     Tests that pass an explicit absolute ``repo_root=tmp_path`` are unaffected.
     """
     monkeypatch.chdir(tmp_path)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
 def _inner_argv(result):
@@ -188,6 +205,54 @@ def test_launch_spawns_visible_controller_seat():
     assert result.spawned is True
     assert adapter.spawned, "controller seat should be spawned in a visible tmux pane"
     assert result.plan.visibility == "operator_visible"
+
+
+def test_launch_refuses_missing_brain_ledger_before_spawn(tmp_path):
+    repo = tmp_path / "missing-brain-repo"
+    repo.mkdir()
+    adapter = FakeAdapter()
+
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
+        launch_runtime.launch(harness="claude", repo_root=repo, tmux_adapter=adapter)
+
+    assert adapter.spawned == []
+    assert not (repo / ".ce" / "state" / "dispatches").exists()
+
+
+def test_launch_refuses_tampered_brain_ledger_before_spawn(tmp_path):
+    repo = tmp_path / "tampered-brain-repo"
+    state_root = repo / ".ce" / "state"
+    _write_brain_ledger(state_root)
+    ledger = brain_runtime.ledger_path(state_root)
+    ledger.write_text(ledger.read_text(encoding="utf-8").replace("ready", "tampered"), encoding="utf-8")
+    adapter = FakeAdapter()
+
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
+        launch_runtime.launch(harness="claude", repo_root=repo, tmux_adapter=adapter)
+
+    assert adapter.spawned == []
+    assert not (repo / ".ce" / "state" / "dispatches").exists()
+
+
+def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
+    adapter = FakeAdapter()
+    result = launch_runtime.launch(
+        harness="claude",
+        session="brain-seat",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+    )
+
+    ref = Path(result.plan.brain_bootstrap_ref)
+    assert ref.is_file()
+    assert result.plan.brain_bootstrap_sha256 == hashlib.sha256(ref.read_bytes()).hexdigest()
+    payload = json.loads(ref.read_text(encoding="utf-8"))
+    assert payload["kind"] == "brain-bootstrap-context"
+    assert payload["context"]["role"] == "controller"
+    assert payload["context"]["seat_class"] == "foreman"
+    wrapper = (Path(result.events_ref).parent / "sentinel-wrapper.sh").read_text(encoding="utf-8")
+    assert f"export CE_BRAIN_BOOTSTRAP_REF={shlex.quote(str(ref))}" in wrapper
+    assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.plan.brain_bootstrap_sha256}" in wrapper
 
 
 def test_launch_writes_seat_lifecycle_record_and_event(tmp_path):

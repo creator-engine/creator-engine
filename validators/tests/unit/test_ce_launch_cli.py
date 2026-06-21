@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -71,6 +71,27 @@ class FakeGhRunner:
                 list(argv), 0, stdout=json.dumps({"html_url": comment["html_url"]}), stderr=""
             )
         raise AssertionError(f"unexpected gh invocation: {argv!r}")
+
+
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-ce-launch-cli-0001",
+        claim={"subject": "controller", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_ce_launch_cli.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_brain_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
 @pytest.fixture()

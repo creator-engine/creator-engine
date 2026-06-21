@@ -32,7 +32,13 @@ from typing import Any, Sequence
 
 import yaml
 
-from . import claude_launch_spec, resource_bound_spec, seat_lifecycle, seat_sentinel
+from . import (
+    brain_bootstrap,
+    claude_launch_spec,
+    resource_bound_spec,
+    seat_lifecycle,
+    seat_sentinel,
+)
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -175,6 +181,12 @@ class ResourceBoundRefused(LaneLaunchError):
     code = "G3-RESOURCE-REFUSED"
 
 
+class BrainBootstrapLaneRefused(LaneLaunchError):
+    """ce-ops#178: Knowledge-SSOT bootstrap refused before lane spawn."""
+
+    code = "G3-BRAIN-BOOTSTRAP-REFUSED"
+
+
 class SeatLifecycleRegistrationFailed(LaneLaunchError):
     """ce-ops#95: post-spawn lifecycle registration failed.
 
@@ -276,6 +288,10 @@ class LaunchResult:
     # surface (`<state_root>/dispatches/<lane_id>/events.jsonl`), also recorded in
     # the ignored sidecar. None only if sentinel materialization was skipped.
     events_ref: str | None = None
+    # ce-ops#178: value-free pointer to the Knowledge-SSOT bootstrap payload
+    # injected into the seat wrapper environment.
+    brain_bootstrap_ref: str | None = None
+    brain_bootstrap_sha256: str | None = None
     # ce-ops#95: one lifecycle object per spawned seat. None for Phase-1
     # compatibility launches whose post-spawn registration failed and proceeded
     # ungoverned with an AWAITING-OPERATOR escalation.
@@ -459,6 +475,32 @@ def _wrap_with_seat_env(command: Sequence[str], seat_env_file: Path) -> list[str
         "sh", "-c", _SEAT_ENV_WRAP_SCRIPT, "ce-seat-env", str(seat_env_file),
         *command,
     ]
+
+
+def _brain_seat_class_for_role(role: str) -> str:
+    return "foreman" if str(role).strip().lower() == "architect" else "worker"
+
+
+def _build_lane_brain_bootstrap(*, state_root: Path, role: str) -> dict[str, Any]:
+    try:
+        return brain_bootstrap.build_bootstrap_payload(
+            state_root=state_root,
+            role=role,
+            seat_class=_brain_seat_class_for_role(role),
+        )
+    except brain_bootstrap.BrainBootstrapRefused as exc:
+        details = "; ".join(exc.errors) if exc.errors else str(exc)
+        raise BrainBootstrapLaneRefused(
+            f"refusing lane launch before spawn: {details}"
+        ) from exc
+
+
+def _materialize_brain_bootstrap(
+    *, seat_dir: Path, payload: dict[str, Any]
+) -> tuple[dict[str, str], str, str]:
+    ref = seat_dir / "brain-bootstrap.json"
+    digest = brain_bootstrap.write_payload(ref, payload)
+    return brain_bootstrap.payload_env(ref, digest), str(ref), digest
 
 
 @dataclass(frozen=True)
@@ -749,6 +791,11 @@ def launch(
             "refusing lane launch before any side effect"
         )
 
+    resolved_state_root = (
+        Path(state_root) if state_root is not None else Path(repo_root) / ".ce" / "state"
+    )
+    brain_payload = _build_lane_brain_bootstrap(state_root=resolved_state_root, role=role)
+
     # 6. CC-G-D Ring 0: when the command is a Claude invocation, refuse prohibited
     #    surfaces and pin the governed command BEFORE any side effect (no tmux
     #    spawn, no Pane Registry write). Non-Claude lanes are untouched.
@@ -869,14 +916,17 @@ def launch(
     # the wrapper OUTSIDE that scope survives to record — is machine-watchable. The
     # seat's model never writes the file (silence≠success). seat_id = lane_id; the
     # events surface lives under the controller's state root the cockpit watches.
-    resolved_state_root = (
-        Path(state_root) if state_root is not None else Path(repo_root) / ".ce" / "state"
+    seat_dir = seat_sentinel.seat_dir_for(resolved_state_root, lane_id)
+    brain_env, brain_ref, brain_sha = _materialize_brain_bootstrap(
+        seat_dir=seat_dir,
+        payload=brain_payload,
     )
     sentinel = seat_sentinel.prepare_seat_sentinel(
-        seat_dir=seat_sentinel.seat_dir_for(resolved_state_root, lane_id),
+        seat_dir=seat_dir,
         inner_argv=launch_command,
         seat_id=lane_id,
         run_id=None,
+        exports=brain_env,
     )
 
     try:
@@ -970,6 +1020,8 @@ def launch(
         sidecar_payload["resource_bound"] = resource_bound_stamp
     # ce-ops#26: the value-free pointer to this seat's lifecycle events surface.
     sidecar_payload["events_ref"] = str(sentinel.events_path)
+    sidecar_payload["brain_bootstrap_ref"] = brain_ref
+    sidecar_payload["brain_bootstrap_sha256"] = brain_sha
     if reviewer_authority_ref or is_distinct_reviewer_venue(
         role=role, lane_kind=mode_resolution.lane_kind
     ):
@@ -1047,6 +1099,8 @@ def launch(
         reviewer_authority_ref=reviewer_authority_ref,
         resource_bound=resource_bound_stamp,
         events_ref=str(sentinel.events_path),
+        brain_bootstrap_ref=brain_ref,
+        brain_bootstrap_sha256=brain_sha,
         seat_record_ref=seat_record_ref,
         seat_lifecycle_state=seat_lifecycle_state,
     )

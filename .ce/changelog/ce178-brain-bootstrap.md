@@ -7,3 +7,6 @@
   missing ledgers.
 - Reuses the seat-class spine by resolving absent or unknown seat classes to
   `foreman`.
+- Wires the bootstrap payload into real controller and lane launch paths before
+  spawn side effects, exporting a value-free payload ref and SHA into the seat
+  sentinel wrapper.

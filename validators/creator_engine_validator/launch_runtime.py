@@ -29,6 +29,7 @@ from typing import Any, Sequence
 
 from . import (
     _versions,
+    brain_bootstrap,
     claude_launch_spec,
     codex_launch_spec,
     hermes_launch_spec,
@@ -94,6 +95,12 @@ class ResourceBoundRefused(LaunchError):
     code = "G6-LAUNCH-RESOURCE-REFUSED"
 
 
+class BrainBootstrapLaunchRefused(LaunchError):
+    """ce-ops#178: Knowledge-SSOT bootstrap refused before controller spawn."""
+
+    code = "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED"
+
+
 class SeatLifecycleRegistrationFailed(LaunchError):
     """ce-ops#95: post-spawn lifecycle registration failed.
 
@@ -139,6 +146,8 @@ class LaunchPlan:
     # ratified opt-down; None when the policy declares no resource governance.
     resource_bound: dict | str | None = None
     codex_bypass_mode: str | None = None
+    brain_bootstrap_ref: str | None = None
+    brain_bootstrap_sha256: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -154,6 +163,8 @@ class LaunchPlan:
             "resume": self.resume,
             "resource_bound": self.resource_bound,
             "codex_bypass_mode": self.codex_bypass_mode,
+            "brain_bootstrap_ref": self.brain_bootstrap_ref,
+            "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
         }
 
 
@@ -266,6 +277,36 @@ def _resolve_seat_surface(
     state_root = Path(repo_root or ".") / ".ce" / "state"
     seat_id = _seat_slug(session, window)
     return seat_sentinel.seat_dir_for(state_root, seat_id), seat_id, None
+
+
+def _brain_state_root(repo_root: Path | str | None) -> Path:
+    return Path(repo_root or ".") / _versions.V3_LOCAL_STATE_ROOT
+
+
+def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str, Any]:
+    try:
+        return brain_bootstrap.build_bootstrap_payload(
+            state_root=_brain_state_root(repo_root),
+            role=brain_bootstrap.DEFAULT_ROLE,
+            seat_class=brain_bootstrap.DEFAULT_SEAT_CLASS,
+        )
+    except brain_bootstrap.BrainBootstrapRefused as exc:
+        details = "; ".join(exc.errors) if exc.errors else str(exc)
+        raise BrainBootstrapLaunchRefused(
+            f"refusing Controller launch before spawn: {details}"
+        ) from exc
+
+
+def _materialize_brain_bootstrap(
+    *,
+    seat_dir: Path,
+    payload: dict[str, Any] | None,
+) -> tuple[dict[str, str] | None, str | None, str | None]:
+    if payload is None:
+        return None, None, None
+    ref = seat_dir / "brain-bootstrap.json"
+    digest = brain_bootstrap.write_payload(ref, payload)
+    return brain_bootstrap.payload_env(ref, digest), str(ref), digest
 
 
 def launch(
@@ -493,6 +534,8 @@ def launch(
             resource_bound=_resource_stamp(bound, resource_policy),
         )
 
+    brain_payload = _build_controller_brain_bootstrap(repo_root)
+
     # Defect-a fix (v3.1-G1): plain `ce launch` pins claude at the strict MCP
     # config but never created it, so the seat exits 1 silently. Provision it
     # idempotently — reusing the lane helper (v1->v1) — into the seat's cwd
@@ -517,11 +560,22 @@ def launch(
     seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
         repo_root=repo_root, session=session, window=window, runtime_policy=runtime_policy
     )
+    brain_env, brain_ref, brain_sha = _materialize_brain_bootstrap(
+        seat_dir=seat_dir,
+        payload=brain_payload,
+    )
+    if brain_ref is not None:
+        plan = replace(
+            plan,
+            brain_bootstrap_ref=brain_ref,
+            brain_bootstrap_sha256=brain_sha,
+        )
     sentinel = seat_sentinel.prepare_seat_sentinel(
         seat_dir=seat_dir,
         inner_argv=plan.command,
         seat_id=seat_id,
         run_id=seat_run_id,
+        exports=brain_env,
     )
 
     pane = tmux_adapter.ensure_pane(

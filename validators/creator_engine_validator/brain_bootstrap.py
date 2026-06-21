@@ -10,7 +10,9 @@ datastore, use MCP, or migrate any memory substrate.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -25,6 +27,8 @@ BOOTSTRAP_SCHEMA_VERSION = "1"
 DEFAULT_ROLE = "controller"
 DEFAULT_SEAT_CLASS = "foreman"
 GLOBAL_SCOPE = "global"
+BOOTSTRAP_REF_ENV = "CE_BRAIN_BOOTSTRAP_REF"
+BOOTSTRAP_SHA256_ENV = "CE_BRAIN_BOOTSTRAP_SHA256"
 
 
 class BrainBootstrapRefused(brain_runtime.BrainRuntimeError):
@@ -65,6 +69,36 @@ def build_bootstrap_payload(
 
     request = BootstrapRequest(scope=scope, role=role, seat_class=seat_class, state_root=state_root)
     return bootstrap(request)
+
+
+def payload_bytes(payload: dict[str, Any]) -> bytes:
+    """Canonical bytes for the launch-injected bootstrap payload."""
+
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def payload_sha256(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(payload_bytes(payload)).hexdigest()
+
+
+def write_payload(path: Path | str, payload: dict[str, Any]) -> str:
+    """Write the payload atomically and return the reproduced SHA256."""
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    content = payload_bytes(payload)
+    digest = hashlib.sha256(content).hexdigest()
+    tmp = target.parent / f"{target.name}.tmp.{os.getpid()}"
+    tmp.write_bytes(content)
+    tmp.rename(target)
+    return digest
+
+
+def payload_env(path: Path | str, sha256: str) -> dict[str, str]:
+    return {
+        BOOTSTRAP_REF_ENV: str(Path(path)),
+        BOOTSTRAP_SHA256_ENV: str(sha256),
+    }
 
 
 def bootstrap(request: BootstrapRequest) -> dict[str, Any]:

@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -101,10 +101,26 @@ def _write_claim(ledger: Path, controller: str, lane: str) -> Path:
     return path
 
 
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-claude-launch-0001",
+        claim={"subject": "controller", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/integration/test_claude_launch_refusal.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
 def test_ce_lane_launch_refuses_claude_bare_no_pane_written(tmp_path, monkeypatch, capsys):
     ledger = tmp_path / ".hermes" / "active-work-ledger"
     ledger.mkdir(parents=True)
     _write_claim(ledger, "hermes-primary", "cc-g-d-lane")
+    _write_brain_ledger(tmp_path / ".ce" / "state")
     prompt = tmp_path / "prompt.md"
     prompt.write_text("governed prompt\n", encoding="utf-8")
     prompt_sha = hashlib.sha256(prompt.read_bytes()).hexdigest()

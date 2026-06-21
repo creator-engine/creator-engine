@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import lane_runtime
+from creator_engine_validator import brain_runtime, lane_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 OPTOUT = {"ratified_prompt_sha": "a" * 64, "approver_ref": "b" * 64}
@@ -95,6 +95,21 @@ def _write_claim(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
     return path
 
 
+def _write_brain_ledger(state_root: Path) -> None:
+    result = brain_runtime.assert_claim(
+        assertion_id="brain-assertion-lane-bound-0001",
+        claim={"subject": "lane", "predicate": "bootstrap", "object": "ready"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_lane_runtime_resource_bound.py#brain-ledger",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    path = brain_runtime.ledger_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+
+
 def _write_policy(tmp_path: Path, **overrides) -> Path:
     policy = {
         "resource_envelopes": [
@@ -119,6 +134,7 @@ def _launch(tmp_path: Path, **overrides):
     prompt, sha = _write_prompt(tmp_path)
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
+    _write_brain_ledger(tmp_path / ".ce" / "state")
     kwargs = dict(
         controller_id="hermes-primary",
         lane_id="gate3-lane",
