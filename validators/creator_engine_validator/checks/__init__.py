@@ -86,6 +86,7 @@ from . import version_boundary as version_boundary  # noqa: E402,F401
 from . import v3_naming_hygiene as v3_naming_hygiene  # noqa: E402,F401
 from . import ce_spend_envelope as ce_spend_envelope  # noqa: E402,F401
 from . import ce_scope as ce_scope  # noqa: E402,F401
+from . import work_sizing as work_sizing  # noqa: E402,F401
 from . import decision_record as decision_record  # noqa: E402,F401
 from . import storage_tier_finding as storage_tier_finding  # noqa: E402,F401
 from . import peer_authority as peer_authority  # noqa: E402,F401
