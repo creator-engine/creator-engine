@@ -5,7 +5,7 @@ committed development first-party app wheel, keep the dependency wheelhouse
 checked, and replace committed-wheel parity with source-built wheel parity.
 
 Base:
-`6e2e697063d98b526398e8418904be6ec05a8a65` (`origin/main` at rebase).
+`159866ea32783834ccf2c486c85a949aecf49663` (`origin/main` at rebase).
 
 Per-file purpose:
 
@@ -41,8 +41,8 @@ Per-file purpose:
 - **`validators/creator_engine_validator/environment_guard.py`** *(M)* - updates
   RED-G-6 wording to dependency wheelhouse.
 - **`validators/creator_engine_validator/packaging_runtime.py`** *(M)* - forbids
-  committed app wheels in `validators/wheelhouse` and builds first-party parity
-  wheels from source.
+  committed app wheels in `validators/wheelhouse`, verifies dependency
+  wheelhouse hashes, and builds first-party parity wheels from source.
 - **`validators/creator_engine_validator/wheel_source_parity.py`** *(A)* -
   shared source-built first-party wheel/source parity helper for packaging and
   brain probes.

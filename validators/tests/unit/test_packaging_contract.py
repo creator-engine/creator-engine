@@ -129,6 +129,33 @@ def test_wheelhouse_does_not_commit_first_party_app_wheel(validators_dir: Path):
     assert "creator-engine-validator" not in names
 
 
+def test_wheelhouse_hash_manifest_is_clean(validators_dir: Path):
+    violations = pkg.wheelhouse_hash_violations(validators_dir / "wheelhouse")
+    assert violations == []
+
+
+def test_wheelhouse_hash_manifest_flags_tampered_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"tampered")
+    (wheelhouse / "SHA256SUMS").write_text(f"{'0' * 64}  {wheel.name}\n", encoding="utf-8")
+
+    violations = pkg.wheelhouse_hash_violations(wheelhouse)
+    assert any("SHA256 mismatch" in violation and wheel.name in violation for violation in violations)
+
+
+def test_wheelhouse_hash_manifest_flags_unmanifested_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"ok")
+    (wheelhouse / "SHA256SUMS").write_text("", encoding="utf-8")
+
+    violations = pkg.wheelhouse_hash_violations(wheelhouse)
+    assert any("missing from SHA256SUMS" in violation for violation in violations)
+
+
 def test_wheelhouse_violations_flags_first_party_app_wheel(tmp_path: Path):
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
@@ -220,6 +247,8 @@ def test_requirements_has_no_stale_pins(validators_dir: Path):
 def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     result = pkg.verify_packaging_contract(repo_root)
     assert result.ok, f"packaging contract violations: {result.violations}"
+    assert result.details["dependency_wheelhouse_ok"] is True
+    assert result.details["dependency_wheelhouse_violations"] == []
 
 
 @pytest.mark.wheel_bake_gate

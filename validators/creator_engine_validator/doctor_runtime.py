@@ -161,6 +161,15 @@ def run_doctor(
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).
     payload["ce_version"] = ce_version(repo_root)
+    dependency_wheelhouse_ok = None
+    dependency_wheelhouse_violations: list[str] = []
+    if facts.packaging:
+        dependency_wheelhouse_ok = bool(
+            facts.packaging.details.get("dependency_wheelhouse_ok", facts.packaging.ok)
+        )
+        dependency_wheelhouse_violations = list(
+            facts.packaging.details.get("dependency_wheelhouse_violations", [])
+        )
     wheelhouse_wheels = (
         list(facts.packaging.details.get("wheelhouse_wheels", []))
         if facts.packaging
@@ -180,8 +189,9 @@ def run_doctor(
         "uv_available": facts.uv_available,
         "podman_available": facts.podman_available,
         "podman_rootless": facts.podman_rootless,
-        "wheelhouse_offline": bool(facts.packaging.ok) if facts.packaging else None,
-        "dependency_wheelhouse_offline": bool(facts.packaging.ok) if facts.packaging else None,
+        "wheelhouse_offline": dependency_wheelhouse_ok,
+        "dependency_wheelhouse_offline": dependency_wheelhouse_ok,
+        "dependency_wheelhouse_violations": dependency_wheelhouse_violations,
         "first_party_app_wheel_committed": first_party_app_wheel_committed,
     }
     payload["requested"] = {

@@ -25,7 +25,11 @@ def _facts(**overrides) -> guard.EnvironmentFacts:
         podman_available=True,
         podman_rootless=True,
         uv_available=True,
-        packaging=PackagingContractResult(ok=True, violations=[], details={}),
+        packaging=PackagingContractResult(
+            ok=True,
+            violations=[],
+            details={"dependency_wheelhouse_ok": True, "dependency_wheelhouse_violations": []},
+        ),
         hidden_continuation=False,
         active_work_ledger_present=True,
     )
@@ -57,7 +61,27 @@ def test_doctor_json_passes_on_governed_host(inject_facts, capsys):
     assert payload["ok"] is True
     assert payload["refused_clauses"] == []
     assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
+    assert payload["prerequisites"]["dependency_wheelhouse_violations"] == []
     assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
+
+
+def test_doctor_json_dependency_wheelhouse_status_is_independent(inject_facts, capsys):
+    inject_facts(
+        packaging=PackagingContractResult(
+            ok=False,
+            violations=["generated _version.py BUILD_GIT_SHA is stale"],
+            details={
+                "dependency_wheelhouse_ok": True,
+                "dependency_wheelhouse_violations": [],
+                "wheelhouse_wheels": [],
+            },
+        )
+    )
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", "."])
+    assert ret != 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
+    assert payload["prerequisites"]["dependency_wheelhouse_violations"] == []
 
 
 def test_doctor_refuses_out_of_contract_interpreter(inject_facts, capsys):
