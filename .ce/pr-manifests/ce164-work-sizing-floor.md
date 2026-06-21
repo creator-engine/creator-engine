@@ -20,8 +20,10 @@ a pure git `--numstat` parser, a schema for persisted floor records, a
 excluded: wheel rebuild, Frame-to-Shape UX, dispatch, datastore, or F1
 record-shape changes.
 
-Per-file purpose (closed path-set - 15 paths):
+Per-file purpose (closed path-set - 18 paths):
 
+- **`.github/pull_request_template.md`** *(M)* - adds the CI-readable declared work-class field.
+- **`.github/workflows/validate.yml`** *(M)* - wires the required PR-diff work-sizing floor gate.
 - **`.ce/changelog/ce164-work-sizing-floor.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce164-work-sizing-floor.md`** *(A)* - this PR's closed path-set carrier.
 - **`schemas/work-sizing-floor.schema.yaml`** *(A)* - schema for persisted floor records.
@@ -36,16 +38,19 @@ Per-file purpose (closed path-set - 15 paths):
 - **`validators/tests/unit/test_open_change.py`** *(M)* - registered-check count drift guard updated.
 - **`validators/tests/unit/test_redact.py`** *(M)* - registered-check count drift guard updated.
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* - registered-check count drift guard updated.
+- **`validators/tests/unit/test_work_sizing_floor_ci_wiring.py`** *(A)* - pins the required CI gate declaration source and workflow wiring.
 - **`validators/tests/unit/test_work_sizing_floor.py`** *(A)* - parser/classifier/check tests.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=18
 
-AUTHORIZED_PATHS_SHA256=e17add2bc5262f3be5f7f836b87b19b754ea22513a4d6e9c775c687d04733c4a
+AUTHORIZED_PATHS_SHA256=e331cc2eb2e4013d6fc939cfaa708692a56b5c345ce1e9bb06fec3bd7f0af9dc
 
 ```text
+.github/pull_request_template.md
+.github/workflows/validate.yml
 .ce/changelog/ce164-work-sizing-floor.md
 .ce/pr-manifests/ce164-work-sizing-floor.md
 schemas/work-sizing-floor.schema.yaml
@@ -60,5 +65,6 @@ validators/tests/unit/test_merge.py
 validators/tests/unit/test_open_change.py
 validators/tests/unit/test_redact.py
 validators/tests/unit/test_version_boundary.py
+validators/tests/unit/test_work_sizing_floor_ci_wiring.py
 validators/tests/unit/test_work_sizing_floor.py
 ```

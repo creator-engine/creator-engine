@@ -15,6 +15,8 @@ surface alongside the existing F1 sizing-record ceremony.
   exclusions, threshold classifier, and derived `sizing_floor` projection.
 - Added deterministic PR-diff enforcement via `run_with_base` and the
   `verify-work-sizing-floor` CLI subcommand.
+- Wired the PR-diff floor gate into the required Validate workflow using the PR
+  body's declared work-class field as the explicit CI-readable source.
 - Added schema and offline tests proving threshold boundaries, exclusions,
   projection drift detection, omitted/understated-record enforcement, excluded
   actual-diff paths, and under-floor declared work-class rejection.

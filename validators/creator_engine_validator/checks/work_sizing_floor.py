@@ -154,7 +154,7 @@ def _coerce_change_stat(raw: ChangeStat | dict[str, Any]) -> ChangeStat:
 
 
 def _size_band(included_lines: int) -> tuple[str, str]:
-    if included_lines <= 200:
+    if included_lines < 400:
         return "target_advisory", "tiny"
     if included_lines < 800:
         return "warn", "story"

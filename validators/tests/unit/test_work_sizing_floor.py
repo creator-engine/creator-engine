@@ -107,6 +107,14 @@ def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
         "size_band": "target_advisory",
         "minimum_work_class": "tiny",
     }
+    assert (
+        chk.classify_change_size([{"path": "a.py", "additions": 201, "deletions": 0}])["size_band"]
+        == "target_advisory"
+    )
+    assert (
+        chk.classify_change_size([{"path": "a.py", "additions": 399, "deletions": 0}])["minimum_work_class"]
+        == "tiny"
+    )
     assert chk.classify_change_size([{"path": "a.py", "additions": 400, "deletions": 0}])["size_band"] == "warn"
     assert chk.classify_change_size([{"path": "a.py", "additions": 799, "deletions": 0}])["minimum_work_class"] == "story"
     assert chk.classify_change_size([{"path": "a.py", "additions": 800, "deletions": 0}]) == {

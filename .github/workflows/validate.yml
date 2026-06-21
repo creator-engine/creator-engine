@@ -115,6 +115,59 @@ jobs:
           PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
             brain verify --drift --state-root .ce/state
 
+      - name: Creator Engine validator — work-sizing floor PR-diff gate (G5)
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          # Fetch the PR base so `<base>..HEAD` resolves; actions/checkout is a
+          # shallow single-commit checkout by default.
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          declared_work_class="$(
+            python - <<'PYEOF'
+          import json
+          import os
+          import re
+          import sys
+
+          allowed = ("tiny", "story", "feature", "epic")
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          try:
+              with open(event_path, encoding="utf-8") as handle:
+                  body = (json.load(handle).get("pull_request") or {}).get("body") or ""
+          except (OSError, TypeError, ValueError):
+              print("FAIL: could not read pull_request.body from GITHUB_EVENT_PATH", file=sys.stderr)
+              sys.exit(1)
+          pattern = re.compile(
+              r"^\s*(?:[-*]\s*)?(?:\*\*)?Declared work class(?:\*\*)?\s*:\s*(?:\*\*)?\s*"
+              r"`?([A-Za-z][A-Za-z0-9_-]*)`?\s*(?:<!--.*-->)?\s*$",
+              re.IGNORECASE | re.MULTILINE,
+          )
+          values = [match.group(1) for match in pattern.finditer(body)]
+          if len(values) != 1:
+              print(
+                  "FAIL: PR body must contain exactly one declared work class line: "
+                  "'- **Declared work class:** <tiny|story|feature|epic>'",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          declared = values[0]
+          if declared not in allowed:
+              print(
+                  f"FAIL: declared work class {declared!r} is invalid; "
+                  f"expected one of: {', '.join(allowed)}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(declared)
+          PYEOF
+          )"
+          echo "Declared work class: ${declared_work_class}"
+          git fetch --no-tags --depth=1 origin "${PR_BASE_SHA}" || true
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-work-sizing-floor --base "${PR_BASE_SHA}" \
+            --declared-work-class "${declared_work_class}" .
+
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}
         env:
