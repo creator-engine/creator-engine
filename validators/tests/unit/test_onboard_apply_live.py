@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import subprocess
+import tarfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,16 @@ def _schema() -> dict[str, Any]:
 
 def _fx(name: str) -> str:
     return (_FX / name).read_text(encoding="utf-8")
+
+
+def _scanner_archive(tool: str, payload: bytes) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        info = tarfile.TarInfo(tool)
+        info.size = len(payload)
+        info.mode = 0o755
+        tf.addfile(info, io.BytesIO(payload))
+    return buf.getvalue()
 
 
 class _ModeBForge:
@@ -1641,10 +1653,20 @@ def test_brownfield_scanner_pins_resolve_for_linux_x86_64_and_arm64():
     for pin in [*x86.values(), *arm64.values()]:
         assert pin.platform in {"linux/x86_64", "linux/arm64"}
         assert onboard_apply_live._valid_sha256(pin.sha256)
-        assert pin.url.startswith("https://creator-engine.dev/downloads/0.2.0/scanners/")
+        assert pin.url.startswith("https://github.com/")
+        assert pin.url.endswith(".tar.gz")
+        assert pin.archive_member == pin.tool
 
 
-def test_brownfield_scanner_manifest_fragment_matches_staged_artifact_hashes():
+def test_brownfield_scanners_default_is_populated_on_supported_linux():
+    platform = onboard_apply_live._host_scanner_platform()
+    if platform in {"linux/x86_64", "linux/arm64"}:
+        assert set(onboard_apply_live.BROWNFIELD_SCANNERS) == set(
+            onboard_apply_live.REQUIRED_SCRUB_SCANNERS
+        )
+
+
+def test_brownfield_scanner_manifest_fragment_matches_release_archive_pins():
     fragment = yaml.safe_load(
         (_SCANNER_MIRROR_DIR / "scanner-mirror.fragment.yaml").read_text(encoding="utf-8")
     )
@@ -1665,22 +1687,42 @@ def test_brownfield_scanner_manifest_fragment_matches_staged_artifact_hashes():
         assert entry["version"] == pin.version
         assert entry["url"] == pin.url
         assert entry["sha256"] == pin.sha256
-        artifact = _SCANNER_MIRROR_DIR / Path(pin.url).name
-        assert artifact.is_file(), f"missing scanner mirror artifact: {artifact}"
-        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == pin.sha256
+        assert entry["archive_member"] == pin.archive_member
 
 
 def test_adoption_scrub_x86_pinned_fetch_runs_two_scanner_clean(tmp_path):
     scan_root = tmp_path / "repo"
     scan_root.mkdir()
     (scan_root / "README.md").write_text("clean project\n", encoding="utf-8")
-    scanners = onboard_apply_live._scanner_pins_for_platform("linux/x86_64")
+    gitleaks_archive = _scanner_archive("gitleaks", b"gitleaks-bin")
+    trufflehog_archive = _scanner_archive("trufflehog", b"trufflehog-bin")
+    gitleaks_url = "https://github.com/gitleaks/gitleaks/releases/download/test/gitleaks.tar.gz"
+    trufflehog_url = "https://github.com/trufflesecurity/trufflehog/releases/download/test/trufflehog.tar.gz"
+    scanners = {
+        "gitleaks": onboard_apply_live.BrownfieldScanner(
+            tool="gitleaks",
+            version="test",
+            url=gitleaks_url,
+            sha256=hashlib.sha256(gitleaks_archive).hexdigest(),
+            platform="linux/x86_64",
+            archive_member="gitleaks",
+        ),
+        "trufflehog": onboard_apply_live.BrownfieldScanner(
+            tool="trufflehog",
+            version="test",
+            url=trufflehog_url,
+            sha256=hashlib.sha256(trufflehog_archive).hexdigest(),
+            platform="linux/x86_64",
+            archive_member="trufflehog",
+        ),
+    }
+    archives = {gitleaks_url: gitleaks_archive, trufflehog_url: trufflehog_archive}
 
     def mirror_fetch(url):
-        return (_SCANNER_MIRROR_DIR / Path(url).name).read_bytes()
+        return archives[url]
 
     def scanner_spawn(argv):
-        tool = Path(argv[0]).name.split("-", 1)[0]
+        tool = Path(argv[0]).name
         stdout = "[]" if tool == "gitleaks" else ""
         return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
 
