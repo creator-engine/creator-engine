@@ -36,9 +36,37 @@ This is the same fail-closed posture as the governed lane-launch primitive
 (`docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md`): visible-or-refuse, no hidden
 fallback.
 
-## 3. Preflight — source `ce doctor --json`
+## 3. Install — offline runtime dependencies + source path
 
-The bootstrap **MUST** run the governed-environment guard preflight first:
+The clone-mode install contract is `source-pythonpath-with-offline-runtime-deps`,
+**offline** (`--no-index`), against the **cp314-only** dependency wheelhouse.
+Python floor is `>=3.14`. The first-party validator code is loaded from the
+checkout with `PYTHONPATH=validators`; clone-mode does not install an app wheel
+from `validators/wheelhouse`.
+
+The bootstrap **MUST** install these runtime dependencies before running the
+source-backed `ce doctor` preflight, because the source `ce` command graph imports
+runtime modules such as PyYAML and jsonschema at startup.
+
+uv-first:
+
+```bash
+uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+```
+
+pip fallback (uv-less host):
+
+```bash
+python -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+```
+
+No network fetch occurs at install or runtime authority
+(`docs/governance/V1_PRODUCT_CONTRACT.md` §6).
+
+## 4. Preflight — source `ce doctor --json`
+
+After the offline runtime dependency install succeeds, the bootstrap **MUST** run
+the governed-environment guard preflight:
 
 ```bash
 PYTHONPATH=validators python -m creator_engine_validator.ce_cli doctor --json
@@ -60,7 +88,7 @@ first-party app wheel:
 | RED-G-5 | unsafe hidden continuation (no visible pane / dead-pane) |
 | RED-G-6 | dependency wheelhouse drift from the Option B contract |
 
-## 4. Blocked-report semantics on failed preflight
+## 5. Blocked-report semantics on failed preflight
 
 If the doctor preflight exits non-zero, the bootstrap **MUST**:
 
@@ -70,32 +98,9 @@ If the doctor preflight exits non-zero, the bootstrap **MUST**:
 3. **Not** ratify any in-flight work and **not** fall back to a hidden/headless
    continuation. There is no hidden fallback.
 
-## 5. Install — offline runtime dependencies + source path
-
-The clone-mode install contract is `source-pythonpath-with-offline-runtime-deps`,
-**offline** (`--no-index`), against the **cp314-only** dependency wheelhouse.
-Python floor is `>=3.14`. The first-party validator code is loaded from the
-checkout with `PYTHONPATH=validators`; clone-mode does not install an app wheel
-from `validators/wheelhouse`.
-
-uv-first:
-
-```bash
-uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-```
-
-pip fallback (uv-less host):
-
-```bash
-python -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-```
-
-No network fetch occurs at install or runtime authority
-(`docs/governance/V1_PRODUCT_CONTRACT.md` §6).
-
 ## 6. Launch — visible Controller seat
 
-After a PASS preflight and a successful offline install, the agent enters the
+After a successful offline install and PASS preflight, the agent enters the
 visible Controller seat:
 
 ```bash

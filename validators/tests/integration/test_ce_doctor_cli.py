@@ -99,6 +99,7 @@ def test_bootstrap_preflight_uses_ce_doctor_json_with_blocked_report(repo_root: 
         "--json",
     ]
     assert preflight["env"] == {"PYTHONPATH": "validators"}
+    assert preflight["requires"] == ["install"]
     assert preflight["on_failure"] == "blocked-report"
     assert preflight["blocked_report"]["stop"] is True
 
@@ -129,10 +130,21 @@ def test_bootstrap_install_is_uv_first_with_pip_fallback(repo_root: Path):
         assert "validators/requirements.txt" in step
 
 
+def test_bootstrap_installs_runtime_deps_before_source_doctor(repo_root: Path):
+    data = _bootstrap_template(repo_root)
+    keys = list(data)
+    assert keys.index("install") < keys.index("preflight")
+    assert data["preflight"]["requires"] == ["install"]
+
+
 def test_bootstrap_doc_references_doctor_and_template(repo_root: Path):
     doc = (repo_root / "docs" / "operations" / "AGENT_NATIVE_BOOTSTRAP.md").read_text(encoding="utf-8")
     assert "ce doctor --json" in doc
     assert "templates/hermes/agent-native-bootstrap.yaml" in doc
+    assert doc.index("## 3. Install") < doc.index("## 4. Preflight")
+    assert doc.index("uv pip install --no-index") < doc.index(
+        "PYTHONPATH=validators python -m creator_engine_validator.ce_cli doctor --json"
+    )
     assert "blocked" in doc.lower()
 
 
