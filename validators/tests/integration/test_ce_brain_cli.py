@@ -3,11 +3,23 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from creator_engine_validator import brain_probe
 from creator_engine_validator import ce_cli
 
 
 def _claim(value: str) -> str:
     return json.dumps({"subject": "brain", "predicate": "mode", "object": value})
+
+
+def _probe_claim(verdict: str) -> str:
+    return json.dumps(
+        {
+            "subject": "capability",
+            "predicate": "probe-verdict",
+            "object": "missing-capability",
+            "verdict": verdict,
+        }
+    )
 
 
 def test_ce_brain_assert_check_correct_verify_roundtrip(tmp_path: Path, capsys):
@@ -152,3 +164,79 @@ def test_ce_brain_verify_catches_tamper(tmp_path: Path, capsys):
 
     assert rc == 1
     assert "brain_assertion_content_address" in capsys.readouterr().err
+
+
+def test_ce_brain_verify_reprobes_probe_backed_assertions(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0004",
+            "--scope",
+            "capability-probes",
+            "--claim-json",
+            _probe_claim("present"),
+            "--evidence-ref",
+            "probe:missing-capability",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    rc = ce_cli.main(["brain", "verify", "--state-root", str(state_root), "--json"])
+
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert any("brain_assertion_probe_disagreement" in error for error in payload["errors"])
+
+
+def test_ce_brain_probe_unknown_capability_returns_unknown(capsys):
+    rc = ce_cli.main(["brain", "probe", "missing-capability", "--json"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "evidence": {"reason": "unknown_probe"},
+        "name": "missing-capability",
+        "verdict": "unknown",
+    }
+
+
+def test_ce_brain_probe_all_json_is_sorted(monkeypatch, capsys):
+    monkeypatch.setattr(
+        brain_probe,
+        "probe_all",
+        lambda context=None: [
+            brain_probe.ProbeResult("wheelhouse_matches_source", "present", {"source": "unit"}),
+            brain_probe.ProbeResult("gh_authenticated", "unknown", {"source": "unit"}),
+        ],
+    )
+
+    rc = ce_cli.main(["brain", "probe", "--all", "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["name"] for item in payload["probes"]] == [
+        "gh_authenticated",
+        "wheelhouse_matches_source",
+    ]
+
+
+def test_ce_brain_probe_requires_name_or_all(capsys):
+    rc = ce_cli.main(["brain", "probe"])
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "specify exactly one of <name> or --all" in captured.err
+
+
+def test_ce_brain_probe_rejects_name_and_all(capsys):
+    rc = ce_cli.main(["brain", "probe", "gh_authenticated", "--all"])
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "specify exactly one of <name> or --all" in captured.err

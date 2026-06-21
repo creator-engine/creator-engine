@@ -31,6 +31,7 @@ ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/st
 ce brain check       # deterministically return the active assertion or unknown
 ce brain correct     # append a supersession marker plus corrected assertion
 ce brain verify      # validate the local brain assertion ledger
+ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
@@ -61,6 +62,7 @@ import sys
 from typing import Sequence
 
 from . import (
+    brain_probe,
     brain_runtime,
     ce_event_runtime,
     connector_runtime,
@@ -81,6 +83,7 @@ from . import (
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
+from .checks import ce_brain_assertions
 from .tmux_adapter import TmuxAdapter
 
 
@@ -548,7 +551,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # assertion ledger under .ce/state. This is only deterministic SSOT; no MCP,
     # datastore, recall/vector, or memory migration surface is introduced here.
     brain = groups.add_parser(
-        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/verify)"
+        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/verify/probe)"
     )
     brain_sub = brain.add_subparsers(dest="brain_cmd")
 
@@ -595,6 +598,11 @@ def _build_parser() -> argparse.ArgumentParser:
     bv = brain_sub.add_parser("verify", help="validate the local brain assertion ledger")
     _add_state_root(bv)
     bv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bp = brain_sub.add_parser("probe", help="freshly interrogate Knowledge-SSOT capability probe(s)")
+    bp.add_argument("probe_name", nargs="?", metavar="name", help="probe name")
+    bp.add_argument("--all", action="store_true", dest="all_probes", help="run all registered probes")
+    bp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce connector — GitHub connector runtime. Validates a connector descriptor +
     # Mission-Brief (G2.005.0 substrate). G2.005.1 added read-only verify/plan/fetch;
@@ -1705,14 +1713,43 @@ def _brain_correct(args) -> int:
 
 def _brain_verify(args) -> int:
     result = brain_runtime.verify_ledger(args.state_root)
+    probe_errors = ce_brain_assertions.validate_file(result.ledger_path) if result.ok else []
+    ok = result.ok and not probe_errors
+    errors = [*result.errors, *(error.format() for error in probe_errors)]
+    summary = dict(result.summary)
+    summary["errors"] = errors
     if getattr(args, "json_output", False):
-        print(json.dumps(result.summary, indent=2, sort_keys=True))
+        print(json.dumps(summary, indent=2, sort_keys=True))
     else:
-        status = "OK" if result.ok else "FAIL"
+        status = "OK" if ok else "FAIL"
         print(f"ce brain verify: {status} ({result.summary.get('record_count', 0)} record(s))")
-        for error in result.errors:
+        for error in errors:
             print(f"  ERROR: {error}", file=sys.stderr)
-    return 0 if result.ok else 1
+    return 0 if ok else 1
+
+
+def _brain_probe(args) -> int:
+    has_name = getattr(args, "probe_name", None) is not None
+    has_all = bool(getattr(args, "all_probes", False))
+    if has_name == has_all:
+        print("ERROR: ce brain probe: specify exactly one of <name> or --all", file=sys.stderr)
+        return 2
+    if has_all:
+        results = sorted(brain_probe.probe_all(), key=lambda result: result.name)
+        payload = {"probes": [result.to_dict() for result in results]}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            for result in results:
+                print(f"ce brain probe {result.name}: {result.verdict}")
+        return 0
+
+    result = brain_probe.probe(args.probe_name)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce brain probe {result.name}: {result.verdict}")
+    return 0
 
 
 def _connector_plan_payload(plan) -> dict:
@@ -2399,6 +2436,7 @@ _BRAIN_DISPATCH = {
     "assert": _brain_assert,
     "check": _brain_check,
     "correct": _brain_correct,
+    "probe": _brain_probe,
     "verify": _brain_verify,
 }
 

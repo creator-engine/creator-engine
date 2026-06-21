@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from .. import brain_probe
 from .. import brain_runtime
 from ..loader import LoaderError, load_yaml
 from ..reporting import CheckResult, ValidationError, make_error
@@ -17,6 +18,11 @@ from . import register
 
 CHECK_NAME = "ce_brain_assertions"
 CONTRACT = brain_runtime.CONTRACT
+
+
+def _pointer(parts: tuple[Any, ...]) -> str:
+    rendered = [str(part).replace("~", "~0").replace("/", "~1") for part in parts]
+    return "/" + "/".join(rendered) if rendered else "/"
 
 
 def _is_yaml(path: Path) -> bool:
@@ -75,7 +81,59 @@ def iter_brain_assertion_files(paths: Iterable[Path]) -> list[Path]:
     return out
 
 
-def validate_file(path: Path) -> list[ValidationError]:
+def _latest_active_indexes(records: list[Any]) -> dict[str, int]:
+    latest: dict[str, int] = {}
+    for idx, record in enumerate(records):
+        if isinstance(record, dict) and isinstance(record.get("id"), str):
+            latest[record["id"]] = idx
+    return {
+        rid: idx
+        for rid, idx in latest.items()
+        if isinstance(records[idx], dict) and records[idx].get("status") == "active"
+    }
+
+
+def _probe_backed_assertion_errors(
+    records: list[Any],
+    *,
+    path: Path,
+    pointer_prefix: tuple[Any, ...],
+    include_index: bool,
+    probe_context: brain_probe.ProbeContext | None,
+) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    active_indexes = _latest_active_indexes(records)
+    for idx in active_indexes.values():
+        record = records[idx]
+        if not isinstance(record, dict):
+            continue
+        probe_name = brain_probe.record_probe_name(record)
+        if probe_name is None:
+            continue
+        expected = brain_probe.record_expected_verdict(record)
+        if expected is None:
+            continue
+        observed = brain_probe.probe(probe_name, probe_context)
+        if observed.verdict == expected:
+            continue
+        errors.append(
+            make_error(
+                brain_probe.CODE_PROBE_DISAGREEMENT,
+                path,
+                _pointer(
+                    pointer_prefix + ((idx,) if include_index else ()) + ("claim", "verdict")
+                ),
+                (
+                    f"probe-backed brain assertion verdict mismatch for probe {probe_name!r}: "
+                    f"claim.verdict is {expected!r} but current probe verdict is {observed.verdict!r}"
+                ),
+                CONTRACT,
+            )
+        )
+    return errors
+
+
+def validate_file(path: Path, *, probe_context: brain_probe.ProbeContext | None = None) -> list[ValidationError]:
     try:
         data = load_yaml(path)
     except LoaderError as exc:
@@ -83,16 +141,35 @@ def validate_file(path: Path) -> list[ValidationError]:
     if not isinstance(data, dict):
         return [make_error(brain_runtime.CODE_SCHEMA, path, "/", "brain assertion file must be a YAML mapping", CONTRACT)]
     if "brain_assertion" in data:
-        return brain_runtime.validate_ledger_doc(
-            {
-                "kind": brain_runtime.LEDGER_KIND,
-                "record_type": brain_runtime.LEDGER_RECORD_TYPE,
-                "schema_version": brain_runtime.SCHEMA_VERSION,
-                "records": [data["brain_assertion"]],
-            },
-            path,
+        doc = {
+            "kind": brain_runtime.LEDGER_KIND,
+            "record_type": brain_runtime.LEDGER_RECORD_TYPE,
+            "schema_version": brain_runtime.SCHEMA_VERSION,
+            "records": [data["brain_assertion"]],
+        }
+        errors = brain_runtime.validate_ledger_doc(doc, path)
+        if errors:
+            return errors
+        return _probe_backed_assertion_errors(
+            doc["records"],
+            path=path,
+            pointer_prefix=("brain_assertion",),
+            include_index=False,
+            probe_context=probe_context,
         )
-    return brain_runtime.validate_ledger_doc(data, path)
+    errors = brain_runtime.validate_ledger_doc(data, path)
+    if errors:
+        return errors
+    records = data.get("records")
+    if not isinstance(records, list):
+        return []
+    return _probe_backed_assertion_errors(
+        records,
+        path=path,
+        pointer_prefix=("records",),
+        include_index=True,
+        probe_context=probe_context,
+    )
 
 
 @register(
@@ -105,6 +182,7 @@ def validate_file(path: Path) -> list[ValidationError]:
         brain_runtime.CODE_FORBIDDEN_IDENTIFIER,
         brain_runtime.CODE_SUPERSEDE_TARGET,
         brain_runtime.CODE_DUPLICATE_ACTIVE,
+        brain_probe.CODE_PROBE_DISAGREEMENT,
     ],
 )
 def run(paths: Iterable[Path]) -> CheckResult:
