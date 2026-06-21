@@ -59,18 +59,24 @@ matches the agent-native bootstrap contract.
 Run inside a governed temp git repo (`.hermes/` git-ignored). Each step is
 either a benign success or a fail-closed refusal:
 
+The source-mode command prefix for the table is:
+
+```bash
+CE_SRC='PYTHONPATH=validators python -m creator_engine_validator.ce_cli'
+```
+
 | Step | Command | Expected | Why safe |
 |---|---|---|---|
-| init | `ce init --repo-root <repo> --json` | exit 0 | writes only under ignored `.hermes/` |
-| doctor | `ce doctor --repo-root <repo> --no-check-packaging --json` | report (0/1) | interpreter contract `>=3.14`; no host mutation |
-| check | `ce check examples/well-formed` (from repo root) | exit 0 | read-only conformance over the shipped examples |
-| launch | `ce launch --dry-run --json` | exit 0, `spawned=false` | plan only; no tmux spawn, no provider login |
-| lane | `ce lane launch … --no-tmux` | exit 1, no pane record | visibility guard refuses a non-visible seat (`G3-VISIBILITY-REFUSED`) |
-| worker | `ce worker status …` (absent record) | exit 1 | read-only fail-closed; no live container |
-| ledger | `ce ledger verify …` | exit 0 / non-zero on tamper | read-only chain replay |
-| fanin | `ce fanin build` + `ce fanin inspect` | exit 0 | deterministic packet under ignored `.hermes/fan-in/` |
-| queue | `ce queue dry-run` + `ce queue inspect` | exit 0 | deterministic preview under ignored `.hermes/integration-queue/` |
-| queue (live) | `ce queue dry-run … --land` | exit 1 | live landing refused (`G8-QUEUE-AUTHORITY-REFUSED`) |
+| init | `$CE_SRC init --repo-root <repo> --json` | exit 0 | writes only under ignored `.hermes/` |
+| doctor | `$CE_SRC doctor --repo-root <repo> --no-check-packaging --json` | report (0/1) | interpreter contract `>=3.14`; no host mutation |
+| check | `$CE_SRC check examples/well-formed` (from repo root) | exit 0 | read-only conformance over the shipped examples |
+| launch | `$CE_SRC launch --dry-run --json` | exit 0, `spawned=false` | plan only; no tmux spawn, no provider login |
+| lane | `$CE_SRC lane launch … --no-tmux` | exit 1, no pane record | visibility guard refuses a non-visible seat (`G3-VISIBILITY-REFUSED`) |
+| worker | `$CE_SRC worker status …` (absent record) | exit 1 | read-only fail-closed; no live container |
+| ledger | `$CE_SRC ledger verify …` | exit 0 / non-zero on tamper | read-only chain replay |
+| fanin | `$CE_SRC fanin build` + `$CE_SRC fanin inspect` | exit 0 | deterministic packet under ignored `.hermes/fan-in/` |
+| queue | `$CE_SRC queue dry-run` + `$CE_SRC queue inspect` | exit 0 | deterministic preview under ignored `.hermes/integration-queue/` |
+| queue (live) | `$CE_SRC queue dry-run … --land` | exit 1 | live landing refused (`G8-QUEUE-AUTHORITY-REFUSED`) |
 
 `ce lane launch` has no `--dry-run` flag (only the refuse-only `--no-tmux`); the
 lane step is rehearsed as the dry-run-safe **refusal**, which proves the

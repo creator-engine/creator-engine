@@ -25,6 +25,7 @@ is introduced, per the format split B6/B7).
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 import subprocess
 import tomllib
@@ -53,6 +54,7 @@ REQUIRED_WHEELHOUSE_DISTRIBUTIONS = frozenset(
 )
 REQUIRED_ABI = "cp314"
 FORBIDDEN_ABI_TAGS = ("cp311", "cp312", "cp313")
+SHA256SUMS = "SHA256SUMS"
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,14 @@ def _wheel_filename_parts(filename: str) -> tuple[str, str] | None:
     if len(parts) < 5:
         return None
     return normalize_name(parts[0]), parts[1]
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 # --- pyproject / lock / requirements parsing --------------------------------
@@ -234,6 +244,64 @@ def wheelhouse_violations(wheelhouse_dir: Path | str) -> list[str]:
     missing = sorted(REQUIRED_WHEELHOUSE_DISTRIBUTIONS - present)
     if missing:
         v.append(f"wheelhouse missing offline wheels for: {missing}")
+    v += wheelhouse_hash_violations(d)
+    return v
+
+
+def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Verify every wheelhouse wheel is covered by ``SHA256SUMS`` and matches it."""
+    v: list[str] = []
+    d = Path(wheelhouse_dir)
+    if not d.is_dir():
+        return [f"missing wheelhouse directory at {d}"]
+    sums = d / SHA256SUMS
+    if not sums.is_file():
+        return [f"missing wheelhouse SHA256SUMS at {sums}"]
+
+    expected: dict[str, str] = {}
+    for lineno, raw in enumerate(sums.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            v.append(f"malformed SHA256SUMS line {lineno}: expected '<sha256>  <filename>'")
+            continue
+        digest, filename = parts
+        digest = digest.lower()
+        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            v.append(f"malformed SHA256SUMS line {lineno}: invalid sha256 {digest!r}")
+            continue
+        if "/" in filename or "\\" in filename or filename in {".", ".."}:
+            v.append(f"malformed SHA256SUMS line {lineno}: filename must be wheelhouse-local: {filename!r}")
+            continue
+        if not filename.endswith(".whl"):
+            v.append(f"SHA256SUMS entry is not a wheel: {filename}")
+            continue
+        if filename in expected:
+            v.append(f"duplicate SHA256SUMS entry: {filename}")
+            continue
+        expected[filename] = digest
+
+    if not expected:
+        v.append("SHA256SUMS has no wheel entries")
+
+    wheels = set(wheelhouse_wheels(d))
+    listed = set(expected)
+    unlisted = sorted(wheels - listed)
+    if unlisted:
+        v.append(f"wheelhouse wheels missing from SHA256SUMS: {unlisted}")
+    extra = sorted(listed - wheels)
+    if extra:
+        v.append(f"SHA256SUMS entries missing wheel files: {extra}")
+
+    for filename, digest in sorted(expected.items()):
+        path = d / filename
+        if not path.is_file():
+            continue
+        actual = _sha256(path)
+        if actual != digest:
+            v.append(f"SHA256 mismatch for {filename}: expected {digest}, got {actual}")
     return v
 
 
@@ -389,10 +457,13 @@ def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     validators = root / "validators"
     violations: list[str] = []
     violations += pyproject_violations(validators / "pyproject.toml")
-    violations += wheelhouse_violations(validators / "wheelhouse")
+    dependency_wheelhouse_violations = wheelhouse_violations(validators / "wheelhouse")
+    violations += dependency_wheelhouse_violations
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
     violations += verify_generated_version(root)
     details = {
+        "dependency_wheelhouse_ok": not dependency_wheelhouse_violations,
+        "dependency_wheelhouse_violations": list(dependency_wheelhouse_violations),
         "requires_python": REQUIRES_PYTHON,
         "runtime_pins": dict(RUNTIME_PINS),
         "wheelhouse_wheels": wheelhouse_wheels(validators / "wheelhouse"),
