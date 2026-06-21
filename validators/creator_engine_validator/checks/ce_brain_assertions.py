@@ -112,6 +112,20 @@ def _probe_backed_assertion_errors(
             continue
         expected = brain_probe.record_expected_verdict(record)
         if expected is None:
+            errors.append(
+                make_error(
+                    brain_probe.CODE_PROBE_EXPECTED_VERDICT,
+                    path,
+                    _pointer(
+                        pointer_prefix + ((idx,) if include_index else ()) + ("claim", "verdict")
+                    ),
+                    (
+                        f"probe-backed brain assertion for probe {probe_name!r} must declare "
+                        "claim.verdict as one of 'present', 'absent', or 'unknown'"
+                    ),
+                    CONTRACT,
+                )
+            )
             continue
         observed = brain_probe.probe(probe_name, probe_context)
         if observed.verdict == expected:
@@ -182,6 +196,7 @@ def validate_file(path: Path, *, probe_context: brain_probe.ProbeContext | None 
         brain_runtime.CODE_FORBIDDEN_IDENTIFIER,
         brain_runtime.CODE_SUPERSEDE_TARGET,
         brain_runtime.CODE_DUPLICATE_ACTIVE,
+        brain_probe.CODE_PROBE_EXPECTED_VERDICT,
         brain_probe.CODE_PROBE_DISAGREEMENT,
     ],
 )

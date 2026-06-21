@@ -5,6 +5,7 @@ from pathlib import Path
 from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator import brain_probe
 from creator_engine_validator.checks import ce_brain_assertions
+from creator_engine_validator.runtime_evidence_spine import CONTENT_HASH_FIELD, canonical_content_hash
 
 
 def _ledger_text() -> str:
@@ -36,6 +37,13 @@ def _probe_ledger_text(*, verdict: str = "present") -> str:
         write=lambda _path, text: captured.append(text),
     )
     return captured[-1]
+
+
+def _valid_rehashed_probe_ledger_text(mutator) -> str:
+    records = rt.load_ledger_text(_probe_ledger_text(verdict="present"))
+    mutator(records[0])
+    records[0][CONTENT_HASH_FIELD] = canonical_content_hash(records[0])
+    return rt.serialize_ledger(records)
 
 
 def test_valid_brain_ledger_passes(tmp_path: Path):
@@ -168,6 +176,46 @@ def test_probe_backed_assertion_live_unknown_fails_closed(tmp_path: Path):
     )
 
     assert any(error.code == brain_probe.CODE_PROBE_DISAGREEMENT for error in errors), [
+        e.format() for e in errors
+    ]
+
+
+def test_probe_backed_assertion_missing_expected_verdict_fails_closed(tmp_path: Path):
+    path = tmp_path / "assertions.yaml"
+    path.write_text(
+        _valid_rehashed_probe_ledger_text(lambda record: record["claim"].pop("verdict")),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(_context):
+        raise AssertionError("probe layer should not run when the expected verdict is malformed")
+
+    errors = ce_brain_assertions.validate_file(
+        path,
+        probe_context=brain_probe.ProbeContext(probes={"gh_authenticated": fail_if_called}),
+    )
+
+    assert any(error.code == brain_probe.CODE_PROBE_EXPECTED_VERDICT for error in errors), [
+        e.format() for e in errors
+    ]
+
+
+def test_probe_backed_assertion_invalid_expected_verdict_fails_closed(tmp_path: Path):
+    path = tmp_path / "assertions.yaml"
+    path.write_text(
+        _valid_rehashed_probe_ledger_text(lambda record: record["claim"].__setitem__("verdict", "enabled")),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(_context):
+        raise AssertionError("probe layer should not run when the expected verdict is malformed")
+
+    errors = ce_brain_assertions.validate_file(
+        path,
+        probe_context=brain_probe.ProbeContext(probes={"gh_authenticated": fail_if_called}),
+    )
+
+    assert any(error.code == brain_probe.CODE_PROBE_EXPECTED_VERDICT for error in errors), [
         e.format() for e in errors
     ]
 

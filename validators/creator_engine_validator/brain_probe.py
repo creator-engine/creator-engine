@@ -19,6 +19,7 @@ Verdict = Literal["present", "absent", "unknown"]
 ProbeFn = Callable[["ProbeContext"], "ProbeResult"]
 
 CODE_PROBE_DISAGREEMENT = "brain_assertion_probe_disagreement"
+CODE_PROBE_EXPECTED_VERDICT = "brain_assertion_probe_expected_verdict"
 PROBE_EVIDENCE_PREFIX = "probe:"
 _VERDICTS: frozenset[str] = frozenset({"present", "absent", "unknown"})
 _TRUE_VALUES = {"1", "true", "yes", "on", "present", "enabled"}
