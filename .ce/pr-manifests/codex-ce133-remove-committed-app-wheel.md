@@ -5,7 +5,7 @@ committed development first-party app wheel, keep the dependency wheelhouse
 checked, and replace committed-wheel parity with source-built wheel parity.
 
 Base:
-`159866ea32783834ccf2c486c85a949aecf49663` (`origin/main` at rebase).
+`6fceba20ba020eb0cdb80623c3df55cb869cb92e` (`origin/main` at rebase).
 
 Per-file purpose:
 
