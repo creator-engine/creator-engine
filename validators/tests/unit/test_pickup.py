@@ -369,6 +369,22 @@ def test_review_requested_own_pr_is_refused(tmp_path):
     assert forge.assignees == []
 
 
+def test_review_requested_unknown_pr_author_is_refused_fail_closed(tmp_path):
+    forge = _FakeForge()
+    ledger = tmp_path / "l.ndjson"
+    outcome = pickup.claim_item(
+        _item(kind="review_requested"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=ledger,
+        run_id="r", backoff_seconds=0,
+        pr_author_lookup=lambda item, runner: None,
+    )
+    assert outcome.claimed is False
+    assert outcome.reason == "pr_author_unknown_refused"
+    assert forge.comments == []
+    assert forge.assignees == []
+    assert not ledger.exists()
+
+
 def test_review_requested_foreign_pr_is_claimable(tmp_path):
     forge = _FakeForge()
     outcome = pickup.claim_item(

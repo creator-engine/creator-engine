@@ -381,8 +381,9 @@ def default_pr_author_lookup(item: Mapping[str, Any], gh_runner: GhRunner) -> st
     """Resolve a PR's author login via ``GET repos/{repo}/pulls/{n}`` (live read).
 
     Returns ``None`` when the item is not a PR or the read does not yield an
-    author (the caller then treats it as not-own — review proceeds, since an
-    unresolved author cannot be proven to be us). Never raises.
+    author. For ``review_requested`` items, the caller treats ``None`` as
+    indeterminate and refuses before claiming; the no-self-review fence must
+    prove the author is foreign, not merely fail to prove it is us. Never raises.
     """
     repo = str(item.get("repo") or "")
     number = item.get("number")
@@ -460,6 +461,13 @@ def claim_item(
     if item.get("kind") == "review_requested":
         lookup = pr_author_lookup or default_pr_author_lookup
         author = lookup(item, gh_runner)
+        if not author:
+            return ClaimOutcome(
+                item=item,
+                claimed=False,
+                reason="pr_author_unknown_refused",
+                note="PR author lookup was unavailable — refusing review claim fail-closed",
+            )
         if author and author == identity:
             return ClaimOutcome(item=item, claimed=False, reason="own_pr_review_refused",
                                 note=f"PR author {author!r} is this identity — refusing self-review")
