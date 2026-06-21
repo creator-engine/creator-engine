@@ -195,6 +195,36 @@ def test_launch_claim_ticket_binding_is_persisted_in_seat_lifecycle(
     assert adapter.spawned
 
 
+def test_launch_claim_ticket_refuses_tampered_brain_before_work_claim_acquire(
+    tmp_path, use_fake_tmux, monkeypatch, capsys
+):
+    brain_runtime.ledger_path(tmp_path / ".ce" / "state").write_text(
+        "not a valid brain ledger\n",
+        encoding="utf-8",
+    )
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    calls = []
+
+    def _acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("work claim acquire must not run before brain bootstrap preflight")
+
+    monkeypatch.setattr(ce_cli.work_claims, "acquire", _acquire)
+
+    ret = ce_cli.main([
+        "launch",
+        "--session", "ce305",
+        "--repo-root", str(tmp_path),
+        "--claim-ticket", "creator-engine/ce-ops#305",
+    ])
+
+    assert ret != 0
+    assert calls == []
+    assert adapter.spawned == []
+    assert "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED" in capsys.readouterr().err
+
+
 def test_launch_resume_refuses_missing_session(use_fake_tmux):
     adapter = FakeAdapter(sessions=set())
     use_fake_tmux(adapter)

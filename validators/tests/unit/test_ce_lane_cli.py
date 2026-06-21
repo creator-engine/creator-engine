@@ -193,6 +193,37 @@ def test_ce_lane_launch_refuses_tmux_unavailable_before_pane_write(tmp_path, mon
     assert not _pane_path(ledger).exists()
 
 
+def test_ce_lane_launch_claim_ticket_refuses_missing_brain_before_work_claim_acquire(
+    tmp_path, monkeypatch, use_fake_tmux, capsys
+):
+    brain_runtime.ledger_path(tmp_path / ".ce" / "state").unlink()
+    calls = []
+
+    def _acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("work claim acquire must not run before brain bootstrap preflight")
+
+    monkeypatch.setattr(ce_cli.work_claims, "acquire", _acquire)
+    ledger = _ledger(tmp_path)
+    prompt, sha = _prompt(tmp_path)
+
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path,
+            ledger,
+            prompt,
+            sha,
+            claim_ticket="creator-engine/ce-ops#305",
+        )
+    )
+
+    assert ret != 0
+    assert calls == []
+    assert not _pane_path(ledger).exists()
+    assert use_fake_tmux.spawned == []
+    assert "G3-BRAIN-BOOTSTRAP-REFUSED" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # Required RED test — launch writes a pane registry record bound to the claim
 # ---------------------------------------------------------------------------

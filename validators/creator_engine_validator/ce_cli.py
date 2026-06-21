@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from . import (
@@ -928,6 +929,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _lane_launch(args) -> int:
+    brain_code = _preflight_launch_brain_bootstrap(args, "lane launch")
+    if brain_code != 0:
+        return brain_code
     # ce-ops#38: acquire + verify the work claim BEFORE any lane side effect.
     claim_code, claim_ctx = _acquire_launch_claim(args, "lane launch")
     if claim_code != 0:
@@ -2084,6 +2088,9 @@ def _init(args) -> int:
 
 
 def _launch(args, invoked_as: str = "launch") -> int:
+    brain_code = _preflight_launch_brain_bootstrap(args, invoked_as)
+    if brain_code != 0:
+        return brain_code
     # ce-ops#38: acquire + verify the work claim BEFORE any launch side effect.
     claim_code, claim_ctx = _acquire_launch_claim(args, invoked_as)
     if claim_code != 0:
@@ -2455,6 +2462,29 @@ def _release_claim_context(claim_ctx: object, *, reason: str) -> None:
         host=str(host or work_claims.resolve_host()),
         reason=reason,
     )
+
+
+def _preflight_launch_brain_bootstrap(args, invoked_as: str) -> int:
+    if not getattr(args, "claim_ticket", None):
+        return 0
+    try:
+        if invoked_as == "lane launch":
+            state_root = Path(getattr(args, "repo_root", ".")) / V3_LOCAL_STATE_ROOT
+            lane_runtime._build_lane_brain_bootstrap(  # type: ignore[attr-defined]
+                state_root=state_root,
+                role=getattr(args, "role", ""),
+            )
+        else:
+            launch_runtime._build_controller_brain_bootstrap(  # type: ignore[attr-defined]
+                getattr(args, "repo_root", None)
+            )
+    except lane_runtime.LaneLaunchError as exc:
+        print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    except launch_runtime.LaunchError as exc:
+        print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:

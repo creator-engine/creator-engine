@@ -22,16 +22,16 @@ The changes:
   deterministic JSON payload for controller bootstrap injection.
 - Wires `ce brain bootstrap` so the injection payload can be reproduced
   directly.
-- Wires the bootstrap payload into `ce launch` and `ce lane launch` before spawn
-  side effects, exporting only a payload file ref + SHA through the existing
-  seat-sentinel wrapper.
+- Wires the bootstrap payload into `ce launch` and `ce lane launch` before claim
+  acquisition or spawn side effects, exporting only a payload file ref + SHA
+  through the existing seat-sentinel wrapper.
 - Resolves seat class through the existing #163 `seat_class` spine, so absent
   or unknown values fail closed to `foreman`.
 - Adds offline unit and CLI coverage for deterministic load, tamper refusal,
   scope filtering, corrected-assertion reflection, launch refusal/injection,
   and seat-class defaulting.
 
-Per-file purpose (closed path-set - 20 paths):
+Per-file purpose (closed path-set - 22 paths):
 - **`.ce/changelog/ce178-brain-bootstrap.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce178-brain-bootstrap.md`** *(A)* - this carrier.
 - **`validators/creator_engine_validator/_version.py`** *(M)* - regenerated
@@ -39,13 +39,18 @@ Per-file purpose (closed path-set - 20 paths):
 - **`validators/creator_engine_validator/brain_bootstrap.py`** *(A)* -
   deterministic born-knowing bootstrap projection.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - wires
-  `ce brain bootstrap`.
+  `ce brain bootstrap` and preflights launch bootstrap before work-claim
+  acquisition.
 - **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - requires and
   injects the bootstrap payload before governed lane spawn.
 - **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - requires
   and injects the bootstrap payload before controller spawn.
 - **`validators/creator_engine_validator/seat_sentinel.py`** *(M)* - adds
   deterministic wrapper env exports for payload refs.
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - app wheel digest re-pinned
+  after rebuild.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`**
+  *(M)* - rebuilt app wheel containing the bootstrap surface.
 - **`validators/tests/integration/test_ce_brain_cli.py`** *(M)* - CLI
   bootstrap coverage.
 - **`validators/tests/integration/test_claude_launch_refusal.py`** *(M)* -
@@ -74,9 +79,9 @@ Per-file purpose (closed path-set - 20 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=20
+AUTHORIZED_PATHS_COUNT=22
 
-AUTHORIZED_PATHS_SHA256=5945aa1d6f2d2cf1e18f1707011d0a70602cf7b59fadd05e7249a2bfc9da9f5d
+AUTHORIZED_PATHS_SHA256=b98f872e883f4347a5300e8fa31d2b0556b971bb06967a8b1b96bbf403852b02
 
 ```text
 .ce/changelog/ce178-brain-bootstrap.md
@@ -99,4 +104,6 @@ validators/tests/unit/test_lane_runtime_reviewer_venue.py
 validators/tests/unit/test_launch_runtime.py
 validators/tests/unit/test_launch_runtime_resource_bound.py
 validators/tests/unit/test_seat_sentinel.py
+validators/wheelhouse/SHA256SUMS
+validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
