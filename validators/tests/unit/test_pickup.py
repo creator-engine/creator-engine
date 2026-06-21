@@ -64,17 +64,37 @@ def _queries_from_calls(calls):
 
 
 def _assert_explicit_search_type(query):
+    """Reject a Search ``q`` lacking exactly one ``is:pull-request``/``is:issue``.
+
+    This is the offline stand-in for GitHub's issues-search ``HTTP 422`` ("Query
+    must include 'is:issue' or 'is:pull-request'") that the ce-ops#182 belt feed
+    tripped live. The fake transport calls this on every issued query.
+    """
     terms = query.split()
-    assert sum(term in {"is:pull-request", "is:issue"} for term in terms) == 1
+    type_terms = sum(term in {"is:pull-request", "is:issue"} for term in terms)
+    assert type_terms == 1, (
+        "search query must carry exactly one is:pull-request/is:issue type "
+        f"qualifier (GitHub returns HTTP 422 otherwise); got {query!r}"
+    )
 
 
 def _fake_transport(responses, calls=None):
-    """Yield a scripted response per call. Each response is (status, headers, body)."""
+    """Yield a scripted response per call. Each response is (status, headers, body).
+
+    The fake mirrors GitHub's issues-search contract: every issued ``q`` MUST
+    carry exactly one ``is:pull-request`` / ``is:issue`` type qualifier. A query
+    lacking it is rejected here (an ``AssertionError``, standing in for GitHub's
+    real ``HTTP 422: "Query must include 'is:issue' or 'is:pull-request'"``) so
+    the ce-ops#182 untyped-query class of bug can NEVER slip past the offline
+    tests again — no per-test opt-in required.
+    """
     seq = list(responses)
 
     def transport(method, url, headers, body):
         if calls is not None:
             calls.append({"method": method, "url": url, "headers": dict(headers), "body": body})
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("q", [""])[0]
+        _assert_explicit_search_type(query)
         status, resp_headers, resp_body = seq.pop(0)
         return status, dict(resp_headers), resp_body
 
@@ -243,6 +263,23 @@ def test_poll_auth_error_is_fail_closed_and_redacted():
 def test_poll_requires_a_token():
     with pytest.raises(pickup.PickupError):
         pickup.poll(token="", transport=_fake_transport([_empty_search()]))
+
+
+def test_fake_transport_rejects_untyped_query_like_github_422():
+    """The fake transport mirrors GitHub's 422: a query lacking a type qualifier
+    is rejected (this is what let the ce-ops#182 bug ship — the fake was lenient).
+
+    We drive the transport directly with an untyped ``q`` (as the buggy belt feed
+    issued) and assert it raises, proving an untyped query can't pass the offline
+    tests anymore.
+    """
+    transport = _fake_transport([_empty_search()])
+    untyped_url = f"{pickup._API_ROOT}/search/issues?" + urllib.parse.urlencode(
+        {"q": "is:open review-requested:@me"}
+    )
+    with pytest.raises(AssertionError) as exc:
+        transport("GET", untyped_url, {}, None)
+    assert "is:pull-request" in str(exc.value) and "is:issue" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
