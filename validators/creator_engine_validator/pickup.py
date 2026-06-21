@@ -1,19 +1,26 @@
-"""CE ce-ops#55 — the autonomous forge work-pickup poller (the "conveyor belt").
+"""CE ce-ops#55/#182 — the autonomous forge work-pickup poller (the "conveyor belt").
 
 A per-seat **read-only** poller that lets a dev-seat pick up its OWN GitHub
 review-requests / assigned-issues / labeled / @mention work with no human relay.
 
-Adopted design (ce-ops#55, Operator-ratified):
+Adopted design (ce-ops#55, amended by ce-ops#182):
 
-* Poll the GitHub **Notifications API** (``GET /notifications``) with conditional
-  ``If-Modified-Since`` / ``Last-Modified`` requests; honor ``X-Poll-Interval``;
-  a ``304`` is a free no-op (it does not count against the rate limit).
+* Poll the GitHub **Search API** (``GET /search/issues``) instead of
+  ``GET /notifications`` so fine-grained read-only PATs can drive the feed.
+  The query set is deterministic: ``is:open review-requested:@me`` →
+  ``review_requested``, ``is:open assignee:@me`` → ``assigned``,
+  ``is:open mentions:@me`` → ``mention``, and optionally
+  ``is:open label:"…"`` → ``labeled`` for team-label pickup.
 * Per-identity auth via ``~/.ce-keys/ce-dev-N.pat`` (or ``CE_PICKUP_TOKEN``).
-* Resolve each notification thread → a normalized work-item
-  ``{repo, kind, number, url, reason, thread_id}``; the actionable reasons are
-  ``review_requested`` / ``assign`` / ``manual`` (→ ``assigned``) / labeling
-  (→ ``labeled``) / ``mention`` (→ ``mention``). Non-actionable reasons
-  (``subscribed`` / ``comment``) are filtered out.
+  Ambient ``gh auth token`` is used only when explicitly opted into by the local
+  convention (``--allow-ambient-gh`` or ``CE_PICKUP_ALLOW_AMBIENT_GH=1``).
+* Resolve each Search hit → a normalized work-item
+  ``{repo, kind, number, url, reason, thread_id}``. Search has no notification
+  thread id, so the thread id is stable and synthetic:
+  ``search:{reason}:{repo}:{kind}:{number}``.
+* Honor Search API rate limiting by failing closed on HTTP ``403``/``429`` and
+  carrying ``Retry-After`` / ``X-RateLimit-Reset`` metadata to the CLI. The
+  default poll interval is five minutes, which is within the Search API budget.
 
 **Hard Ring-0 constraint (verified in code):** CE refuses headless authoring —
 ``claude_launch_spec.CLAUSE_PRINT`` (``CC-D-2``: ``-p``/``--print``) and
@@ -23,10 +30,10 @@ governed lane via ``ce lane launch`` (S3), fed a seed-file; the poller only
 observes (S1), claims via the forge (S2), and triggers the lane (S3, gated OFF
 by default).
 
-The lone live network touch lives behind an injectable ``transport`` seam (a
-stdlib ``urllib`` HTTPS call by default), mirroring ``forge/app_jwt_runner.py``;
-tests inject fakes and perform ZERO live network / subprocess. Importing this
-module performs no I/O and registers no validator check.
+The live network touch lives behind an injectable ``transport`` seam (a stdlib
+``urllib`` HTTPS call by default), mirroring ``forge/app_jwt_runner.py``; tests
+inject fakes and perform ZERO live network / subprocess. Importing this module
+performs no I/O and registers no validator check.
 
 Defensive only — it picks up the Creator Engine's own work; never offensive.
 """
@@ -34,11 +41,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -55,22 +64,16 @@ _ACCEPT = "application/vnd.github+json"
 DEFAULT_KEYS_DIR = Path.home() / ".ce-keys"
 #: The env override for the seat token (takes precedence over the PAT file).
 TOKEN_ENV = "CE_PICKUP_TOKEN"
+#: Explicit opt-in for falling back to the local ``gh auth token`` store.
+AMBIENT_GH_TOKEN_ENV = "CE_PICKUP_ALLOW_AMBIENT_GH"
 
-#: GitHub's documented minimum notification poll interval (seconds); honored if
-#: the server omits ``X-Poll-Interval`` on a response.
-DEFAULT_POLL_INTERVAL = 60
+#: Search API pickup cadence. Three queries plus optional labels every five
+#: minutes stays within the documented Search API budget for one seat.
+DEFAULT_POLL_INTERVAL = 300
+DEFAULT_SEARCH_PER_PAGE = 100
 
-#: Notification ``reason`` → normalized work-item ``kind``. Any reason NOT in this
-#: map (e.g. ``subscribed`` / ``comment`` / ``state_change`` / ``ci_activity``) is
-#: non-actionable and filtered out — the poller never picks up passive noise.
-_REASON_TO_KIND: dict[str, str] = {
-    "review_requested": "review_requested",
-    "assign": "assigned",
-    "manual": "assigned",
-    "team_mention": "mention",
-    "mention": "mention",
-    "labeled": "labeled",
-}
+_REPO_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_ORG_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class PickupError(Exception):
@@ -79,19 +82,55 @@ class PickupError(Exception):
     code = "PICKUP-INPUT"
 
 
+class PickupRateLimited(PickupError):
+    """Search API refused the poll with a rate-limit/backoff response."""
+
+    code = "PICKUP-RATE-LIMITED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int,
+        retry_after_seconds: int | None = None,
+        rate_limit_reset: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.retry_after_seconds = retry_after_seconds
+        self.rate_limit_reset = rate_limit_reset
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "retry_after_seconds": self.retry_after_seconds,
+            "rate_limit_reset": self.rate_limit_reset,
+        }
+        return {k: v for k, v in payload.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    """One GitHub Search query and the pickup reason assigned to its hits."""
+
+    reason: str
+    query: str
+
+
 @dataclass(frozen=True)
 class PollResult:
-    """The outcome of one read-only notifications poll (PURE value).
+    """The outcome of one read-only Search API poll (PURE value).
 
-    ``not_modified`` is ``True`` for a 304 (a free no-op: empty ``items``, the
-    prior ``last_modified`` carried forward unchanged so the next poll stays
-    conditional). On a 200, ``last_modified`` is the fresh server cursor.
+    Search API has no notification cursor. ``last_modified`` and
+    ``not_modified`` are retained as output fields for the existing belt JSON
+    contract, but they are always ``None`` / ``False`` for Search-backed polls.
     """
 
     items: tuple[dict[str, Any], ...] = ()
     last_modified: str | None = None
     poll_interval: int = DEFAULT_POLL_INTERVAL
     not_modified: bool = False
+    rate_limit: Mapping[str, Any] | None = None
 
 
 def _default_transport(  # pragma: no cover - the lone live HTTPS shell; tests inject a fake
@@ -107,14 +146,25 @@ def _default_transport(  # pragma: no cover - the lone live HTTPS shell; tests i
 
 
 def resolve_token(
-    *, keys_dir: Path | str | None = None, identity: str, environ: Mapping[str, str] | None = None
+    *,
+    keys_dir: Path | str | None = None,
+    identity: str,
+    environ: Mapping[str, str] | None = None,
+    allow_ambient_gh: bool = False,
+    gh_token_runner: Callable[[], subprocess.CompletedProcess] | None = None,
 ) -> str:
-    """Resolve the per-identity PAT: ``$CE_PICKUP_TOKEN`` else ``<keys_dir>/<identity>.pat``.
+    """Resolve the per-identity PAT without ever logging its value.
+
+    Order:
+
+    1. ``$CE_PICKUP_TOKEN``.
+    2. ``<keys_dir>/<identity>.pat`` (default ``~/.ce-keys/<identity>.pat``).
+    3. Ambient ``gh auth token`` only when explicitly enabled by local convention
+       (``allow_ambient_gh`` or ``CE_PICKUP_ALLOW_AMBIENT_GH=1``).
 
     Per-identity auth keeps the pickup loop running as the dev's OWN account (the
     #137 identity model), never a shared/overwatch token. A missing credential
-    raises :class:`PickupError` (fail-closed) — a token-less poller would silently
-    fall back to ambient auth.
+    raises :class:`PickupError` (fail-closed).
     """
     env = os.environ if environ is None else environ
     env_token = env.get(TOKEN_ENV)
@@ -126,70 +176,39 @@ def resolve_token(
         text = pat.read_text(encoding="utf-8").strip()
         if text:
             return text
+    if allow_ambient_gh or _truthy(env.get(AMBIENT_GH_TOKEN_ENV)):
+        ambient_env = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN")
+        if ambient_env and ambient_env.strip():
+            return ambient_env.strip()
+        ambient = _ambient_gh_token(gh_token_runner)
+        if ambient:
+            return ambient
     raise PickupError(
-        f"no pickup token for identity {identity!r}: set ${TOKEN_ENV} or write {pat}"
+        f"no pickup token for identity {identity!r}: set ${TOKEN_ENV}, write {pat}, "
+        f"or opt into ambient gh auth with ${AMBIENT_GH_TOKEN_ENV}=1"
     )
 
 
-def _api_to_web_url(api_url: str, subject_type: str) -> str:
-    """Map a notification subject API url → the human ``github.com`` url.
-
-    ``…/repos/o/r/pulls/7`` → ``https://github.com/o/r/pull/7`` and
-    ``…/repos/o/r/issues/5`` → ``https://github.com/o/r/issues/5``. An
-    unrecognized url is returned unchanged (best-effort; never raises).
-    """
-    marker = "/repos/"
-    idx = api_url.find(marker)
-    if idx < 0:
-        return api_url
-    tail = api_url[idx + len(marker):]  # o/r/pulls/7
-    parts = tail.split("/")
-    if len(parts) >= 4 and parts[2] in ("pulls", "issues"):
-        owner, repo, kind, number = parts[0], parts[1], parts[2], parts[3]
-        web_kind = "pull" if kind == "pulls" else "issues"
-        return f"https://github.com/{owner}/{repo}/{web_kind}/{number}"
-    return api_url
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _subject_number(api_url: str) -> int | None:
-    """Extract the trailing issue/PR number from a subject API url."""
-    tail = api_url.rstrip("/").rsplit("/", 1)[-1]
-    return int(tail) if tail.isdigit() else None
-
-
-def resolve_thread(raw: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Normalize one notification thread → a work-item, or ``None`` if non-actionable.
-
-    A work-item is ``{repo, kind, number, url, reason, thread_id, title,
-    subject_type}``. A thread whose ``reason`` is not in :data:`_REASON_TO_KIND`
-    (``subscribed`` / ``comment`` / …) yields ``None`` (filtered). A thread with no
-    resolvable issue/PR number also yields ``None`` (nothing to act on).
-    """
-    if not isinstance(raw, Mapping):
+def _ambient_gh_token(
+    gh_token_runner: Callable[[], subprocess.CompletedProcess] | None = None,
+) -> str | None:
+    runner = gh_token_runner or _default_gh_token_runner
+    try:
+        proc = runner()
+    except Exception:
         return None
-    reason = str(raw.get("reason") or "")
-    kind = _REASON_TO_KIND.get(reason)
-    if kind is None:
+    if getattr(proc, "returncode", 1) != 0:
         return None
-    subject = raw.get("subject") if isinstance(raw.get("subject"), Mapping) else {}
-    repo_obj = raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
-    repo = str(repo_obj.get("full_name") or "")
-    api_url = str(subject.get("url") or "")
-    number = _subject_number(api_url)
-    if not repo or number is None:
-        return None
-    subject_type = str(subject.get("type") or "")
-    return {
-        "repo": repo,
-        "kind": kind,
-        "number": number,
-        "url": _api_to_web_url(api_url, subject_type),
-        "reason": reason,
-        "thread_id": str(raw.get("id") or ""),
-        "title": subject.get("title"),
-        "subject_type": subject_type,
-        "updated_at": raw.get("updated_at"),
-    }
+    token = (getattr(proc, "stdout", "") or "").strip()
+    return token or None
+
+
+def _default_gh_token_runner() -> subprocess.CompletedProcess:  # pragma: no cover - local gh seam
+    return subprocess.run(["gh", "auth", "token"], check=False, capture_output=True, text=True, timeout=30)
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -200,75 +219,228 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
     return None
 
 
+def build_queries(
+    *,
+    labels: Sequence[str] = (),
+    repo: str | None = None,
+    org: str | None = None,
+) -> tuple[SearchQuery, ...]:
+    """Build the deterministic Search API query set for one poll."""
+    if repo and org:
+        raise PickupError("--repo and --org are mutually exclusive search scopes")
+    scope_terms: list[str] = []
+    if repo:
+        if not _REPO_SCOPE_RE.match(repo):
+            raise PickupError(f"--repo must be owner/name, got {repo!r}")
+        scope_terms.append(f"repo:{repo}")
+    if org:
+        if not _ORG_SCOPE_RE.match(org):
+            raise PickupError(f"--org must be a GitHub organization/user slug, got {org!r}")
+        scope_terms.append(f"org:{org}")
+
+    specs = [
+        SearchQuery("review_requested", " ".join(["is:open", "review-requested:@me", *scope_terms])),
+        SearchQuery("assigned", " ".join(["is:open", "assignee:@me", *scope_terms])),
+        SearchQuery("mention", " ".join(["is:open", "mentions:@me", *scope_terms])),
+    ]
+    for label in _normalize_labels(labels):
+        specs.append(SearchQuery("labeled", " ".join(["is:open", _label_term(label), *scope_terms])))
+    return tuple(specs)
+
+
+def _normalize_labels(labels: Sequence[str]) -> tuple[str, ...]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in labels or ():
+        for part in str(raw).split(","):
+            label = part.strip()
+            if label and label not in seen:
+                seen.add(label)
+                out.append(label)
+    return tuple(out)
+
+
+def _label_term(label: str) -> str:
+    escaped = label.replace("\\", "\\\\").replace('"', '\\"')
+    return f'label:"{escaped}"'
+
+
 def poll(
     *,
     token: str,
     transport: Transport | None = None,
-    last_modified: str | None = None,
-    all_threads: bool = False,
+    labels: Sequence[str] = (),
+    repo: str | None = None,
+    org: str | None = None,
+    per_page: int = DEFAULT_SEARCH_PER_PAGE,
 ) -> PollResult:
-    """One READ-ONLY notifications poll → a :class:`PollResult` (observe-only).
+    """One READ-ONLY Search API poll → a :class:`PollResult` (observe-only).
 
-    Issues ``GET /notifications`` with ``Authorization: Bearer <token>`` and, when
-    ``last_modified`` is set, a conditional ``If-Modified-Since`` header. A ``304``
-    returns an empty-items :class:`PollResult` (``not_modified=True``) carrying the
-    prior cursor forward — the free no-op that keeps the loop cheap under the rate
-    limit. A ``200`` parses the JSON array, resolves each thread to a work-item
-    (filtering non-actionable reasons), and captures the fresh ``Last-Modified`` +
-    ``X-Poll-Interval``. This NEVER mutates the forge.
+    This issues one ``GET /search/issues`` request per configured reason query,
+    normalizes hits to the belt work-item shape, de-duplicates overlapping query
+    hits by ``(repo, number)``, and NEVER mutates the forge.
     """
     if not token or not token.strip():
-        raise PickupError("poll requires a non-empty token (a token-less poll falls back to ambient auth)")
+        raise PickupError("poll requires a non-empty token")
     _transport = transport or _default_transport
-    headers = {
-        "Authorization": f"Bearer {token.strip()}",
-        "Accept": _ACCEPT,
-        "X-GitHub-Api-Version": _API_VERSION,
-    }
-    if last_modified:
-        headers["If-Modified-Since"] = last_modified
-    url = f"{_API_ROOT}/notifications"
-    if all_threads:
-        url += "?all=true"
-
-    status, resp_headers, body = _transport("GET", url, headers, None)
-
-    if status == 304:
-        return PollResult(items=(), last_modified=last_modified, not_modified=True,
-                          poll_interval=_interval(resp_headers))
-    if not (200 <= status < 300):
-        raise PickupError(f"notifications poll failed (HTTP {status})")
-
-    try:
-        payload = json.loads(body) if body and body.strip() else []
-    except (ValueError, TypeError) as exc:
-        raise PickupError(f"unparseable notifications payload: {exc}") from exc
-    threads = payload if isinstance(payload, list) else []
-
+    queries = build_queries(labels=labels, repo=repo, org=org)
     items: list[dict[str, Any]] = []
-    for raw in threads:
-        item = resolve_thread(raw) if isinstance(raw, Mapping) else None
-        if item is not None:
-            items.append(item)
+    rate_limit: dict[str, Any] = {}
 
-    new_last_modified = _header(resp_headers, "Last-Modified") or last_modified
+    for query in queries:
+        page_items, rate_limit = _search_once(
+            token=token.strip(),
+            transport=_transport,
+            query=query,
+            per_page=per_page,
+        )
+        items.extend(page_items)
+
     return PollResult(
-        items=tuple(items),
-        last_modified=new_last_modified,
-        poll_interval=_interval(resp_headers),
+        items=tuple(_dedupe_items(items)),
+        last_modified=None,
+        poll_interval=DEFAULT_POLL_INTERVAL,
         not_modified=False,
+        rate_limit=rate_limit or None,
     )
 
 
-def _interval(headers: Mapping[str, str]) -> int:
-    raw = _header(headers, "X-Poll-Interval")
+def _search_once(
+    *,
+    token: str,
+    transport: Transport,
+    query: SearchQuery,
+    per_page: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": _ACCEPT,
+        "X-GitHub-Api-Version": _API_VERSION,
+    }
+    params = urllib.parse.urlencode({
+        "q": query.query,
+        "per_page": str(per_page),
+        "sort": "updated",
+        "order": "desc",
+    })
+    url = f"{_API_ROOT}/search/issues?{params}"
+    status, resp_headers, body = transport("GET", url, headers, None)
+
+    if status in (403, 429):
+        raise _rate_limited(status, resp_headers)
+    if not (200 <= status < 300):
+        raise PickupError(f"search poll failed (HTTP {status})")
+
+    try:
+        payload = json.loads(body) if body and body.strip() else {}
+    except (ValueError, TypeError) as exc:
+        raise PickupError(f"unparseable search payload: {exc}") from exc
+    hits = payload.get("items", []) if isinstance(payload, Mapping) else []
+
+    items: list[dict[str, Any]] = []
+    for raw in hits if isinstance(hits, list) else []:
+        item = resolve_search_hit(raw, query.reason) if isinstance(raw, Mapping) else None
+        if item is not None:
+            items.append(item)
+    return items, _rate_limit_payload(resp_headers)
+
+
+def _rate_limited(status: int, headers: Mapping[str, str]) -> PickupRateLimited:
+    retry_after = _parse_positive_int(_header(headers, "Retry-After"))
+    reset = _header(headers, "X-RateLimit-Reset")
+    return PickupRateLimited(
+        f"search poll failed closed (HTTP {status}); retry later",
+        status=status,
+        retry_after_seconds=retry_after,
+        rate_limit_reset=reset,
+    )
+
+
+def _rate_limit_payload(headers: Mapping[str, str]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for header, key in (
+        ("X-RateLimit-Limit", "limit"),
+        ("X-RateLimit-Remaining", "remaining"),
+        ("X-RateLimit-Reset", "reset"),
+        ("Retry-After", "retry_after_seconds"),
+    ):
+        value = _header(headers, header)
+        if value is not None:
+            payload[key] = _parse_positive_int(value) if key != "reset" else value
+    return payload
+
+
+def _parse_positive_int(raw: str | None) -> int | None:
     if raw is None:
-        return DEFAULT_POLL_INTERVAL
+        return None
     try:
         value = int(str(raw).strip())
     except (ValueError, TypeError):
-        return DEFAULT_POLL_INTERVAL
-    return value if value > 0 else DEFAULT_POLL_INTERVAL
+        return None
+    return value if value > 0 else None
+
+
+def resolve_search_hit(raw: Mapping[str, Any], reason: str) -> dict[str, Any] | None:
+    """Normalize one Search API issue/PR hit into the belt work-item shape."""
+    repo = _repo_from_search_hit(raw)
+    number = _issue_number(raw.get("number"))
+    if not repo or number is None:
+        return None
+    is_pr = isinstance(raw.get("pull_request"), Mapping)
+    subject_type = "PullRequest" if is_pr else "Issue"
+    url = str(raw.get("html_url") or "").strip()
+    if not url:
+        web_kind = "pull" if is_pr else "issues"
+        url = f"https://github.com/{repo}/{web_kind}/{number}"
+    kind = reason
+    return {
+        "repo": repo,
+        "kind": kind,
+        "number": number,
+        "url": url,
+        "reason": reason,
+        "thread_id": f"search:{reason}:{repo}:{kind}:{number}",
+        "title": raw.get("title"),
+        "subject_type": subject_type,
+        "updated_at": raw.get("updated_at"),
+    }
+
+
+def _repo_from_search_hit(raw: Mapping[str, Any]) -> str | None:
+    repo_url = str(raw.get("repository_url") or "")
+    marker = "/repos/"
+    if marker in repo_url:
+        slug = repo_url.split(marker, 1)[1].strip("/")
+        parts = slug.split("/")
+        if len(parts) >= 2:
+            return f"{parts[0]}/{parts[1]}"
+    html = str(raw.get("html_url") or "")
+    marker = "github.com/"
+    if marker in html:
+        slug = html.split(marker, 1)[1].split("/")
+        if len(slug) >= 2:
+            return f"{slug[0]}/{slug[1]}"
+    return None
+
+
+def _issue_number(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _dedupe_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for item in items:
+        key = (str(item.get("repo") or ""), int(item.get("number") or 0))
+        if not key[0] or key[1] <= 0 or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
 
 
 # ===========================================================================
@@ -560,8 +732,8 @@ _DEFAULT_ROLE = "implementer"
 _DEFAULT_LANE_KIND = "implementation"
 
 #: The lane-launch sentinel that confirms the seat is live (the lane runtime's
-#: registered lifecycle state). The notification thread is marked read ONLY after
-#: this is observed — never on a mere spawn-exit-0.
+#: registered lifecycle state). Search-backed work has no read-state API; this
+#: sentinel still gates launch success and seed bookkeeping.
 LAUNCHED_STATE = "launched"
 
 
@@ -611,7 +783,7 @@ def build_seed(
         f"You are picking up auto-detected forge work as **{identity}** ({role} lane).\n\n"
         f"- repo: {item.get('repo')}\n"
         f"- item: #{item.get('number')} ({item.get('subject_type')})\n"
-        f"- kind: {item.get('kind')} (notification reason: {item.get('reason')})\n"
+        f"- kind: {item.get('kind')} (pickup reason: {item.get('reason')})\n"
         f"- url: {item.get('url')}\n"
         f"- title: {item.get('title')}\n"
         f"- claim_id: {claim_id}\n"
@@ -660,8 +832,8 @@ def launch_lane(
     """Write a seed and spawn a fresh governed ``ce lane launch`` for a claimed item.
 
     Returns ``launched=True`` ONLY when the spawn exits 0 AND its JSON reports the
-    lane's :data:`LAUNCHED_STATE` sentinel — the caller marks the notification
-    thread read only on that confirmation, never on a bare exit-0.
+    lane's :data:`LAUNCHED_STATE` sentinel. Search-backed pickup has no
+    notification read marker; the claim ledger remains the idempotency gate.
     """
     runner = spawn or _default_spawn
     seed = build_seed(item, identity=identity, run_id=run_id, claim_id=claim_id, seed_root=seed_root)
@@ -691,14 +863,14 @@ def launch_lane(
 
 
 def mark_thread_read(thread_id: str, *, gh_runner: GhRunner) -> bool:
-    """Mark a notification thread read (``PATCH /notifications/threads/{id}``).
+    """Best-effort notification read marker for legacy thread ids.
 
-    Called ONLY after a launch confirms :data:`LAUNCHED_STATE` — so an item the
-    poller could not actually pick up stays unread and is retried next tick.
-    Best-effort: a failure leaves the thread unread (a benign re-pickup that the
-    dedup ledger + forge-arbitrated acquire then short-circuit). Never raises.
+    Search-backed pickup thread ids are synthetic (``search:…``) and cannot be
+    marked read through GitHub. For those, this is an explicit no-op. Legacy
+    notification ids are retained for backward compatibility and are marked only
+    after a launch confirms :data:`LAUNCHED_STATE`.
     """
-    if not thread_id:
+    if not thread_id or str(thread_id).startswith("search:"):
         return False
     try:
         proc = gh_runner(
