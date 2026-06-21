@@ -73,7 +73,11 @@ properties:
     type: string
     minLength: 1
     maxLength: 128
-    pattern: "^[A-Za-z0-9_.:/-]+$"
+    description: >-
+      Value-free attestor label. Must be a local actor class and label pair
+      such as `operator:peer-operator`; never a URL, hostname, filesystem path,
+      repository path, or client-specific locator.
+    pattern: "^[A-Za-z][A-Za-z0-9_-]{0,31}:[A-Za-z][A-Za-z0-9_-]{0,63}$"
   attested_at:
     type: string
     pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$"

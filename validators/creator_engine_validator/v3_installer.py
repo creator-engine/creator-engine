@@ -2068,6 +2068,13 @@ def _canonical_json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
+_BROWNFIELD_ATTESTOR_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}:[A-Za-z][A-Za-z0-9_-]{0,63}$")
+
+
+def _valid_brownfield_attestor_ref(value: Any) -> bool:
+    return isinstance(value, str) and bool(_BROWNFIELD_ATTESTOR_REF_RE.fullmatch(value))
+
+
 def brownfield_baseline_attestation_record(
     *,
     baseline_commit_sha: str,
@@ -2083,6 +2090,10 @@ def brownfield_baseline_attestation_record(
     and value-free scrub metadata; the returned record self-attests via
     ``content_digest`` over canonical JSON excluding that field.
     """
+    if not _valid_brownfield_attestor_ref(attestor_ref):
+        raise ValueError(
+            "attestor_ref must be a value-free actor label pair like 'operator:peer-operator'"
+        )
     scanners = scrub_result.get("scanners") if isinstance(scrub_result, Mapping) else ()
     scanner_rows: list[dict[str, str]] = []
     if isinstance(scanners, Iterable) and not isinstance(scanners, (str, bytes, Mapping)):

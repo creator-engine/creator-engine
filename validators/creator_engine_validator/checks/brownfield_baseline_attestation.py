@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -22,6 +23,9 @@ CODE_SCHEMA = "VAL-BROWNFIELD-BASELINE-ATTESTATION-SCHEMA"
 CODE_INVALID = "VAL-BROWNFIELD-BASELINE-ATTESTATION-INVALID"
 CODE_CONTENT_DIGEST = "VAL-BROWNFIELD-BASELINE-ATTESTATION-DIGEST"
 CODE_SECRET = "VAL-BROWNFIELD-BASELINE-ATTESTATION-SECRET"
+CODE_VALUE_FREE = "VAL-BROWNFIELD-BASELINE-ATTESTATION-VALUE-FREE"
+
+_ATTESTOR_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}:[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
 
 def _is_yaml(path: Path) -> bool:
@@ -81,8 +85,23 @@ def _canonical_content_digest(record: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _attestor_ref_is_value_free(value: Any) -> bool:
+    return isinstance(value, str) and bool(_ATTESTOR_REF_RE.fullmatch(value))
+
+
 def validate_brownfield_baseline_attestation(record: dict[str, Any], path: Path) -> list[ValidationError]:
     errors = list(validate_with_schema(record, SCHEMA, path, code=CODE_SCHEMA, contract=CONTRACT))
+    if not _attestor_ref_is_value_free(record.get("attestor_ref")):
+        errors.append(
+            make_error(
+                CODE_VALUE_FREE,
+                path,
+                "/attestor_ref",
+                "attestor_ref must be a value-free actor label pair like 'operator:peer-operator'; "
+                "URLs, hostnames, filesystem paths, repository paths, and client-specific locators are refused",
+                CONTRACT,
+            )
+        )
     if _contains_secret(record):
         errors.append(
             make_error(
@@ -108,7 +127,7 @@ def validate_brownfield_baseline_attestation(record: dict[str, Any], path: Path)
     return errors
 
 
-@register(CHECK_NAME, [CODE_SCHEMA, CODE_INVALID, CODE_CONTENT_DIGEST, CODE_SECRET])
+@register(CHECK_NAME, [CODE_SCHEMA, CODE_INVALID, CODE_CONTENT_DIGEST, CODE_SECRET, CODE_VALUE_FREE])
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
     for record_path in iter_brownfield_baseline_attestations(paths):

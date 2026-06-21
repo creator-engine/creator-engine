@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import yaml
+import pytest
 from jsonschema import Draft202012Validator
 
 from creator_engine_validator import v3_installer
@@ -85,6 +86,66 @@ def test_schema_rejects_raw_scrub_findings_or_unknown_fields():
     assert _schema_errors(record)
 
 
+@pytest.mark.parametrize(
+    "attestor_ref",
+    [
+        "https://github.com/creator-engine/creator-engine",
+        "creator-engine.dev",
+        "/home/operator/baseline",
+        "docs/baseline.yaml",
+        "operator.peer-operator",
+    ],
+)
+def test_schema_rejects_value_bearing_attestor_refs(attestor_ref: str):
+    record = _record()
+    record["attestor_ref"] = attestor_ref
+
+    assert _schema_errors(record)
+
+
+@pytest.mark.parametrize(
+    "attestor_ref",
+    [
+        "https://github.com/creator-engine/creator-engine",
+        "creator-engine.dev",
+        "/home/operator/baseline",
+        "docs/baseline.yaml",
+    ],
+)
+def test_registered_check_rejects_value_bearing_attestor_refs(tmp_path: Path, attestor_ref: str):
+    record = _record()
+    record["attestor_ref"] = attestor_ref
+    path = tmp_path / "baseline.yaml"
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+
+    result = chk.run([tmp_path])
+
+    assert any(error.code == chk.CODE_VALUE_FREE for error in result.errors)
+
+
+@pytest.mark.parametrize(
+    "attestor_ref",
+    [
+        "https://github.com/creator-engine/creator-engine",
+        "creator-engine.dev",
+        "/home/operator/baseline",
+        "docs/baseline.yaml",
+    ],
+)
+def test_builder_rejects_value_bearing_attestor_refs(attestor_ref: str):
+    with pytest.raises(ValueError, match="attestor_ref"):
+        v3_installer.brownfield_baseline_attestation_record(
+            baseline_commit_sha=BASELINE_SHA,
+            snapshot_content_digest=SNAPSHOT_DIGEST,
+            scrub_result={
+                "status": "clean",
+                "scanners": [{"name": "gitleaks", "version": "8.28.0", "result": "clean"}],
+            },
+            attestor_ref=attestor_ref,
+            attested_at="2026-06-21T08:30:00Z",
+        )
+
+
 def test_registered_check_enforces_content_digest(tmp_path: Path):
     assert chk.CHECK_NAME in registered_checks()
     record = _record()
@@ -99,4 +160,3 @@ def test_registered_check_enforces_content_digest(tmp_path: Path):
 
     result = chk.run([tmp_path])
     assert any(error.code == chk.CODE_CONTENT_DIGEST for error in result.errors)
-
