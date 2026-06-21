@@ -19,8 +19,8 @@ commands. Two modes, one human contract.
   hash-published.
 - **Agent-native** — the operator points their agent at the CE site; the agent
   fetches the **signed install spec** (`llms-install.md`), **verifies it against a
-  pinned CE public key BEFORE executing**, and assists from the same inventory
-  artifact.
+  pinned CE public key plus an out-of-band fingerprint anchor BEFORE executing**,
+  and assists from the same inventory artifact.
 
 E1 stops at authenticated inventory. It does **not** run sudo, provision the
 runtime backend, automate the GitHub-App click, mutate branch protections, or
@@ -35,10 +35,11 @@ authorization click.
 
 `docs/install.sh` is the shell I/O edge. Its ordered contract is:
 
-1. Fetch only `llms-install.md` and `keys/ce-root-v1` into a mode-0700 temp
-   workspace.
+1. Fetch only `llms-install.md`, `keys/ce-root-v1`, and the out-of-band
+   trust-anchor assertion into a mode-0700 temp workspace.
 2. Reconstruct canonical bytes, check `content_sha256`, verify the embedded
-   SSHSIG with stock `ssh-keygen -Y verify`, and refuse before persistent
+   SSHSIG with stock `ssh-keygen -Y verify`, require the out-of-band anchor to
+   match the fetched trust-root key fingerprint, and refuse before persistent
    mutation on any failure.
 3. Parse the signature-covered artifact manifest from `llms-install.md`.
 4. Fetch `downloads/0.2.0/SHA256SUMS`, verify its signed-manifest hash, and
@@ -53,7 +54,7 @@ authorization click.
 7. Execute:
 
    ```text
-   <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
+   <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
    ```
 
 The Pages mirror lives under `docs/downloads/0.2.0/`. Its `SHA256SUMS` publishes

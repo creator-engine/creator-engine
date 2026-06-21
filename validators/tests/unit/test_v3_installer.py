@@ -423,9 +423,15 @@ def _embedded_signature_value(spec_text: str):
     return m.group(1).strip() if m else None
 
 
+def _embedded_signature_key_id(spec_text: str):
+    m = _re.search(r"(?m)^  key_id: (.+)$", spec_text)
+    return m.group(1).strip() if m else None
+
+
 _SSH_KEYGEN = _shutil.which("ssh-keygen")
 _SPEC_TEXT = _LLMS_INSTALL.read_text(encoding="utf-8") if _LLMS_INSTALL.exists() else ""
 _EMBEDDED_VALUE = _embedded_signature_value(_SPEC_TEXT)
+_EMBEDDED_KEY_ID = _embedded_signature_key_id(_SPEC_TEXT)
 _SIGNED = (
     _EMBEDDED_VALUE is not None
     and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
@@ -438,7 +444,7 @@ _SIGNED = (
 def test_e2e_real_sshsig_through_require_verified_positive_and_tampered():
     pinned = inst.parse_allowed_signers(_KEY_FILE.read_text(encoding="utf-8"))
     canonical = inst.canonical_spec_bytes(_SPEC_TEXT)
-    sig = {"key_id": "ce-root-v1", "algo": inst.SSH_ED25519_ALGO, "value": _EMBEDDED_VALUE}
+    sig = {"key_id": _EMBEDDED_KEY_ID, "algo": inst.SSH_ED25519_ALGO, "value": _EMBEDDED_VALUE}
     verifier = inst.ssh_ed25519_verifier(_real_ssh_keygen_runner)
     # positive: require_verified (the real onboard gate) accepts the signed spec
     assert inst.require_verified(canonical, sig, pinned_keys=pinned, verifier=verifier).ok
