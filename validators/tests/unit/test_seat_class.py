@@ -74,6 +74,18 @@ def test_coordination_path_edit_is_coordination():
     ) == "coordination"
 
 
+def test_coordination_path_prefixes_none_is_empty_and_total():
+    assert (
+        classify_work_class(
+            "Edit",
+            "docs/contracts/seat-class-policy.md",
+            "docs",
+            coordination_path_prefixes=None,
+        )
+        == "implementation"
+    )
+
+
 def test_foreman_would_deny_only_implementation_for_required_classes():
     reason = foreman_would_deny("foreman", "implementation", "code", POLICY)
     assert reason is not None
@@ -96,6 +108,13 @@ def test_resolve_seat_class_fails_closed():
     assert resolve_seat_class("FOREMAN") == "foreman"
 
 
+def test_resolve_seat_class_absent_or_unknown_ignores_default_and_fails_closed():
+    assert resolve_seat_class(None, default="worker") == "foreman"
+    assert resolve_seat_class("", default="worker") == "foreman"
+    assert resolve_seat_class("bogus", default="worker") == "foreman"
+    assert resolve_seat_class("worker", default="foreman") == "worker"
+
+
 def test_determinism_as_identical_json_bytes():
     kwargs = {
         "tool": "Bash",
@@ -111,4 +130,3 @@ def test_totality_over_work_classes_and_baseline_mutation_classes():
     assert WORK_CLASSES == frozenset({"coordination", "implementation", "restricted"})
     for work_class, mutation_class in product(WORK_CLASSES, BASELINE_MUTATION_CLASSES):
         foreman_would_deny("foreman", work_class, mutation_class, POLICY)
-

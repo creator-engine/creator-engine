@@ -38,11 +38,11 @@ _IMPLEMENTATION_MARKERS: Final[frozenset[str]] = frozenset(
 
 def resolve_seat_class(raw: str | None, *, default: str = "foreman") -> str:
     """Resolve a launch-pinned seat class, failing closed to ``foreman``."""
+    del default  # API compatibility only; absence/unknown always fail closed.
     candidate = str(raw or "").strip().lower()
     if candidate in SEAT_CLASSES:
         return candidate
-    default_candidate = str(default or "").strip().lower()
-    return default_candidate if default_candidate in SEAT_CLASSES else "foreman"
+    return "foreman"
 
 
 def _tokens(command: str | None) -> tuple[str, ...]:
@@ -137,7 +137,7 @@ def classify_work_class(
     if tool_name in _COORDINATION_TOOLS:
         return "coordination"
 
-    prefixes = tuple(str(prefix) for prefix in coordination_path_prefixes)
+    prefixes = tuple(str(prefix) for prefix in (coordination_path_prefixes or ()))
     if tool_name in _MUTATING_TOOLS:
         if _coordination_path_match(command, prefixes):
             return "coordination"
@@ -181,4 +181,3 @@ def foreman_would_deny(
     if str(mutation_class or "") not in _policy_required_classes(policy):
         return None
     return "implementation work requires worker delegation"
-
