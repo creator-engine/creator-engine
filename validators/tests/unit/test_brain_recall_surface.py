@@ -384,6 +384,145 @@ def test_absent_ssot_ledger_is_empty_not_error(tmp_path: Path):
     assert result.recall_items, "probabilistic recall still answers with no SSOT ledger"
 
 
+def _ingest_scoped_corpus(
+    tmp_path: Path,
+    *,
+    public_count: int,
+    confidential_as_of: str = AS_OF,
+) -> tuple[Path, Path]:
+    """Ingest ``public_count`` ``public`` chunks plus a single ``confidential`` one.
+
+    Reproduces ce-ops#181 finding 3: the lone filtered match must survive even
+    when the surrounding (unfiltered) corpus is far larger than ``top_k * 4``, so
+    a fixed unfiltered retrieval window would otherwise drop it.
+    """
+
+    state_root = tmp_path / ".ce" / "state"
+    db_path = state_root / "brain" / "recall.sqlite"
+
+    # Public chunks repeat every query token heavily, so they dominate BOTH the
+    # semantic and the keyword leg and crowd the lone confidential record well
+    # outside the unfiltered `top_k * 4` window (semantic ~rank 16, keyword last).
+    public_corpus = tmp_path / "public"
+    public_corpus.mkdir(exist_ok=True)
+    for idx in range(public_count):
+        _write(
+            public_corpus,
+            f"public_{idx:03d}.md",
+            f"# Merge queue prior art {idx}\n\n"
+            f"merge queue prior art merge queue prior art merge queue prior art note {idx}.\n",
+        )
+    ingest.ingest_markdown(
+        sources=[str(public_corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope="public",
+        as_of=AS_OF,
+    )
+
+    # The confidential record matches only weakly (one query token, once) so it
+    # ranks at the bottom of both legs — exactly the slice a truncated window drops.
+    conf_corpus = tmp_path / "confidential"
+    conf_corpus.mkdir(exist_ok=True)
+    _write(
+        conf_corpus,
+        "secret.md",
+        "# Merge\n\nmerge.\n",
+    )
+    ingest.ingest_markdown(
+        sources=[str(conf_corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope="confidential",
+        as_of=confidential_as_of,
+    )
+    return state_root, db_path
+
+
+def test_scope_filter_pushes_past_truncated_retrieval_window(tmp_path: Path):
+    """ce-ops#181 finding 3: a lone scoped match outside top_k*4 must survive.
+
+    30 ``public`` chunks + 1 ``confidential`` chunk, queried top_k=1 with
+    ``scope='confidential'``, used to return ZERO because the unfiltered leg
+    fetch (top_k*4 = 4 candidates) never reached the single confidential record.
+    The filter must be honoured as part of retrieval (paged), so it returns the
+    confidential record, not nothing.
+    """
+
+    state_root, db_path = _ingest_scoped_corpus(tmp_path, public_count=30)
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+
+    result = surf.recall("merge queue prior art", top_k=1, scope="confidential")
+    recall_items = result.recall_items
+    assert len(recall_items) == 1, "the lone confidential match must survive filtering"
+    assert recall_items[0].scope == "confidential"
+    assert recall_items[0].source_path == "secret.md"
+
+    # And the public scope still returns its matches (no regression).
+    public = surf.recall("merge queue prior art", top_k=3, scope="public")
+    assert public.recall_items
+    assert all(item.scope == "public" for item in public.recall_items)
+
+
+def test_as_of_filter_pushes_past_truncated_retrieval_window(tmp_path: Path):
+    """ce-ops#181 finding 3 (as-of variant): a lone in-window record survives.
+
+    Many ``public`` records stamped AS_OF plus a single record stamped in the
+    far future; an ``as_of`` bound BELOW AS_OF excludes the bulk corpus, leaving
+    only... well, here we invert it: the bulk is future-stamped and the lone
+    match is the in-bound record, which must page through past the truncated
+    unfiltered window rather than being dropped.
+    """
+
+    state_root = tmp_path / ".ce" / "state"
+    db_path = state_root / "brain" / "recall.sqlite"
+
+    # 30 future-stamped public records that dominate both legs (excluded by an
+    # AS_OF bound) — they crowd the lone in-bound record outside the window.
+    future_corpus = tmp_path / "future"
+    future_corpus.mkdir(exist_ok=True)
+    for idx in range(30):
+        _write(
+            future_corpus,
+            f"future_{idx:03d}.md",
+            f"# Merge queue prior art {idx}\n\n"
+            f"merge queue prior art merge queue prior art merge queue prior art future {idx}.\n",
+        )
+    ingest.ingest_markdown(
+        sources=[str(future_corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope="public",
+        as_of=LATER_AS_OF,
+    )
+
+    # ... plus one weakly-matching in-bound record stamped AS_OF (ranks last).
+    past_corpus = tmp_path / "past"
+    past_corpus.mkdir(exist_ok=True)
+    _write(
+        past_corpus,
+        "inbound.md",
+        "# Merge\n\nmerge.\n",
+    )
+    ingest.ingest_markdown(
+        sources=[str(past_corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope="public",
+        as_of=AS_OF,
+    )
+
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+
+    # An as_of bound at AS_OF excludes the 30 future records, leaving the lone
+    # inbound record — which must survive the paged retrieval, not be truncated.
+    result = surf.recall("merge queue prior art", top_k=1, as_of=AS_OF)
+    recall_items = result.recall_items
+    assert len(recall_items) == 1, "the lone in-as_of-bound match must survive filtering"
+    assert recall_items[0].source_path == "inbound.md"
+    assert recall_items[0].as_of == AS_OF
+
+
 def test_keyword_leg_queries_fts5(tmp_path: Path):
     """The FTS5 column populated by F6.2 is now queried (keyword leg)."""
 

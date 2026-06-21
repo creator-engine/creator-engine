@@ -267,13 +267,42 @@ class BrainRecallSurface:
         as_of: str | None,
         allow_confidential_egress: bool,
     ) -> tuple[SurfaceItem, ...]:
-        # Over-fetch each leg so fusion has candidates beyond the final top_k.
+        # CORRECTNESS (ce-ops#181 finding 3): the scope/as-of filters must be
+        # honoured AS PART OF retrieval, not applied to an already-truncated
+        # window. A naive fixed `top_k * 4` leg fetch drops valid filtered
+        # records when the matching slice falls outside that unfiltered window
+        # (e.g. 30 `public` + 1 `confidential`, top_k=1 --scope confidential
+        # used to return zero). We page each leg with a geometrically growing
+        # window, re-fusing and re-filtering, until we have `top_k` matching
+        # records OR every leg is exhausted — so a single rare match anywhere in
+        # the store is still surfaced. The legs are scanned-in-full + ranked by
+        # the store, so paging only widens how deep we look, never re-orders.
         leg_k = max(top_k * 4, top_k)
-        semantic = self._semantic_hits(
-            context, top_k=leg_k, allow_confidential_egress=allow_confidential_egress
-        )
-        keyword = self._keyword_hits(context, top_k=leg_k)
-        fused = _reciprocal_rank_fusion(semantic, keyword)
+        while True:
+            semantic = self._semantic_hits(
+                context, top_k=leg_k, allow_confidential_egress=allow_confidential_egress
+            )
+            keyword = self._keyword_hits(context, top_k=leg_k)
+            fused = _reciprocal_rank_fusion(semantic, keyword)
+            items = self._filtered_recall_items(
+                fused, top_k=top_k, scope=scope, as_of=as_of
+            )
+            # Enough matches after filtering, or both legs are exhausted (each
+            # returned fewer than we asked for => the store has no deeper
+            # candidates to page into). Either way, stop.
+            legs_exhausted = len(semantic) < leg_k and len(keyword) < leg_k
+            if len(items) >= top_k or legs_exhausted:
+                return items
+            leg_k *= 2
+
+    @staticmethod
+    def _filtered_recall_items(
+        fused: Sequence[tuple[RecallRecord, float]],
+        *,
+        top_k: int,
+        scope: str | None,
+        as_of: str | None,
+    ) -> tuple[SurfaceItem, ...]:
         items: list[SurfaceItem] = []
         for record, score in fused:
             if scope is not None and record.scope != scope:
