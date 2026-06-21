@@ -41,6 +41,7 @@ from .checks import completion_report_required_for_envelope, completion_report_s
 from .checks import mutation_class
 from .checks.completion_report_terminal_sections import CANONICAL_HEADERS, _header_positions
 from .checks.path_manifest_fidelity import extract_manifest_paths_from_file
+from .seat_class import classify_work_class, foreman_would_deny, resolve_seat_class
 
 # v3.5-B.3 refusal-record seam: the SHARED hash-chain substrate only
 # (V1->shared is the allowed boundary edge). The v3 evidence-persistence sink
@@ -59,6 +60,8 @@ SCOPE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
 
 OUT_OF_MANIFEST_REASON = "tracked path is outside the ratified path manifest"
 NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
+FOREMAN_DELEGATION_REASON = "implementation work requires worker delegation"
+DEFAULT_FOREMAN_MUTATION_CLASS = "code"
 
 
 # --------------------------------------------------------------------------
@@ -87,6 +90,8 @@ class HookContext:
     closeout_text: str | None = None
     completion_report_path: str | None = None
     side_effect_authority: dict | None = None
+    seat_class: str = "foreman"
+    seat_class_policy: dict | None = None
     repo_root: str | None = None
     posture_note: str | None = None
 
@@ -619,6 +624,36 @@ def _secret_would_deny(file_path: Any, context: HookContext) -> str | None:
     return f"read of credential-like path denied (matched rule: {category})"
 
 
+def _mutation_class_from_event(event: dict) -> str:
+    ce = event.get("ce") if isinstance(event.get("ce"), dict) else {}
+    value = ce.get("mutation_class")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return DEFAULT_FOREMAN_MUTATION_CLASS
+
+
+def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
+    tool = event.get("tool_name") or event.get("toolName") or ""
+    tool_input = event.get("tool_input") or event.get("toolInput") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    command = tool_input.get("command") if tool == "Bash" else tool_input.get("file_path")
+    policy = context.seat_class_policy or {}
+    prefixes = policy.get("coordination_path_prefixes") if isinstance(policy, dict) else ()
+    work_class = classify_work_class(
+        str(tool),
+        command if isinstance(command, str) else None,
+        _mutation_class_from_event(event),
+        coordination_path_prefixes=prefixes if isinstance(prefixes, (list, tuple)) else (),
+    )
+    return foreman_would_deny(
+        context.seat_class,
+        work_class,
+        _mutation_class_from_event(event),
+        policy,
+    )
+
+
 # --------------------------------------------------------------------------
 # Stop / completion-report closeout
 # --------------------------------------------------------------------------
@@ -831,10 +866,11 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
     # ADVISORY (allow-with-warning), not a hard deny — author-time scope
     # containment moves to the PR-diff gate (path_manifest_fidelity --base). The
     # secret-path and restricted-mechanic denies are UNCHANGED: they remain hard
-    # denies under governed posture. Branch on the reason so only the manifest
-    # outcome is relaxed.
+    # denies under governed posture. Foreman delegation is also WARN-only in
+    # this slice. Branch on the reason so only these outcomes are relaxed.
     manifest_mismatch = would_deny_reason == OUT_OF_MANIFEST_REASON
-    if context.posture == "governed" and not manifest_mismatch:
+    foreman_delegation = would_deny_reason == FOREMAN_DELEGATION_REASON
+    if context.posture == "governed" and not manifest_mismatch and not foreman_delegation:
         return HookDecision(
             ok=True,
             hook_event_name="PreToolUse",
@@ -852,6 +888,8 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
     # path-manifest mismatch (G-i). Still report what would have been denied.
     if manifest_mismatch and context.posture == "governed":
         reason = f"advisory (governed; manifest enforcement is advisory): would deny — {would_deny_reason}"
+    elif foreman_delegation and context.posture == "governed":
+        reason = f"advisory (governed; foreman observation is WARN-only): would deny — {would_deny_reason}"
     else:
         reason = f"advisory (ungoverned): would deny — {would_deny_reason}"
     if context.posture_note:
@@ -884,6 +922,8 @@ def _evaluate_pre_tool_use(event: dict, context: HookContext) -> HookDecision:
         would_deny_reason = _secret_would_deny(tool_input.get("file_path"), context)
     elif tool == "Bash":
         would_deny_reason = _mechanics_would_deny(tool_input.get("command"), context)
+    if would_deny_reason is None:
+        would_deny_reason = _foreman_would_deny(event, context)
     # Other tools have no governed scope/mechanics/secret rule here → allow.
     return _pre_tool_use_decision(would_deny_reason, context)
 
@@ -1066,6 +1106,33 @@ def _resolve_side_effect_authority(ce: dict, posture_root: str | None) -> dict |
     return rec if isinstance(rec, dict) else None
 
 
+def _resolve_seat_class_policy(ce: dict, posture_root: str | None) -> dict | None:
+    """Resolve inline ``ce.seat_class_policy`` or ``ce.seat_class_policy_ref``.
+
+    The live-arm slice is WARN-only, so runtime resolution deliberately avoids
+    adding schema coupling here. Invalid/missing refs fail closed by returning no
+    policy; the pure helper then uses its default required mutation classes.
+    """
+    from .loader import LoaderError, load_yaml
+
+    inline = ce.get("seat_class_policy")
+    if isinstance(inline, dict):
+        return inline
+    ref = ce.get("seat_class_policy_ref")
+    if not isinstance(ref, str) or not ref:
+        return None
+    search = [Path(posture_root) / ref, Path(ref)] if posture_root else [Path(ref)]
+    for path in search:
+        if not path.is_file():
+            continue
+        try:
+            candidate = load_yaml(path)
+        except LoaderError:
+            return None
+        return candidate if isinstance(candidate, dict) else None
+    return None
+
+
 def build_context(
     event: dict,
     *,
@@ -1094,6 +1161,9 @@ def build_context(
     evidence_root = evidence_root or ce.get("evidence_root")
     completion_report = completion_report or ce.get("completion_report")
     side_effect_authority = _resolve_side_effect_authority(ce, posture_root)
+    seat_class_policy = _resolve_seat_class_policy(ce, posture_root)
+    policy_seat_class = seat_class_policy.get("seat_class") if isinstance(seat_class_policy, dict) else None
+    seat_class = resolve_seat_class(ce.get("seat_class") or policy_seat_class)
 
     closeout_text = ce.get("closeout_text")
     if closeout_file:
@@ -1109,6 +1179,8 @@ def build_context(
         closeout_text=closeout_text,
         completion_report_path=completion_report,
         side_effect_authority=side_effect_authority,
+        seat_class=seat_class,
+        seat_class_policy=seat_class_policy,
         repo_root=posture_root,
         posture_note=manifest.posture_note,
     )

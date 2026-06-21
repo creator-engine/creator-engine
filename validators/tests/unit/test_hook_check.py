@@ -387,6 +387,146 @@ def test_ungoverned_secret_read_is_advisory_allow():
     assert decision.would_have_denied is True
 
 
+# --- Foreman seat-class WARN-only observation ------------------------------
+
+
+def test_foreman_implementation_work_warns_without_refusal_record(tmp_path):
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {"mutation_class": "code"}
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        repo_root=str(tmp_path),
+        seat_class="foreman",
+        seat_class_policy={"delegation_required_mutation_classes": ["code"]},
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert decision.would_have_denied is True
+    assert decision.hook_specific_output["permissionDecision"] == "allow"
+    assert "worker delegation" in decision.reason
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_foreman_implementation_work_without_mutation_class_warns():
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="foreman",
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "allow"
+    assert decision.advisory is True
+    assert decision.would_have_denied is True
+    assert "worker delegation" in decision.reason
+
+
+def test_worker_implementation_work_does_not_warn(tmp_path):
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {"mutation_class": "code"}
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        repo_root=str(tmp_path),
+        seat_class="worker",
+        seat_class_policy={"delegation_required_mutation_classes": ["code"]},
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "allow"
+    assert decision.advisory is False
+    assert decision.would_have_denied is False
+    assert "worker delegation" not in decision.reason
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_foreman_coordination_work_does_not_warn():
+    event = _bash_event("git status --porcelain")
+    event["ce"] = {"mutation_class": "code"}
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="foreman",
+        seat_class_policy={"delegation_required_mutation_classes": ["code"]},
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "allow"
+    assert decision.advisory is False
+    assert decision.would_have_denied is False
+
+
+def test_foreman_coordination_path_mutation_does_not_warn():
+    event = _edit_event(".ce/changelog/ce163-foreman-warn-arm.md", tool="Write")
+    event["ce"] = {"mutation_class": "code"}
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=(".ce/changelog/ce163-foreman-warn-arm.md",),
+        seat_class="foreman",
+        seat_class_policy={
+            "delegation_required_mutation_classes": ["code"],
+            "coordination_path_prefixes": [".ce/changelog/"],
+        },
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "allow"
+    assert decision.advisory is False
+    assert decision.would_have_denied is False
+
+
+def test_restricted_mechanic_still_hard_denies_before_foreman_warning(tmp_path):
+    event = _bash_event("git push origin main")
+    event["ce"] = {"mutation_class": "deploy"}
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        repo_root=str(tmp_path),
+        seat_class="foreman",
+        seat_class_policy={"delegation_required_mutation_classes": ["deploy"]},
+    )
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "deny"
+    assert decision.advisory is False
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "restricted mechanic (deploy)" in decision.reason
+    assert "worker delegation" not in decision.reason
+    assert len(_load_refusal_records(tmp_path)) == 1
+
+
+def test_build_context_resolves_seat_class_policy_and_fails_closed_to_foreman(tmp_path):
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "seat_class": "nonsense",
+        "seat_class_policy": {
+            "seat_class": "worker",
+            "delegation_required_mutation_classes": ["code"],
+        },
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+
+    assert ctx.seat_class == "foreman"
+    assert ctx.seat_class_policy == event["ce"]["seat_class_policy"]
+    decision = hook_check.evaluate(event, ctx)
+    assert decision.advisory is True
+    assert "worker delegation" in decision.reason
+
+
 # --- Stop / completion-report closeout -------------------------------------
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -609,6 +611,14 @@ def _hook_check(args) -> int:
         print("ERROR: hook-check: event JSON must be an object", file=sys.stderr)
         return 2
 
+    seat_class = _launch_pinned_seat_class_from_env()
+    if seat_class:
+        ce = event.get("ce")
+        if not isinstance(ce, dict):
+            ce = {}
+            event["ce"] = ce
+        ce["seat_class"] = seat_class
+
     # G2.007.3: a live reviewer venue exports its authority ref via the launch-pinned
     # environment; the hook forwards it here. Inject it as ce.reviewer_authority_ref so
     # build_context() resolves it exactly as the synthetic probes proved — but never
@@ -639,6 +649,44 @@ def _hook_check(args) -> int:
         payload = decision.to_dict()
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
+
+
+def _launch_pinned_seat_class_from_env() -> str:
+    """Resolve the launch-pinned brain-bootstrap seat class, failing to foreman.
+
+    The hook event itself is not the authority for seat class. A governed launch
+    writes a bootstrap payload and exports its path plus digest; only a matching
+    payload can opt a seat down to ``worker``. Missing or invalid payloads fail
+    closed to ``foreman`` so event-local seat-class claims cannot weaken the live
+    hook posture.
+    """
+    from . import brain_bootstrap
+
+    ref = os.environ.get(brain_bootstrap.BOOTSTRAP_REF_ENV)
+    expected = os.environ.get(brain_bootstrap.BOOTSTRAP_SHA256_ENV)
+    if not ref and not expected:
+        return "foreman"
+    if not ref or not expected:
+        return "foreman"
+    try:
+        data = Path(ref).read_bytes()
+    except OSError:
+        return "foreman"
+    if hashlib.sha256(data).hexdigest() != expected:
+        return "foreman"
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return "foreman"
+    if not isinstance(payload, dict):
+        return "foreman"
+    context = payload.get("context")
+    if not isinstance(context, dict):
+        return "foreman"
+    raw = context.get("seat_class")
+    if raw == "worker":
+        return "worker"
+    return "foreman"
 
 
 def _resolve_ledger_root(args_ledger_root: str | None, repo_root_path: Path) -> Path:
