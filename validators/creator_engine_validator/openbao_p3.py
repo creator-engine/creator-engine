@@ -398,6 +398,10 @@ def make_openbao_http_runner(
         }
         if request.token:
             headers["X-Vault-Token"] = request.token
+        if request.wrap_ttl_seconds is not None:
+            if request.wrap_ttl_seconds <= 0:
+                raise SecretIdentityRefused("OpenBao wrap_ttl_seconds must be positive")
+            headers["X-Vault-Wrap-TTL"] = f"{request.wrap_ttl_seconds}s"
         body = None
         if request.json is not None:
             body = json.dumps(request.json, separators=(",", ":")).encode("utf-8")
