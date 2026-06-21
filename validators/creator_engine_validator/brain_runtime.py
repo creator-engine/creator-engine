@@ -214,8 +214,6 @@ def _records_from_doc(data: Any, path: Path | str) -> list[dict[str, Any]]:
     records = data.get("records")
     if not isinstance(records, list):
         raise BrainLedgerInvalid("brain assertion ledger records must be a list")
-    if not records:
-        return []
     errors = validate_ledger_doc(data, path)
     if errors:
         raise BrainLedgerInvalid(errors)

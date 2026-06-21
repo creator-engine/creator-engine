@@ -108,6 +108,41 @@ def test_unknown_claim_returns_unknown_without_guessing():
     assert result.record is None
 
 
+def test_on_disk_empty_records_ledger_fails_closed_and_is_not_rewritten(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+    path = state_root / "brain" / "assertions.yaml"
+    path.parent.mkdir(parents=True)
+    original = yaml.safe_dump(
+        {
+            "kind": rt.LEDGER_KIND,
+            "record_type": rt.LEDGER_RECORD_TYPE,
+            "schema_version": rt.SCHEMA_VERSION,
+            "records": [],
+        },
+        sort_keys=True,
+    )
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(rt.BrainLedgerInvalid):
+        rt.load_records(state_root)
+
+    with pytest.raises(rt.BrainLedgerInvalid):
+        rt.check_claim(claim=CLAIM, scope=SCOPE, state_root=state_root)
+
+    write = CaptureWrite()
+    with pytest.raises(rt.BrainLedgerInvalid):
+        rt.assert_claim(
+            claim={"subject": "brain", "predicate": "new", "object": "fact"},
+            scope=SCOPE,
+            evidence_ref=EVIDENCE,
+            state_root=state_root,
+            assertion_id="brain-assertion-runtime-0003",
+            write=write,
+        )
+    assert write.calls == []
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_schema_invalid_ledger_fails_closed():
     sink = CaptureWrite()
     _assert(write=sink)
