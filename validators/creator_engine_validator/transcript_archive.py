@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .git_worktree import find_enclosing_git_worktree
+
 
 class ArchiveError(Exception):
     """Base class for transcript archive errors."""
@@ -52,14 +54,7 @@ def sha256_bytes(data: bytes) -> str:
 
 def _detect_repo_root(path: Path) -> Path | None:
     """Walk up from ``path`` looking for an enclosing git work tree."""
-    try:
-        current = path.resolve()
-    except OSError:
-        current = path
-    for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
+    return find_enclosing_git_worktree(path)
 
 
 def _is_inside(path: Path, root: Path) -> bool:

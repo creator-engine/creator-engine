@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
 from .checks import pcl_record as pcl_check
+from .git_worktree import find_enclosing_git_worktree
 from .schema import validate_with_schema
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schemas" / "pcl-record.schema.yaml"
@@ -204,14 +205,7 @@ def _default_git_runner(argv: Sequence[str]) -> subprocess.CompletedProcess:
 
 
 def _detect_repo_root(path: Path) -> Path | None:
-    try:
-        current = path.resolve()
-    except OSError:
-        current = path
-    for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
+    return find_enclosing_git_worktree(path)
 
 
 def _is_inside(path: Path, root: Path) -> bool:

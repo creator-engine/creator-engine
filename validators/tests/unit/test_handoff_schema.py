@@ -115,6 +115,18 @@ def test_run_walks_tree(tmp_path: Path):
     assert result.ok, [e.format() for e in result.errors]
 
 
+def test_run_ignores_empty_ancestor_dot_git(tmp_path: Path):
+    ambient = tmp_path / "ambient"
+    doc_root = ambient / "pytest-case"
+    (ambient / ".git").mkdir(parents=True)
+    doc_root.mkdir()
+    (doc_root / "h.md").write_text(VALID_HANDOFF_FRONT_MATTER)
+
+    result = run([doc_root])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
 def test_cli_scan_handoffs_runs(capsys, tmp_path: Path):
     (tmp_path / "h.md").write_text(VALID_HANDOFF_FRONT_MATTER)
     exit_code = main(["scan-handoffs", str(tmp_path)])

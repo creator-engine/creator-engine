@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..git_worktree import is_git_worktree_root
 from ..loader import LoaderError
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
@@ -109,7 +110,7 @@ def _validate_with_jsonschema(instance: Any, schema: dict[str, Any]) -> list[str
 def _repo_root_for(path: Path) -> Path:
     def _walk(start: Path) -> Path | None:
         for candidate in (start, *start.parents):
-            if (candidate / ".git").exists() or (candidate / "validators").is_dir():
+            if is_git_worktree_root(candidate) or (candidate / "validators").is_dir():
                 return candidate
         return None
 

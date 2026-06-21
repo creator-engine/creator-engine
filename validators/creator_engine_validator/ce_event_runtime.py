@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
 from .checks import ce_event_block as block_check
+from .git_worktree import find_enclosing_git_worktree
 from .schema import validate_with_schema
 
 # The block schema lives at the repo root; resolve it package-relatively so the
@@ -185,14 +186,7 @@ def _default_git_runner(argv: Sequence[str]) -> subprocess.CompletedProcess:
 
 
 def _detect_repo_root(path: Path) -> Path | None:
-    try:
-        current = path.resolve()
-    except OSError:
-        current = path
-    for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
+    return find_enclosing_git_worktree(path)
 
 
 def _is_inside(path: Path, root: Path) -> bool:

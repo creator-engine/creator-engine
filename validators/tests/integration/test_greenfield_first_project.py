@@ -6,14 +6,14 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import v3_cli
-from validators.tests.unit.test_v3_cli import _GREENFIELD_ANSWERS_YAML, _brownfield_cli_probe, _spec
+from validators.tests.unit.test_v3_cli import _brownfield_cli_probe, _greenfield_answers_yaml, _spec
 
 
 def test_greenfield_onboard_plan_is_read_only_and_bootstrap_not_ship(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
     root = tmp_path / "state"
     answers = tmp_path / "ce-install.answers.yaml"
-    answers.write_text(_GREENFIELD_ANSWERS_YAML, encoding="utf-8")
+    answers.write_text(_greenfield_answers_yaml(tmp_path), encoding="utf-8")
 
     code = v3_cli.main([
         "onboard",

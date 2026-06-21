@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from . import side_effect_ledger_runtime
+from .git_worktree import find_enclosing_git_worktree
 from .loader import LoaderError, load_yaml
 from .schema import validate_with_schema
 
@@ -153,14 +154,7 @@ def _default_git_runner(argv: Sequence[str]) -> subprocess.CompletedProcess:
 
 
 def _detect_repo_root(path: Path) -> Path | None:
-    try:
-        current = path.resolve()
-    except OSError:
-        current = path
-    for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
+    return find_enclosing_git_worktree(path)
 
 
 def _is_inside(path: Path, root: Path) -> bool:

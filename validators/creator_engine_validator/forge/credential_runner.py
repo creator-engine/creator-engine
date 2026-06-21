@@ -43,9 +43,8 @@ from collections.abc import Sequence
 from .github_repo_config import ForgeConfigRefused, GhRunner
 from .scoped_token import ScopedToken
 
-#: Competing ambient auth env vars dropped from the child so the scoped ``GH_TOKEN`` is unambiguous.
-#: ``GH_TOKEN`` already wins by precedence; neutralizing these is defense-in-depth.
-_NEUTRALIZED_AUTH_ENV = ("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+#: Ambient auth env vars dropped before setting the scoped ``GH_TOKEN`` explicitly.
+_NEUTRALIZED_AUTH_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 
 #: Endpoint/debug host vars scrubbed from the child env so an inherited host var can neither
 #: redirect the ``Authorization`` header to a non-github host (``GH_HOST`` / ``GITHUB_API_URL`` /

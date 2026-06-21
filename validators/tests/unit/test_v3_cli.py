@@ -1122,6 +1122,14 @@ project:
 """
 
 
+def _greenfield_answers_yaml(tmp_path: Path) -> str:
+    return _GREENFIELD_ANSWERS_YAML.replace(
+        "host:\n  sudo_grant: [git, python, runsc, proxy]\n",
+        f"host:\n  sudo_grant: [git, python, runsc, proxy]\n"
+        f"  workspace_root: {tmp_path / 'greenfield-workspaces'}\n",
+    )
+
+
 def _spec(tmp_path):
     spec = tmp_path / "llms-install.md"
     spec.write_text("# Install CE\n", encoding="utf-8")
@@ -1505,7 +1513,7 @@ def test_onboard_authentic_plan_trust_anchor_evidence_is_value_free(tmp_path, ca
 
 def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
-    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    answers = _answers_file(tmp_path, _greenfield_answers_yaml(tmp_path))
     code = v3_cli.main([
         "onboard",
         "--spec", str(_spec(tmp_path)),
@@ -1917,7 +1925,7 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
     root = tmp_path / "state"
-    greenfield_answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    greenfield_answers = _answers_file(tmp_path, _greenfield_answers_yaml(tmp_path))
     code = v3_cli.main([
         "onboard", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(greenfield_answers),
@@ -1980,7 +1988,7 @@ def test_onboard_apply_solo_pilot_os_native_not_refused_without_runsc_or_proxy(t
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
     # solo-pilot, EMPTY sudo grant — governance-only, zero privileged installs.
-    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML.replace(
+    answers = _answers_file(tmp_path, _greenfield_answers_yaml(tmp_path).replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
     code = v3_cli.main([
         "onboard", "--spec", str(_signed_spec(tmp_path)),
@@ -2008,7 +2016,7 @@ def test_onboard_apply_team_gvisor_still_refuses_when_runsc_proxy_missing(tmp_pa
         raise AssertionError("apply_onboard must not run when the gvisor-proxy preflight refuses")
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
-    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML.replace(
+    answers = _answers_file(tmp_path, _greenfield_answers_yaml(tmp_path).replace(
         "profile: solo-pilot", "profile: team").replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
     code = v3_cli.main([
@@ -2038,7 +2046,7 @@ def test_onboard_apply_solo_pilot_os_native_real_e2e_succeeds_with_held_runtime(
     monkeypatch.setattr(onboard_apply, "ApplyDriver", FakeDriver)
 
     root = tmp_path / "state"
-    answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
+    answers = _answers_file(tmp_path, _greenfield_answers_yaml(tmp_path))
     code = v3_cli.main([
         "onboard", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers), "--apply", "--non-interactive",

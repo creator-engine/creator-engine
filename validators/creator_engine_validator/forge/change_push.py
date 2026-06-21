@@ -61,9 +61,9 @@ from .scoped_token import ScopedToken
 # forge convention, so the frozen sibling modules stay byte-unchanged and this module couples to none.
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 
-#: Competing ambient auth env vars dropped from the child so the scoped ``GH_TOKEN`` is unambiguous
-#: (the ``credential_runner.py:48`` convention, re-defined locally).
-_NEUTRALIZED_AUTH_ENV = ("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+#: Ambient auth env vars dropped from child envs. Authenticated calls set an explicit scoped
+#: ``GH_TOKEN`` after this scrub; local read-only git calls remain token-clean.
+_NEUTRALIZED_AUTH_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 #: Endpoint/debug host vars scrubbed so an inherited host var can neither redirect auth to a
 #: non-github host nor echo the bearer via gh's debug (the ``credential_runner.py:55`` convention).
 _SCRUBBED_CHILD_ENV = ("GH_DEBUG", "GH_HOST", "GH_CONFIG_DIR", "GITHUB_API_URL")
