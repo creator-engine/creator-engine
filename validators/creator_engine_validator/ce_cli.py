@@ -778,6 +778,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="harness for the spawned governed lane (S3)")
     pp.add_argument("--seed-root", default=None, dest="seed_root",
                     help="directory for per-item seed files (S3; default: <ledger-root>/seeds)")
+    pp.add_argument("--backoff-seconds", type=float, default=1.0, dest="backoff_seconds",
+                    help="re-read backoff for the fail-closed acquire race (default: 1.0)")
     pp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce launch / ce hud — deterministic visible Controller-seat launcher
@@ -2072,6 +2074,17 @@ def _make_pickup_transport():
     return _pickup._default_transport
 
 
+def _make_pickup_gh_runner(identity: str):
+    """Factory for the per-identity pickup gh runner (monkeypatchable in tests).
+
+    Resolves the seat's own PAT (the #137 identity model) and returns a runner
+    that injects it into the child ``gh`` env — never ambient/overwatch auth.
+    """
+    from . import pickup as _pickup
+    token = _pickup.resolve_token(identity=identity)
+    return _pickup.make_gh_runner(token)
+
+
 def _pickup_poll(args) -> int:
     from . import pickup
 
@@ -2119,10 +2132,78 @@ def _pickup_poll(args) -> int:
 def _pickup_claim_and_launch(args, pickup, result) -> int:
     """S2/S3: forge-arbitrate a claim per actionable item, then (S3, gated) launch a lane.
 
-    Built incrementally — S2 wires the claim + dedup ledger (dry-run), S3 wires the
-    gated `ce lane launch`. See ``runner/pickup.py`` for the claim/ledger primitives.
+    S2 wires the claim + dedup ledger (dry-run: a successful claim prints "would
+    launch" but does NOT spawn a lane). S3 wires the gated `ce lane launch` behind
+    ``--enable-launch`` (a per-seat canary, default OFF). See ``pickup.py``.
     """
-    raise NotImplementedError("pickup --claim is wired in slice S2")
+    import os as _os
+
+    from . import pickup as _pickup
+
+    ledger_root = args.pickup_ledger_root or _os.path.join(_versions.V3_LOCAL_STATE_ROOT, "pickup")
+    ledger_path = _os.path.join(ledger_root, _pickup.DEFAULT_LEDGER_NAME)
+    run_id = args.pickup_run_id or f"pickup-{args.identity}-{result.last_modified or 'init'}"
+    gh_runner = _make_pickup_gh_runner(args.identity)
+
+    repo_fence = getattr(args, "repo", None)
+    enable_launch = bool(getattr(args, "enable_launch", False))
+
+    claims: list[dict] = []
+    for item in result.items:
+        if repo_fence and item["repo"] != repo_fence:
+            claims.append({**item, "claimed": False, "reason": "out_of_repo_fence",
+                           "would_launch": False, "launched": False})
+            continue
+        outcome = _pickup.claim_item(
+            item, identity=args.identity, gh_runner=gh_runner,
+            ledger_path=ledger_path, run_id=run_id,
+            backoff_seconds=getattr(args, "backoff_seconds", 1.0),
+        )
+        record = {
+            "repo": item["repo"], "kind": item["kind"], "number": item["number"],
+            "url": item["url"], "thread_id": item["thread_id"],
+            "claimed": outcome.claimed, "reason": outcome.reason,
+            "claim_id": outcome.claim_id,
+            "would_launch": outcome.claimed and not enable_launch,
+            "launched": False,
+            "seed_path": None,
+        }
+        if outcome.claimed and enable_launch:
+            record = _pickup_launch_for_outcome(args, _pickup, outcome, gh_runner, record)
+        claims.append(record)
+
+    payload = {
+        "ok": True,
+        "not_modified": result.not_modified,
+        "last_modified": result.last_modified,
+        "poll_interval": result.poll_interval,
+        "enable_launch": enable_launch,
+        "claims": claims,
+        "claimed_count": sum(1 for c in claims if c["claimed"]),
+        "count": len(claims),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"ce pickup poll: {payload['claimed_count']}/{len(claims)} item(s) claimed "
+              f"(launch {'ON' if enable_launch else 'OFF — dry-run'})")
+        for c in claims:
+            if c["claimed"] and c["would_launch"]:
+                print(f"  + would launch lane for [{c['kind']}] {c['repo']}#{c['number']} {c['url']}")
+            elif c["claimed"] and c["launched"]:
+                print(f"  ✓ launched lane for [{c['kind']}] {c['repo']}#{c['number']} (seed {c['seed_path']})")
+            else:
+                print(f"  - skipped [{c['kind']}] {c['repo']}#{c['number']} ({c['reason']})")
+    return 0
+
+
+def _pickup_launch_for_outcome(args, pickup, outcome, gh_runner, record) -> dict:
+    """S3: write a seed file + spawn a governed lane for a successfully-claimed item.
+
+    Wired in slice S3 (gated behind --enable-launch). Until then a claim with the
+    flag set still records launched=False (no spawn).
+    """
+    raise NotImplementedError("pickup --enable-launch is wired in slice S3")
 
 
 def _emit_pickup(args, code: int, message: str, payload) -> int:

@@ -34,12 +34,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from . import work_claims
 
 #: HTTPS transport: ``(method, url, headers, body) -> (status, headers, body_text)``.
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
@@ -266,3 +269,265 @@ def _interval(headers: Mapping[str, str]) -> int:
     except (ValueError, TypeError):
         return DEFAULT_POLL_INTERVAL
     return value if value > 0 else DEFAULT_POLL_INTERVAL
+
+
+# ===========================================================================
+# S2 — claim + idempotency (forge-arbitrated claim + an append-only dedup ledger).
+# ===========================================================================
+
+#: The append-only dedup ledger (NDJSON), mirroring ``runner/notify_feed.py``'s
+#: pure-fold pattern: the dedup key is ``(thread_id, item_id, action)`` and carries
+#: ONLY GitHub server timestamps — NO wall-clock diffing — so it is idempotent
+#: across restarts and re-polls by construction.
+DEFAULT_LEDGER_NAME = "ledger.ndjson"
+
+#: The single pickup ``action`` recorded today (one per picked-up thread).
+ACTION_CLAIM = "claim"
+
+#: A GhRunner runs a ``gh`` invocation (argv incl. the leading "gh") with an
+#: optional stdin body — the same shape as ``work_claims.GhRunner``.
+GhRunner = Callable[[Sequence[str], "str | None"], "subprocess.CompletedProcess"]
+
+#: A PR-author lookup: ``(item, gh_runner) -> author_login`` (the independent-
+#: reviewer fence input). Injectable so tests perform zero live forge reads.
+PrAuthorLookup = Callable[[Mapping[str, Any], GhRunner], "str | None"]
+
+
+@dataclass(frozen=True)
+class ClaimOutcome:
+    """The outcome of attempting to claim one work-item (PURE value).
+
+    ``claimed`` is the gate for an S3 launch. ``reason`` is one of: ``claimed`` /
+    ``already_seen`` (dedup) / ``own_pr_review_refused`` (independent-reviewer) /
+    ``active_foreign_claim`` / ``stale_foreign_claim`` / ``lost_after_reread`` /
+    ``no_number``. ``would_launch`` / ``launched`` are set by the S3 caller.
+    """
+
+    item: Mapping[str, Any]
+    claimed: bool
+    reason: str
+    claim_id: str | None = None
+    posted_url: str | None = None
+    would_launch: bool = False
+    launched: bool = False
+    seed_path: str | None = None
+    note: str | None = None
+
+
+def ledger_key(thread_id: str, item_id: str, action: str) -> tuple[str, str, str]:
+    """The dedup identity ``(thread_id, item_id, action)`` — NO clock term."""
+    return (str(thread_id), str(item_id), str(action))
+
+
+def _ledger_path(path: Path | str) -> Path:
+    return Path(path)
+
+
+def load_ledger(path: Path | str) -> list[dict[str, Any]]:
+    """Read the dedup ledger (NDJSON, tolerant). Missing file ⇒ ``[]`` (I/O edge).
+
+    A malformed line is skipped (at worst a benign re-claim attempt that the
+    forge-arbitrated acquire then fails closed on — never a lost pickup).
+    """
+    p = _ledger_path(path)
+    if not p.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+    return out
+
+
+def ledger_keys(records: Iterable[Mapping[str, Any]]) -> set[tuple[str, str, str]]:
+    """Fold ledger records → the set of seen dedup keys (PURE)."""
+    keys: set[tuple[str, str, str]] = set()
+    for r in records:
+        if not isinstance(r, Mapping):
+            continue
+        keys.add(ledger_key(
+            str(r.get("thread_id") or ""),
+            str(r.get("item_id") or ""),
+            str(r.get("action") or ""),
+        ))
+    return keys
+
+
+def append_ledger(path: Path | str, record: Mapping[str, Any]) -> None:
+    """Append one dedup record to the ledger (I/O edge, the only governance-free write)."""
+    p = _ledger_path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _item_id(item: Mapping[str, Any]) -> str:
+    """The stable per-item dedup component: ``<repo>:<number>``."""
+    return f"{item.get('repo')}:{item.get('number')}"
+
+
+def default_pr_author_lookup(item: Mapping[str, Any], gh_runner: GhRunner) -> str | None:
+    """Resolve a PR's author login via ``GET repos/{repo}/pulls/{n}`` (live read).
+
+    Returns ``None`` when the item is not a PR or the read does not yield an
+    author (the caller then treats it as not-own — review proceeds, since an
+    unresolved author cannot be proven to be us). Never raises.
+    """
+    repo = str(item.get("repo") or "")
+    number = item.get("number")
+    if not repo or number is None or str(item.get("subject_type")) != "PullRequest":
+        return None
+    try:
+        proc = gh_runner(["gh", "api", "--method", "GET", f"repos/{repo}/pulls/{number}"], None)
+    except Exception:
+        return None
+    out = (getattr(proc, "stdout", "") or "").strip()
+    if not out:
+        return None
+    try:
+        payload = json.loads(out)
+    except (ValueError, TypeError):
+        return None
+    user = payload.get("user") if isinstance(payload, Mapping) else None
+    return user.get("login") if isinstance(user, Mapping) else None
+
+
+def _self_assign(work_key: work_claims.WorkKey, identity: str, gh_runner: GhRunner) -> bool:
+    """Self-assign the issue/PR to ``identity`` (best-effort; never raises).
+
+    Returns ``ok``. The structured claim comment is the AUTHORITATIVE lock (the
+    #38 work-claim shape); the assignee is the human-visible forge signal.
+    """
+    try:
+        proc = gh_runner(
+            ["gh", "api", "--method", "POST",
+             f"repos/{work_key.repo_slug}/issues/{work_key.number}/assignees",
+             "--input", "-"],
+            json.dumps({"assignees": [identity]}),
+        )
+    except Exception:
+        return False
+    return getattr(proc, "returncode", 1) == 0
+
+
+def claim_item(
+    item: Mapping[str, Any],
+    *,
+    identity: str,
+    gh_runner: GhRunner,
+    ledger_path: Path | str,
+    run_id: str,
+    pr_author_lookup: PrAuthorLookup | None = None,
+    backoff_seconds: float = 1.0,
+) -> ClaimOutcome:
+    """Forge-arbitrate a claim on one work-item (fail-closed), with dedup + the
+    independent-reviewer fence.
+
+    Order (each gate fails closed before any side effect):
+
+    1. **Independent-reviewer refusal** — for a ``review_requested`` item whose PR
+       author IS this identity, refuse (we never review our own PR). NO post.
+    2. **Dedup** — if ``(thread_id, <repo>:<number>, claim)`` is already in the
+       ledger, short-circuit (``already_seen``); NO post.
+    3. **Forge-arbitrated claim** — ``work_claims.acquire`` reads → refuses on a
+       foreign active claim → posts the structured ``ce-work-claim`` marker (the
+       #38 shape) → re-reads after a bounded backoff → proceeds only if our claim
+       wins, else posts a void release and fails closed.
+    4. **Self-assign** the issue/PR to ``identity`` (human-visible forge signal).
+    5. **Append** the dedup record (server timestamps only; no wall-clock).
+    """
+    number = item.get("number")
+    repo = str(item.get("repo") or "")
+    if not repo or number is None:
+        return ClaimOutcome(item=item, claimed=False, reason="no_number")
+
+    thread_id = str(item.get("thread_id") or "")
+    item_id = _item_id(item)
+    key_tuple = ledger_key(thread_id, item_id, ACTION_CLAIM)
+
+    # 1. Independent-reviewer refusal (own-PR review) — before any side effect.
+    if item.get("kind") == "review_requested":
+        lookup = pr_author_lookup or default_pr_author_lookup
+        author = lookup(item, gh_runner)
+        if author and author == identity:
+            return ClaimOutcome(item=item, claimed=False, reason="own_pr_review_refused",
+                                note=f"PR author {author!r} is this identity — refusing self-review")
+
+    # 2. Dedup — a server-keyed short-circuit (no wall-clock).
+    if key_tuple in ledger_keys(load_ledger(ledger_path)):
+        return ClaimOutcome(item=item, claimed=False, reason="already_seen")
+
+    # 3. Forge-arbitrated claim (fail-closed, race-tested in work_claims.acquire).
+    work_key = work_claims.WorkKey(*repo.split("/", 1), int(number))
+    result = work_claims.acquire(
+        work_key, gh_runner,
+        holder=identity, host=identity, reason="manual",
+        backoff_seconds=backoff_seconds,
+    )
+    if not result.ok:
+        return ClaimOutcome(item=item, claimed=False,
+                            reason=result.refusal_reason or "claim_refused",
+                            note=result.note)
+
+    # 4. Self-assign (human-visible; the comment marker is the authoritative lock).
+    _self_assign(work_key, identity, gh_runner)
+
+    # 5. Append the dedup record (GitHub server-time stamp from the marker).
+    append_ledger(ledger_path, {
+        "kind": "ce-pickup-dedup",
+        "schema_version": 1,
+        "thread_id": thread_id,
+        "item_id": item_id,
+        "action": ACTION_CLAIM,
+        "repo": repo,
+        "number": int(number),
+        "work_kind": item.get("kind"),
+        "identity": identity,
+        "run_id": run_id,
+        "claim_id": result.claim_id,
+        "claimed_at": _claim_marker_time(result),
+    })
+    return ClaimOutcome(item=item, claimed=True, reason="claimed",
+                        claim_id=result.claim_id, posted_url=result.posted_url)
+
+
+def _claim_marker_time(result: work_claims.ClaimResult) -> str | None:
+    """The GitHub server-time of the winning claim marker (never the local clock)."""
+    active = result.state.active if result.state else None
+    return active.claimed_at if active else None
+
+
+#: Ambient auth env vars dropped from the child ``gh`` env so the per-identity
+#: ``GH_TOKEN`` is unambiguous (``GH_TOKEN`` already wins by precedence; dropping
+#: these is defense-in-depth — the same hygiene the v3 credential_runner applies).
+_AMBIENT_AUTH_ENV = ("GITHUB_TOKEN", "GH_CONFIG_DIR", "GH_HOST")
+
+
+def make_gh_runner(token: str) -> GhRunner:
+    """Return a :data:`GhRunner` that runs ``gh`` AS ``identity`` (token in the child env ONLY).
+
+    The per-identity PAT lands in a per-call child ``GH_TOKEN`` env — never the
+    argv, a log, the returned process, or disk — so the pickup loop authenticates
+    as the dev's OWN account (the #137 identity model), never ambient/overwatch auth.
+    """
+    def runner(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        for var in _AMBIENT_AUTH_ENV:
+            env.pop(var, None)
+        env["GH_TOKEN"] = token
+        return subprocess.run(
+            list(argv), check=False, capture_output=True, text=True,
+            input=input_text, env=env, timeout=60,
+        )
+    return runner

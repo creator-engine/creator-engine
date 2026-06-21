@@ -218,3 +218,190 @@ def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
         "pickup", "poll", "--identity", "ce-dev-9", "--keys-dir", str(tmp_path),
     ])
     assert code == 2
+
+
+# ===========================================================================
+# S2 — claim + idempotency (dry-run).
+# ===========================================================================
+
+import subprocess  # noqa: E402
+
+from creator_engine_validator import work_claims  # noqa: E402
+
+
+class _FakeForge:
+    """A shared in-memory GitHub issue/PR store driving a work_claims.GhRunner.
+
+    Two pollers built over the SAME store race through one comment list, so the
+    deterministic re-read winner in ``work_claims.acquire`` is exercised for real.
+    Also tracks assignees so the self-assign side effect is observable.
+    """
+
+    def __init__(self, pr_author=None):
+        self.comments: list[dict] = []
+        self._next_id = 1
+        self.assignees: list[str] = []
+        self.pr_author = pr_author
+
+    def runner(self, identity):
+        def gh(argv, input_text=None):
+            return self._dispatch(list(argv), input_text, identity)
+        return gh
+
+    def _dispatch(self, argv, input_text, identity):
+        # argv shape: ["gh", "api", ("--method", M)?, <path>, ("-f"|"--input" "-")?]
+        method = "GET"
+        path = ""
+        i = 2  # skip "gh", "api"
+        while i < len(argv):
+            tok = argv[i]
+            if tok == "--method":
+                method = argv[i + 1]
+                i += 2
+                continue
+            if tok in ("-f", "--input"):
+                i += 2
+                continue
+            if not tok.startswith("-") and not path:
+                path = tok.split("?", 1)[0]  # strip query string
+            i += 1
+        body = json.loads(input_text) if input_text else None
+
+        if path.endswith("/comments") and method == "GET":
+            return self._ok(self.comments)
+        if path.endswith("/comments") and method == "POST":
+            cid = self._next_id
+            self._next_id += 1
+            comment = {"id": cid, "body": body["body"],
+                       "created_at": "2026-06-21T00:00:00Z",
+                       "user": {"login": identity}}
+            self.comments.append(comment)
+            return self._ok({"id": cid, "html_url": f"https://github.com/x/y#c{cid}"})
+        if path.endswith("/assignees") and method == "POST":
+            for a in (body or {}).get("assignees", []):
+                if a not in self.assignees:
+                    self.assignees.append(a)
+            return self._ok({"assignees": [{"login": a} for a in self.assignees]})
+        return self._ok({})
+
+    @staticmethod
+    def _ok(payload):
+        return subprocess.CompletedProcess([], 0, stdout=json.dumps(payload), stderr="")
+
+
+def _item(kind="review_requested", repo="o/r", number=10, thread_id="t1"):
+    return {
+        "repo": repo, "kind": kind, "number": number,
+        "url": f"https://github.com/{repo}/pull/{number}",
+        "reason": kind, "thread_id": thread_id,
+        "title": "x", "subject_type": "PullRequest",
+    }
+
+
+def test_claim_item_acquires_and_self_assigns(tmp_path):
+    forge = _FakeForge(pr_author="someone-else")
+    ledger = tmp_path / "pickup" / "ledger.ndjson"
+    outcome = pickup.claim_item(
+        _item(kind="assigned"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=ledger,
+        run_id="run-1", backoff_seconds=0,
+    )
+    assert outcome.claimed is True
+    assert outcome.reason == "claimed"
+    # self-assigned to the picking identity.
+    assert "ce-dev-2" in forge.assignees
+    # dedup ledger now records the claim.
+    records = pickup.load_ledger(ledger)
+    assert len(records) == 1
+    assert records[0]["thread_id"] == "t1"
+
+
+def test_claim_item_is_idempotent_via_ledger(tmp_path):
+    forge = _FakeForge()
+    ledger = tmp_path / "ledger.ndjson"
+    item = _item(kind="assigned")
+    first = pickup.claim_item(item, identity="ce-dev-2", gh_runner=forge.runner("ce-dev-2"),
+                              ledger_path=ledger, run_id="run-1", backoff_seconds=0)
+    assert first.claimed is True
+    # Second pass over the same thread → dedup short-circuit, no new claim posted.
+    posted_before = len(forge.comments)
+    second = pickup.claim_item(item, identity="ce-dev-2", gh_runner=forge.runner("ce-dev-2"),
+                               ledger_path=ledger, run_id="run-2", backoff_seconds=0)
+    assert second.claimed is False
+    assert second.reason == "already_seen"
+    assert len(forge.comments) == posted_before  # no second acquire comment
+
+
+def test_two_pollers_same_item_only_one_claims(tmp_path):
+    # Both pollers share ONE forge store but are DISTINCT identities/ledgers.
+    forge = _FakeForge()
+    a = pickup.claim_item(_item(kind="assigned"), identity="ce-dev-2",
+                          gh_runner=forge.runner("ce-dev-2"),
+                          ledger_path=tmp_path / "a.ndjson", run_id="A", backoff_seconds=0)
+    b = pickup.claim_item(_item(kind="assigned"), identity="ce-dev-3",
+                          gh_runner=forge.runner("ce-dev-3"),
+                          ledger_path=tmp_path / "b.ndjson", run_id="B", backoff_seconds=0)
+    claimed = [o for o in (a, b) if o.claimed]
+    assert len(claimed) == 1  # exactly one wins; the other fails closed
+    loser = a if not a.claimed else b
+    assert loser.reason in ("active_foreign_claim", "lost_after_reread", "stale_foreign_claim")
+
+
+def test_review_requested_own_pr_is_refused(tmp_path):
+    # The PR author IS the picking identity → independent-reviewer refusal.
+    forge = _FakeForge(pr_author="ce-dev-2")
+    outcome = pickup.claim_item(
+        _item(kind="review_requested"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=tmp_path / "l.ndjson",
+        run_id="r", backoff_seconds=0,
+        pr_author_lookup=lambda item, runner: "ce-dev-2",
+    )
+    assert outcome.claimed is False
+    assert outcome.reason == "own_pr_review_refused"
+    # nothing posted, nothing assigned — fully fail-closed.
+    assert forge.comments == []
+    assert forge.assignees == []
+
+
+def test_review_requested_foreign_pr_is_claimable(tmp_path):
+    forge = _FakeForge()
+    outcome = pickup.claim_item(
+        _item(kind="review_requested"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=tmp_path / "l.ndjson",
+        run_id="r", backoff_seconds=0,
+        pr_author_lookup=lambda item, runner: "another-dev",
+    )
+    assert outcome.claimed is True
+
+
+def test_ledger_key_uses_server_fields_not_wall_clock():
+    # the dedup key is (thread_id, item_id, action) — no clock term.
+    k = pickup.ledger_key("t1", "10", "claim")
+    assert k == ("t1", "10", "claim")
+
+
+def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    forge = _FakeForge()
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_t\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    body = json.dumps([_notif("t1", "assign", repo="o/r", number=11,
+                              url="https://api.github.com/repos/o/r/issues/11")])
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport",
+                        lambda: _fake_transport([(200, {}, body)]))
+    monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),
+        "--claim", "--ledger-root", str(tmp_path / "pickup"), "--run-id", "run-x",
+        "--backoff-seconds", "0", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+    # claimed, but dry-run (no --enable-launch): "would launch", not launched.
+    claim = out["claims"][0]
+    assert claim["claimed"] is True
+    assert claim["launched"] is False
+    assert claim["would_launch"] is True
