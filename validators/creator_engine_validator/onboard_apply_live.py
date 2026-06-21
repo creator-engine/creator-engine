@@ -126,6 +126,14 @@ ENV_APP_PEM = "CE_FORGE_APP_PEM"
 #: adoption WRITE path requires BOTH ``CE_FORGE_LIVE_FORGE=1`` AND ``CE_FORGE_ADOPTION_WRITE=1``
 #: — the one-time, human-ratified per-install escalation gate beyond #233's zero-write posture.
 ENV_ADOPTION_WRITE = "CE_FORGE_ADOPTION_WRITE"
+#: ce-ops#157 — the shared-App mint-broker URL. When set on a ``github.app.kind: shared`` run,
+#: the driver mints its scoped token via the standing broker (``POST <url>/v1/token``) instead
+#: of a local PEM signer, so the user needs NO App private key on disk. Absent → the shared run
+#: falls through to the local-signer path (and is ``None`` if no PEM resolves — fail-closed).
+ENV_MINT_BROKER_URL = "CE_FORGE_MINT_BROKER_URL"
+#: ce-ops#157 — the caller's ``ghu_`` user token (from the S1 device flow) the broker uses for
+#: its user->installation binding check. Carried host-side, never in the portable answers file.
+ENV_MINT_BROKER_USER_TOKEN = "CE_FORGE_MINT_BROKER_USER_TOKEN"
 
 #: ce-ops#85 §6.1 — the least-privilege join-PR WRITE ceiling. GitHub installation-token
 #: permissions are a ``scope -> level`` map, so ``contents:write`` SUBSUMES ``contents:read``
@@ -470,7 +478,14 @@ def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
 
 
 def _app_jwt_get(config: LiveForgeConfig, path: str) -> tuple[int, object, str]:
-    """GET a GitHub App endpoint with App-JWT auth through the injected HTTPS transport."""
+    """GET a GitHub App endpoint with App-JWT auth through the injected HTTPS transport.
+
+    Fail-closed on the broker path: when ``signer`` is ``None`` (ce-ops#157, the shared-App key
+    lives only in the broker) this driver cannot author an App-JWT itself, so the App-level read
+    returns an error tuple rather than raising — the caller treats it as an unavailable read.
+    """
+    if config.signer is None:
+        return 1, None, "app-level read unavailable: no local signer (shared-App broker path)"
     jwt = build_app_jwt(config.app_client_id, signer=config.signer)
     headers = {
         "Authorization": f"Bearer {jwt}",
@@ -2042,6 +2057,82 @@ def pem_signer(pem_path: str) -> Signer:
     return sign
 
 
+def _post_mint_broker(url: str, payload: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - live HTTPS
+    """POST a mint request to the broker's ``/v1/token`` and return the parsed JSON response.
+
+    The lone live network shell for the broker mint path; tests monkeypatch this. Never logs the
+    request/response bodies (they carry credentials).
+    """
+    import urllib.error
+    import urllib.request
+
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as resp:  # noqa: S310 — fixed https broker URL
+            body = resp.read().decode("utf-8", "replace")
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        status = exc.code
+    try:
+        parsed = json.loads(body) if body else {}
+    except (json.JSONDecodeError, ValueError):
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    parsed.setdefault("status", status)
+    return parsed
+
+
+def broker_minter(
+    broker_url: str, *, caller_user_token: str = ""
+) -> "TokenMinter":
+    """Return a :data:`TokenMinter` that mints THROUGH the standing shared-App broker (ce-ops#157).
+
+    The returned closure maps a :class:`TokenRequest` to the broker's ``POST /v1/token`` call and
+    wraps the response token in a :class:`ScopedToken`. The shared-App private key never enters
+    this process — the broker holds it. A non-200 broker response (binding/ceiling/transport
+    refusal) raises :class:`ForgeConfigError` so the driver fails closed exactly as a local mint
+    refusal would. The user's ``ghu_`` token rides in the request body the broker uses for its
+    binding check and never appears in a log or exception here.
+    """
+    endpoint = broker_url.rstrip("/") + "/v1/token"
+
+    def mint(request: TokenRequest) -> ScopedToken:
+        payload = {
+            "installation_id": request.installation_id,
+            "repo": request.repo,
+            "permissions": dict(request.permissions),
+            "caller_user_token": caller_user_token,
+        }
+        resp = _post_mint_broker(endpoint, payload)
+        if int(resp.get("status") or 0) != 200 or not resp.get("token"):
+            raise ForgeConfigError(
+                f"mint broker refused the request for {request.repo} "
+                f"(status {resp.get('status')}, reason {resp.get('reason')!r})"
+            )
+        perms = tuple(
+            (str(p[0]), str(p[1])) for p in (resp.get("permissions") or ()) if len(p) == 2
+        ) or tuple(sorted((str(k), str(v)) for k, v in request.permissions.items()))
+        expires_at = str(resp.get("expires_at") or "")
+        return ScopedToken(
+            run_id=request.run_id,
+            repo=request.repo,
+            policy_sha=request.policy_sha,
+            secret_name=request.secret_name,
+            permissions=perms,
+            expires_at=expires_at,
+            token_ref=f"{request.repo}@broker@{expires_at}",
+            value=str(resp["token"]),
+        )
+
+    return mint
+
+
 # ---------------------------------------------------------------------------------------------
 # Selection factory (OQ-D) — default OFF, fail-closed to the base noop driver
 # ---------------------------------------------------------------------------------------------
@@ -2069,6 +2160,36 @@ def resolve_live_config(
     installation_raw = merged.value("github.app.installation_id") or env.get(ENV_INSTALLATION_ID)
     client_id = env.get(ENV_APP_CLIENT_ID)
     pem_path = env.get(ENV_APP_PEM)
+
+    # ce-ops#157 — shared-App mint-broker branch. On a ``github.app.kind: shared`` run with a
+    # broker URL configured, mint via the standing broker (the user needs NO App PEM); the
+    # signer is None and a ``broker_minter`` closure becomes the driver's token_minter. Requires
+    # a resolvable installation id + client id; missing broker URL or install → fall through /
+    # fail-closed. ``kind: own`` NEVER takes this path (it always uses its local PEM signer).
+    kind = str(merged.value("github.app.kind", "shared") or "shared")
+    broker_url = env.get(ENV_MINT_BROKER_URL)
+    if kind == "shared" and broker_url:
+        if not (installation_raw and client_id):
+            return None
+        try:
+            installation_id = int(installation_raw)
+        except (TypeError, ValueError):
+            return None
+        if installation_id <= 0:
+            return None
+        return LiveForgeConfig(
+            repo=repo,
+            installation_id=installation_id,
+            app_client_id=str(client_id),
+            signer=None,  # the broker holds the key — no PEM on the user's disk
+            policy_sha=policy_sha,
+            run_id=f"onboard-live-forge:{repo}",
+            token_minter=broker_minter(
+                broker_url, caller_user_token=env.get(ENV_MINT_BROKER_USER_TOKEN, "")
+            ),
+            brownfield_scanners=_scanner_pins_from_env(env),
+        )
+
     if not (installation_raw and client_id and pem_path):
         return None
     try:
