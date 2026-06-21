@@ -52,8 +52,9 @@ def _readme_text() -> str:
 def test_as_built_ce_inventory_matches_expected():
     # Guard the inventory itself so a new/removed command forces a docs update.
     assert _ce_command_groups() == {
-        "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "connector",
-        "reviewer-triage", "claim", "check", "doctor", "init", "launch", "hud",
+        "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
+        "connector", "reviewer-triage", "claim", "check", "doctor", "init",
+        "launch", "hud",
     }
 
 

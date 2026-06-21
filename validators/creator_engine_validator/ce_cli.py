@@ -27,6 +27,10 @@ ce pcl verify        # validate an on-disk PCL ledger + head manifest, read-only
 ce pcl replay        # deterministic ordered read-only projection of a PCL ledger
 ce pcl index         # deterministic content-hashed index of a PCL ledger (written to the ignored cache)
 ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
+ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/state
+ce brain check       # deterministically return the active assertion or unknown
+ce brain correct     # append a supersession marker plus corrected assertion
+ce brain verify      # validate the local brain assertion ledger
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
@@ -57,6 +61,7 @@ import sys
 from typing import Sequence
 
 from . import (
+    brain_runtime,
     ce_event_runtime,
     connector_runtime,
     doctor_runtime,
@@ -74,6 +79,7 @@ from . import (
     work_claims,
     worker_runtime,
 )
+from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .tmux_adapter import TmuxAdapter
 
@@ -537,6 +543,58 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--repo-root", default=None, help="repo root for the cache git-ignore guard")
     pm.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
     pm.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce brain — first Knowledge-SSOT slice. Local, schema-gated, hash-chained
+    # assertion ledger under .ce/state. This is only deterministic SSOT; no MCP,
+    # datastore, recall/vector, or memory migration surface is introduced here.
+    brain = groups.add_parser(
+        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/verify)"
+    )
+    brain_sub = brain.add_subparsers(dest="brain_cmd")
+
+    def _add_state_root(p):
+        p.add_argument(
+            "--state-root",
+            default=V3_LOCAL_STATE_ROOT,
+            help=f"CE local state root (default: {V3_LOCAL_STATE_ROOT})",
+        )
+
+    def _add_required_scope(p):
+        scope_group = p.add_mutually_exclusive_group(required=True)
+        scope_group.add_argument("--scope", default=None, help="scope as a non-empty string")
+        scope_group.add_argument("--scope-json", default=None, help="scope as a JSON object")
+
+    def _add_optional_scope(p):
+        scope_group = p.add_mutually_exclusive_group(required=False)
+        scope_group.add_argument("--scope", default=None, help="override corrected assertion scope as a string")
+        scope_group.add_argument("--scope-json", default=None, help="override corrected assertion scope as a JSON object")
+
+    ba = brain_sub.add_parser("assert", help="append one structured brain assertion")
+    _add_state_root(ba)
+    _add_required_scope(ba)
+    ba.add_argument("--id", dest="assertion_id", default=None, help="optional brain-assertion-* id")
+    ba.add_argument("--claim-json", required=True, help="structured claim mapping as JSON")
+    ba.add_argument("--evidence-ref", required=True, help="required local/opaque evidence reference")
+    ba.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bc = brain_sub.add_parser("check", help="return active verified assertion or unknown")
+    _add_state_root(bc)
+    _add_required_scope(bc)
+    bc.add_argument("--claim-json", required=True, help="structured claim mapping as JSON")
+    bc.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bco = brain_sub.add_parser("correct", help="supersede an active assertion and append its correction")
+    _add_state_root(bco)
+    _add_optional_scope(bco)
+    bco.add_argument("--id", dest="assertion_id", required=True, help="active brain-assertion-* id to supersede")
+    bco.add_argument("--new-id", dest="new_assertion_id", default=None, help="optional corrected brain-assertion-* id")
+    bco.add_argument("--claim-json", required=True, help="corrected structured claim mapping as JSON")
+    bco.add_argument("--evidence-ref", required=True, help="required correction evidence reference")
+    bco.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bv = brain_sub.add_parser("verify", help="validate the local brain assertion ledger")
+    _add_state_root(bv)
+    bv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce connector — GitHub connector runtime. Validates a connector descriptor +
     # Mission-Brief (G2.005.0 substrate). G2.005.1 added read-only verify/plan/fetch;
@@ -1474,6 +1532,149 @@ def _pcl_merge(args) -> int:
     return 0
 
 
+def _brain_claim(args, *, context: str) -> dict:
+    try:
+        claim = json.loads(args.claim_json)
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: ce brain {context}: --claim-json is not valid JSON: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(claim, dict):
+        print(f"ERROR: ce brain {context}: --claim-json must decode to a JSON object", file=sys.stderr)
+        raise SystemExit(1)
+    return claim
+
+
+def _brain_scope(args, *, required: bool) -> str | dict | None:
+    raw_json = getattr(args, "scope_json", None)
+    if raw_json is not None:
+        try:
+            scope = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: ce brain: --scope-json is not valid JSON: {exc}", file=sys.stderr)
+            raise SystemExit(1)
+        if not isinstance(scope, dict):
+            print("ERROR: ce brain: --scope-json must decode to a JSON object", file=sys.stderr)
+            raise SystemExit(1)
+        return scope
+    scope_text = getattr(args, "scope", None)
+    if scope_text is not None:
+        return scope_text
+    if required:
+        print("ERROR: ce brain: scope is required", file=sys.stderr)
+        raise SystemExit(1)
+    return None
+
+
+def _brain_error(verb: str, exc: brain_runtime.BrainRuntimeError) -> int:
+    print(f"ERROR: ce brain {verb} refused [{exc.code}]: {exc}", file=sys.stderr)
+    errors = getattr(exc, "errors", ())
+    for error in errors:
+        print(f"  ERROR: {error.format()}", file=sys.stderr)
+    return 1
+
+
+def _brain_assert(args) -> int:
+    try:
+        result = brain_runtime.assert_claim(
+            claim=_brain_claim(args, context="assert"),
+            scope=_brain_scope(args, required=True),
+            evidence_ref=args.evidence_ref,
+            state_root=args.state_root,
+            assertion_id=args.assertion_id,
+        )
+    except SystemExit as exc:
+        return int(exc.code)
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("assert", exc)
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "ledger_path": str(result.ledger_path),
+                "id": result.record["id"],
+                "status": result.record["status"],
+                "sequence": result.sequence,
+                "content_hash": result.content_hash,
+                "prev_hash": result.prev_hash,
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(f"ce brain assert: wrote {result.record['id']} to {result.ledger_path}")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
+def _brain_check(args) -> int:
+    try:
+        result = brain_runtime.check_claim(
+            claim=_brain_claim(args, context="check"),
+            scope=_brain_scope(args, required=True),
+            state_root=args.state_root,
+        )
+    except SystemExit as exc:
+        return int(exc.code)
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("check", exc)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.status == "unknown":
+        print("ce brain check: unknown")
+    else:
+        assert result.record is not None
+        print(f"ce brain check: active ({result.record['id']})")
+        print(f"content_hash: {result.record['content_hash']}")
+    return 0
+
+
+def _brain_correct(args) -> int:
+    try:
+        result = brain_runtime.correct_claim(
+            assertion_id=args.assertion_id,
+            claim=_brain_claim(args, context="correct"),
+            scope=_brain_scope(args, required=False),
+            evidence_ref=args.evidence_ref,
+            state_root=args.state_root,
+            new_assertion_id=args.new_assertion_id,
+        )
+    except SystemExit as exc:
+        return int(exc.code)
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("correct", exc)
+    if getattr(args, "json_output", False):
+        print(json.dumps(
+            {
+                "ledger_path": str(result.ledger_path),
+                "superseded_id": result.superseded_record["id"],
+                "superseded_status": result.superseded_record["status"],
+                "id": result.record["id"],
+                "status": result.record["status"],
+                "content_hash": result.record["content_hash"],
+            },
+            indent=2,
+            sort_keys=True,
+        ))
+    else:
+        print(
+            f"ce brain correct: superseded {result.superseded_record['id']} "
+            f"with {result.record['id']}"
+        )
+        print(f"content_hash: {result.record['content_hash']}")
+    return 0
+
+
+def _brain_verify(args) -> int:
+    result = brain_runtime.verify_ledger(args.state_root)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.summary, indent=2, sort_keys=True))
+    else:
+        status = "OK" if result.ok else "FAIL"
+        print(f"ce brain verify: {status} ({result.summary.get('record_count', 0)} record(s))")
+        for error in result.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
 def _connector_plan_payload(plan) -> dict:
     return {
         "connector_id": plan.connector_id,
@@ -1968,6 +2169,13 @@ _PCL_DISPATCH = {
     "merge": _pcl_merge,
 }
 
+_BRAIN_DISPATCH = {
+    "assert": _brain_assert,
+    "check": _brain_check,
+    "correct": _brain_correct,
+    "verify": _brain_verify,
+}
+
 _CONNECTOR_DISPATCH = {
     "verify": _connector_verify,
     "plan": _connector_plan,
@@ -2038,6 +2246,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _PCL_DISPATCH.get(pcl_cmd)
         if handler is None:
             parser.parse_args(["pcl", "--help"])  # prints pcl help, exits
+            return 2
+        return handler(args)
+    if args.group == "brain":
+        brain_cmd = getattr(args, "brain_cmd", None)
+        handler = _BRAIN_DISPATCH.get(brain_cmd)
+        if handler is None:
+            parser.parse_args(["brain", "--help"])  # prints brain help, exits
             return 2
         return handler(args)
     if args.group == "connector":
