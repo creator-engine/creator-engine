@@ -106,6 +106,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
+        # ce-ops#157 shared-App self-serve: user-side OAuth device-flow install
+        # discovery (POST /login/device/code → poll → GET /user/installations).
+        # Part of the v3 forge adapter family; injectable transport, no v1 import.
+        "forge.user_install_discovery",
         # runner backends
         "runner",
         "runner.audit_overlay",
