@@ -10,8 +10,9 @@ no HTTP server and zero live network. For each request, in this deliberate order
    ``permits()`` is the gate: an ``administration:write`` / unknown-scope / over-level request
    is a ``403`` with reason ``out_of_ceiling`` and NO binding call, NO mint call. The standing
    broker can never even *attempt* an admin mint.
-3. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation;
-   a spoof is a ``403`` (``binding_refused``) with NOTHING minted.
+3. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation
+   and that installation must cover the requested repo; a spoof is a ``403``
+   (``binding_refused``) with NOTHING minted.
 4. **Mint** via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition (the
    shared-App key stays behind the injected openssl ``signer``); a transport failure is a
    ``502`` (fail-closed).
@@ -38,7 +39,7 @@ from egress_broker.audit import append_audit
 from mint_broker.binding import BindingRefused, BindingTransportError
 from mint_broker.config import MintBrokerConfig
 
-#: The binding-check seam: ``(caller_user_token, *, installation_id) -> None`` (raises on refuse).
+#: The binding-check seam: ``(caller_user_token, *, installation_id, repo_full_name) -> None``.
 BindingCheck = Callable[..., None]
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
@@ -112,9 +113,9 @@ def handle_token_request(
     if not config.permits(permissions):
         return _deny(config, status=403, reason="out_of_ceiling", repo=repo, installation_id=installation_id)
 
-    # 3. binding check (S2) — the caller must control the claimed installation ----------------
+    # 3. binding check (S2) — the caller must control the installation+repo pair -------------
     try:
-        binding_check(caller_token, installation_id=installation_id)
+        binding_check(caller_token, installation_id=installation_id, repo_full_name=repo)
     except BindingRefused:
         return _deny(config, status=403, reason="binding_refused", repo=repo, installation_id=installation_id)
     except BindingTransportError:
