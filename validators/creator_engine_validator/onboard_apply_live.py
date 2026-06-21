@@ -51,7 +51,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import onboard_apply, v3_installer
 from .forge.app_jwt_runner import Signer, app_jwt_gh_runner, build_app_jwt
@@ -78,6 +78,16 @@ from .forge.scoped_token import (
 )
 
 __ce_version_line__ = "v3"
+
+#: ce-ops#157 — the token-minting seam. A ``token_minter`` maps a validated
+#: :class:`~creator_engine_validator.forge.scoped_token.TokenRequest` to a minted
+#: :class:`~creator_engine_validator.forge.scoped_token.ScopedToken`. When set on
+#: :class:`LiveForgeConfig` it REPLACES the in-process local-signer mint path
+#: (``app_jwt_gh_runner`` → ``mint_scoped_token``): the standing shared-App mint broker holds
+#: the key and mints server-side, so a user can join WITHOUT a PEM on their disk. The driver
+#: builds the SAME request either way, so the least-privilege ceiling is identical regardless
+#: of who mints. ``None`` (the default) keeps today's local-signer path byte-for-byte.
+TokenMinter = Callable[[TokenRequest], ScopedToken]
 
 #: Phase-1 least-privilege READ ceiling. ``administration:read`` is required because GitHub
 #: gates branch-protection reads behind the Administration permission; it is the read-mostly
@@ -399,17 +409,26 @@ class LiveForgeConfig:
     """Everything the live driver needs to mint + use + revoke its own forge-read token.
 
     ``signer`` is the host-side RS256 :data:`Signer` over the App PEM — the PEM content never
-    enters the driver. ``transport`` / ``spawn`` / ``git_spawn`` are injectable network seams
-    (live by default); tests inject fakes and perform ZERO live network / subprocess.
+    enters the driver. It is REQUIRED for the local-signer mint path and OPTIONAL (``None``)
+    when a ``token_minter`` is supplied — the mint broker (ce-ops#157) then holds the key and
+    mints the scoped token server-side, so the user never needs a PEM. ``transport`` / ``spawn``
+    / ``git_spawn`` are injectable network seams (live by default); tests inject fakes and
+    perform ZERO live network / subprocess.
     """
 
     repo: str
     installation_id: int
     app_client_id: str
-    signer: Signer
+    #: RS256 signer over the App PEM. REQUIRED for the local-signer mint path; ``None`` is
+    #: permitted ONLY when ``token_minter`` is set (the broker holds the key — ce-ops#157).
+    signer: Signer | None
     #: 64-hex digest binding issuance to the verified install spec in force (its canonical sha).
     policy_sha: str
     run_id: str
+    #: ce-ops#157 — when set, mint the scoped token THROUGH this seam (the shared-App broker)
+    #: instead of the in-process local-signer path; the driver builds the same request either
+    #: way. ``None`` → today's local-signer mint (``app_jwt_gh_runner`` → ``mint_scoped_token``).
+    token_minter: TokenMinter | None = None
     transport: Any = None  # app-JWT HTTPS transport seam
     spawn: Any = None  # authenticated-gh subprocess seam
     git_spawn: Any = None  # workspace-clone subprocess seam
@@ -691,14 +710,32 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         self._bootstrap_forge_identity: dict[str, str] | None = None
 
     # -- credential lifecycle (mint -> use -> revoke) ----------------------------------------
+    def _mint(self, request: TokenRequest) -> ScopedToken:
+        """Mint a scoped token via the ``token_minter`` seam (broker) or the local-signer path.
+
+        ce-ops#157: when ``LiveForgeConfig.token_minter`` is set, the standing shared-App mint
+        broker mints server-side (the App key never enters this process — the user needs no
+        PEM); the driver still builds the request, so the least-privilege ceiling is identical.
+        Otherwise the in-process local-signer path is used UNCHANGED
+        (``app_jwt_gh_runner`` → ``mint_scoped_token``), which requires a ``signer``.
+        """
+        if self._cfg.token_minter is not None:
+            return self._cfg.token_minter(request)
+        if self._cfg.signer is None:
+            raise ForgeConfigRefused(
+                "LiveForgeConfig.signer is required for the local mint path "
+                "(set a token_minter to mint via the shared-App broker instead)"
+            )
+        mint_runner = app_jwt_gh_runner(
+            self._cfg.app_client_id,
+            signer=self._cfg.signer,
+            transport=self._cfg.transport,
+        )
+        return mint_scoped_token(request, gh_runner=mint_runner)
+
     def _reader(self) -> GhRunner:
         """Lazily mint the Phase-1 read token and return the authenticated ``GhRunner`` (cached)."""
         if self._read_runner is None:
-            mint_runner = app_jwt_gh_runner(
-                self._cfg.app_client_id,
-                signer=self._cfg.signer,
-                transport=self._cfg.transport,
-            )
             request = TokenRequest(
                 repo=self._cfg.repo,
                 installation_id=self._cfg.installation_id,
@@ -709,7 +746,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 requested_ttl_seconds=FORGE_READ_TTL_SECONDS,
                 escalation_authority=PHASE1_ESCALATION_AUTHORITY,
             )
-            self._token = mint_scoped_token(request, gh_runner=mint_runner)
+            self._token = self._mint(request)
             self._read_runner = authenticated_gh_runner(self._token, spawn=self._cfg.spawn)
         return self._read_runner
 
@@ -1509,9 +1546,6 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
     def _writer(self) -> GhRunner:
         """Lazily mint the §6.1 WRITE token (Tier-2 escalation bound) and return its runner."""
         if self._write_runner is None:
-            mint_runner = app_jwt_gh_runner(
-                self._cfg.app_client_id, signer=self._cfg.signer, transport=self._cfg.transport
-            )
             request = TokenRequest(
                 repo=self._cfg.repo,
                 installation_id=self._cfg.installation_id,
@@ -1523,8 +1557,9 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
                 escalation_authority=ADOPTION_ESCALATION_AUTHORITY,
             )
             # Tier-2 default-deny: if a future edit dropped ADOPTION_ESCALATION_AUTHORITY, the
-            # minter raises TokenMintRefused BEFORE any forge call (defence-in-depth, §6.3).
-            self._write_token = mint_scoped_token(request, gh_runner=mint_runner)
+            # minter raises TokenMintRefused BEFORE any forge call (defence-in-depth, §6.3). The
+            # broker path (ce-ops#157) mints the write token server-side at the SAME ceiling.
+            self._write_token = self._mint(request)
             self._write_runner = authenticated_gh_runner(self._write_token, spawn=self._cfg.spawn)
         return self._write_runner
 
