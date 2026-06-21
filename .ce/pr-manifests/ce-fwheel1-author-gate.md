@@ -24,6 +24,9 @@ Per-file purpose:
 - **`validators/creator_engine_validator/packaging_runtime.py`** *(M)* - keeps
   the RED-G-6 aggregate packaging guard required author-side while splitting
   first-party app-wheel/source parity into the bake gate.
+- **`validators/creator_engine_validator/_version.py`** *(M)* - regenerated
+  after rebasing onto current main so the baked build SHA remains a real branch
+  ancestor in full-checkout packaging gates.
 - **`validators/creator_engine_validator/wheel_bake.py`** *(A)* - typed
   `build_app_wheel_from_source` helper, manifest dataclass, deterministic
   `SOURCE_DATE_EPOCH`, and build-artifact cleanup.
@@ -56,9 +59,9 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=18
+AUTHORIZED_PATHS_COUNT=19
 
-AUTHORIZED_PATHS_SHA256=a31f5b0c3da78641ef8e0cb36c6d10a9b7742a8c9043801d6efc47e559437ac4
+AUTHORIZED_PATHS_SHA256=9e10aa6147a13be3e7bf3ad1319505037c6e797d97945d3843fe45e854562737
 
 ```text
 .ce/changelog/ce164-fwheel1-author-gate.md
@@ -66,6 +69,7 @@ AUTHORIZED_PATHS_SHA256=a31f5b0c3da78641ef8e0cb36c6d10a9b7742a8c9043801d6efc47e5
 .github/workflows/validate.yml
 NOTICE
 docs/decisions/ADR-0010-take-app-wheel-out-of-authored-prs.md
+validators/creator_engine_validator/_version.py
 validators/creator_engine_validator/packaging_runtime.py
 validators/creator_engine_validator/wheel_bake.py
 validators/requirements-dev.txt
