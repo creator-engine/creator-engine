@@ -27,17 +27,18 @@ checked-in cp314 wheelhouse, with no network access.
 
 ```bash
 uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators python -m creator_engine_validator --list-checks
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
 ```
 
 **pip fallback:**
 
 ```bash
 python3.14 -m venv .venv
-source .venv/bin/activate
-pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators python -m creator_engine_validator --list-checks
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
 ```
 
 The validator must not call external services during dependency installation
@@ -114,14 +115,15 @@ full-suite parallel run (form 2) is a green-gate result; CI runs exactly that.
 ## Invocation
 
 ```bash
-python -m creator_engine_validator --list-checks
-python -m creator_engine_validator check examples/well-formed/
-python -m creator_engine_validator check-examples
-python -m creator_engine_validator scan-no-limitless
-python -m creator_engine_validator scan-pane-registry examples/well-formed/pane-registry
-python -m creator_engine_validator scan-side-effect-ledger examples/well-formed/side-effect-ledger
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check-examples
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator scan-no-limitless
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator scan-pane-registry examples/well-formed/pane-registry
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator scan-side-effect-ledger examples/well-formed/side-effect-ledger
 echo '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"README.md"},"ce":{"posture":"governed","manifest_paths":["schemas/x.yaml"]}}' \
-  | python -m creator_engine_validator hook-check --stdin
+  | PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator hook-check --stdin
 ```
 
 ## Exit codes
@@ -315,7 +317,7 @@ Slice 2R behavior.
 
 The `role_boundary_attribution` check (contract: `docs/operations/CONTROLLER_BOUNDARY_POLICY.md`) is a Phase-1 audit aid for R-011 controller-seat-edit pressure. It runs in two distinct modes, and its limitations matter when reading its output:
 
-- **Default whole-tree mode (advisory, not a hard failure).** Invoked through `python -m creator_engine_validator check <paths>` (and `check-examples`). It scans documents whose front matter declares `kind: hermes-handoff` or `kind: hermes-recommended-prompt` and emits *warnings* — never errors — when a `role: controller` document also carries a fenced path manifest. Whole-tree mode is intentionally conservative: it gives the verifier a starting point and MUST NOT be relied on as a hard governance gate. A clean default run does not by itself prove that no boundary breach occurred; conversely, a warning is a signal to investigate, not a CI-blocking error.
+- **Default whole-tree mode (advisory, not a hard failure).** Invoked through `PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check <paths>` (and `check-examples`). It scans documents whose front matter declares `kind: hermes-handoff` or `kind: hermes-recommended-prompt` and emits *warnings* — never errors — when a `role: controller` document also carries a fenced path manifest. Whole-tree mode is intentionally conservative: it gives the verifier a starting point and MUST NOT be relied on as a hard governance gate. A clean default run does not by itself prove that no boundary breach occurred; conversely, a warning is a signal to investigate, not a CI-blocking error.
 - **`verify-attribution --base <commit>` mode (best-effort, fresh-clone limited).** Compares the changed files between `<base>..HEAD` against the active handoff manifests under `.hermes/handoffs/` and emits errors for any changed file not covered by an active handoff. This mode REQUIRES `.hermes/handoffs/` to be present and readable in the worktree. A fresh clone of the upstream public repository does NOT carry `.hermes/` and so this mode is unavailable there; the check emits `role_boundary_no_active_handoff` rather than silently passing. Operators relying on attribution evidence outside of an environment with `.hermes/` populated must use an alternative attribution record.
 
 Both modes are verifier evidence. Neither ratifies a batch.
