@@ -18,6 +18,10 @@ from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _ALLOWED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
+# GitHub's merge_queue rule uses upper-case merge methods, distinct from the
+# pull_request rule's lower-case allowed_merge_methods.
+_ALLOWED_QUEUE_MERGE_METHODS = frozenset({"MERGE", "SQUASH", "REBASE"})
+_ALLOWED_QUEUE_GROUPING = frozenset({"ALLGREEN", "HEADGREEN"})
 CE_PROTECTION_RULESET_NAME = "ce-reference-protection-floor"
 
 
@@ -69,12 +73,73 @@ class RulesetPolicy:
     required_review_thread_resolution: bool = True
     allowed_merge_methods: tuple[str, ...] = ("squash",)
     bypass_actors: tuple[RulesetBypassActor, ...] = ()
+    # Merge queue (ce-ops#39). Opt-in: when require_merge_queue is False (the
+    # default) no merge_queue rule is emitted, so existing policies are unchanged.
+    # The queue merge method must agree with allowed_merge_methods (squash floor).
+    require_merge_queue: bool = False
+    merge_queue_merge_method: str = "SQUASH"
+    merge_queue_grouping_strategy: str = "ALLGREEN"
+    merge_queue_max_entries_to_build: int = 5
+    merge_queue_max_entries_to_merge: int = 5
+    merge_queue_min_entries_to_merge: int = 1
+    merge_queue_min_entries_to_merge_wait_minutes: int = 5
+    merge_queue_check_response_timeout_minutes: int = 60
 
     def _ref_include(self) -> str:
         branch = (self.branch or "").strip()
         if not branch:
             raise RulesetRefused("ruleset branch must be non-empty")
         return branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+
+    def _merge_queue_rule(self, allowed_methods: tuple[str, ...]) -> dict:
+        """Build the GitHub ``merge_queue`` ruleset rule (validated).
+
+        The queue merge method must be expressible by the pull_request rule's
+        ``allowed_merge_methods`` (e.g. a SQUASH queue under a squash-only floor),
+        otherwise GitHub would queue a merge the protection floor forbids.
+        """
+        method = (self.merge_queue_merge_method or "").upper()
+        if method not in _ALLOWED_QUEUE_MERGE_METHODS:
+            raise RulesetRefused(
+                f"unsupported merge_queue merge_method {self.merge_queue_merge_method!r}; "
+                f"one of {sorted(_ALLOWED_QUEUE_MERGE_METHODS)}"
+            )
+        if method.lower() not in {m.lower() for m in allowed_methods}:
+            raise RulesetRefused(
+                f"merge_queue merge_method {method!r} is not in the policy's "
+                f"allowed_merge_methods {allowed_methods!r}"
+            )
+        grouping = (self.merge_queue_grouping_strategy or "").upper()
+        if grouping not in _ALLOWED_QUEUE_GROUPING:
+            raise RulesetRefused(
+                f"unsupported merge_queue grouping_strategy {self.merge_queue_grouping_strategy!r}; "
+                f"one of {sorted(_ALLOWED_QUEUE_GROUPING)}"
+            )
+        for label, value in (
+            ("max_entries_to_build", self.merge_queue_max_entries_to_build),
+            ("max_entries_to_merge", self.merge_queue_max_entries_to_merge),
+            ("min_entries_to_merge", self.merge_queue_min_entries_to_merge),
+            ("min_entries_to_merge_wait_minutes", self.merge_queue_min_entries_to_merge_wait_minutes),
+            ("check_response_timeout_minutes", self.merge_queue_check_response_timeout_minutes),
+        ):
+            if not isinstance(value, int) or value < 0:
+                raise RulesetRefused(f"merge_queue {label} must be a non-negative integer")
+        if self.merge_queue_min_entries_to_merge > self.merge_queue_max_entries_to_merge:
+            raise RulesetRefused(
+                "merge_queue min_entries_to_merge must not exceed max_entries_to_merge"
+            )
+        return {
+            "type": "merge_queue",
+            "parameters": {
+                "merge_method": method,
+                "grouping_strategy": grouping,
+                "max_entries_to_build": self.merge_queue_max_entries_to_build,
+                "max_entries_to_merge": self.merge_queue_max_entries_to_merge,
+                "min_entries_to_merge": self.merge_queue_min_entries_to_merge,
+                "min_entries_to_merge_wait_minutes": self.merge_queue_min_entries_to_merge_wait_minutes,
+                "check_response_timeout_minutes": self.merge_queue_check_response_timeout_minutes,
+            },
+        }
 
     def to_put_payload(self) -> dict:
         """Serialize to the repository rulesets create/update body."""
@@ -114,6 +179,8 @@ class RulesetPolicy:
                 },
             }
         )
+        if self.require_merge_queue:
+            rules.append(self._merge_queue_rule(methods))
         return {
             "name": name,
             "target": "branch",
@@ -311,6 +378,13 @@ def ruleset_satisfies_policy(ruleset: dict | None, policy: RulesetPolicy) -> boo
     methods = tuple(m.lower() for m in policy.allowed_merge_methods)
     if methods and set(pull_params.get("allowed_merge_methods") or []) != set(methods):
         return False
+    if policy.require_merge_queue:
+        queue_rule = _rule_by_type(live, "merge_queue")
+        if not queue_rule:
+            return False
+        queue_params = queue_rule.get("parameters", {}) or {}
+        if str(queue_params.get("merge_method", "")).upper() != policy.merge_queue_merge_method.upper():
+            return False
     return True
 
 
