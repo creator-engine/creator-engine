@@ -99,7 +99,9 @@ def test_taxonomy_counts_and_disjoint():
     # G-A2 runner Ring-1 increment 1 added ``runner.ring1_tool_guard``: 43 -> 44.
     # ce-ops#99 P1 added three repo-scope devops forge ops
     # (``forge.ruleset``, ``forge.review_submit``, ``forge.auto_merge``): 44 -> 47.
-    assert len(ver.V3_RUNTIME) == 47
+    # ce-ops#157 added the shared-App user-side install discovery
+    # (``forge.user_install_discovery``): 47 -> 48.
+    assert len(ver.V3_RUNTIME) == 48
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
