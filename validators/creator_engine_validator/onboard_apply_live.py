@@ -39,6 +39,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import io
 import json
 import os
 import platform
@@ -46,9 +47,10 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tarfile
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from . import onboard_apply, v3_installer
@@ -145,12 +147,12 @@ FORGE_WRITE_SECRET_NAME = "onboard_forge_adoption_write"
 
 @dataclass(frozen=True)
 class BrownfieldScanner:
-    """A sha256-pinned, mirror-served secrets scanner for the scrub gate (§3.3, OQ-5).
+    """A sha256-pinned secrets scanner for the brownfield scrub gate (§3.3, OQ-5).
 
-    Gitleaks + TruffleHog (the client-zero runbook pair). ``sha256`` pins the EXACT mirror-
-    served binary bytes; an EMPTY ``sha256`` means UNPINNED → the live scan fail-closes
-    (``ran=False``) so an unverified binary is NEVER executed. ``platform`` selects the
-    commissioned Linux scanner binary for the host architecture. Mirrors ``MirrorUserspaceWheel``.
+    Gitleaks + TruffleHog (the client-zero runbook pair). ``sha256`` pins the EXACT fetched
+    artifact bytes; an EMPTY ``sha256`` means UNPINNED -> the live scan fail-closes
+    (``ran=False``) so an unverified artifact is NEVER executed. ``archive_member`` names the
+    regular file to extract when the pinned URL is a release tarball.
     """
 
     tool: str
@@ -158,44 +160,50 @@ class BrownfieldScanner:
     url: str
     sha256: str
     platform: str = ""
+    archive_member: str = ""
 
 
 #: The two-scanner set the scrub gate requires (mirrors ``onboard_apply.REQUIRED_SCRUB_SCANNERS``).
 REQUIRED_SCRUB_SCANNERS: tuple[str, ...] = ("gitleaks", "trufflehog")
-SCANNER_MIRROR_BASE_URL = "https://creator-engine.dev/downloads/0.2.0/scanners"
+GITLEAKS_RELEASE_BASE_URL = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1"
+TRUFFLEHOG_RELEASE_BASE_URL = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.95.6"
 
-#: ce-ops#123 commissioned scanner mirror pins. Hashes are reproduced from the executable bytes
-#: extracted from the upstream GitHub release archives, then staged under ``docs/downloads`` for
-#: controller re-verification and ce-root-v1 signing/publish. The live path never executes a
-#: scanner whose fetched bytes drift from these pins.
+#: ce-ops#159 commissioned scanner release pins. Hashes are reproduced from the upstream
+#: GitHub release archives and checked against the publishers' checksum files. The live path
+#: verifies the archive bytes before extracting the expected scanner binary; any fetch/hash/
+#: extraction drift fail-closes before execution.
 BROWNFIELD_SCANNER_MIRROR: tuple[BrownfieldScanner, ...] = (
     BrownfieldScanner(
         tool="gitleaks",
         version="8.30.1",
-        url=f"{SCANNER_MIRROR_BASE_URL}/gitleaks-8.30.1-linux-x86_64",
-        sha256="88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+        url=f"{GITLEAKS_RELEASE_BASE_URL}/gitleaks_8.30.1_linux_x64.tar.gz",
+        sha256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
         platform="linux/x86_64",
+        archive_member="gitleaks",
     ),
     BrownfieldScanner(
         tool="gitleaks",
         version="8.30.1",
-        url=f"{SCANNER_MIRROR_BASE_URL}/gitleaks-8.30.1-linux-arm64",
-        sha256="00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",
+        url=f"{GITLEAKS_RELEASE_BASE_URL}/gitleaks_8.30.1_linux_arm64.tar.gz",
+        sha256="e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
         platform="linux/arm64",
+        archive_member="gitleaks",
     ),
     BrownfieldScanner(
         tool="trufflehog",
         version="3.95.6",
-        url=f"{SCANNER_MIRROR_BASE_URL}/trufflehog-3.95.6-linux-x86_64",
-        sha256="d4414128597485471941f9d03c2aecf072141d84aa5d728b31dfbfe79d64d2b9",
+        url=f"{TRUFFLEHOG_RELEASE_BASE_URL}/trufflehog_3.95.6_linux_amd64.tar.gz",
+        sha256="1b62ea3cbc672ed5fd36e0eebb00b1fb50bbb7ee35090f42437a5852a299e16b",
         platform="linux/x86_64",
+        archive_member="trufflehog",
     ),
     BrownfieldScanner(
         tool="trufflehog",
         version="3.95.6",
-        url=f"{SCANNER_MIRROR_BASE_URL}/trufflehog-3.95.6-linux-arm64",
-        sha256="c2c5117f305b214f4e07d215d070e51e33479bae87e365c641ba3d9e8b2af0eb",
+        url=f"{TRUFFLEHOG_RELEASE_BASE_URL}/trufflehog_3.95.6_linux_arm64.tar.gz",
+        sha256="e0d8722485bf592f9ef9a72009fb5184656cfab4864fed453bbbf694d5b9350b",
         platform="linux/arm64",
+        archive_member="trufflehog",
     ),
 )
 
@@ -1624,10 +1632,10 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
     def _run_pinned_scanner(self, pin: "BrownfieldScanner", scan_root: str) -> dict[str, Any]:
         """Stage the sha256-pinned scanner binary (fetch+verify) and run it; never raises.
 
-        Reuses the wheel-staging anti-tamper pattern: fetch ``pin.url`` from CE's mirror, verify
-        the bytes against ``pin.sha256`` BEFORE making it executable, then run the tool over
-        ``scan_root``. Returns ``{ran, exit_code, findings, error}`` — fail-closed on any
-        fetch/hash/spawn error. (Commission-gated; exercised at the VPS Mode-A rehearsal.)
+        Reuses the wheel-staging anti-tamper pattern: fetch ``pin.url``, verify the artifact
+        bytes against ``pin.sha256`` BEFORE extracting/making any binary executable, then run the
+        tool over ``scan_root``. Returns ``{ran, exit_code, findings, error}`` — fail-closed on
+        any fetch/hash/extract/spawn error.
         """
         staged_dir = Path(tempfile.mkdtemp(prefix=f"ce-scanner-{pin.tool}-"))
         try:
@@ -1641,8 +1649,17 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
                     "ran": False, "exit_code": None, "findings": [],
                     "error": f"{pin.tool}: sha256 mismatch (expected {pin.sha256}, got {actual})",
                 }
+            try:
+                binary_bytes = _scanner_binary_bytes(pin, data)
+            except ValueError as exc:
+                return {
+                    "ran": False,
+                    "exit_code": None,
+                    "findings": [],
+                    "error": f"{pin.tool}: extract failed: {exc}",
+                }
             binary = staged_dir / pin.tool
-            binary.write_bytes(data)
+            binary.write_bytes(binary_bytes)
             binary.chmod(0o700)
             argv = _scanner_argv(pin.tool, str(binary), scan_root)
             spawn = self._cfg.pip_spawn or _default_pip_spawn  # reuse the injectable spawn shape
@@ -1896,6 +1913,39 @@ def _scanner_argv(tool: str, binary: str, scan_root: str) -> list[str]:
     if tool == "trufflehog":
         return [binary, "filesystem", scan_root, "--json", "--no-update"]
     return [binary, "--version"]
+
+
+def _scanner_binary_bytes(pin: BrownfieldScanner, payload: bytes) -> bytes:
+    """Return executable scanner bytes from a pinned payload.
+
+    Env overrides may still point at raw binaries. The built-in #159 defaults point at upstream
+    ``.tar.gz`` release archives; for those, read exactly one regular file named by
+    ``archive_member``/``tool`` without extracting archive paths to disk.
+    """
+
+    if not (pin.archive_member or pin.url.endswith((".tar.gz", ".tgz"))):
+        return payload
+
+    target = pin.archive_member or pin.tool
+    matches: list[tarfile.TarInfo] = []
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tf:
+            for member in tf.getmembers():
+                member_path = PurePosixPath(member.name)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    continue
+                if member.isfile() and member_path.name == target:
+                    matches.append(member)
+            if len(matches) != 1:
+                raise ValueError(
+                    f"expected exactly one regular archive member named {target!r}, found {len(matches)}"
+                )
+            extracted = tf.extractfile(matches[0])
+            if extracted is None:
+                raise ValueError(f"archive member {matches[0].name!r} could not be read")
+            return extracted.read()
+    except tarfile.TarError as exc:
+        raise ValueError(f"invalid tar.gz payload: {exc}") from exc
 
 
 def _parse_scanner_findings(tool: str, stdout: str) -> list[str]:
