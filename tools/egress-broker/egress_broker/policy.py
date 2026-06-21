@@ -58,9 +58,11 @@ _NOREPLY_RE = re.compile(
 )
 
 #: A well-formed git branch name for our purposes: non-empty, no whitespace/control chars, no
-#: leading dash (would look like a flag), and no ``..`` (refspec/range hazard). Deliberately
+#: leading dash (would look like a flag), no ``..`` (refspec/range hazard), and no URL query
+#: delimiters that could rewrite unescaped downstream API query strings. Deliberately
 #: conservative — a branch we cannot cleanly name is a branch we refuse.
 _BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[!-~]+$")
+_BRANCH_QUERY_DELIMITER_RE = re.compile(r"[?&#=]")
 
 #: Branches the broker NEVER pushes to regardless of config — the absolute floor. ``main`` and
 #: ``master`` are matched case-insensitively (so ``MAIN`` is also refused); the configured base
@@ -193,7 +195,7 @@ def _branch_not_forbidden(branch: str, policy: BrokerPolicy) -> CheckResult:
 
 def _branch_in_namespace(branch: str, policy: BrokerPolicy) -> CheckResult:
     name = branch or ""
-    if not _BRANCH_RE.match(name):
+    if not _BRANCH_RE.match(name) or _BRANCH_QUERY_DELIMITER_RE.search(name):
         return CheckResult(
             "branch_in_namespace", False, f"branch {branch!r} is empty or malformed"
         )

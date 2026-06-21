@@ -209,6 +209,13 @@ def test_malformed_branch_denies(branch):
     assert d.allowed is False
 
 
+@pytest.mark.parametrize("delimiter", ["?", "&", "#", "="])
+def test_branch_with_query_delimiter_denies(delimiter):
+    d = evaluate(_facts(), f"ce-x{delimiter}develop", _policy())
+    assert d.allowed is False
+    assert not _check(d, "branch_in_namespace").passed
+
+
 # ---------------------------------------------------------------------------
 # Head-sha gate — a missing / malformed head can't be verified → deny
 # ---------------------------------------------------------------------------

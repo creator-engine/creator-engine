@@ -226,6 +226,54 @@ def test_apply_mints_pushes_opens_pr_and_revokes_in_order(tmp_path):
     assert rec["app_owner"] == "cedev4vps-coder"
 
 
+def test_apply_without_injected_mint_uses_default_minter(tmp_path):
+    import json
+
+    transport_calls = []
+    boundary_calls = []
+
+    def signer(signing_input: bytes) -> bytes:
+        return b"SIG::" + signing_input[:6]
+
+    def transport(method, url, headers, body):
+        transport_calls.append({"method": method, "url": url, "body": body})
+        if method == "GET" and "app/installations" in url:
+            return 200, json.dumps([{"id": 555, "account": {"login": "creator-engine"}}])
+        if method == "POST" and url.endswith("/app/installations/555/access_tokens"):
+            return 201, json.dumps({"token": "ghs_default_minted", "expires_at": "2026-06-20T13:00:00Z"})
+        raise AssertionError(f"unexpected request {method} {url}")
+
+    def push(token):
+        boundary_calls.append(("push", token.value))
+        return {"pushed": True, "remote_head": "a" * 40, "local_head": "a" * 40}
+
+    def open_pr(token):
+        boundary_calls.append(("open_pr", token.value))
+        return {"pr_number": 321, "created": True}
+
+    def revoke(token):
+        boundary_calls.append(("revoke", token.value))
+        return True
+
+    result = courier(
+        "dev-4", "/seat/workspace/creator-engine", "ce-egress-broker",
+        config=_config(tmp_path), apply=True, read_facts_fn=lambda: _GOOD_FACTS,
+        signer=signer, transport=transport, now=lambda: 1_700_000_000,
+        push_fn=push, open_pr_fn=open_pr, revoke_fn=revoke,
+    )
+
+    assert result.allowed is True and result.applied is True
+    assert result.installation_id == 555
+    assert result.pr_number == 321
+    assert [c["method"] for c in transport_calls] == ["GET", "POST"]
+    assert transport_calls[1]["url"].endswith("/app/installations/555/access_tokens")
+    assert boundary_calls == [
+        ("push", "ghs_default_minted"),
+        ("open_pr", "ghs_default_minted"),
+        ("revoke", "ghs_default_minted"),
+    ]
+
+
 def test_token_is_revoked_even_if_pr_step_raises(tmp_path):
     spy = _Spy(push_raises=True)
     with pytest.raises(RuntimeError):
@@ -295,6 +343,24 @@ def test_open_or_update_pr_creates_when_none_exists():
     assert out["created"] is True
     methods = [c["argv"][c["argv"].index("-X") + 1] for c in calls]
     assert "GET" in methods and "POST" in methods
+
+
+def test_open_or_update_pr_encodes_lookup_query_params():
+    from urllib.parse import parse_qs, urlsplit
+
+    calls = []
+    open_or_update_pr(
+        "creator-engine/creator-engine", "ce-x&base=develop", "main",
+        seat_id="dev-4", head_sha="a" * 40, gh_runner=_gh_fake(existing=[], calls=calls),
+    )
+    get_path = calls[0]["argv"][4]
+    query = urlsplit(get_path).query
+    params = parse_qs(query)
+
+    assert "%26" in query
+    assert params["state"] == ["open"]
+    assert params["head"] == ["creator-engine:ce-x&base=develop"]
+    assert params["base"] == ["main"]
 
 
 def test_open_or_update_pr_updates_when_one_exists():

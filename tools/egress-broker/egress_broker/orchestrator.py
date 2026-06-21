@@ -27,7 +27,8 @@ import hashlib
 import json
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from urllib.parse import urlencode
 
 from creator_engine_validator.forge._redact import redact_gh_stderr
 from creator_engine_validator.forge.credential_runner import authenticated_gh_runner
@@ -139,9 +140,10 @@ def open_or_update_pr(
     """
     owner = repo.split("/", 1)[0]
     body_text = render_pr_body(seat_id=seat_id, branch=branch, head_sha=head_sha)
+    query = urlencode((("state", "open"), ("head", f"{owner}:{branch}"), ("base", base)))
 
     code, parsed, stderr = _gh_api(
-        gh_runner, "GET", f"repos/{repo}/pulls?state=open&head={owner}:{branch}&base={base}"
+        gh_runner, "GET", f"repos/{repo}/pulls?{query}"
     )
     if code != 0:
         raise RuntimeError(
@@ -306,14 +308,19 @@ def courier(
     )
     run_id = f"egress-{seat_id}-{facts.head_sha[:12]}"
     policy_sha = policy_binding_sha(config)
-    _mint = mint_fn or (
-        lambda s, iid: mint_egress_token(
-            s, repo=config.repo, installation_owner=config.installation_owner, signer=signer,
+
+    def _default_mint(s: SeatAppConfig, iid: int) -> ScopedToken:
+        return mint_egress_token(
+            replace(s, installation_id=iid),
+            repo=config.repo,
+            installation_owner=config.installation_owner,
+            signer=signer,
             run_id=run_id, policy_sha=policy_sha, permissions=PUSH_PR_PERMISSIONS,
             escalation_authority=PUSH_PR_ESCALATION, ttl_seconds=PUSH_PR_TTL_SECONDS,
-            secret_name=PUSH_PR_SECRET_NAME, transport=transport, now=now, installation_id=iid,
+            secret_name=PUSH_PR_SECRET_NAME, transport=transport, now=now,
         )
-    )
+
+    _mint = mint_fn or _default_mint
     _push = push_fn or (lambda token: _default_push(config.repo, branch, repo_path, token, git_spawn))
     _open_pr = open_pr_fn or (
         lambda token: open_or_update_pr(
