@@ -38,6 +38,15 @@ def test_schema_error_fires_on_empty_artifact_set():
     assert chk.CODE_SCHEMA in _codes(_record(artifact_set=[]))
 
 
+def test_projection_drift_fires_on_schema_valid_mismatched_gates():
+    record = _record(
+        mutation_class="docs",
+        ratification_gates=["operator_front_bet", "operator_merge"],
+        adr_required=True,
+    )
+    assert chk.CODE_INVALID in _codes(record)
+
+
 def test_run_green_on_valid_sizing_record_dir(tmp_path):
     (tmp_path / "sizing.yml").write_text(yaml.safe_dump(_record()))
     result = chk.run([tmp_path])

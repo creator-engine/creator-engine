@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from ..loader import LoaderError, load_yaml
 from ..reporting import CheckResult, ValidationError, make_error
 from ..schema import validate_with_schema
+from ..work_sizing import size_ceremony
 from . import register
 
 CHECK_NAME = "work_sizing"
@@ -17,6 +18,7 @@ KIND_VALUE = "sizing-record"
 
 CODE_SCHEMA = "VAL-WORK-SIZING-SCHEMA"
 CODE_INVALID = "VAL-WORK-SIZING-INVALID"
+DERIVED_FIELDS = ("artifact_set", "decomposition_depth", "ratification_gates", "adr_required")
 
 
 def _is_under_excluded(path: Path) -> bool:
@@ -70,8 +72,24 @@ def iter_work_sizing_records(paths: Iterable[Path]) -> list[Path]:
 
 
 def validate_work_sizing(record: dict[str, Any], path: Path) -> list[ValidationError]:
-    """Validate one work-sizing record against the schema."""
-    return validate_with_schema(record, SCHEMA, path, code=CODE_SCHEMA, contract=CONTRACT)
+    """Validate one work-sizing record against schema and deterministic projection."""
+    errors = validate_with_schema(record, SCHEMA, path, code=CODE_SCHEMA, contract=CONTRACT)
+    if errors:
+        return errors
+    try:
+        expected = size_ceremony(str(record["work_class"]), str(record["mutation_class"]))
+    except (KeyError, ValueError):
+        return errors
+    for field in DERIVED_FIELDS:
+        if record.get(field) != expected[field]:
+            errors.append(make_error(
+                CODE_INVALID,
+                path,
+                field,
+                f"{field} must equal size_ceremony(work_class, mutation_class)",
+                CONTRACT,
+            ))
+    return errors
 
 
 @register(CHECK_NAME, [CODE_SCHEMA, CODE_INVALID])
@@ -87,4 +105,3 @@ def run(paths: Iterable[Path]) -> CheckResult:
             continue
         errors.extend(validate_work_sizing(record, record_path))
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))
-
