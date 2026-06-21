@@ -2265,6 +2265,15 @@ def _pickup_poll(args) -> int:
     from . import pickup
 
     try:
+        pickup.build_queries(
+            labels=getattr(args, "pickup_labels", ()) or (),
+            repo=getattr(args, "repo", None),
+            org=getattr(args, "org", None),
+        )
+    except pickup.PickupError as exc:
+        return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
+
+    try:
         token = pickup.resolve_token(
             keys_dir=args.keys_dir,
             identity=args.identity,

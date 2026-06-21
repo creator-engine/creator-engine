@@ -90,6 +90,12 @@ def test_build_queries_maps_reasons_scopes_and_labels():
     assert specs[5].query == 'is:open label:"triage" repo:o/r'
 
 
+def test_build_queries_refuses_unscoped_label():
+    with pytest.raises(pickup.PickupError) as exc:
+        pickup.build_queries(labels=["ready"])
+    assert "--label requires an explicit Search scope" in str(exc.value)
+
+
 def test_poll_resolves_search_hits_and_reason_mapping():
     transport = _fake_transport(_ACTIONABLE_RESPONSES)
     result = pickup.poll(token="ghp_fake", transport=transport)
@@ -135,6 +141,19 @@ def test_poll_label_option_maps_to_labeled_kind_and_adds_query():
     parsed = urllib.parse.urlparse(label_call["url"])
     query = urllib.parse.parse_qs(parsed.query)["q"][0]
     assert query == 'is:open label:"team/feed" org:creator-engine'
+
+
+def test_poll_unscoped_label_fails_before_transport_call():
+    calls = []
+
+    def transport(method, url, headers, body):
+        calls.append({"method": method, "url": url, "headers": dict(headers), "body": body})
+        raise AssertionError("transport should not be called for unscoped labels")
+
+    with pytest.raises(pickup.PickupError) as exc:
+        pickup.poll(token="ghp_fake", transport=transport, labels=["ready"])
+    assert "--label requires an explicit Search scope" in str(exc.value)
+    assert calls == []
 
 
 def test_poll_dedupes_overlapping_queries_by_repo_number():
@@ -268,6 +287,55 @@ def test_cli_pickup_poll_observe_only_emits_items(monkeypatch, tmp_path, capsys)
     # observe-only: no claim, no launch fields.
     kinds = {i["kind"] for i in out["items"]}
     assert kinds == {"review_requested", "assigned", "mention"}
+
+
+def test_cli_pickup_poll_unscoped_label_fails_before_transport(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_clitoken\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+
+    def should_not_make_transport():
+        raise AssertionError("transport factory should not be called for unscoped labels")
+
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport", should_not_make_transport)
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2",
+        "--keys-dir", str(tmp_path), "--label", "ready", "--json",
+    ])
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert "--label requires an explicit Search scope" in out["error"]
+
+
+def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_clitoken\n", encoding="utf-8")
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_pickup_transport",
+        lambda: _fake_transport([
+            _empty_search(),
+            _empty_search(),
+            _empty_search(),
+            (200, {}, _body(_hit(repo="o/r", number=23, pr=False))),
+        ], calls=calls),
+    )
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2",
+        "--keys-dir", str(tmp_path), "--label", "ready", "--org", "creator-engine", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["items"][0]["kind"] == "labeled"
+    parsed = urllib.parse.urlparse(calls[-1]["url"])
+    assert urllib.parse.parse_qs(parsed.query)["q"][0] == 'is:open label:"ready" org:creator-engine'
 
 
 def test_cli_pickup_poll_help_mentions_search_label_and_launch(capsys):

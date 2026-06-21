@@ -228,6 +228,9 @@ def build_queries(
     """Build the deterministic Search API query set for one poll."""
     if repo and org:
         raise PickupError("--repo and --org are mutually exclusive search scopes")
+    normalized_labels = _normalize_labels(labels)
+    if normalized_labels and not (repo or org):
+        raise PickupError("--label requires an explicit Search scope: supply --repo owner/name or --org slug")
     scope_terms: list[str] = []
     if repo:
         if not _REPO_SCOPE_RE.match(repo):
@@ -243,7 +246,7 @@ def build_queries(
         SearchQuery("assigned", " ".join(["is:open", "assignee:@me", *scope_terms])),
         SearchQuery("mention", " ".join(["is:open", "mentions:@me", *scope_terms])),
     ]
-    for label in _normalize_labels(labels):
+    for label in normalized_labels:
         specs.append(SearchQuery("labeled", " ".join(["is:open", _label_term(label), *scope_terms])))
     return tuple(specs)
 
