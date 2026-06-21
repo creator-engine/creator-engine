@@ -19,6 +19,14 @@ EGRESS_BROKER_ROOT = REPO_ROOT / "tools" / "egress-broker"
 if str(EGRESS_BROKER_ROOT) not in sys.path:
     sys.path.insert(0, str(EGRESS_BROKER_ROOT))
 
+# ce-ops#157 mint broker (host-side, internet-facing shared-App minting service under
+# ``tools/mint-broker/``) is exercised by the same CI-collected suite. Like the egress
+# broker it is host operations, not installable validator logic, so its import root is
+# added explicitly (it reuses the egress broker's audit + the forge mint seams).
+MINT_BROKER_ROOT = REPO_ROOT / "tools" / "mint-broker"
+if str(MINT_BROKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(MINT_BROKER_ROOT))
+
 
 def pytest_configure(config):
     config.addinivalue_line(
