@@ -29,17 +29,22 @@ authority_model:
 install:
   contract: source-pythonpath-with-offline-runtime-deps
   python_floor: ">=3.14"
+  validator_python_env: CE_VALIDATOR_PYTHON
+  validator_python_default: .venv/bin/python
   dependency_wheelhouse: validators/wheelhouse
   source_path: validators
   network: forbidden
   uv_first:
-    - ["uv", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
+    - ["uv", "venv", "--python", "3.14"]
+    - ["uv", "pip", "install", "--python", "${CE_VALIDATOR_PYTHON:-.venv/bin/python}", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
   pip_fallback:
-    - ["python", "-m", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
+    - ["python3.14", "-m", "venv", ".venv"]
+    - ["${CE_VALIDATOR_PYTHON:-.venv/bin/python}", "-m", "pip", "install", "--no-index", "--find-links", "validators/wheelhouse", "-r", "validators/requirements.txt"]
 
 preflight:
-  command: ["python", "-m", "creator_engine_validator.ce_cli", "doctor", "--json"]
+  command: ["${CE_VALIDATOR_PYTHON:-.venv/bin/python}", "-m", "creator_engine_validator.ce_cli", "doctor", "--json"]
   env:
+    CE_VALIDATOR_PYTHON: "${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
     PYTHONPATH: validators
   required: true
   requires: [install]
@@ -53,12 +58,13 @@ preflight:
       work, and MUST NOT fall back to a hidden/headless continuation.
 
 launch:
-  command: ["python", "-m", "creator_engine_validator.ce_cli", "launch", "--json"]
+  command: ["${CE_VALIDATOR_PYTHON:-.venv/bin/python}", "-m", "creator_engine_validator.ce_cli", "launch", "--json"]
   env:
+    CE_VALIDATOR_PYTHON: "${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
     PYTHONPATH: validators
   visible: true
   hidden_fallback: false
-  hud_alias: ["python", "-m", "creator_engine_validator.ce_cli", "hud", "--json"]
+  hud_alias: ["${CE_VALIDATOR_PYTHON:-.venv/bin/python}", "-m", "creator_engine_validator.ce_cli", "hud", "--json"]
 
 boundaries:
   hosted_service: false

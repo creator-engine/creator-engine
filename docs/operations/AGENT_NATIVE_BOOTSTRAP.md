@@ -51,17 +51,24 @@ runtime modules such as PyYAML and jsonschema at startup.
 uv-first:
 
 ```bash
-uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+uv venv --python 3.14
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
 pip fallback (uv-less host):
 
 ```bash
-python -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+python3.14 -m venv .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
 No network fetch occurs at install or runtime authority
 (`docs/governance/V1_PRODUCT_CONTRACT.md` §6).
+All source-backed validator invocations below **MUST** use
+`$CE_VALIDATOR_PYTHON` so the checkout source runs under the same interpreter
+environment that received the offline runtime dependencies.
 
 ## 4. Preflight — source `ce doctor --json`
 
@@ -69,7 +76,8 @@ After the offline runtime dependency install succeeds, the bootstrap **MUST** ru
 the governed-environment guard preflight:
 
 ```bash
-PYTHONPATH=validators python -m creator_engine_validator.ce_cli doctor --json
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
 The source-backed `ce doctor` module invocation evaluates the governed-environment
@@ -104,9 +112,10 @@ After a successful offline install and PASS preflight, the agent enters the
 visible Controller seat:
 
 ```bash
-PYTHONPATH=validators python -m creator_engine_validator.ce_cli launch --json
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli launch --json
 # `hud` is an alias/seam label for the same launcher:
-PYTHONPATH=validators python -m creator_engine_validator.ce_cli hud --json
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli hud --json
 ```
 
 The launch command opens/attaches a **visible** tmux Controller seat (DP-2 = B).
