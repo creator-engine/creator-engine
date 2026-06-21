@@ -1,0 +1,90 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/brownfield-baseline-attestation.schema.yaml"
+title: "Creator Engine Brownfield Baseline Attestation"
+description: >-
+  Value-free v0 baseline attestation for brownfield no-history capture. The
+  record binds the baseline commit, the captured snapshot digest, the clean scrub
+  summary, the attestor reference, and a content digest. It deliberately carries
+  no raw findings, paths, hostnames, repository URLs, secrets, SSHSIG block, or
+  client-specific values.
+type: object
+required:
+  - kind
+  - record_type
+  - schema_version
+  - baseline_commit_sha
+  - snapshot
+  - scrub
+  - attestor_ref
+  - attested_at
+  - content_digest
+additionalProperties: false
+properties:
+  kind:
+    type: string
+    const: brownfield-baseline-attestation
+  record_type:
+    type: string
+    const: brownfield_baseline_attestation
+  schema_version:
+    type: string
+    const: "1"
+  baseline_commit_sha:
+    type: string
+    pattern: "^[0-9a-f]{40}$"
+  snapshot:
+    type: object
+    required: [content_digest]
+    additionalProperties: false
+    properties:
+      content_digest:
+        $ref: "#/$defs/sha256"
+  scrub:
+    type: object
+    required: [status, scanners]
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+        const: clean
+      scanners:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: object
+          required: [name, version, result]
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: "^[A-Za-z0-9_.-]+$"
+            version:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: "^[A-Za-z0-9_.:+/-]+$"
+            result:
+              type: string
+              const: clean
+  attestor_ref:
+    type: string
+    minLength: 1
+    maxLength: 128
+    description: >-
+      Value-free attestor label. Must be a local actor class and label pair
+      such as `operator:peer-operator`; never a URL, hostname, filesystem path,
+      repository path, or client-specific locator.
+    pattern: "^[A-Za-z][A-Za-z0-9_-]{0,31}:[A-Za-z][A-Za-z0-9_-]{0,63}$"
+  attested_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$"
+  content_digest:
+    $ref: "#/$defs/sha256"
+
+$defs:
+  sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
