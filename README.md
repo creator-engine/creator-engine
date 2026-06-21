@@ -105,7 +105,7 @@ CE currently has two supported install paths, both documented by
    automate the GitHub App click, mutate branch protection, or create/adopt a
    project.
 
-2. **Clone plus offline wheelhouse.**
+2. **Clone plus offline dependency wheelhouse.**
 
    ```bash
    git clone https://github.com/creator-engine/creator-engine.git
@@ -117,8 +117,9 @@ CE currently has two supported install paths, both documented by
    ```
 
    The runtime wheelhouse is cp314 and dual-arch for Linux x86_64/aarch64 where
-   native wheels are needed. Developer/test dependencies live separately under
-   `validators/wheelhouse-dev/`. See
+   native wheels are needed, and it carries runtime dependencies only. The
+   first-party validator code runs from the checkout through `PYTHONPATH=validators`;
+   developer/test dependencies live separately under `validators/wheelhouse-dev/`. See
    [`validators/README.md`](./validators/README.md) for the full offline runtime
    and test install commands.
 

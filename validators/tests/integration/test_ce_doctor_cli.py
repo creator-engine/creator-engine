@@ -63,6 +63,8 @@ def test_doctor_passes_on_real_kernel_repo_with_packaging_clause(repo_root: Path
     packaging = [c for c in payload["checks"] if c["clause"] == guard.CLAUSE_PACKAGING][0]
     assert packaging["ok"] is True
     assert payload["prerequisites"]["python_in_contract"] is True
+    assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
+    assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +91,14 @@ def test_bootstrap_template_is_safe_loadable_yaml(repo_root: Path):
 def test_bootstrap_preflight_uses_ce_doctor_json_with_blocked_report(repo_root: Path):
     data = _bootstrap_template(repo_root)
     preflight = data["preflight"]
-    assert preflight["command"] == ["ce", "doctor", "--json"]
+    assert preflight["command"] == [
+        "python",
+        "-m",
+        "creator_engine_validator.ce_cli",
+        "doctor",
+        "--json",
+    ]
+    assert preflight["env"] == {"PYTHONPATH": "validators"}
     assert preflight["on_failure"] == "blocked-report"
     assert preflight["blocked_report"]["stop"] is True
 
@@ -107,14 +116,17 @@ def test_bootstrap_authority_is_one_directional_no_hosted(repo_root: Path):
 def test_bootstrap_install_is_uv_first_with_pip_fallback(repo_root: Path):
     data = _bootstrap_template(repo_root)
     install = data["install"]
-    assert install["contract"] == "uv-first-with-pip-fallback"
+    assert install["contract"] == "source-pythonpath-with-offline-runtime-deps"
     assert install["python_floor"] == ">=3.14"
     assert install["network"] == "forbidden"
+    assert install["source_path"] == "validators"
     # uv-first command and a pip fallback are both present and offline.
     assert any("uv" in step for step in install["uv_first"])
     assert any("pip" in step for step in install["pip_fallback"])
     for step in install["uv_first"] + install["pip_fallback"]:
         assert "--no-index" in step
+        assert "-r" in step
+        assert "validators/requirements.txt" in step
 
 
 def test_bootstrap_doc_references_doctor_and_template(repo_root: Path):
