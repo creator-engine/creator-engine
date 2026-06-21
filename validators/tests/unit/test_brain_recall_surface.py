@@ -325,6 +325,38 @@ def test_recall_default_embedder_against_gemma_store_fails_closed(tmp_path: Path
     assert "embedder" in message.lower()
 
 
+def test_recall_same_dim_wrong_model_store_fails_closed(tmp_path: Path):
+    """A same-dimension WRONG-model store must fail closed (model-identity guard).
+
+    Regression for the F6.3 correctness blocker: dimension agreement is not
+    enough. A store built with model_id A and an embedder of the SAME dimension
+    but a DIFFERENT model_id B live in incompatible vector spaces, so querying
+    one with the other returns garbage from a mismatched embedding space. The
+    surface must persist the ingest model identity (normal `ingest_markdown`
+    path, not just `rebuild_from_source`) and refuse the mismatch up front.
+    """
+
+    model_a = DeterministicFakeEmbedding(model_id="ce-model-A", dim=32)
+    state_root, db_path = _ingest_with_embedder(tmp_path, model_a)
+
+    # The ingest path (upsert, not rebuild) must have persisted the model identity.
+    store = SqliteVecStore(str(db_path), state_root=str(state_root))
+    assert store.model_id == "ce-model-A"
+    assert store.dim == 32
+
+    # Same dimension, different model => fail closed before any semantic query.
+    model_b = DeterministicFakeEmbedding(model_id="ce-model-B", dim=32)
+    with pytest.raises(brain_recall.BrainRecallInvalid) as exc:
+        surface.open_surface(db_path=str(db_path), state_root=str(state_root), embedder=model_b)
+    message = str(exc.value)
+    assert "ce-model-A" in message and "ce-model-B" in message
+    assert "model" in message.lower()
+    # The matching model_id (same dim) must still open and query successfully.
+    matching = DeterministicFakeEmbedding(model_id="ce-model-A", dim=32)
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root), embedder=matching)
+    assert surf.recall("merge queue prior art", top_k=5).recall_items
+
+
 def test_open_surface_named_embedder_reuses_ingest_factory(tmp_path: Path):
     """``embedder_name`` selection routes through the F6.2 ingest factory.
 

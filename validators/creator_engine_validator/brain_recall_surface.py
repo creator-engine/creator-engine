@@ -414,11 +414,25 @@ def open_surface(
 def _require_embedder_matches_store(store: Any, embedder: Any) -> None:
     """Fail closed when the selected embedder cannot query this store.
 
-    F6.2 records the store's vector dimension in metadata. If the embedder's
-    output dimension is known and disagrees, querying would dimension-mismatch
-    deep inside the store; surface that as a clear configuration error up front
-    so an operator picks the embedder the store was built with.
+    F6.2 records both the store's vector *dimension* and the ingest embedder's
+    *model identity* in metadata. Two checks are needed, because dimension alone
+    is not enough: two different models can share a dimension (e.g. two 768-dim
+    models, or two 32-dim test models) yet live in incompatible vector spaces, so
+    a same-dimension wrong-model query returns garbage from a mismatched embedding
+    space without ever tripping the dimension guard.
+
+    1. **Dimension** — if the embedder's output dim disagrees with the store dim,
+       the query would dimension-mismatch deep inside the store.
+    2. **Model identity** — if both the store's recorded ``model_id`` and the
+       embedder's ``model_id`` are known and disagree, the query would silently
+       use the wrong vector space even when the dims match.
+
+    Either mismatch raises an actionable ``BrainRecallInvalid`` up front so an
+    operator re-runs recall with the embedder/model the store was built with.
     """
+
+    store_model = getattr(store, "model_id", None)
+    embedder_model = getattr(embedder, "model_id", None)
 
     store_dim = getattr(store, "dim", None)
     embedder_dim = getattr(embedder, "dim", None)
@@ -426,15 +440,28 @@ def _require_embedder_matches_store(store: Any, embedder: Any) -> None:
         store_dim = int(store_dim) if store_dim is not None else None
         embedder_dim = int(embedder_dim) if embedder_dim is not None else None
     except (TypeError, ValueError):
-        return
-    if store_dim is None or embedder_dim is None:
-        return
-    if store_dim != embedder_dim:
-        store_model = getattr(store, "model_id", None)
+        store_dim = embedder_dim = None
+
+    if store_dim is not None and embedder_dim is not None and store_dim != embedder_dim:
         hint = f" (store model_id={store_model!r})" if store_model else ""
         raise BrainRecallInvalid(
             "recall embedder does not match the store it was built with: store vectors are "
             f"{store_dim}-dim but the selected embedder produces {embedder_dim}-dim vectors{hint}; "
+            "re-run recall with the same --embedder/--model-path the store was ingested with"
+        )
+
+    # Same-dimension wrong-model guard: a different model that happens to share the
+    # store's dimension is still a different embedding space, so fail closed when
+    # both model identities are known and disagree.
+    if (
+        isinstance(store_model, str)
+        and isinstance(embedder_model, str)
+        and store_model != embedder_model
+    ):
+        raise BrainRecallInvalid(
+            "recall embedder does not match the store it was built with: store was ingested "
+            f"with model_id={store_model!r} but the selected embedder is model_id={embedder_model!r} "
+            "(same vector dimension is not enough — a different model is a different vector space); "
             "re-run recall with the same --embedder/--model-path the store was ingested with"
         )
 

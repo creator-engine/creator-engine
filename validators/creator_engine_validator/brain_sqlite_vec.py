@@ -86,11 +86,20 @@ class SqliteVecStore(VectorStoreAdapter):
         self,
         entries: Iterable[RecallVector] | RecallVector | RecallRecord | Mapping[str, Any],
         vector: Sequence[float] | None = None,
+        *,
+        model_id: str | None = None,
     ) -> int:
         prepared = tuple(self._prepare_entries(entries, vector=vector))
         if not prepared:
             return 0
         with self._conn:
+            # Persist the embedding model identity alongside the dimension so the
+            # recall surface can fail closed on a same-dimension wrong-model query
+            # (a different model that happens to share the dim is still a different
+            # vector space). The dim is recorded per-entry by `_require_dim`; the
+            # model_id is recorded here from the ingesting embedder.
+            if model_id is not None:
+                self._require_model_id(str(model_id))
             for entry in prepared:
                 self._upsert_one(entry)
             self._set_metadata("entry_count", str(self._count_entries()))
@@ -402,6 +411,17 @@ class SqliteVecStore(VectorStoreAdapter):
             return
         if stored_dim != dim:
             raise BrainRecallInvalid("vector dimension does not match the store dimension")
+
+    def _require_model_id(self, model_id: str) -> None:
+        stored_model_id = self.model_id
+        if stored_model_id is None:
+            self._set_metadata(METADATA_VECTOR_MODEL_ID, model_id)
+            return
+        if stored_model_id != model_id:
+            raise BrainRecallInvalid(
+                "vector model identity does not match the store model: store was built with "
+                f"model_id={stored_model_id!r} but this upsert uses model_id={model_id!r}"
+            )
 
     def _replace_fts(self, key: RecallKey, text: str) -> None:
         self._delete_fts(key)

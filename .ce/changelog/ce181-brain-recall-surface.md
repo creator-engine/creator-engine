@@ -2,10 +2,12 @@
 slug: ce181-brain-recall-surface
 ticket: ce-ops#181
 type: feature
-scope: brain recall surface (hybrid recall + MCP/SSOT surface + session hydration)
+scope: brain recall surface (CLI/in-process hybrid recall + SSOT tiering + session hydration; MCP deferred to G11)
 ---
 
-Adds the F6.3 company-brain recall surface — MVP-complete after this slice:
+Adds the F6.3 company-brain recall surface as a CLI / in-process surface. The
+standalone MCP recall surface is deferred to G11 (ce-ops#170 W4) and is NOT
+delivered by this slice:
 
 - Adds `ce brain recall <context>` for hybrid retrieval: the sqlite-vec semantic
   leg fused with the FTS5 keyword leg (the column F6.2 populated but never
@@ -22,8 +24,15 @@ Adds the F6.3 company-brain recall surface — MVP-complete after this slice:
 - Privacy fail-closed: the semantic leg refuses to embed a query through an
   egress-requiring embedder over a confidential corpus without explicit consent,
   reusing the F6.1 gate; the local-first default embedder needs no consent.
+- Embedder/store parity fail-closed: recall exposes the same `--embedder` /
+  `--model-path` selection as ingest and refuses up front when the selected
+  embedder does not match the store — both on vector dimension AND on model
+  identity (a same-dimension wrong-model query is still a different vector space).
+  Ingest now persists the embedding `model_id` on the normal upsert path so this
+  guard works for the standard ingest flow, not only `rebuild_from_source`.
 - Builds on the merged F6.1 adapters (`brain_recall`) and F6.2 store/ingest
   (`brain_sqlite_vec`, `brain_ingest_runtime`); adds `SqliteVecStore.keyword_search`
   for the FTS5 leg and a new `brain_recall_surface` composing module. No new
-  store/model/server work (Phase-2). Offline, deterministic CI (heavy model deps
-  blocked at import time).
+  store/model/server work. The standalone MCP recall surface is deferred to G11
+  (ce-ops#170 W4); this slice delivers CLI / in-process recall only. Offline,
+  deterministic CI (heavy model deps blocked at import time).
