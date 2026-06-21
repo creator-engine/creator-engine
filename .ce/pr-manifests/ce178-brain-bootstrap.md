@@ -30,13 +30,12 @@ The changes:
 - Adds offline unit and CLI coverage for deterministic load, tamper refusal,
   scope filtering, corrected-assertion reflection, launch refusal/injection,
   and seat-class defaulting.
-- Rebuilds the tracked validator wheel and refreshes `SHA256SUMS`.
 
-Per-file purpose (closed path-set - 22 paths):
+Per-file purpose (closed path-set - 20 paths):
 - **`.ce/changelog/ce178-brain-bootstrap.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce178-brain-bootstrap.md`** *(A)* - this carrier.
 - **`validators/creator_engine_validator/_version.py`** *(M)* - regenerated
-  build identity before the wheel rebuild.
+  build identity after rebasing onto current main.
 - **`validators/creator_engine_validator/brain_bootstrap.py`** *(A)* -
   deterministic born-knowing bootstrap projection.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - wires
@@ -71,17 +70,13 @@ Per-file purpose (closed path-set - 22 paths):
   resource-bound launch coverage with valid bootstrap state.
 - **`validators/tests/unit/test_seat_sentinel.py`** *(M)* - wrapper env-export
   regression coverage.
-- **`validators/wheelhouse/SHA256SUMS`** *(M)* - app wheel digest re-pinned
-  after rebuild.
-- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`**
-  *(M)* - rebuilt app wheel containing the bootstrap surface.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=22
+AUTHORIZED_PATHS_COUNT=20
 
-AUTHORIZED_PATHS_SHA256=b98f872e883f4347a5300e8fa31d2b0556b971bb06967a8b1b96bbf403852b02
+AUTHORIZED_PATHS_SHA256=5945aa1d6f2d2cf1e18f1707011d0a70602cf7b59fadd05e7249a2bfc9da9f5d
 
 ```text
 .ce/changelog/ce178-brain-bootstrap.md
@@ -104,6 +99,4 @@ validators/tests/unit/test_lane_runtime_reviewer_venue.py
 validators/tests/unit/test_launch_runtime.py
 validators/tests/unit/test_launch_runtime_resource_bound.py
 validators/tests/unit/test_seat_sentinel.py
-validators/wheelhouse/SHA256SUMS
-validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl
 ```
