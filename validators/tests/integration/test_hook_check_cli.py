@@ -30,6 +30,30 @@ def _run(argv, capsys, stdin_text=None, monkeypatch=None):
     return code, out
 
 
+def _pin_bootstrap_seat_class(monkeypatch, tmp_path: Path, seat_class: str) -> None:
+    payload = {
+        "kind": brain_bootstrap.BOOTSTRAP_KIND,
+        "schema_version": brain_bootstrap.BOOTSTRAP_SCHEMA_VERSION,
+        "context": {
+            "role": "implementer",
+            "seat_class": seat_class,
+            "scope": {"seat_class": seat_class},
+        },
+        "knowledge_ssot": {
+            "ledger_path": ".ce/state/brain/assertions.yaml",
+            "record_count": 0,
+            "active_count": 0,
+            "scope_relevant_count": 0,
+            "head_content_hash": None,
+            "assertions": [],
+        },
+    }
+    ref = tmp_path / f"brain-bootstrap-{seat_class}.json"
+    digest = brain_bootstrap.write_payload(ref, payload)
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_REF_ENV, str(ref))
+    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, digest)
+
+
 def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch):
     # G-i: author-time path-manifest enforcement is ADVISORY under governed
     # posture (scope is enforced post-hoc by the CI path_manifest_fidelity
@@ -301,6 +325,7 @@ def test_hook_check_foreman_seat_class_policy_ref_warns(capsys, tmp_path, monkey
 
 
 def test_hook_check_worker_seat_class_policy_ref_does_not_warn(capsys, tmp_path, monkeypatch):
+    _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
     policy = tmp_path / "seat-class.ce.yml"
     policy.write_text(
         "kind: seat-class-policy-record\n"
@@ -343,23 +368,7 @@ def test_hook_check_worker_seat_class_policy_ref_does_not_warn(capsys, tmp_path,
 
 
 def test_hook_check_launch_pinned_brain_bootstrap_seat_class_overrides_event(capsys, tmp_path, monkeypatch):
-    payload = {
-        "kind": brain_bootstrap.BOOTSTRAP_KIND,
-        "schema_version": brain_bootstrap.BOOTSTRAP_SCHEMA_VERSION,
-        "context": {"role": "implementer", "seat_class": "worker", "scope": {"seat_class": "worker"}},
-        "knowledge_ssot": {
-            "ledger_path": ".ce/state/brain/assertions.yaml",
-            "record_count": 0,
-            "active_count": 0,
-            "scope_relevant_count": 0,
-            "head_content_hash": None,
-            "assertions": [],
-        },
-    }
-    ref = tmp_path / "brain-bootstrap.json"
-    digest = brain_bootstrap.write_payload(ref, payload)
-    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_REF_ENV, str(ref))
-    monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, digest)
+    _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
     event = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Edit",
@@ -379,6 +388,33 @@ def test_hook_check_launch_pinned_brain_bootstrap_seat_class_overrides_event(cap
     assert payload["decision"] == "allow"
     assert payload["advisory"] is False
     assert payload["wouldHaveDenied"] is False
+
+
+def test_hook_check_missing_brain_bootstrap_ignores_event_worker_seat_class(capsys, monkeypatch):
+    monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_REF_ENV, raising=False)
+    monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, raising=False)
+    monkeypatch.delenv("CE_SEAT_CLASS", raising=False)
+    monkeypatch.delenv("CE_LAUNCH_TYPE", raising=False)
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class": "worker",
+        },
+    }
+
+    code, out = _run(["hook-check", "--stdin"], capsys, json.dumps(event), monkeypatch)
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is True
+    assert payload["wouldHaveDenied"] is True
+    assert "worker delegation" in payload["reason"]
 
 
 def test_hook_check_invalid_brain_bootstrap_seat_class_fails_closed(capsys, tmp_path, monkeypatch):

@@ -630,20 +630,21 @@ def _hook_check(args) -> int:
     return 0
 
 
-def _launch_pinned_seat_class_from_env() -> str | None:
+def _launch_pinned_seat_class_from_env() -> str:
     """Resolve the launch-pinned brain-bootstrap seat class, failing to foreman.
 
     The hook event itself is not the authority for seat class. A governed launch
     writes a bootstrap payload and exports its path plus digest; only a matching
-    payload can opt a seat down to ``worker``. Missing payloads mean the existing
-    default applies. Present-but-invalid payloads fail closed to ``foreman``.
+    payload can opt a seat down to ``worker``. Missing or invalid payloads fail
+    closed to ``foreman`` so event-local seat-class claims cannot weaken the live
+    hook posture.
     """
     from . import brain_bootstrap
 
     ref = os.environ.get(brain_bootstrap.BOOTSTRAP_REF_ENV)
     expected = os.environ.get(brain_bootstrap.BOOTSTRAP_SHA256_ENV)
     if not ref and not expected:
-        return None
+        return "foreman"
     if not ref or not expected:
         return "foreman"
     try:
