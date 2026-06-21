@@ -225,6 +225,47 @@ def test_parse_allowed_signers_and_pinned_key_matches_served_root():
     assert inst.parse_allowed_signers("# just a comment\n\n") == {}
 
 
+def test_public_key_fingerprint_matches_out_of_band_anchor_record():
+    line = inst.PINNED_KEYS["ce-root-v1"]
+    fingerprint = inst.public_key_fingerprint(line)
+    anchors = inst.parse_trust_anchor_records(
+        f"# DNS TXT form\nce-root-v1={fingerprint}\n",
+        source="dns-txt",
+    )
+
+    evidence = inst.verify_trust_anchors("ce-root-v1", line, anchors)
+
+    assert fingerprint.startswith("SHA256:")
+    assert evidence.ok is True
+    assert evidence.status == "verified"
+    assert evidence.agreed == ("dns-txt",)
+
+
+def test_out_of_band_anchor_missing_is_degraded_not_verified():
+    evidence = inst.verify_trust_anchors(
+        "ce-root-v1",
+        inst.PINNED_KEYS["ce-root-v1"],
+        (),
+    )
+
+    assert evidence.ok is False
+    assert evidence.status == "same_origin_only"
+    assert "out-of-band" in evidence.reason
+
+
+def test_out_of_band_anchor_mismatch_is_refused():
+    anchors = inst.parse_trust_anchor_records(
+        "ce-root-v1=SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        source="github-org-profile",
+    )
+
+    evidence = inst.verify_trust_anchors("ce-root-v1", inst.PINNED_KEYS["ce-root-v1"], anchors)
+
+    assert evidence.ok is False
+    assert evidence.status == "mismatch"
+    assert evidence.mismatched == ("github-org-profile",)
+
+
 def test_canonical_spec_bytes_normalizes_dynamic_fields_and_is_idempotent():
     spec = (
         "head\n  key_id: ce-root-v1\n  value: AAAAREALbase64==\n"

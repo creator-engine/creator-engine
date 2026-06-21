@@ -192,6 +192,7 @@ EDUCATE_AT_OPTOUT = (
 )
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_OPENSSH_SHA256_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 #: The in-tree integrity-floor algorithm (a content address; not asymmetric crypto).
 CONTENT_ALGO = "sha256-content"
 #: The real asymmetric algorithm the served spec is signed with (an OpenSSH
@@ -298,6 +299,143 @@ def parse_allowed_signers(text: str) -> dict[str, str]:
         principal = fields[0].split(",")[0]
         pinned[principal] = line
     return pinned
+
+
+def public_key_fingerprint(key_material: str) -> str:
+    """Return the OpenSSH-style SHA256 fingerprint for an ``allowed_signers`` key.
+
+    The out-of-band trust anchor publishes this fingerprint, not the key line
+    itself, so DNS TXT / GitHub profile / Sigstore evidence can be compared
+    without trusting the same-origin served ``allowed_signers`` file.
+    """
+    fields = key_material.split()
+    if len(fields) < 3:
+        raise InstallRefused("trust anchor refused: key material is not an OpenSSH public key")
+    try:
+        raw_key = base64.b64decode(fields[2].encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+        raise InstallRefused(f"trust anchor refused: malformed OpenSSH key material: {exc}") from exc
+    return "SHA256:" + base64.b64encode(hashlib.sha256(raw_key).digest()).decode("ascii").rstrip("=")
+
+
+@dataclass(frozen=True)
+class TrustAnchorRecord:
+    source: str
+    key_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class TrustAnchorEvidence:
+    ok: bool
+    status: str
+    reason: str
+    agreed: tuple[str, ...] = ()
+    mismatched: tuple[str, ...] = ()
+    fingerprint: str | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        """JSON-serializable evidence for CLI inventory / plan output."""
+        record: dict[str, Any] = {
+            "ok": self.ok,
+            "status": self.status,
+            "reason": self.reason,
+            "agreed": list(self.agreed),
+            "mismatched": list(self.mismatched),
+        }
+        if self.fingerprint is not None:
+            record["fingerprint"] = self.fingerprint
+        return record
+
+
+def parse_trust_anchor_records(text: str, *, source: str) -> tuple[TrustAnchorRecord, ...]:
+    """Parse out-of-band ce-root fingerprint assertions (PURE).
+
+    Supported publish forms are intentionally line-oriented so they work for DNS
+    TXT records, a GitHub org/profile field, or a Sigstore bundle annotation:
+    ``ce-root-v1=SHA256:...`` and ``ce-root-v1 SHA256:...``. Invalid or unrelated
+    lines are ignored; an empty parse later fails closed as ``same_origin_only``.
+    """
+    records: list[TrustAnchorRecord] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip('"').strip("'").strip()
+        if not line or line.startswith("#"):
+            continue
+        key_id = ""
+        fingerprint = ""
+        if "=" in line:
+            left, right = line.split("=", 1)
+            key_id = left.strip()
+            fingerprint = (right.strip().split() or [""])[0]
+        else:
+            fields = line.split()
+            if len(fields) >= 2:
+                key_id = fields[0].rstrip(":")
+                fingerprint = next((field for field in fields[1:] if field.startswith("SHA256:")), "")
+        if key_id and _OPENSSH_SHA256_FINGERPRINT_RE.fullmatch(fingerprint):
+            records.append(TrustAnchorRecord(source=source, key_id=key_id, fingerprint=fingerprint))
+    return tuple(records)
+
+
+def _unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return tuple(out)
+
+
+def verify_trust_anchors(
+    key_id: str,
+    key_material: str,
+    anchors: Iterable[TrustAnchorRecord],
+) -> TrustAnchorEvidence:
+    """Compare the verified trust-root key to out-of-band fingerprint anchors.
+
+    Authentic install mode is VERIFIED only when at least one independently
+    supplied anchor agrees with the fetched trust root and no supplied anchor for
+    the key disagrees. With no matching anchor, the status is intentionally
+    degraded to ``same_origin_only``.
+    """
+    fingerprint = public_key_fingerprint(key_material)
+    relevant = tuple(anchor for anchor in anchors if anchor.key_id == key_id)
+    if not relevant:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="same_origin_only",
+            reason=(
+                "no out-of-band trust anchor matched the fetched trust root; "
+                "authentic verification would rely only on same-origin repo-served material"
+            ),
+            fingerprint=fingerprint,
+        )
+    agreed = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint == fingerprint)
+    mismatched = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint != fingerprint)
+    if mismatched:
+        return TrustAnchorEvidence(
+            ok=False,
+            status="mismatch",
+            reason="out-of-band trust anchor fingerprint does not match the fetched trust root",
+            agreed=agreed,
+            mismatched=mismatched,
+            fingerprint=fingerprint,
+        )
+    if agreed:
+        return TrustAnchorEvidence(
+            ok=True,
+            status="verified",
+            reason="out-of-band trust anchor fingerprint matches the fetched trust root",
+            agreed=agreed,
+            fingerprint=fingerprint,
+        )
+    return TrustAnchorEvidence(
+        ok=False,
+        status="same_origin_only",
+        reason="no out-of-band trust anchor agreed with the fetched trust root",
+        fingerprint=fingerprint,
+    )
 
 
 @dataclass(frozen=True)
