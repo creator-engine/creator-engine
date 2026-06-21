@@ -49,11 +49,13 @@ def _default_wheel_source_checker(repo_root: Path) -> list[str]:
     root = Path(repo_root)
     source_root = root / "validators" / "creator_engine_validator"
     wheelhouse = root / "validators" / "wheelhouse"
-    if not source_root.is_dir() or not wheelhouse.is_dir():
-        return []
+    if not source_root.is_dir():
+        return [f"missing validator source tree at {source_root}"]
+    if not wheelhouse.is_dir():
+        return [f"missing validator wheelhouse at {wheelhouse}"]
     wheels = sorted(wheelhouse.glob("creator_engine_validator-*.whl"))
     if not wheels:
-        return []
+        return [f"missing creator_engine_validator app wheel in {wheelhouse}"]
 
     source_files = {
         path.relative_to(source_root).as_posix(): path
@@ -215,6 +217,8 @@ def probe(name: str, context: ProbeContext | None = None) -> ProbeResult:
         result = fn(ctx)
     except Exception as exc:
         return _unknown(name, reason="probe_error", error=exc)
+    if not isinstance(result, ProbeResult):
+        return _unknown(name, reason="invalid_probe_result")
     if result.verdict not in _VERDICTS:
         return _unknown(name, reason="invalid_probe_verdict")
     if result.name != name:

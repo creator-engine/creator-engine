@@ -115,6 +115,30 @@ def test_wheelhouse_matches_source_uses_injected_checker(tmp_path: Path):
     assert unknown.evidence["error"] == "ValueError"
 
 
+def test_wheelhouse_matches_source_absent_when_repo_evidence_missing(tmp_path: Path):
+    result = brain_probe.probe(
+        "wheelhouse_matches_source",
+        brain_probe.ProbeContext(repo_root=tmp_path),
+    )
+
+    assert result.verdict == "absent"
+    assert result.evidence["violation_count"] == 1
+    assert "missing validator source tree" in result.evidence["violations"][0]
+
+
+def test_probe_invalid_injected_result_returns_unknown():
+    result = brain_probe.probe(
+        "gh_authenticated",
+        brain_probe.ProbeContext(probes={"gh_authenticated": lambda _context: {"verdict": "present"}}),
+    )
+
+    assert result.to_dict() == {
+        "evidence": {"reason": "invalid_probe_result"},
+        "name": "gh_authenticated",
+        "verdict": "unknown",
+    }
+
+
 def test_probe_all_is_sorted_and_json_deterministic(tmp_path: Path):
     context = brain_probe.ProbeContext(
         repo_root=tmp_path,
