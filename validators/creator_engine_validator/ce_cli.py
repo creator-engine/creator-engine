@@ -30,6 +30,7 @@ ce pcl merge         # deterministic conflict-detecting merge projection of >=2 
 ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/state
 ce brain check       # deterministically return the active assertion or unknown
 ce brain correct     # append a supersession marker plus corrected assertion
+ce brain ingest      # derive/update the local rebuildable recall vector store
 ce brain verify      # validate the local brain assertion ledger
 ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
@@ -64,6 +65,8 @@ from typing import Sequence
 from . import (
     brain_probe,
     brain_runtime,
+    brain_ingest_runtime,
+    brain_recall,
     ce_event_runtime,
     connector_runtime,
     doctor_runtime,
@@ -547,11 +550,10 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--no-cache", action="store_true", help="compute only; do not write the cache projection")
     pm.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    # ce brain — first Knowledge-SSOT slice. Local, schema-gated, hash-chained
-    # assertion ledger under .ce/state. This is only deterministic SSOT; no MCP,
-    # datastore, recall/vector, or memory migration surface is introduced here.
+    # ce brain — local Knowledge-SSOT assertion ledger plus rebuildable recall
+    # ingest. The recall store remains a derived projection of Markdown source.
     brain = groups.add_parser(
-        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/verify/probe)"
+        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/ingest/verify/probe)"
     )
     brain_sub = brain.add_subparsers(dest="brain_cmd")
 
@@ -594,6 +596,30 @@ def _build_parser() -> argparse.ArgumentParser:
     bco.add_argument("--claim-json", required=True, help="corrected structured claim mapping as JSON")
     bco.add_argument("--evidence-ref", required=True, help="required correction evidence reference")
     bco.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bi = brain_sub.add_parser("ingest", help="derive/update the local rebuildable recall vector store")
+    _add_state_root(bi)
+    _add_optional_scope(bi)
+    bi.add_argument("--source", action="append", dest="sources", required=True, help="repeatable Markdown file or directory source")
+    bi.add_argument("--db", default=None, help="recall SQLite DB path (default: <state-root>/brain/recall.sqlite)")
+    bi.add_argument(
+        "--embedder",
+        default="deterministic",
+        choices=("deterministic", "embeddinggemma"),
+        help="embedding adapter (default: deterministic offline fake)",
+    )
+    bi.add_argument("--model-path", default=None, help="local model path for --embedder embeddinggemma")
+    bi.add_argument(
+        "--allow-confidential-egress",
+        action="store_true",
+        help="permit egress-requiring embedders to process confidential recall chunks",
+    )
+    bi.add_argument(
+        "--as-of",
+        default=None,
+        help="snapshot timestamp for produced records (YYYY-MM-DDTHH:MM:SSZ; deterministic default)",
+    )
+    bi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bv = brain_sub.add_parser("verify", help="validate the local brain assertion ledger")
     _add_state_root(bv)
@@ -1752,6 +1778,44 @@ def _brain_probe(args) -> int:
     return 0
 
 
+def _brain_ingest(args) -> int:
+    try:
+        scope = _brain_scope(args, required=False)
+    except SystemExit as exc:
+        return int(exc.code)
+    if scope is None:
+        scope = brain_ingest_runtime.DEFAULT_SCOPE
+    try:
+        result = brain_ingest_runtime.ingest_markdown(
+            sources=args.sources,
+            state_root=args.state_root,
+            db_path=args.db,
+            scope=scope,
+            embedder_name=args.embedder,
+            model_path=args.model_path,
+            allow_confidential_egress=args.allow_confidential_egress,
+            as_of=args.as_of,
+        )
+    except brain_ingest_runtime.BrainIngestError as exc:
+        print(f"ERROR: ce brain ingest refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    except brain_recall.BrainRecallError as exc:
+        print(f"ERROR: ce brain ingest refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce brain ingest: {result.chunk_count} chunk(s) from {result.source_count} source file(s)")
+        print(f"db: {result.db_path}")
+        print(f"model: {result.model_id} dim={result.dim}")
+        print(
+            f"upserted: {result.embedded_count} skipped: {result.skipped_count} "
+            f"deleted: {result.deleted_count}"
+        )
+    return 0
+
+
 def _connector_plan_payload(plan) -> dict:
     return {
         "connector_id": plan.connector_id,
@@ -2436,6 +2500,7 @@ _BRAIN_DISPATCH = {
     "assert": _brain_assert,
     "check": _brain_check,
     "correct": _brain_correct,
+    "ingest": _brain_ingest,
     "probe": _brain_probe,
     "verify": _brain_verify,
 }
