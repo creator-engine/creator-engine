@@ -31,6 +31,7 @@ ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/st
 ce brain check       # deterministically return the active assertion or unknown
 ce brain correct     # append a supersession marker plus corrected assertion
 ce brain ingest      # derive/update the local rebuildable recall vector store
+ce brain recall      # hybrid (semantic+keyword) recall: SSOT-precedence, tier-tagged pointers
 ce brain verify      # validate the local brain assertion ledger
 ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
 ce brain bootstrap   # emit the deterministic injection bootstrap payload
@@ -70,6 +71,7 @@ from . import (
     brain_runtime,
     brain_ingest_runtime,
     brain_recall,
+    brain_recall_surface,
     ce_event_runtime,
     connector_runtime,
     doctor_runtime,
@@ -557,7 +559,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # ce brain — local Knowledge-SSOT assertion ledger plus rebuildable recall
     # ingest. The recall store remains a derived projection of Markdown source.
     brain = groups.add_parser(
-        "brain", help="local Knowledge-SSOT assertion ledger (assert/check/correct/ingest/verify/probe/bootstrap)"
+        "brain",
+        help=(
+            "local Knowledge-SSOT assertion ledger + recall "
+            "(assert/check/correct/ingest/recall/verify/probe/bootstrap)"
+        ),
     )
     brain_sub = brain.add_subparsers(dest="brain_cmd")
 
@@ -624,6 +630,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="snapshot timestamp for produced records (YYYY-MM-DDTHH:MM:SSZ; deterministic default)",
     )
     bi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    br = brain_sub.add_parser(
+        "recall",
+        help="hybrid (semantic+keyword) recall surface: SSOT-precedence, tier-tagged pointers",
+    )
+    _add_state_root(br)
+    br.add_argument("context", help="free-form context to recall against (task/ticket/diff)")
+    br.add_argument("--db", default=None, help="recall SQLite DB path (default: <state-root>/brain/recall.sqlite)")
+    br.add_argument("--top-k", type=int, default=brain_recall_surface.DEFAULT_TOP_K, help="max items per tier")
+    br.add_argument("--scope", default=None, help="restrict recall to this scope string")
+    br.add_argument("--as-of", default=None, help="exclude recall records stamped after this as_of (YYYY-MM-DDTHH:MM:SSZ)")
+    br.add_argument(
+        "--allow-confidential-egress",
+        action="store_true",
+        help="permit an egress-requiring embedder to embed the query over a confidential corpus",
+    )
+    br.add_argument(
+        "--hydrate",
+        action="store_true",
+        help="emit a session-hydration payload (additive over the always-load CORE markdown)",
+    )
+    br.add_argument("--core-path", default=None, help="always-load CORE markdown path reported by --hydrate (never edited)")
+    br.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bv = brain_sub.add_parser("verify", help="validate the local brain assertion ledger")
     _add_state_root(bv)
@@ -1874,6 +1903,62 @@ def _brain_bootstrap(args) -> int:
     return 0
 
 
+def _brain_recall(args) -> int:
+    db_path = args.db
+    if db_path is None:
+        db_path = brain_ingest_runtime.default_db_path(args.state_root)
+    try:
+        surface = brain_recall_surface.open_surface(db_path=db_path, state_root=args.state_root)
+    except brain_recall.BrainRecallError as exc:
+        print(f"ERROR: ce brain recall refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    try:
+        if getattr(args, "hydrate", False):
+            payload = surface.hydrate_session(
+                args.context,
+                top_k=args.top_k,
+                core_path=args.core_path,
+                scope=args.scope,
+                as_of=args.as_of,
+                allow_confidential_egress=args.allow_confidential_egress,
+            )
+        else:
+            payload = surface.recall(
+                args.context,
+                top_k=args.top_k,
+                scope=args.scope,
+                as_of=args.as_of,
+                allow_confidential_egress=args.allow_confidential_egress,
+            )
+    except brain_recall.BrainRecallError as exc:
+        print(f"ERROR: ce brain recall refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload.to_dict(), indent=2, sort_keys=True))
+        return 0
+
+    if getattr(args, "hydrate", False):
+        print(
+            f"ce brain recall (hydrate): CORE {'loaded' if payload.core_loaded else 'absent'}"
+            f"{f' ({payload.core_path})' if payload.core_path else ''}; "
+            f"{len(payload.recall)} additive recall pointer(s)"
+        )
+        items = payload.recall
+    else:
+        print(f"ce brain recall: {len(payload.items)} item(s) for {args.context!r}")
+        items = payload.items
+    for item in items:
+        if item.tier == brain_recall_surface.TIER_SSOT:
+            print(f"  [SSOT] {item.assertion_id} (verified) score={item.score}")
+        else:
+            print(
+                f"  [recall] {item.source_path}#{item.chunk_ref} "
+                f"as_of={item.as_of} score={item.score} (re-verify against source)"
+            )
+    return 0
+
+
 def _connector_plan_payload(plan) -> dict:
     return {
         "connector_id": plan.connector_id,
@@ -2610,6 +2695,7 @@ _BRAIN_DISPATCH = {
     "check": _brain_check,
     "correct": _brain_correct,
     "ingest": _brain_ingest,
+    "recall": _brain_recall,
     "probe": _brain_probe,
     "verify": _brain_verify,
 }
