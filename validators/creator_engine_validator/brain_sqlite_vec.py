@@ -262,6 +262,10 @@ class SqliteVecStore(VectorStoreAdapter):
         raw = self._metadata(METADATA_VECTOR_DIM)
         return int(raw) if raw is not None else None
 
+    @property
+    def model_id(self) -> str | None:
+        return self._metadata(METADATA_VECTOR_MODEL_ID)
+
     def _initialize(self) -> None:
         try:
             with self._conn:

@@ -260,6 +260,130 @@ def test_zero_top_k_returns_empty(tmp_path: Path):
     assert surf.recall("merge", top_k=0).items == ()
 
 
+def _ingest_with_embedder(tmp_path: Path, embedder, scope: str = "public") -> tuple[Path, Path]:
+    """Ingest the standard corpus through a caller-supplied embedder.
+
+    Mirrors a real F6.2 ``--embedder embeddinggemma`` store: the store records the
+    embedder's (non-default) vector dimension, so a default-embedder recall query
+    can no longer silently match against it.
+    """
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir(exist_ok=True)
+    _write(corpus, "merge.md", "# Merge throughput\n\nReviewed-vs-merged head merge queue prior art.\n")
+    _write(corpus, "topology.md", "# Seat identity topology\n\nThe DGX spark host controller seat map.\n")
+    state_root = tmp_path / ".ce" / "state"
+    db_path = state_root / "brain" / "recall.sqlite"
+    ingest.ingest_markdown(
+        sources=[str(corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope=scope,
+        as_of=AS_OF,
+        embedder=embedder,
+    )
+    return state_root, db_path
+
+
+def test_recall_queries_non_default_embedder_store(tmp_path: Path):
+    """A store built with an EmbeddingGemma-like 768-dim embedder is queryable.
+
+    Regression for the F6.3 contract escape: recall must use the SAME embedder
+    selection ingest used. Querying a 768-dim store with a matching 768-dim
+    embedder returns hybrid hits (no dimension mismatch).
+    """
+
+    gemma_like = DeterministicFakeEmbedding(model_id="google/embeddinggemma-300m", dim=768)
+    state_root, db_path = _ingest_with_embedder(tmp_path, gemma_like)
+
+    store = SqliteVecStore(str(db_path), state_root=str(state_root))
+    assert store.dim == 768
+
+    matching = DeterministicFakeEmbedding(model_id="google/embeddinggemma-300m", dim=768)
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root), embedder=matching)
+    result = surf.recall("merge queue prior art", top_k=5)
+    assert result.recall_items, "recall must query a non-default embedder store"
+
+
+def test_recall_default_embedder_against_gemma_store_fails_closed(tmp_path: Path):
+    """A dimension mismatch between query embedder and store must fail closed.
+
+    Opening recall with the default (32-dim) embedder over a 768-dim store must
+    raise an actionable configuration error up front, never silently return
+    garbage or trip a late opaque store error.
+    """
+
+    gemma_like = DeterministicFakeEmbedding(model_id="google/embeddinggemma-300m", dim=768)
+    state_root, db_path = _ingest_with_embedder(tmp_path, gemma_like)
+
+    with pytest.raises(brain_recall.BrainRecallInvalid) as exc:
+        # No embedder selection => deterministic 32-dim default, mismatching the
+        # 768-dim store.
+        surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+    message = str(exc.value)
+    assert "768" in message and "32" in message
+    assert "embedder" in message.lower()
+
+
+def test_open_surface_named_embedder_reuses_ingest_factory(tmp_path: Path):
+    """``embedder_name`` selection routes through the F6.2 ingest factory.
+
+    Selecting an unknown/misconfigured embedder by name surfaces the SAME ingest
+    validation (reused, not duplicated) as a recall-side configuration error.
+    """
+
+    state_root, db_path = _ingest(tmp_path)
+    # embeddinggemma without a --model-path is invalid in the shared ingest
+    # factory; recall must surface that as a fail-closed configuration error.
+    with pytest.raises(brain_recall.BrainRecallInvalid) as exc:
+        surface.open_surface(
+            db_path=str(db_path),
+            state_root=str(state_root),
+            embedder_name="embeddinggemma",
+            model_path=None,
+        )
+    assert "model-path" in str(exc.value)
+    # The named default selection still works and matches the default store.
+    surf = surface.open_surface(
+        db_path=str(db_path), state_root=str(state_root), embedder_name="deterministic"
+    )
+    assert surf.recall("merge queue", top_k=3).recall_items
+
+
+def test_malformed_ssot_ledger_fails_closed(tmp_path: Path):
+    """A present-but-malformed SSOT ledger must FAIL CLOSED, not downgrade.
+
+    Regression for the HIGH finding: catching ``BrainRuntimeError`` and
+    continuing with probabilistic recall defeats the SSOT tier boundary.
+    """
+
+    state_root, db_path = _ingest(tmp_path)
+    ledger = brain_runtime.ledger_path(str(state_root))
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    # records must be a list; "not-a-list" is present-but-malformed.
+    ledger.write_text("kind: brain-assertion-ledger\nrecords: not-a-list\n", encoding="utf-8")
+
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+    with pytest.raises(brain_runtime.BrainRuntimeError):
+        surf.recall("merge queue", top_k=5)
+
+
+def test_absent_ssot_ledger_is_empty_not_error(tmp_path: Path):
+    """An ABSENT ledger is a legitimate empty-SSOT case — recall still answers.
+
+    Distinguishes absent/empty (ok) from present-but-malformed (fail closed).
+    """
+
+    state_root, db_path = _ingest(tmp_path)
+    ledger = brain_runtime.ledger_path(str(state_root))
+    assert not ledger.exists(), "fixture must not create an SSOT ledger"
+
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+    result = surf.recall("merge queue", top_k=5)
+    assert result.ssot_items == ()
+    assert result.recall_items, "probabilistic recall still answers with no SSOT ledger"
+
+
 def test_keyword_leg_queries_fts5(tmp_path: Path):
     """The FTS5 column populated by F6.2 is now queried (keyword leg)."""
 

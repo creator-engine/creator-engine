@@ -225,12 +225,14 @@ class BrainRecallSurface:
     # -- internals -------------------------------------------------------------
 
     def _ssot_items(self, context: str, *, scope: str | None) -> tuple[SurfaceItem, ...]:
-        try:
-            records = brain_runtime.load_records(self.state_root)
-        except brain_runtime.BrainRuntimeError:
-            # A malformed/absent ledger must not crash recall: SSOT simply yields
-            # nothing and the probabilistic leg still answers.
-            return ()
+        # SSOT precedence must FAIL CLOSED on a malformed/tampered ledger: a
+        # present-but-invalid `.ce/state/brain/assertions.yaml` must surface its
+        # error rather than silently downgrade to probabilistic recall (which
+        # would defeat the SSOT tier boundary). An ABSENT ledger is a legitimate
+        # empty-SSOT case — `brain_runtime.load_records()` returns `[]` for that
+        # and only raises `BrainRuntimeError` for present-but-malformed, so we
+        # let the malformed case propagate untouched.
+        records = brain_runtime.load_records(self.state_root)
         if not records:
             return ()
         latest, _indexes = brain_runtime._latest_by_id(records)
@@ -336,12 +338,28 @@ def open_surface(
     db_path: Path | str | None = None,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
     embedder: Any | None = None,
+    embedder_name: str | None = None,
+    model_path: Path | str | None = None,
     store: Any | None = None,
 ) -> BrainRecallSurface:
     """Open the recall surface over the F6.2 SQLite store + an embedder.
 
-    Defaults to the deterministic offline embedder so CI never touches a model
-    download; callers wire EmbeddingGemma explicitly for the live path.
+    Recall MUST query a store with the SAME embedder F6.2 ingest built it with:
+    a default-embedder query against an EmbeddingGemma (768-dim) store would hit
+    a dimension mismatch (or, worse, silently query the wrong vector space). So
+    the surface exposes the SAME ``embedder_name`` / ``model_path`` selection as
+    ingest and builds the adapter through the SAME ``brain_ingest_runtime``
+    factory (reused, not duplicated). ``embedder`` (an already-built adapter)
+    still wins when supplied directly.
+
+    Selection precedence: an explicit ``embedder`` object > a named
+    ``embedder_name`` (+ ``model_path``) > the deterministic offline default
+    (so CI never touches a model download).
+
+    When the store records a vector dimension (F6.2 metadata) that the selected
+    embedder cannot match, this FAILS CLOSED with an actionable
+    ``BrainRecallInvalid`` rather than letting a mismatched query silently return
+    garbage or trip a late, opaque store error.
     """
 
     if store is None:
@@ -349,8 +367,47 @@ def open_surface(
 
         store = SqliteVecStore(db_path, state_root=state_root)
     if embedder is None:
-        embedder = brain_recall.DeterministicFakeEmbedding()
+        if embedder_name is not None:
+            # Reuse the F6.2 ingest embedder construction so recall and ingest
+            # can never drift apart in how an embedder is selected/built.
+            from . import brain_ingest_runtime
+
+            try:
+                embedder = brain_ingest_runtime.make_embedder(embedder_name, model_path=model_path)
+            except brain_ingest_runtime.BrainIngestError as exc:
+                raise BrainRecallInvalid(str(exc)) from exc
+        else:
+            embedder = brain_recall.DeterministicFakeEmbedding()
+    _require_embedder_matches_store(store, embedder)
     return BrainRecallSurface(store=store, embedder=embedder, state_root=state_root)
+
+
+def _require_embedder_matches_store(store: Any, embedder: Any) -> None:
+    """Fail closed when the selected embedder cannot query this store.
+
+    F6.2 records the store's vector dimension in metadata. If the embedder's
+    output dimension is known and disagrees, querying would dimension-mismatch
+    deep inside the store; surface that as a clear configuration error up front
+    so an operator picks the embedder the store was built with.
+    """
+
+    store_dim = getattr(store, "dim", None)
+    embedder_dim = getattr(embedder, "dim", None)
+    try:
+        store_dim = int(store_dim) if store_dim is not None else None
+        embedder_dim = int(embedder_dim) if embedder_dim is not None else None
+    except (TypeError, ValueError):
+        return
+    if store_dim is None or embedder_dim is None:
+        return
+    if store_dim != embedder_dim:
+        store_model = getattr(store, "model_id", None)
+        hint = f" (store model_id={store_model!r})" if store_model else ""
+        raise BrainRecallInvalid(
+            "recall embedder does not match the store it was built with: store vectors are "
+            f"{store_dim}-dim but the selected embedder produces {embedder_dim}-dim vectors{hint}; "
+            "re-run recall with the same --embedder/--model-path the store was ingested with"
+        )
 
 
 # -- module-level helpers ------------------------------------------------------

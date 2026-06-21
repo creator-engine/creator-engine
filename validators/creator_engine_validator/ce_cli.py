@@ -638,6 +638,13 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_state_root(br)
     br.add_argument("context", help="free-form context to recall against (task/ticket/diff)")
     br.add_argument("--db", default=None, help="recall SQLite DB path (default: <state-root>/brain/recall.sqlite)")
+    br.add_argument(
+        "--embedder",
+        default="deterministic",
+        choices=("deterministic", "embeddinggemma"),
+        help="embedding adapter to query with — MUST match the embedder the store was ingested with (default: deterministic offline fake)",
+    )
+    br.add_argument("--model-path", default=None, help="local model path for --embedder embeddinggemma (must match ingest)")
     br.add_argument("--top-k", type=int, default=brain_recall_surface.DEFAULT_TOP_K, help="max items per tier")
     br.add_argument("--scope", default=None, help="restrict recall to this scope string")
     br.add_argument("--as-of", default=None, help="exclude recall records stamped after this as_of (YYYY-MM-DDTHH:MM:SSZ)")
@@ -1908,7 +1915,12 @@ def _brain_recall(args) -> int:
     if db_path is None:
         db_path = brain_ingest_runtime.default_db_path(args.state_root)
     try:
-        surface = brain_recall_surface.open_surface(db_path=db_path, state_root=args.state_root)
+        surface = brain_recall_surface.open_surface(
+            db_path=db_path,
+            state_root=args.state_root,
+            embedder_name=args.embedder,
+            model_path=args.model_path,
+        )
     except brain_recall.BrainRecallError as exc:
         print(f"ERROR: ce brain recall refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
@@ -1933,6 +1945,10 @@ def _brain_recall(args) -> int:
     except brain_recall.BrainRecallError as exc:
         print(f"ERROR: ce brain recall refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
+    except brain_runtime.BrainRuntimeError as exc:
+        # A malformed/tampered SSOT ledger fails CLOSED: refuse rather than
+        # silently downgrade to probabilistic-only recall.
+        return _brain_error("recall", exc)
 
     if getattr(args, "json_output", False):
         print(json.dumps(payload.to_dict(), indent=2, sort_keys=True))
