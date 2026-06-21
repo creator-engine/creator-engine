@@ -93,6 +93,7 @@ if [ -z "$out" ] || [ -z "$url" ]; then
 fi
 case "$url" in
   https://creator-engine.dev/*) rel="${url#https://creator-engine.dev/}" ;;
+  "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT") rel="trust/ce-root-v1.txt" ;;
   *) echo "fake curl: unsupported URL $url" >&2; exit 2 ;;
 esac
 if [ "${FAKE_404_DOWNLOAD:-}" = "1" ] && [[ "$rel" == downloads/* ]]; then
@@ -134,7 +135,6 @@ def _run_install(
         "HOME": str(tmp_path / "home"),
         "FAKE_SITE": str(site),
         "FAKE_CURL_LOG": str(curl_log),
-        "CE_TRUST_ANCHOR_URL": "https://creator-engine.dev/trust/ce-root-v1.txt",
         "CE_TRUST_ANCHOR_SOURCE": "dns-txt:test",
     }
     # The bootstrap contract being tested is the signed wheel install. CI runs
@@ -178,18 +178,22 @@ def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_p
     assert not (install_root / "venv").exists()
 
 
-def test_install_sh_refuses_same_origin_only_before_artifacts(tmp_path: Path, repo_root: Path):
+def test_install_sh_refuses_matching_same_origin_anchor_before_artifacts(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
-    key_id = _signature_key_id((repo_root / "docs" / "llms-install.md").read_text(encoding="utf-8"))
-    (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}=SHA256:{'A' * 43}\n", encoding="utf-8")
     install_root = tmp_path / "install-root"
-    proc = _run_install(tmp_path, repo_root, site=site, install_root=install_root)
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        install_root=install_root,
+        extra_env={"CE_TRUST_ANCHOR_URL": "https://creator-engine.dev/trust/ce-root-v1.txt"},
+    )
     assert proc.returncode != 0
     assert "trust_anchor_refused" in proc.stderr
+    assert "shares origin" in proc.stderr
     assert _curl_urls(tmp_path / "curl.log") == [
         "https://creator-engine.dev/llms-install.md",
         "https://creator-engine.dev/keys/ce-root-v1",
-        "https://creator-engine.dev/trust/ce-root-v1.txt",
     ]
     assert not (install_root / "venv").exists()
 
@@ -219,6 +223,8 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
     payload = json.loads(first.stdout)
     assert payload["action"] == "onboard_inventory"
     assert payload["verified"]["trust_anchors"]["agreed"] == ["dns-txt:test"]
+    assert "fingerprint" not in payload["verified"]["trust_anchors"]
+    assert "trust_anchor_fingerprint" not in (install_root / "install-state").read_text(encoding="utf-8")
     rows = {row["key"]: row for row in payload["inventory"]}
     assert rows["profile"]["status"] == "answered:solo-pilot"
     assert (install_root / "venv" / "bin" / "cev3").is_file()
@@ -287,7 +293,7 @@ def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Pat
     assert _curl_urls(tmp_path / "curl.log") == [
         "https://creator-engine.dev/llms-install.md",
         "https://creator-engine.dev/keys/ce-root-v1",
-        "https://creator-engine.dev/trust/ce-root-v1.txt",
+        "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT",
     ]
 
     fresh = tmp_path / "fresh"

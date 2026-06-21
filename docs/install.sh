@@ -125,6 +125,18 @@ hash_file() {
   fi
 }
 
+url_origin() {
+  printf '%s\n' "$1" | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://[^/?#]+).*#\1#'
+}
+
+refuse_same_origin_trust_anchor() {
+  site_origin="$(url_origin "$CE_SITE")"
+  anchor_origin="$(url_origin "$CE_TRUST_ANCHOR_URL")"
+  if [ "$site_origin" = "$anchor_origin" ]; then
+    fail trust_anchor_refused "trust anchor URL must be out-of-band; ${CE_TRUST_ANCHOR_URL} shares origin with ${CE_SITE}"
+  fi
+}
+
 base64_decode_to() {
   input="$1"
   output="$2"
@@ -376,7 +388,6 @@ write_state() {
     printf 'trust_root_sha256=%s\n' "$TRUST_ROOT_SHA"
     printf 'trust_anchor_source=%s\n' "$CE_TRUST_ANCHOR_SOURCE"
     printf 'trust_anchor_sha256=%s\n' "$TRUST_ANCHOR_SHA"
-    printf 'trust_anchor_fingerprint=%s\n' "$TRUST_ANCHOR_FINGERPRINT"
     printf 'sha256s_sha256=%s\n' "$SHA256S_SHA"
     printf 'package_version=%s\n' "$PACKAGE_VERSION"
     printf 'python_executable=%s\n' "$PYTHON_BIN"
@@ -471,6 +482,7 @@ verified=$((verified + 1))
 TRUST_ROOT_SHA="$(hash_file "$TRUST_ROOT_FILE")"
 say "signed spec verified: canonical sha256 ${SPEC_CANONICAL_SHA}"
 
+refuse_same_origin_trust_anchor
 say "fetching out-of-band trust anchor from ${CE_TRUST_ANCHOR_URL}"
 fetch_url "$CE_TRUST_ANCHOR_URL" "$TRUST_ANCHOR_RAW_FILE" trust_anchor_unreadable
 TRUST_ANCHOR_RECORD="$(anchor_record "$KEY_ID" "$TRUST_ANCHOR_RAW_FILE" || true)"
@@ -481,7 +493,7 @@ TRUST_ROOT_FINGERPRINT="$(trust_root_fingerprint "$KEY_ID" || true)"
 [ -n "$TRUST_ROOT_FINGERPRINT" ] \
   || fail trust_anchor_refused "could not derive fingerprint for $KEY_ID from fetched trust root"
 [ "$TRUST_ANCHOR_FINGERPRINT" = "$TRUST_ROOT_FINGERPRINT" ] \
-  || fail trust_anchor_refused "out-of-band anchor mismatch for $KEY_ID expected=${TRUST_ANCHOR_FINGERPRINT} actual=${TRUST_ROOT_FINGERPRINT}"
+  || fail trust_anchor_refused "out-of-band anchor mismatch for $KEY_ID"
 printf '%s\n' "$TRUST_ANCHOR_RECORD" >"$TRUST_ANCHOR_FILE"
 TRUST_ANCHOR_SHA="$(hash_file "$TRUST_ANCHOR_FILE")"
 verified=$((verified + 1))

@@ -36,7 +36,8 @@ authorization click.
 `docs/install.sh` is the shell I/O edge. Its ordered contract is:
 
 1. Fetch only `llms-install.md`, `keys/ce-root-v1`, and the out-of-band
-   trust-anchor assertion into a mode-0700 temp workspace.
+   trust-anchor assertion into a mode-0700 temp workspace. A trust-anchor URL
+   with the same origin as `CE_SITE` is refused before fetch.
 2. Reconstruct canonical bytes, check `content_sha256`, verify the embedded
    SSHSIG with stock `ssh-keygen -Y verify`, require the out-of-band anchor to
    match the fetched trust-root key fingerprint, and refuse before persistent

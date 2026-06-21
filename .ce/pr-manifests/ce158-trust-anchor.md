@@ -15,9 +15,10 @@ ce-ops#158 out-of-band trust anchor for `ce-root-v1`, authentic onboarding UX
 refusals, and verifier evidence.
 
 Base:
-`d6ba7ee291c882aa865af7e0e32972b3223b5532` (`origin/main` at branch creation).
+Rebased onto `146272ca82a4c160ddf0a67087381418b43e24eb` (`origin/main`
+after ce-ops#23 baseline attestation).
 
-Per-file purpose (closed path-set - 16 paths):
+Per-file purpose (closed path-set - 17 paths):
 
 - **`.ce/changelog/ce158-trust-anchor.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce158-trust-anchor.md`** *(A)* - this PR's closed path-set carrier.
@@ -28,20 +29,21 @@ Per-file purpose (closed path-set - 16 paths):
 - **`docs/install.sh`** *(M)* - bootstrap fetches/verifies an out-of-band trust-anchor record and passes it to `cev3 onboard`.
 - **`docs/llms-install.md`** *(M)* - signed install spec documents and pins the trust-anchor bootstrap contract.
 - **`docs/llms.txt`** *(M)* - public install index reflects the trust-root plus out-of-band-anchor requirement.
+- **`validators/creator_engine_validator/_version.py`** *(M)* - regenerated
+  build identity for the served app-wheel rebuild.
 - **`validators/creator_engine_validator/v3_cli.py`** *(M)* - authentic onboarding `--trust-anchor SOURCE=PATH` gate and evidence output.
 - **`validators/creator_engine_validator/v3_installer.py`** *(M)* - pure key fingerprint, anchor parsing, and anchor agreement checks.
 - **`validators/tests/integration/test_install_bootstrap.py`** *(M)* - bootstrap regression coverage for trust-anchor fetch/refusal and inventory handoff.
 - **`validators/tests/unit/test_v3_cli.py`** *(M)* - authentic onboarding agreement, same-origin-only, and mismatch coverage.
 - **`validators/tests/unit/test_v3_installer.py`** *(M)* - pure anchor parser/verifier coverage.
-- **`validators/wheelhouse/SHA256SUMS`** *(M)* - refreshed app-wheel checksum line.
-- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* - rebuilt validator app wheel from changed source.
-
+- **`validators/wheelhouse/SHA256SUMS`** *(M)* - refreshed local app-wheel checksum after rebuilding from changed source.
+- **`validators/wheelhouse/creator_engine_validator-0.2.0-py3-none-any.whl`** *(M)* - rebuilt local validator app wheel from changed source for reviewer wheel-parity proof.
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=c034db2bb5a14f2bb2f4c7aece8ae23d1e4859a8c43556d148fc3d26c66d6af3
+AUTHORIZED_PATHS_SHA256=55fe94364bd5eb9094ca1601dbd4c9b5a45ea131f3733326ea9702c26ecc62e3
 
 ```text
 .ce/changelog/ce158-trust-anchor.md
@@ -53,6 +55,7 @@ docs/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
 docs/install.sh
 docs/llms-install.md
 docs/llms.txt
+validators/creator_engine_validator/_version.py
 validators/creator_engine_validator/v3_cli.py
 validators/creator_engine_validator/v3_installer.py
 validators/tests/integration/test_install_bootstrap.py

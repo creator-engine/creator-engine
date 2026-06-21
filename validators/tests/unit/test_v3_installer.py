@@ -239,6 +239,7 @@ def test_public_key_fingerprint_matches_out_of_band_anchor_record():
     assert evidence.ok is True
     assert evidence.status == "verified"
     assert evidence.agreed == ("dns-txt",)
+    assert "fingerprint" not in evidence.to_record()
 
 
 def test_out_of_band_anchor_missing_is_degraded_not_verified():

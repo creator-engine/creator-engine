@@ -332,7 +332,6 @@ class TrustAnchorEvidence:
     reason: str
     agreed: tuple[str, ...] = ()
     mismatched: tuple[str, ...] = ()
-    fingerprint: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         """JSON-serializable evidence for CLI inventory / plan output."""
@@ -343,8 +342,6 @@ class TrustAnchorEvidence:
             "agreed": list(self.agreed),
             "mismatched": list(self.mismatched),
         }
-        if self.fingerprint is not None:
-            record["fingerprint"] = self.fingerprint
         return record
 
 
@@ -409,7 +406,6 @@ def verify_trust_anchors(
                 "no out-of-band trust anchor matched the fetched trust root; "
                 "authentic verification would rely only on same-origin repo-served material"
             ),
-            fingerprint=fingerprint,
         )
     agreed = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint == fingerprint)
     mismatched = _unique_ordered(anchor.source for anchor in relevant if anchor.fingerprint != fingerprint)
@@ -420,7 +416,6 @@ def verify_trust_anchors(
             reason="out-of-band trust anchor fingerprint does not match the fetched trust root",
             agreed=agreed,
             mismatched=mismatched,
-            fingerprint=fingerprint,
         )
     if agreed:
         return TrustAnchorEvidence(
@@ -428,13 +423,11 @@ def verify_trust_anchors(
             status="verified",
             reason="out-of-band trust anchor fingerprint matches the fetched trust root",
             agreed=agreed,
-            fingerprint=fingerprint,
         )
     return TrustAnchorEvidence(
         ok=False,
         status="same_origin_only",
         reason="no out-of-band trust anchor agreed with the fetched trust root",
-        fingerprint=fingerprint,
     )
 
 

@@ -76,7 +76,7 @@ ce onboard \
 ```
 
 Machine-readable evidence is attached under `verified.trust_anchors`, including
-`status`, `agreed`, `mismatched`, and the computed fingerprint. The
+`status`, `agreed`, and `mismatched` source labels only. The
 same-origin-only case fails closed with `status: same_origin_only`; a
 fingerprint disagreement fails closed with `status: mismatch`.
 

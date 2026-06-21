@@ -13,8 +13,8 @@ signature:
   key_id: ce-dev1-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRHZLamg3QXE0c05WczZJeGxjS3IzMGFVempGNEFDTTc0NlVNaFZ4L0lQWm56cVZXQVUwd3lvL0oKY1dTYzdpVkRMSmdhRUtUUDB3Q2ZrYnV5cVY3OWtDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: b1bab35b370af64d5a0144b1c8c726d44471f84b8feda6e83b3c0c9798be04ff
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQWxCbFVvSWdWczY3TkkyK0wxOHgvWlZWNmlEdVZHa0t4d2d4UEtRZU1sQzkram5pK1hZaDhhVmgKZURLZjFXcjQ2TzZSS1Bwc0ZPTWNCcVNqTHFpQWNLCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: e0017039efe899df25fc500c926d22a9de326183c5a87f91e54133c00fad6b89
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: 9a74d77e3c11541eb4e62d0c4dd8b47849820ac089cb3587e9e3010327cc0a4a
+  sha256s_sha256: b486c19de135ce4caa87161da5778f7dddf374626960c197930524588e6c5ab0
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -36,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: cb9c54e10cb46ed46aac8b724d8a270122f7a697d989c35baf2f6d3fca4b9ff6
+      sha256: 602fbec628165235ad844043178d48fb9e58b558634a2263ff0e05ff26b3a718
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
@@ -118,7 +118,8 @@ curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
 
 # 2. Fetch an out-of-band fingerprint anchor for the signature key. The public
 #    bootstrap uses DNS TXT; an equivalent operator-published channel is valid
-#    only if it is independent of creator-engine.dev Pages.
+#    only if it is independent of creator-engine.dev Pages; same-origin anchor
+#    URLs are refused before fetch.
 curl -fsSL 'https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT' \
     -o ce-root-v1.anchor.raw
 grep -Eo 'ce-dev1-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw \
