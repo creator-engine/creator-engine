@@ -19,11 +19,12 @@ app wheel. It does not build G-A capture planning or G-B scrub wiring.
 Base:
 `4693465d8760bad13ccfa230cc9b17022092e71f` (`origin/main` at branch cut).
 
-Per-file purpose (closed path-set - 17 paths):
+Per-file purpose (closed path-set - 18 paths):
 
 - **`.ce/changelog/ce23-s1-baseline-attestation.md`** *(A)* - per-change changelog fragment.
 - **`.ce/pr-manifests/ce23-s1-baseline-attestation.md`** *(A)* - this PR's closed path-set carrier.
 - **`schemas/brownfield-baseline-attestation.schema.yaml`** *(A)* - value-free baseline-attestation schema.
+- **`validators/creator_engine_validator/_version.py`** *(M)* - regenerated build identity for the rebuilt validator app wheel.
 - **`validators/creator_engine_validator/checks/__init__.py`** *(M)* - registers the new validator check.
 - **`validators/creator_engine_validator/checks/brownfield_baseline_attestation.py`** *(A)* - schema, secret-shape, and content-digest validator.
 - **`validators/creator_engine_validator/v3_installer.py`** *(M)* - pure deterministic baseline-attestation record builder.
@@ -42,14 +43,15 @@ Per-file purpose (closed path-set - 17 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=18
 
-AUTHORIZED_PATHS_SHA256=24266ea87d0eb0fa99c401c8467726ba8f5c57dac0d999f343a2a97fc8873238
+AUTHORIZED_PATHS_SHA256=57c222c390909cdff55ba20ffe83c5f8a37e3642bd960578a269b201840e5464
 
 ```text
 .ce/changelog/ce23-s1-baseline-attestation.md
 .ce/pr-manifests/ce23-s1-baseline-attestation.md
 schemas/brownfield-baseline-attestation.schema.yaml
+validators/creator_engine_validator/_version.py
 validators/creator_engine_validator/checks/__init__.py
 validators/creator_engine_validator/checks/brownfield_baseline_attestation.py
 validators/creator_engine_validator/v3_installer.py
