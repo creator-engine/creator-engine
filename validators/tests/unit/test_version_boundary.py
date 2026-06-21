@@ -71,7 +71,8 @@ def test_taxonomy_counts_and_disjoint():
     # v3.5-F Q1 added the per-seat resource-bounding launch mechanics
     # (``resource_bound_spec``, sibling of ``claude_launch_spec``): 21 -> 22.
     # G1-codex adds ``codex_launch_spec`` as the 23rd v1 runtime module.
-    assert len(ver.V1_RUNTIME) == 23
+    # ce-ops#55 adds ``pickup`` (the ``ce pickup`` work-pickup poller) as the 24th.
+    assert len(ver.V1_RUNTIME) == 24
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

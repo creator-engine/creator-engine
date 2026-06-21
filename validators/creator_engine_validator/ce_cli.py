@@ -746,6 +746,40 @@ def _build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--write-cache", default=None, dest="write_cache",
                      metavar="ROOT", help="write the view-only Cockpit cache under <ROOT>/claims/claims.json")
 
+    # ce pickup poll — the ce-ops#55 autonomous forge work-pickup "conveyor belt".
+    # A per-seat READ-ONLY poller over the GitHub Notifications API; observe-only by
+    # default (S1), claims via the forge + a dedup ledger (S2, dry-run by default),
+    # and triggers a fresh governed `ce lane launch` ONLY when --enable-launch is set
+    # (S3, canary OFF by default). The poller NEVER authors (CC-D-2 / CDX-D-1).
+    pickup = groups.add_parser(
+        "pickup", help="autonomous forge work-pickup poller (read-only; ce-ops#55)"
+    )
+    pickup_sub = pickup.add_subparsers(dest="pickup_cmd")
+    pp = pickup_sub.add_parser("poll", help="one read-only notifications poll → work-items JSON")
+    pp.add_argument("--identity", required=True,
+                    help="seat identity (e.g. ce-dev-2); selects ~/.ce-keys/<identity>.pat")
+    pp.add_argument("--keys-dir", default=None, dest="keys_dir",
+                    help="PAT directory (default: ~/.ce-keys)")
+    pp.add_argument("--last-modified", default=None, dest="last_modified",
+                    help="prior Last-Modified cursor for the conditional If-Modified-Since request")
+    pp.add_argument("--all", action="store_true", dest="all_threads",
+                    help="include already-read threads (?all=true)")
+    pp.add_argument("--ledger-root", default=None, dest="pickup_ledger_root",
+                    help="dedup ledger root (default: <state>/pickup); enables claim + dedup (S2)")
+    pp.add_argument("--claim", action="store_true", dest="pickup_claim",
+                    help="S2: forge-arbitrate a claim per actionable item (else observe-only)")
+    pp.add_argument("--repo", default=None,
+                    help="restrict claims to a single owner/name repo (claim safety fence)")
+    pp.add_argument("--run-id", default=None, dest="pickup_run_id",
+                    help="run id stamped into the claim marker (default: derived)")
+    pp.add_argument("--enable-launch", action="store_true", dest="enable_launch",
+                    help="S3 canary (default OFF): on a successful claim, launch a governed lane")
+    pp.add_argument("--harness", default="claude", choices=("claude", "codex"),
+                    help="harness for the spawned governed lane (S3)")
+    pp.add_argument("--seed-root", default=None, dest="seed_root",
+                    help="directory for per-item seed files (S3; default: <ledger-root>/seeds)")
+    pp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     # ce launch / ce hud — deterministic visible Controller-seat launcher
     # (DP-2 = B, RV1-063). ce hud is an alias/seam label for the same launcher.
     def _add_launch_args(p: argparse.ArgumentParser) -> None:
@@ -2032,6 +2066,73 @@ def _claim_status(args) -> int:
     return 1 if result.state.invalid_count else 0
 
 
+def _make_pickup_transport():
+    """Factory for the pickup notifications HTTPS transport (monkeypatchable in tests)."""
+    from . import pickup as _pickup
+    return _pickup._default_transport
+
+
+def _pickup_poll(args) -> int:
+    from . import pickup
+
+    try:
+        token = pickup.resolve_token(keys_dir=args.keys_dir, identity=args.identity)
+    except pickup.PickupError as exc:
+        return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
+
+    try:
+        result = pickup.poll(
+            token=token,
+            transport=_make_pickup_transport(),
+            last_modified=args.last_modified,
+            all_threads=args.all_threads,
+        )
+    except pickup.PickupError as exc:
+        return _emit_pickup(args, 2, f"ce pickup poll failed: {exc}", None)
+
+    # S1 observe-only is the default. When --claim is set the poller forge-arbitrates
+    # a claim per actionable item (S2) and, only when --enable-launch is ALSO set,
+    # spawns a fresh governed lane (S3, canary OFF by default).
+    if getattr(args, "pickup_claim", False):
+        return _pickup_claim_and_launch(args, pickup, result)
+
+    payload = {
+        "ok": True,
+        "not_modified": result.not_modified,
+        "last_modified": result.last_modified,
+        "poll_interval": result.poll_interval,
+        "items": list(result.items),
+        "count": len(result.items),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif result.not_modified:
+        print(f"ce pickup poll: 304 not-modified (next poll >= {result.poll_interval}s)")
+    else:
+        print(f"ce pickup poll: {len(result.items)} actionable item(s) "
+              f"(next poll >= {result.poll_interval}s)")
+        for item in result.items:
+            print(f"  - [{item['kind']}] {item['repo']}#{item['number']} ({item['reason']}) {item['url']}")
+    return 0
+
+
+def _pickup_claim_and_launch(args, pickup, result) -> int:
+    """S2/S3: forge-arbitrate a claim per actionable item, then (S3, gated) launch a lane.
+
+    Built incrementally — S2 wires the claim + dedup ledger (dry-run), S3 wires the
+    gated `ce lane launch`. See ``runner/pickup.py`` for the claim/ledger primitives.
+    """
+    raise NotImplementedError("pickup --claim is wired in slice S2")
+
+
+def _emit_pickup(args, code: int, message: str, payload) -> int:
+    if getattr(args, "json_output", False):
+        print(json.dumps({"ok": code == 0, "error": message, **(payload or {})}, indent=2, sort_keys=True))
+    else:
+        print(f"ERROR: {message}", file=sys.stderr)
+    return code
+
+
 def _emit_claim(args, code: int, message: str, payload) -> int:
     if getattr(args, "json_output", False):
         print(json.dumps({"ok": code == 0, "error": message, **(payload or {})}, indent=2, sort_keys=True))
@@ -2194,6 +2295,10 @@ _CLAIM_DISPATCH = {
     "status": _claim_status,
 }
 
+_PICKUP_DISPATCH = {
+    "poll": _pickup_poll,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -2267,6 +2372,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _REVIEWER_TRIAGE_DISPATCH.get(reviewer_triage_cmd)
         if handler is None:
             parser.parse_args(["reviewer-triage", "--help"])  # prints reviewer-triage help, exits
+            return 2
+        return handler(args)
+    if args.group == "pickup":
+        pickup_cmd = getattr(args, "pickup_cmd", None)
+        handler = _PICKUP_DISPATCH.get(pickup_cmd)
+        if handler is None:
+            parser.print_usage(sys.stderr)
             return 2
         return handler(args)
     if args.group == "claim":
