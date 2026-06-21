@@ -64,11 +64,12 @@ platform evolves:
 - **`ce`** is the retained v1 command-line runtime. It wraps the validator and
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
-  `brain`, `connector`, `reviewer-triage`, and `claim`.
+  `brain`, `connector`, `reviewer-triage`, `claim`, and `pickup`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
-  `ce reviewer-triage`, and `ce claim`. `ce hud` is an alias for the visible `ce launch` Controller-seat
+  `ce reviewer-triage`, `ce claim`, and `ce pickup` (the ce-ops#55 read-only
+  autonomous forge work-pickup poller). `ce hud` is an alias for the visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
 - **`cev3`** is the v3 work-driving entry point in this repository. It covers the

@@ -58,6 +58,11 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "hook_check",
         "hook_pack_confirm",
         # ``ce`` launcher subcommand runtimes (driven by ce_cli)
+        # ce-ops#55 autonomous forge work-pickup poller: a READ-ONLY ``ce pickup``
+        # subcommand runtime. Imports only stdlib + (S3) crosses to the v1 ``ce
+        # lane launch`` as SUBPROCESS + DATA (seed file + argv) — imports NO v3
+        # module, so the HARD v1<->v3 isolation invariant stays untouched.
+        "pickup",
         "ce_event_runtime",
         "connector_runtime",
         "doctor_runtime",
