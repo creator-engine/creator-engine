@@ -2068,6 +2068,52 @@ def _canonical_json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
+def brownfield_baseline_attestation_record(
+    *,
+    baseline_commit_sha: str,
+    snapshot_content_digest: str,
+    scrub_result: Mapping[str, Any],
+    attestor_ref: str,
+    attested_at: str,
+) -> dict[str, Any]:
+    """Build the value-free v0 brownfield baseline attestation record.
+
+    Slice 1 is deliberately CI-pure: no SSHSIG, no filesystem read, no scanner
+    execution, and no client values. Callers pass only already-computed digests
+    and value-free scrub metadata; the returned record self-attests via
+    ``content_digest`` over canonical JSON excluding that field.
+    """
+    scanners = scrub_result.get("scanners") if isinstance(scrub_result, Mapping) else ()
+    scanner_rows: list[dict[str, str]] = []
+    if isinstance(scanners, Iterable) and not isinstance(scanners, (str, bytes, Mapping)):
+        for scanner in scanners:
+            if not isinstance(scanner, Mapping):
+                continue
+            scanner_rows.append(
+                {
+                    "name": str(scanner.get("name", "")),
+                    "version": str(scanner.get("version", "")),
+                    "result": str(scanner.get("result", "")),
+                }
+            )
+    scanner_rows.sort(key=lambda row: (row["name"], row["version"], row["result"]))
+    record: dict[str, Any] = {
+        "kind": "brownfield-baseline-attestation",
+        "record_type": "brownfield_baseline_attestation",
+        "schema_version": "1",
+        "baseline_commit_sha": str(baseline_commit_sha),
+        "snapshot": {"content_digest": str(snapshot_content_digest)},
+        "scrub": {
+            "status": str(scrub_result.get("status", "")) if isinstance(scrub_result, Mapping) else "",
+            "scanners": scanner_rows,
+        },
+        "attestor_ref": str(attestor_ref),
+        "attested_at": str(attested_at),
+    }
+    record["content_digest"] = content_digest(_canonical_json_bytes(record))
+    return record
+
+
 def canonical_brownfield_inventory_sha256(payload: dict[str, Any]) -> str:
     """Hash the value-free brownfield inventory payload with stable JSON."""
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
