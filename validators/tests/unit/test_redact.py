@@ -119,5 +119,5 @@ def test_redactor_registers_no_check_and_no_backend():
     from creator_engine_validator.checks import registered_checks
     from creator_engine_validator.runner import available_backends
 
-    assert len(registered_checks()) == 59  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup; v3.5-E.3 E3-G1 added install_answers; ce-ops#26 added seat_event; ce-ops#142 added ce_computer_use_authority_envelope; ce-ops#145 added ce_playbook_format; ce-ops#167 added ce_brain_assertions; ce-ops#163 added seat_class_policy; ce-ops#168 added work_sizing; ce-ops#23 S1 added brownfield_baseline_attestation
+    assert len(registered_checks()) == 60  # G-6 added ce_scope; v3.5-C A-C1..A-C4 added decision_record + storage_tier_finding + peer_authority + forge_claim_dedup; v3.5-E.3 E3-G1 added install_answers; ce-ops#26 added seat_event; ce-ops#142 added ce_computer_use_authority_envelope; ce-ops#145 added ce_playbook_format; ce-ops#167 added ce_brain_assertions; ce-ops#163 added seat_class_policy; ce-ops#168 added work_sizing; ce-ops#23 S1 added brownfield_baseline_attestation; ce-ops#177 added ce_brain_drift
     assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a)

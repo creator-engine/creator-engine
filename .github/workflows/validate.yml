@@ -110,6 +110,11 @@ jobs:
         run: |
           PYTHONPATH=validators python -m creator_engine_validator --list-checks
 
+      - name: Creator Engine validator — brain drift check
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
+            brain verify --drift --state-root .ce/state
+
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}
         env:

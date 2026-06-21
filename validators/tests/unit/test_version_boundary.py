@@ -35,7 +35,8 @@ def test_registered_in_check_surface():
     # ce-ops#163 added seat_class_policy: 56 -> 57.
     # ce-ops#168 added work_sizing: 57 -> 58.
     # ce-ops#23 Slice 1 added brownfield_baseline_attestation: 58 -> 59.
-    assert len(reg) == 59
+    # ce-ops#177 added ce_brain_drift: 59 -> 60.
+    assert len(reg) == 60
 
 
 def test_green_on_real_package(version_boundary_real_run):
