@@ -34,17 +34,19 @@ checked-in cp314 dependency wheelhouse, then runs the checkout source with
 
 ```bash
 uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators python -m creator_engine_validator.ce_cli --help
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli --help
 ```
 
 **pip fallback** (run from a neutral working directory so the source tree does
 not shadow the wheel):
 
 ```bash
-python3.14 -m venv .venv && . .venv/bin/activate
-pip install --no-index --find-links "$PWD/validators/wheelhouse" -r "$PWD/validators/requirements.txt"
-PYTHONPATH="$PWD/validators" python -m creator_engine_validator.ce_cli --help
+python3.14 -m venv .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links "$PWD/validators/wheelhouse" -r "$PWD/validators/requirements.txt"
+PYTHONPATH="$PWD/validators" "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli --help
 ```
 
 Both install PyYAML 6.0.3 / jsonschema 4.26.0 and exercise the source-backed
@@ -63,7 +65,8 @@ The source-mode command helper for the table is:
 
 ```bash
 ce_src() {
-  PYTHONPATH=validators python -m creator_engine_validator.ce_cli "$@"
+  CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+  PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli "$@"
 }
 ```
 

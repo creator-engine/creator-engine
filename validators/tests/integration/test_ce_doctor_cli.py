@@ -92,13 +92,16 @@ def test_bootstrap_preflight_uses_ce_doctor_json_with_blocked_report(repo_root: 
     data = _bootstrap_template(repo_root)
     preflight = data["preflight"]
     assert preflight["command"] == [
-        "python",
+        "${CE_VALIDATOR_PYTHON:-.venv/bin/python}",
         "-m",
         "creator_engine_validator.ce_cli",
         "doctor",
         "--json",
     ]
-    assert preflight["env"] == {"PYTHONPATH": "validators"}
+    assert preflight["env"] == {
+        "CE_VALIDATOR_PYTHON": "${CE_VALIDATOR_PYTHON:-.venv/bin/python}",
+        "PYTHONPATH": "validators",
+    }
     assert preflight["requires"] == ["install"]
     assert preflight["on_failure"] == "blocked-report"
     assert preflight["blocked_report"]["stop"] is True
@@ -119,12 +122,16 @@ def test_bootstrap_install_is_uv_first_with_pip_fallback(repo_root: Path):
     install = data["install"]
     assert install["contract"] == "source-pythonpath-with-offline-runtime-deps"
     assert install["python_floor"] == ">=3.14"
+    assert install["validator_python_env"] == "CE_VALIDATOR_PYTHON"
+    assert install["validator_python_default"] == ".venv/bin/python"
     assert install["network"] == "forbidden"
     assert install["source_path"] == "validators"
     # uv-first command and a pip fallback are both present and offline.
     assert any("uv" in step for step in install["uv_first"])
     assert any("pip" in step for step in install["pip_fallback"])
-    for step in install["uv_first"] + install["pip_fallback"]:
+    assert any("--python" in step and "${CE_VALIDATOR_PYTHON:-.venv/bin/python}" in step for step in install["uv_first"])
+    install_steps = [step for step in install["uv_first"] + install["pip_fallback"] if "install" in step]
+    for step in install_steps:
         assert "--no-index" in step
         assert "-r" in step
         assert "validators/requirements.txt" in step
@@ -142,8 +149,8 @@ def test_bootstrap_doc_references_doctor_and_template(repo_root: Path):
     assert "ce doctor --json" in doc
     assert "templates/hermes/agent-native-bootstrap.yaml" in doc
     assert doc.index("## 3. Install") < doc.index("## 4. Preflight")
-    assert doc.index("uv pip install --no-index") < doc.index(
-        "PYTHONPATH=validators python -m creator_engine_validator.ce_cli doctor --json"
+    assert doc.index("uv pip install --python \"$CE_VALIDATOR_PYTHON\" --no-index") < doc.index(
+        "PYTHONPATH=validators \"$CE_VALIDATOR_PYTHON\" -m creator_engine_validator.ce_cli doctor --json"
     )
     assert "blocked" in doc.lower()
 
