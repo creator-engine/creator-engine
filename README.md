@@ -111,9 +111,9 @@ CE currently has two supported install paths, both documented by
    git clone https://github.com/creator-engine/creator-engine.git
    cd creator-engine
    python3.14 -m venv .venv
-   . .venv/bin/activate
-   pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-   PYTHONPATH=validators python -m creator_engine_validator --list-checks
+   CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+   "$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+   PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
    ```
 
    The runtime wheelhouse is cp314 and dual-arch for Linux x86_64/aarch64 where
@@ -196,9 +196,10 @@ OpenShell targeted behind the same adapter direction.
 Use Python 3.14. For normal runtime validation:
 
 ```bash
-PYTHONPATH=validators python -m creator_engine_validator --list-checks
-PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
-PYTHONPATH=validators python -m creator_engine_validator check-examples
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check-examples
 ```
 
 For the full validator test suite, install both runtime and dev/test

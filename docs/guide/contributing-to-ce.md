@@ -60,15 +60,17 @@ execution, and the checked-in dependency wheelhouse contract
 
 ```bash
 uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators python -m creator_engine_validator --list-checks
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
 ```
 
 If you need the full pytest gate, install the dev/test dependency set from the checked-in dev wheelhouse (`validators/README.md:41-55`):
 
 ```bash
-python -m venv .venv-test
-.venv-test/bin/pip install --no-index \
+python3.14 -m venv .venv-test
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv-test/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index \
   --find-links validators/wheelhouse \
   --find-links validators/wheelhouse-dev \
   -r validators/requirements.txt \
@@ -80,13 +82,13 @@ Run these three named CI checks locally before asking for review:
 ```bash
 # Creator Engine validator - pytest suite (offline)
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
-  python -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
+  "$CE_VALIDATOR_PYTHON" -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
 
 # Creator Engine validator - well-formed examples
-PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/well-formed/
 
 # Creator Engine validator - malformed examples (expect failures)
-if PYTHONPATH=validators python -m creator_engine_validator check examples/malformed/; then
+if PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/malformed/; then
   echo "FAIL: malformed examples unexpectedly passed"
   exit 1
 else
