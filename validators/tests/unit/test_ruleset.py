@@ -180,6 +180,35 @@ def test_merge_queue_method_must_match_allowed_pull_methods():
         policy.to_put_payload()
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"merge_queue_max_entries_to_build": 0},
+        {"merge_queue_max_entries_to_merge": 0},
+        {"merge_queue_min_entries_to_merge": 0},
+        {"merge_queue_max_entries_to_build": 101},
+        {"merge_queue_max_entries_to_merge": 101},
+        {"merge_queue_min_entries_to_merge": 101},
+        {"merge_queue_min_entries_to_merge": 6, "merge_queue_max_entries_to_merge": 5},
+        {"merge_queue_min_entries_to_merge_wait_minutes": -1},
+        {"merge_queue_min_entries_to_merge_wait_minutes": 361},
+        {"merge_queue_check_response_timeout_minutes": 0},
+        {"merge_queue_check_response_timeout_minutes": 361},
+    ],
+)
+def test_merge_queue_refuses_impossible_limits_before_any_call(kwargs):
+    """Impossible queue limits fail closed before a live upsert can call GitHub."""
+    fake = FakeRulesetGh([])
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        require_merge_queue=True,
+        **kwargs,
+    )
+    with pytest.raises(RulesetRefused):
+        upsert_ruleset(REPO, policy, apply=True, gh_runner=fake)
+    assert fake.calls == []
+
+
 def test_merge_queue_satisfies_policy_round_trips():
     """A live ruleset built from the policy's own payload satisfies the policy."""
     policy = RulesetPolicy(
@@ -196,6 +225,31 @@ def test_merge_queue_satisfies_policy_round_trips():
     )
     live_no_queue = {"id": 9, **no_queue.to_put_payload()}
     assert ruleset_satisfies_policy(live_no_queue, policy) is False
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("merge_method", "MERGE"),
+        ("grouping_strategy", "HEADGREEN"),
+        ("max_entries_to_build", 4),
+        ("max_entries_to_merge", 4),
+        ("min_entries_to_merge", 2),
+        ("min_entries_to_merge_wait_minutes", 6),
+        ("check_response_timeout_minutes", 61),
+    ],
+)
+def test_merge_queue_satisfies_policy_rejects_parameter_drift(key, value):
+    """Live merge_queue params must match the policy, not only carry a queue rule."""
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        require_merge_queue=True,
+    )
+    live = {"id": 9, **policy.to_put_payload()}
+    queue_rule = next(rule for rule in live["rules"] if rule["type"] == "merge_queue")
+    queue_rule["parameters"][key] = value
+    assert ruleset_satisfies_policy(live, policy) is False
 
 
 def test_ruleset_plan_does_not_mutate():

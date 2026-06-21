@@ -22,6 +22,9 @@ _ALLOWED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
 # pull_request rule's lower-case allowed_merge_methods.
 _ALLOWED_QUEUE_MERGE_METHODS = frozenset({"MERGE", "SQUASH", "REBASE"})
 _ALLOWED_QUEUE_GROUPING = frozenset({"ALLGREEN", "HEADGREEN"})
+_MERGE_QUEUE_MAX_ENTRIES_CEILING = 100
+_MERGE_QUEUE_WAIT_MINUTES_CEILING = 360
+_MERGE_QUEUE_CHECK_TIMEOUT_MINUTES_CEILING = 360
 CE_PROTECTION_RULESET_NAME = "ce-reference-protection-floor"
 
 
@@ -115,15 +118,17 @@ class RulesetPolicy:
                 f"unsupported merge_queue grouping_strategy {self.merge_queue_grouping_strategy!r}; "
                 f"one of {sorted(_ALLOWED_QUEUE_GROUPING)}"
             )
-        for label, value in (
-            ("max_entries_to_build", self.merge_queue_max_entries_to_build),
-            ("max_entries_to_merge", self.merge_queue_max_entries_to_merge),
-            ("min_entries_to_merge", self.merge_queue_min_entries_to_merge),
-            ("min_entries_to_merge_wait_minutes", self.merge_queue_min_entries_to_merge_wait_minutes),
-            ("check_response_timeout_minutes", self.merge_queue_check_response_timeout_minutes),
+        for label, value, minimum, maximum in (
+            ("max_entries_to_build", self.merge_queue_max_entries_to_build, 1, _MERGE_QUEUE_MAX_ENTRIES_CEILING),
+            ("max_entries_to_merge", self.merge_queue_max_entries_to_merge, 1, _MERGE_QUEUE_MAX_ENTRIES_CEILING),
+            ("min_entries_to_merge", self.merge_queue_min_entries_to_merge, 1, _MERGE_QUEUE_MAX_ENTRIES_CEILING),
+            ("min_entries_to_merge_wait_minutes", self.merge_queue_min_entries_to_merge_wait_minutes, 0, _MERGE_QUEUE_WAIT_MINUTES_CEILING),
+            ("check_response_timeout_minutes", self.merge_queue_check_response_timeout_minutes, 1, _MERGE_QUEUE_CHECK_TIMEOUT_MINUTES_CEILING),
         ):
-            if not isinstance(value, int) or value < 0:
-                raise RulesetRefused(f"merge_queue {label} must be a non-negative integer")
+            if not isinstance(value, int) or value < minimum or value > maximum:
+                raise RulesetRefused(
+                    f"merge_queue {label} must be an integer between {minimum} and {maximum}"
+                )
         if self.merge_queue_min_entries_to_merge > self.merge_queue_max_entries_to_merge:
             raise RulesetRefused(
                 "merge_queue min_entries_to_merge must not exceed max_entries_to_merge"
@@ -383,8 +388,15 @@ def ruleset_satisfies_policy(ruleset: dict | None, policy: RulesetPolicy) -> boo
         if not queue_rule:
             return False
         queue_params = queue_rule.get("parameters", {}) or {}
-        if str(queue_params.get("merge_method", "")).upper() != policy.merge_queue_merge_method.upper():
-            return False
+        desired_queue = _rule_by_type(desired, "merge_queue")
+        desired_params = desired_queue.get("parameters", {}) if desired_queue else {}
+        for key, expected in desired_params.items():
+            actual = queue_params.get(key)
+            if key in ("merge_method", "grouping_strategy"):
+                if str(actual).upper() != str(expected).upper():
+                    return False
+            elif actual != expected:
+                return False
     return True
 
 
