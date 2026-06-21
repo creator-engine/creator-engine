@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 from creator_engine_validator import brain_probe
 from creator_engine_validator import ce_cli
+from creator_engine_validator.checks import ce_brain_drift
 
 
 def _claim(value: str) -> str:
@@ -18,6 +20,17 @@ def _probe_claim(verdict: str) -> str:
             "predicate": "probe-verdict",
             "object": "missing-capability",
             "verdict": verdict,
+        }
+    )
+
+
+def _artifact_hash_claim(digest: str) -> str:
+    return json.dumps(
+        {
+            "subject": "artifact",
+            "predicate": "sha256",
+            "object": "evidence.txt",
+            "sha256": digest,
         }
     )
 
@@ -191,6 +204,73 @@ def test_ce_brain_verify_reprobes_probe_backed_assertions(tmp_path: Path, capsys
     assert rc == 1
     payload = json.loads(capsys.readouterr().out)
     assert any("brain_assertion_probe_disagreement" in error for error in payload["errors"])
+
+
+def test_ce_brain_verify_drift_passes_matching_artifact_hash(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current\n", encoding="utf-8")
+    digest = hashlib.sha256(b"current\n").hexdigest()
+
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0005",
+            "--scope",
+            "integration",
+            "--claim-json",
+            _artifact_hash_claim(digest),
+            "--evidence-ref",
+            "evidence.txt",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    rc = ce_cli.main(["brain", "verify", "--drift", "--state-root", str(state_root), "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drift"]["ok"] is True
+    assert payload["drift"]["active_count"] == 1
+    assert payload["drift"]["findings"] == []
+
+
+def test_ce_brain_verify_drift_returns_nonzero_on_artifact_drift(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("observed\n", encoding="utf-8")
+
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0006",
+            "--scope",
+            "integration",
+            "--claim-json",
+            _artifact_hash_claim("a" * 64),
+            "--evidence-ref",
+            "evidence.txt",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    rc = ce_cli.main(["brain", "verify", "--drift", "--state-root", str(state_root), "--json"])
+
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drift"]["ok"] is False
+    assert [finding["code"] for finding in payload["drift"]["findings"]] == [ce_brain_drift.CODE_DRIFT]
+    assert any("brain-assertion-cli-0006" in error for error in payload["errors"])
 
 
 def test_ce_brain_probe_unknown_capability_returns_unknown(capsys):

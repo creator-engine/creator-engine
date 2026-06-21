@@ -87,6 +87,7 @@ from . import (
 from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_brain_assertions
+from .checks import ce_brain_drift
 from .tmux_adapter import TmuxAdapter
 
 
@@ -623,6 +624,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     bv = brain_sub.add_parser("verify", help="validate the local brain assertion ledger")
     _add_state_root(bv)
+    bv.add_argument("--drift", action="store_true", help="re-verify active assertions against their evidence_ref")
     bv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bp = brain_sub.add_parser("probe", help="freshly interrogate Knowledge-SSOT capability probe(s)")
@@ -1739,16 +1741,29 @@ def _brain_correct(args) -> int:
 
 def _brain_verify(args) -> int:
     result = brain_runtime.verify_ledger(args.state_root)
-    probe_errors = ce_brain_assertions.validate_file(result.ledger_path) if result.ok else []
-    ok = result.ok and not probe_errors
-    errors = [*result.errors, *(error.format() for error in probe_errors)]
     summary = dict(result.summary)
+    if getattr(args, "drift", False):
+        drift = ce_brain_drift.verify_state_root(args.state_root) if result.ok else None
+        drift_errors = list(drift.findings) if drift is not None else []
+        ok = result.ok and not drift_errors
+        errors = [*result.errors, *(error.format() for error in drift_errors)]
+        summary["drift"] = drift.to_dict() if drift is not None else {
+            "active_count": 0,
+            "findings": [],
+            "ledger_path": str(result.ledger_path),
+            "ok": False,
+        }
+    else:
+        probe_errors = ce_brain_assertions.validate_file(result.ledger_path) if result.ok else []
+        ok = result.ok and not probe_errors
+        errors = [*result.errors, *(error.format() for error in probe_errors)]
     summary["errors"] = errors
     if getattr(args, "json_output", False):
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
         status = "OK" if ok else "FAIL"
-        print(f"ce brain verify: {status} ({result.summary.get('record_count', 0)} record(s))")
+        suffix = " --drift" if getattr(args, "drift", False) else ""
+        print(f"ce brain verify{suffix}: {status} ({result.summary.get('record_count', 0)} record(s))")
         for error in errors:
             print(f"  ERROR: {error}", file=sys.stderr)
     return 0 if ok else 1
