@@ -193,15 +193,89 @@ propagated into the chain's `pr_opened.change_set` by `cev3 collect`; a pre-F6 c
 lacks `base_sha` is **legacy-unprovable** and is refused, never overridden. The merge still
 mints **no** per-run token and rides the Operator's ambient `gh` identity (§e).
 
-### Phase-1 trigger (recorded, not yet built): GitHub native merge queue
+### Phase-1: GitHub native merge queue (F6 — the trigger is now being hit live)
 
 Enable the GitHub native **merge queue** when CE sees **3 or more concurrent ratified PRs
-more than once per week**, or a **third authoring host** is onboarded. At that volume the
+more than once per week**, or a **third authoring host** is onboarded. That trigger is being
+hit live: the serial train's per-step re-review tax blocked #297/#296. At this volume the
 queue's tested-`gh-readonly-queue/{base}` integrator earns its integration cost; below it,
 serial direct merge under the Phase-0 re-stamp is cheaper. Phase-1 does not change the
 authority semantics — it only changes the trusted integrator (the queue owns final
-integration; CE verifies the queued result is patch/tree-equivalent to the ratified
-change-block). It adds `merge_group` to required CI triggers, switches `cev3 merge --apply`
-from direct squash PUT to enqueue (supplying the current ratified/re-stamped head), and
-appends `pr_enqueued` then `pr_merged` only after GitHub reports the queue merge. Required
-review / dismiss-stale / code-owner / `enforce_admins` / conversation-resolution all stay.
+integration; CE verifies the queued result is tree-equivalent to the ratified change-block).
+
+**Enablement is a gated controller/Operator action — see
+[`MERGE_QUEUE_ENABLEMENT_RUNBOOK.md`](MERGE_QUEUE_ENABLEMENT_RUNBOOK.md).** The CI
+prerequisite ships ahead of it as ordinary code.
+
+What Phase-1 changes:
+
+- **`merge_group` required-CI trigger (the load-bearing change, SHIPPED ce-ops#39).**
+  `validate.yml` triggers on `merge_group: { types: [checks_requested] }`; without it the
+  required check never reports on `gh-readonly-queue/{base}` and the queue stalls forever.
+  Guarded by `validators/tests/unit/test_workflow_merge_group_trigger.py`.
+- **The flip** is one `merge_queue` rule on the `ce-reference-protection-floor` repository
+  ruleset. `RulesetPolicy(require_merge_queue=True, merge_queue_merge_method="SQUASH", …)`
+  emits it through the existing `upsert_ruleset` adapter (plan-by-default, idempotent,
+  verify-on-apply). Classic branch protection cannot express a merge queue; the queue is
+  ruleset-only.
+- `cev3 merge --apply` switches from direct squash PUT to **enqueue** (supplying the current
+  ratified/re-stamped head), appending `pr_enqueued` then `pr_merged` only after GitHub
+  reports the queue merge.
+- Required review / dismiss-stale / last-push-approval / code-owner / `enforce_admins` /
+  conversation-resolution **all stay**; the queue runs *after* the independent approval and
+  its server-side rebase does not dismiss it.
+
+#### F6 — the "re-sign the merged head" question, adjudicated
+
+The merge-queue head (the `merge_group` synthetic commit, then the squash on `main`) differs
+from the reviewed head. The question framed by ce-ops#39 was: *who re-signs the merged head
+under `ce-root-v1` so the conserved head-pin survives the queue's rebase?*
+
+**The premise dissolves on inspection of what CE actually conserves.** CE does **not** hold a
+`ce-root-v1` ed25519 signature over any merged commit head today. The offline `ce-root-v1`
+(`ce-spec-v1` namespace) key signs exactly one thing — the install spec
+(`docs/llms-install.md`) via detached SSHSIG, verified offline by the installer. The **merge
+head-pin is not a cryptographic signature at all**: it is (1) the server-side
+`--match-head-commit` guard on the squash PUT, plus (2) the F6 Phase-0 machine proof
+(`runtime_change_restamp`, `authority: machine_rebase_equivalence`) and the post-merge
+`runtime_merge_audit` tree-equivalence record in the hash-chained evidence spine. The
+conserved invariant is **what-was-TESTED == what-MERGES**, carried by machine proof +
+append-only evidence — *not* by an asymmetric signature over the head.
+
+Therefore F6 needs **no new key, no delegated/sub-queue-signer, and no signing step in CI.**
+The merge queue is simply the **trusted integrator** that performs the base-only motion the
+Phase-0 re-stamp already models; CE re-binds review to the change-block and re-validates the
+integrated state — exactly what every surveyed system (GitHub MQ, bors, Zuul, SubmitQueue)
+does. Putting any private key in CI to "re-sign" the queue head would be a regression: it
+would move custody of a trust root into the most-exposed surface to defend a property CE
+never asserted with a key.
+
+**Recommended F6 approach (no key custody change):**
+
+1. Keep `ce-root-v1` exactly where it is — offline, controller/Operator-held, signing the
+   install spec only. **Never in CI.**
+2. The queue's merged head is governed by the **existing** evidence machinery, retargeted:
+   - `pr_enqueued` records the ratified/re-stamped head handed to the queue (the
+     change-block anchor `base_sha` + content/patch identity already stamped at PR-open).
+   - After GitHub reports the queue merge, append `pr_merged` + a **post-merge**
+     `runtime_merge_audit` proving the merged-commit tree is equivalent to the
+     ratified/tested change-block tree. A mismatch is an operator-visible alarm
+     (`merge_audit_tree_mismatch`), never a silent pass.
+   - Because the queue is a GitHub black box, this audit is **post-hoc** (GitHub integrated;
+     CE verifies after the fact) rather than the pre-merge gate of the direct path. That is
+     the one genuine loosening — recorded, bounded, and the same trade every consumer of a
+     native queue accepts.
+3. The independent forge-side auditor (separate from the merge spine) re-confirms the
+   tree/patch equivalence out-of-band, preserving small-blast-radius separation.
+
+> **THE KEY-CUSTODY DECISION THAT NEEDS OPERATOR RATIFICATION** is therefore *narrow and
+> negative*: ratify that **F6 introduces no new signing key and no CI-resident key** — the
+> merged head is conserved by machine tree-equivalence + the append-only evidence chain, not
+> by a `ce-root-v1` (or delegated) signature over the head. The only authority change to
+> ratify is accepting the **post-hoc** (rather than pre-merge) tree-equivalence audit as the
+> integrity gate for queue-merged heads. If the Operator instead wants a cryptographic
+> signature over merged heads, that is a *new* requirement (not a conservation of an existing
+> one) and would need: a delegated signer key trust-rooted under `ce-root-v1`, a custody home
+> for it (OpenBao per ce-ops#113, **not** CI secrets), and a controller-side post-merge
+> signing step — none of which is built or should be invented here without that explicit
+> decision.

@@ -6,6 +6,13 @@ name: Validate
 
 on:
   pull_request:
+  # Merge queue (ce-ops#39): GitHub runs required checks on the synthetic
+  # merge_group event against a temporary gh-readonly-queue/* branch, NOT on the
+  # PR head. Without this trigger the "Validate governance artifacts" required
+  # check never reports on the merge group and the queue stalls forever.
+  # `checks_requested` is the only valid merge_group activity type.
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - main

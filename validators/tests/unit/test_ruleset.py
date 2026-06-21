@@ -15,6 +15,7 @@ from creator_engine_validator.forge import (
     delete_ruleset,
     upsert_ruleset,
 )
+from creator_engine_validator.forge.ruleset import ruleset_satisfies_policy
 
 REPO = "creator-engine/creator-engine"
 
@@ -109,6 +110,146 @@ def test_reference_floor_ruleset_payload_has_required_check_strict_reviews_and_n
     assert pull["parameters"]["required_approving_review_count"] == 1
     assert pull["parameters"]["dismiss_stale_reviews_on_push"] is True
     assert pull["parameters"]["require_code_owner_review"] is False
+
+
+def test_merge_queue_rule_absent_by_default():
+    """A policy without merge-queue config emits no merge_queue rule (opt-in only)."""
+    payload = _policy().to_put_payload()
+    assert all(rule["type"] != "merge_queue" for rule in payload["rules"])
+
+
+def test_merge_queue_rule_payload_shape():
+    """require_merge_queue=True emits a GitHub merge_queue rule with the queue params."""
+    payload = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        require_merge_queue=True,
+        merge_queue_merge_method="SQUASH",
+        merge_queue_max_entries_to_build=5,
+        merge_queue_max_entries_to_merge=5,
+        merge_queue_min_entries_to_merge=1,
+        merge_queue_min_entries_to_merge_wait_minutes=5,
+        merge_queue_grouping_strategy="ALLGREEN",
+        merge_queue_check_response_timeout_minutes=60,
+    ).to_put_payload()
+    mq = next(rule for rule in payload["rules"] if rule["type"] == "merge_queue")
+    params = mq["parameters"]
+    assert params == {
+        "merge_method": "SQUASH",
+        "grouping_strategy": "ALLGREEN",
+        "max_entries_to_build": 5,
+        "max_entries_to_merge": 5,
+        "min_entries_to_merge": 1,
+        "min_entries_to_merge_wait_minutes": 5,
+        "check_response_timeout_minutes": 60,
+    }
+    # The squash-only floor and the queue merge method must agree.
+    pull = next(rule for rule in payload["rules"] if rule["type"] == "pull_request")
+    assert pull["parameters"]["allowed_merge_methods"] == ["squash"]
+
+
+def test_merge_queue_refuses_unknown_merge_method():
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        require_merge_queue=True,
+        merge_queue_merge_method="FASTFORWARD",
+    )
+    with pytest.raises(RulesetRefused):
+        policy.to_put_payload()
+
+
+def test_merge_queue_refuses_grouping_strategy_other_than_allgreen_headgreen():
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        require_merge_queue=True,
+        merge_queue_grouping_strategy="WHATEVER",
+    )
+    with pytest.raises(RulesetRefused):
+        policy.to_put_payload()
+
+
+def test_merge_queue_method_must_match_allowed_pull_methods():
+    """A merge_queue method outside the policy's allowed PR merge methods is refused."""
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        allowed_merge_methods=("squash",),
+        require_merge_queue=True,
+        merge_queue_merge_method="MERGE",
+    )
+    with pytest.raises(RulesetRefused):
+        policy.to_put_payload()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"merge_queue_max_entries_to_build": 0},
+        {"merge_queue_max_entries_to_merge": 0},
+        {"merge_queue_min_entries_to_merge": 0},
+        {"merge_queue_max_entries_to_build": 101},
+        {"merge_queue_max_entries_to_merge": 101},
+        {"merge_queue_min_entries_to_merge": 101},
+        {"merge_queue_min_entries_to_merge": 6, "merge_queue_max_entries_to_merge": 5},
+        {"merge_queue_min_entries_to_merge_wait_minutes": -1},
+        {"merge_queue_min_entries_to_merge_wait_minutes": 361},
+        {"merge_queue_check_response_timeout_minutes": 0},
+        {"merge_queue_check_response_timeout_minutes": 361},
+    ],
+)
+def test_merge_queue_refuses_impossible_limits_before_any_call(kwargs):
+    """Impossible queue limits fail closed before a live upsert can call GitHub."""
+    fake = FakeRulesetGh([])
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        require_merge_queue=True,
+        **kwargs,
+    )
+    with pytest.raises(RulesetRefused):
+        upsert_ruleset(REPO, policy, apply=True, gh_runner=fake)
+    assert fake.calls == []
+
+
+def test_merge_queue_satisfies_policy_round_trips():
+    """A live ruleset built from the policy's own payload satisfies the policy."""
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        require_merge_queue=True,
+    )
+    live = {"id": 9, **policy.to_put_payload()}
+    assert ruleset_satisfies_policy(live, policy) is True
+    # A live ruleset missing the merge_queue rule does NOT satisfy a queue policy.
+    no_queue = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+    )
+    live_no_queue = {"id": 9, **no_queue.to_put_payload()}
+    assert ruleset_satisfies_policy(live_no_queue, policy) is False
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("merge_method", "MERGE"),
+        ("grouping_strategy", "HEADGREEN"),
+        ("max_entries_to_build", 4),
+        ("max_entries_to_merge", 4),
+        ("min_entries_to_merge", 2),
+        ("min_entries_to_merge_wait_minutes", 6),
+        ("check_response_timeout_minutes", 61),
+    ],
+)
+def test_merge_queue_satisfies_policy_rejects_parameter_drift(key, value):
+    """Live merge_queue params must match the policy, not only carry a queue rule."""
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        require_merge_queue=True,
+    )
+    live = {"id": 9, **policy.to_put_payload()}
+    queue_rule = next(rule for rule in live["rules"] if rule["type"] == "merge_queue")
+    queue_rule["parameters"][key] = value
+    assert ruleset_satisfies_policy(live, policy) is False
 
 
 def test_ruleset_plan_does_not_mutate():
