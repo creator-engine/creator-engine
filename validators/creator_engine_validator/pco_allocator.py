@@ -17,6 +17,7 @@ Prose contract: ``docs/operations/WORKTREE_ALLOCATOR_PROTOCOL.md``.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import os
 import shutil
 import subprocess
@@ -129,6 +130,43 @@ def _lane_lock(lock_dir: Path, lane_id: str) -> Iterator[None]:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
+def _checkout_lock_key(worktree_path: Path | str) -> str:
+    """Derive a stable, path-safe lock key for a checkout (``worktree_path``).
+
+    The key is a sha256 over the *resolved* (realpath, normalized) worktree
+    path so equivalent path spellings (trailing slashes, ``.``/``..`` segments,
+    symlinked parents) collide on the SAME lock. ``os.path.realpath`` is used
+    rather than ``Path.resolve(strict=True)`` because the checkout directory may
+    not yet exist (in-place allocation records advisory metadata only).
+    """
+    normalized = _normalize_worktree_path(str(worktree_path))
+    resolved = os.path.realpath(normalized) if normalized else normalized
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()
+    return f"checkout-{digest[:32]}"
+
+
+@contextmanager
+def _checkout_lock(lock_dir: Path, worktree_path: Path | str) -> Iterator[None]:
+    """Exclusive advisory ``flock`` keyed by the resolved ``worktree_path``.
+
+    This is the checkout-scoped sibling of :func:`_lane_lock`. Two DIFFERENT
+    lanes (``lane_id``) targeting the SAME checkout (``worktree_path``) resolve
+    to the SAME lock here, so they cannot both pass the pre-write conflict scan
+    and write live lease+claim records for one checkout — the one-live-lane-per
+    -checkout race dev-3's probe demonstrated. ``_lane_lock`` (keyed by
+    ``lane_id``) still guards lane-id idempotency; this lock closes the
+    cross-lane race.
+    """
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{_checkout_lock_key(worktree_path)}.lock"
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 # ---------------------------------------------------------------------------
 # PCO-030: callable pane-launch guard
 # ---------------------------------------------------------------------------
@@ -227,9 +265,41 @@ def _normalize_worktree_path(value: str) -> str:
     return text
 
 
-def _check_proposed_worktree_conflict(ledger_root: Path, worktree_path: Path) -> None:
-    """Raise PcoConflictError if any existing live claim targets the same worktree_path."""
-    proposed_norm = _normalize_worktree_path(str(worktree_path))
+def _canonical_checkout_id(value: str | Path) -> str:
+    """Canonical physical-checkout identity: realpath of the normalized path.
+
+    Two spellings of the SAME physical checkout (trailing slashes, ``.``/``..``
+    segments, and — critically — symlink/alias paths) MUST collide on this id so
+    that EVERY in-place predicate (lock key, cross-lane conflict scan, lease
+    coverage, idempotency match) agrees about which checkout a path names.
+
+    This is the comparison-side sibling of :func:`_checkout_lock_key` (which
+    hashes this same value): the lock keys on realpath, so the predicates the
+    lock serializes must key on realpath too, or two aliases of one checkout
+    serialize on the same lock yet slip past conflict detection and BOTH
+    allocate (the dev-1/dev-3 symlink double-allocation finding, ce-ops#200).
+    ``os.path.realpath`` (not ``Path.resolve(strict=True)``) is used because the
+    checkout directory need not exist — an empty/missing input stays empty.
+    """
+    normalized = _normalize_worktree_path(str(value))
+    if not normalized:
+        return normalized
+    return os.path.realpath(normalized)
+
+
+def _check_proposed_worktree_conflict(
+    ledger_root: Path, worktree_path: Path, *, canonical: bool = False
+) -> None:
+    """Raise PcoConflictError if any existing live claim targets the same worktree_path.
+
+    With ``canonical=False`` (the original ``allocate`` git-worktree path) both
+    sides are compared on the raw normalized path. With ``canonical=True`` (the
+    in-place path) both sides are compared on :func:`_canonical_checkout_id` so
+    alias/symlink spellings of one physical checkout collide — matching the
+    realpath-keyed checkout lock that serializes the in-place critical section.
+    """
+    _identity = _canonical_checkout_id if canonical else _normalize_worktree_path
+    proposed_norm = _identity(str(worktree_path))
     if not proposed_norm:
         return
     claims_dir = ledger_root / "claims"
@@ -250,7 +320,7 @@ def _check_proposed_worktree_conflict(ledger_root: Path, worktree_path: Path) ->
                 continue
             if existing.get("released_at"):
                 continue
-            existing_wt = _normalize_worktree_path(str(existing.get("worktree_path") or ""))
+            existing_wt = _identity(str(existing.get("worktree_path") or ""))
             if existing_wt and existing_wt == proposed_norm:
                 raise PcoConflictError(
                     f"proposed worktree_path {str(worktree_path)!r} conflicts with "
@@ -260,6 +330,130 @@ def _check_proposed_worktree_conflict(ledger_root: Path, worktree_path: Path) ->
 
 def _format_validation_errors(errors: list[Any]) -> str:
     return "; ".join(error.format() for error in errors)
+
+
+def _existing_live_lease_covers(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    worktree_path: Path,
+    now: datetime,
+    canonical: bool = False,
+) -> bool:
+    """Return True iff a schema-valid, live (non-expired) Worktree Lease record
+    under the SAME ``(controller_id, normalized worktree_path)`` exists.
+
+    This is the in-place mirror of the conflict check's ``PCO-021`` lease-coverage
+    predicate (``_claim_requires_live_lease``): a live claim is only legitimate
+    when covered by a live lease under the same controller+worktree. Reuses the
+    same schema loader (``validate_worktree_lease_record``), normalization, and
+    ``expires_at`` liveness rule the conflict layer applies, so the idempotency
+    fast-path admits exactly the states ``guard`` would accept.
+    """
+    _identity = _canonical_checkout_id if canonical else _normalize_worktree_path
+    proposed_norm = _identity(str(worktree_path))
+    if not proposed_norm:
+        return False
+    leases_dir = ledger_root / "leases" / controller_id
+    if not leases_dir.is_dir():
+        return False
+    for lease_file in leases_dir.glob("*.yaml"):
+        if ".tmp." in lease_file.name:
+            continue
+        try:
+            record = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        # Schema-valid lease only — mirror the conflict layer's PCO-020 gate.
+        if validate_worktree_lease_record(record, lease_file):
+            continue
+        if str(record.get("controller_id") or "") != controller_id:
+            continue
+        if _identity(str(record.get("worktree_path") or "")) != proposed_norm:
+            continue
+        # Liveness: live when now < expires_at; an unparseable/source-controlled
+        # expires_at defaults to live, matching ``_lease_is_live`` in the
+        # conflict layer.
+        expires_raw = record.get("expires_at")
+        parsed = None
+        if isinstance(expires_raw, str) and not (
+            expires_raw.startswith("commit:") or expires_raw.startswith("source-controlled:")
+        ):
+            text = expires_raw[:-1] + "+00:00" if expires_raw.endswith("Z") else expires_raw
+            try:
+                parsed = datetime.fromisoformat(text)
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+        if parsed is None or now < parsed.astimezone(UTC):
+            return True
+    return False
+
+
+def _assert_existing_claim_is_idempotent_reuse(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    lane_id: str,
+    worktree_path: Path,
+    claim_path: Path,
+    existing: Any,
+) -> None:
+    """Fail-CLOSED idempotency gate (dev-1 review, ce-ops#200).
+
+    An existing claim file at ``claim_path`` is only a legitimate idempotent
+    no-op when it is PROVEN to be a real live claim. If ANY of these fail, raise
+    ``PcoConflictError`` so ``pickup.launch_lane`` catches it (``PcoAllocatorError``)
+    and returns ``launched=False`` WITHOUT spawning a doomed lane that
+    ``ce lane launch`` would then refuse (``G3-CLAIM-MISSING``/schema). Reuses the
+    same schema loader the allocator applies to a fresh claim and the conflict
+    layer's lease-coverage predicate rather than hand-rolling field checks.
+
+    Requirements (all must hold):
+    * loads to a YAML mapping (not malformed/truncated/non-dict);
+    * passes ``validate_active_work_ledger_record`` (same schema as a fresh claim);
+    * ``controller_id``/``lane_id`` match this allocation;
+    * NOT ``released_at`` (a released claim is reallocated, not reused);
+    * lease-covered: a matching live lease exists (``PCO-021`` coverage).
+    """
+    if not isinstance(existing, dict):
+        raise PcoConflictError(
+            f"existing claim at {claim_path} is not a YAML mapping; "
+            "refusing fail-closed (a malformed claim would spawn a lane that "
+            "ce lane launch then rejects)"
+        )
+    schema_errors = validate_active_work_ledger_record(existing, claim_path)
+    if schema_errors:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} fails schema validation: "
+            f"{_format_validation_errors(schema_errors)}; refusing fail-closed"
+        )
+    if str(existing.get("controller_id") or "") != controller_id:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} controller_id "
+            f"{existing.get('controller_id')!r} does not match {controller_id!r}; "
+            "refusing fail-closed"
+        )
+    if str(existing.get("lane_id") or "") != lane_id:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} lane_id {existing.get('lane_id')!r} "
+            f"does not match {lane_id!r}; refusing fail-closed"
+        )
+    if not _existing_live_lease_covers(
+        ledger_root=ledger_root,
+        controller_id=controller_id,
+        worktree_path=worktree_path,
+        now=datetime.now(UTC),
+        canonical=True,
+    ):
+        raise PcoConflictError(
+            f"existing live claim at {claim_path} is not covered by a live "
+            f"worktree-lease under controller {controller_id!r} (PCO-021); "
+            "refusing fail-closed"
+        )
 
 
 def _validate_proposed_allocation_state(
@@ -479,6 +673,205 @@ def allocate(
             raise AllocationError(
                 f"record write failed after git add; rolled back: {exc}"
             ) from exc
+
+
+# ---------------------------------------------------------------------------
+# In-place claim allocation (no git-worktree-add)
+# ---------------------------------------------------------------------------
+
+
+class ClaimAlreadyLive(PcoAllocatorError):
+    """A live, unreleased claim already exists for this controller/lane."""
+
+
+def allocate_in_place(
+    *,
+    ledger_root: Path,
+    lane_id: str,
+    controller_id: str,
+    worktree_path: Path | str,
+    envelope_ref: str = "none",
+    branch: str | None = None,
+    lease_seconds: int = 3600,
+    pane_label: str | None = None,
+) -> bool:
+    """Allocate an Active-Work lease + claim + event for an EXISTING in-place checkout.
+
+    This is the claim-allocation half of :func:`allocate` without the
+    ``git worktree add`` step and without the root-checkout refusal. It is the
+    primitive the ce-ops#55 work-pickup belt needs: ``ce lane launch`` hard-requires
+    a live, unreleased, schema-valid Active-Work claim YAML at
+    ``<ledger_root>/claims/<controller_id>/<lane_id>.yaml`` (RV1-030,
+    ``G3-CLAIM-MISSING``), but the belt drives a lane in the controller's OWN
+    checkout — it neither needs nor can create a fresh secondary worktree from the
+    root checkout. ``worktree_path`` here names that existing checkout and is
+    advisory record metadata only (``ce lane launch`` only enforces a directory
+    that exists when an explicit ``--worktree-path`` is supplied).
+
+    The lease is written alongside the claim so the claim is always covered by a
+    live lease under the same ``(controller_id, worktree_path)`` — keeping the
+    Active-Work conflict guard's ``PCO-021`` lease-coverage predicate satisfied
+    even when other lanes in the same ledger have written lease records (the
+    predicate arms once ANY lease exists in the tree).
+
+    **Idempotent + fail-closed**: a re-poll of an already-claimed item is a no-op
+    that returns ``False`` (no double-allocation, no crash) when a live,
+    unreleased claim already exists for this ``(controller_id, lane_id)``. A
+    released claim is reallocated. Returns ``True`` when a fresh claim was written.
+
+    Does NOT run ``git`` at all, does NOT push, does NOT mutate GitHub/tracker
+    state, does NOT create a worktree or branch.
+    """
+    ledger_root = Path(ledger_root)
+    worktree_path = Path(worktree_path)
+
+    lock_dir = ledger_root / "locks"
+    # Checkout-scoped lock (outer) serializes the whole conflict-check + write
+    # critical section by ``worktree_path`` so two DIFFERENT lanes targeting the
+    # SAME checkout cannot both pass ``_check_proposed_worktree_conflict`` and
+    # write live lease+claim records (dev-3 race review). The lane-id lock
+    # (inner) still guards same-lane idempotency. Lock order is ALWAYS
+    # checkout-then-lane to avoid a lock-ordering cycle.
+    with _checkout_lock(lock_dir, worktree_path), _lane_lock(lock_dir, lane_id):
+        claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+
+        # Idempotency (fail-CLOSED, dev-1 review): an existing claim file is a
+        # legitimate idempotent no-op (return False) ONLY when it is PROVEN to be a
+        # real live claim — schema-valid (same validation a fresh claim gets),
+        # controller_id/lane_id-matching, NOT released, AND lease-covered (PCO-021).
+        # A malformed / truncated / mismatched / lease-uncovered existing claim is
+        # NOT a live claim: silently treating it as live (the old fail-OPEN
+        # short-circuit) spawned a doomed lane that ``ce lane launch`` then refused
+        # (G3-CLAIM-MISSING / schema). So ``_assert_existing_claim_is_idempotent_reuse``
+        # RAISES ``PcoConflictError`` instead, which ``pickup.launch_lane`` catches
+        # (``PcoAllocatorError``) → ``launched=False`` WITHOUT spawning. A released
+        # claim falls through to reallocation.
+        if claim_path.is_file():
+            try:
+                existing = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise PcoConflictError(
+                    f"existing claim at {claim_path} could not be parsed; "
+                    f"refusing in-place allocation fail-closed: {exc}"
+                ) from exc
+            if isinstance(existing, dict) and not existing.get("released_at"):
+                # Present + unreleased → must PROVE it is a real live claim.
+                _assert_existing_claim_is_idempotent_reuse(
+                    ledger_root=ledger_root,
+                    controller_id=controller_id,
+                    lane_id=lane_id,
+                    worktree_path=worktree_path,
+                    claim_path=claim_path,
+                    existing=existing,
+                )
+                return False
+            if not isinstance(existing, dict):
+                # A non-mapping file present at the claim path is malformed claim
+                # state, not a released claim — fail closed rather than reallocate
+                # over an unparsed file.
+                raise PcoConflictError(
+                    f"existing claim at {claim_path} is not a YAML mapping; "
+                    "refusing in-place allocation fail-closed"
+                )
+
+        # Preflight conflict check against the existing ledger.
+        conflicts = guard(ledger_root)
+        if not conflicts.ok:
+            codes = ", ".join(e.code for e in conflicts.errors)
+            raise PcoConflictError(
+                f"active_work_ledger_conflicts refuses in-place allocation: {codes}"
+            )
+
+        # A live claim under a DIFFERENT lane that names the same worktree is a
+        # conflict the schema-level guard would not catch pre-write. Compare on
+        # the CANONICAL (realpath) checkout id — the SAME identity the checkout
+        # lock above keys on — so alias/symlink spellings of one physical
+        # checkout collide here too; otherwise two aliases serialize on the lock
+        # yet both slip past this scan and BOTH allocate (ce-ops#200).
+        _check_proposed_worktree_conflict(ledger_root, worktree_path, canonical=True)
+
+        now = _utc_now_str()
+        expires_at = _expires_at_str(lease_seconds)
+        ts_compact = _event_ts_compact()
+        lease_id = f"lease-{lane_id}-{ts_compact}"
+        event_id = _event_id("claim-created", ts_compact)
+
+        lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
+        event_dir = ledger_root / "events" / datetime.now(UTC).strftime("%Y/%m/%d")
+        event_path = event_dir / f"{event_id}.yaml"
+
+        lease_record: dict[str, Any] = {
+            "kind": "worktree-lease-record",
+            "record_type": "worktree_lease",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "lease_id": lease_id,
+            "worktree_path": str(worktree_path),
+            "acquired_at": now,
+            "lease_seconds": lease_seconds,
+            "expires_at": expires_at,
+        }
+        if pane_label:
+            lease_record["pane_label"] = pane_label
+        if branch:
+            lease_record["branch"] = branch
+        if envelope_ref:
+            lease_record["envelope_ref"] = envelope_ref
+
+        claim_record: dict[str, Any] = {
+            "kind": "active-work-ledger-record",
+            "record_type": "claim",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "worktree_path": str(worktree_path),
+            "envelope_ref": envelope_ref,
+            "lease_seconds": lease_seconds,
+            "claimed_at": now,
+            "last_heartbeat_at": now,
+        }
+        if pane_label:
+            claim_record["pane_label"] = pane_label
+        if branch:
+            claim_record["branch"] = branch
+
+        event_record: dict[str, Any] = {
+            "kind": "active-work-ledger-record",
+            "record_type": "event",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "event_kind": "claim_created",
+            "event_id": event_id,
+            "event_timestamp": now,
+        }
+
+        _validate_proposed_allocation_state(
+            ledger_root=ledger_root,
+            lease_path=lease_path,
+            lease_record=lease_record,
+            claim_path=claim_path,
+            claim_record=claim_record,
+            event_path=event_path,
+            event_record=event_record,
+        )
+
+        # Write lease FIRST (PCO-029: lease precedes claim), then claim + event.
+        _atomic_write(lease_path, yaml.safe_dump(lease_record, sort_keys=True))
+        try:
+            _atomic_write(claim_path, yaml.safe_dump(claim_record, sort_keys=True))
+            _atomic_write(event_path, yaml.safe_dump(event_record, sort_keys=True))
+        except Exception as exc:
+            for p in [claim_path, event_path, lease_path]:
+                p.unlink(missing_ok=True)
+            raise AllocationError(
+                f"in-place record write failed; rolled back: {exc}"
+            ) from exc
+        return True
 
 
 # ---------------------------------------------------------------------------

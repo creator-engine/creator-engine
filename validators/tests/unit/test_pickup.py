@@ -21,8 +21,12 @@ import urllib.parse
 from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator import pickup
+from creator_engine_validator.checks.active_work_ledger_schema import (
+    validate_active_work_ledger_record,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +697,176 @@ def test_launch_lane_failure_does_not_mark_launched(tmp_path):
     assert result.launched is False
 
 
+def test_launch_lane_allocates_active_work_claim_before_spawn(tmp_path):
+    """ce-ops#200: poll/claim → ALLOCATE → launch → LAUNCHED_STATE.
+
+    The belt's launch path must write the live, unreleased Active-Work claim YAML
+    that ``ce lane launch`` hard-requires (RV1-030, G3-CLAIM-MISSING) BEFORE the
+    spawn — otherwise every belt-launched lane refuses with exit 1. The fake spawn
+    asserts the claim (and its lease) already exist at the moment ``lane launch``
+    would run, in the SAME ledger root the argv forwards to ``--ledger-root``.
+    """
+    from creator_engine_validator import lane_runtime
+
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="review_requested", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+    claim_path = lane_runtime._claim_path(awl, identity, expected_lane_id)
+    lease_path = awl / "leases" / identity / f"{expected_lane_id}.yaml"
+
+    seen = {}
+
+    def fake_spawn(argv):
+        # The allocation MUST have happened before the spawn (= before lane launch).
+        seen["claim_exists_at_spawn"] = claim_path.is_file()
+        seen["lease_exists_at_spawn"] = lease_path.is_file()
+        # The argv forwards the SAME ledger root the claim was allocated under.
+        lr_idx = argv.index("--ledger-root")
+        seen["argv_ledger_root"] = argv[lr_idx + 1]
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="wclaim-abc",
+        harness="claude", seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=fake_spawn,
+    )
+
+    assert result.launched is True
+    assert result.lane_id == expected_lane_id
+    assert seen["claim_exists_at_spawn"] is True
+    assert seen["lease_exists_at_spawn"] is True
+    assert seen["argv_ledger_root"] == str(awl)
+
+    # The written claim is schema-valid, live (unreleased), and matches identity/lane
+    # — exactly what lane launch's G3-CLAIM-MISSING gate checks.
+    claim = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+    assert claim["controller_id"] == identity
+    assert claim["lane_id"] == expected_lane_id
+    assert "released_at" not in claim
+    assert validate_active_work_ledger_record(claim, claim_path) == []
+
+
+def test_launch_lane_allocation_is_idempotent_on_repoll(tmp_path):
+    """A re-poll of an already-claimed item must NOT double-allocate or crash."""
+    awl = tmp_path / "awl"
+    item = _item(kind="assigned", repo="o/r", number=10)
+
+    def fake_spawn(argv):
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    kwargs = dict(
+        identity="ce-dev-2", run_id="r1", claim_id="c", harness="codex",
+        seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=fake_spawn,
+    )
+    first = pickup.launch_lane(item, **kwargs)
+    second = pickup.launch_lane(item, **kwargs)
+    assert first.launched is True
+    assert second.launched is True  # idempotent: live claim reused, no refusal/crash
+
+
+def test_launch_lane_allocation_refusal_fails_closed_without_spawn(tmp_path, monkeypatch):
+    """dev-1 review (ce-ops#200): when ``allocate_in_place`` REFUSES (raises), the
+    belt must fail closed — return ``launched=False`` with the allocation-refused
+    note and the correct computed ``lane_id``, and MUST NOT spawn ``ce lane launch``.
+
+    The fail-OPEN bug was: a malformed/lease-uncovered existing claim was silently
+    treated as a live no-op, so ``launch_lane`` proceeded to spawn a doomed lane
+    that ``ce lane launch`` then rejected (G3-CLAIM-MISSING/schema). The fix makes
+    the idempotency path fail closed (RAISE). Here we force the allocator to raise
+    and assert the belt neither spawns nor reports ``launched``.
+    """
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="review_requested", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+
+    spawn_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)  # must never be invoked on a refused allocation
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    # Force the in-place allocator to refuse (raise the conflict/allocation error
+    # type ``launch_lane`` catches). This stands in for a malformed / lease-uncovered
+    # existing claim that the fail-closed idempotency path now rejects.
+    def refusing_allocate(*args, **kwargs):
+        raise pickup.pco_allocator.PcoConflictError(
+            "existing live claim is not lease-covered; refusing fail-closed (PCO-021)"
+        )
+
+    monkeypatch.setattr(pickup.pco_allocator, "allocate_in_place", refusing_allocate)
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="wclaim-abc",
+        harness="claude", seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    # (a) launched=False, allocation-refused note, correct computed lane_id.
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert "lane claim allocation refused" in (result.note or "")
+    assert "PCO-021" in (result.note or "")
+    # (b) the spawn seam was NEVER invoked — no doomed lane spawned.
+    assert spawn_calls == []
+
+
+def test_launch_lane_malformed_existing_claim_fails_closed_without_spawn(tmp_path):
+    """End-to-end (no monkeypatch): a malformed unreleased claim already on disk at
+    the lane's claim path makes the REAL ``allocate_in_place`` fail closed, so the
+    belt does not spawn.
+
+    This proves the fail-closed idempotency change at the allocator boundary, not
+    just the ``launch_lane`` catch: a partial/truncated claim (missing required
+    schema fields) is no longer silently accepted as a live no-op.
+    """
+    from creator_engine_validator import lane_runtime
+
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="assigned", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+
+    # Plant a malformed (schema-invalid: missing required fields), UNRELEASED claim
+    # at exactly the path the lane would use.
+    claim_path = lane_runtime._claim_path(awl, identity, expected_lane_id)
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.write_text(
+        yaml.safe_dump({"kind": "active-work-ledger-record", "record_type": "claim"}),
+        encoding="utf-8",
+    )
+
+    spawn_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="c",
+        harness="codex", seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert "lane claim allocation refused" in (result.note or "")
+    assert spawn_calls == []  # never spawned a doomed lane
+
+
 def test_mark_thread_read_only_after_launched(tmp_path):
     forge = _FakeForge()
     calls = []
@@ -860,3 +1034,153 @@ def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     assert claim["claimed"] is True
     assert claim["launched"] is False
     assert claim["would_launch"] is True
+
+
+def test_allocate_in_place_two_lanes_same_checkout_serializes(tmp_path):
+    """Two DIFFERENT lanes for the SAME checkout must not both write a live claim.
+
+    Regression for dev-3's race review (ce-ops#200): ``allocate_in_place`` held
+    only the ``lane_id``-keyed lock, so two lanes targeting one ``worktree_path``
+    acquired DIFFERENT locks, both passed ``_check_proposed_worktree_conflict``
+    before either wrote, and both wrote live lease+claim records for one
+    checkout (PCO-021 only requires lease COVERAGE, not uniqueness, so the guard
+    still passed). The checkout-scoped lock serializes the critical section so at
+    most ONE live claim+lease survives per checkout.
+
+    Without the ``_checkout_lock`` this test fails: both threads succeed, leaving
+    two live claims + two live leases. With it, exactly one wins and the other is
+    refused with ``PcoConflictError``.
+    """
+    import threading
+
+    from creator_engine_validator import pco_allocator
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+
+    def _run(lane_id: str) -> None:
+        # Rendezvous so both threads enter the critical section together,
+        # deterministically exercising the race.
+        barrier.wait()
+        try:
+            wrote = pco_allocator.allocate_in_place(
+                ledger_root=ledger_root,
+                lane_id=lane_id,
+                controller_id=controller_id,
+                worktree_path=checkout,
+            )
+            results[lane_id] = wrote
+        except pco_allocator.PcoAllocatorError as exc:
+            results[lane_id] = exc
+
+    t1 = threading.Thread(target=_run, args=("lane-aaa",))
+    t2 = threading.Thread(target=_run, args=("lane-bbb",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Exactly one lane wrote a live claim (returned True); the other was refused
+    # (raised a conflict) or otherwise did NOT write a second live claim.
+    successes = [lane for lane, r in results.items() if r is True]
+    refusals = [lane for lane, r in results.items() if isinstance(r, Exception)]
+    assert len(successes) == 1, f"expected exactly one winner, got {results!r}"
+    assert len(refusals) == 1, f"expected exactly one refusal, got {results!r}"
+    assert isinstance(refusals and results[refusals[0]], pco_allocator.PcoConflictError), (
+        f"loser should raise PcoConflictError, got {results!r}"
+    )
+
+    # And on disk: at most one live (unreleased) claim + one live lease for the
+    # checkout — the one-live-lane-per-checkout posture actually holds.
+    live_claims = []
+    for claim_file in (ledger_root / "claims").rglob("*.yaml"):
+        if ".tmp." in claim_file.name:
+            continue
+        rec = yaml.safe_load(claim_file.read_text(encoding="utf-8"))
+        if isinstance(rec, dict) and not rec.get("released_at"):
+            live_claims.append(rec)
+    assert len(live_claims) == 1, f"expected one live claim, found {len(live_claims)}"
+
+    live_leases = []
+    leases_dir = ledger_root / "leases"
+    if leases_dir.is_dir():
+        for lease_file in leases_dir.rglob("*.yaml"):
+            if ".tmp." in lease_file.name:
+                continue
+            rec = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                live_leases.append(rec)
+    assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"
+
+
+def test_allocate_in_place_symlink_alias_of_same_checkout_is_refused(tmp_path):
+    """Alias/symlink spelling of one physical checkout must collide everywhere.
+
+    Regression for the dev-1/dev-3 review (ce-ops#200): the checkout lock keyed
+    on ``os.path.realpath`` (so two spellings of one checkout serialize on the
+    SAME lock), but ``_check_proposed_worktree_conflict`` /
+    ``_existing_live_lease_covers`` compared RAW normalized strings. So lane-a via
+    the alias path and lane-b via the real path of ONE physical checkout
+    serialized on the lock yet slipped past conflict detection and BOTH allocated
+    — two live claims for one checkout. With the canonical (realpath) checkout id
+    applied consistently across lock + conflict scan + lease coverage +
+    idempotency, lane-b is REFUSED and exactly one live claim+lease survives.
+
+    Pre-fix: lane-b returns True (a second live claim). Post-fix: lane-b raises
+    ``PcoConflictError`` and exactly one live claim + one live lease remains.
+    """
+    from creator_engine_validator import pco_allocator
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout, target_is_directory=True)
+
+    # lane-a claims via the ALIAS (symlink) spelling.
+    wrote_a = pco_allocator.allocate_in_place(
+        ledger_root=ledger_root,
+        lane_id="lane-a",
+        controller_id=controller_id,
+        worktree_path=alias,
+    )
+    assert wrote_a is True
+
+    # lane-b targets the SAME physical checkout via its REAL path — it MUST be
+    # refused (no second live claim for one checkout).
+    with pytest.raises(pco_allocator.PcoConflictError):
+        pco_allocator.allocate_in_place(
+            ledger_root=ledger_root,
+            lane_id="lane-b",
+            controller_id=controller_id,
+            worktree_path=checkout,
+        )
+
+    # On disk: exactly one live (unreleased) claim + one live lease for the
+    # single physical checkout.
+    live_claims = []
+    for claim_file in (ledger_root / "claims").rglob("*.yaml"):
+        if ".tmp." in claim_file.name:
+            continue
+        rec = yaml.safe_load(claim_file.read_text(encoding="utf-8"))
+        if isinstance(rec, dict) and not rec.get("released_at"):
+            live_claims.append(rec)
+    assert len(live_claims) == 1, f"expected one live claim, found {len(live_claims)}"
+
+    live_leases = []
+    leases_dir = ledger_root / "leases"
+    if leases_dir.is_dir():
+        for lease_file in leases_dir.rglob("*.yaml"):
+            if ".tmp." in lease_file.name:
+                continue
+            rec = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                live_leases.append(rec)
+    assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"
