@@ -261,8 +261,11 @@ def _build_parser() -> argparse.ArgumentParser:
     release_stage.add_argument("--version", required=True, help="package semver to stage")
     release_stage.add_argument(
         "--build-git-sha",
-        required=True,
-        help="merged main commit SHA baked into _version.py and the staged manifest",
+        default=None,
+        help=(
+            "checkout HEAD SHA baked into _version.py and the staged manifest; "
+            "when supplied, it must match --repo-root HEAD (defaults to HEAD)"
+        ),
     )
     release_stage.add_argument("--out", required=True, help="explicit output directory for the staged Pages mirror")
     release_stage.add_argument(

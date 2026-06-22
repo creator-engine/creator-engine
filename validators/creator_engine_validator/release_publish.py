@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,15 +74,45 @@ def _require_file(path: Path, label: str) -> None:
         raise ReleasePublishError(f"missing {label}: {path}")
 
 
-def _validate_inputs(version: str, build_git_sha: str, out: Path, sign_mode: str) -> None:
+def _validate_inputs(version: str, build_git_sha: str | None, out: Path, sign_mode: str) -> None:
     if not SEMVER_RE.fullmatch(version):
         raise ReleasePublishError(f"invalid release version {version!r}")
-    if not SHA_RE.fullmatch(build_git_sha):
+    if build_git_sha is not None and not SHA_RE.fullmatch(build_git_sha):
         raise ReleasePublishError(f"invalid build git sha {build_git_sha!r}; expected 40 lowercase hex")
     if sign_mode != "placeholder":
         raise ReleasePublishError("only --sign-mode placeholder is supported; root signing is Operator-gated")
     if not str(out).strip():
         raise ReleasePublishError("explicit output directory is required")
+
+
+def _checkout_head(repo_root: Path) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
+        raise ReleasePublishError(f"cannot resolve checkout HEAD for {repo_root}: {exc}") from exc
+    head = proc.stdout.strip().lower()
+    if proc.returncode != 0 or not SHA_RE.fullmatch(head):
+        detail = proc.stderr.strip() or proc.stdout.strip()
+        raise ReleasePublishError(f"cannot resolve checkout HEAD for {repo_root}: {detail}")
+    return head
+
+
+def _select_build_git_sha(repo_root: Path, requested: str | None) -> str:
+    checkout_head = _checkout_head(repo_root)
+    if requested is None:
+        return checkout_head
+    if requested != checkout_head:
+        raise ReleasePublishError(
+            f"requested build git sha {requested!r} does not match checkout HEAD {checkout_head!r}; "
+            "run release-stage from a checkout at the requested commit, or omit --build-git-sha "
+            "to use the current checkout HEAD"
+        )
+    return requested
 
 
 def _copy_file(src: Path, dst: Path) -> None:
@@ -350,7 +381,7 @@ def stage_signed_release(
     *,
     repo_root: Path | str,
     version: str,
-    build_git_sha: str,
+    build_git_sha: str | None = None,
     out: Path | str,
     sign_mode: str = "placeholder",
     force: bool = False,
@@ -363,19 +394,21 @@ def stage_signed_release(
     """Stage a deterministic Pages release mirror, stopping before root signing.
 
     Fail-closed ordering:
-    1. generate ``_version.py`` for ``build_git_sha``;
-    2. build app wheel and verify source parity;
-    3. assemble a temporary mirror and re-pin ``SHA256SUMS``;
-    4. write placeholder signed-spec bytes and signing instructions;
-    5. verify staged hashes;
-    6. atomically promote to the explicit output directory.
+    1. require requested ``build_git_sha`` to match checkout HEAD, or default to HEAD;
+    2. generate ``_version.py`` for that checkout commit;
+    3. build app wheel and verify source parity;
+    4. assemble a temporary mirror and re-pin ``SHA256SUMS``;
+    5. write placeholder signed-spec bytes and signing instructions;
+    6. verify staged hashes;
+    7. atomically promote to the explicit output directory.
     """
     root = Path(repo_root).resolve()
     output = Path(out).resolve()
     _validate_inputs(version, build_git_sha, output, sign_mode)
-    _ensure_output_target(output, force=force or dry_run)
     if not root.is_dir():
         raise ReleasePublishError(f"repo root does not exist: {root}")
+    selected_build_git_sha = _select_build_git_sha(root, build_git_sha)
+    _ensure_output_target(output, force=force or dry_run)
 
     validators_dir = root / "validators"
     package_dir = validators_dir / "creator_engine_validator"
@@ -399,7 +432,7 @@ def stage_signed_release(
     original_version_bytes = (package_dir / "_version.py").read_bytes() if (package_dir / "_version.py").exists() else None
     try:
         (package_dir / "_version.py").write_text(
-            version_runtime.render_build_file(version, build_git_sha),
+            version_runtime.render_build_file(version, selected_build_git_sha),
             encoding="utf-8",
         )
         with tempfile.TemporaryDirectory(prefix="ce-release-wheel-") as wheel_tmp:
@@ -409,10 +442,10 @@ def stage_signed_release(
                 raise ReleasePublishError(
                     f"built wheel version {wheel_manifest.version!r} does not match requested {version!r}"
                 )
-            if wheel_manifest.source_commit != build_git_sha:
+            if wheel_manifest.source_commit != selected_build_git_sha:
                 raise ReleasePublishError(
                     "built wheel source commit "
-                    f"{wheel_manifest.source_commit!r} does not match requested {build_git_sha!r}"
+                    f"{wheel_manifest.source_commit!r} does not match requested {selected_build_git_sha!r}"
                 )
             wheel_path = wheel_out / wheel_manifest.wheel_name
             _require_file(wheel_path, "built app wheel")
@@ -476,7 +509,7 @@ def stage_signed_release(
                 (temp_stage / "release-stage-manifest.yml").write_text(
                     _stage_manifest(
                         version=version,
-                        build_git_sha=build_git_sha,
+                        build_git_sha=selected_build_git_sha,
                         wheel_name=wheel_manifest.wheel_name,
                         wheel_sha256=actual_wheel_sha,
                         sha256s_sha256=sha256s_sha,
@@ -495,7 +528,7 @@ def stage_signed_release(
                 return ReleaseStageResult(
                     out_dir=output,
                     version=version,
-                    build_git_sha=build_git_sha,
+                    build_git_sha=selected_build_git_sha,
                     wheel_name=wheel_manifest.wheel_name,
                     wheel_sha256=actual_wheel_sha,
                     sha256s_sha256=sha256s_sha,
