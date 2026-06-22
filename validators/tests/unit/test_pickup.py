@@ -938,3 +938,85 @@ def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     assert claim["claimed"] is True
     assert claim["launched"] is False
     assert claim["would_launch"] is True
+
+
+def test_allocate_in_place_two_lanes_same_checkout_serializes(tmp_path):
+    """Two DIFFERENT lanes for the SAME checkout must not both write a live claim.
+
+    Regression for dev-3's race review (ce-ops#200): ``allocate_in_place`` held
+    only the ``lane_id``-keyed lock, so two lanes targeting one ``worktree_path``
+    acquired DIFFERENT locks, both passed ``_check_proposed_worktree_conflict``
+    before either wrote, and both wrote live lease+claim records for one
+    checkout (PCO-021 only requires lease COVERAGE, not uniqueness, so the guard
+    still passed). The checkout-scoped lock serializes the critical section so at
+    most ONE live claim+lease survives per checkout.
+
+    Without the ``_checkout_lock`` this test fails: both threads succeed, leaving
+    two live claims + two live leases. With it, exactly one wins and the other is
+    refused with ``PcoConflictError``.
+    """
+    import threading
+
+    from creator_engine_validator import pco_allocator
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+
+    def _run(lane_id: str) -> None:
+        # Rendezvous so both threads enter the critical section together,
+        # deterministically exercising the race.
+        barrier.wait()
+        try:
+            wrote = pco_allocator.allocate_in_place(
+                ledger_root=ledger_root,
+                lane_id=lane_id,
+                controller_id=controller_id,
+                worktree_path=checkout,
+            )
+            results[lane_id] = wrote
+        except pco_allocator.PcoAllocatorError as exc:
+            results[lane_id] = exc
+
+    t1 = threading.Thread(target=_run, args=("lane-aaa",))
+    t2 = threading.Thread(target=_run, args=("lane-bbb",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Exactly one lane wrote a live claim (returned True); the other was refused
+    # (raised a conflict) or otherwise did NOT write a second live claim.
+    successes = [lane for lane, r in results.items() if r is True]
+    refusals = [lane for lane, r in results.items() if isinstance(r, Exception)]
+    assert len(successes) == 1, f"expected exactly one winner, got {results!r}"
+    assert len(refusals) == 1, f"expected exactly one refusal, got {results!r}"
+    assert isinstance(refusals and results[refusals[0]], pco_allocator.PcoConflictError), (
+        f"loser should raise PcoConflictError, got {results!r}"
+    )
+
+    # And on disk: at most one live (unreleased) claim + one live lease for the
+    # checkout — the one-live-lane-per-checkout posture actually holds.
+    live_claims = []
+    for claim_file in (ledger_root / "claims").rglob("*.yaml"):
+        if ".tmp." in claim_file.name:
+            continue
+        rec = yaml.safe_load(claim_file.read_text(encoding="utf-8"))
+        if isinstance(rec, dict) and not rec.get("released_at"):
+            live_claims.append(rec)
+    assert len(live_claims) == 1, f"expected one live claim, found {len(live_claims)}"
+
+    live_leases = []
+    leases_dir = ledger_root / "leases"
+    if leases_dir.is_dir():
+        for lease_file in leases_dir.rglob("*.yaml"):
+            if ".tmp." in lease_file.name:
+                continue
+            rec = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                live_leases.append(rec)
+    assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"

@@ -17,6 +17,7 @@ Prose contract: ``docs/operations/WORKTREE_ALLOCATOR_PROTOCOL.md``.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import os
 import shutil
 import subprocess
@@ -121,6 +122,43 @@ def _lane_lock(lock_dir: Path, lane_id: str) -> Iterator[None]:
     """Exclusive advisory ``flock`` on ``<lock_dir>/<lane_id>.lock``."""
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{lane_id}.lock"
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _checkout_lock_key(worktree_path: Path | str) -> str:
+    """Derive a stable, path-safe lock key for a checkout (``worktree_path``).
+
+    The key is a sha256 over the *resolved* (realpath, normalized) worktree
+    path so equivalent path spellings (trailing slashes, ``.``/``..`` segments,
+    symlinked parents) collide on the SAME lock. ``os.path.realpath`` is used
+    rather than ``Path.resolve(strict=True)`` because the checkout directory may
+    not yet exist (in-place allocation records advisory metadata only).
+    """
+    normalized = _normalize_worktree_path(str(worktree_path))
+    resolved = os.path.realpath(normalized) if normalized else normalized
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()
+    return f"checkout-{digest[:32]}"
+
+
+@contextmanager
+def _checkout_lock(lock_dir: Path, worktree_path: Path | str) -> Iterator[None]:
+    """Exclusive advisory ``flock`` keyed by the resolved ``worktree_path``.
+
+    This is the checkout-scoped sibling of :func:`_lane_lock`. Two DIFFERENT
+    lanes (``lane_id``) targeting the SAME checkout (``worktree_path``) resolve
+    to the SAME lock here, so they cannot both pass the pre-write conflict scan
+    and write live lease+claim records for one checkout — the one-live-lane-per
+    -checkout race dev-3's probe demonstrated. ``_lane_lock`` (keyed by
+    ``lane_id``) still guards lane-id idempotency; this lock closes the
+    cross-lane race.
+    """
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{_checkout_lock_key(worktree_path)}.lock"
     with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         try:
@@ -532,7 +570,13 @@ def allocate_in_place(
     worktree_path = Path(worktree_path)
 
     lock_dir = ledger_root / "locks"
-    with _lane_lock(lock_dir, lane_id):
+    # Checkout-scoped lock (outer) serializes the whole conflict-check + write
+    # critical section by ``worktree_path`` so two DIFFERENT lanes targeting the
+    # SAME checkout cannot both pass ``_check_proposed_worktree_conflict`` and
+    # write live lease+claim records (dev-3 race review). The lane-id lock
+    # (inner) still guards same-lane idempotency. Lock order is ALWAYS
+    # checkout-then-lane to avoid a lock-ordering cycle.
+    with _checkout_lock(lock_dir, worktree_path), _lane_lock(lock_dir, lane_id):
         claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
 
         # Idempotency: a live (unreleased) claim already present → no-op.
