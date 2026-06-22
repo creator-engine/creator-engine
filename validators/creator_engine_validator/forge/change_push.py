@@ -349,8 +349,13 @@ def _parse_name_status(stdout: str) -> tuple[frozenset[str], frozenset[str]]:
         if not path:
             continue
         code = status[:1]
-        if code != "D":
-            changed.add(path)
+        # Every status touches its destination path on the branch side: A/M/R/C and — load-bearing
+        # for the supersession overlap — D. A deletion IS a branch-side change to that path, so it
+        # must contribute to ``changed`` (the overlap predicate); excluding it failed the guard OPEN
+        # for a branch that deletes a path the base also changed since merge-base. The overlap is a
+        # boolean intersection, independent of the net-negative line threshold, so a deletion-overlap
+        # is caught regardless of diff size.
+        changed.add(path)
         if code == "A":
             added.add(path)
     return frozenset(added), frozenset(changed)

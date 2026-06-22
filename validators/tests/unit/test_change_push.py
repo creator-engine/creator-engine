@@ -248,6 +248,25 @@ def test_supersession_refuses_base_changed_path_overlap_before_remote_read():
     assert git.argv_for("push") is None
 
 
+def test_supersession_refuses_branch_deletion_overlapping_base_change_before_remote_read():
+    # A branch that DELETES a path the base also changed since merge-base is a supersession
+    # conflict: a deletion is a branch-side change to that path. Before the fix, ``D`` entries were
+    # excluded from the branch changed-path set, so the overlap predicate failed OPEN and the push
+    # was allowed. The deletion-overlap must be caught regardless of any net-negative line threshold
+    # (here the numstat is net-positive), so the guard cannot slip a deletion through on size.
+    git = ScriptedGit(
+        branch_name_status="D\tpolicy.md\n",
+        base_changed_paths="policy.md\n",
+        numstat="50\t1\tREADME.md\n",
+    )
+
+    with pytest.raises(PushRefused, match="base_changed_path_overlap"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
 def test_supersession_refuses_adr_number_collision_before_remote_read():
     git = ScriptedGit(
         branch_name_status="A\tdocs/decisions/ADR-0012-new-design.md\n",
