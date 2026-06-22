@@ -250,6 +250,47 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
         assert shim.resolve() == target.resolve()
 
 
+def test_install_sh_repairs_partial_or_corrupt_verified_venv_state(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    answers = tmp_path / "answers.yaml"
+    answers.write_text("answers_version: 1\nprofile: solo-pilot\n", encoding="utf-8")
+
+    # Partial pre-state: a previous run left a non-symlink venv path and no
+    # install-state. The rerun must preserve it out of the way, promote a
+    # verified target, and converge without operator teardown.
+    partial_root = tmp_path / "partial-root"
+    partial_venv = partial_root / "venv"
+    partial_venv.mkdir(parents=True)
+    (partial_venv / "stale.txt").write_text("stale partial venv\n", encoding="utf-8")
+
+    partial = _run_install(tmp_path, repo_root, site=site, install_root=partial_root, answers=answers)
+
+    assert partial.returncode == 0, partial.stderr
+    assert json.loads(partial.stdout)["action"] == "onboard_inventory"
+    assert (partial_root / "venv").is_symlink()
+    assert (partial_root / "venv" / "bin" / "cev3").is_file()
+    assert not list(partial_root.glob("venv.previous.*"))
+
+    # Corrupt pre-state: the state file exists, but the target entrypoint is
+    # missing. The rerun must fail the current/target probes, rebuild from the
+    # signed wheelhouse, and write a fresh valid state.
+    corrupt_root = tmp_path / "corrupt-root"
+    first = _run_install(tmp_path, repo_root, site=site, install_root=corrupt_root, answers=answers)
+    assert first.returncode == 0, first.stderr
+    state_before = (corrupt_root / "install-state").read_text(encoding="utf-8")
+    target_line = next(line for line in state_before.splitlines() if line.startswith("venv_target="))
+    target = Path(target_line.split("=", 1)[1])
+    (target / "bin" / "cev3").unlink()
+
+    repaired = _run_install(tmp_path, repo_root, site=site, install_root=corrupt_root, answers=answers)
+
+    assert repaired.returncode == 0, repaired.stderr
+    assert "building verified venv target" in repaired.stderr
+    assert (target / "bin" / "cev3").is_file()
+    assert (corrupt_root / "venv").is_symlink()
+    assert json.loads(repaired.stdout)["action"] == "onboard_inventory"
+
+
 def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path, repo_root: Path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

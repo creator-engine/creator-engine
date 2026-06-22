@@ -1023,6 +1023,480 @@ def build_bootstrap_artifact_plan(
 
 
 # ---------------------------------------------------------------------------
+# Re-install reconciliation (PURE)
+# ---------------------------------------------------------------------------
+CE_SCAFFOLD_ROOT = ".ce"
+CE_OWNER_MARKERS = frozenset({"ce", "creator-engine"})
+_TOKEN_FRESH_STATES = frozenset({"fresh", "valid"})
+_VERIFIED_PRIOR_STATUSES = frozenset({"applied", "already_satisfied", "skipped", "held"})
+
+
+def _path_under_ce(path: Any) -> bool:
+    text = str(path).strip().rstrip("/")
+    return text == CE_SCAFFOLD_ROOT or text.startswith(f"{CE_SCAFFOLD_ROOT}/")
+
+
+def _record_from(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        return {"exists": True, "sha256": value}
+    if value is True:
+        return {"exists": True}
+    if value is False or value is None:
+        return {"exists": False}
+    return {"exists": True, "value": value}
+
+
+def _ce_owned(record: Mapping[str, Any]) -> bool:
+    owner = str(record.get("owner") or record.get("managed_by") or "").strip()
+    return owner in CE_OWNER_MARKERS or record.get("ce_owned") is True
+
+
+def plan_ce_scaffold_reconcile(
+    desired: Mapping[str, Any],
+    current: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Plan an idempotent ``.ce`` scaffold repair without blind overwrites.
+
+    Callers inject read-only file facts. Missing CE-owned paths are created,
+    CE-owned drift is repaired, matching paths are preserved, and non-CE-owned
+    conflicts are refused instead of overwritten. Extra existing ``.ce`` paths
+    are left alone so re-install never deletes operator or future-version state.
+    """
+    current = current or {}
+    steps: list[dict[str, Any]] = []
+    problems: list[str] = []
+    desired_paths = sorted(str(path).strip().rstrip("/") for path in desired)
+    for path in desired_paths:
+        want = _record_from(desired[path])
+        want_kind = str(want.get("kind") or "file")
+        want_sha = want.get("sha256")
+        if not _path_under_ce(path):
+            problems.append(f"{path}: scaffold path is outside {CE_SCAFFOLD_ROOT}/")
+            continue
+        have = _record_from(current.get(path))
+        exists = have.get("exists", bool(current.get(path))) is not False
+        if not exists:
+            steps.append({
+                "path": path,
+                "action": "create",
+                "reason": "missing",
+                "sha256": want_sha,
+            })
+            continue
+        have_kind = str(have.get("kind") or want_kind)
+        have_sha = have.get("sha256")
+        if have_kind != want_kind:
+            if _ce_owned(have):
+                steps.append({
+                    "path": path,
+                    "action": "repair",
+                    "reason": f"ce_owned_kind_drift:{have_kind}->{want_kind}",
+                    "sha256": want_sha,
+                })
+            else:
+                problems.append(
+                    f"{path}: existing non-CE {have_kind} conflicts with desired {want_kind}; "
+                    "refusing to overwrite"
+                )
+            continue
+        if want_sha and have_sha != want_sha:
+            if _ce_owned(have):
+                steps.append({
+                    "path": path,
+                    "action": "repair",
+                    "reason": "ce_owned_hash_drift",
+                    "sha256": want_sha,
+                    "current_sha256": have_sha,
+                })
+            else:
+                problems.append(
+                    f"{path}: existing non-CE file hash differs; refusing to overwrite"
+                )
+            continue
+        steps.append({"path": path, "action": "preserve", "reason": "matches"})
+    for path in sorted(str(path).strip().rstrip("/") for path in current if path not in desired):
+        if _path_under_ce(path):
+            steps.append({
+                "path": path,
+                "action": "preserve",
+                "reason": "extra_existing_state",
+            })
+    write_actions = {"create", "repair"}
+    return {
+        "root": CE_SCAFFOLD_ROOT,
+        "strategy": "reconcile_ce_owned_state_preserve_everything_else",
+        "steps": steps,
+        "will_write": [step for step in steps if step["action"] in write_actions],
+        "problems": problems,
+        "converged": not problems and all(step["action"] == "preserve" for step in steps),
+    }
+
+
+def _entrypoints_ok(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return value.get("ce") is True and value.get("cev3") is True
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, Mapping)):
+        entries = {str(item) for item in value}
+        return {"ce", "cev3"} <= entries
+    return False
+
+
+def plan_verified_venv_reconcile(
+    desired: Mapping[str, Any],
+    current: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Plan safe venv reuse or rebuild.
+
+    A current venv is reused only when its marker facts prove the package,
+    Python posture, entry points, and artifact digest still match. Anything
+    missing, partial, stale, or unverified is rebuilt through a staging venv and
+    atomic promotion; the planner never asks the shell edge to mutate a suspect
+    venv in place.
+    """
+    desired = dict(desired)
+    current = _record_from(current)
+    problems: list[str] = []
+    if current.get("exists") and str(current.get("kind") or "venv") not in {"dir", "venv"}:
+        problems.append("existing venv path is not a directory/venv; refusing to overwrite")
+    if problems:
+        return {
+            "action": "refuse",
+            "reuse": False,
+            "staging_required": False,
+            "in_place": False,
+            "mismatches": [],
+            "problems": problems,
+            "converged": False,
+        }
+    if current.get("exists") is not True:
+        return {
+            "action": "build_staging_promote",
+            "reuse": False,
+            "staging_required": True,
+            "in_place": False,
+            "reason": "missing",
+            "mismatches": ["missing"],
+            "problems": [],
+            "converged": False,
+        }
+    mismatches: list[str] = []
+    for key in ("package_name", "package_version", "python_requires", "platform", "app_wheel_sha256"):
+        if key in desired and current.get(key) != desired[key]:
+            mismatches.append(key)
+    if current.get("verified") is not True:
+        mismatches.append("verified")
+    if current.get("python_ok") is not True and current.get("python_version_ok") is not True:
+        mismatches.append("python_ok")
+    if not _entrypoints_ok(current.get("entrypoints")):
+        mismatches.append("entrypoints")
+    if mismatches:
+        return {
+            "action": "build_staging_promote",
+            "reuse": False,
+            "staging_required": True,
+            "in_place": False,
+            "reason": "current_venv_unverified_or_mismatched",
+            "mismatches": sorted(set(mismatches)),
+            "problems": [],
+            "converged": False,
+        }
+    return {
+        "action": "reuse",
+        "reuse": True,
+        "staging_required": False,
+        "in_place": False,
+        "mismatches": [],
+        "problems": [],
+        "converged": True,
+    }
+
+
+_APP_PRESERVE_KEYS = (
+    "kind",
+    "app_id",
+    "client_id",
+    "installation_id",
+    "bot_identity",
+    "identity",
+    "forge_identity",
+    "commit_identity",
+    "reviewer",
+)
+_APP_IMMUTABLE_KEYS = ("kind", "app_id", "client_id", "installation_id", "bot_identity")
+
+
+def plan_app_config_reconcile(
+    desired: Mapping[str, Any] | None = None,
+    current: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve App config on reinstall while preserving existing identity.
+
+    Existing App identity/config is treated as authority for re-runs. Matching
+    config is preserved, partial config is repaired without dropping identity,
+    and a conflicting desired value refuses instead of overwriting the installed
+    App identity.
+    """
+    desired = dict(desired or {})
+    current = _record_from(current)
+    resolved = dict(desired)
+    problems: list[str] = []
+    if current.get("exists") is True or any(key in current for key in _APP_PRESERVE_KEYS):
+        for key in _APP_PRESERVE_KEYS:
+            if key not in current:
+                continue
+            if key in _APP_IMMUTABLE_KEYS and desired.get(key) not in (None, current[key]):
+                problems.append(
+                    f"github.app.{key} conflicts with installed App config; "
+                    "refusing to overwrite existing identity"
+                )
+            resolved[key] = current[key]
+        if "bot_identity" not in resolved:
+            slug = str(resolved.get("app_id") or SHARED_APP_SLUG)
+            resolved["bot_identity"] = app_bot_identity(slug if resolved.get("kind") == "own" else SHARED_APP_SLUG)
+        action = "repair_preserve_identity" if current.get("valid") is False or current.get("partial") else "preserve_existing"
+        return {
+            "action": "refuse" if problems else action,
+            "resolved": resolved,
+            "preserved_keys": [key for key in _APP_PRESERVE_KEYS if key in current],
+            "click_required": resolved.get("installation_id") is None,
+            "problems": problems,
+            "converged": not problems and action == "preserve_existing",
+        }
+    if "bot_identity" not in resolved:
+        resolved["bot_identity"] = app_bot_identity()
+    return {
+        "action": "write_new",
+        "resolved": resolved,
+        "preserved_keys": [],
+        "click_required": resolved.get("installation_id") is None,
+        "problems": [],
+        "converged": False,
+    }
+
+
+def _permission_tuple(values: Any) -> tuple[str, ...]:
+    if isinstance(values, Mapping):
+        return tuple(f"{key}:{values[key]}" for key in sorted(values))
+    if isinstance(values, Iterable) and not isinstance(values, (str, bytes, Mapping)):
+        return tuple(sorted(str(value) for value in values))
+    if values:
+        return (str(values),)
+    return ()
+
+
+def plan_minted_token_reconcile(
+    current: Mapping[str, Any] | None = None,
+    *,
+    repo: Any,
+    installation_id: Any,
+    permissions: Any = None,
+) -> dict[str, Any]:
+    """Plan JIT installation-token reuse vs remint from value-free metadata."""
+    current = _record_from(current)
+    requested_permissions = _permission_tuple(permissions)
+    problems: list[str] = []
+    if not repo:
+        problems.append("repo is required to mint an installation token")
+    if installation_id in (None, ""):
+        problems.append("installation_id is required to mint an installation token")
+    if current.get("contains_secret_value") is True:
+        problems.append("planner input must be value-free; raw token material is refused")
+    if problems:
+        return {
+            "action": "refuse",
+            "reuse": False,
+            "remove_stale_path": False,
+            "remint": False,
+            "secret_material": False,
+            "reasons": problems,
+            "converged": False,
+        }
+    reasons: list[str] = []
+    exists = current.get("exists") is True
+    if not exists:
+        reasons.append("missing")
+    state = str(current.get("state") or "").strip()
+    if exists and state not in _TOKEN_FRESH_STATES:
+        reasons.append(state or "state_unverified")
+    if exists and current.get("verified") is not True:
+        reasons.append("unverified")
+    if exists and current.get("repo") != repo:
+        reasons.append("repo_mismatch")
+    if exists and current.get("installation_id") != installation_id:
+        reasons.append("installation_mismatch")
+    current_permissions = _permission_tuple(current.get("permissions"))
+    if exists and requested_permissions and current_permissions != requested_permissions:
+        reasons.append("permission_mismatch")
+    if reasons:
+        return {
+            "action": "remint",
+            "reuse": False,
+            "remove_stale_path": exists,
+            "remint": True,
+            "secret_material": False,
+            "reasons": sorted(set(reasons)),
+            "converged": False,
+            "request": {
+                "repo": str(repo),
+                "installation_id": installation_id,
+                "permissions": list(requested_permissions),
+            },
+        }
+    return {
+        "action": "reuse",
+        "reuse": True,
+        "remove_stale_path": False,
+        "remint": False,
+        "secret_material": False,
+        "reasons": [],
+        "converged": True,
+    }
+
+
+def plan_partial_run_resume(
+    step_ids: Iterable[str],
+    prior_ledger: Iterable[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Resume a partial run by trusting only verified prior leg outcomes."""
+    latest: dict[str, Mapping[str, Any]] = {}
+    for entry in prior_ledger or ():
+        if isinstance(entry, Mapping) and entry.get("id"):
+            latest[str(entry["id"])] = entry
+        elif isinstance(entry, Mapping) and entry.get("leg_id"):
+            latest[str(entry["leg_id"])] = entry
+    steps: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for step_id in step_ids:
+        prior = latest.get(str(step_id))
+        if prior is None:
+            steps.append({"id": str(step_id), "action": "run", "reason": "not_started"})
+            continue
+        if prior.get("manual_rollback_required") is True:
+            problems.append(f"{step_id}: manual rollback is required before resume")
+            steps.append({"id": str(step_id), "action": "blocked", "reason": "manual_rollback_required"})
+            continue
+        verification = prior.get("verification") if isinstance(prior.get("verification"), Mapping) else {}
+        status = str(prior.get("status") or "")
+        if status in _VERIFIED_PRIOR_STATUSES and verification.get("ok") is True:
+            steps.append({"id": str(step_id), "action": "skip", "reason": "verified_prior_outcome"})
+        else:
+            steps.append({
+                "id": str(step_id),
+                "action": "repair",
+                "reason": status or "unverified_prior_outcome",
+            })
+    resume_from = None
+    if not problems:
+        for step in steps:
+            if step["action"] in {"run", "repair"}:
+                resume_from = step["id"]
+                break
+    return {
+        "steps": steps,
+        "resume_from": resume_from,
+        "problems": problems,
+        "converged": not problems and resume_from is None,
+    }
+
+
+def _filename_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path or url
+    return path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _digest_for(fetched_digests: Mapping[str, Any], *, filename: str, url: str | None = None) -> Any:
+    for key in (filename, url):
+        if key and key in fetched_digests:
+            return fetched_digests[key]
+    return None
+
+
+def _artifact_row(name: str, expected: Any, actual: Any) -> dict[str, Any]:
+    return {
+        "artifact": name,
+        "expected_sha256": expected,
+        "actual_sha256": actual,
+        "ok": bool(expected and actual == expected),
+    }
+
+
+def verify_bootstrap_artifacts(
+    manifest: BootstrapManifest,
+    *,
+    sha256s_text: bytes | str,
+    fetched_digests: Mapping[str, Any],
+    os_name: str,
+    machine: str,
+    include_python_acquisition: bool = False,
+) -> dict[str, Any]:
+    """Verify every selected bootstrap artifact before persistent mutation.
+
+    The signed spec pins the SHA256SUMS digest, wheel digests, answers-schema
+    digest, and uv acquisition digest. Any mismatch or missing digest raises
+    :class:`InstallRefused` with ``artifact_hash_mismatch`` so callers fail
+    closed before scaffold/venv/App state is touched.
+    """
+    sums_bytes = sha256s_text.encode("utf-8") if isinstance(sha256s_text, str) else sha256s_text
+    sums_text = sums_bytes.decode("utf-8")
+    sums_digest = content_digest(sums_bytes)
+    sums = parse_sha256s(sums_text)
+    artifact_plan = build_bootstrap_artifact_plan(manifest, os_name=os_name, machine=machine)
+    rows: list[dict[str, Any]] = [
+        _artifact_row("SHA256SUMS", manifest.sha256s_sha256, sums_digest)
+    ]
+    problems: list[str] = []
+    if rows[-1]["ok"] is not True:
+        problems.append("SHA256SUMS digest does not match the signed manifest")
+
+    install_name = manifest.install_sh_sha256s_entry
+    install_expected = sums.get(install_name)
+    install_actual = _digest_for(
+        fetched_digests, filename=install_name, url=manifest.install_sh_url
+    )
+    rows.append(_artifact_row(install_name, install_expected, install_actual))
+    if install_expected is None:
+        problems.append(f"SHA256SUMS is missing {install_name}")
+    if rows[-1]["ok"] is not True:
+        problems.append(f"{install_name} digest mismatch")
+
+    answers_name = _filename_from_url(manifest.answers_schema_url)
+    answers_actual = _digest_for(
+        fetched_digests, filename=answers_name, url=manifest.answers_schema_url
+    )
+    rows.append(_artifact_row(answers_name, manifest.answers_schema_sha256, answers_actual))
+    if rows[-1]["ok"] is not True:
+        problems.append(f"{answers_name} digest mismatch")
+    if answers_name in sums and sums[answers_name] != manifest.answers_schema_sha256:
+        problems.append(f"SHA256SUMS entry for {answers_name} disagrees with the signed manifest")
+
+    for wheel in manifest.wheels_for_platform(artifact_plan["platform"]):
+        sum_value = sums.get(wheel.filename)
+        if sum_value is None:
+            problems.append(f"SHA256SUMS is missing {wheel.filename}")
+        elif sum_value != wheel.sha256:
+            problems.append(f"SHA256SUMS entry for {wheel.filename} disagrees with the signed manifest")
+        actual = _digest_for(fetched_digests, filename=wheel.filename, url=wheel.url)
+        rows.append(_artifact_row(wheel.filename, wheel.sha256, actual))
+        if rows[-1]["ok"] is not True:
+            problems.append(f"{wheel.filename} digest mismatch")
+
+    if include_python_acquisition:
+        acquisition = manifest.python_acquisition_for_platform(artifact_plan["platform"])
+        name = _filename_from_url(acquisition.url)
+        actual = _digest_for(fetched_digests, filename=name, url=acquisition.url)
+        rows.append(_artifact_row(name, acquisition.sha256, actual))
+        if rows[-1]["ok"] is not True:
+            problems.append(f"{name} digest mismatch")
+
+    if problems:
+        raise InstallRefused("artifact_hash_mismatch: " + "; ".join(problems))
+    return {"ok": True, "platform": artifact_plan["platform"], "rows": rows}
+
+
+# ---------------------------------------------------------------------------
 # Dependency detection — detect-don't-assume, fix-with-permission (PURE)
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -2184,6 +2658,264 @@ def build_github_leg_plan(
             "the HTTPS-Bearer App-JWT mint leg (forge.app_jwt_runner; gh cannot App-JWT auth)",
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#173 — idempotent / overwrite-safe reinstall convergence (PURE)
+# ---------------------------------------------------------------------------
+
+_SCAFFOLD_STATES = frozenset({"absent", "complete", "partial", "drifted"})
+_VENV_STATES = frozenset({"absent", "current", "stale", "broken", "partial"})
+_APP_STATES = frozenset({"absent", "installed", "partial", "drifted"})
+_TOKEN_STATES = frozenset({"absent", "valid", "expired", "stale", "invalid"})
+_PARTIAL_RUN_STATES = frozenset({"absent", "interrupted", "failed", "in_progress"})
+_PRESERVED_IDENTITY_KEYS = (
+    "identity_ref",
+    "installation_id",
+    "app_id",
+    "client_id",
+    "bot_identity",
+    "repo",
+    "reviewer",
+)
+
+
+def _state_from_record(
+    prior_state: Mapping[str, Any],
+    key: str,
+    *,
+    default: str,
+    allowed: frozenset[str],
+) -> tuple[str, Mapping[str, Any]]:
+    raw = prior_state.get(key)
+    if raw is None:
+        state = default
+        record: Mapping[str, Any] = {}
+    elif isinstance(raw, str):
+        state = raw
+        record = {"state": raw}
+    elif isinstance(raw, Mapping):
+        state = str(raw.get("state") or default)
+        record = raw
+    else:
+        raise InstallRefused(f"prior_state.{key} must be a mapping or state string")
+    if state not in allowed:
+        raise InstallRefused(
+            f"prior_state.{key}.state {state!r} is unknown; expected one of {sorted(allowed)}"
+        )
+    return state, record
+
+
+def _preserved_identity(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: record[key] for key in _PRESERVED_IDENTITY_KEYS if key in record}
+
+
+def plan_prior_state_convergence(
+    prior_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Plan deterministic repair/reuse decisions for a rerun over prior state.
+
+    This is the pure contract the live installer follows: every recognized
+    prior-state case has one explicit convergence action. Unknown state labels
+    fail closed because guessing during reinstall could overwrite identity,
+    config, or partially-applied state. The function never mutates and never
+    treats partial state as clean.
+    """
+    prior = prior_state or {}
+    decisions: list[dict[str, Any]] = []
+
+    scaffold_state, scaffold = _state_from_record(
+        prior, "ce_scaffold", default="absent", allowed=_SCAFFOLD_STATES
+    )
+    scaffold_preserved = _preserved_identity(scaffold)
+    if scaffold_state == "absent":
+        decisions.append({
+            "case": "ce_scaffold",
+            "state": scaffold_state,
+            "action": "create_scaffold",
+            "status": "planned",
+            "preserve": {},
+            "reason": "no CE scaffold detected",
+        })
+    elif scaffold_state == "complete":
+        decisions.append({
+            "case": "ce_scaffold",
+            "state": scaffold_state,
+            "action": "reconcile_scaffold",
+            "status": "already_satisfied",
+            "preserve": scaffold_preserved,
+            "reason": "existing CE scaffold is kept; only deterministic drift is reconciled",
+        })
+    else:
+        decisions.append({
+            "case": "ce_scaffold",
+            "state": scaffold_state,
+            "action": "repair_scaffold",
+            "status": "repair",
+            "preserve": scaffold_preserved,
+            "reason": "partial/drifted scaffold is repaired in place without dropping identity",
+        })
+
+    venv_state, venv = _state_from_record(
+        prior, "venv", default="absent", allowed=_VENV_STATES
+    )
+    if venv_state == "current":
+        decisions.append({
+            "case": "venv",
+            "state": venv_state,
+            "action": "reuse_verified_venv",
+            "status": "already_satisfied",
+            "preserve": {"venv_target": venv.get("target")} if venv.get("target") else {},
+            "reason": "venv target matches the verified artifact state and entrypoints run",
+        })
+    elif venv_state == "absent":
+        decisions.append({
+            "case": "venv",
+            "state": venv_state,
+            "action": "build_verified_venv",
+            "status": "planned",
+            "preserve": {},
+            "reason": "no reusable venv detected",
+        })
+    else:
+        decisions.append({
+            "case": "venv",
+            "state": venv_state,
+            "action": "rebuild_verified_venv",
+            "status": "repair",
+            "preserve": {"previous_venv": "preserve_as_backup_until_promotion"},
+            "reason": "stale/broken/partial venv is rebuilt from verified artifacts",
+        })
+
+    app_state, app = _state_from_record(
+        prior, "github_app", default="absent", allowed=_APP_STATES
+    )
+    app_preserved = _preserved_identity(app)
+    if app_state == "installed" and app.get("installation_id") is not None:
+        decisions.append({
+            "case": "github_app",
+            "state": app_state,
+            "action": "preserve_installation",
+            "status": "already_satisfied",
+            "preserve": app_preserved,
+            "reason": "existing App installation identity is authoritative on rerun",
+        })
+    elif app_state == "absent":
+        decisions.append({
+            "case": "github_app",
+            "state": app_state,
+            "action": "request_install_click",
+            "status": "planned",
+            "preserve": {},
+            "reason": "no App installation detected",
+        })
+    else:
+        decisions.append({
+            "case": "github_app",
+            "state": app_state,
+            "action": "reconcile_app_config",
+            "status": "repair",
+            "preserve": app_preserved,
+            "reason": "partial/drifted App config is reconciled without changing identity",
+        })
+
+    token_state, token = _state_from_record(
+        prior, "minted_token", default="absent", allowed=_TOKEN_STATES
+    )
+    if token_state == "valid":
+        decisions.append({
+            "case": "minted_token",
+            "state": token_state,
+            "action": "reuse_live_token",
+            "status": "already_satisfied",
+            "preserve": {"expires_at": token.get("expires_at")} if token.get("expires_at") else {},
+            "reason": "token probe says the scoped JIT token is still valid",
+        })
+    else:
+        decisions.append({
+            "case": "minted_token",
+            "state": token_state,
+            "action": "remint_scoped_token",
+            "status": "planned" if token_state == "absent" else "repair",
+            "preserve": {},
+            "reason": "missing/stale/expired/invalid tokens are never reused",
+        })
+
+    partial_state, partial = _state_from_record(
+        prior, "partial_run", default="absent", allowed=_PARTIAL_RUN_STATES
+    )
+    if partial_state == "absent":
+        decisions.append({
+            "case": "partial_run",
+            "state": partial_state,
+            "action": "start_from_verified_plan",
+            "status": "already_satisfied",
+            "preserve": {},
+            "reason": "no interrupted apply ledger detected",
+        })
+    else:
+        decisions.append({
+            "case": "partial_run",
+            "state": partial_state,
+            "action": "resume_or_repair_from_last_verified_step",
+            "status": "repair",
+            "preserve": {
+                key: partial[key]
+                for key in ("last_verified_step", "ledger_ref", "invocation_id")
+                if key in partial
+            },
+            "reason": "interrupted runs resume only from verified ledger evidence",
+        })
+
+    return {
+        "kind": "ce-reinstall-convergence-plan",
+        "schema_version": 1,
+        "converged": all(item["status"] == "already_satisfied" for item in decisions),
+        "decisions": tuple(decisions),
+    }
+
+
+def _prior_state_github_probe(prior_state: Mapping[str, Any]) -> dict[str, Any]:
+    app = prior_state.get("github_app")
+    if isinstance(app, Mapping) and app.get("installation_id") is not None:
+        return {"app_installation_id": app.get("installation_id")}
+    return {}
+
+
+def build_reinstall_convergence_plan(
+    spec_bytes: bytes | str,
+    signature: Any,
+    *,
+    pinned_keys: dict[str, Any],
+    prior_state: Mapping[str, Any] | None = None,
+    answers: dict[str, Any] | None = None,
+    schema: dict[str, Any] | None = None,
+    github_probe: dict[str, Any] | None = None,
+    verifier: Callable[[str, bytes, Any, Any], bool] | None = None,
+) -> dict[str, Any]:
+    """Verify first, then plan overwrite-safe reinstall convergence.
+
+    The signature gate intentionally runs before prior-state interpretation:
+    tampered installer input must fail closed before any repair/reconcile plan is
+    emitted. When answers/schema are supplied, the preserved App installation ID
+    from prior state is threaded into the GitHub leg probe so reruns skip the
+    human click while preserving the installation identity.
+    """
+    verified = require_verified(spec_bytes, signature, pinned_keys=pinned_keys, verifier=verifier)
+    prior = prior_state or {}
+    convergence = plan_prior_state_convergence(prior)
+    result: dict[str, Any] = {
+        "kind": "ce-reinstall-plan",
+        "schema_version": 1,
+        "verified": {"ok": verified.ok, "key_id": verified.key_id},
+        "prior_state": convergence,
+    }
+    if answers is not None or schema is not None:
+        if answers is None or schema is None:
+            raise InstallRefused("reinstall GitHub convergence requires both answers and schema")
+        merged_probe = {**_prior_state_github_probe(prior), **(github_probe or {})}
+        result["github"] = build_github_leg_plan(answers, schema=schema, probe=merged_probe)
+    return result
 
 
 # ---------------------------------------------------------------------------

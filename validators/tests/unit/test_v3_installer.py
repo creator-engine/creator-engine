@@ -454,6 +454,117 @@ def test_sha256s_parser_and_platform_plan():
         assert "creator-engine.dev/install.sh" in detail
 
 
+_INSTALL_SH_SHA = "b" * 64
+_ANSWERS_SCHEMA_SHA = "c" * 64
+_APP_WHEEL_SHA = "d" * 64
+_ATTRS_WHEEL_SHA = "e" * 64
+_UV_TARBALL_SHA = "f" * 64
+_APP_WHEEL = "creator_engine_validator-0.2.0-py3-none-any.whl"
+_ATTRS_WHEEL = "attrs-26.1.0-py3-none-any.whl"
+_ANSWERS_SCHEMA_FILE = "install-answers.schema.yaml"
+_UV_TARBALL = "uv-x86_64-unknown-linux-gnu.tar.gz"
+_REINSTALL_SHA256S = (
+    f"{_INSTALL_SH_SHA}  install.sh\n"
+    f"{_APP_WHEEL_SHA}  {_APP_WHEEL}\n"
+    f"{_ATTRS_WHEEL_SHA}  {_ATTRS_WHEEL}\n"
+    f"{_ANSWERS_SCHEMA_SHA}  {_ANSWERS_SCHEMA_FILE}\n"
+)
+
+
+def _reinstall_manifest() -> inst.BootstrapManifest:
+    return inst.BootstrapManifest(
+        artifact_manifest_version=1,
+        package_name="creator-engine-validator",
+        package_version="0.2.0",
+        python_requires=">=3.14",
+        artifact_base_url="https://creator-engine.example/downloads/0.2.0",
+        sha256s_url="https://creator-engine.example/downloads/0.2.0/SHA256SUMS",
+        sha256s_sha256=inst.content_digest(_REINSTALL_SHA256S),
+        install_sh_url="https://creator-engine.example/install.sh",
+        install_sh_sha256s_entry="install.sh",
+        answers_schema_url=f"https://creator-engine.example/schemas/{_ANSWERS_SCHEMA_FILE}",
+        answers_schema_sha256=_ANSWERS_SCHEMA_SHA,
+        app_wheel=_APP_WHEEL,
+        required_wheels=(
+            inst.BootstrapWheel(
+                _APP_WHEEL,
+                f"https://creator-engine.example/downloads/0.2.0/{_APP_WHEEL}",
+                _APP_WHEEL_SHA,
+            ),
+            inst.BootstrapWheel(
+                _ATTRS_WHEEL,
+                f"https://creator-engine.example/downloads/0.2.0/{_ATTRS_WHEEL}",
+                _ATTRS_WHEEL_SHA,
+            ),
+        ),
+        python_acquisitions=(
+            inst.PythonAcquisition(
+                platform="linux-x86_64-cp314",
+                tool="uv",
+                version="0.11.21",
+                url=f"https://creator-engine.example/downloads/0.2.0/{_UV_TARBALL}",
+                sha256=_UV_TARBALL_SHA,
+                command="uv python install 3.14",
+            ),
+        ),
+    )
+
+
+def _verified_artifact_digests(**overrides):
+    digests = {
+        "install.sh": _INSTALL_SH_SHA,
+        _ANSWERS_SCHEMA_FILE: _ANSWERS_SCHEMA_SHA,
+        _APP_WHEEL: _APP_WHEEL_SHA,
+        _ATTRS_WHEEL: _ATTRS_WHEEL_SHA,
+        _UV_TARBALL: _UV_TARBALL_SHA,
+    }
+    digests.update(overrides)
+    return digests
+
+
+def test_bootstrap_artifact_verification_accepts_complete_verified_set():
+    result = inst.verify_bootstrap_artifacts(
+        _reinstall_manifest(),
+        sha256s_text=_REINSTALL_SHA256S,
+        fetched_digests=_verified_artifact_digests(),
+        os_name="Linux",
+        machine="x86_64",
+        include_python_acquisition=True,
+    )
+
+    assert result["ok"] is True
+    assert result["platform"] == "linux-x86_64-cp314"
+    assert all(row["ok"] for row in result["rows"])
+    assert {row["artifact"] for row in result["rows"]} >= {
+        "SHA256SUMS",
+        "install.sh",
+        _APP_WHEEL,
+        _ATTRS_WHEEL,
+        _ANSWERS_SCHEMA_FILE,
+        _UV_TARBALL,
+    }
+
+
+def test_bootstrap_artifact_verification_failure_fails_closed():
+    with pytest.raises(inst.InstallRefused, match="artifact_hash_mismatch"):
+        inst.verify_bootstrap_artifacts(
+            _reinstall_manifest(),
+            sha256s_text=_REINSTALL_SHA256S,
+            fetched_digests=_verified_artifact_digests(**{_APP_WHEEL: "0" * 64}),
+            os_name="Linux",
+            machine="x86_64",
+        )
+    tampered_sums = _REINSTALL_SHA256S.replace(_ATTRS_WHEEL_SHA, "1" * 64)
+    with pytest.raises(inst.InstallRefused, match="SHA256SUMS digest"):
+        inst.verify_bootstrap_artifacts(
+            _reinstall_manifest(),
+            sha256s_text=tampered_sums,
+            fetched_digests=_verified_artifact_digests(),
+            os_name="Linux",
+            machine="x86_64",
+        )
+
+
 # --- the E2E proof: a REAL detached SSHSIG, stock ssh-keygen, clean dir --------
 def _real_ssh_keygen_runner(**kwargs):
     """The injected runner the CLI/live-drive uses: shell `ssh-keygen -Y verify`
@@ -590,6 +701,182 @@ def test_build_plan_refuses_unverified_spec_nothing_planned():
     sig = inst.sign_spec(SPEC, key_id="rogue")
     with pytest.raises(inst.InstallRefused):
         inst.build_install_plan(SPEC, sig, pinned_keys=PINNED, probe={})
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#173 — re-install prior-state reconciliation
+# ---------------------------------------------------------------------------
+def test_ce_scaffold_repairs_ce_owned_drift_and_preserves_extra_state():
+    desired = {
+        ".ce/skills/project-conventions.md": {"sha256": "1" * 64},
+        ".ce/state/onboard/config.json": {"sha256": "2" * 64},
+    }
+    current = {
+        ".ce/skills/project-conventions.md": {
+            "exists": True,
+            "sha256": "0" * 64,
+            "owner": "creator-engine",
+        },
+        ".ce/state/onboard/config.json": {
+            "exists": True,
+            "sha256": "2" * 64,
+            "owner": "creator-engine",
+        },
+        ".ce/state/operator-note.json": {
+            "exists": True,
+            "sha256": "3" * 64,
+            "owner": "operator",
+        },
+    }
+
+    plan = inst.plan_ce_scaffold_reconcile(desired, current)
+
+    assert plan["problems"] == []
+    assert not plan["converged"]
+    writes = {step["path"]: step for step in plan["will_write"]}
+    assert writes[".ce/skills/project-conventions.md"]["action"] == "repair"
+    assert ".ce/state/onboard/config.json" not in writes
+    extra = next(step for step in plan["steps"] if step["path"] == ".ce/state/operator-note.json")
+    assert extra["action"] == "preserve" and extra["reason"] == "extra_existing_state"
+
+
+def test_ce_scaffold_refuses_non_ce_conflict_without_clobbering():
+    desired = {".ce/skills/project-validation.md": {"sha256": "4" * 64}}
+    current = {
+        ".ce/skills/project-validation.md": {
+            "exists": True,
+            "sha256": "5" * 64,
+            "owner": "operator",
+        }
+    }
+
+    plan = inst.plan_ce_scaffold_reconcile(desired, current)
+
+    assert plan["problems"]
+    assert "refusing to overwrite" in plan["problems"][0]
+    assert plan["will_write"] == []
+    assert not plan["converged"]
+
+
+def test_existing_verified_venv_reuses_and_partial_venv_rebuilds_safely():
+    desired = {
+        "package_name": "creator-engine-validator",
+        "package_version": "0.2.0",
+        "python_requires": ">=3.14",
+        "platform": "linux-x86_64-cp314",
+        "app_wheel_sha256": _APP_WHEEL_SHA,
+    }
+    current = {
+        "exists": True,
+        "kind": "venv",
+        **desired,
+        "verified": True,
+        "python_ok": True,
+        "entrypoints": {"ce": True, "cev3": True},
+    }
+
+    reused = inst.plan_verified_venv_reconcile(desired, current)
+    assert reused["action"] == "reuse" and reused["converged"]
+
+    partial = inst.plan_verified_venv_reconcile(
+        desired,
+        {**current, "package_version": "0.1.0", "verified": False},
+    )
+    assert partial["action"] == "build_staging_promote"
+    assert partial["staging_required"] is True
+    assert partial["in_place"] is False
+    assert {"package_version", "verified"} <= set(partial["mismatches"])
+
+
+def test_app_config_preserves_existing_installation_and_identity():
+    current = {
+        "exists": True,
+        "kind": "shared",
+        "installation_id": 12345678,
+        "bot_identity": "creator-engine[bot]",
+        "forge_identity": {
+            "login": "ce-dev-1",
+            "email": "ce-dev-1@users.noreply.github.com",
+            "source": "bootstrap_token_get_user",
+        },
+    }
+
+    plan = inst.plan_app_config_reconcile({"kind": "shared"}, current)
+
+    assert plan["action"] == "preserve_existing"
+    assert plan["click_required"] is False
+    assert plan["resolved"]["installation_id"] == 12345678
+    assert plan["resolved"]["forge_identity"]["login"] == "ce-dev-1"
+    assert "forge_identity" in plan["preserved_keys"]
+
+    conflict = inst.plan_app_config_reconcile(
+        {"kind": "shared", "installation_id": 99999999},
+        current,
+    )
+    assert conflict["action"] == "refuse"
+    assert conflict["resolved"]["installation_id"] == 12345678
+    assert any("refusing to overwrite existing identity" in p for p in conflict["problems"])
+
+
+def test_stale_minted_token_path_remints_and_fresh_token_reuses():
+    request = {
+        "repo": "owner/repo",
+        "installation_id": 12345678,
+        "permissions": {"contents": "read", "metadata": "read"},
+    }
+    stale = {
+        "exists": True,
+        "state": "expired",
+        "verified": True,
+        "repo": "owner/repo",
+        "installation_id": 12345678,
+        "permissions": {"contents": "read", "metadata": "read"},
+    }
+
+    repair = inst.plan_minted_token_reconcile(stale, **request)
+    assert repair["action"] == "remint"
+    assert repair["remove_stale_path"] is True
+    assert repair["secret_material"] is False
+    assert "expired" in repair["reasons"]
+
+    fresh = inst.plan_minted_token_reconcile({**stale, "state": "fresh"}, **request)
+    assert fresh["action"] == "reuse" and fresh["converged"]
+
+
+def test_partial_run_resume_skips_verified_legs_and_repairs_first_bad_leg():
+    plan = inst.plan_partial_run_resume(
+        ("signed_spec_verify", "ce_scaffold", "verified_venv", "onboard_inventory"),
+        [
+            {
+                "id": "signed_spec_verify",
+                "status": "already_satisfied",
+                "verification": {"ok": True},
+            },
+            {
+                "id": "ce_scaffold",
+                "status": "failed",
+                "verification": {"ok": False},
+            },
+        ],
+    )
+
+    actions = {step["id"]: step["action"] for step in plan["steps"]}
+    assert actions["signed_spec_verify"] == "skip"
+    assert actions["ce_scaffold"] == "repair"
+    assert actions["verified_venv"] == "run"
+    assert plan["resume_from"] == "ce_scaffold"
+    assert not plan["converged"]
+
+    blocked = inst.plan_partial_run_resume(
+        ("host_dependencies",),
+        [{
+            "id": "host_dependencies",
+            "status": "failed",
+            "verification": {"ok": False},
+            "manual_rollback_required": True,
+        }],
+    )
+    assert blocked["problems"] and blocked["resume_from"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -1698,3 +1985,114 @@ def test_github_detected_facts_projection():
         "github.reviewer": "human", "github.app.installation_id": 5,
     }
     assert inst.github_detected_facts(None) == {}
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#173 reinstall convergence — explicit prior-state decisions
+# ---------------------------------------------------------------------------
+def _decision(plan: dict, case: str) -> dict:
+    return next(item for item in plan["prior_state"]["decisions"] if item["case"] == case)
+
+
+def test_reinstall_convergence_clean_state_plans_safe_first_install():
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+
+    plan = inst.build_reinstall_convergence_plan(SPEC, sig, pinned_keys=PINNED)
+
+    assert plan["verified"]["ok"] is True
+    assert _decision(plan, "ce_scaffold")["action"] == "create_scaffold"
+    assert _decision(plan, "venv")["action"] == "build_verified_venv"
+    assert _decision(plan, "github_app")["action"] == "request_install_click"
+    assert _decision(plan, "minted_token")["action"] == "remint_scoped_token"
+    assert _decision(plan, "partial_run")["action"] == "start_from_verified_plan"
+
+
+def test_reinstall_convergence_fully_installed_state_preserves_identity_and_skips_app_click():
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+    prior_state = {
+        "ce_scaffold": {
+            "state": "complete",
+            "identity_ref": ".ce/identity/creator-engine.yml",
+            "repo": "chmod735/creator-engine-canonical",
+            "reviewer": "chmod735",
+        },
+        "venv": {"state": "current", "target": "venv-0.2.0-good"},
+        "github_app": {
+            "state": "installed",
+            "installation_id": 12345678,
+            "client_id": "Iv1.shared",
+            "bot_identity": "creator-engine[bot]",
+        },
+        "minted_token": {"state": "valid", "expires_at": "2026-06-22T08:00:00Z"},
+    }
+
+    plan = inst.build_reinstall_convergence_plan(
+        SPEC,
+        sig,
+        pinned_keys=PINNED,
+        prior_state=prior_state,
+        answers=GOOD_ANSWERS,
+        schema=ANSWERS_SCHEMA,
+        github_probe=_github_probe(app_installation_id=None),
+    )
+
+    assert plan["prior_state"]["converged"] is True
+    assert _decision(plan, "ce_scaffold")["status"] == "already_satisfied"
+    assert _decision(plan, "ce_scaffold")["preserve"]["identity_ref"] == ".ce/identity/creator-engine.yml"
+    assert _decision(plan, "venv")["action"] == "reuse_verified_venv"
+    assert _decision(plan, "github_app")["action"] == "preserve_installation"
+    assert _decision(plan, "github_app")["preserve"]["installation_id"] == 12345678
+    assert _decision(plan, "minted_token")["action"] == "reuse_live_token"
+    assert plan["github"]["app"]["click_required"] is False
+    assert plan["github"]["human_approves"] == []
+
+
+def test_reinstall_convergence_repairs_partial_state_and_remints_stale_token():
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+    prior_state = {
+        "ce_scaffold": {"state": "partial", "identity_ref": ".ce/identity/creator-engine.yml"},
+        "venv": {"state": "broken"},
+        "github_app": {"state": "drifted", "installation_id": 12345678},
+        "minted_token": {"state": "expired", "expires_at": "2026-06-21T00:00:00Z"},
+        "partial_run": {
+            "state": "interrupted",
+            "last_verified_step": "github_app_install",
+            "ledger_ref": ".ce/state/onboard/ledger.ndjson",
+            "invocation_id": "apply-1",
+        },
+    }
+
+    plan = inst.build_reinstall_convergence_plan(
+        SPEC, sig, pinned_keys=PINNED, prior_state=prior_state
+    )
+
+    assert _decision(plan, "ce_scaffold")["action"] == "repair_scaffold"
+    assert _decision(plan, "ce_scaffold")["preserve"]["identity_ref"] == ".ce/identity/creator-engine.yml"
+    assert _decision(plan, "venv")["action"] == "rebuild_verified_venv"
+    assert _decision(plan, "github_app")["action"] == "reconcile_app_config"
+    assert _decision(plan, "github_app")["preserve"]["installation_id"] == 12345678
+    assert _decision(plan, "minted_token")["action"] == "remint_scoped_token"
+    partial = _decision(plan, "partial_run")
+    assert partial["action"] == "resume_or_repair_from_last_verified_step"
+    assert partial["preserve"] == {
+        "last_verified_step": "github_app_install",
+        "ledger_ref": ".ce/state/onboard/ledger.ndjson",
+        "invocation_id": "apply-1",
+    }
+
+
+def test_reinstall_convergence_unknown_prior_state_fails_closed():
+    with pytest.raises(inst.InstallRefused, match="prior_state.venv.state 'mystery' is unknown"):
+        inst.plan_prior_state_convergence({"venv": {"state": "mystery"}})
+
+
+def test_reinstall_convergence_verifies_before_interpreting_prior_state():
+    sig = inst.sign_spec(SPEC, key_id="rogue")
+
+    with pytest.raises(inst.InstallRefused, match="install spec refused before execution"):
+        inst.build_reinstall_convergence_plan(
+            SPEC,
+            sig,
+            pinned_keys=PINNED,
+            prior_state={"venv": {"state": "mystery"}},
+        )
