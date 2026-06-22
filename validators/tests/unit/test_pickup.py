@@ -15,6 +15,7 @@ behind a per-seat enable flag (canary, default OFF).
 """
 
 import json
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -26,6 +27,9 @@ import yaml
 from creator_engine_validator import pickup
 from creator_engine_validator.checks.active_work_ledger_schema import (
     validate_active_work_ledger_record,
+)
+from creator_engine_validator.checks.worktree_lease_schema import (
+    validate_worktree_lease_record,
 )
 
 
@@ -1184,3 +1188,137 @@ def test_allocate_in_place_symlink_alias_of_same_checkout_is_refused(tmp_path):
             if isinstance(rec, dict):
                 live_leases.append(rec)
     assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#203: production-length lane ids must not overflow the PCO-020
+# ``lease_id`` bound. The live canary post-#200 reached
+# ``allocate_in_place`` but the lease write was REFUSED because the naive
+# ``lease-<lane_id>-<14-digit stamp>`` derivation overflowed
+# ``^[a-z0-9][a-z0-9-]{2,63}$`` (~69 chars > 64) for pickup's long lane ids.
+# The #200 tests used SHORT synthetic lane ids (``lane-aaa``) and missed it.
+# These tests reproduce production by feeding the REAL pickup lane format.
+# ---------------------------------------------------------------------------
+
+# pco_allocator's lease_id schema pattern (worktree-lease.schema.yaml).
+_LEASE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
+
+
+def _production_pickup_lane_id() -> str:
+    """The real pickup lane id for ce-ops#202 on ce-dev-2 (see pickup._lane_id):
+    ``pickup-<repo>-<number>-<run_id>``. ~48 chars -- long enough that the naive
+    ``lease-<lane>-<stamp>`` derivation overflowed the 64-char lease_id bound."""
+    lane = pickup._lane_id(
+        {"repo": "creator-engine/ce-ops", "number": 202}, "pickup-ce-dev-2"
+    )
+    # Sanity: this must actually be a LONG lane (the condition that triggered #203).
+    assert len(lane) > 40, f"expected a production-length lane, got {lane!r} ({len(lane)})"
+    return lane
+
+
+def test_allocate_in_place_production_length_lane_writes_conformant_lease(tmp_path):
+    """``allocate_in_place`` with a PRODUCTION-LENGTH pickup lane id must SUCCEED
+    and write a lease whose ``lease_id`` satisfies the live PCO-020 schema.
+
+    Pre-fix (naive ``lease-<lane>-<stamp>``): the lease write is REFUSED with
+    ``PcoConflictError`` because ``lease_id`` is ~69 chars > the 64-char bound --
+    exactly the live-canary failure. Post-fix (length-independent hashed id): the
+    call returns ``True`` and the on-disk lease, claim, and event records each
+    pass the live schema validators.
+    """
+    from creator_engine_validator import pco_allocator
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    lane_id = _production_pickup_lane_id()
+
+    # (a) The call SUCCEEDS -- _validate_proposed_allocation_state did not refuse.
+    wrote = pco_allocator.allocate_in_place(
+        ledger_root=ledger_root,
+        lane_id=lane_id,
+        controller_id=controller_id,
+        worktree_path=checkout,
+        envelope_ref="none",
+    )
+    assert wrote is True, "allocate_in_place must write a fresh claim for a long lane"
+
+    # (b) Read records back from disk and validate against the LIVE schema checks.
+    lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
+    claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+    assert lease_path.is_file(), "lease record must be written"
+    assert claim_path.is_file(), "claim record must be written"
+
+    lease_rec = yaml.safe_load(lease_path.read_text(encoding="utf-8"))
+    claim_rec = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+
+    # The lease_id FIELD itself must match the bounded PCO-020 pattern.
+    lease_id = lease_rec["lease_id"]
+    assert _LEASE_ID_PATTERN.match(lease_id), (
+        f"lease_id {lease_id!r} (len {len(lease_id)}) violates ^[a-z0-9][a-z0-9-]{{2,63}}$"
+    )
+
+    assert validate_worktree_lease_record(lease_rec, lease_path) == [], (
+        "on-disk lease record must pass the live worktree-lease schema validator"
+    )
+    assert validate_active_work_ledger_record(claim_rec, claim_path) == [], (
+        "on-disk claim record must pass the live active-work-ledger schema validator"
+    )
+
+    # The event record must also validate.
+    event_files = [
+        p for p in (ledger_root / "events").rglob("*.yaml") if ".tmp." not in p.name
+    ]
+    assert event_files, "an event record must be written"
+    for event_path in event_files:
+        event_rec = yaml.safe_load(event_path.read_text(encoding="utf-8"))
+        assert validate_active_work_ledger_record(event_rec, event_path) == [], (
+            f"on-disk event record {event_path} must pass the schema validator"
+        )
+
+
+def test_allocate_production_length_lane_writes_conformant_lease(tmp_path):
+    """The same length-independence guarantee for the full ``allocate`` path.
+
+    ``allocate``'s controller callers historically passed SHORT lane ids so this
+    overflow never tripped here, but the bug was shared (both paths derived
+    ``lease-<lane>-<stamp>``). Feeding a production-length lane proves
+    ``allocate`` is also safe for long lanes. Uses a no-op git double so no real
+    ``git worktree add`` runs.
+    """
+    from creator_engine_validator import pco_allocator
+
+    # A worktree-style checkout (not the root) so allocate() does not refuse.
+    repo_root = tmp_path / "worktree"
+    repo_root.mkdir()
+    (repo_root / ".git").write_text("gitdir: ../../.git/worktrees/test\n", encoding="utf-8")
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+    lane_id = _production_pickup_lane_id()
+
+    def _noop_git(*args, **kwargs):
+        return None
+
+    pco_allocator.allocate(
+        repo_root=repo_root,
+        ledger_root=ledger_root,
+        lane_id=lane_id,
+        worktree_path=tmp_path / "new-wt",
+        envelope_ref="none",
+        branch="test/branch",
+        controller_id=controller_id,
+        _git_fn=_noop_git,
+    )
+
+    lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
+    assert lease_path.is_file(), "allocate must write a lease for a long lane"
+    lease_rec = yaml.safe_load(lease_path.read_text(encoding="utf-8"))
+    lease_id = lease_rec["lease_id"]
+    assert _LEASE_ID_PATTERN.match(lease_id), (
+        f"lease_id {lease_id!r} (len {len(lease_id)}) violates ^[a-z0-9][a-z0-9-]{{2,63}}$"
+    )
+    assert validate_worktree_lease_record(lease_rec, lease_path) == [], (
+        "on-disk lease record must pass the live worktree-lease schema validator"
+    )
