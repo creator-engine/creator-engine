@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
+import re
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -84,11 +86,20 @@ class SqliteVecStore(VectorStoreAdapter):
         self,
         entries: Iterable[RecallVector] | RecallVector | RecallRecord | Mapping[str, Any],
         vector: Sequence[float] | None = None,
+        *,
+        model_id: str | None = None,
     ) -> int:
         prepared = tuple(self._prepare_entries(entries, vector=vector))
         if not prepared:
             return 0
         with self._conn:
+            # Persist the embedding model identity alongside the dimension so the
+            # recall surface can fail closed on a same-dimension wrong-model query
+            # (a different model that happens to share the dim is still a different
+            # vector space). The dim is recorded per-entry by `_require_dim`; the
+            # model_id is recorded here from the ingesting embedder.
+            if model_id is not None:
+                self._require_model_id(str(model_id))
             for entry in prepared:
                 self._upsert_one(entry)
             self._set_metadata("entry_count", str(self._count_entries()))
@@ -110,6 +121,60 @@ class SqliteVecStore(VectorStoreAdapter):
             record = self._record_from_row(row)
             stored_vector = _normalize_vector(json.loads(row["vector_json"]))
             hits.append(RecallHit(record=record, score=_cosine(query_vector, stored_vector)))
+        return tuple(
+            sorted(
+                hits,
+                key=lambda hit: (
+                    -hit.score,
+                    hit.record.source_path,
+                    hit.record.chunk_ref,
+                    hit.record.content_hash,
+                    hit.record.as_of,
+                ),
+            )[:top_k]
+        )
+
+    def keyword_search(self, query_text: str, top_k: int = 5) -> tuple[RecallHit, ...]:
+        """Query the FTS5 keyword index, returning BM25-ranked recall hits.
+
+        F6.2 populated the ``recall_fts`` column but never queried it; F6.3 turns
+        it into the keyword leg of hybrid retrieval. The BM25 score is mapped to a
+        descending, non-negative relevance (SQLite returns a lower-is-better cost),
+        and ordering is made deterministic by the same key tuple as the semantic
+        leg so equal-relevance ties never depend on storage order.
+        """
+
+        if top_k <= 0 or self._count_entries() == 0:
+            return ()
+        match_expr = _fts_match_expression(query_text)
+        if match_expr is None:
+            return ()
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT f.source_path AS source_path,
+                       f.chunk_ref AS chunk_ref,
+                       bm25(recall_fts) AS rank,
+                       e.content_hash AS content_hash,
+                       e.as_of AS as_of,
+                       e.scope_json AS scope_json,
+                       e.requires_egress AS requires_egress
+                  FROM recall_fts AS f
+                  JOIN recall_entries AS e
+                    ON e.source_path = f.source_path
+                   AND e.chunk_ref = f.chunk_ref
+                 WHERE recall_fts MATCH ?
+                """,
+                (match_expr,),
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "fts5" in str(exc).lower() or "no such" in str(exc).lower():
+                raise BrainRecallInvalid("SQLite FTS5 support is required for recall keyword search") from exc
+            raise
+        hits = [
+            RecallHit(record=self._record_from_row(row), score=_bm25_relevance(row["rank"]))
+            for row in rows
+        ]
         return tuple(
             sorted(
                 hits,
@@ -205,6 +270,10 @@ class SqliteVecStore(VectorStoreAdapter):
     def dim(self) -> int | None:
         raw = self._metadata(METADATA_VECTOR_DIM)
         return int(raw) if raw is not None else None
+
+    @property
+    def model_id(self) -> str | None:
+        return self._metadata(METADATA_VECTOR_MODEL_ID)
 
     def _initialize(self) -> None:
         try:
@@ -343,6 +412,17 @@ class SqliteVecStore(VectorStoreAdapter):
         if stored_dim != dim:
             raise BrainRecallInvalid("vector dimension does not match the store dimension")
 
+    def _require_model_id(self, model_id: str) -> None:
+        stored_model_id = self.model_id
+        if stored_model_id is None:
+            self._set_metadata(METADATA_VECTOR_MODEL_ID, model_id)
+            return
+        if stored_model_id != model_id:
+            raise BrainRecallInvalid(
+                "vector model identity does not match the store model: store was built with "
+                f"model_id={stored_model_id!r} but this upsert uses model_id={model_id!r}"
+            )
+
     def _replace_fts(self, key: RecallKey, text: str) -> None:
         self._delete_fts(key)
         self._conn.execute(
@@ -396,6 +476,44 @@ class SqliteVecStore(VectorStoreAdapter):
 
 
 SqliteVectorStore = SqliteVecStore
+
+
+_FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+
+
+def _fts_match_expression(query_text: str) -> str | None:
+    """Build a safe FTS5 MATCH expression from free-form context text.
+
+    Tokens are extracted alphanumerically (dropping FTS operators/quotes so user
+    text can never inject MATCH syntax), lower-cased for stability, and OR-joined
+    so any keyword overlap surfaces a candidate. Returns ``None`` when no usable
+    token survives so callers can short-circuit to an empty result.
+    """
+
+    if not isinstance(query_text, str):
+        raise BrainRecallInvalid("query text must be a string")
+    tokens = [token.lower() for token in _FTS_TOKEN_RE.findall(query_text)]
+    if not tokens:
+        return None
+    seen: list[str] = []
+    for token in tokens:
+        if token not in seen:
+            seen.append(token)
+    return " OR ".join(f'"{token}"' for token in seen)
+
+
+def _bm25_relevance(rank: Any) -> float:
+    """Map SQLite's lower-is-better bm25 cost to a descending non-negative score."""
+
+    try:
+        value = float(rank)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    # bm25() returns a negative cost (better matches are more negative). Negate so
+    # a larger score is a better match, matching the semantic leg's cosine sign.
+    return -value
 
 
 __all__ = [

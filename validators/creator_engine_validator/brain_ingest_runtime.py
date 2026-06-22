@@ -221,18 +221,27 @@ def ingest_markdown(
         if any(len(vector) != embedder_dim for vector in vectors):
             raise BrainIngestInvalid("embedder returned a vector with a dimension different from embedder.dim")
         requires_egress = bool(getattr(active_embedder, "requires_egress", False))
-        active_store.upsert(
-            tuple(
-                _TextUpsertEntry(
-                    chunk=brain_recall.RecallChunk(
-                        record=_record_with_egress(chunk.record, requires_egress),
-                        text=chunk.text,
-                    ),
-                    vector=vector,
-                )
-                for chunk, vector in zip(changed_chunks, vectors, strict=True)
+        # Persist the embedding model identity (not just the dimension) so recall
+        # can fail closed on a same-dimension wrong-model query. Stores that do
+        # not accept a `model_id` kwarg (older/foreign adapters) still work.
+        embedder_model_id = getattr(active_embedder, "model_id", None)
+        upsert_entries = tuple(
+            _TextUpsertEntry(
+                chunk=brain_recall.RecallChunk(
+                    record=_record_with_egress(chunk.record, requires_egress),
+                    text=chunk.text,
+                ),
+                vector=vector,
             )
+            for chunk, vector in zip(changed_chunks, vectors, strict=True)
         )
+        try:
+            active_store.upsert(
+                upsert_entries,
+                model_id=str(embedder_model_id) if embedder_model_id is not None else None,
+            )
+        except TypeError:
+            active_store.upsert(upsert_entries)
 
     deleted_count = _delete_stale_chunks(active_store, chunks)
     receipt_records = tuple(
