@@ -185,21 +185,21 @@
   <section class="install" id="install">
     <div class="wrap">
       <h2 class="install-title"><span class="chev">&#10217;</span>Agent-Native Install</h2>
-      <p class="lede">Point your coding agent at our <button class="link-playbook" id="playbookLink">signed playbook</button>, or copy-paste our one-liner into your terminal.</p>
+      <p class="lede">Point your coding agent at our <button class="link-playbook" id="playbookLink">signed playbook</button>, or copy-paste our one-liner into your Linux terminal. On Windows, use WSL2/Ubuntu and run the existing Linux installer inside WSL2; native Windows one-liner remediation is pending signed installer release if needed.</p>
 
       <div class="install-blocks">
         <div class="iblock agent">
           <div class="cmd">
             <div class="cmd-comment"># Agent-native — paste into Claude Code / Codex / your agent</div>
             <div class="cmd-line">
-              <code id="agentPrompt">Install Creator Engine for me: fetch https://creator-engine.dev/llms-install.md, verify its ce-root-v1 signature, then follow it to install CE and onboard my project.</code>
+              <code id="agentPrompt">Install Creator Engine for me: if I am on Windows, use WSL2/Ubuntu and stay inside WSL2; then fetch https://creator-engine.dev/llms-install.md, verify its ce-root-v1 signature, and follow it to install CE and onboard my project.</code>
               <button class="copy" data-target="agentPrompt">Copy</button>
             </div>
           </div>
         </div>
         <div class="iblock">
           <div class="cmd">
-            <div class="cmd-comment"># Human — run in your terminal</div>
+            <div class="cmd-comment"># Human — run in Linux; on Windows use WSL2/Ubuntu</div>
             <div class="cmd-line">
               <span class="dollar">$</span>
               <code id="oneLiner">curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash</code>
