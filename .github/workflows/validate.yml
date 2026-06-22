@@ -175,9 +175,10 @@ jobs:
                 cat "${output}" >&2
                 rm -f "${output}"
                 return 0
+              else
+                status=$?
               fi
 
-              status=$?
               cat "${output}" >&2
               if ! grep -Fq "shallow file has changed since we read it" "${output}" ||
                 [[ "${attempt}" -eq "${max_attempts}" ]]; then

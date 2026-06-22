@@ -25,16 +25,19 @@ Per-file purpose:
   path-set carrier.
 - **`.github/workflows/validate.yml`** *(M)* - bounded retry around the
   live-base fetch/deepen commands.
+- **`validators/tests/unit/test_work_sizing_floor_ci_wiring.py`** *(M)* -
+  regression coverage for non-race fetch failure status preservation.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=e036defa713228d0fea9fbfc0b9361942995c1fa2d5e572ad64bd4ee34f62f69
+AUTHORIZED_PATHS_SHA256=23435abc1a61602197b3b6ae9154a2640e9b0dc02d3cee2b6b1cc1893dd28d3a
 
 ```text
 .ce/changelog/ce192-ci-shallow-fetch.md
 .ce/pr-manifests/ce192-ci-shallow-fetch.md
 .github/workflows/validate.yml
+validators/tests/unit/test_work_sizing_floor_ci_wiring.py
 ```
