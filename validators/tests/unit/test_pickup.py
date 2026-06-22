@@ -783,6 +783,50 @@ def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
     assert spawned == []  # flag OFF → no lane spawn at all
 
 
+def test_cli_claim_without_launch_uses_default_state_root_and_records_ledger(
+    monkeypatch, tmp_path, capsys
+):
+    from creator_engine_validator import ce_cli
+
+    forge = _FakeForge()
+    pat = tmp_path / "ce-dev-2.pat"
+    pat.write_text("ghp_t\n", encoding="utf-8")
+    state_root = tmp_path / ".ce" / "state"
+    monkeypatch.setattr(ce_cli, "V3_LOCAL_STATE_ROOT", str(state_root))
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    responses = [
+        _empty_search(),
+        _empty_search(),
+        (200, {}, _body(_hit(repo="o/r", number=11, pr=False))),
+        *_empty_searches(2),
+    ]
+    monkeypatch.setattr(ce_cli, "_make_pickup_transport",
+                        lambda: _fake_transport(responses))
+    monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
+
+    spawned = []
+    monkeypatch.setattr(ce_cli, "_make_pickup_lane_spawn",
+                        lambda: (lambda argv: spawned.append(argv)))
+
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),
+        "--claim", "--run-id", "run-default-root", "--backoff-seconds", "0", "--json",
+    ])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    claim = out["claims"][0]
+    assert claim["claimed"] is True
+    assert claim["would_launch"] is True
+    assert claim["launched"] is False
+    assert spawned == []  # no --enable-launch → no lane spawn
+
+    ledger = state_root / "pickup" / pickup.DEFAULT_LEDGER_NAME
+    records = pickup.load_ledger(ledger)
+    assert len(records) == 1
+    assert records[0]["thread_id"] == "search:assigned:o/r:assigned:11"
+    assert records[0]["run_id"] == "run-default-root"
+
+
 def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
