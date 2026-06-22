@@ -113,23 +113,30 @@ _AGGREGATE_LABELS = frozenset(
     {
         "aggregate",
         "arc",
+        "debug",
         "epic",
         "kind:arc",
+        "kind:debug",
         "kind:epic",
         "kind:meta",
         "kind/arc",
+        "kind/debug",
         "kind/epic",
         "kind/meta",
         "meta",
+        "meta-debug",
+        "meta/debug",
         "parent",
         "rollup",
         "roadmap",
         "tracker",
         "tracking",
         "type:arc",
+        "type:debug",
         "type:epic",
         "type:meta",
         "type/arc",
+        "type/debug",
         "type/epic",
         "type/meta",
     }
@@ -138,6 +145,12 @@ _AGGREGATE_TITLE_RE = re.compile(
     r"^\s*(?:\[?\s*)?(?:arc|epic|meta|tracker|tracking|rollup|roadmap)\b",
     re.IGNORECASE,
 )
+# Hold markers carried in an issue body or comment (ce-ops#196). The
+# AWAITING-OPERATOR queue rule + ⏸️ marker convention flag an item that is
+# parked pending an Operator confirm; such items must never surface as ready.
+_HOLD_MARKER_RE = re.compile(r"awaiting[-\s]*operator|⏸", re.IGNORECASE)
+_COMMENT_PAGE_SIZE = 100
+_COMMENT_MAX_PAGES = 20
 _HELD_CHECKPOINT_LINE_RE = re.compile(r"\bheld[-\s]+checkpoints?\b", re.IGNORECASE)
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
 _DEPENDENCY_FIELDS = (
@@ -680,17 +693,26 @@ def _skip_reason(
         return "aggregate_issue"
     if _issue_ref_contains(arc_held_refs, candidate):
         return "held_checkpoint"
+    if _body_carries_hold_marker(candidate):
+        return "held_marker"
     if candidate.assignees:
         return "already_assigned"
     readiness = readiness_blockers(candidate)
     if readiness:
         return readiness[0]
     if gh_runner is not None:
-        open_pr_reference = _has_open_pr_reference(candidate, gh_runner)
-        if open_pr_reference is None:
-            return "open_pr_status_unavailable"
-        if open_pr_reference:
+        linked_pr = _linked_pr_status(candidate, gh_runner)
+        if linked_pr is None:
+            return "linked_pr_status_unavailable"
+        if linked_pr == "open":
             return "open_pr"
+        if linked_pr == "done":
+            return "done_pr"
+        hold_marker = _comments_carry_hold_marker(candidate, gh_runner)
+        if hold_marker is None:
+            return "hold_marker_status_unavailable"
+        if hold_marker:
+            return "held_marker"
         try:
             status = work_claims.status(candidate.work_key, gh_runner)
         except work_claims.WorkClaimError:
@@ -761,11 +783,24 @@ def _issue_ref_contains(refs: Mapping[str, frozenset[int]], candidate: IssueCand
     return candidate.number in refs.get(candidate.repo.lower(), frozenset())
 
 
-def _has_open_pr_reference(
+def _body_carries_hold_marker(candidate: IssueCandidate) -> bool:
+    return bool(_HOLD_MARKER_RE.search(candidate.body))
+
+
+def _linked_pr_status(
     candidate: IssueCandidate,
     gh_runner: GhRunner,
-) -> bool | None:
+) -> str | None:
+    """Classify the issue's linked PR work as open/done/none.
+
+    Returns ``"open"`` for an in-flight linked PR, ``"done"`` for a linked PR
+    that has merged or closed-as-done (the issue stayed open behind it),
+    ``"none"`` when no linked PR is found, and ``None`` (fail closed) on any
+    ambiguous event or incomplete/failed lookup. Mirrors the #194 paginated,
+    fail-closed timeline scan.
+    """
     ambiguous = False
+    done_seen = False
     for page in range(1, _TIMELINE_MAX_PAGES + 1):
         query = urllib.parse.urlencode(
             {"per_page": str(_TIMELINE_PAGE_SIZE), "page": str(page)}
@@ -785,19 +820,23 @@ def _has_open_pr_reference(
             return None
 
         for raw_event in payload:
-            state = _open_pr_state_from_timeline_event(raw_event)
-            if state is True:
-                return True
+            state = _linked_pr_state_from_timeline_event(raw_event)
+            if state == "open":
+                return "open"
+            if state == "done":
+                done_seen = True
             if state is None:
                 ambiguous = True
         if len(payload) < _TIMELINE_PAGE_SIZE:
-            return None if ambiguous else False
+            if ambiguous:
+                return None
+            return "done" if done_seen else "none"
     return None
 
 
-def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
+def _linked_pr_state_from_timeline_event(raw_event: Any) -> str | None:
     if not isinstance(raw_event, Mapping):
-        return False
+        return "none"
     candidates: list[Any] = []
     for key in ("source", "subject"):
         source = raw_event.get(key)
@@ -806,26 +845,81 @@ def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
     candidates.append(raw_event)
 
     ambiguous = False
+    done_seen = False
     for issue in candidates:
-        state = _open_pr_state_from_issue_mapping(issue)
-        if state is True:
-            return True
+        state = _linked_pr_state_from_issue_mapping(issue)
+        if state == "open":
+            return "open"
+        if state == "done":
+            done_seen = True
         if state is None:
             ambiguous = True
-    return None if ambiguous else False
+    if ambiguous:
+        return None
+    return "done" if done_seen else "none"
 
 
-def _open_pr_state_from_issue_mapping(issue: Any) -> bool | None:
+def _linked_pr_state_from_issue_mapping(issue: Any) -> str | None:
     if not isinstance(issue, Mapping):
-        return False
-    if "pull_request" not in issue or issue.get("pull_request") is None:
+        return "none"
+    pull_request = issue.get("pull_request")
+    is_pr = "pull_request" in issue and pull_request is not None
+    if not is_pr:
         url = issue.get("url") or issue.get("html_url")
         if not (isinstance(url, str) and "/pull/" in url):
-            return False
+            return "none"
+    # A merged PR is "done" regardless of the recorded state string.
+    if isinstance(pull_request, Mapping) and pull_request.get("merged_at"):
+        return "done"
+    if issue.get("merged") is True or issue.get("merged_at"):
+        return "done"
     state = issue.get("state")
     if not isinstance(state, str):
         return None
-    return state.lower() == "open"
+    state_lower = state.lower()
+    if state_lower == "open":
+        return "open"
+    if state_lower == "closed":
+        return "done"
+    return None
+
+
+def _comments_carry_hold_marker(
+    candidate: IssueCandidate,
+    gh_runner: GhRunner,
+) -> bool | None:
+    """Return whether any issue comment carries a hold marker.
+
+    Paginated and fail-closed like the timeline scan: any failed/malformed
+    lookup returns ``None`` so the caller excludes the candidate rather than
+    leak a possibly-held item.
+    """
+    for page in range(1, _COMMENT_MAX_PAGES + 1):
+        query = urllib.parse.urlencode(
+            {"per_page": str(_COMMENT_PAGE_SIZE), "page": str(page)}
+        )
+        path = f"repos/{candidate.repo}/issues/{candidate.number}/comments?{query}"
+        try:
+            proc = gh_runner(["gh", "api", "--method", "GET", path], None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if getattr(proc, "returncode", 1) != 0:
+            return None
+        try:
+            payload = json.loads((getattr(proc, "stdout", "") or "").strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+        for raw_comment in payload:
+            if not isinstance(raw_comment, Mapping):
+                return None
+            body = raw_comment.get("body")
+            if isinstance(body, str) and _HOLD_MARKER_RE.search(body):
+                return True
+        if len(payload) < _COMMENT_PAGE_SIZE:
+            return False
+    return None
 
 
 def _skip_record(candidate: IssueCandidate, reason: str) -> dict[str, Any]:
