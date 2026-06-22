@@ -1116,3 +1116,71 @@ def test_allocate_in_place_two_lanes_same_checkout_serializes(tmp_path):
             if isinstance(rec, dict):
                 live_leases.append(rec)
     assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"
+
+
+def test_allocate_in_place_symlink_alias_of_same_checkout_is_refused(tmp_path):
+    """Alias/symlink spelling of one physical checkout must collide everywhere.
+
+    Regression for the dev-1/dev-3 review (ce-ops#200): the checkout lock keyed
+    on ``os.path.realpath`` (so two spellings of one checkout serialize on the
+    SAME lock), but ``_check_proposed_worktree_conflict`` /
+    ``_existing_live_lease_covers`` compared RAW normalized strings. So lane-a via
+    the alias path and lane-b via the real path of ONE physical checkout
+    serialized on the lock yet slipped past conflict detection and BOTH allocated
+    — two live claims for one checkout. With the canonical (realpath) checkout id
+    applied consistently across lock + conflict scan + lease coverage +
+    idempotency, lane-b is REFUSED and exactly one live claim+lease survives.
+
+    Pre-fix: lane-b returns True (a second live claim). Post-fix: lane-b raises
+    ``PcoConflictError`` and exactly one live claim + one live lease remains.
+    """
+    from creator_engine_validator import pco_allocator
+
+    ledger_root = tmp_path / "active-work-ledger"
+    controller_id = "ce-dev-2"
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout, target_is_directory=True)
+
+    # lane-a claims via the ALIAS (symlink) spelling.
+    wrote_a = pco_allocator.allocate_in_place(
+        ledger_root=ledger_root,
+        lane_id="lane-a",
+        controller_id=controller_id,
+        worktree_path=alias,
+    )
+    assert wrote_a is True
+
+    # lane-b targets the SAME physical checkout via its REAL path — it MUST be
+    # refused (no second live claim for one checkout).
+    with pytest.raises(pco_allocator.PcoConflictError):
+        pco_allocator.allocate_in_place(
+            ledger_root=ledger_root,
+            lane_id="lane-b",
+            controller_id=controller_id,
+            worktree_path=checkout,
+        )
+
+    # On disk: exactly one live (unreleased) claim + one live lease for the
+    # single physical checkout.
+    live_claims = []
+    for claim_file in (ledger_root / "claims").rglob("*.yaml"):
+        if ".tmp." in claim_file.name:
+            continue
+        rec = yaml.safe_load(claim_file.read_text(encoding="utf-8"))
+        if isinstance(rec, dict) and not rec.get("released_at"):
+            live_claims.append(rec)
+    assert len(live_claims) == 1, f"expected one live claim, found {len(live_claims)}"
+
+    live_leases = []
+    leases_dir = ledger_root / "leases"
+    if leases_dir.is_dir():
+        for lease_file in leases_dir.rglob("*.yaml"):
+            if ".tmp." in lease_file.name:
+                continue
+            rec = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                live_leases.append(rec)
+    assert len(live_leases) == 1, f"expected one live lease, found {len(live_leases)}"

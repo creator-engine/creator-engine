@@ -265,9 +265,41 @@ def _normalize_worktree_path(value: str) -> str:
     return text
 
 
-def _check_proposed_worktree_conflict(ledger_root: Path, worktree_path: Path) -> None:
-    """Raise PcoConflictError if any existing live claim targets the same worktree_path."""
-    proposed_norm = _normalize_worktree_path(str(worktree_path))
+def _canonical_checkout_id(value: str | Path) -> str:
+    """Canonical physical-checkout identity: realpath of the normalized path.
+
+    Two spellings of the SAME physical checkout (trailing slashes, ``.``/``..``
+    segments, and — critically — symlink/alias paths) MUST collide on this id so
+    that EVERY in-place predicate (lock key, cross-lane conflict scan, lease
+    coverage, idempotency match) agrees about which checkout a path names.
+
+    This is the comparison-side sibling of :func:`_checkout_lock_key` (which
+    hashes this same value): the lock keys on realpath, so the predicates the
+    lock serializes must key on realpath too, or two aliases of one checkout
+    serialize on the same lock yet slip past conflict detection and BOTH
+    allocate (the dev-1/dev-3 symlink double-allocation finding, ce-ops#200).
+    ``os.path.realpath`` (not ``Path.resolve(strict=True)``) is used because the
+    checkout directory need not exist — an empty/missing input stays empty.
+    """
+    normalized = _normalize_worktree_path(str(value))
+    if not normalized:
+        return normalized
+    return os.path.realpath(normalized)
+
+
+def _check_proposed_worktree_conflict(
+    ledger_root: Path, worktree_path: Path, *, canonical: bool = False
+) -> None:
+    """Raise PcoConflictError if any existing live claim targets the same worktree_path.
+
+    With ``canonical=False`` (the original ``allocate`` git-worktree path) both
+    sides are compared on the raw normalized path. With ``canonical=True`` (the
+    in-place path) both sides are compared on :func:`_canonical_checkout_id` so
+    alias/symlink spellings of one physical checkout collide — matching the
+    realpath-keyed checkout lock that serializes the in-place critical section.
+    """
+    _identity = _canonical_checkout_id if canonical else _normalize_worktree_path
+    proposed_norm = _identity(str(worktree_path))
     if not proposed_norm:
         return
     claims_dir = ledger_root / "claims"
@@ -288,7 +320,7 @@ def _check_proposed_worktree_conflict(ledger_root: Path, worktree_path: Path) ->
                 continue
             if existing.get("released_at"):
                 continue
-            existing_wt = _normalize_worktree_path(str(existing.get("worktree_path") or ""))
+            existing_wt = _identity(str(existing.get("worktree_path") or ""))
             if existing_wt and existing_wt == proposed_norm:
                 raise PcoConflictError(
                     f"proposed worktree_path {str(worktree_path)!r} conflicts with "
@@ -306,6 +338,7 @@ def _existing_live_lease_covers(
     controller_id: str,
     worktree_path: Path,
     now: datetime,
+    canonical: bool = False,
 ) -> bool:
     """Return True iff a schema-valid, live (non-expired) Worktree Lease record
     under the SAME ``(controller_id, normalized worktree_path)`` exists.
@@ -317,7 +350,8 @@ def _existing_live_lease_covers(
     ``expires_at`` liveness rule the conflict layer applies, so the idempotency
     fast-path admits exactly the states ``guard`` would accept.
     """
-    proposed_norm = _normalize_worktree_path(str(worktree_path))
+    _identity = _canonical_checkout_id if canonical else _normalize_worktree_path
+    proposed_norm = _identity(str(worktree_path))
     if not proposed_norm:
         return False
     leases_dir = ledger_root / "leases" / controller_id
@@ -337,7 +371,7 @@ def _existing_live_lease_covers(
             continue
         if str(record.get("controller_id") or "") != controller_id:
             continue
-        if _normalize_worktree_path(str(record.get("worktree_path") or "")) != proposed_norm:
+        if _identity(str(record.get("worktree_path") or "")) != proposed_norm:
             continue
         # Liveness: live when now < expires_at; an unparseable/source-controlled
         # expires_at defaults to live, matching ``_lease_is_live`` in the
@@ -413,6 +447,7 @@ def _assert_existing_claim_is_idempotent_reuse(
         controller_id=controller_id,
         worktree_path=worktree_path,
         now=datetime.now(UTC),
+        canonical=True,
     ):
         raise PcoConflictError(
             f"existing live claim at {claim_path} is not covered by a live "
@@ -748,8 +783,12 @@ def allocate_in_place(
             )
 
         # A live claim under a DIFFERENT lane that names the same worktree is a
-        # conflict the schema-level guard would not catch pre-write.
-        _check_proposed_worktree_conflict(ledger_root, worktree_path)
+        # conflict the schema-level guard would not catch pre-write. Compare on
+        # the CANONICAL (realpath) checkout id — the SAME identity the checkout
+        # lock above keys on — so alias/symlink spellings of one physical
+        # checkout collide here too; otherwise two aliases serialize on the lock
+        # yet both slip past this scan and BOTH allocate (ce-ops#200).
+        _check_proposed_worktree_conflict(ledger_root, worktree_path, canonical=True)
 
         now = _utc_now_str()
         expires_at = _expires_at_str(lease_seconds)
