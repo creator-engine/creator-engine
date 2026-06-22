@@ -41,12 +41,43 @@ The envelope wrapper is `privileged_action_envelope`. Required fields:
 | `execution` | Custody mode, execution mode, blast radius, irreversibility, and reason. |
 | `audit_hooks` | Side-Effect Ledger, OpenBao audit, lease revocation, broker audit, or supervisor audit refs. |
 | `lease` | Optional OpenBao lease/accessor/revocation metadata. Values are refs only. |
-| `metadata` | Optional non-authority notes. Secret-shaped content remains prohibited. |
+| `metadata` | Optional non-authority notes. Closed to a fixed allow-list of descriptive keys (`note`, `design_ref`, `openbao_version_basis`, `tool_ref`, `labels`); arbitrary keys such as `password` or `token` are schema-rejected. Secret-shaped values remain prohibited. |
 
 Forbidden anywhere in the envelope: passwords, private keys, SSH private keys,
 OpenBao tokens, wrapping tokens, OTP values, dynamic usernames/passwords,
 service-account token values, decrypted plaintext, recovery codes, cookies, and
 provider API credentials.
+
+### Schema enforcement boundary
+
+The envelope schema enforces these structurally:
+
+- **Closed object shapes.** Every object uses `additionalProperties: false`,
+  including `metadata`, which is restricted to the descriptive allow-list above.
+  An arbitrary key such as `metadata.password` is rejected. This makes the
+  value-free claim structural for envelope shape, not prose-only.
+- **High/irreversible work is proxied.** A cross-field rule in `execution`
+  forbids `execution_mode: capability-handoff` whenever `blast_radius` is `high`
+  or `irreversible`, or whenever `irreversible` is `true`. Such combinations are
+  schema-invalid; high or irreversible work must use `broker-proxies`.
+
+The schema is **structural only** for two checks that a deterministic broker
+policy MUST run before treating any envelope as broker-valid:
+
+- **Capability coherence.** The `capability.engine`, `capability.operation`, and
+  `capability.mode` fields are independent enums, so structurally incoherent
+  tuples (for example `engine: openbao_ssh` with `operation: transit_decrypt` and
+  `mode: service_account_token`) still pass the schema. Encoding every valid
+  engine/operation/mode tuple in JSON Schema would be large and brittle, so the
+  broker policy core validates capability coherence before acceptance and denies
+  incoherent tuples.
+- **Semantic secret scanning.** The closed `metadata` allow-list still permits
+  free-form scalar values under descriptive keys, so a semantic secret-scanner
+  validator MUST run before broker-acceptance to reject secret-shaped values that
+  the schema cannot detect by shape alone.
+
+These two policy checks are the "Envelope validator slice" and "Policy core
+slice" listed under Implementation Slices.
 
 ## Broker Architecture
 

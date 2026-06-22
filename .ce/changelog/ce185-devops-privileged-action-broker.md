@@ -14,3 +14,9 @@ envelope for ratified privileged-action grants.
 This is docs/schema only. It does not implement a runtime broker, deploy OpenBao
 mounts, mint live capabilities, perform root actions, merge, or change forge
 permissions.
+
+Tightened the envelope schema after review (#323): closed `metadata` to a
+non-secret descriptive allow-list, added a cross-field rule forbidding
+`capability-handoff` for high/irreversible work, and documented that capability
+coherence and semantic secret scanning are structural-only and require a broker
+policy gate.

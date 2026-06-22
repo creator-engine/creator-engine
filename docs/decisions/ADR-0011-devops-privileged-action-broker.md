@@ -117,6 +117,22 @@ host-root writes, live deploys, destructive provider mutations, secret
 decryption, and broad network access are high or irreversible and use
 `broker-proxies`.
 
+This rule is enforced structurally in the schema: a cross-field constraint in
+`execution` makes `execution_mode: capability-handoff` schema-invalid whenever
+`blast_radius` is `high` or `irreversible`, or whenever `irreversible` is `true`.
+
+### Structural vs policy enforcement
+
+The envelope schema closes every object (`additionalProperties: false`) and
+restricts `metadata` to a descriptive allow-list, so the value-free claim is
+structural for envelope shape rather than prose-only. Two checks remain
+**structural-only** in the schema and are delegated to a deterministic broker
+policy core that MUST run before an envelope is treated as broker-valid:
+capability coherence (the `engine`/`operation`/`mode` enums are independent, so
+incoherent tuples still validate the schema) and semantic secret scanning (the
+allow-listed `metadata` values are still free-form scalars). The schema
+description and the contract both state this boundary explicitly.
+
 ## Placement
 
 This broker composes with, but does not replace, existing brokers:
