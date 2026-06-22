@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -23,6 +24,8 @@ GhRunner = Callable[[Sequence[str], "str | None"], subprocess.CompletedProcess]
 
 DEFAULT_PICKUP_LABEL = "ce-pickup/triage-ready"
 SCHEMA_VERSION = 1
+_TIMELINE_PAGE_SIZE = 100
+_TIMELINE_MAX_PAGES = 20
 
 _GITHUB_ISSUE_RE = re.compile(
     r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/(?:issues|pull)/(\d+)"
@@ -54,18 +57,89 @@ _DEPENDENCY_BODY_RE = re.compile(
 _BLOCKING_LABELS = frozenset(
     {
         "blocked",
+        "checkpoint",
+        "checkpoint held",
+        "checkpoint-held",
         "dependency-blocked",
         "dependencies-blocked",
+        "do-not-claim",
         "do-not-pickup",
+        "do not claim",
         "do not pickup",
+        "held",
+        "held checkpoint",
+        "held-checkpoint",
         "hold",
-        "on-hold",
         "on hold",
+        "on-hold",
         "status:blocked",
+        "status:checkpoint",
+        "status:held",
+        "status:hold",
+        "status:on-hold",
+        "status/checkpoint",
+        "status/held",
+        "status/hold",
+        "status/on-hold",
         "waiting",
         "wip",
     }
 )
+_BLOCKING_LABEL_PREFIXES = (
+    "blocked:",
+    "blocked/",
+    "checkpoint:",
+    "checkpoint/",
+    "held:",
+    "held/",
+    "hold:",
+    "hold/",
+)
+_DONE_LABELS = frozenset(
+    {
+        "closed",
+        "complete",
+        "completed",
+        "done",
+        "state:closed",
+        "state:done",
+        "status:closed",
+        "status:complete",
+        "status:completed",
+        "status:done",
+    }
+)
+_AGGREGATE_LABELS = frozenset(
+    {
+        "aggregate",
+        "arc",
+        "epic",
+        "kind:arc",
+        "kind:epic",
+        "kind:meta",
+        "kind/arc",
+        "kind/epic",
+        "kind/meta",
+        "meta",
+        "parent",
+        "rollup",
+        "roadmap",
+        "tracker",
+        "tracking",
+        "type:arc",
+        "type:epic",
+        "type:meta",
+        "type/arc",
+        "type/epic",
+        "type/meta",
+    }
+)
+_AGGREGATE_TITLE_RE = re.compile(
+    r"^\s*(?:\[?\s*)?(?:arc|epic|meta|tracker|tracking|rollup|roadmap)\b",
+    re.IGNORECASE,
+)
+_HELD_CHECKPOINT_LINE_RE = re.compile(r"\bheld[-\s]+checkpoints?\b", re.IGNORECASE)
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
 _DEPENDENCY_FIELDS = (
     "blocked_by",
     "blocked_by_issues",
@@ -241,8 +315,9 @@ def plan_triage(
 ) -> TriageResult:
     """Plan deterministic pickup actions for unblocked, unclaimed issues.
 
-    Supplying ``gh_runner`` enables live work-claim collision checks only; no
-    mutation happens here. Use :func:`apply_triage_result` for explicit writes.
+    Supplying ``gh_runner`` enables live in-flight PR and work-claim collision
+    checks; no mutation happens here. Use :func:`apply_triage_result` for
+    explicit writes.
     """
     candidates = normalize_issue_payloads(issues, default_repo=repo)
     arc_key = _parse_arc_ticket(arc_ticket, repo)
@@ -252,7 +327,13 @@ def plan_triage(
             "or N with --repo"
         )
     arc_work_key = arc_key.work_key
-    candidates = _filter_candidates_by_arc_refs(candidates, arc_work_key)
+    arc_candidate = _find_arc_candidate(candidates, arc_work_key)
+    arc_held_refs = _extract_arc_held_checkpoint_refs(arc_candidate) if arc_candidate else {}
+    candidates = _filter_candidates_by_arc_refs(
+        candidates,
+        arc_work_key,
+        arc_candidate=arc_candidate,
+    )
     normalized_label = _require_label(pickup_label)
     seats = _normalize_seats(assign_to)
     pickup_query_hint = f"--label {normalized_label}"
@@ -261,7 +342,12 @@ def plan_triage(
     skipped: list[Mapping[str, Any]] = []
     seat_index = 0
     for candidate in candidates:
-        skip_reason = _skip_reason(candidate, arc_work_key=arc_work_key, gh_runner=gh_runner)
+        skip_reason = _skip_reason(
+            candidate,
+            arc_work_key=arc_work_key,
+            arc_held_refs=arc_held_refs,
+            gh_runner=gh_runner,
+        )
         if skip_reason is not None:
             skipped.append(_skip_record(candidate, skip_reason))
             continue
@@ -368,10 +454,12 @@ def _dedupe_candidates(candidates: Sequence[IssueCandidate]) -> list[IssueCandid
 def _filter_candidates_by_arc_refs(
     candidates: Sequence[IssueCandidate],
     arc_work_key: str | None,
+    *,
+    arc_candidate: IssueCandidate | None = None,
 ) -> tuple[IssueCandidate, ...]:
     if arc_work_key is None:
         return tuple(candidates)
-    arc_candidate = _find_arc_candidate(candidates, arc_work_key)
+    arc_candidate = arc_candidate or _find_arc_candidate(candidates, arc_work_key)
     if arc_candidate is None:
         return tuple(candidates)
     refs_by_repo = _extract_arc_issue_refs(arc_candidate)
@@ -400,10 +488,29 @@ def _find_arc_candidate(
 
 
 def _extract_arc_issue_refs(candidate: IssueCandidate) -> Mapping[str, frozenset[int]]:
-    refs: dict[str, set[int]] = {}
     text = f"{candidate.title}\n{candidate.body}"
-    arc_repo = candidate.repo
+    return _extract_issue_refs(text, candidate.repo)
 
+
+def _extract_arc_held_checkpoint_refs(
+    candidate: IssueCandidate,
+) -> Mapping[str, frozenset[int]]:
+    refs: dict[str, set[int]] = {}
+    in_held_list = False
+    for line in candidate.body.splitlines():
+        if _HELD_CHECKPOINT_LINE_RE.search(line):
+            in_held_list = True
+            _merge_issue_refs(refs, _extract_issue_refs(line, candidate.repo))
+            continue
+        if in_held_list and _MARKDOWN_HEADING_RE.match(line):
+            break
+        if in_held_list:
+            _merge_issue_refs(refs, _extract_issue_refs(line, candidate.repo))
+    return {repo: frozenset(numbers) for repo, numbers in refs.items()}
+
+
+def _extract_issue_refs(text: str, default_repo: str) -> Mapping[str, frozenset[int]]:
+    refs: dict[str, set[int]] = {}
     for match in _GITHUB_REF_URL_RE.finditer(text):
         _add_issue_ref(refs, f"{match.group(1)}/{match.group(2)}", int(match.group(3)))
     for match in _GITHUB_API_ISSUE_RE.finditer(text):
@@ -411,11 +518,16 @@ def _extract_arc_issue_refs(candidate: IssueCandidate) -> Mapping[str, frozenset
     for match in _OWNER_REPO_REF_RE.finditer(text):
         _add_issue_ref(refs, match.group(1), int(match.group(2)))
     for match in _SHORT_REPO_REF_RE.finditer(text):
-        _add_issue_ref(refs, _repo_for_short_ref(match.group(1), arc_repo), int(match.group(2)))
+        _add_issue_ref(refs, _repo_for_short_ref(match.group(1), default_repo), int(match.group(2)))
     for match in _BARE_ISSUE_REF_RE.finditer(text):
-        _add_issue_ref(refs, arc_repo, int(match.group(1)))
+        _add_issue_ref(refs, default_repo, int(match.group(1)))
 
     return {repo: frozenset(numbers) for repo, numbers in refs.items()}
+
+
+def _merge_issue_refs(target: dict[str, set[int]], source: Mapping[str, frozenset[int]]) -> None:
+    for repo, numbers in source.items():
+        target.setdefault(repo, set()).update(numbers)
 
 
 def _repo_for_short_ref(short_repo: str, arc_repo: str) -> str:
@@ -555,18 +667,30 @@ def _skip_reason(
     candidate: IssueCandidate,
     *,
     arc_work_key: str | None,
+    arc_held_refs: Mapping[str, frozenset[int]],
     gh_runner: GhRunner | None,
 ) -> str | None:
     if arc_work_key and candidate.work_key.work_key == arc_work_key:
         return "arc_ticket"
-    if candidate.state.lower() != "open":
+    if candidate.state.strip().lower() != "open":
         return "not_open"
+    if _has_done_label(candidate):
+        return "closed_or_done"
+    if _is_aggregate_issue(candidate):
+        return "aggregate_issue"
+    if _issue_ref_contains(arc_held_refs, candidate):
+        return "held_checkpoint"
     if candidate.assignees:
         return "already_assigned"
     readiness = readiness_blockers(candidate)
     if readiness:
         return readiness[0]
     if gh_runner is not None:
+        open_pr_reference = _has_open_pr_reference(candidate, gh_runner)
+        if open_pr_reference is None:
+            return "open_pr_status_unavailable"
+        if open_pr_reference:
+            return "open_pr"
         try:
             status = work_claims.status(candidate.work_key, gh_runner)
         except work_claims.WorkClaimError:
@@ -582,7 +706,7 @@ def readiness_blockers(candidate: IssueCandidate) -> tuple[str, ...]:
     lower_labels = {_label_key(label) for label in candidate.labels}
     if lower_labels.intersection(_BLOCKING_LABELS):
         reasons.append("blocked_label")
-    if any(label.startswith("blocked:") for label in lower_labels):
+    if any(label.startswith(_BLOCKING_LABEL_PREFIXES) for label in lower_labels):
         reasons.append("blocked_label")
     raw = candidate.raw or {}
     for field in _DEPENDENCY_FIELDS:
@@ -593,6 +717,115 @@ def readiness_blockers(candidate: IssueCandidate) -> tuple[str, ...]:
     if _DEPENDENCY_BODY_RE.search(candidate.body):
         reasons.append("blocked_dependency")
     return tuple(_dedupe_strings(reasons))
+
+
+def _has_done_label(candidate: IssueCandidate) -> bool:
+    labels = {_label_key(label) for label in candidate.labels}
+    return bool(labels.intersection(_DONE_LABELS))
+
+
+def _is_aggregate_issue(candidate: IssueCandidate) -> bool:
+    labels = {_label_key(label) for label in candidate.labels}
+    if labels.intersection(_AGGREGATE_LABELS):
+        return True
+    if candidate.work_class == "epic":
+        return True
+    if _AGGREGATE_TITLE_RE.search(candidate.title):
+        return True
+    raw = candidate.raw or {}
+    if isinstance(raw, Mapping):
+        if _raw_aggregate_marker(raw):
+            return True
+        if raw.get("pull_request"):
+            return True
+        for key in ("aggregate", "is_aggregate", "leaf", "leaf_work_item"):
+            value = raw.get(key)
+            if key in {"leaf", "leaf_work_item"} and value is False:
+                return True
+            if key in {"aggregate", "is_aggregate"} and value is True:
+                return True
+    return False
+
+
+def _raw_aggregate_marker(raw: Mapping[str, Any]) -> bool:
+    for key in ("kind", "type", "issue_type", "item_type", "category"):
+        value = raw.get(key)
+        if isinstance(value, Mapping):
+            value = value.get("name") or value.get("kind")
+        if isinstance(value, str) and _label_key(value) in _AGGREGATE_LABELS:
+            return True
+    return False
+
+
+def _issue_ref_contains(refs: Mapping[str, frozenset[int]], candidate: IssueCandidate) -> bool:
+    return candidate.number in refs.get(candidate.repo.lower(), frozenset())
+
+
+def _has_open_pr_reference(
+    candidate: IssueCandidate,
+    gh_runner: GhRunner,
+) -> bool | None:
+    ambiguous = False
+    for page in range(1, _TIMELINE_MAX_PAGES + 1):
+        query = urllib.parse.urlencode(
+            {"per_page": str(_TIMELINE_PAGE_SIZE), "page": str(page)}
+        )
+        path = f"repos/{candidate.repo}/issues/{candidate.number}/timeline?{query}"
+        try:
+            proc = gh_runner(["gh", "api", "--method", "GET", path], None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if getattr(proc, "returncode", 1) != 0:
+            return None
+        try:
+            payload = json.loads((getattr(proc, "stdout", "") or "").strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+
+        for raw_event in payload:
+            state = _open_pr_state_from_timeline_event(raw_event)
+            if state is True:
+                return True
+            if state is None:
+                ambiguous = True
+        if len(payload) < _TIMELINE_PAGE_SIZE:
+            return None if ambiguous else False
+    return None
+
+
+def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
+    if not isinstance(raw_event, Mapping):
+        return False
+    candidates: list[Any] = []
+    for key in ("source", "subject"):
+        source = raw_event.get(key)
+        if isinstance(source, Mapping):
+            candidates.append(source.get("issue"))
+    candidates.append(raw_event)
+
+    ambiguous = False
+    for issue in candidates:
+        state = _open_pr_state_from_issue_mapping(issue)
+        if state is True:
+            return True
+        if state is None:
+            ambiguous = True
+    return None if ambiguous else False
+
+
+def _open_pr_state_from_issue_mapping(issue: Any) -> bool | None:
+    if not isinstance(issue, Mapping):
+        return False
+    if "pull_request" not in issue or issue.get("pull_request") is None:
+        url = issue.get("url") or issue.get("html_url")
+        if not (isinstance(url, str) and "/pull/" in url):
+            return False
+    state = issue.get("state")
+    if not isinstance(state, str):
+        return None
+    return state.lower() == "open"
 
 
 def _skip_record(candidate: IssueCandidate, reason: str) -> dict[str, Any]:
