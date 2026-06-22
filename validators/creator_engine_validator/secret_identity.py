@@ -362,6 +362,7 @@ _MAX_SECRET_ZERO_TTL_SECONDS = 600
 _SECRET_ZERO_DELIVERY_MODES = frozenset({"broker-channel", "unix-socket", "stdin-once", "memory"})
 _SEAT_ID_RE = re.compile(r"^dev-[1-9][0-9]*$")
 _APPROLE_MOUNT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_LOCAL_SOURCE_REF_RE = re.compile(r"^host-local-ref:[A-Za-z0-9][A-Za-z0-9./:@-]{0,127}$")
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
 _CapabilityPolicy = Mapping[SecretRef, _CapabilitySet]
 
@@ -448,6 +449,16 @@ def _validate_runtime_policy_binding(
         raise SecretIdentityRefused(
             f"requested capabilities are not allowed by policy: {denied}"
         )
+
+
+def _validate_local_source_ref(source_ref: object) -> str:
+    if not isinstance(source_ref, str) or not source_ref:
+        raise SecretIdentityRefused("local source refs must be non-empty strings")
+    if not _LOCAL_SOURCE_REF_RE.fullmatch(source_ref):
+        raise SecretIdentityRefused(
+            "local source refs must be value-free host-local-ref references"
+        )
+    return source_ref
 
 
 def _validate_secret_zero_common(seat_id: str, role_name: str, auth_mount: str) -> None:
@@ -721,7 +732,7 @@ class LocalSecretIdentityBackend:
         self._allowed_capabilities = _normalize_allowed_capabilities(
             self._allowed_refs, allowed_capabilities
         )
-        self._materializer = materializer or (lambda _source_ref, _target_ref: None)
+        self._materializer = materializer
         self._clock = clock
         self._counter = 0
         self._audit: dict[str, Mapping[str, str]] = {}
@@ -729,16 +740,7 @@ class LocalSecretIdentityBackend:
     def validate_config(self) -> None:
         for ref, source_ref in self._local_refs.items():
             _validate_ref_shape(ref, backend_key=self.backend_key)
-            if not isinstance(source_ref, str) or not source_ref.strip():
-                raise SecretIdentityRefused("local source refs must be non-empty strings")
-            if "\n" in source_ref or "\r" in source_ref:
-                raise SecretIdentityRefused(
-                    "local source refs must be single-line value-free refs"
-                )
-            if "BEGIN " in source_ref.upper() or "PRIVATE KEY" in source_ref.upper():
-                raise SecretIdentityRefused(
-                    "local source refs must not contain inline secret material"
-                )
+            _validate_local_source_ref(source_ref)
 
     def resolve_identity(self, seat_id: str) -> IdentityDescriptor:
         try:
@@ -756,7 +758,7 @@ class LocalSecretIdentityBackend:
         self.validate_config()
         self._counter += 1
         now = self._clock()
-        source_ref = self._local_refs[request.secret_ref]
+        source_ref = _validate_local_source_ref(self._local_refs[request.secret_ref])
         grant = SecretGrant(
             grant_id=f"local-grant-{request.run_id}-{self._counter:03d}",
             run_id=request.run_id,
@@ -786,11 +788,15 @@ class LocalSecretIdentityBackend:
         if grant.revoked_at is not None:
             raise SecretIdentityRefused(f"grant {grant.grant_id!r} is already revoked")
         try:
-            source_ref = self._local_refs[grant.secret_ref]
+            source_ref = _validate_local_source_ref(self._local_refs[grant.secret_ref])
         except KeyError:
             raise SecretIdentityRefused(
                 f"local source ref missing for {grant.secret_ref.mount}/{grant.secret_ref.path}"
             ) from None
+        if self._materializer is None:
+            raise SecretIdentityRefused(
+                "local secret materialization requires an injected materializer"
+            )
         try:
             self._materializer(source_ref, target_ref)
         except Exception:

@@ -326,6 +326,8 @@ def test_local_backend_models_existing_behavior_with_injected_materializer_value
     audit = backend.collect_audit(materialized_grant)
     assert audit["backend"] == "local"
     assert audit["grant_id"] == grant.grant_id
+    assert audit["source_ref"] == "host-local-ref:github-app-pem"
+    assert "live-secret-value" not in repr(audit)
 
     revoked = backend.revoke(materialized_grant)
     assert revoked.revoked_at is not None
@@ -333,16 +335,41 @@ def test_local_backend_models_existing_behavior_with_injected_materializer_value
         backend.materialize(revoked, "tmpfs:/run/ce/other.pem")
 
 
-def test_local_backend_refuses_inline_secret_material_in_source_ref_before_grant():
+@pytest.mark.parametrize(
+    "source_ref",
+    [
+        "-----BEGIN PRIVATE KEY-----\nlive-secret-value",
+        "ghp_1234567890abcdef",
+        "password=supersecret",
+        "live-secret-value",
+    ],
+)
+def test_local_backend_refuses_inline_secret_material_in_source_ref_before_grant(source_ref):
     ref = _local_secret_ref()
     backend = LocalSecretIdentityBackend(
-        local_refs={ref: "-----BEGIN PRIVATE KEY-----\nlive-secret-value"},
+        local_refs={ref: source_ref},
     )
 
     with pytest.raises(SecretIdentityRefused) as exc:
         backend.issue(_secret_request(secret_ref=ref))
 
     assert "live-secret-value" not in str(exc.value)
+    assert "supersecret" not in str(exc.value)
+    assert getattr(backend, "_audit") == {}
+
+
+def test_local_backend_refuses_materialize_without_injected_materializer():
+    ref = _local_secret_ref()
+    backend = LocalSecretIdentityBackend(
+        local_refs={ref: "host-local-ref:github-app-pem"},
+    )
+    grant = backend.issue(_secret_request(secret_ref=ref, requested_capabilities=("read",)))
+
+    with pytest.raises(SecretIdentityRefused) as exc:
+        backend.materialize(grant, "tmpfs:/run/ce/secret.pem")
+
+    assert "materializer" in str(exc.value)
+    assert grant.delivery_ref is None
 
 
 def test_local_backend_refuses_secret_zero_because_openbao_owns_that_flow():
