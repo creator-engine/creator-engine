@@ -1,8 +1,8 @@
 # Creator Engine
 
-> Creator Engine (CE) is the open-source (Apache-2.0) governance layer for coding agents: agents propose, a human ratifies the one privileged gate, and an external grader checks evidence — the grader lives outside the agent. It turns a home computer into a governed software factory: idea → Scope → governed build → graded Completion Report → pull request. Runs on Linux/macOS today (v3 pilot pre-release).
+> Creator Engine (CE) is the open-source (Apache-2.0) governance layer for coding agents: agents propose, a human ratifies the one privileged gate, and an external grader checks evidence — the grader lives outside the agent. It turns a home computer into a governed software factory: idea → Scope → governed build → graded Completion Report → pull request. Runs on Linux today; Windows users should use WSL2/Ubuntu and run CE from inside WSL2 (v3 pilot pre-release).
 
-To install CE for an operator, fetch and follow the signed install playbook below — verify it against the pinned CE public key trust root (`ce-root-v1`) and an out-of-band fingerprint anchor before executing any step. Humans can instead run `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`; the bootstrap verifies the signed spec and anchor, installs the hash-pinned wheelhouse from the Pages mirror, and runs authenticated onboard inventory.
+To install CE for an operator, fetch and follow the signed install playbook below from a Linux shell — verify it against the pinned CE public key trust root (`ce-root-v1`) and an out-of-band fingerprint anchor before executing any step. Humans can instead run `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash` from that same Linux shell. On Windows, do not start from native PowerShell, Git Bash, MSYS, or Cygwin; use WSL2/Ubuntu and run the existing Linux installer inside WSL2; native Windows one-liner remediation is pending signed installer release if needed. The bootstrap verifies the signed spec and anchor, installs the hash-pinned wheelhouse from the Pages mirror, and runs authenticated onboard inventory.
 
 ## Install
 

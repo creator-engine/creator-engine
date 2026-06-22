@@ -309,6 +309,17 @@ def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Pat
     assert "pages_mirror_not_ready" in pages.stderr
 
 
+def test_unsigned_install_docs_defer_native_windows_one_liner_until_signed_release(repo_root: Path):
+    index = (repo_root / "docs" / "index.html").read_text(encoding="utf-8")
+    llms = (repo_root / "docs" / "llms.txt").read_text(encoding="utf-8")
+    for text in (index, llms):
+        assert "use WSL2/Ubuntu" in text
+        assert "run the existing Linux installer inside WSL2" in text
+        assert "native Windows one-liner remediation is pending signed installer release if needed" in text
+    assert "PowerShell" not in index
+    assert "native PowerShell, Git Bash, MSYS, or Cygwin" in llms
+
+
 def test_install_sh_accepts_linux_aarch64_and_selects_arm_wheelhouse(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     arm_pyyaml = (

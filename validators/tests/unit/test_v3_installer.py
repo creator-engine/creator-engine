@@ -441,6 +441,17 @@ def test_sha256s_parser_and_platform_plan():
         inst.build_bootstrap_artifact_plan(manifest, os_name="Darwin", machine="arm64")
     with pytest.raises(inst.InstallRefused, match="unsupported_platform"):
         inst.build_bootstrap_artifact_plan(manifest, os_name="Linux", machine="s390x")
+    for os_name in ("Windows", "win32", "MINGW64_NT-10.0", "MSYS_NT-10.0", "CYGWIN_NT-10.0"):
+        with pytest.raises(inst.InstallRefused) as excinfo:
+            inst.build_bootstrap_artifact_plan(manifest, os_name=os_name, machine="x86_64")
+        detail = str(excinfo.value)
+        assert "unsupported_platform" in detail
+        assert "native Windows" in detail
+        assert "WSL2" in detail
+        assert "Ubuntu" in detail
+        assert "existing Linux installer inside WSL2" in detail
+        assert "pending signed installer release" in detail
+        assert "creator-engine.dev/install.sh" in detail
 
 
 # --- the E2E proof: a REAL detached SSHSIG, stock ssh-keygen, clean dir --------

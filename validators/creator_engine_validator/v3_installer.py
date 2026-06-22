@@ -778,9 +778,28 @@ def _parse_platforms(value: str | None) -> tuple[str, ...]:
     return platforms or ("all",)
 
 
+def _is_native_windows_platform(os_name: str) -> bool:
+    normalized = os_name.lower()
+    return normalized in {"windows", "win32"} or normalized.startswith(
+        ("mingw", "msys", "cygwin")
+    )
+
+
+def _native_windows_remediation(os_name: str, machine: str) -> str:
+    return (
+        f"unsupported_platform: native Windows ({os_name}/{machine}) is not supported by "
+        "the E1 bootstrap; use WSL2/Ubuntu and run the existing Linux installer "
+        "inside WSL2: curl --proto '=https' --tlsv1.2 -fsSL "
+        "https://creator-engine.dev/install.sh | bash. Native Windows one-liner "
+        "remediation is pending signed installer release if needed."
+    )
+
+
 def _platform_tag_for(os_name: str, machine: str) -> str:
     normalized_os = os_name.lower()
     normalized_machine = machine.lower()
+    if _is_native_windows_platform(os_name):
+        raise InstallRefused(_native_windows_remediation(os_name, machine))
     if normalized_os != "linux":
         raise InstallRefused(
             f"unsupported_platform: no signed wheelhouse for {os_name}/{machine}; "
