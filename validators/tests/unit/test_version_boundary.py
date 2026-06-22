@@ -38,7 +38,8 @@ def test_registered_in_check_surface():
     # ce-ops#23 Slice 1 added brownfield_baseline_attestation: 59 -> 60.
     # ce-ops#177 added ce_brain_drift: 60 -> 61.
     # ce-ops#185 added devops_privileged_action_broker: 61 -> 62.
-    assert len(reg) == 62
+    # ce-ops#162 added operator_runbook_refusal_sync: 62 -> 63.
+    assert len(reg) == 63
 
 
 def test_green_on_real_package(version_boundary_real_run):
