@@ -176,19 +176,19 @@ def evaluate(
         )
     )
 
-    # RED-G-6 — dependency wheelhouse drift from the Option B contract.
+    # RED-G-6 — packaging drift from the Option B contract.
     packaging = facts.packaging
     packaging_ok = bool(packaging.ok) if packaging is not None else False
     if packaging is None:
         packaging_detail = "packaging contract not evaluated"
     elif packaging_ok:
-        packaging_detail = "dependency wheelhouse posture matches the Option B contract"
+        packaging_detail = "packaging posture matches the Option B contract"
     else:
-        packaging_detail = "dependency wheelhouse drift: " + "; ".join(packaging.violations)
+        packaging_detail = "packaging contract drift: " + "; ".join(packaging.violations)
     checks.append(
         GuardCheck(
             clause=CLAUSE_PACKAGING,
-            name="dependency-wheelhouse-contract",
+            name="packaging-contract",
             applicable=check_packaging,
             ok=packaging_ok,
             detail=packaging_detail,

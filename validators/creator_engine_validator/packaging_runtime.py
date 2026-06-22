@@ -227,29 +227,38 @@ def pyproject_violations(path: Path | str) -> list[str]:
 
 
 def wheelhouse_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Return dependency wheelhouse ABI/presence/hash violations.
+
+    First-party app-wheel posture is intentionally reported by
+    :func:`first_party_app_wheel_violations` so doctor can keep dependency
+    wheelhouse integrity independent from the no-committed-app-wheel contract.
+    """
     v: list[str] = []
     d = Path(wheelhouse_dir)
     if not d.is_dir():
         return [f"missing wheelhouse directory at {d}"]
-    wheels = wheelhouse_wheels(d)
+    wheels = [w for w in wheelhouse_wheels(d) if _wheel_distribution(w) != DISTRIBUTION_NAME]
     offenders = [w for w in wheels if any(tag in w for tag in FORBIDDEN_ABI_TAGS)]
     if offenders:
         v.append(f"non-cp314 ABI wheels present (must be removed): {offenders}")
-    app_wheels = [w for w in wheels if _wheel_distribution(w) == DISTRIBUTION_NAME]
-    if app_wheels:
-        v.append(f"wheelhouse must not contain first-party app wheels: {app_wheels}")
     if not any("cp314" in w for w in wheels):
         v.append("wheelhouse contains no cp314 ABI wheel; cp314 build not present")
-    present = {normalize_name(n) for n in wheelhouse_distribution_names(d)}
+    present = {_wheel_distribution(w) for w in wheels}
     missing = sorted(REQUIRED_WHEELHOUSE_DISTRIBUTIONS - present)
     if missing:
         v.append(f"wheelhouse missing offline wheels for: {missing}")
-    v += wheelhouse_hash_violations(d)
+    v += _wheelhouse_hash_violations(d, ignored_distributions={DISTRIBUTION_NAME})
     return v
 
 
 def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
     """Verify every wheelhouse wheel is covered by ``SHA256SUMS`` and matches it."""
+    return _wheelhouse_hash_violations(wheelhouse_dir, ignored_distributions=set())
+
+
+def _wheelhouse_hash_violations(
+    wheelhouse_dir: Path | str, *, ignored_distributions: set[str]
+) -> list[str]:
     v: list[str] = []
     d = Path(wheelhouse_dir)
     if not d.is_dir():
@@ -269,14 +278,16 @@ def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
             continue
         digest, filename = parts
         digest = digest.lower()
-        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
-            v.append(f"malformed SHA256SUMS line {lineno}: invalid sha256 {digest!r}")
-            continue
         if "/" in filename or "\\" in filename or filename in {".", ".."}:
             v.append(f"malformed SHA256SUMS line {lineno}: filename must be wheelhouse-local: {filename!r}")
             continue
         if not filename.endswith(".whl"):
             v.append(f"SHA256SUMS entry is not a wheel: {filename}")
+            continue
+        if _wheel_distribution(filename) in ignored_distributions:
+            continue
+        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            v.append(f"malformed SHA256SUMS line {lineno}: invalid sha256 {digest!r}")
             continue
         if filename in expected:
             v.append(f"duplicate SHA256SUMS entry: {filename}")
@@ -286,7 +297,11 @@ def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
     if not expected:
         v.append("SHA256SUMS has no wheel entries")
 
-    wheels = set(wheelhouse_wheels(d))
+    wheels = {
+        filename
+        for filename in wheelhouse_wheels(d)
+        if _wheel_distribution(filename) not in ignored_distributions
+    }
     listed = set(expected)
     unlisted = sorted(wheels - listed)
     if unlisted:
@@ -303,6 +318,17 @@ def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
         if actual != digest:
             v.append(f"SHA256 mismatch for {filename}: expected {digest}, got {actual}")
     return v
+
+
+def first_party_app_wheel_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Return violations for committed first-party app wheels."""
+    d = Path(wheelhouse_dir)
+    if not d.is_dir():
+        return []
+    app_wheels = [w for w in wheelhouse_wheels(d) if _wheel_distribution(w) == DISTRIBUTION_NAME]
+    if app_wheels:
+        return [f"wheelhouse must not contain first-party app wheels: {app_wheels}"]
+    return []
 
 
 def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str) -> list[str]:
@@ -457,16 +483,22 @@ def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     validators = root / "validators"
     violations: list[str] = []
     violations += pyproject_violations(validators / "pyproject.toml")
-    dependency_wheelhouse_violations = wheelhouse_violations(validators / "wheelhouse")
+    wheelhouse_dir = validators / "wheelhouse"
+    dependency_wheelhouse_violations = wheelhouse_violations(wheelhouse_dir)
+    first_party_app_wheel_violations_list = first_party_app_wheel_violations(wheelhouse_dir)
     violations += dependency_wheelhouse_violations
+    violations += first_party_app_wheel_violations_list
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
     violations += verify_generated_version(root)
+    wheels = wheelhouse_wheels(wheelhouse_dir)
     details = {
         "dependency_wheelhouse_ok": not dependency_wheelhouse_violations,
         "dependency_wheelhouse_violations": list(dependency_wheelhouse_violations),
+        "first_party_app_wheel_committed": bool(first_party_app_wheel_violations_list),
+        "first_party_app_wheel_violations": list(first_party_app_wheel_violations_list),
         "requires_python": REQUIRES_PYTHON,
         "runtime_pins": dict(RUNTIME_PINS),
-        "wheelhouse_wheels": wheelhouse_wheels(validators / "wheelhouse"),
+        "wheelhouse_wheels": wheels,
         "uv_lock": parse_uv_lock(validators / "uv.lock"),
     }
     return PackagingContractResult(ok=not violations, violations=violations, details=details)

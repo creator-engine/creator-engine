@@ -7,6 +7,7 @@ ledger; governed/ungoverned postures are built under pytest ``tmp_path``.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -65,6 +66,36 @@ def test_doctor_passes_on_real_kernel_repo_with_packaging_clause(repo_root: Path
     assert payload["prerequisites"]["python_in_contract"] is True
     assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
     assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
+
+
+def test_doctor_reports_first_party_app_wheel_separately_from_dependency_wheelhouse(
+    tmp_path: Path, repo_root: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(["init", "--initial-branch=main"], repo)
+    (repo / ".gitignore").write_text(".hermes/\n", encoding="utf-8")
+    validators = repo / "validators"
+    validators.mkdir()
+    source_validators = repo_root / "validators"
+    for filename in ("pyproject.toml", "requirements.txt", "uv.lock"):
+        shutil.copy2(source_validators / filename, validators / filename)
+    shutil.copytree(source_validators / "wheelhouse", validators / "wheelhouse")
+    (validators / "wheelhouse" / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(
+        b"reintroduced first-party app wheel"
+    )
+
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", str(repo)])
+
+    assert ret != 0
+    payload = json.loads(capsys.readouterr().out)
+    packaging = [c for c in payload["checks"] if c["clause"] == guard.CLAUSE_PACKAGING][0]
+    assert packaging["ok"] is False
+    assert "first-party app wheels" in packaging["detail"]
+    assert payload["prerequisites"]["wheelhouse_offline"] is True
+    assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
+    assert payload["prerequisites"]["dependency_wheelhouse_violations"] == []
+    assert payload["prerequisites"]["first_party_app_wheel_committed"] is True
 
 
 # ---------------------------------------------------------------------------

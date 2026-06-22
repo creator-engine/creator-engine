@@ -8,8 +8,7 @@ reflects the current source. Gate 8 evidence caught a G6-era wheel that still
 installed cleanly while missing the G7 ``ce fanin`` and G8 ``ce queue`` command
 groups.
 
-These tests close that gap by building a temporary wheel from the checkout source
-and introspecting it directly (stdlib ``zipfile`` only), while also asserting the
+These tests build a temporary wheel from checkout source and also assert the
 development wheelhouse does not recommit a first-party app wheel:
 
 * it bundles ``creator_engine_validator/ce_cli.py`` byte-for-byte identical to the

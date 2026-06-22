@@ -17,6 +17,7 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 from __future__ import annotations
 
 import hashlib
+import shutil
 import tomllib
 import zipfile
 from pathlib import Path
@@ -156,12 +157,27 @@ def test_wheelhouse_hash_manifest_flags_unmanifested_wheel(tmp_path: Path):
     assert any("missing from SHA256SUMS" in violation for violation in violations)
 
 
-def test_wheelhouse_violations_flags_first_party_app_wheel(tmp_path: Path):
+def test_first_party_app_wheel_violations_flags_first_party_app_wheel(tmp_path: Path):
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     (wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(b"")
-    violations = pkg.wheelhouse_violations(wheelhouse)
+    violations = pkg.first_party_app_wheel_violations(wheelhouse)
     assert any("must not contain first-party app wheels" in violation for violation in violations)
+
+
+def test_dependency_wheelhouse_violations_ignore_first_party_app_wheel(
+    validators_dir: Path, tmp_path: Path
+):
+    wheelhouse = tmp_path / "wheelhouse"
+    shutil.copytree(validators_dir / "wheelhouse", wheelhouse)
+    (wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(
+        b"reintroduced first-party app wheel"
+    )
+    with (wheelhouse / "SHA256SUMS").open("a", encoding="utf-8") as fh:
+        fh.write("\nnot-a-digest  creator_engine_validator-0.2.0-py3-none-any.whl\n")
+
+    assert pkg.wheelhouse_violations(wheelhouse) == []
+    assert pkg.first_party_app_wheel_violations(wheelhouse)
 
 
 # ---------------------------------------------------------------------------
@@ -244,11 +260,39 @@ def test_requirements_has_no_stale_pins(validators_dir: Path):
 # ---------------------------------------------------------------------------
 
 
+def _copy_minimal_packaging_tree(validators_dir: Path, tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    copied_validators = root / "validators"
+    copied_validators.mkdir(parents=True)
+    for filename in ("pyproject.toml", "requirements.txt", "uv.lock"):
+        shutil.copy2(validators_dir / filename, copied_validators / filename)
+    shutil.copytree(validators_dir / "wheelhouse", copied_validators / "wheelhouse")
+    return root
+
+
 def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     result = pkg.verify_packaging_contract(repo_root)
     assert result.ok, f"packaging contract violations: {result.violations}"
     assert result.details["dependency_wheelhouse_ok"] is True
     assert result.details["dependency_wheelhouse_violations"] == []
+    assert result.details["first_party_app_wheel_committed"] is False
+    assert result.details["first_party_app_wheel_violations"] == []
+
+
+def test_verify_packaging_contract_keeps_first_party_app_wheel_independent(
+    validators_dir: Path, tmp_path: Path
+):
+    root = _copy_minimal_packaging_tree(validators_dir, tmp_path)
+    app_wheel = root / "validators" / "wheelhouse" / "creator_engine_validator-0.2.0-py3-none-any.whl"
+    app_wheel.write_bytes(b"reintroduced first-party app wheel")
+
+    result = pkg.verify_packaging_contract(root)
+
+    assert result.ok is False
+    assert result.details["dependency_wheelhouse_ok"] is True
+    assert result.details["dependency_wheelhouse_violations"] == []
+    assert result.details["first_party_app_wheel_committed"] is True
+    assert any("first-party app wheels" in violation for violation in result.violations)
 
 
 @pytest.mark.wheel_bake_gate

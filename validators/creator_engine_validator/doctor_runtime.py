@@ -175,10 +175,17 @@ def run_doctor(
         if facts.packaging
         else []
     )
-    first_party_app_wheel_committed = any(
-        name.startswith("creator_engine_validator-") and name.endswith(".whl")
-        for name in wheelhouse_wheels
-    )
+    first_party_app_wheel_committed = False
+    if facts.packaging:
+        first_party_app_wheel_committed = bool(
+            facts.packaging.details.get(
+                "first_party_app_wheel_committed",
+                any(
+                    name.startswith("creator_engine_validator-") and name.endswith(".whl")
+                    for name in wheelhouse_wheels
+                ),
+            )
+        )
     payload["prerequisites"] = {
         "python_interpreter": ".".join(str(x) for x in facts.version_info),
         "python_in_contract": interpreter_in_contract(facts.version_info),

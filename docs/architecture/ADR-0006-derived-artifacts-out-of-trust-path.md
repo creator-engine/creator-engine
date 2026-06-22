@@ -202,12 +202,6 @@ Exit evidence:
 - `ce doctor` reports dependency bundle posture separately from first-party
   release-wheel posture.
 
-Implementation status (2026-06-21): ce-ops#133 / night arc #170 removes the
-development `validators/wheelhouse/creator_engine_validator-*.whl` artifact and
-its `SHA256SUMS` entry, keeps the third-party dependency wheelhouse checks
-required, and replaces committed-wheel parity with a source-built wheel parity
-gate. The public served wheel under `docs/downloads/0.2.0/` remains unchanged.
-
 ### Gate 4 — Signed release artifact publication
 
 - Publish the CI-built app wheel as a release artifact only after merge and

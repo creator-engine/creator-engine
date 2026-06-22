@@ -38,15 +38,10 @@ fallback.
 
 ## 3. Install — offline runtime dependencies + source path
 
-The clone-mode install contract is `source-pythonpath-with-offline-runtime-deps`,
-**offline** (`--no-index`), against the **cp314-only** dependency wheelhouse.
-Python floor is `>=3.14`. The first-party validator code is loaded from the
-checkout with `PYTHONPATH=validators`; clone-mode does not install an app wheel
-from `validators/wheelhouse`.
-
-The bootstrap **MUST** install these runtime dependencies before running the
-source-backed `ce doctor` preflight, because the source `ce` command graph imports
-runtime modules such as PyYAML and jsonschema at startup.
+The clone-mode contract is `source-pythonpath-with-offline-runtime-deps`: install
+the cp314 runtime dependencies first, then run checkout source with
+`PYTHONPATH=validators`. Clone-mode does not install an app wheel from
+`validators/wheelhouse`.
 
 uv-first:
 
@@ -64,28 +59,21 @@ CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 "$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-No network fetch occurs at install or runtime authority
-(`docs/governance/V1_PRODUCT_CONTRACT.md` §6).
 All source-backed validator invocations below **MUST** use
 `$CE_VALIDATOR_PYTHON` so the checkout source runs under the same interpreter
-environment that received the offline runtime dependencies.
+that received the offline runtime dependencies.
 
 ## 4. Preflight — source `ce doctor --json`
 
-After the offline runtime dependency install succeeds, the bootstrap **MUST** run
-the governed-environment guard preflight:
+After dependency install, run the governed-environment guard preflight:
 
 ```bash
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
-The source-backed `ce doctor` module invocation evaluates the governed-environment
-guard predicate (DP-3 = B,
-`docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md`) and exits
-**non-zero** on any refused clause. The public/package-installed `ce doctor`
-entry point is equivalent, but clone-mode bootstrap does not require a committed
-first-party app wheel:
+The source-backed `ce doctor` evaluates DP-3 and exits **non-zero** on any
+refused clause:
 
 | Clause | Refusal |
 |---|---|

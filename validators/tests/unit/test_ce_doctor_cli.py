@@ -65,25 +65,6 @@ def test_doctor_json_passes_on_governed_host(inject_facts, capsys):
     assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
 
 
-def test_doctor_json_dependency_wheelhouse_status_is_independent(inject_facts, capsys):
-    inject_facts(
-        packaging=PackagingContractResult(
-            ok=False,
-            violations=["generated _version.py BUILD_GIT_SHA is stale"],
-            details={
-                "dependency_wheelhouse_ok": True,
-                "dependency_wheelhouse_violations": [],
-                "wheelhouse_wheels": [],
-            },
-        )
-    )
-    ret = ce_cli.main(["doctor", "--json", "--repo-root", "."])
-    assert ret != 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
-    assert payload["prerequisites"]["dependency_wheelhouse_violations"] == []
-
-
 def test_doctor_refuses_out_of_contract_interpreter(inject_facts, capsys):
     inject_facts(version_info=(3, 13, 13))
     ret = ce_cli.main(["doctor", "--json", "--repo-root", "."])

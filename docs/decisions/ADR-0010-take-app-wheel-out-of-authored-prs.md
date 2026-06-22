@@ -101,16 +101,6 @@ constraints: (a) the bake is deterministic and verifiable — the committed whee
 must provably equal a fresh build of the merged source; (b) it runs only on
 already-merged source, never as a pre-review injection path.
 
-## Implementation Note — Gate 3 Removal
-
-ce-ops#133 / night arc #170 implements the repository-removal part of ADR-0006
-Gate 3: `validators/wheelhouse/` stays committed as the runtime dependency
-wheelhouse, but no longer carries `creator_engine_validator-*.whl` or its
-`SHA256SUMS` line. First-party wheel/source parity now builds from checkout
-source into a temporary directory for the explicit bake gate. The public served
-installer path under `docs/downloads/0.2.0/` is unchanged and remains the
-authority for `docs/install.sh`.
-
 ## Consequences
 
 - Good — eliminates the ~61% author-side wheel conflict (the highest-leverage

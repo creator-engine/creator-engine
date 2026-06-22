@@ -1,12 +1,10 @@
-AUTHORIZED_PATHS_COUNT=26
-AUTHORIZED_PATHS_SHA256=37243aaa90138278b63ce3aeea1cbb6054876f5e05b75efa58dafe050093d9b4
+AUTHORIZED_PATHS_COUNT=24
+AUTHORIZED_PATHS_SHA256=30a1137fd137f62882fc58990aa42f870cf77b1dc6989823473fb8299093d547
 ```text
 .ce/changelog/ce133-remove-committed-app-wheel.md
 .ce/pr-manifests/codex-ce133-remove-committed-app-wheel.md
 CONTRIBUTING.md
 README.md
-docs/architecture/ADR-0006-derived-artifacts-out-of-trust-path.md
-docs/decisions/ADR-0010-take-app-wheel-out-of-authored-prs.md
 docs/guide/contributing-to-ce.md
 docs/operations/AGENT_NATIVE_BOOTSTRAP.md
 docs/operations/V1_DELIVERY_REHEARSAL.md

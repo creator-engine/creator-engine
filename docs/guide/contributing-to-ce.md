@@ -53,21 +53,18 @@ cd creator-engine
 git rev-parse --short=7 HEAD
 ```
 
-Install validator runtime dependencies using the uv-first offline source path:
+Install the validator using the uv-first offline source path (`validators/README.md:7-17`):
 
 ```bash
-uv venv --python 3.14
+uv venv --python 3.14 .venv
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
 ```
 
-If you need the full pytest gate, install the dev/test dependency set:
+If you need the full pytest gate, add dev/test dependencies to the same interpreter (`validators/README.md:41-55`):
 
 ```bash
-python3.14 -m venv .venv-test
-CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv-test/bin/python}"
-"$CE_VALIDATOR_PYTHON" -m pip install --no-index \
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index \
   --find-links validators/wheelhouse \
   --find-links validators/wheelhouse-dev \
   -r validators/requirements.txt \
@@ -95,10 +92,8 @@ fi
 
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
-> **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
-> `ce-worktrees/*` have no local `.venv`; set `CE_VALIDATOR_PYTHON` to a known
-> interpreter and invoke the validator through `$CE_VALIDATOR_PYTHON`. See
-> [`../../validators/README.md`](../../validators/README.md).
+> **Running from an isolated worktree (creator-engine#82)?** Set
+> `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
 
 ## 4. The Governed Cycle
 

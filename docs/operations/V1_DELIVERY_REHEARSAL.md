@@ -24,64 +24,50 @@ clean.
 It is a **rehearsal**, not an authority transfer: it lands nothing, ratifies
 nothing, and enqueues nothing.
 
-## 2. Offline install (Option B)
+## 2. Offline source install
 
-The rehearsal installs the validator runtime dependencies offline from the
-checked-in cp314 dependency wheelhouse, then runs the checkout source with
-`PYTHONPATH=validators`, both ways, with no network access:
+Install runtime dependencies from the cp314 dependency wheelhouse, then run the
+checkout source with `PYTHONPATH=validators` and the same interpreter:
 
 **uv-first (primary):**
 
 ```bash
-uv venv --python 3.14
+uv venv --python 3.14 .venv
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli --help
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
-**pip fallback** (run from a neutral working directory so the source tree does
-not shadow the wheel):
+**pip fallback:**
 
 ```bash
 python3.14 -m venv .venv
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links "$PWD/validators/wheelhouse" -r "$PWD/validators/requirements.txt"
-PYTHONPATH="$PWD/validators" "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli --help
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
-Both install PyYAML 6.0.3 / jsonschema 4.26.0 and exercise the source-backed
-`ce` command surface. The explicit wheel-bake gate builds a temporary
-first-party wheel from this same checkout and verifies the wheel surface still
-matches source, but clone-mode rehearsal no longer installs an app wheel from
-`validators/wheelhouse`. This dependency-install-before-source-execution order
-matches the agent-native bootstrap contract.
+The table's `ce ...` commands mean
+`PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli ...`;
+clone-mode rehearsal does not install a first-party app wheel.
 
 ## 3. Dry-run-safe pipeline
 
 Run inside a governed temp git repo (`.hermes/` git-ignored). Each step is
 either a benign success or a fail-closed refusal:
 
-The source-mode command helper for the table is:
-
-```bash
-ce_src() {
-  CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-  PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli "$@"
-}
-```
-
 | Step | Command | Expected | Why safe |
 |---|---|---|---|
-| init | `ce_src init --repo-root <repo> --json` | exit 0 | writes only under ignored `.hermes/` |
-| doctor | `ce_src doctor --repo-root <repo> --no-check-packaging --json` | report (0/1) | interpreter contract `>=3.14`; no host mutation |
-| check | `ce_src check examples/well-formed` (from repo root) | exit 0 | read-only conformance over the shipped examples |
-| launch | `ce_src launch --dry-run --json` | exit 0, `spawned=false` | plan only; no tmux spawn, no provider login |
-| lane | `ce_src lane launch … --no-tmux` | exit 1, no pane record | visibility guard refuses a non-visible seat (`G3-VISIBILITY-REFUSED`) |
-| worker | `ce_src worker status …` (absent record) | exit 1 | read-only fail-closed; no live container |
-| ledger | `ce_src ledger verify …` | exit 0 / non-zero on tamper | read-only chain replay |
-| fanin | `ce_src fanin build` + `ce_src fanin inspect` | exit 0 | deterministic packet under ignored `.hermes/fan-in/` |
-| queue | `ce_src queue dry-run` + `ce_src queue inspect` | exit 0 | deterministic preview under ignored `.hermes/integration-queue/` |
-| queue (live) | `ce_src queue dry-run … --land` | exit 1 | live landing refused (`G8-QUEUE-AUTHORITY-REFUSED`) |
+| init | `ce init --repo-root <repo> --json` | exit 0 | writes only under ignored `.hermes/` |
+| doctor | `ce doctor --repo-root <repo> --no-check-packaging --json` | report (0/1) | interpreter contract `>=3.14`; no host mutation |
+| check | `ce check examples/well-formed` (from repo root) | exit 0 | read-only conformance over the shipped examples |
+| launch | `ce launch --dry-run --json` | exit 0, `spawned=false` | plan only; no tmux spawn, no provider login |
+| lane | `ce lane launch … --no-tmux` | exit 1, no pane record | visibility guard refuses a non-visible seat (`G3-VISIBILITY-REFUSED`) |
+| worker | `ce worker status …` (absent record) | exit 1 | read-only fail-closed; no live container |
+| ledger | `ce ledger verify …` | exit 0 / non-zero on tamper | read-only chain replay |
+| fanin | `ce fanin build` + `ce fanin inspect` | exit 0 | deterministic packet under ignored `.hermes/fan-in/` |
+| queue | `ce queue dry-run` + `ce queue inspect` | exit 0 | deterministic preview under ignored `.hermes/integration-queue/` |
+| queue (live) | `ce queue dry-run … --land` | exit 1 | live landing refused (`G8-QUEUE-AUTHORITY-REFUSED`) |
 
 `ce lane launch` has no `--dry-run` flag (only the refuse-only `--no-tmux`); the
 lane step is rehearsed as the dry-run-safe **refusal**, which proves the
