@@ -638,13 +638,20 @@ def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
     if not isinstance(tool_input, dict):
         tool_input = {}
     command = tool_input.get("command") if tool == "Bash" else tool_input.get("file_path")
+    if tool == "Bash":
+        action = classify_mechanics(command)
+        if action is not None and _authority_covers(context.side_effect_authority, action, command):
+            return None
     policy = context.seat_class_policy or {}
     prefixes = policy.get("coordination_path_prefixes") if isinstance(policy, dict) else ()
+    coordination_prefixes = list(prefixes if isinstance(prefixes, (list, tuple)) else ())
+    if context.evidence_root:
+        coordination_prefixes.append(context.evidence_root)
     work_class = classify_work_class(
         str(tool),
         command if isinstance(command, str) else None,
         _mutation_class_from_event(event),
-        coordination_path_prefixes=prefixes if isinstance(prefixes, (list, tuple)) else (),
+        coordination_path_prefixes=coordination_prefixes,
     )
     return foreman_would_deny(
         context.seat_class,
@@ -769,7 +776,10 @@ def _refusal_record_body(event: dict, decision: HookDecision) -> dict[str, Any]:
         command = tool_input.get("command")
         command = command if isinstance(command, str) else ""
         action = classify_mechanics(command)
-        op, mut_class = _MECHANIC_RECORD_AXES.get(action or "", ("exec", "none"))
+        if action is None and decision.reason == FOREMAN_DELEGATION_REASON:
+            op, mut_class = "exec", _mutation_class_from_event(event)
+        else:
+            op, mut_class = _MECHANIC_RECORD_AXES.get(action or "", ("exec", "none"))
         target = command[:_TARGET_MAXLEN]
         first = command.split()[0] if command.split() else "Bash"
         tool_repr = f"Bash:{first}"
@@ -778,7 +788,12 @@ def _refusal_record_body(event: dict, decision: HookDecision) -> dict[str, Any]:
         op, mut_class = "secret", "security"
         target = str(file_path or "")[:_TARGET_MAXLEN]
         tool_repr = "Read"
-    else:  # defensive: today only Bash/Read produce governed hard denies
+    elif tool in SCOPE_TOOLS:
+        file_path = tool_input.get("file_path")
+        op, mut_class = "file", _mutation_class_from_event(event)
+        target = str(file_path or "")[:_TARGET_MAXLEN]
+        tool_repr = str(tool or "unknown")
+    else:  # defensive fallback for future governed hard-deny classes
         op, mut_class = "exec", "none"
         target = ""
         tool_repr = str(tool or "unknown")
@@ -862,15 +877,14 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
                 "permissionDecisionReason": reason,
             },
         )
-    # G-i (v3 kickoff): under governed posture a *path-manifest mismatch* is now
+    # G-i (v3 kickoff): under governed posture a *path-manifest mismatch* is
     # ADVISORY (allow-with-warning), not a hard deny — author-time scope
-    # containment moves to the PR-diff gate (path_manifest_fidelity --base). The
-    # secret-path and restricted-mechanic denies are UNCHANGED: they remain hard
-    # denies under governed posture. Foreman delegation is also WARN-only in
-    # this slice. Branch on the reason so only these outcomes are relaxed.
+    # containment moves to the PR-diff gate (path_manifest_fidelity --base).
+    # Secret-path, restricted-mechanic, and foreman-delegation denies are hard
+    # denies under governed posture. Branch on the reason so only manifest
+    # mismatches are relaxed.
     manifest_mismatch = would_deny_reason == OUT_OF_MANIFEST_REASON
-    foreman_delegation = would_deny_reason == FOREMAN_DELEGATION_REASON
-    if context.posture == "governed" and not manifest_mismatch and not foreman_delegation:
+    if context.posture == "governed" and not manifest_mismatch:
         return HookDecision(
             ok=True,
             hook_event_name="PreToolUse",
@@ -888,8 +902,6 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
     # path-manifest mismatch (G-i). Still report what would have been denied.
     if manifest_mismatch and context.posture == "governed":
         reason = f"advisory (governed; manifest enforcement is advisory): would deny — {would_deny_reason}"
-    elif foreman_delegation and context.posture == "governed":
-        reason = f"advisory (governed; foreman observation is WARN-only): would deny — {would_deny_reason}"
     else:
         reason = f"advisory (ungoverned): would deny — {would_deny_reason}"
     if context.posture_note:
@@ -979,10 +991,10 @@ def evaluate(event: dict, context: HookContext) -> HookDecision:
     if name == "PreToolUse":
         decision = _evaluate_pre_tool_use(event, context)
         if decision.decision == "deny":
-            # v3.5-B.3: decide FIRST, record AFTER. Only the governed hard
-            # denies (restricted mechanic / secret path) reach decision=="deny"
-            # (a governed manifest mismatch is advisory-allow under G-i), and
-            # recording is best-effort — the deny above stands regardless.
+            # v3.5-B.3: decide FIRST, record AFTER. Governed hard denies reach
+            # decision=="deny"; governed manifest mismatch remains
+            # advisory-allow under G-i. Recording is best-effort — the deny
+            # above stands regardless.
             _record_refusal(event, context, decision)
         return decision
     if name == "Stop":
@@ -1109,9 +1121,9 @@ def _resolve_side_effect_authority(ce: dict, posture_root: str | None) -> dict |
 def _resolve_seat_class_policy(ce: dict, posture_root: str | None) -> dict | None:
     """Resolve inline ``ce.seat_class_policy`` or ``ce.seat_class_policy_ref``.
 
-    The live-arm slice is WARN-only, so runtime resolution deliberately avoids
-    adding schema coupling here. Invalid/missing refs fail closed by returning no
-    policy; the pure helper then uses its default required mutation classes.
+    Runtime resolution deliberately avoids adding schema coupling here.
+    Invalid/missing refs fail closed by returning no policy; the pure helper
+    then uses its default required mutation classes.
     """
     from .loader import LoaderError, load_yaml
 

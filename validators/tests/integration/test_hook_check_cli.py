@@ -73,7 +73,8 @@ def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch)
     assert payload["posture"] == "governed"
 
 
-def test_hook_check_input_json_file(capsys, tmp_path):
+def test_hook_check_input_json_file(capsys, tmp_path, monkeypatch):
+    _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
     event = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Edit",
@@ -249,7 +250,8 @@ def test_hook_check_posture_auto_ungoverned_empty(capsys, tmp_path, monkeypatch)
     assert payload["advisory"] is True
 
 
-def test_hook_check_manifest_doc_parsing(capsys, monkeypatch):
+def test_hook_check_manifest_doc_parsing(capsys, tmp_path, monkeypatch):
+    _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
     handoff = EXAMPLES / "well-formed/handoffs/example-handoff.md"
     # In-manifest path from the fenced ALLOWED_PATHS block -> allow.
     in_event = {
@@ -281,7 +283,7 @@ def test_hook_check_manifest_doc_parsing(capsys, monkeypatch):
     assert out_payload["advisory"] is True
 
 
-def test_hook_check_foreman_seat_class_policy_ref_warns(capsys, tmp_path, monkeypatch):
+def test_hook_check_foreman_seat_class_policy_ref_denies(capsys, tmp_path, monkeypatch):
     policy = tmp_path / "seat-class.ce.yml"
     policy.write_text(
         "kind: seat-class-policy-record\n"
@@ -318,9 +320,10 @@ def test_hook_check_foreman_seat_class_policy_ref_warns(capsys, tmp_path, monkey
 
     assert code == 0
     payload = json.loads(out)
-    assert payload["decision"] == "allow"
-    assert payload["advisory"] is True
+    assert payload["decision"] == "deny"
+    assert payload["advisory"] is False
     assert payload["wouldHaveDenied"] is True
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "worker delegation" in payload["reason"]
 
 
@@ -390,7 +393,7 @@ def test_hook_check_launch_pinned_brain_bootstrap_seat_class_overrides_event(cap
     assert payload["wouldHaveDenied"] is False
 
 
-def test_hook_check_missing_brain_bootstrap_ignores_event_worker_seat_class(capsys, monkeypatch):
+def test_hook_check_missing_brain_bootstrap_denies_event_worker_seat_class(capsys, monkeypatch):
     monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_REF_ENV, raising=False)
     monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, raising=False)
     monkeypatch.delenv("CE_SEAT_CLASS", raising=False)
@@ -411,13 +414,14 @@ def test_hook_check_missing_brain_bootstrap_ignores_event_worker_seat_class(caps
 
     assert code == 0
     payload = json.loads(out)
-    assert payload["decision"] == "allow"
-    assert payload["advisory"] is True
+    assert payload["decision"] == "deny"
+    assert payload["advisory"] is False
     assert payload["wouldHaveDenied"] is True
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "worker delegation" in payload["reason"]
 
 
-def test_hook_check_invalid_brain_bootstrap_seat_class_fails_closed(capsys, tmp_path, monkeypatch):
+def test_hook_check_invalid_brain_bootstrap_seat_class_denies(capsys, tmp_path, monkeypatch):
     ref = tmp_path / "brain-bootstrap.json"
     ref.write_text(
         json.dumps({"context": {"seat_class": "worker"}}, sort_keys=True),
@@ -441,9 +445,10 @@ def test_hook_check_invalid_brain_bootstrap_seat_class_fails_closed(capsys, tmp_
 
     assert code == 0
     payload = json.loads(out)
-    assert payload["decision"] == "allow"
-    assert payload["advisory"] is True
+    assert payload["decision"] == "deny"
+    assert payload["advisory"] is False
     assert payload["wouldHaveDenied"] is True
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "worker delegation" in payload["reason"]
 
 
@@ -498,6 +503,7 @@ def test_hook_check_end_to_end_governed_lane(capsys, tmp_path, monkeypatch):
         "```text\ndocs/keep.md\n```\n",
         encoding="utf-8",
     )
+    _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
 
     base = {"hook_event_name": "PreToolUse", "tool_name": "Edit"}
 
