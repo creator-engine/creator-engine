@@ -56,12 +56,16 @@ class FakeGh:
         self,
         comments_by_number: dict[int, list[dict]] | None = None,
         timeline_by_number: dict[int, object] | None = None,
+        timeline_pages_by_number: dict[int, dict[int, object]] | None = None,
         timeline_stdout_by_number: dict[int, str] | None = None,
-        timeline_failures: set[int] | None = None,
+        timeline_stdout_by_page: dict[tuple[int, int], str] | None = None,
+        timeline_failures: set[int | tuple[int, int]] | None = None,
     ):
         self.comments_by_number = comments_by_number or {}
         self.timeline_by_number = timeline_by_number or {}
+        self.timeline_pages_by_number = timeline_pages_by_number or {}
         self.timeline_stdout_by_number = timeline_stdout_by_number or {}
+        self.timeline_stdout_by_page = timeline_stdout_by_page or {}
         self.timeline_failures = timeline_failures or set()
         self.calls: list[tuple[list[str], str | None]] = []
 
@@ -71,12 +75,24 @@ class FakeGh:
         match = re.search(r"/issues/(\d+)/timeline", path)
         if match:
             number = int(match.group(1))
-            if number in self.timeline_failures:
+            page_match = re.search(r"(?:\?|&)page=(\d+)", path)
+            page = int(page_match.group(1)) if page_match else 1
+            if (
+                number in self.timeline_failures
+                or (number, page) in self.timeline_failures
+            ):
                 return subprocess.CompletedProcess(
                     argv,
                     1,
                     stdout="",
                     stderr="timeline unavailable",
+                )
+            if (number, page) in self.timeline_stdout_by_page:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    stdout=self.timeline_stdout_by_page[(number, page)],
+                    stderr="",
                 )
             if number in self.timeline_stdout_by_number:
                 return subprocess.CompletedProcess(
@@ -85,10 +101,16 @@ class FakeGh:
                     stdout=self.timeline_stdout_by_number[number],
                     stderr="",
                 )
+            if number in self.timeline_pages_by_number:
+                payload = self.timeline_pages_by_number[number].get(page, [])
+            elif page == 1:
+                payload = self.timeline_by_number.get(number, [])
+            else:
+                payload = []
             return subprocess.CompletedProcess(
                 argv,
                 0,
-                stdout=json.dumps(self.timeline_by_number.get(number, [])),
+                stdout=json.dumps(payload),
                 stderr="",
             )
         match = re.search(r"/issues/(\d+)/comments", path)
@@ -337,6 +359,40 @@ def test_open_pr_reference_is_skipped_when_gh_runner_is_supplied():
     assert result.skipped[0]["reason"] == "open_pr"
 
 
+def test_open_pr_reference_paginates_until_later_open_pr():
+    first_page = [
+        {"event": "commented", "body": f"note {index}"} for index in range(100)
+    ]
+    second_page = [
+        {
+            "event": "cross-referenced",
+            "source": {
+                "issue": {
+                    "number": 99,
+                    "state": "open",
+                    "pull_request": {
+                        "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99"
+                    },
+                }
+            },
+        }
+    ]
+    fake = FakeGh(timeline_pages_by_number={1: {1: first_page, 2: second_page}})
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "open_pr"
+    assert any(
+        "/issues/1/timeline?per_page=100&page=2" in call[0][-1]
+        for call in fake.calls
+    )
+
+
 def test_open_pr_lookup_failure_fails_closed():
     fake = FakeGh(timeline_failures={1})
     result = ft.plan_triage(
@@ -347,6 +403,30 @@ def test_open_pr_lookup_failure_fails_closed():
 
     assert [item.issue.number for item in result.items] == [2]
     assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
+
+
+def test_open_pr_lookup_full_page_then_next_page_failure_fails_closed():
+    first_page = [
+        {"event": "commented", "body": f"note {index}"} for index in range(100)
+    ]
+    fake = FakeGh(
+        timeline_pages_by_number={1: {1: first_page}},
+        timeline_failures={(1, 2)},
+    )
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert any(
+        "/issues/1/timeline?per_page=100&page=2" in call[0][-1]
+        for call in fake.calls
+    )
     assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
 
 

@@ -24,6 +24,8 @@ GhRunner = Callable[[Sequence[str], "str | None"], subprocess.CompletedProcess]
 
 DEFAULT_PICKUP_LABEL = "ce-pickup/triage-ready"
 SCHEMA_VERSION = 1
+_TIMELINE_PAGE_SIZE = 100
+_TIMELINE_MAX_PAGES = 20
 
 _GITHUB_ISSUE_RE = re.compile(
     r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/(?:issues|pull)/(\d+)"
@@ -763,29 +765,34 @@ def _has_open_pr_reference(
     candidate: IssueCandidate,
     gh_runner: GhRunner,
 ) -> bool | None:
-    query = urllib.parse.urlencode({"per_page": "100"})
-    path = f"repos/{candidate.repo}/issues/{candidate.number}/timeline?{query}"
-    try:
-        proc = gh_runner(["gh", "api", "--method", "GET", path], None)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if getattr(proc, "returncode", 1) != 0:
-        return None
-    try:
-        payload = json.loads((getattr(proc, "stdout", "") or "").strip())
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, list):
-        return None
-
     ambiguous = False
-    for raw_event in payload:
-        state = _open_pr_state_from_timeline_event(raw_event)
-        if state is True:
-            return True
-        if state is None:
-            ambiguous = True
-    return None if ambiguous else False
+    for page in range(1, _TIMELINE_MAX_PAGES + 1):
+        query = urllib.parse.urlencode(
+            {"per_page": str(_TIMELINE_PAGE_SIZE), "page": str(page)}
+        )
+        path = f"repos/{candidate.repo}/issues/{candidate.number}/timeline?{query}"
+        try:
+            proc = gh_runner(["gh", "api", "--method", "GET", path], None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if getattr(proc, "returncode", 1) != 0:
+            return None
+        try:
+            payload = json.loads((getattr(proc, "stdout", "") or "").strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+
+        for raw_event in payload:
+            state = _open_pr_state_from_timeline_event(raw_event)
+            if state is True:
+                return True
+            if state is None:
+                ambiguous = True
+        if len(payload) < _TIMELINE_PAGE_SIZE:
+            return None if ambiguous else False
+    return None
 
 
 def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
