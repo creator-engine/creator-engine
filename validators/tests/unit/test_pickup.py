@@ -21,8 +21,12 @@ import urllib.parse
 from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator import pickup
+from creator_engine_validator.checks.active_work_ledger_schema import (
+    validate_active_work_ledger_record,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +695,80 @@ def test_launch_lane_failure_does_not_mark_launched(tmp_path):
         ledger_root=str(tmp_path / "awl"), spawn=fake_spawn,
     )
     assert result.launched is False
+
+
+def test_launch_lane_allocates_active_work_claim_before_spawn(tmp_path):
+    """ce-ops#200: poll/claim → ALLOCATE → launch → LAUNCHED_STATE.
+
+    The belt's launch path must write the live, unreleased Active-Work claim YAML
+    that ``ce lane launch`` hard-requires (RV1-030, G3-CLAIM-MISSING) BEFORE the
+    spawn — otherwise every belt-launched lane refuses with exit 1. The fake spawn
+    asserts the claim (and its lease) already exist at the moment ``lane launch``
+    would run, in the SAME ledger root the argv forwards to ``--ledger-root``.
+    """
+    from creator_engine_validator import lane_runtime
+
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="review_requested", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+    claim_path = lane_runtime._claim_path(awl, identity, expected_lane_id)
+    lease_path = awl / "leases" / identity / f"{expected_lane_id}.yaml"
+
+    seen = {}
+
+    def fake_spawn(argv):
+        # The allocation MUST have happened before the spawn (= before lane launch).
+        seen["claim_exists_at_spawn"] = claim_path.is_file()
+        seen["lease_exists_at_spawn"] = lease_path.is_file()
+        # The argv forwards the SAME ledger root the claim was allocated under.
+        lr_idx = argv.index("--ledger-root")
+        seen["argv_ledger_root"] = argv[lr_idx + 1]
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="wclaim-abc",
+        harness="claude", seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=fake_spawn,
+    )
+
+    assert result.launched is True
+    assert result.lane_id == expected_lane_id
+    assert seen["claim_exists_at_spawn"] is True
+    assert seen["lease_exists_at_spawn"] is True
+    assert seen["argv_ledger_root"] == str(awl)
+
+    # The written claim is schema-valid, live (unreleased), and matches identity/lane
+    # — exactly what lane launch's G3-CLAIM-MISSING gate checks.
+    claim = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+    assert claim["controller_id"] == identity
+    assert claim["lane_id"] == expected_lane_id
+    assert "released_at" not in claim
+    assert validate_active_work_ledger_record(claim, claim_path) == []
+
+
+def test_launch_lane_allocation_is_idempotent_on_repoll(tmp_path):
+    """A re-poll of an already-claimed item must NOT double-allocate or crash."""
+    awl = tmp_path / "awl"
+    item = _item(kind="assigned", repo="o/r", number=10)
+
+    def fake_spawn(argv):
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    kwargs = dict(
+        identity="ce-dev-2", run_id="r1", claim_id="c", harness="codex",
+        seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=fake_spawn,
+    )
+    first = pickup.launch_lane(item, **kwargs)
+    second = pickup.launch_lane(item, **kwargs)
+    assert first.launched is True
+    assert second.launched is True  # idempotent: live claim reused, no refusal/crash
 
 
 def test_mark_thread_read_only_after_launched(tmp_path):

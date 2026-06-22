@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import work_claims
+from . import pco_allocator, work_claims
 
 #: HTTPS transport: ``(method, url, headers, body) -> (status, headers, body_text)``.
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
@@ -856,6 +856,32 @@ def launch_lane(
     """
     runner = spawn or _default_spawn
     seed = build_seed(item, identity=identity, run_id=run_id, claim_id=claim_id, seed_root=seed_root)
+    lane_id = _lane_id(item, run_id)
+
+    # ce-ops#200: ``ce lane launch`` hard-requires a live, unreleased Active-Work
+    # claim YAML at <ledger_root>/claims/<identity>/<lane_id>.yaml (RV1-030,
+    # G3-CLAIM-MISSING) — but nothing on the belt path allocated it, so every
+    # belt-launched lane refused. Allocate the in-place lease+claim+event BEFORE
+    # the spawn, in the SAME ledger root build_lane_argv forwards to
+    # ``--ledger-root``. The lane Active-Work claim is bound to the forge work
+    # arbitration through ``lane_id`` (which encodes repo+item number) and the
+    # seed file (which records the forge ``claim_id``). Idempotent + fail-closed:
+    # a re-poll of an already-claimed item is a no-op (no double-allocation, no
+    # crash).
+    try:
+        pco_allocator.allocate_in_place(
+            ledger_root=Path(ledger_root),
+            lane_id=lane_id,
+            controller_id=identity,
+            worktree_path=Path(repo_root),
+            envelope_ref="none",
+        )
+    except pco_allocator.PcoAllocatorError as exc:
+        return LaunchResult(
+            launched=False, seed_path=seed.path, lane_id=lane_id,
+            note=f"lane claim allocation refused: {exc}",
+        )
+
     argv = build_lane_argv(
         item, identity=identity, run_id=run_id, harness=harness,
         seed=seed, repo_root=repo_root, ledger_root=ledger_root,
@@ -876,7 +902,7 @@ def launch_lane(
             state = None
     launched = state == LAUNCHED_STATE
     return LaunchResult(
-        launched=launched, seed_path=seed.path, lane_id=_lane_id(item, run_id),
+        launched=launched, seed_path=seed.path, lane_id=lane_id,
         note=None if launched else f"lane did not confirm '{LAUNCHED_STATE}' (state={state!r})",
     )
 

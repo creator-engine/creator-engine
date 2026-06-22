@@ -482,6 +482,165 @@ def allocate(
 
 
 # ---------------------------------------------------------------------------
+# In-place claim allocation (no git-worktree-add)
+# ---------------------------------------------------------------------------
+
+
+class ClaimAlreadyLive(PcoAllocatorError):
+    """A live, unreleased claim already exists for this controller/lane."""
+
+
+def allocate_in_place(
+    *,
+    ledger_root: Path,
+    lane_id: str,
+    controller_id: str,
+    worktree_path: Path | str,
+    envelope_ref: str = "none",
+    branch: str | None = None,
+    lease_seconds: int = 3600,
+    pane_label: str | None = None,
+) -> bool:
+    """Allocate an Active-Work lease + claim + event for an EXISTING in-place checkout.
+
+    This is the claim-allocation half of :func:`allocate` without the
+    ``git worktree add`` step and without the root-checkout refusal. It is the
+    primitive the ce-ops#55 work-pickup belt needs: ``ce lane launch`` hard-requires
+    a live, unreleased, schema-valid Active-Work claim YAML at
+    ``<ledger_root>/claims/<controller_id>/<lane_id>.yaml`` (RV1-030,
+    ``G3-CLAIM-MISSING``), but the belt drives a lane in the controller's OWN
+    checkout — it neither needs nor can create a fresh secondary worktree from the
+    root checkout. ``worktree_path`` here names that existing checkout and is
+    advisory record metadata only (``ce lane launch`` only enforces a directory
+    that exists when an explicit ``--worktree-path`` is supplied).
+
+    The lease is written alongside the claim so the claim is always covered by a
+    live lease under the same ``(controller_id, worktree_path)`` — keeping the
+    Active-Work conflict guard's ``PCO-021`` lease-coverage predicate satisfied
+    even when other lanes in the same ledger have written lease records (the
+    predicate arms once ANY lease exists in the tree).
+
+    **Idempotent + fail-closed**: a re-poll of an already-claimed item is a no-op
+    that returns ``False`` (no double-allocation, no crash) when a live,
+    unreleased claim already exists for this ``(controller_id, lane_id)``. A
+    released claim is reallocated. Returns ``True`` when a fresh claim was written.
+
+    Does NOT run ``git`` at all, does NOT push, does NOT mutate GitHub/tracker
+    state, does NOT create a worktree or branch.
+    """
+    ledger_root = Path(ledger_root)
+    worktree_path = Path(worktree_path)
+
+    lock_dir = ledger_root / "locks"
+    with _lane_lock(lock_dir, lane_id):
+        claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+
+        # Idempotency: a live (unreleased) claim already present → no-op.
+        if claim_path.is_file():
+            try:
+                existing = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+            except Exception:
+                existing = None
+            if isinstance(existing, dict) and not existing.get("released_at"):
+                return False
+
+        # Preflight conflict check against the existing ledger.
+        conflicts = guard(ledger_root)
+        if not conflicts.ok:
+            codes = ", ".join(e.code for e in conflicts.errors)
+            raise PcoConflictError(
+                f"active_work_ledger_conflicts refuses in-place allocation: {codes}"
+            )
+
+        # A live claim under a DIFFERENT lane that names the same worktree is a
+        # conflict the schema-level guard would not catch pre-write.
+        _check_proposed_worktree_conflict(ledger_root, worktree_path)
+
+        now = _utc_now_str()
+        expires_at = _expires_at_str(lease_seconds)
+        ts_compact = _event_ts_compact()
+        lease_id = f"lease-{lane_id}-{ts_compact}"
+        event_id = _event_id("claim-created", ts_compact)
+
+        lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
+        event_dir = ledger_root / "events" / datetime.now(UTC).strftime("%Y/%m/%d")
+        event_path = event_dir / f"{event_id}.yaml"
+
+        lease_record: dict[str, Any] = {
+            "kind": "worktree-lease-record",
+            "record_type": "worktree_lease",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "lease_id": lease_id,
+            "worktree_path": str(worktree_path),
+            "acquired_at": now,
+            "lease_seconds": lease_seconds,
+            "expires_at": expires_at,
+        }
+        if pane_label:
+            lease_record["pane_label"] = pane_label
+        if branch:
+            lease_record["branch"] = branch
+        if envelope_ref:
+            lease_record["envelope_ref"] = envelope_ref
+
+        claim_record: dict[str, Any] = {
+            "kind": "active-work-ledger-record",
+            "record_type": "claim",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "worktree_path": str(worktree_path),
+            "envelope_ref": envelope_ref,
+            "lease_seconds": lease_seconds,
+            "claimed_at": now,
+            "last_heartbeat_at": now,
+        }
+        if pane_label:
+            claim_record["pane_label"] = pane_label
+        if branch:
+            claim_record["branch"] = branch
+
+        event_record: dict[str, Any] = {
+            "kind": "active-work-ledger-record",
+            "record_type": "event",
+            "schema_version": "1",
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+            "record_timestamp": now,
+            "event_kind": "claim_created",
+            "event_id": event_id,
+            "event_timestamp": now,
+        }
+
+        _validate_proposed_allocation_state(
+            ledger_root=ledger_root,
+            lease_path=lease_path,
+            lease_record=lease_record,
+            claim_path=claim_path,
+            claim_record=claim_record,
+            event_path=event_path,
+            event_record=event_record,
+        )
+
+        # Write lease FIRST (PCO-029: lease precedes claim), then claim + event.
+        _atomic_write(lease_path, yaml.safe_dump(lease_record, sort_keys=True))
+        try:
+            _atomic_write(claim_path, yaml.safe_dump(claim_record, sort_keys=True))
+            _atomic_write(event_path, yaml.safe_dump(event_record, sort_keys=True))
+        except Exception as exc:
+            for p in [claim_path, event_path, lease_path]:
+                p.unlink(missing_ok=True)
+            raise AllocationError(
+                f"in-place record write failed; rolled back: {exc}"
+            ) from exc
+        return True
+
+
+# ---------------------------------------------------------------------------
 # PCO-028: pco-release
 # ---------------------------------------------------------------------------
 
