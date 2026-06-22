@@ -23,6 +23,11 @@ lane-launch tmux spawn through it. Foundational, zero-behaviour-change slice
   test keeps working; the Pane Registry terminal record and visibility class are
   now built from the backend's `SurfaceHandle`.
 
+- Classifies the new `visibility_backend` module as `v1` in the version-boundary
+  taxonomy (`_versions.py`): it is the v1 launcher's surface seam — a thin
+  `tmux_adapter` (v1) wrapper consumed only by `lane_runtime` (v1) — so both
+  import edges stay `v1->v1` and no new `shared->v1` ratchet edge is introduced.
+
 No headless backend, no visibility-gate relaxation, no schema/validator change,
 and no `ce launch` change in this slice — same inputs, same outputs, same
 refusals.
