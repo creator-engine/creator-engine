@@ -98,3 +98,4 @@ from . import install_answers as install_answers  # noqa: E402,F401
 from . import seat_event as seat_event  # noqa: E402,F401
 from . import ce_playbook_format as ce_playbook_format  # noqa: E402,F401
 from . import devops_privileged_action_broker as devops_privileged_action_broker  # noqa: E402,F401
+from . import operator_runbook_refusal_sync as operator_runbook_refusal_sync  # noqa: E402,F401
