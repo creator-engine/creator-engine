@@ -141,6 +141,15 @@
   .cap .faint{color:var(--muted);opacity:.8}
   @media (max-width:880px){.caps{grid-template-columns:repeat(2,1fr)}}
   @media (max-width:560px){.caps{grid-template-columns:1fr}}
+  .docs-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .doc-card{display:block;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:20px;text-decoration:none;color:inherit;transition:border-color .18s,box-shadow .18s,transform .18s}
+  .doc-card:hover{border-color:var(--violet-deep);box-shadow:0 0 30px -18px var(--violet-soft);transform:translateY(-1px)}
+  .doc-card .tag{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--violet);margin-bottom:9px}
+  .doc-card h3{font-size:17px;margin:0 0 7px;font-weight:700;color:var(--paper)}
+  .doc-card p{margin:0 0 15px;font-size:13.5px;color:var(--muted);line-height:1.55}
+  .doc-card .go{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--moss)}
+  @media (max-width:880px){.docs-grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:560px){.docs-grid{grid-template-columns:1fr}}
   .cta{position:relative;overflow:hidden;padding:84px 0;text-align:center;border-top:1px solid var(--line)}
   .cta::before{content:"";position:absolute;inset:0;background:radial-gradient(620px 320px at 34% 0%,rgba(127,176,105,.10),transparent 70%),radial-gradient(560px 300px at 72% 14%,var(--violet-soft),transparent 70%);pointer-events:none}
   .cta .inner{position:relative;z-index:1;max-width:64ch;margin:0 auto}
@@ -646,6 +655,55 @@
         <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div><h3>Evidence-verified</h3><p>The grader lives outside the agent. Done is a verdict, not a self-claim.</p></div>
         <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="4" y="4" width="16" height="14" rx="2"/><path d="M8 9l3 3-3 3M13 15h3"/></svg></div><h3>Your agent, under CE</h3><p>CE wraps your own coding agent instead of replacing the tool you already like.</p></div>
         <div class="cap"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div><h3>Repo-visible trail</h3><p>Ledger, fan-in, validator output, and the report are replayable from a clone.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DOCS -->
+  <section class="band alt docs-band" id="docs">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-eyebrow">Docs</span>
+        <h2>Current docs for installing, piloting, and trusting CE.</h2>
+        <p>Start with the signed bootstrap, then read the user guide, pilot path, contributor rules, security model, and v3.5 roadmap that frame the pitch path.</p>
+      </div>
+      <div class="docs-grid">
+        <a class="doc-card" href="llms-install.md">
+          <span class="tag">Install</span>
+          <h3>Signed install spec</h3>
+          <p>The agent-native bootstrap spec with SSHSIG metadata, pinned artifacts, trust-root verification, and installer contract references.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
+        <a class="doc-card" href="guide/understanding-ce.md">
+          <span class="tag">User guide</span>
+          <h3>Understanding CE</h3>
+          <p>A plain-language guide to the five stages, Scope cards, budgets, change types, and the outside-the-agent grader.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
+        <a class="doc-card" href="guide/pilot-runbook.md">
+          <span class="tag">Pilot</span>
+          <h3>Pilot runbook</h3>
+          <p>The end-to-end pilot path: install, inventory, repo provisioning, GitHub App authorization, and governed PR flow.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
+        <a class="doc-card" href="guide/contributing-to-ce.md">
+          <span class="tag">Contribute</span>
+          <h3>Contributor guide</h3>
+          <p>The human contributor on-ramp with trust tiers, authority boundaries, local setup, and review expectations.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
+        <a class="doc-card" href="security/SECURITY_MODEL.md">
+          <span class="tag">Security</span>
+          <h3>Security model</h3>
+          <p>The security and redaction posture: privileged mutation classes, Source-only security ratification, and incident handling.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
+        <a class="doc-card" href="v3.5-roadmap.md">
+          <span class="tag">Roadmap</span>
+          <h3>v3.5 roadmap</h3>
+          <p>The current program plan from shipped v3.1 through the pitch-critical workstreams and post-pitch horizon.</p>
+          <span class="go">Open doc -&gt;</span>
+        </a>
       </div>
     </div>
   </section>
