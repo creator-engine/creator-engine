@@ -143,6 +143,15 @@ MUST NOT embed:
 * durable actor ids or app slugs;
 * concrete model, tool, CLI, runner, or account identifiers.
 
+Within a repo/project/profile scope, `controller_id` is the durable identity
+that carries live Controller mutation authority. Duplicate live
+mutation-capable Controller seats for the same `controller_id` are invalid:
+there is one current writer authority for that identity until the seat becomes
+terminal, transfers by a ratified handoff, or is re-entered by attach/resume.
+Concrete process ids, tmux sessions, panes, sentinels, and harness sessions are
+observational runtime evidence for this durable identity; they do not mint a
+second ownership authority and do not supersede the ledger identity.
+
 Concrete bindings remain deployment-time overlay decisions per
 `docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md` §c precedent.
 

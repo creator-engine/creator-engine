@@ -34,6 +34,16 @@ ledger/handoff flow described in
 [`./ACTIVE_WORK_LEDGER_PROTOCOL.md`](./ACTIVE_WORK_LEDGER_PROTOCOL.md)
 §g.1.
 
+For Controller seats, that means tmux pane identity, sentinel
+`seat_id`, process id, harness session, or any other visible terminal
+evidence is observational only. The durable `controller_id` remains
+the live-exclusive mutation authority identity within the
+repo/project/profile scope, and duplicate live mutation-capable
+Controller panes for the same `controller_id` are invalid unless the
+later launch/runtime contract classifies the action as attach/resume,
+ratified transfer/terminalization, or read-only observer mode with
+mutation disabled.
+
 ## 2. Runtime Directory Shape
 
 Pane Registry records are ignored runtime state under:
@@ -128,6 +138,11 @@ Valid statuses:
 unreleased claim in future cross-record validation. A later validator
 MAY refuse duplicate active panes for the same claim and role when
 the contract forbids duplicates.
+
+For mutation-capable Controller panes, the future duplicate refusal is keyed by
+the durable `controller_id`, not by a concrete pane/process/sentinel id. Pane
+Registry evidence can support that refusal decision, but it does not create or
+transfer Controller mutation authority.
 
 ## 6. Terminal Identity
 

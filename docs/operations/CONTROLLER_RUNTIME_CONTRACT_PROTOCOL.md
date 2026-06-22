@@ -106,7 +106,32 @@ OpenClaw appearing as in-seat, or a missing in-seat harness, is refused with
 > visible Gate 2 implementation lane itself is **Claude Code Opus 4.7, effort
 > high**, only.
 
-## 4. Redaction safety
+## 4. Controller identity exclusivity
+
+`controller_id` is the durable live-exclusive mutation authority identity for a
+Controller within a repo/project/profile scope. It is distinct from concrete
+runtime identity: process id, tmux session/window/pane, sentinel `seat_id`, and
+harness session ids are observational evidence for where the identity is
+running. They do not mint ownership authority and they do not make two
+mutation-capable seats for the same `controller_id` valid.
+
+Future `ce launch` / `ce hud` behavior MUST refuse a duplicate live
+mutation-capable Controller seat for the same `controller_id` before side
+effects. The only contract-level exceptions are:
+
+- attaching to or resuming the already-live seat for that identity;
+- a ratified transfer or terminalization that closes the old live authority
+  before opening the new one;
+- explicit read-only observer mode, with mutation disabled and no claim that
+  the observer holds Controller mutation authority.
+
+Pane Registry and seat-sentinel evidence MAY inform the duplicate-live-seat
+decision, but they are not ownership authority. The Active-Work Ledger
+`controller_id` semantics documented for creator-engine/creator-engine#84 cover
+ledger identity; this section records the runtime launch/refusal contract for
+creator-engine/creator-engine#89.
+
+## 5. Redaction safety
 
 No field may contain a token value, API key, OAuth refresh token, source-host
 installation ID, model API key, account name, browser session cookie, or any
@@ -115,7 +140,7 @@ names and secret-shaped values anywhere in the record with **`RV1-020-SECRET`**.
 `state_boundary.durable_account_authority` and `state_boundary.provider_authority`
 must both be `none`.
 
-## 5. Validation
+## 6. Validation
 
 ```bash
 PYTHONPATH=validators python3.14 -m creator_engine_validator.cli \
@@ -131,9 +156,14 @@ Validation codes:
 | `RV1-020-CONTAINMENT` | Contained Controller posture is incomplete or mismatched. |
 | `RV1-020-SECRET` | Secret or provider-authority value present in a field. |
 
-## 6. Scope boundary
+## 7. Scope boundary
 
 This protocol is substrate/validator work only. It does **not** implement `ce`,
 `ce launch`, `ce hud`, packaging, install, worker runtime, the Side-Effect
 Ledger runtime, or fan-in. The companion state boundary is defined in
 [`STATE_BOUNDARY_PROTOCOL.md`](STATE_BOUNDARY_PROTOCOL.md).
+
+The duplicate Controller-seat exclusivity text added for
+creator-engine/creator-engine#89 is docs/design only. It introduces no runtime
+behavior, schema field, validator check, test, GitHub authority, credential
+authority, or provider/account change.
