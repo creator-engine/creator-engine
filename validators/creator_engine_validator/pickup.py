@@ -43,6 +43,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -828,7 +829,7 @@ def build_lane_argv(
     role = _KIND_TO_ROLE.get(str(item.get("kind")), _DEFAULT_ROLE)
     lane_kind = _KIND_TO_LANE_KIND.get(str(item.get("kind")), _DEFAULT_LANE_KIND)
     return [
-        "ce", "lane", "launch",
+        sys.executable, "-m", "creator_engine_validator.ce_cli", "lane", "launch",
         "--controller-id", identity,
         "--lane-id", _lane_id(item, run_id),
         "--role", role,
