@@ -55,6 +55,8 @@ import base64
 import binascii
 import hashlib
 import json
+import ntpath
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Mapping
@@ -1032,8 +1034,50 @@ _VERIFIED_PRIOR_STATUSES = frozenset({"applied", "already_satisfied", "skipped",
 
 
 def _path_under_ce(path: Any) -> bool:
-    text = str(path).strip().rstrip("/")
-    return text == CE_SCAFFOLD_ROOT or text.startswith(f"{CE_SCAFFOLD_ROOT}/")
+    normalized, _problem = _normalize_ce_scaffold_path(path)
+    return normalized is not None
+
+
+def _normalize_ce_scaffold_path(path: Any) -> tuple[str | None, str | None]:
+    raw = str(path).strip()
+    if not raw:
+        return None, "<empty>: invalid scaffold path is empty"
+    if "\\" in raw:
+        return None, f"{raw}: invalid scaffold path uses backslashes"
+    if ntpath.splitdrive(raw)[0]:
+        return None, f"{raw}: invalid scaffold path is drive-qualified"
+    if posixpath.isabs(raw) or ntpath.isabs(raw):
+        return None, f"{raw}: invalid scaffold path is absolute"
+
+    text = raw.rstrip("/")
+    if not text:
+        return None, f"{raw}: invalid scaffold path is empty"
+    if ".." in text.split("/"):
+        return None, f"{raw}: invalid scaffold path contains parent traversal"
+
+    normalized = posixpath.normpath(text)
+    if normalized != CE_SCAFFOLD_ROOT and not normalized.startswith(f"{CE_SCAFFOLD_ROOT}/"):
+        return None, f"{raw}: scaffold path is outside {CE_SCAFFOLD_ROOT}/"
+    return normalized, None
+
+
+def _normalized_ce_scaffold_records(
+    records: Mapping[str, Any],
+    problems: list[str],
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for raw_path, record in sorted(records.items(), key=lambda item: str(item[0]).strip()):
+        path, problem = _normalize_ce_scaffold_path(raw_path)
+        if problem:
+            problems.append(problem)
+            continue
+        if path in normalized:
+            problems.append(
+                f"{raw_path}: invalid scaffold path duplicates {path} after normalization"
+            )
+            continue
+        normalized[path] = record
+    return normalized
 
 
 def _record_from(value: Any) -> dict[str, Any]:
@@ -1067,14 +1111,13 @@ def plan_ce_scaffold_reconcile(
     current = current or {}
     steps: list[dict[str, Any]] = []
     problems: list[str] = []
-    desired_paths = sorted(str(path).strip().rstrip("/") for path in desired)
+    desired = _normalized_ce_scaffold_records(desired, problems)
+    current = _normalized_ce_scaffold_records(current, problems)
+    desired_paths = sorted(desired)
     for path in desired_paths:
         want = _record_from(desired[path])
         want_kind = str(want.get("kind") or "file")
         want_sha = want.get("sha256")
-        if not _path_under_ce(path):
-            problems.append(f"{path}: scaffold path is outside {CE_SCAFFOLD_ROOT}/")
-            continue
         have = _record_from(current.get(path))
         exists = have.get("exists", bool(current.get(path))) is not False
         if not exists:
@@ -1116,13 +1159,12 @@ def plan_ce_scaffold_reconcile(
                 )
             continue
         steps.append({"path": path, "action": "preserve", "reason": "matches"})
-    for path in sorted(str(path).strip().rstrip("/") for path in current if path not in desired):
-        if _path_under_ce(path):
-            steps.append({
-                "path": path,
-                "action": "preserve",
-                "reason": "extra_existing_state",
-            })
+    for path in sorted(path for path in current if path not in desired):
+        steps.append({
+            "path": path,
+            "action": "preserve",
+            "reason": "extra_existing_state",
+        })
     write_actions = {"create", "repair"}
     return {
         "root": CE_SCAFFOLD_ROOT,

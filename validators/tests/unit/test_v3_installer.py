@@ -758,6 +758,61 @@ def test_ce_scaffold_refuses_non_ce_conflict_without_clobbering():
     assert not plan["converged"]
 
 
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        ".ce/../README.md",
+        ".ce/sub/../../README.md",
+        "/tmp/.ce/README.md",
+        r".ce\..\README.md",
+    ],
+)
+def test_ce_scaffold_refuses_invalid_paths_before_writing(bad_path):
+    plan = inst.plan_ce_scaffold_reconcile({bad_path: {"sha256": HEX}}, {})
+
+    assert plan["will_write"] == []
+    assert bad_path not in {step["path"] for step in plan["steps"]}
+    assert any(
+        "invalid scaffold path" in problem or "outside" in problem
+        for problem in plan["problems"]
+    )
+    assert not plan["converged"]
+
+
+def test_ce_scaffold_refuses_invalid_current_paths_before_preserving():
+    current = {
+        ".ce/../README.md": {
+            "exists": True,
+            "sha256": HEX,
+            "owner": "creator-engine",
+        }
+    }
+
+    plan = inst.plan_ce_scaffold_reconcile({}, current)
+
+    assert plan["will_write"] == []
+    assert plan["steps"] == []
+    assert any("invalid scaffold path" in problem for problem in plan["problems"])
+    assert not plan["converged"]
+
+
+def test_ce_scaffold_valid_paths_still_plan_writes():
+    path = ".ce/skills/project-validation.md"
+
+    plan = inst.plan_ce_scaffold_reconcile({path: {"sha256": HEX}}, {})
+
+    assert plan["problems"] == []
+    assert plan["will_write"] == [
+        {
+            "path": path,
+            "action": "create",
+            "reason": "missing",
+            "sha256": HEX,
+        }
+    ]
+    assert not plan["converged"]
+
+
 def test_existing_verified_venv_reuses_and_partial_venv_rebuilds_safely():
     desired = {
         "package_name": "creator-engine-validator",
