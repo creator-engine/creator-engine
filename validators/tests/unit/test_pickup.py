@@ -16,6 +16,7 @@ behind a per-seat enable flag (canary, default OFF).
 
 import json
 import subprocess
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -667,8 +668,11 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
     )
     assert result.launched is True
     argv = calls[0]
-    # invokes `ce lane launch` with the seed as the prompt pointer + its sha.
-    assert "lane" in argv and "launch" in argv
+    # invokes the lane CLI by module, independent of a bare `ce` executable on PATH.
+    assert argv[0] == sys.executable
+    assert argv[1:3] == ["-m", "creator_engine_validator.ce_cli"]
+    assert argv[0] != "ce"
+    assert argv[3:5] == ["lane", "launch"]
     assert "--prompt" in argv and "--prompt-sha" in argv
     # review_requested → a reviewer role lane; the harness rides --command.
     role_idx = argv.index("--role")
