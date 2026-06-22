@@ -36,6 +36,9 @@ _GITHUB_REF_URL_RE = re.compile(
 _GITHUB_API_ISSUE_RE = re.compile(
     r"https?://api\.github\.com/repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)"
 )
+_GITHUB_API_PULL_RE = re.compile(
+    r"https?://api\.github\.com/repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pulls/(\d+)"
+)
 _API_REPO_RE = re.compile(r"https?://api\.github\.com/repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
 _OWNER_REPO_REF_RE = re.compile(r"(?<![\w./-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)")
 _SHORT_REPO_REF_RE = re.compile(r"(?<![\w./-])([A-Za-z0-9_.-]+)#(\d+)")
@@ -62,6 +65,9 @@ _BLOCKING_LABELS = frozenset(
         "checkpoint-held",
         "dependency-blocked",
         "dependencies-blocked",
+        "awaiting operator",
+        "awaiting-operator",
+        "awaiting_operator",
         "do-not-claim",
         "do-not-pickup",
         "do not claim",
@@ -73,6 +79,8 @@ _BLOCKING_LABELS = frozenset(
         "on hold",
         "on-hold",
         "status:blocked",
+        "status:awaiting-operator",
+        "status/awaiting-operator",
         "status:checkpoint",
         "status:held",
         "status:hold",
@@ -114,12 +122,16 @@ _AGGREGATE_LABELS = frozenset(
         "aggregate",
         "arc",
         "epic",
+        "issue:tracking",
+        "issue/tracking",
         "kind:arc",
         "kind:epic",
         "kind:meta",
+        "kind:tracking",
         "kind/arc",
         "kind/epic",
         "kind/meta",
+        "kind/tracking",
         "meta",
         "parent",
         "rollup",
@@ -129,9 +141,11 @@ _AGGREGATE_LABELS = frozenset(
         "type:arc",
         "type:epic",
         "type:meta",
+        "type:tracking",
         "type/arc",
         "type/epic",
         "type/meta",
+        "type/tracking",
     }
 )
 _AGGREGATE_TITLE_RE = re.compile(
@@ -140,6 +154,22 @@ _AGGREGATE_TITLE_RE = re.compile(
 )
 _HELD_CHECKPOINT_LINE_RE = re.compile(r"\bheld[-\s]+checkpoints?\b", re.IGNORECASE)
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
+_HOLD_MARKER_RE = re.compile(
+    r"\b(?:AWAITING[-_\s]+OPERATOR|HOLD[-_\s]+MARKER)\b",
+    re.IGNORECASE,
+)
+_CLOSED_DONE_STATE_REASONS = frozenset(
+    {
+        "completed",
+        "done",
+        "fixed",
+        "resolved",
+    }
+)
+_PR_STATUS_NONE = "none"
+_PR_STATUS_OPEN = "open"
+_PR_STATUS_DONE = "done"
+_PR_STATUS_CLOSED_NOT_DONE = "closed_not_done"
 _DEPENDENCY_FIELDS = (
     "blocked_by",
     "blocked_by_issues",
@@ -315,7 +345,7 @@ def plan_triage(
 ) -> TriageResult:
     """Plan deterministic pickup actions for unblocked, unclaimed issues.
 
-    Supplying ``gh_runner`` enables live in-flight PR and work-claim collision
+    Supplying ``gh_runner`` enables live linked-PR and work-claim collision
     checks; no mutation happens here. Use :func:`apply_triage_result` for
     explicit writes.
     """
@@ -686,11 +716,9 @@ def _skip_reason(
     if readiness:
         return readiness[0]
     if gh_runner is not None:
-        open_pr_reference = _has_open_pr_reference(candidate, gh_runner)
-        if open_pr_reference is None:
-            return "open_pr_status_unavailable"
-        if open_pr_reference:
-            return "open_pr"
+        pr_skip_reason = _linked_pr_skip_reason(candidate, gh_runner)
+        if pr_skip_reason is not None:
+            return pr_skip_reason
         try:
             status = work_claims.status(candidate.work_key, gh_runner)
         except work_claims.WorkClaimError:
@@ -716,6 +744,8 @@ def readiness_blockers(candidate: IssueCandidate) -> tuple[str, ...]:
             break
     if _DEPENDENCY_BODY_RE.search(candidate.body):
         reasons.append("blocked_dependency")
+    if _HOLD_MARKER_RE.search(candidate.body):
+        reasons.append("hold_marker")
     return tuple(_dedupe_strings(reasons))
 
 
@@ -761,10 +791,10 @@ def _issue_ref_contains(refs: Mapping[str, frozenset[int]], candidate: IssueCand
     return candidate.number in refs.get(candidate.repo.lower(), frozenset())
 
 
-def _has_open_pr_reference(
+def _linked_pr_skip_reason(
     candidate: IssueCandidate,
     gh_runner: GhRunner,
-) -> bool | None:
+) -> str | None:
     ambiguous = False
     for page in range(1, _TIMELINE_MAX_PAGES + 1):
         query = urllib.parse.urlencode(
@@ -774,30 +804,32 @@ def _has_open_pr_reference(
         try:
             proc = gh_runner(["gh", "api", "--method", "GET", path], None)
         except (OSError, subprocess.SubprocessError):
-            return None
+            return "open_pr_status_unavailable"
         if getattr(proc, "returncode", 1) != 0:
-            return None
+            return "open_pr_status_unavailable"
         try:
             payload = json.loads((getattr(proc, "stdout", "") or "").strip())
         except (TypeError, ValueError, json.JSONDecodeError):
-            return None
+            return "open_pr_status_unavailable"
         if not isinstance(payload, list):
-            return None
+            return "open_pr_status_unavailable"
 
         for raw_event in payload:
-            state = _open_pr_state_from_timeline_event(raw_event)
-            if state is True:
-                return True
-            if state is None:
+            status = _pr_status_from_timeline_event(raw_event, gh_runner)
+            if status == _PR_STATUS_OPEN:
+                return "open_pr"
+            if status == _PR_STATUS_DONE:
+                return "closed_done_pr"
+            if status is None:
                 ambiguous = True
         if len(payload) < _TIMELINE_PAGE_SIZE:
-            return None if ambiguous else False
-    return None
+            return "open_pr_status_unavailable" if ambiguous else None
+    return "open_pr_status_unavailable"
 
 
-def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
+def _pr_status_from_timeline_event(raw_event: Any, gh_runner: GhRunner) -> str | None:
     if not isinstance(raw_event, Mapping):
-        return False
+        return _PR_STATUS_NONE
     candidates: list[Any] = []
     for key in ("source", "subject"):
         source = raw_event.get(key)
@@ -807,25 +839,149 @@ def _open_pr_state_from_timeline_event(raw_event: Any) -> bool | None:
 
     ambiguous = False
     for issue in candidates:
-        state = _open_pr_state_from_issue_mapping(issue)
-        if state is True:
-            return True
-        if state is None:
+        status = _pr_status_from_issue_mapping(issue, gh_runner)
+        if status in {_PR_STATUS_OPEN, _PR_STATUS_DONE}:
+            return status
+        if status is None:
             ambiguous = True
-    return None if ambiguous else False
+    return None if ambiguous else _PR_STATUS_NONE
 
 
-def _open_pr_state_from_issue_mapping(issue: Any) -> bool | None:
+def _pr_status_from_issue_mapping(issue: Any, gh_runner: GhRunner) -> str | None:
     if not isinstance(issue, Mapping):
-        return False
-    if "pull_request" not in issue or issue.get("pull_request") is None:
-        url = issue.get("url") or issue.get("html_url")
-        if not (isinstance(url, str) and "/pull/" in url):
-            return False
+        return _PR_STATUS_NONE
+    if not _is_pull_request_issue_mapping(issue):
+        return _PR_STATUS_NONE
+
     state = issue.get("state")
     if not isinstance(state, str):
+        if _closed_pr_done_state(issue) is True:
+            return _PR_STATUS_DONE
         return None
-    return state.lower() == "open"
+
+    state_key = state.strip().lower()
+    if state_key == "open":
+        return _PR_STATUS_OPEN
+    if state_key != "closed":
+        return None
+
+    done_state = _closed_pr_done_state(issue)
+    if done_state is True:
+        return _PR_STATUS_DONE
+    if done_state is False:
+        return _PR_STATUS_CLOSED_NOT_DONE
+
+    pr_ref = _pull_request_ref_from_mapping(issue)
+    if pr_ref is None:
+        return None
+    detail = _fetch_pull_request(pr_ref, gh_runner)
+    if detail is None:
+        return None
+    return _pr_status_from_detail_mapping(detail)
+
+
+def _pr_status_from_detail_mapping(detail: Any) -> str | None:
+    if not isinstance(detail, Mapping):
+        return None
+    state = detail.get("state")
+    if not isinstance(state, str):
+        if _closed_pr_done_state(detail) is True:
+            return _PR_STATUS_DONE
+        return None
+    state_key = state.strip().lower()
+    if state_key == "open":
+        return _PR_STATUS_OPEN
+    if state_key != "closed":
+        return None
+    done_state = _closed_pr_done_state(detail)
+    if done_state is True:
+        return _PR_STATUS_DONE
+    if done_state is False:
+        return _PR_STATUS_CLOSED_NOT_DONE
+    return None
+
+
+def _is_pull_request_issue_mapping(issue: Mapping[str, Any]) -> bool:
+    if issue.get("pull_request") is not None:
+        return True
+    return _pull_request_ref_from_mapping(issue) is not None
+
+
+def _closed_pr_done_state(issue: Mapping[str, Any]) -> bool | None:
+    if issue.get("merged") is True:
+        return True
+    explicit_not_merged = issue.get("merged") is False
+
+    merged_at_present, merged_at = _merged_at_value(issue)
+    if isinstance(merged_at, str) and merged_at.strip():
+        return True
+    if merged_at_present:
+        explicit_not_merged = True
+
+    state_reason = issue.get("state_reason")
+    if isinstance(state_reason, str) and _label_key(state_reason) in _CLOSED_DONE_STATE_REASONS:
+        return True
+
+    labels = {_label_key(label) for label in _labels_from_issue(issue)}
+    if labels.intersection(_DONE_LABELS):
+        return True
+
+    if explicit_not_merged:
+        return False
+    return None
+
+
+def _merged_at_value(issue: Mapping[str, Any]) -> tuple[bool, Any]:
+    if "merged_at" in issue:
+        return True, issue.get("merged_at")
+    pull_request = issue.get("pull_request")
+    if isinstance(pull_request, Mapping) and "merged_at" in pull_request:
+        return True, pull_request.get("merged_at")
+    return False, None
+
+
+def _pull_request_ref_from_mapping(issue: Mapping[str, Any]) -> tuple[str, int] | None:
+    sources: list[Any] = [
+        issue.get("url"),
+        issue.get("html_url"),
+    ]
+    pull_request = issue.get("pull_request")
+    if isinstance(pull_request, Mapping):
+        sources.extend(
+            [
+                pull_request.get("url"),
+                pull_request.get("html_url"),
+            ]
+        )
+
+    for value in sources:
+        if not isinstance(value, str):
+            continue
+        api_match = _GITHUB_API_PULL_RE.search(value)
+        if api_match:
+            return f"{api_match.group(1)}/{api_match.group(2)}", int(api_match.group(3))
+        web_match = _GITHUB_ISSUE_RE.search(value)
+        if web_match and "/pull/" in value:
+            return f"{web_match.group(1)}/{web_match.group(2)}", int(web_match.group(3))
+    return None
+
+
+def _fetch_pull_request(pr_ref: tuple[str, int], gh_runner: GhRunner) -> Mapping[str, Any] | None:
+    repo, number = pr_ref
+    path = f"repos/{repo}/pulls/{number}"
+    try:
+        proc = gh_runner(["gh", "api", "--method", "GET", path], None)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if getattr(proc, "returncode", 1) != 0:
+        return None
+    try:
+        payload = json.loads((getattr(proc, "stdout", "") or "").strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return payload
 
 
 def _skip_record(candidate: IssueCandidate, reason: str) -> dict[str, Any]:

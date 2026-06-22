@@ -60,6 +60,9 @@ class FakeGh:
         timeline_stdout_by_number: dict[int, str] | None = None,
         timeline_stdout_by_page: dict[tuple[int, int], str] | None = None,
         timeline_failures: set[int | tuple[int, int]] | None = None,
+        pulls_by_number: dict[int, object] | None = None,
+        pull_stdout_by_number: dict[int, str] | None = None,
+        pull_failures: set[int] | None = None,
     ):
         self.comments_by_number = comments_by_number or {}
         self.timeline_by_number = timeline_by_number or {}
@@ -67,6 +70,9 @@ class FakeGh:
         self.timeline_stdout_by_number = timeline_stdout_by_number or {}
         self.timeline_stdout_by_page = timeline_stdout_by_page or {}
         self.timeline_failures = timeline_failures or set()
+        self.pulls_by_number = pulls_by_number or {}
+        self.pull_stdout_by_number = pull_stdout_by_number or {}
+        self.pull_failures = pull_failures or set()
         self.calls: list[tuple[list[str], str | None]] = []
 
     def __call__(self, argv, input_text=None):
@@ -111,6 +117,29 @@ class FakeGh:
                 argv,
                 0,
                 stdout=json.dumps(payload),
+                stderr="",
+            )
+        match = re.search(r"/pulls/(\d+)", path)
+        if match:
+            number = int(match.group(1))
+            if number in self.pull_failures:
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout="",
+                    stderr="pull unavailable",
+                )
+            if number in self.pull_stdout_by_number:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    stdout=self.pull_stdout_by_number[number],
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=json.dumps(self.pulls_by_number.get(number, {})),
                 stderr="",
             )
         match = re.search(r"/issues/(\d+)/comments", path)
@@ -261,6 +290,21 @@ def test_held_label_issue_is_skipped():
     assert result.skipped[0]["reason"] == "blocked_label"
 
 
+def test_awaiting_operator_hold_marker_issue_is_skipped():
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={
+            "items": [
+                _issue(1, body="Escalation: AWAITING-OPERATOR before pickup."),
+                _issue(2),
+            ]
+        },
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "hold_marker"
+
+
 def test_arc_held_checkpoint_list_issue_is_skipped():
     payload = {
         "items": [
@@ -284,6 +328,16 @@ def test_meta_issue_is_skipped_as_non_leaf_work():
     result = ft.plan_triage(
         arc_ticket="creator-engine/ce-ops#187",
         issues={"items": [_issue(1, labels=[{"name": "type/meta"}]), _issue(2)]},
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "aggregate_issue"
+
+
+def test_tracking_label_issue_is_skipped_as_non_leaf_work():
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1, labels=[{"name": "kind/tracking"}]), _issue(2)]},
     )
 
     assert [item.issue.number for item in result.items] == [2]
@@ -357,6 +411,128 @@ def test_open_pr_reference_is_skipped_when_gh_runner_is_supplied():
 
     assert [item.issue.number for item in result.items] == [2]
     assert result.skipped[0]["reason"] == "open_pr"
+
+
+def test_merged_pr_reference_is_skipped_when_gh_runner_is_supplied():
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99",
+                            "merged_at": "2026-06-22T10:33:22Z",
+                        },
+                    }
+                },
+            }
+        ]
+    }
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=FakeGh(timeline_by_number=timeline),
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "closed_done_pr"
+
+
+def test_closed_completed_pr_reference_is_skipped_from_pull_detail():
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99"
+                        },
+                    }
+                },
+            }
+        ]
+    }
+    fake = FakeGh(
+        timeline_by_number=timeline,
+        pulls_by_number={99: {"number": 99, "state": "closed", "merged": True}},
+    )
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "closed_done_pr"
+    assert any("/pulls/99" in call[0][-1] for call in fake.calls)
+
+
+def test_closed_unmerged_pr_reference_does_not_skip_by_itself():
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99",
+                            "merged_at": None,
+                        },
+                    }
+                },
+            }
+        ]
+    }
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=FakeGh(timeline_by_number=timeline),
+    )
+
+    assert [item.issue.number for item in result.items] == [1, 2]
+    assert result.skipped == ()
+
+
+def test_closed_pr_ambiguous_detail_lookup_fails_closed():
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99"
+                        },
+                    }
+                },
+            }
+        ]
+    }
+    fake = FakeGh(timeline_by_number=timeline, pull_failures={99})
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert any("/pulls/99" in call[0][-1] for call in fake.calls)
+    assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
 
 
 def test_open_pr_reference_paginates_until_later_open_pr():
