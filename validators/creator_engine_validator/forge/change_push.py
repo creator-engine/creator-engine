@@ -16,6 +16,8 @@ Like the rest of ``forge/`` it is **plan-by-default** and talks to git only thro
 * ``apply=True`` (never run against a live remote in CI) pushes ``refs/heads/<branch>`` to the
   remote, is a verified no-op when the remote ref already equals the local head, and **refuses a
   non-fast-forward** (it NEVER force-pushes).
+* Before any remote read or mutation, a deterministic supersession guard compares the would-push
+  branch with the current base ref and refuses stale duplicate/regressive courier pushes.
 
 Defensive invariants (deliberate, load-bearing):
 
@@ -37,6 +39,9 @@ Defensive invariants (deliberate, load-bearing):
 * **Refuse a malformed request BEFORE any git call** (refuse-before-side-effect): a malformed
   ``repo``, an empty ``branch``, a credential-less ``token``, or a missing/absent local branch is
   refused before ``spawn`` is ever invoked.
+* **Refuse a superseded branch BEFORE any remote call**: branch-added paths already present on the
+  base ref, path overlap with base-side changes since merge-base, ADR/decision number collisions,
+  regressive ``base -> branch`` net-negative diffs, and stale bases all deny before ``ls-remote``.
 
 Network/subprocess only behind the injectable ``spawn`` seam; tests inject a fake and perform ZERO
 live git / network. Importing this module performs no I/O and registers no validator check (so
@@ -71,6 +76,7 @@ _SCRUBBED_CHILD_ENV = ("GH_DEBUG", "GH_HOST", "GH_CONFIG_DIR", "GITHUB_API_URL")
 #: The authenticated-git config args: clear any inherited helper, then route credentials through
 #: ``gh auth git-credential`` (which reads ``GH_TOKEN`` from the env). The token never enters argv.
 _GH_CREDENTIAL_ARGS = ("-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential")
+_ADR_NUMBER_RE = re.compile(r"(?:^|/)ADR-(\d{4,})[-_.]")
 
 
 class PushRefused(ForgeConfigRefused):
@@ -118,6 +124,145 @@ class PushResult:
             "applied": self.applied,
             "pushed": self.pushed,
         }
+
+
+@dataclass(frozen=True)
+class SupersessionPolicy:
+    """Pure policy knobs for refusing stale/superseded branch pushes."""
+
+    base_ref: str = "origin/main"
+    max_net_negative_lines: int = 500
+    max_base_commits_since_merge_base: int = 50
+    max_base_seconds_since_merge_base: int = 48 * 60 * 60
+
+
+@dataclass(frozen=True)
+class SupersessionFacts:
+    """Immutable git facts used by the supersession evaluator; carries no secrets."""
+
+    base_ref: str
+    base_head: str
+    branch_head: str
+    merge_base: str
+    branch_added_paths: frozenset[str]
+    branch_changed_paths: frozenset[str]
+    base_paths: frozenset[str]
+    base_changed_paths_since_merge_base: frozenset[str]
+    branch_added_adr_numbers: frozenset[str]
+    base_adr_numbers: frozenset[str]
+    base_to_branch_added_lines: int
+    base_to_branch_deleted_lines: int
+    base_commits_since_merge_base: int
+    base_seconds_since_merge_base: int
+
+    @property
+    def net_negative_lines(self) -> int:
+        return self.base_to_branch_deleted_lines - self.base_to_branch_added_lines
+
+
+@dataclass(frozen=True)
+class SupersessionCheck:
+    """One deterministic guard check result."""
+
+    code: str
+    passed: bool
+    detail: str
+    offenders: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SupersessionDecision:
+    """Pure supersession decision: allow iff every check passed."""
+
+    allowed: bool
+    checks: tuple[SupersessionCheck, ...]
+
+    @property
+    def failed_checks(self) -> tuple[SupersessionCheck, ...]:
+        return tuple(check for check in self.checks if not check.passed)
+
+
+def evaluate_supersession(
+    facts: SupersessionFacts,
+    policy: SupersessionPolicy = SupersessionPolicy(),
+) -> SupersessionDecision:
+    """Pure deterministic supersession decision for one would-push branch.
+
+    All inputs are already-extracted git facts. A single failed check denies the
+    push before any remote mutation, intentionally favoring over-exclusion over
+    duplicate or regressive autonomous couriering.
+    """
+    added_on_base = tuple(sorted(facts.branch_added_paths.intersection(facts.base_paths)))
+    base_overlap = tuple(
+        sorted(facts.branch_changed_paths.intersection(facts.base_changed_paths_since_merge_base))
+    )
+    adr_overlap = tuple(sorted(facts.branch_added_adr_numbers.intersection(facts.base_adr_numbers)))
+    checks = (
+        SupersessionCheck(
+            "added_path_already_on_base",
+            not added_on_base,
+            "branch-added paths are absent from the current base"
+            if not added_on_base else
+            "branch-added paths already exist on the current base",
+            added_on_base,
+        ),
+        SupersessionCheck(
+            "base_changed_path_overlap",
+            not base_overlap,
+            "branch paths do not overlap paths changed on base since merge-base"
+            if not base_overlap else
+            "branch paths overlap paths changed on base since merge-base",
+            base_overlap,
+        ),
+        SupersessionCheck(
+            "adr_number_available",
+            not adr_overlap,
+            "branch-added ADR/decision numbers are not already present on base"
+            if not adr_overlap else
+            "branch-added ADR/decision numbers already exist on base",
+            adr_overlap,
+        ),
+        SupersessionCheck(
+            "net_negative_within_threshold",
+            facts.net_negative_lines <= policy.max_net_negative_lines,
+            (
+                f"net-negative lines {facts.net_negative_lines} <= "
+                f"{policy.max_net_negative_lines}"
+            )
+            if facts.net_negative_lines <= policy.max_net_negative_lines else
+            (
+                f"net-negative lines {facts.net_negative_lines} exceed "
+                f"{policy.max_net_negative_lines}"
+            ),
+        ),
+        SupersessionCheck(
+            "base_commits_within_threshold",
+            facts.base_commits_since_merge_base <= policy.max_base_commits_since_merge_base,
+            (
+                f"base moved {facts.base_commits_since_merge_base} commit(s) since merge-base "
+                f"<= {policy.max_base_commits_since_merge_base}"
+            )
+            if facts.base_commits_since_merge_base <= policy.max_base_commits_since_merge_base else
+            (
+                f"base moved {facts.base_commits_since_merge_base} commit(s) since merge-base "
+                f"> {policy.max_base_commits_since_merge_base}"
+            ),
+        ),
+        SupersessionCheck(
+            "base_age_within_threshold",
+            facts.base_seconds_since_merge_base <= policy.max_base_seconds_since_merge_base,
+            (
+                f"base is {facts.base_seconds_since_merge_base}s newer than merge-base "
+                f"<= {policy.max_base_seconds_since_merge_base}s"
+            )
+            if facts.base_seconds_since_merge_base <= policy.max_base_seconds_since_merge_base else
+            (
+                f"base is {facts.base_seconds_since_merge_base}s newer than merge-base "
+                f"> {policy.max_base_seconds_since_merge_base}s"
+            ),
+        ),
+    )
+    return SupersessionDecision(allowed=all(check.passed for check in checks), checks=checks)
 
 
 #: The injectable git transport: ``(argv, input_text, env) -> CompletedProcess`` (the
@@ -181,6 +326,204 @@ def _local_head(spawn, source_dir: str, branch: str) -> str:
     return out
 
 
+def _git_stdout(spawn, source_dir: str, args: Sequence[str], *, purpose: str) -> str:
+    """Run one local read-only git probe; failure is a fail-closed policy refusal."""
+    proc = spawn(["git", "-C", str(source_dir), *args], None, _child_env(None))
+    if getattr(proc, "returncode", 1) != 0:
+        detail = (getattr(proc, "stderr", "") or "").strip() or "unknown error"
+        raise PushRefused(
+            f"supersession guard could not {purpose}: {detail}; refusing before push"
+        )
+    return (getattr(proc, "stdout", "") or "").strip()
+
+
+def _parse_name_status(stdout: str) -> tuple[frozenset[str], frozenset[str]]:
+    added: set[str] = set()
+    changed: set[str] = set()
+    for raw in stdout.splitlines():
+        parts = raw.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0]
+        path = parts[-1].strip()
+        if not path:
+            continue
+        code = status[:1]
+        # Every status touches its destination path on the branch side: A/M/R/C and — load-bearing
+        # for the supersession overlap — D. A deletion IS a branch-side change to that path, so it
+        # must contribute to ``changed`` (the overlap predicate); excluding it failed the guard OPEN
+        # for a branch that deletes a path the base also changed since merge-base. The overlap is a
+        # boolean intersection, independent of the net-negative line threshold, so a deletion-overlap
+        # is caught regardless of diff size.
+        changed.add(path)
+        if code == "A":
+            added.add(path)
+    return frozenset(added), frozenset(changed)
+
+
+def _parse_path_lines(stdout: str) -> frozenset[str]:
+    return frozenset(line.strip() for line in stdout.splitlines() if line.strip())
+
+
+def _parse_numstat(stdout: str) -> tuple[int, int]:
+    added = 0
+    deleted = 0
+    for raw in stdout.splitlines():
+        parts = raw.split("\t")
+        if len(parts) < 3:
+            continue
+        try:
+            added += int(parts[0])
+            deleted += int(parts[1])
+        except ValueError:
+            continue
+    return added, deleted
+
+
+def _parse_int(raw: str, *, purpose: str) -> int:
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise PushRefused(
+            f"supersession guard could not parse {purpose}; refusing before push"
+        ) from exc
+
+
+def _adr_numbers(paths: frozenset[str]) -> frozenset[str]:
+    numbers: set[str] = set()
+    for path in paths:
+        match = _ADR_NUMBER_RE.search(path)
+        if match:
+            numbers.add(match.group(1))
+    return frozenset(numbers)
+
+
+def _collect_supersession_facts(
+    spawn,
+    source_dir: str,
+    branch: str,
+    branch_head: str,
+    policy: SupersessionPolicy,
+) -> SupersessionFacts:
+    """Extract value-free local git facts for the supersession guard."""
+    base_ref = (policy.base_ref or "").strip()
+    if not base_ref:
+        raise PushRefused("supersession guard base_ref is empty; refusing before push")
+    base_head = _git_stdout(
+        spawn,
+        source_dir,
+        ["rev-parse", "--verify", "--quiet", base_ref],
+        purpose=f"resolve base ref {base_ref!r}",
+    )
+    if not base_head:
+        raise PushRefused(f"supersession guard found empty base ref {base_ref!r}; refusing before push")
+    merge_base = _git_stdout(
+        spawn,
+        source_dir,
+        ["merge-base", base_head, branch_head],
+        purpose=f"compute merge-base for {base_ref!r} and {branch!r}",
+    )
+    if not merge_base:
+        raise PushRefused("supersession guard found empty merge-base; refusing before push")
+
+    branch_status = _git_stdout(
+        spawn,
+        source_dir,
+        ["diff", "--name-status", merge_base, branch_head],
+        purpose="read branch changed paths",
+    )
+    branch_added_paths, branch_changed_paths = _parse_name_status(branch_status)
+    base_paths = _parse_path_lines(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["ls-tree", "-r", "--name-only", base_head],
+            purpose=f"list paths at {base_ref!r}",
+        )
+    )
+    base_changed_paths = _parse_path_lines(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["diff", "--name-only", merge_base, base_head],
+            purpose=f"read paths changed on {base_ref!r} since merge-base",
+        )
+    )
+    base_to_branch_added, base_to_branch_deleted = _parse_numstat(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["diff", "--numstat", base_head, branch_head],
+            purpose=f"read {base_ref!r} to branch diff numstat",
+        )
+    )
+    base_commits = _parse_int(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["rev-list", "--count", f"{merge_base}..{base_head}"],
+            purpose=f"count {base_ref!r} commits since merge-base",
+        ),
+        purpose="base commit count",
+    )
+    base_time = _parse_int(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["show", "-s", "--format=%ct", base_head],
+            purpose=f"read {base_ref!r} commit time",
+        ),
+        purpose="base commit time",
+    )
+    merge_base_time = _parse_int(
+        _git_stdout(
+            spawn,
+            source_dir,
+            ["show", "-s", "--format=%ct", merge_base],
+            purpose="read merge-base commit time",
+        ),
+        purpose="merge-base commit time",
+    )
+    return SupersessionFacts(
+        base_ref=base_ref,
+        base_head=base_head,
+        branch_head=branch_head,
+        merge_base=merge_base,
+        branch_added_paths=branch_added_paths,
+        branch_changed_paths=branch_changed_paths,
+        base_paths=base_paths,
+        base_changed_paths_since_merge_base=base_changed_paths,
+        branch_added_adr_numbers=_adr_numbers(branch_added_paths),
+        base_adr_numbers=_adr_numbers(base_paths),
+        base_to_branch_added_lines=base_to_branch_added,
+        base_to_branch_deleted_lines=base_to_branch_deleted,
+        base_commits_since_merge_base=base_commits,
+        base_seconds_since_merge_base=max(0, base_time - merge_base_time),
+    )
+
+
+def _enforce_supersession_guard(
+    spawn,
+    source_dir: str,
+    branch: str,
+    branch_head: str,
+    policy: SupersessionPolicy,
+) -> None:
+    facts = _collect_supersession_facts(spawn, source_dir, branch, branch_head, policy)
+    decision = evaluate_supersession(facts, policy)
+    if decision.allowed:
+        return
+    rendered = "; ".join(
+        f"{check.code}: {check.detail}"
+        + (f" ({', '.join(check.offenders[:5])})" if check.offenders else "")
+        for check in decision.failed_checks
+    )
+    raise PushRefused(
+        f"supersession guard refused branch {branch!r} against {policy.base_ref!r}: "
+        f"{rendered}"
+    )
+
+
 def _ls_remote(spawn, source_dir: str, url: str, branch: str, token: ScopedToken) -> str | None:
     """The remote ``refs/heads/<branch>`` sha via authenticated ``git ls-remote``, or ``None``."""
     proc = spawn(
@@ -239,6 +582,7 @@ def push_change(
     token: ScopedToken,
     apply: bool = False,
     spawn=None,
+    supersession_policy: SupersessionPolicy | None = SupersessionPolicy(),
 ) -> PushResult:
     """Push (or plan to push) ``refs/heads/<branch>`` to the CONSTRUCTED HTTPS remote (plan-by-default).
 
@@ -255,6 +599,8 @@ def push_change(
     url = _https_remote_url(repo)
 
     local = _local_head(_spawn, source_dir, branch)
+    if supersession_policy is not None:
+        _enforce_supersession_guard(_spawn, source_dir, branch, local, supersession_policy)
     remote = _ls_remote(_spawn, source_dir, url, branch, token)
 
     if remote is not None and remote == local:

@@ -35,6 +35,8 @@ SENTINEL = "ghs_SENTINELtoken_DEADBEEFcafef00d"
 REPO = "creator-engine/creator-engine"
 BRANCH = "v31-g2-forge-join"
 LOCAL = "a" * 40
+BASE = "b" * 40
+MERGE_BASE = "c" * 40
 HEAD_SHA = "d" * 40
 _FIXED_NOW = datetime(2026, 6, 11, 9, 30, 0, tzinfo=timezone.utc)
 
@@ -102,7 +104,7 @@ class FakeGhSpawn:
 
 
 class FakeGit:
-    """The push spawn: rev-parse (local head) / ls-remote / merge-base / push."""
+    """The push spawn: local/base probes / ls-remote / fast-forward check / push."""
 
     def __init__(self, *, local=LOCAL, remote=None, push_rc=0):
         self.calls = []
@@ -113,13 +115,29 @@ class FakeGit:
     def __call__(self, argv, input_text, env):
         argv = list(argv)
         self.calls.append({"argv": argv, "env": dict(env)})
-        if "rev-parse" in argv:
+        if "rev-parse" in argv and any(str(arg).endswith(f"refs/heads/{BRANCH}") for arg in argv):
             return _CP(argv, 0, stdout=self.local + "\n")
+        if "rev-parse" in argv:
+            return _CP(argv, 0, stdout=BASE + "\n")
         if "ls-remote" in argv:
             out = f"{self.remote}\trefs/heads/{BRANCH}\n" if self.remote else ""
             return _CP(argv, 0, stdout=out)
-        if "merge-base" in argv:
+        if "merge-base" in argv and "--is-ancestor" in argv:
             return _CP(argv, 0)
+        if "merge-base" in argv:
+            return _CP(argv, 0, stdout=MERGE_BASE + "\n")
+        if "diff" in argv and "--name-status" in argv:
+            return _CP(argv, 0, stdout="M\ta.py\n")
+        if "diff" in argv and "--name-only" in argv:
+            return _CP(argv, 0)
+        if "diff" in argv and "--numstat" in argv:
+            return _CP(argv, 0, stdout="1\t0\ta.py\n")
+        if "ls-tree" in argv:
+            return _CP(argv, 0, stdout="README.md\n")
+        if "rev-list" in argv:
+            return _CP(argv, 0, stdout="0\n")
+        if "show" in argv and "--format=%ct" in argv:
+            return _CP(argv, 0, stdout="1770000000\n")
         if "push" in argv:
             return _CP(argv, self.push_rc, stderr="push boom" if self.push_rc else "")
         raise AssertionError(f"unexpected git argv: {argv}")  # pragma: no cover
