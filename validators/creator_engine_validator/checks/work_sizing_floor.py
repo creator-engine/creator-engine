@@ -83,6 +83,15 @@ def excluded_path_category(path: str) -> str | None:
     return None
 
 
+def _is_test_path(path: str) -> bool:
+    pure = _normalize_path(path)
+    parts = tuple(part.lower() for part in pure.parts)
+    if len(parts) >= 2 and parts[:2] == ("validators", "tests"):
+        return True
+    name = pure.name.lower()
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
 def parse_numstat(text: str) -> list[ChangeStat]:
     """Parse ``git diff --numstat`` text into deterministic change stats."""
     stats: list[ChangeStat] = []
@@ -209,6 +218,21 @@ def sizing_floor_projection(
     return projection
 
 
+def _pr_diff_ceiling_stats(change_stats: Iterable[ChangeStat | dict[str, Any]]) -> list[ChangeStat]:
+    """Return PR-diff stats for the class ceiling: source/non-test additions only."""
+    stats: list[ChangeStat] = []
+    for raw in change_stats:
+        stat = _coerce_change_stat(raw)
+        additions = 0 if _is_test_path(stat.path) else stat.additions
+        stats.append(ChangeStat(
+            path=stat.path,
+            additions=additions,
+            deletions=0,
+            binary=stat.binary,
+        ))
+    return stats
+
+
 def _is_under_excluded(path: Path) -> bool:
     parts = path.parts
     return "schemas" in parts or "templates" in parts
@@ -331,7 +355,10 @@ def run_with_base(
         return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
     try:
-        projection = sizing_floor_projection(declared_work_class, parse_numstat(stdout))
+        projection = sizing_floor_projection(
+            declared_work_class,
+            _pr_diff_ceiling_stats(parse_numstat(stdout)),
+        )
     except ValueError:
         errors.append(make_error(
             CODE_INVALID,

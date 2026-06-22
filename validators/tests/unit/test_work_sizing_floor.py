@@ -161,6 +161,13 @@ def test_generated_lockfile_and_vendored_lines_are_excluded_from_floor():
     }
 
 
+def test_pr_diff_test_path_detection_matches_floor_amendment():
+    assert chk._is_test_path("validators/tests/unit/fixture_helpers.py")
+    assert chk._is_test_path("src/test_parser.py")
+    assert chk._is_test_path("src/parser_test.py")
+    assert not chk._is_test_path("src/parser_tests.py")
+
+
 def test_valid_floor_record_passes():
     assert _codes(_record()) == []
 
@@ -253,6 +260,32 @@ def test_run_with_base_excludes_generated_lockfile_and_vendored_actual_diff(tmp_
     _write_repo_file(repo, "vendor/lib.c", lines=1200)
     _commit_all(repo)
 
+    result = chk.run_with_base([repo], base, declared_work_class="tiny")
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_with_base_sizes_source_added_lines_not_test_added_lines(tmp_path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/app.py", lines=399)
+    _write_repo_file(repo, "validators/tests/unit/fixture_helpers.py", lines=450)
+    _write_repo_file(repo, "src/parser_test.py", lines=451)
+    _commit_all(repo)
+
+    numstat = subprocess.run(
+        ["git", "diff", "--numstat", "--no-renames", f"{base}..HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    projection = chk.sizing_floor_projection(
+        "tiny",
+        chk._pr_diff_ceiling_stats(chk.parse_numstat(numstat)),
+    )
+
+    assert projection["included_lines"] == 399
+    assert projection["minimum_work_class"] == "tiny"
     result = chk.run_with_base([repo], base, declared_work_class="tiny")
 
     assert result.ok, [e.format() for e in result.errors]
