@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import pco_allocator, work_claims
+from . import pco_allocator, seat_lifecycle, work_claims
 
 #: HTTPS transport: ``(method, url, headers, body) -> (status, headers, body_text)``.
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
@@ -753,7 +753,14 @@ _DEFAULT_LANE_KIND = "implementation"
 #: The lane-launch sentinel that confirms the seat is live (the lane runtime's
 #: registered lifecycle state). Search-backed work has no read-state API; this
 #: sentinel still gates launch success and seed bookkeeping.
-LAUNCHED_STATE = "launched"
+#:
+#: ce-ops#205: this MUST equal the state ``ce lane launch --json`` reports for a
+#: fully-governed spawn — ``seat_lifecycle.register_spawn`` returns
+#: ``REGISTRATION_STATE_GOVERNED`` (``"alive"``), NOT ``"launched"``. The old
+#: literal ``"launched"`` never matched, so the belt reported ``launched=False``
+#: for EVERY successful spawn (the seed/dedup bookkeeping never confirmed). Bind
+#: to the lifecycle constant so the sentinel tracks the runtime contract.
+LAUNCHED_STATE = seat_lifecycle.REGISTRATION_STATE_GOVERNED
 
 
 @dataclass(frozen=True)
@@ -889,9 +896,10 @@ def launch_lane(
     try:
         proc = runner(argv)
     except Exception as exc:
-        return LaunchResult(launched=False, seed_path=seed.path, note=f"spawn error: {exc}")
+        return LaunchResult(launched=False, seed_path=seed.path, lane_id=lane_id,
+                            note=f"spawn error: {exc}")
     if getattr(proc, "returncode", 1) != 0:
-        return LaunchResult(launched=False, seed_path=seed.path,
+        return LaunchResult(launched=False, seed_path=seed.path, lane_id=lane_id,
                             note=f"lane launch exited {getattr(proc, 'returncode', '?')}")
     state = None
     out = (getattr(proc, "stdout", "") or "").strip()

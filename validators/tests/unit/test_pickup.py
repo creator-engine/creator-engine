@@ -661,9 +661,12 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
 
     def fake_spawn(argv):
         calls.append(argv)
+        # ce-ops#205: a fully-governed ``ce lane launch --json`` reports
+        # ``seat_lifecycle_state: "alive"`` (seat_lifecycle.REGISTRATION_STATE_GOVERNED),
+        # NOT "launched"; the belt's success sentinel binds to that constant.
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched",
+            stdout=json.dumps({"seat_lifecycle_state": "alive",
                                "pane_path": "/x", "record": {}}),
             stderr="",
         )
@@ -731,7 +734,7 @@ def test_launch_lane_allocates_active_work_claim_before_spawn(tmp_path):
         seen["argv_ledger_root"] = argv[lr_idx + 1]
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
 
     result = pickup.launch_lane(
         item, identity=identity, run_id=run_id, claim_id="wclaim-abc",
@@ -762,7 +765,7 @@ def test_launch_lane_allocation_is_idempotent_on_repoll(tmp_path):
     def fake_spawn(argv):
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
 
     kwargs = dict(
         identity="ce-dev-2", run_id="r1", claim_id="c", harness="codex",
@@ -798,7 +801,7 @@ def test_launch_lane_allocation_refusal_fails_closed_without_spawn(tmp_path, mon
         spawn_calls.append(argv)  # must never be invoked on a refused allocation
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
 
     # Force the in-place allocator to refuse (raise the conflict/allocation error
     # type ``launch_lane`` catches). This stands in for a malformed / lease-uncovered
@@ -857,7 +860,7 @@ def test_launch_lane_malformed_existing_claim_fails_closed_without_spawn(tmp_pat
         spawn_calls.append(argv)
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
 
     result = pickup.launch_lane(
         item, identity=identity, run_id=run_id, claim_id="c",
@@ -910,7 +913,7 @@ def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatc
         launched_argvs.append(argv)
         return subprocess.CompletedProcess(
             argv, 0,
-            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
 
     monkeypatch.setattr(ce_cli, "_make_pickup_lane_spawn", lambda: fake_spawn)
 
