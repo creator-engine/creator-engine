@@ -27,6 +27,7 @@ ce pcl verify        # validate an on-disk PCL ledger + head manifest, read-only
 ce pcl replay        # deterministic ordered read-only projection of a PCL ledger
 ce pcl index         # deterministic content-hashed index of a PCL ledger (written to the ignored cache)
 ce pcl merge         # deterministic conflict-detecting merge projection of >=2 ledgers (read-only)
+ce brain init        # idempotently bootstrap a valid genesis brain assertion ledger
 ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/state
 ce brain check       # deterministically return the active assertion or unknown
 ce brain correct     # append a supersession marker plus corrected assertion
@@ -678,6 +679,13 @@ def _build_parser() -> argparse.ArgumentParser:
     bb.add_argument("--role", default=brain_bootstrap.DEFAULT_ROLE, help="bootstrap role label")
     bb.add_argument("--seat-class", default=brain_bootstrap.DEFAULT_SEAT_CLASS, help="foreman/worker; unknown fails closed to foreman")
     bb.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bin_ = brain_sub.add_parser(
+        "init",
+        help="idempotently bootstrap a valid genesis brain assertion ledger (ce-ops#206)",
+    )
+    _add_state_root(bin_)
+    bin_.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce connector — GitHub connector runtime. Validates a connector descriptor +
     # Mission-Brief (G2.005.0 substrate). G2.005.1 added read-only verify/plan/fetch;
@@ -1933,6 +1941,94 @@ def _brain_bootstrap(args) -> int:
     return 0
 
 
+# ce-ops#206: the fixed, deterministic genesis assertion `ce brain init` writes
+# to bootstrap an empty workspace's brain ledger. Its claim merely records that
+# the ledger was genesis-initialized — it carries no capability verdict and is
+# never corrected; downstream asserts/corrects layer on top of it. The id is
+# fixed so re-running init is a deterministic no-op rather than appending a
+# fresh genesis on every invocation.
+_BRAIN_INIT_ASSERTION_ID = "brain-assertion-genesis-0001"
+_BRAIN_INIT_SCOPE = "global"
+_BRAIN_INIT_CLAIM = {
+    "subject": "brain-ledger",
+    "predicate": "is",
+    "object": "genesis-initialized",
+}
+_BRAIN_INIT_EVIDENCE_REF = "ce-ops#206:ce-brain-init"
+
+
+def _brain_init_payload(result_path, *, created: bool, summary) -> dict:
+    return {
+        "ledger_path": str(result_path),
+        "created": created,
+        "already_initialized": not created,
+        "genesis_id": _BRAIN_INIT_ASSERTION_ID,
+        "record_count": summary.get("record_count"),
+        "active_count": summary.get("active_count"),
+        "head_content_hash": summary.get("head_content_hash"),
+    }
+
+
+def _brain_init(args) -> int:
+    state_root = args.state_root
+    path = brain_runtime.ledger_path(state_root)
+    json_output = getattr(args, "json_output", False)
+
+    # Idempotent / fail-closed: if a ledger file already exists, only a VALID
+    # one is a no-op. A corrupt/invalid/conflicting ledger is refused (we never
+    # overwrite or append a duplicate genesis on top of a broken ledger).
+    if path.is_file():
+        verify = brain_runtime.verify_ledger(state_root)
+        if verify.ok:
+            payload = _brain_init_payload(verify.ledger_path, created=False, summary=verify.summary)
+            if json_output:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"ce brain init: already initialized ({path})")
+                print(f"head_content_hash: {verify.summary.get('head_content_hash')}")
+            return 0
+        print(
+            "ERROR: ce brain init refused [CE-BRAIN-INIT-REFUSED]: "
+            f"existing ledger at {path} is not valid; refusing to overwrite",
+            file=sys.stderr,
+        )
+        for error in verify.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+        return 1
+
+    # Fresh workspace: write the genesis assertion via the SSOT assert path.
+    try:
+        result = brain_runtime.assert_claim(
+            claim=dict(_BRAIN_INIT_CLAIM),
+            scope=_BRAIN_INIT_SCOPE,
+            evidence_ref=_BRAIN_INIT_EVIDENCE_REF,
+            state_root=state_root,
+            assertion_id=_BRAIN_INIT_ASSERTION_ID,
+        )
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("init", exc)
+
+    verify = brain_runtime.verify_ledger(state_root)
+    if not verify.ok:
+        # Defensive: the SSOT write path should always land a valid ledger.
+        print(
+            "ERROR: ce brain init refused [CE-BRAIN-INIT-REFUSED]: "
+            f"wrote ledger at {result.ledger_path} but it did not verify",
+            file=sys.stderr,
+        )
+        for error in verify.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+        return 1
+
+    payload = _brain_init_payload(result.ledger_path, created=True, summary=verify.summary)
+    if json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"ce brain init: initialized genesis ledger at {result.ledger_path}")
+        print(f"content_hash: {result.content_hash}")
+    return 0
+
+
 def _brain_recall(args) -> int:
     db_path = args.db
     if db_path is None:
@@ -2778,6 +2874,7 @@ _BRAIN_DISPATCH = {
     "bootstrap": _brain_bootstrap,
     "check": _brain_check,
     "correct": _brain_correct,
+    "init": _brain_init,
     "ingest": _brain_ingest,
     "recall": _brain_recall,
     "probe": _brain_probe,
