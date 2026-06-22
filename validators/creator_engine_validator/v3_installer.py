@@ -2955,7 +2955,8 @@ def build_reinstall_convergence_plan(
     if answers is not None or schema is not None:
         if answers is None or schema is None:
             raise InstallRefused("reinstall GitHub convergence requires both answers and schema")
-        merged_probe = {**_prior_state_github_probe(prior), **(github_probe or {})}
+        live_probe = {key: value for key, value in (github_probe or {}).items() if value is not None}
+        merged_probe = {**_prior_state_github_probe(prior), **live_probe}
         result["github"] = build_github_leg_plan(answers, schema=schema, probe=merged_probe)
     return result
 
