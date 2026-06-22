@@ -10,11 +10,11 @@ bootstrap circularity).
 Contract: docs/contracts/installer.md.
 
 signature:
-  key_id: ce-dev1-root-v1
+  key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWd5T1hld2VxUGx5NjFDL0Flc1V2cXAvSkRJNgpEUDdaK3l5Z2tmYjJkSzlOOEFBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDNPenZoZlRiWGxNY1VKd3ZRcy9EajluUkp1d1FHekJVKzBPQnE0dk9rV0VIKys0ZVZrNXRML3QKYnpHajZzMm1xTS9LY0JaUTMrS3Y3cGg3RU5OWlVCCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: dda8682130a57c3774a27bcf8280dfd769d9161821cd0bee6aa97b29d4a991e6
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQmhzOEQvbHFBUnM4eWhCb1VYOW1LUVR5eTN2dGhkaTVpVHBsM0JSbGxKOC9vWERTTEo2VDBKK20KZm8zay91QnJjMTkxZlRHaVlyajZTME9POWVpUzhLCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: d34a296e306998077c34dcf8265ac7fe92d3759237fa99b77346f6d7085762b9
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.2.0
   sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: e11aa9c5da012cf1f79654510651e00ef354a148434fea4c9174a36fb2ee6e74
+  sha256s_sha256: 6cd2baf3b481a64c9b542716108fbaa9ce2b1022c110fb7bab780ec03dbee716
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -36,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.2.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: 14cae3942d1d638a470b61f36c60ffaffdf0ad7fb0e3a8a0a18fed12e8cd1544
+      sha256: 709547f73c6365f522020814bdc264755b1c7d42394d5aa21ef30d859d4e3fa4
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
@@ -122,10 +122,10 @@ curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
 #    URLs are refused before fetch.
 curl -fsSL 'https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT' \
     -o ce-root-v1.anchor.raw
-grep -Eo 'ce-dev1-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw \
+grep -Eo 'ce-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw \
     | sed -E 's/[[:space:]]+/=/' > ce-root-v1.anchor
 test "$(cut -d= -f2 ce-root-v1.anchor)" = "$(ssh-keygen -l -f ce-root-v1 -E sha256 \
-    | awk '$3 == "ce-dev1-root-v1" { print $2; exit }')"
+    | awk '$3 == "ce-root-v1" { print $2; exit }')"
 
 # 3. Reconstruct the CANONICAL bytes this signature covers: this file with the
 #    signature block's value:/content_sha256: lines reset to their placeholder.
@@ -138,7 +138,7 @@ printf '%s' '<paste the value: base64 here>' | base64 -d > ce-spec.sig
 
 # 5. Verify under the fixed namespace `ce-spec-v1`. On "Good ... signature",
 #    continue; on ANY other output, STOP — do not execute a single step.
-ssh-keygen -Y verify -f ce-root-v1 -I ce-dev1-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
+ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
 
 # 6. (Optional in-tree floor.) The block's content_sha256 must equal:
 sha256sum ce-spec.canonical
