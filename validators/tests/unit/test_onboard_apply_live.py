@@ -1327,10 +1327,22 @@ class _AdoptionForge:
         if "ls-remote" in argv:
             # empty → branch absent on remote (a clean create push); else a non-ancestor sha.
             return self._done(argv, 0, "" if self.fast_forward else ("9" * 40 + "\trefs/heads/ce/adopt-governance"))
-        if "merge-base" in argv:
+        if "merge-base" in argv and "--is-ancestor" in argv:
             return self._done(argv, 0 if self.fast_forward else 1)
+        if "merge-base" in argv:
+            return self._done(argv, 0, "e" * 40 + "\n")
         if "rev-parse" in argv:
             return self._done(argv, 0, "f" * 40)
+        if "diff" in argv and "--name-status" in argv:
+            return self._done(argv, 0, "M\t.ce/skills/project-conventions.md\n")
+        if "diff" in argv and "--name-only" in argv:
+            return self._done(argv, 0, "")
+        if "diff" in argv and "--numstat" in argv:
+            return self._done(argv, 0, "1\t0\t.ce/skills/project-conventions.md\n")
+        if "rev-list" in argv:
+            return self._done(argv, 0, "0\n")
+        if "show" in argv and "--format=%ct" in argv:
+            return self._done(argv, 0, "1770000000\n")
         if "commit" in argv:
             if self.expected_commit_login:
                 if (

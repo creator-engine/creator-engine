@@ -3,7 +3,8 @@
 Every git/network edge is faked through the ``spawn=`` seam: ZERO live git / network. The
 gate's heart is the secret-hygiene proof — a sentinel token value appears in NO argv and NO
 :class:`PushResult` bytes, lands ONLY in the authenticated child env's ``GH_TOKEN``, and the
-push is plan-by-default, HTTPS-URL-constructed, and NEVER force.
+push is plan-by-default, HTTPS-URL-constructed, NEVER force, and refuses superseded branches
+before any remote read or push.
 """
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ REPO = "creator-engine/creator-engine"
 BRANCH = "v31-g2-forge-join"
 LOCAL = "a" * 40
 REMOTE = "b" * 40
+BASE = "c" * 40
+MERGE_BASE = "d" * 40
 
 
 def _token(value: str = SENTINEL) -> ScopedToken:
@@ -38,6 +41,10 @@ class ScriptedGit:
     def __init__(
         self, *, local_head=LOCAL, remote_head=None, is_ancestor=True,
         local_rc=0, ls_remote_rc=0, push_rc=0,
+        base_head=BASE, base_rc=0, merge_base=MERGE_BASE, merge_base_rc=0,
+        branch_name_status="M\tREADME.md\n", base_paths="README.md\n",
+        base_changed_paths="", numstat="5\t0\tREADME.md\n", base_commits=0,
+        base_time=1_700_000_000, merge_base_time=1_700_000_000,
     ):
         self.local_head = local_head
         self.remote_head = remote_head
@@ -45,13 +52,43 @@ class ScriptedGit:
         self.local_rc = local_rc
         self.ls_remote_rc = ls_remote_rc
         self.push_rc = push_rc
+        self.base_head = base_head
+        self.base_rc = base_rc
+        self.merge_base = merge_base
+        self.merge_base_rc = merge_base_rc
+        self.branch_name_status = branch_name_status
+        self.base_paths = base_paths
+        self.base_changed_paths = base_changed_paths
+        self.numstat = numstat
+        self.base_commits = base_commits
+        self.base_time = base_time
+        self.merge_base_time = merge_base_time
         self.calls: list[dict] = []
 
     def __call__(self, argv, input_text, env):
         argv = list(argv)
         self.calls.append({"argv": argv, "input": input_text, "env": dict(env)})
         if "rev-parse" in argv:
+            if "refs/heads/" not in argv[-1]:
+                return subprocess.CompletedProcess(argv, self.base_rc, stdout=self.base_head + "\n", stderr="")
             return subprocess.CompletedProcess(argv, self.local_rc, stdout=self.local_head + "\n", stderr="")
+        if "merge-base" in argv and "--is-ancestor" not in argv:
+            return subprocess.CompletedProcess(
+                argv, self.merge_base_rc, stdout=self.merge_base + "\n", stderr=""
+            )
+        if "diff" in argv and "--name-status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=self.branch_name_status, stderr="")
+        if "ls-tree" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=self.base_paths, stderr="")
+        if "diff" in argv and "--name-only" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=self.base_changed_paths, stderr="")
+        if "diff" in argv and "--numstat" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=self.numstat, stderr="")
+        if "rev-list" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{self.base_commits}\n", stderr="")
+        if "show" in argv:
+            value = self.base_time if argv[-1] == self.base_head else self.merge_base_time
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{value}\n", stderr="")
         if "ls-remote" in argv:
             if self.ls_remote_rc != 0:
                 return subprocess.CompletedProcess(argv, self.ls_remote_rc, stdout="", stderr="ls-remote boom")
@@ -179,6 +216,90 @@ def test_refuses_missing_local_branch():
     with pytest.raises(PushRefused):
         push_change(REPO, BRANCH, source_dir="/wt", token=_token(), spawn=git)
     assert git.argv_for("ls-remote") is None  # refused at local-head resolution
+
+
+# ---------------------------------------------------------------------------
+# Supersession guard — refuse before the remote read/push side effect
+# ---------------------------------------------------------------------------
+
+def test_supersession_refuses_added_path_already_on_base_before_remote_read():
+    git = ScriptedGit(
+        branch_name_status="A\tdocs/new-contract.md\n",
+        base_paths="README.md\ndocs/new-contract.md\n",
+    )
+
+    with pytest.raises(PushRefused, match="added_path_already_on_base"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_refuses_base_changed_path_overlap_before_remote_read():
+    git = ScriptedGit(
+        branch_name_status="M\tvalidators/creator_engine_validator/pickup.py\n",
+        base_changed_paths="validators/creator_engine_validator/pickup.py\n",
+    )
+
+    with pytest.raises(PushRefused, match="base_changed_path_overlap"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_refuses_adr_number_collision_before_remote_read():
+    git = ScriptedGit(
+        branch_name_status="A\tdocs/decisions/ADR-0012-new-design.md\n",
+        base_paths="README.md\ndocs/decisions/ADR-0012-existing-design.md\n",
+    )
+
+    with pytest.raises(PushRefused, match="adr_number_available"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_refuses_net_negative_branch_before_remote_read():
+    git = ScriptedGit(numstat="1\t700\tobsolete-cockpit.txt\n")
+
+    with pytest.raises(PushRefused, match="net_negative_within_threshold"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("--numstat")[-2:] == [BASE, LOCAL]
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_refuses_branch_too_many_base_commits_behind():
+    git = ScriptedGit(base_commits=51)
+
+    with pytest.raises(PushRefused, match="base_commits_within_threshold"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_refuses_branch_too_old_against_base():
+    git = ScriptedGit(base_time=1_700_000_000, merge_base_time=1_698_700_000)
+
+    with pytest.raises(PushRefused, match="base_age_within_threshold"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+
+
+def test_supersession_fact_read_failure_fails_closed_before_remote_read():
+    git = ScriptedGit(base_rc=1)
+
+    with pytest.raises(PushRefused, match="could not resolve base ref"):
+        push_change(REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git)
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
 
 
 # ---------------------------------------------------------------------------
