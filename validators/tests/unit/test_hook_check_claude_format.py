@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 
+from creator_engine_validator import brain_bootstrap
 from creator_engine_validator.cli import main
 from creator_engine_validator.hook_check import HookDecision
 
@@ -130,6 +131,17 @@ _GOVERNED_OUT_OF_MANIFEST = {
     "ce": {"posture": "governed", "manifest_paths": ["schemas/x.yaml"]},
 }
 
+_GOVERNED_FOREMAN_IMPLEMENTATION = {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Edit",
+    "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+    "ce": {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+    },
+}
+
 
 def test_cli_format_claude_pretooluse_advisory_allow(capsys, monkeypatch):
     # G-i (v3 kickoff): a governed path-manifest mismatch routed through the
@@ -152,6 +164,25 @@ def test_cli_format_claude_pretooluse_advisory_allow(capsys, monkeypatch):
     # Minimal Claude shape: none of the raw decision-dict keys leak through.
     assert "ok" not in payload
     assert "decision" not in payload
+    assert "posture" not in payload
+
+
+def test_cli_format_claude_foreman_pretooluse_denies(capsys, monkeypatch):
+    monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_REF_ENV, raising=False)
+    monkeypatch.delenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, raising=False)
+    code, out = _run(
+        ["hook-check", "--stdin", "--format", "claude"],
+        capsys,
+        json.dumps(_GOVERNED_FOREMAN_IMPLEMENTATION),
+        monkeypatch,
+    )
+    assert code == 0
+    payload = json.loads(out)
+    hso = payload["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["permissionDecision"] == "deny"
+    assert "worker delegation" in hso["permissionDecisionReason"]
+    assert "ok" not in payload
     assert "posture" not in payload
 
 

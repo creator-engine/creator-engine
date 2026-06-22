@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import brain_bootstrap
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRETOOLUSE = REPO_ROOT / ".claude/hooks/ce-pretooluse.sh"
 
@@ -130,6 +132,32 @@ def _run_hook(event, project_dir: Path, extra_env=None, stdin_text=None):
     )
 
 
+def _bootstrap_env(root: Path, seat_class: str) -> dict[str, str]:
+    payload = {
+        "kind": brain_bootstrap.BOOTSTRAP_KIND,
+        "schema_version": brain_bootstrap.BOOTSTRAP_SCHEMA_VERSION,
+        "context": {
+            "role": "implementer",
+            "seat_class": seat_class,
+            "scope": {"seat_class": seat_class},
+        },
+        "knowledge_ssot": {
+            "ledger_path": ".ce/state/brain/assertions.yaml",
+            "record_count": 0,
+            "active_count": 0,
+            "scope_relevant_count": 0,
+            "head_content_hash": None,
+            "assertions": [],
+        },
+    }
+    ref = root / f"brain-bootstrap-{seat_class}.json"
+    digest = brain_bootstrap.write_payload(ref, payload)
+    return {
+        brain_bootstrap.BOOTSTRAP_REF_ENV: str(ref),
+        brain_bootstrap.BOOTSTRAP_SHA256_ENV: digest,
+    }
+
+
 def _permission(proc):
     """Parse the Claude PreToolUse permissionDecision, or None when the hook
     emitted no decision (fail-open / allow)."""
@@ -160,7 +188,11 @@ def test_governed_out_of_manifest_edit_advisory_allows(tmp_path):
 
 def test_governed_in_manifest_edit_allows(tmp_path):
     root = _build_governed_root(tmp_path, ["docs/keep.md"])
-    proc = _run_hook(_governed_event("Edit", {"file_path": "docs/keep.md"}), root)
+    proc = _run_hook(
+        _governed_event("Edit", {"file_path": "docs/keep.md"}),
+        root,
+        extra_env=_bootstrap_env(root, "worker"),
+    )
     assert proc.returncode == 0
     assert _permission(proc) == "allow"
 
@@ -179,9 +211,9 @@ def test_governed_git_push_denies(tmp_path):
     assert _permission(proc) == "deny"
 
 
-def test_governed_safe_bash_allows(tmp_path):
+def test_governed_coordination_bash_allows(tmp_path):
     root = _build_governed_root(tmp_path, ["docs/keep.md"])
-    proc = _run_hook(_governed_event("Bash", {"command": "ls -la"}), root)
+    proc = _run_hook(_governed_event("Bash", {"command": "git status --short"}), root)
     assert proc.returncode == 0
     assert _permission(proc) == "allow"
 

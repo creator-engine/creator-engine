@@ -77,7 +77,9 @@ def test_governed_out_of_manifest_edit_is_advisory_allow():
 
 
 def test_governed_in_manifest_edit_allows():
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     decision = hook_check.evaluate(
         _edit_event("validators/creator_engine_validator/hook_check.py"), ctx
     )
@@ -86,7 +88,9 @@ def test_governed_in_manifest_edit_allows():
 
 
 def test_governed_write_in_manifest_allows():
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     decision = hook_check.evaluate(
         _edit_event("schemas/completion-report.schema.yaml", tool="Write"), ctx
     )
@@ -164,7 +168,9 @@ def test_governed_bash_git_push_denies():
     ],
 )
 def test_git_grammar_local_subcommands_allow(command):
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 
@@ -199,7 +205,9 @@ def test_git_grammar_builtin_alias_shadowing_denies(command, action):
     ],
 )
 def test_git_grammar_builtin_alias_shadowing_allows_local_builtins(command):
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 
@@ -240,7 +248,9 @@ def test_git_grammar_unresolvable_alias_is_opaque_deny(command):
 
 
 def test_git_grammar_plain_unknown_subcommand_allows():
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     command = "git not-a-git-command"
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
@@ -287,7 +297,9 @@ def test_git_grammar_outward_bridges_and_prefix_deny(command, action):
     ],
 )
 def test_git_grammar_inward_bridges_and_nonprefix_allow(command):
-    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 
@@ -387,10 +399,10 @@ def test_ungoverned_secret_read_is_advisory_allow():
     assert decision.would_have_denied is True
 
 
-# --- Foreman seat-class WARN-only observation ------------------------------
+# --- Foreman seat-class enforcement ----------------------------------------
 
 
-def test_foreman_implementation_work_warns_without_refusal_record(tmp_path):
+def test_foreman_implementation_work_denies_with_refusal_record(tmp_path):
     event = _edit_event("validators/creator_engine_validator/hook_check.py")
     event["ce"] = {"mutation_class": "code"}
     ctx = hook_check.HookContext(
@@ -403,15 +415,19 @@ def test_foreman_implementation_work_warns_without_refusal_record(tmp_path):
 
     decision = hook_check.evaluate(event, ctx)
 
-    assert decision.decision == "allow"
-    assert decision.advisory is True
+    assert decision.decision == "deny"
+    assert decision.advisory is False
     assert decision.would_have_denied is True
-    assert decision.hook_specific_output["permissionDecision"] == "allow"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
     assert "worker delegation" in decision.reason
-    assert not _refusal_chain_file(tmp_path).exists()
+    records = _load_refusal_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["op"] == "file"
+    assert records[0]["mutation_class"] == "code"
+    assert records[0]["target"] == "validators/creator_engine_validator/hook_check.py"
 
 
-def test_foreman_implementation_work_without_mutation_class_warns():
+def test_foreman_implementation_work_without_mutation_class_denies():
     event = _edit_event("validators/creator_engine_validator/hook_check.py")
     ctx = hook_check.HookContext(
         posture="governed",
@@ -421,13 +437,13 @@ def test_foreman_implementation_work_without_mutation_class_warns():
 
     decision = hook_check.evaluate(event, ctx)
 
-    assert decision.decision == "allow"
-    assert decision.advisory is True
+    assert decision.decision == "deny"
+    assert decision.advisory is False
     assert decision.would_have_denied is True
     assert "worker delegation" in decision.reason
 
 
-def test_worker_implementation_work_does_not_warn(tmp_path):
+def test_worker_implementation_work_allows(tmp_path):
     event = _edit_event("validators/creator_engine_validator/hook_check.py")
     event["ce"] = {"mutation_class": "code"}
     ctx = hook_check.HookContext(
@@ -447,7 +463,7 @@ def test_worker_implementation_work_does_not_warn(tmp_path):
     assert not _refusal_chain_file(tmp_path).exists()
 
 
-def test_foreman_coordination_work_does_not_warn():
+def test_foreman_coordination_work_allows():
     event = _bash_event("git status --porcelain")
     event["ce"] = {"mutation_class": "code"}
     ctx = hook_check.HookContext(
@@ -464,12 +480,12 @@ def test_foreman_coordination_work_does_not_warn():
     assert decision.would_have_denied is False
 
 
-def test_foreman_coordination_path_mutation_does_not_warn():
-    event = _edit_event(".ce/changelog/ce163-foreman-warn-arm.md", tool="Write")
+def test_foreman_coordination_path_mutation_allows():
+    event = _edit_event(".ce/changelog/ce186-g6-seat-class-enforce.md", tool="Write")
     event["ce"] = {"mutation_class": "code"}
     ctx = hook_check.HookContext(
         posture="governed",
-        manifest_paths=(".ce/changelog/ce163-foreman-warn-arm.md",),
+        manifest_paths=(".ce/changelog/ce186-g6-seat-class-enforce.md",),
         seat_class="foreman",
         seat_class_policy={
             "delegation_required_mutation_classes": ["code"],
@@ -484,7 +500,7 @@ def test_foreman_coordination_path_mutation_does_not_warn():
     assert decision.would_have_denied is False
 
 
-def test_restricted_mechanic_still_hard_denies_before_foreman_warning(tmp_path):
+def test_restricted_mechanic_still_hard_denies_before_foreman(tmp_path):
     event = _bash_event("git push origin main")
     event["ce"] = {"mutation_class": "deploy"}
     ctx = hook_check.HookContext(
@@ -523,7 +539,9 @@ def test_build_context_resolves_seat_class_policy_and_fails_closed_to_foreman(tm
     assert ctx.seat_class == "foreman"
     assert ctx.seat_class_policy == event["ce"]["seat_class_policy"]
     decision = hook_check.evaluate(event, ctx)
-    assert decision.advisory is True
+    assert decision.decision == "deny"
+    assert decision.advisory is False
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
     assert "worker delegation" in decision.reason
 
 
