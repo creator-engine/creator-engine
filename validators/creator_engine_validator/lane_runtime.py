@@ -45,7 +45,8 @@ from .checks.pane_registry import validate_pane_registry_record
 from .init_runtime import DEFAULT_MCP_CONFIG_PAYLOAD
 from .loader import LoaderError, load_yaml
 from .pco_allocator import guard
-from .tmux_adapter import TmuxAdapter, TmuxPane, TmuxUnavailable
+from .tmux_adapter import TmuxPane, TmuxUnavailable
+from .visibility_backend import TmuxVisibilityBackend, get_visibility_backend
 
 # Pane Registry role enum is exactly the visibility-required role set.
 VISIBILITY_REQUIRED_ROLES = frozenset({"architect", "implementer", "reviewer", "verification"})
@@ -888,9 +889,18 @@ def launch(
         if resource_policy.fleet_memory_max:
             resource_bound_stamp["fleet_memory_max"] = resource_policy.fleet_memory_max
 
-    # 6b. tmux must be available for a tmux lane — before pane write (RV1-030).
-    adapter = tmux_adapter if tmux_adapter is not None else TmuxAdapter()
-    if terminal_kind == TMUX_TERMINAL_KIND and not adapter.is_available():
+    # 6b. Resolve the visibility backend for this terminal kind (ce-ops#207 W1).
+    #     The spawn seam routes through the VisibilityBackend registry instead of
+    #     calling tmux directly. The default `terminal_kind` is still tmux, so the
+    #     default behaviour is byte-identical. When the caller injects a tmux
+    #     adapter (the long-standing test seam), wrap it in the tmux backend so
+    #     every existing fake-adapter test keeps working unchanged.
+    if tmux_adapter is not None:
+        visibility_backend = TmuxVisibilityBackend(tmux_adapter)
+    else:
+        visibility_backend = get_visibility_backend(terminal_kind)
+    # tmux must be available for a tmux lane — before pane write (RV1-030).
+    if terminal_kind == TMUX_TERMINAL_KIND and not visibility_backend.is_available():
         raise TmuxUnavailableError(
             "tmux is unavailable; refusing visible lane launch before any side effect"
         )
@@ -930,7 +940,7 @@ def launch(
     )
 
     try:
-        pane = adapter.ensure_pane(
+        surface = visibility_backend.ensure_surface(
             session=session_name,
             window=window_name,
             command=sentinel.pane_command,
@@ -977,19 +987,13 @@ def launch(
         "record_timestamp": timestamp,
         "registered_at": timestamp,
         "last_seen_at": timestamp,
-        "visibility": "operator_visible",
-        "terminal": {
-            "kind": TMUX_TERMINAL_KIND,
-            "session_id": pane.session_id,
-            "window_id": pane.window_id,
-            "pane_id": pane.pane_id,
-        },
+        # ce-ops#207 W1: the visibility class + terminal record now come from the
+        # backend's SurfaceHandle instead of being hardcoded. The tmux backend
+        # reproduces the previous values exactly (operator_visible + the tmux ids).
+        "visibility": surface.visibility_class,
+        "terminal": dict(surface.terminal),
         "claim_record_sha256": _sha256_file(claim_path),
     }
-    if pane.pane_tty:
-        record["terminal"]["pane_tty"] = pane.pane_tty
-    if pane.pane_pid is not None:
-        record["terminal"]["pane_pid"] = pane.pane_pid
 
     # Bind worktree_path/branch/envelope_ref from the claim when not overridden.
     resolved_worktree = worktree_path or claim.get("worktree_path")
@@ -1090,7 +1094,7 @@ def launch(
     return LaunchResult(
         pane_path=pane_path,
         record=record,
-        pane=pane,
+        pane=surface.native,
         claim_path=claim_path,
         claude_governance=claude_governance,
         operating_mode=mode_resolution.operating_mode,

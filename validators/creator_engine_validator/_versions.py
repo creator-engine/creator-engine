@@ -53,6 +53,14 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # existing policy-read seam (loader.load_yaml); imports no v3 module.
         "resource_bound_spec",
         "tmux_adapter",
+        # ce-ops#207 W1: the visibility-backend registry — the v1 launcher's
+        # witnessability/surface seam. A THIN wrapper over ``tmux_adapter`` (v1),
+        # consumed only by ``lane_runtime`` (v1) at its spawn seam. It belongs to
+        # the v1 launcher surface (not ``shared``): it imports a v1 module and is
+        # part of the ``ce lane launch`` mechanics, exactly like the launch specs.
+        # Classifying it v1 keeps both edges v1->v1 (no new shared->v1 ratchet
+        # edge); it imports NO v3 module, so the HARD invariant is untouched.
+        "visibility_backend",
         "transcript_archive",
         "pco_allocator",
         "hook_check",

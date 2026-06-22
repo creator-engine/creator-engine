@@ -76,7 +76,10 @@ def test_taxonomy_counts_and_disjoint():
     # (``resource_bound_spec``, sibling of ``claude_launch_spec``): 21 -> 22.
     # G1-codex adds ``codex_launch_spec`` as the 23rd v1 runtime module.
     # ce-ops#55 adds ``pickup`` (the ``ce pickup`` work-pickup poller) as the 24th.
-    assert len(ver.V1_RUNTIME) == 24
+    # ce-ops#207 W1 adds ``visibility_backend`` (the v1 launcher's visibility/
+    # surface seam — a thin tmux_adapter wrapper consumed only by lane_runtime)
+    # as the 25th.
+    assert len(ver.V1_RUNTIME) == 25
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
