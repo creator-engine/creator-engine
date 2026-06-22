@@ -2102,6 +2102,33 @@ def test_reinstall_convergence_fully_installed_state_preserves_identity_and_skip
     assert plan["github"]["human_approves"] == []
 
 
+def test_reinstall_convergence_prior_installation_survives_null_live_probe_when_answers_omit_id():
+    sig = inst.sign_spec(SPEC, key_id=KEY)
+    prior_state = {
+        "github_app": {
+            "state": "installed",
+            "installation_id": 12345678,
+            "client_id": "Iv1.shared",
+            "bot_identity": "creator-engine[bot]",
+        },
+    }
+
+    plan = inst.build_reinstall_convergence_plan(
+        SPEC,
+        sig,
+        pinned_keys=PINNED,
+        prior_state=prior_state,
+        answers=_answers(**{"github.app.installation_id": _DELETE}),
+        schema=ANSWERS_SCHEMA,
+        github_probe=_github_probe(app_installation_id=None),
+    )
+
+    assert _decision(plan, "github_app")["action"] == "preserve_installation"
+    assert plan["github"]["app"]["installation_id"] == 12345678
+    assert plan["github"]["app"]["click_required"] is False
+    assert plan["github"]["human_approves"] == []
+
+
 def test_reinstall_convergence_repairs_partial_state_and_remints_stale_token():
     sig = inst.sign_spec(SPEC, key_id=KEY)
     prior_state = {
