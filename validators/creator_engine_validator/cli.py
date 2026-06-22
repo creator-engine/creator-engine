@@ -275,6 +275,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="signing mode; only Operator-gated placeholder staging is supported",
     )
     release_stage.add_argument(
+        "--signing-key-id",
+        default="ce-dev1-root-v1",
+        choices=["ce-root-v1", "ce-dev1-root-v1"],
+        help=(
+            "valid root trust anchor that will sign this release "
+            "(default: ce-dev1-root-v1); becomes the staged spec signature.key_id "
+            "and is part of the signed canonical bytes"
+        ),
+    )
+    release_stage.add_argument(
         "--force",
         action="store_true",
         help="replace a non-empty explicit output directory atomically",
@@ -584,6 +594,7 @@ def _release_stage(args) -> int:
             build_git_sha=args.build_git_sha,
             out=args.out,
             sign_mode=args.sign_mode,
+            signing_key_id=args.signing_key_id,
             force=args.force,
             dry_run=args.dry_run,
         )
