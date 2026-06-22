@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -21,6 +24,17 @@ def _validate_step(name: str) -> dict:
     matches = [step for step in steps if step.get("name") == name]
     assert len(matches) == 1
     return matches[0]
+
+
+def _fetch_with_shallow_retry_source() -> str:
+    run = _validate_step("Resolve live comparison base")["run"]
+    match = re.search(
+        r"^fetch_with_shallow_retry\(\) \{\n.*?^\}$",
+        run,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+    return match.group(0)
 
 
 def test_validate_workflow_resolves_live_comparison_base_from_git():
@@ -44,6 +58,43 @@ def test_validate_workflow_resolves_live_comparison_base_from_git():
     workflow_text = _VALIDATE_WORKFLOW.read_text()
     assert "github.event.pull_request.base.sha" not in workflow_text
     assert "PR_BASE_SHA" not in workflow_text
+
+
+def test_fetch_with_shallow_retry_preserves_non_race_fetch_failure_status(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1" == "fetch" ]]; then
+  echo "fatal: authentication failed" >&2
+  exit 42
+fi
+exit 99
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    script = (
+        f"set -euo pipefail\n{_fetch_with_shallow_retry_source()}\n"
+        "fetch_with_shallow_retry --no-tags origin +refs/heads/main:refs/remotes/origin/main\n"
+    )
+
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 42
+    assert "fatal: authentication failed" in completed.stderr
+    assert "shallow metadata race" not in completed.stderr
 
 
 def test_validate_workflow_runs_work_sizing_floor_gate_from_pr_body():
