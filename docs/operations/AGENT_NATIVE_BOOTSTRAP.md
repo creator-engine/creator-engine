@@ -36,17 +36,44 @@ This is the same fail-closed posture as the governed lane-launch primitive
 (`docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md`): visible-or-refuse, no hidden
 fallback.
 
-## 3. Preflight — `ce doctor --json`
+## 3. Install — offline runtime dependencies + source path
 
-The bootstrap **MUST** run the governed-environment guard preflight first:
+The clone-mode contract is `source-pythonpath-with-offline-runtime-deps`: install
+the cp314 runtime dependencies first, then run checkout source with
+`PYTHONPATH=validators`. Clone-mode does not install an app wheel from
+`validators/wheelhouse`.
+
+uv-first:
 
 ```bash
-ce doctor --json
+uv venv --python 3.14
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-`ce doctor` evaluates the governed-environment guard predicate (DP-3 = B,
-`docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md`) and exits
-**non-zero** on any refused clause:
+pip fallback (uv-less host):
+
+```bash
+python3.14 -m venv .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+```
+
+All source-backed validator invocations below **MUST** use
+`$CE_VALIDATOR_PYTHON` so the checkout source runs under the same interpreter
+that received the offline runtime dependencies.
+
+## 4. Preflight — source `ce doctor --json`
+
+After dependency install, run the governed-environment guard preflight:
+
+```bash
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
+```
+
+The source-backed `ce doctor` evaluates DP-3 and exits **non-zero** on any
+refused clause:
 
 | Clause | Refusal |
 |---|---|
@@ -55,11 +82,11 @@ ce doctor --json
 | RED-G-3 | missing rootless Podman, or rootful Podman, for worker execution (PCO-045) |
 | RED-G-4 | ungoverned `.hermes/` state-path posture (not git-ignored) |
 | RED-G-5 | unsafe hidden continuation (no visible pane / dead-pane) |
-| RED-G-6 | dependency / wheelhouse drift from the Option B contract |
+| RED-G-6 | dependency wheelhouse drift from the Option B contract |
 
-## 4. Blocked-report semantics on failed preflight
+## 5. Blocked-report semantics on failed preflight
 
-If `ce doctor --json` exits non-zero, the bootstrap **MUST**:
+If the doctor preflight exits non-zero, the bootstrap **MUST**:
 
 1. **Stop** (`preflight.blocked_report.stop: true`). Do not continue.
 2. Emit a **blocked report** naming the refused guard clauses from the
@@ -67,37 +94,20 @@ If `ce doctor --json` exits non-zero, the bootstrap **MUST**:
 3. **Not** ratify any in-flight work and **not** fall back to a hidden/headless
    continuation. There is no hidden fallback.
 
-## 5. Install — uv-first with pip fallback (offline)
-
-The install contract is `uv-first-with-pip-fallback`, **offline** (`--no-index`),
-against the **cp314-only** offline wheelhouse. Python floor is `>=3.14`.
-
-uv-first:
-
-```bash
-uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
-```
-
-pip fallback (uv-less host):
-
-```bash
-python -m pip install --no-index --find-links validators/wheelhouse creator-engine-validator
-```
-
-No network fetch occurs at install or runtime authority
-(`docs/governance/V1_PRODUCT_CONTRACT.md` §6).
-
 ## 6. Launch — visible Controller seat
 
-After a PASS preflight and a successful offline install, the agent enters the
+After a successful offline install and PASS preflight, the agent enters the
 visible Controller seat:
 
 ```bash
-ce launch --json     # ce hud --json is an alias/seam label for the same launcher
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli launch --json
+# `hud` is an alias/seam label for the same launcher:
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli hud --json
 ```
 
-`ce launch` opens/attaches a **visible** tmux Controller seat (DP-2 = B). It
-refuses hidden/headless continuation; `ce hud` is an **alias**, not a CE-native
+The launch command opens/attaches a **visible** tmux Controller seat (DP-2 = B).
+It refuses hidden/headless continuation; `hud` is an **alias**, not a CE-native
 HUD/TUI.
 
 ## 7. Boundaries (POST-V1 / seam-only)

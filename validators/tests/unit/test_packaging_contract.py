@@ -17,9 +17,11 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 from __future__ import annotations
 
 import hashlib
+import shutil
 import tomllib
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,6 +125,61 @@ def test_wheelhouse_covers_runtime_dependencies(validators_dir: Path):
         assert required in names, f"wheelhouse missing offline wheel for {required}: have {sorted(names)}"
 
 
+def test_wheelhouse_does_not_commit_first_party_app_wheel(validators_dir: Path):
+    names = {pkg.normalize_name(n) for n in pkg.wheelhouse_distribution_names(validators_dir / "wheelhouse")}
+    assert "creator-engine-validator" not in names
+
+
+def test_wheelhouse_hash_manifest_is_clean(validators_dir: Path):
+    violations = pkg.wheelhouse_hash_violations(validators_dir / "wheelhouse")
+    assert violations == []
+
+
+def test_wheelhouse_hash_manifest_flags_tampered_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"tampered")
+    (wheelhouse / "SHA256SUMS").write_text(f"{'0' * 64}  {wheel.name}\n", encoding="utf-8")
+
+    violations = pkg.wheelhouse_hash_violations(wheelhouse)
+    assert any("SHA256 mismatch" in violation and wheel.name in violation for violation in violations)
+
+
+def test_wheelhouse_hash_manifest_flags_unmanifested_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"ok")
+    (wheelhouse / "SHA256SUMS").write_text("", encoding="utf-8")
+
+    violations = pkg.wheelhouse_hash_violations(wheelhouse)
+    assert any("missing from SHA256SUMS" in violation for violation in violations)
+
+
+def test_first_party_app_wheel_violations_flags_first_party_app_wheel(tmp_path: Path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(b"")
+    violations = pkg.first_party_app_wheel_violations(wheelhouse)
+    assert any("must not contain first-party app wheels" in violation for violation in violations)
+
+
+def test_dependency_wheelhouse_violations_ignore_first_party_app_wheel(
+    validators_dir: Path, tmp_path: Path
+):
+    wheelhouse = tmp_path / "wheelhouse"
+    shutil.copytree(validators_dir / "wheelhouse", wheelhouse)
+    (wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(
+        b"reintroduced first-party app wheel"
+    )
+    with (wheelhouse / "SHA256SUMS").open("a", encoding="utf-8") as fh:
+        fh.write("\nnot-a-digest  creator_engine_validator-0.2.0-py3-none-any.whl\n")
+
+    assert pkg.wheelhouse_violations(wheelhouse) == []
+    assert pkg.first_party_app_wheel_violations(wheelhouse)
+
+
 # ---------------------------------------------------------------------------
 # wheelhouse-dev: cp314 dual-arch native wheels for offline dev/test installs
 # ---------------------------------------------------------------------------
@@ -203,9 +260,39 @@ def test_requirements_has_no_stale_pins(validators_dir: Path):
 # ---------------------------------------------------------------------------
 
 
+def _copy_minimal_packaging_tree(validators_dir: Path, tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    copied_validators = root / "validators"
+    copied_validators.mkdir(parents=True)
+    for filename in ("pyproject.toml", "requirements.txt", "uv.lock"):
+        shutil.copy2(validators_dir / filename, copied_validators / filename)
+    shutil.copytree(validators_dir / "wheelhouse", copied_validators / "wheelhouse")
+    return root
+
+
 def test_verify_packaging_contract_is_clean_on_repo(repo_root: Path):
     result = pkg.verify_packaging_contract(repo_root)
     assert result.ok, f"packaging contract violations: {result.violations}"
+    assert result.details["dependency_wheelhouse_ok"] is True
+    assert result.details["dependency_wheelhouse_violations"] == []
+    assert result.details["first_party_app_wheel_committed"] is False
+    assert result.details["first_party_app_wheel_violations"] == []
+
+
+def test_verify_packaging_contract_keeps_first_party_app_wheel_independent(
+    validators_dir: Path, tmp_path: Path
+):
+    root = _copy_minimal_packaging_tree(validators_dir, tmp_path)
+    app_wheel = root / "validators" / "wheelhouse" / "creator_engine_validator-0.2.0-py3-none-any.whl"
+    app_wheel.write_bytes(b"reintroduced first-party app wheel")
+
+    result = pkg.verify_packaging_contract(root)
+
+    assert result.ok is False
+    assert result.details["dependency_wheelhouse_ok"] is True
+    assert result.details["dependency_wheelhouse_violations"] == []
+    assert result.details["first_party_app_wheel_committed"] is True
+    assert any("first-party app wheels" in violation for violation in result.violations)
 
 
 @pytest.mark.wheel_bake_gate
@@ -214,12 +301,12 @@ def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
     assert violations == []
 
 
-def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
+def test_verify_wheel_matches_source_flags_synthetic_drift(monkeypatch, tmp_path: Path):
     validators_dir = tmp_path / "validators"
     source_dir = validators_dir / "creator_engine_validator"
-    wheelhouse = validators_dir / "wheelhouse"
+    built_dir = tmp_path / "built-wheel"
     source_dir.mkdir(parents=True)
-    wheelhouse.mkdir()
+    built_dir.mkdir()
     (validators_dir / "pyproject.toml").write_text(
         "[project]\nname = \"creator-engine-validator\"\nversion = \"0.2.0\"\n",
         encoding="utf-8",
@@ -228,16 +315,36 @@ def test_verify_wheel_matches_source_flags_synthetic_drift(tmp_path: Path):
     (source_dir / "version.py").write_text("__version__ = \"0.2.0\"\n", encoding="utf-8")
     (source_dir / "drift.py").write_text("VALUE = 'source'\n", encoding="utf-8")
 
-    wheel = wheelhouse / "creator_engine_validator-0.2.0-py3-none-any.whl"
+    wheel = built_dir / "creator_engine_validator-0.2.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         zf.writestr("creator_engine_validator/__init__.py", "")
         zf.writestr("creator_engine_validator/version.py", "__version__ = \"0.2.0\"\n")
         zf.writestr("creator_engine_validator/drift.py", "VALUE = 'wheel'\n")
 
+    def fake_build(repo_root, out_dir):
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        target = out / wheel.name
+        target.write_bytes(wheel.read_bytes())
+        return SimpleNamespace(wheel_name=wheel.name)
+
+    monkeypatch.setattr(pkg, "build_app_wheel_from_source", fake_build)
     violations = pkg.verify_wheel_matches_source(tmp_path)
     assert any("differs from source file drift.py" in violation for violation in violations)
     aggregate = pkg.verify_packaging_contract(tmp_path)
     assert not any("differs from source file drift.py" in violation for violation in aggregate.violations)
+
+
+def test_verify_wheel_matches_source_flags_build_failure(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "validators" / "creator_engine_validator"
+    source_dir.mkdir(parents=True)
+
+    def fake_build(repo_root, out_dir):
+        raise pkg.WheelBakeError("build backend unavailable")
+
+    monkeypatch.setattr(pkg, "build_app_wheel_from_source", fake_build)
+    violations = pkg.verify_wheel_matches_source(tmp_path)
+    assert violations == ["app wheel build from source failed: build backend unavailable"]
 
 
 def test_verify_packaging_contract_flags_missing_wheelhouse(tmp_path: Path):
@@ -361,7 +468,7 @@ def test_pages_mirror_wheels_match_published_sha256sums(repo_root: Path):
     # mirror's INTERNAL self-consistency, NOT a byte-match against the live dev
     # validators/wheelhouse/ (which advances to 0.2.0+sha freely; the published
     # wheel only changes at a ratified release + re-sign -> 0.3.0). The dev
-    # wheel<->source contract stays covered by verify_wheel_matches_source.
+    # source-built wheel<->source contract stays covered by verify_wheel_matches_source.
     mirror = repo_root / "docs" / "downloads" / "0.2.0"
     sums = _parse_sha256sums(mirror / "SHA256SUMS")
     wheels = sorted(path.name for path in mirror.glob("*.whl"))

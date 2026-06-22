@@ -53,18 +53,18 @@ cd creator-engine
 git rev-parse --short=7 HEAD
 ```
 
-Install the validator using the uv-first offline path. The validator README defines Python 3.14 as the current floor, uv-first offline install, and the checked-in wheelhouse contract (`validators/README.md:7-17`):
+Install the validator using the uv-first offline source path (`validators/README.md:7-17`):
 
 ```bash
-uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+uv venv --python 3.14 .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-If you need the full pytest gate, install the dev/test dependency set from the checked-in dev wheelhouse (`validators/README.md:41-55`):
+If you need the full pytest gate, add dev/test dependencies to the same interpreter (`validators/README.md:41-55`):
 
 ```bash
-python -m venv .venv-test
-.venv-test/bin/pip install --no-index \
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index \
   --find-links validators/wheelhouse \
   --find-links validators/wheelhouse-dev \
   -r validators/requirements.txt \
@@ -76,13 +76,13 @@ Run these three named CI checks locally before asking for review:
 ```bash
 # Creator Engine validator - pytest suite (offline)
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
-  python -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
+  "$CE_VALIDATOR_PYTHON" -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
 
 # Creator Engine validator - well-formed examples
-PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/well-formed/
 
 # Creator Engine validator - malformed examples (expect failures)
-if PYTHONPATH=validators python -m creator_engine_validator check examples/malformed/; then
+if PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/malformed/; then
   echo "FAIL: malformed examples unexpectedly passed"
   exit 1
 else
@@ -92,11 +92,8 @@ fi
 
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
-> **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
-> `ce-worktrees/*` have no local `.venv` — it is gitignored and lives only in the
-> canonical checkout. When no virtualenv is active, set `CE_VALIDATOR_PYTHON` to a
-> known interpreter (e.g. the canonical checkout's venv) and invoke the validator as
-> `${CE_VALIDATOR_PYTHON:-python}`. See [`../../validators/README.md`](../../validators/README.md).
+> **Running from an isolated worktree (creator-engine#82)?** Set
+> `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
 
 ## 4. The Governed Cycle
 

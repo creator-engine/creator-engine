@@ -24,37 +24,32 @@ clean.
 It is a **rehearsal**, not an authority transfer: it lands nothing, ratifies
 nothing, and enqueues nothing.
 
-## 2. Offline install (Option B)
+## 2. Offline source install
 
-The rehearsal installs the validator/`ce` runtime offline from the checked-in
-cp314 wheelhouse, both ways, with no network access:
+Install runtime dependencies from the cp314 dependency wheelhouse, then run the
+checkout source with `PYTHONPATH=validators` and the same interpreter:
 
 **uv-first (primary):**
 
 ```bash
-uv venv --python 3.14
-UV_PYTHON_DOWNLOADS=never uv pip install --no-index --find-links validators/wheelhouse creator-engine-validator
+uv venv --python 3.14 .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
-**pip fallback** (run from a neutral working directory so the source tree does
-not shadow the wheel):
+**pip fallback:**
 
 ```bash
-python3.14 -m venv .venv && . .venv/bin/activate
-pip install --no-index --find-links "$PWD/validators/wheelhouse" -r "$PWD/validators/requirements.txt"
-pip install --no-index --find-links "$PWD/validators/wheelhouse" creator-engine-validator
+python3.14 -m venv .venv
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
 ```
 
-Both install `creator-engine-validator==0.1.0` with PyYAML 6.0.3 / jsonschema
-4.26.0 and expose the `ce` console script. As of **Gate 9** the cp314 wheel was
-**rebuilt from current source** (`setuptools.build_meta`), so the offline install
-now exposes the full as-built surface `{lane, ledger, worker, fanin, queue, check,
-doctor, init, launch, hud}` — including `ce fanin` (Gate 7) and `ce queue`
-(Gate 8) — and still registers **no** `ce dev`. (The previously committed wheel
-was G6-era and predated `ce fanin`/`ce queue`; Gate 9 closed that packaging
-mismatch.) **Note:** because the version is unchanged at `0.1.0`, pass
-`--no-cache` (uv) / `--no-cache-dir` (pip) to defeat a stale cached `0.1.0`
-wheel and install the wheelhouse artifact itself.
+The table's `ce ...` commands mean
+`PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli ...`;
+clone-mode rehearsal does not install a first-party app wheel.
 
 ## 3. Dry-run-safe pipeline
 

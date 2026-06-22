@@ -107,37 +107,36 @@ Pull requests should:
 
 ## Local validation
 
-Before opening a PR, please run the checks that CI also runs locally.
-These are offline and require only Python 3 and the bundled
-wheelhouse (see [`validators/README.md`](./validators/README.md) for
-the install quickstart). From the repo root:
+Before opening a PR, please run the checks that CI also runs locally. These are
+offline; see [`validators/README.md`](./validators/README.md) for setup.
 
 ```bash
 # Catch whitespace defects and merge-conflict markers.
 git diff --check
 
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+
 # Validate bundled well-formed and malformed examples against schemas.
-PYTHONPATH=validators python3 -m creator_engine_validator check-examples
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check-examples
 
 # Run the no-LIMITLESS generic-path scan (LIMITLESS is the named
 # dogfood tenant; generic paths must not hardcode it).
-PYTHONPATH=validators python3 -m creator_engine_validator scan-no-limitless
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator scan-no-limitless
 ```
 
 If you change the validator, schemas, or examples, also run the full
 check suite:
 
 ```bash
-PYTHONPATH=validators python3 -m creator_engine_validator check
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check
 ```
 
 A PR whose changes do not pass these checks locally will not pass CI.
 
 > **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
-> `ce-worktrees/*` have no local `.venv` — it is gitignored and lives only in the
-> canonical checkout. The commands above use your active interpreter; when no
-> virtualenv is active, set `CE_VALIDATOR_PYTHON` to a known interpreter (e.g. the
-> canonical checkout's venv) and invoke the validator as `${CE_VALIDATOR_PYTHON:-python}`.
+> `ce-worktrees/*` have no local `.venv`; set `CE_VALIDATOR_PYTHON` to a known
+> interpreter before invoking source-backed validator commands from that worktree.
 > See [`validators/README.md`](./validators/README.md).
 
 ## Version boundary (v1 ↔ v3)

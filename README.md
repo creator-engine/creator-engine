@@ -105,20 +105,19 @@ CE currently has two supported install paths, both documented by
    automate the GitHub App click, mutate branch protection, or create/adopt a
    project.
 
-2. **Clone plus offline wheelhouse.**
+2. **Clone plus offline dependency wheelhouse.**
 
    ```bash
    git clone https://github.com/creator-engine/creator-engine.git
    cd creator-engine
    python3.14 -m venv .venv
-   . .venv/bin/activate
-   pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-   PYTHONPATH=validators python -m creator_engine_validator --list-checks
+   CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+   "$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
+   PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
    ```
 
-   The runtime wheelhouse is cp314 and dual-arch for Linux x86_64/aarch64 where
-   native wheels are needed. Developer/test dependencies live separately under
-   `validators/wheelhouse-dev/`. See
+   The runtime wheelhouse carries dependencies only; first-party validator code
+   runs from the checkout through `PYTHONPATH=validators`. See
    [`validators/README.md`](./validators/README.md) for the full offline runtime
    and test install commands.
 
@@ -192,19 +191,21 @@ OpenShell targeted behind the same adapter direction.
 
 ## Running Local Gates
 
-Use Python 3.14. For normal runtime validation:
+Use Python 3.14 and the dependency venv for source-backed validation:
 
 ```bash
-PYTHONPATH=validators python -m creator_engine_validator --list-checks
-PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
-PYTHONPATH=validators python -m creator_engine_validator check-examples
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check examples/well-formed/
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check-examples
 ```
 
 For the full validator test suite, install both runtime and dev/test
 wheelhouses, then run:
 
 ```bash
-PYTHONPATH=validators python -m pytest validators/tests/ -q
+CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv-test/bin/python}"
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests/ -q
 ```
 
 CI also enforces per-PR path-manifest fidelity. New PRs should include a carrier

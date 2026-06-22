@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 import yaml
+
+from .wheel_source_parity import verify_wheel_matches_source
 
 Verdict = Literal["present", "absent", "unknown"]
 ProbeFn = Callable[["ProbeContext"], "ProbeResult"]
@@ -49,39 +50,9 @@ def _default_read_text(path: Path) -> str:  # pragma: no cover - live edge
 def _default_wheel_source_checker(repo_root: Path) -> list[str]:
     root = Path(repo_root)
     source_root = root / "validators" / "creator_engine_validator"
-    wheelhouse = root / "validators" / "wheelhouse"
     if not source_root.is_dir():
         return [f"missing validator source tree at {source_root}"]
-    if not wheelhouse.is_dir():
-        return [f"missing validator wheelhouse at {wheelhouse}"]
-    wheels = sorted(wheelhouse.glob("creator_engine_validator-*.whl"))
-    if not wheels:
-        return [f"missing creator_engine_validator app wheel in {wheelhouse}"]
-
-    source_files = {
-        path.relative_to(source_root).as_posix(): path
-        for path in source_root.rglob("*.py")
-        if path.is_file()
-    }
-    violations: list[str] = []
-    for wheel in wheels:
-        try:
-            with zipfile.ZipFile(wheel) as zf:
-                wheel_files = {
-                    name.removeprefix("creator_engine_validator/")
-                    for name in zf.namelist()
-                    if name.startswith("creator_engine_validator/") and name.endswith(".py")
-                }
-                for rel in sorted(wheel_files - source_files.keys()):
-                    violations.append(f"app wheel {wheel.name} has no source file for {rel}")
-                for rel in sorted(source_files.keys() - wheel_files):
-                    violations.append(f"app wheel {wheel.name} missing source file {rel}")
-                for rel in sorted(source_files.keys() & wheel_files):
-                    if zf.read(f"creator_engine_validator/{rel}") != source_files[rel].read_bytes():
-                        violations.append(f"app wheel {wheel.name} differs from source file {rel}")
-        except zipfile.BadZipFile:
-            violations.append(f"invalid app wheel zip archive: {wheel.name}")
-    return violations
+    return verify_wheel_matches_source(root)
 
 
 @dataclass(frozen=True)

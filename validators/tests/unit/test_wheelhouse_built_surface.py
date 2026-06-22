@@ -1,17 +1,16 @@
-"""Gate 9 — final-packaging contract: the tracked wheelhouse ``creator_engine_validator``
-wheel must be built from the *current* source command surface.
+"""Gate 9 — final-packaging contract: the source-built ``creator_engine_validator``
+wheel must expose the *current* source command surface.
 
 The Option B packaging-contract tests (``test_packaging_contract.py``) assert the
 pyproject pins, the cp314-only wheelhouse, and the uv.lock/requirements lockstep,
-but nothing asserted that the *built* ``creator-engine-validator`` wheel shipped in
-``validators/wheelhouse/`` actually reflects the current source. Gate 8 evidence
-caught a G6-era wheel that still installed cleanly while missing the G7 ``ce fanin``
-and G8 ``ce queue`` command groups.
+but nothing asserted that a built ``creator-engine-validator`` wheel actually
+reflects the current source. Gate 8 evidence caught a G6-era wheel that still
+installed cleanly while missing the G7 ``ce fanin`` and G8 ``ce queue`` command
+groups.
 
-These tests close that gap by introspecting the tracked wheel directly (stdlib
-``zipfile`` only) and asserting:
+These tests build a temporary wheel from checkout source and also assert the
+development wheelhouse does not recommit a first-party app wheel:
 
-* exactly one ``creator_engine_validator-*.whl`` is present,
 * it bundles ``creator_engine_validator/ce_cli.py`` byte-for-byte identical to the
   current source (the wheel is not stale relative to source),
 * the bundled ``ce`` surface registers ``fanin`` and ``queue`` and does **not**
@@ -26,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator.wheel_bake import build_app_wheel_from_source
+
 DISTRIBUTION = "creator_engine_validator"
 pytestmark = pytest.mark.wheel_bake_gate
 
@@ -36,11 +37,16 @@ def wheelhouse(repo_root: Path) -> Path:
 
 
 @pytest.fixture()
-def validator_wheel(wheelhouse: Path) -> Path:
+def validator_wheel(repo_root: Path, tmp_path: Path) -> Path:
+    manifest = build_app_wheel_from_source(repo_root, tmp_path)
+    wheel = tmp_path / manifest.wheel_name
+    assert wheel.is_file(), f"source build did not produce {wheel}"
+    return wheel
+
+
+def test_runtime_wheelhouse_has_no_committed_first_party_app_wheel(wheelhouse: Path):
     matches = sorted(wheelhouse.glob(f"{DISTRIBUTION}-*.whl"))
-    assert matches, f"no {DISTRIBUTION} wheel in {wheelhouse}"
-    assert len(matches) == 1, f"expected exactly one {DISTRIBUTION} wheel, found {matches}"
-    return matches[0]
+    assert matches == [], f"runtime dependency wheelhouse must not commit app wheels: {matches}"
 
 
 def _bundled_ce_cli(wheel: Path) -> str:
@@ -61,12 +67,12 @@ def _entry_points(wheel: Path) -> dict[str, str]:
 def test_wheelhouse_validator_wheel_matches_current_source(
     validator_wheel: Path, repo_root: Path
 ):
-    """The bundled ce surface must equal the current source — proves the wheel is rebuilt."""
+    """The bundled ce surface must equal current source from a fresh source build."""
     source = (repo_root / "validators" / DISTRIBUTION / "ce_cli.py").read_text(encoding="utf-8")
     bundled = _bundled_ce_cli(validator_wheel)
     assert bundled == source, (
-        "tracked wheel's ce_cli.py is stale relative to source; rebuild the wheel "
-        f"into {validator_wheel.parent}"
+        "source-built wheel's ce_cli.py is stale relative to source; inspect "
+        f"the build output in {validator_wheel.parent}"
     )
 
 

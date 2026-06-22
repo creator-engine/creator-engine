@@ -1,12 +1,12 @@
 """RV1-060 — Option B v1.0 packaging-contract introspection.
 
 This module is the single source of truth for the Source-locked Option B / 1B
-packaging contract and the read-only helpers that assert it. ``ce doctor``
-reuses :func:`verify_packaging_contract` for the dependency/wheelhouse-drift
-guard clause (RED-G-6), and the packaging tests assert the required author-side
-contract over the tracked artifacts. The first-party app-wheel/source parity
-attestation is exposed separately by :func:`verify_wheel_matches_source` so the
-post-merge wheel-bake lane can run it without serializing authored PRs.
+packaging contract. ``ce doctor`` reuses :func:`verify_packaging_contract` for
+the dependency-wheelhouse drift guard clause (RED-G-6), and the packaging tests
+assert the required author-side contract over the tracked artifacts. The
+first-party app-wheel/source parity attestation is exposed separately by
+:func:`verify_wheel_matches_source` so an explicit bake gate can build from
+source without requiring a committed app wheel.
 
 The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 
@@ -15,6 +15,7 @@ The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 * runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
     * cp314-only dual-arch Linux offline wheelhouse (no cp311/cp312/cp313 artifacts).
 * ``uv.lock`` is primary; ``requirements.txt`` is a lockstep export.
+* the first-party app wheel is not committed in ``validators/wheelhouse``.
 * build backend ``setuptools.build_meta``; distribution stays
   ``creator-engine-validator`` (DP-1 = A); both console scripts retained.
 
@@ -24,13 +25,16 @@ is introduced, per the format split B6/B7).
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 import subprocess
 import tomllib
-import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
+
+from . import wheel_source_parity
+from .wheel_bake import WheelBakeError, build_app_wheel_from_source
 
 # --- Locked contract constants ---------------------------------------------
 
@@ -50,6 +54,7 @@ REQUIRED_WHEELHOUSE_DISTRIBUTIONS = frozenset(
 )
 REQUIRED_ABI = "cp314"
 FORBIDDEN_ABI_TAGS = ("cp311", "cp312", "cp313")
+SHA256SUMS = "SHA256SUMS"
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,14 @@ def _wheel_filename_parts(filename: str) -> tuple[str, str] | None:
     if len(parts) < 5:
         return None
     return normalize_name(parts[0]), parts[1]
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 # --- pyproject / lock / requirements parsing --------------------------------
@@ -214,21 +227,108 @@ def pyproject_violations(path: Path | str) -> list[str]:
 
 
 def wheelhouse_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Return dependency wheelhouse ABI/presence/hash violations.
+
+    First-party app-wheel posture is intentionally reported by
+    :func:`first_party_app_wheel_violations` so doctor can keep dependency
+    wheelhouse integrity independent from the no-committed-app-wheel contract.
+    """
     v: list[str] = []
     d = Path(wheelhouse_dir)
     if not d.is_dir():
         return [f"missing wheelhouse directory at {d}"]
-    wheels = wheelhouse_wheels(d)
+    wheels = [w for w in wheelhouse_wheels(d) if _wheel_distribution(w) != DISTRIBUTION_NAME]
     offenders = [w for w in wheels if any(tag in w for tag in FORBIDDEN_ABI_TAGS)]
     if offenders:
         v.append(f"non-cp314 ABI wheels present (must be removed): {offenders}")
     if not any("cp314" in w for w in wheels):
         v.append("wheelhouse contains no cp314 ABI wheel; cp314 build not present")
-    present = {normalize_name(n) for n in wheelhouse_distribution_names(d)}
+    present = {_wheel_distribution(w) for w in wheels}
     missing = sorted(REQUIRED_WHEELHOUSE_DISTRIBUTIONS - present)
     if missing:
         v.append(f"wheelhouse missing offline wheels for: {missing}")
+    v += _wheelhouse_hash_violations(d, ignored_distributions={DISTRIBUTION_NAME})
     return v
+
+
+def wheelhouse_hash_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Verify every wheelhouse wheel is covered by ``SHA256SUMS`` and matches it."""
+    return _wheelhouse_hash_violations(wheelhouse_dir, ignored_distributions=set())
+
+
+def _wheelhouse_hash_violations(
+    wheelhouse_dir: Path | str, *, ignored_distributions: set[str]
+) -> list[str]:
+    v: list[str] = []
+    d = Path(wheelhouse_dir)
+    if not d.is_dir():
+        return [f"missing wheelhouse directory at {d}"]
+    sums = d / SHA256SUMS
+    if not sums.is_file():
+        return [f"missing wheelhouse SHA256SUMS at {sums}"]
+
+    expected: dict[str, str] = {}
+    for lineno, raw in enumerate(sums.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            v.append(f"malformed SHA256SUMS line {lineno}: expected '<sha256>  <filename>'")
+            continue
+        digest, filename = parts
+        digest = digest.lower()
+        if "/" in filename or "\\" in filename or filename in {".", ".."}:
+            v.append(f"malformed SHA256SUMS line {lineno}: filename must be wheelhouse-local: {filename!r}")
+            continue
+        if not filename.endswith(".whl"):
+            v.append(f"SHA256SUMS entry is not a wheel: {filename}")
+            continue
+        if _wheel_distribution(filename) in ignored_distributions:
+            continue
+        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            v.append(f"malformed SHA256SUMS line {lineno}: invalid sha256 {digest!r}")
+            continue
+        if filename in expected:
+            v.append(f"duplicate SHA256SUMS entry: {filename}")
+            continue
+        expected[filename] = digest
+
+    if not expected:
+        v.append("SHA256SUMS has no wheel entries")
+
+    wheels = {
+        filename
+        for filename in wheelhouse_wheels(d)
+        if _wheel_distribution(filename) not in ignored_distributions
+    }
+    listed = set(expected)
+    unlisted = sorted(wheels - listed)
+    if unlisted:
+        v.append(f"wheelhouse wheels missing from SHA256SUMS: {unlisted}")
+    extra = sorted(listed - wheels)
+    if extra:
+        v.append(f"SHA256SUMS entries missing wheel files: {extra}")
+
+    for filename, digest in sorted(expected.items()):
+        path = d / filename
+        if not path.is_file():
+            continue
+        actual = _sha256(path)
+        if actual != digest:
+            v.append(f"SHA256 mismatch for {filename}: expected {digest}, got {actual}")
+    return v
+
+
+def first_party_app_wheel_violations(wheelhouse_dir: Path | str) -> list[str]:
+    """Return violations for committed first-party app wheels."""
+    d = Path(wheelhouse_dir)
+    if not d.is_dir():
+        return []
+    app_wheels = [w for w in wheelhouse_wheels(d) if _wheel_distribution(w) == DISTRIBUTION_NAME]
+    if app_wheels:
+        return [f"wheelhouse must not contain first-party app wheels: {app_wheels}"]
+    return []
 
 
 def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str) -> list[str]:
@@ -251,82 +351,12 @@ def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str)
 
 
 def verify_wheel_matches_source(repo_root: Path | str) -> list[str]:
-    """Report app-wheel/source drift when both the repo source and wheel exist.
-
-    Installed end-user contexts may have only the wheel (or only a checkout
-    without the shipped wheelhouse), so this guard is intentionally a no-op
-    unless both sides of the fidelity comparison are present.
-    """
-    root = Path(repo_root)
-    validators = root / "validators"
-    source_root = validators / "creator_engine_validator"
-    wheelhouse = validators / "wheelhouse"
-    if not source_root.is_dir() or not wheelhouse.is_dir():
-        return []
-    app_wheels = sorted(wheelhouse.glob("creator_engine_validator-*.whl"))
-    if not app_wheels:
-        return []
-
-    v: list[str] = []
-    pyproject_version = _pyproject_version(validators / "pyproject.toml")
-    source_version = _source_declared_version(source_root / "version.py")
-    if pyproject_version is None:
-        v.append(f"missing project version in {validators / 'pyproject.toml'}")
-    if source_version is None:
-        v.append(f"missing __version__ in {source_root / 'version.py'}")
-    if pyproject_version and source_version and pyproject_version != source_version:
-        v.append(
-            f"pyproject version {pyproject_version!r} differs from "
-            f"creator_engine_validator.version.__version__ {source_version!r}"
-        )
-
-    source_files = {
-        path.relative_to(source_root).as_posix(): path
-        for path in source_root.rglob("*.py")
-        if path.is_file()
-    }
-
-    for wheel in app_wheels:
-        parsed = _wheel_filename_parts(wheel.name)
-        if parsed is None:
-            v.append(f"invalid app wheel filename: {wheel.name}")
-            continue
-        wheel_dist, wheel_version = parsed
-        if wheel_dist != DISTRIBUTION_NAME:
-            v.append(
-                f"app wheel {wheel.name} distribution must be {DISTRIBUTION_NAME!r}, "
-                f"got {wheel_dist!r}"
-            )
-        if pyproject_version and wheel_version != pyproject_version:
-            v.append(
-                f"app wheel {wheel.name} version {wheel_version!r} differs from "
-                f"pyproject version {pyproject_version!r}"
-            )
-        if source_version and wheel_version != source_version:
-            v.append(
-                f"app wheel {wheel.name} version {wheel_version!r} differs from "
-                f"creator_engine_validator.version.__version__ {source_version!r}"
-            )
-
-        try:
-            with zipfile.ZipFile(wheel) as zf:
-                wheel_files = {
-                    name.removeprefix("creator_engine_validator/")
-                    for name in zf.namelist()
-                    if name.startswith("creator_engine_validator/") and name.endswith(".py")
-                }
-                for rel in sorted(wheel_files - source_files.keys()):
-                    v.append(f"app wheel {wheel.name} has no source file for {rel}")
-                for rel in sorted(source_files.keys() - wheel_files):
-                    v.append(f"app wheel {wheel.name} missing source file {rel}")
-                for rel in sorted(source_files.keys() & wheel_files):
-                    wheel_bytes = zf.read(f"creator_engine_validator/{rel}")
-                    source_bytes = source_files[rel].read_bytes()
-                    if wheel_bytes != source_bytes:
-                        v.append(f"app wheel {wheel.name} differs from source file {rel}")
-        except zipfile.BadZipFile:
-            v.append(f"invalid app wheel zip archive: {wheel}")
-    return v
+    """V1 packaging facade for the shared source-built wheel/source parity gate."""
+    return wheel_source_parity.verify_wheel_matches_source(
+        repo_root,
+        build_app_wheel=build_app_wheel_from_source,
+        wheel_bake_error=WheelBakeError,
+    )
 
 
 def _module_str_constant(path: Path | str, name: str) -> str | None:
@@ -443,22 +473,32 @@ def verify_generated_version(repo_root: Path | str) -> list[str]:
 def verify_packaging_contract(repo_root: Path | str) -> PackagingContractResult:
     """Aggregate the author-side Option B packaging contract (RED-G-6).
 
-    ADR-0010 moves first-party app-wheel/source parity to the post-merge bake
-    gate. This aggregate therefore keeps pyproject, runtime wheelhouse,
-    lockstep, and generated-version checks required, but intentionally excludes
+    ADR-0010 / ADR-0006 Gate 3 moves first-party app-wheel/source parity to an
+    explicit source-build gate. This aggregate therefore keeps pyproject,
+    runtime dependency wheelhouse, lockstep, generated-version, and
+    no-committed-app-wheel checks required, but intentionally excludes
     :func:`verify_wheel_matches_source`.
     """
     root = Path(repo_root)
     validators = root / "validators"
     violations: list[str] = []
     violations += pyproject_violations(validators / "pyproject.toml")
-    violations += wheelhouse_violations(validators / "wheelhouse")
+    wheelhouse_dir = validators / "wheelhouse"
+    dependency_wheelhouse_violations = wheelhouse_violations(wheelhouse_dir)
+    first_party_app_wheel_violations_list = first_party_app_wheel_violations(wheelhouse_dir)
+    violations += dependency_wheelhouse_violations
+    violations += first_party_app_wheel_violations_list
     violations += lockstep_violations(validators / "requirements.txt", validators / "uv.lock")
     violations += verify_generated_version(root)
+    wheels = wheelhouse_wheels(wheelhouse_dir)
     details = {
+        "dependency_wheelhouse_ok": not dependency_wheelhouse_violations,
+        "dependency_wheelhouse_violations": list(dependency_wheelhouse_violations),
+        "first_party_app_wheel_committed": bool(first_party_app_wheel_violations_list),
+        "first_party_app_wheel_violations": list(first_party_app_wheel_violations_list),
         "requires_python": REQUIRES_PYTHON,
         "runtime_pins": dict(RUNTIME_PINS),
-        "wheelhouse_wheels": wheelhouse_wheels(validators / "wheelhouse"),
+        "wheelhouse_wheels": wheels,
         "uv_lock": parse_uv_lock(validators / "uv.lock"),
     }
     return PackagingContractResult(ok=not violations, violations=violations, details=details)
