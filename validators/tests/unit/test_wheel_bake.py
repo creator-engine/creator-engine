@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import hashlib
+import subprocess
 import tomllib
 import zipfile
 from pathlib import Path
@@ -50,10 +51,17 @@ def test_build_app_wheel_from_source_returns_recomputed_manifest(
 ):
     manifest = build_app_wheel_from_source(repo_root, tmp_path)
     wheel = tmp_path / manifest.wheel_name
+    head = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
     assert wheel.is_file()
     assert manifest.version == __version__
     assert manifest.sha256 == hashlib.sha256(wheel.read_bytes()).hexdigest()
+    assert manifest.source_commit == head
     assert len(manifest.source_commit) == 40
     assert all(ch in "0123456789abcdef" for ch in manifest.source_commit)
 
