@@ -9,9 +9,9 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized path
 set below. This carrier lists itself.
 
 Ratified scope:
-Issue #83 docs-only slice: define the CE GitHub Issue intake/opening
-role/sub-agent contract. This pass does not implement runtime code, GitHub
-mutation tooling, workflow wiring, or validator behavior.
+`creator-engine/creator-engine#83` docs-only slice: define the CE GitHub Issue
+intake/opening role/sub-agent contract. This pass does not implement runtime
+code, GitHub mutation tooling, workflow wiring, or validator behavior.
 
 Base:
 `10dc92261073945cfc3088255de9360fdb8d83b6` (`origin/main` at authoring time).

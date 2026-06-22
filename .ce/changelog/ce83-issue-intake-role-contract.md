@@ -3,7 +3,7 @@ slug: ce83-issue-intake-role-contract
 date: 2026-06-22
 kind: added
 scope: GitHub issue intake contract
-issue: ce-ops#83
+issue: creator-engine/creator-engine#83
 ---
 
 Adds a documentation-only contract for the GitHub Issue intake role.

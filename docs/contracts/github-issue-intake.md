@@ -1,8 +1,8 @@
 # Contract: GitHub Issue Intake Role
 
-**Status:** Draft contract for ce-ops#83. Documentation-only slice; this
-document does not add runtime enforcement, GitHub mutation tooling, workflow
-wiring, or validator behavior.
+**Status:** Draft contract for `creator-engine/creator-engine#83`.
+Documentation-only slice; this document does not add runtime enforcement,
+GitHub mutation tooling, workflow wiring, or validator behavior.
 
 ## Purpose
 
