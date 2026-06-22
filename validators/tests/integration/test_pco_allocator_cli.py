@@ -8,6 +8,7 @@ implementation worktrees.
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from creator_engine_validator.checks.pane_registry import validate_pane_registry_record
 from creator_engine_validator.cli import main
 
 
@@ -201,6 +203,84 @@ def test_allocate_release_cycle(secondary_worktree: Path, tmp_path: Path, capsys
     updated_claim = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
     assert "released_at" in updated_claim, "Claim must be marked released"
     assert not lease_path.exists(), "Lease must be removed after release"
+
+
+def test_pco_release_lapsed_terminalizes_matching_pane_registry_record(
+    secondary_worktree: Path, tmp_path: Path, capsys
+):
+    """A stale/lapsed lane release also closes the matching Pane Registry record."""
+    new_wt = tmp_path / "allocated-wt"
+    ledger = secondary_worktree / ".hermes" / "active-work-ledger"
+    branch = "implementer/pco-lapsed-pane-test"
+
+    ret = main([
+        "pco-allocate",
+        "--lane-id", "test-lane",
+        "--worktree-path", str(new_wt),
+        "--controller-id", "hermes-primary",
+        "--branch", branch,
+        "--envelope-ref", "none",
+        "--no-write-authority",
+        "--ledger-root", str(ledger),
+        "--repo-root", str(secondary_worktree),
+    ])
+    capsys.readouterr()
+    assert ret == 0
+
+    claim_path = ledger / "claims" / "hermes-primary" / "test-lane.yaml"
+    pane_path = ledger / "panes" / "hermes-primary" / "test-lane.yaml"
+    pane_path.parent.mkdir(parents=True, exist_ok=True)
+    pane_record = {
+        "kind": "pane-registry-record",
+        "record_type": "pane_identity",
+        "schema_version": "1",
+        "controller_id": "hermes-primary",
+        "lane_id": "test-lane",
+        "claim_ref": "claims/hermes-primary/test-lane.yaml",
+        "host_id": "host-one",
+        "pane_id": "pane-test1",
+        "role": "implementer",
+        "status": "active",
+        "record_timestamp": "2026-05-23T00:00:00Z",
+        "registered_at": "2026-05-23T00:00:00Z",
+        "last_seen_at": "2026-05-23T00:00:00Z",
+        "visibility": "operator_visible",
+        "terminal": {
+            "kind": "tmux",
+            "session_id": "ce-lane",
+            "window_id": "0",
+            "pane_id": "%1",
+        },
+        "claim_record_sha256": hashlib.sha256(
+            claim_path.read_bytes()
+        ).hexdigest(),
+        "worktree_path": str(new_wt),
+        "branch": branch,
+    }
+    assert validate_pane_registry_record(pane_record, pane_path) == []
+    pane_path.write_text(
+        yaml.safe_dump(pane_record, sort_keys=True), encoding="utf-8"
+    )
+
+    ret = main([
+        "pco-release",
+        "--lane-id", "test-lane",
+        "--controller-id", "hermes-primary",
+        "--ledger-root", str(ledger),
+        "--repo-root", str(secondary_worktree),
+        "--release-reason", "lapsed",
+    ])
+    capsys.readouterr()
+    assert ret == 0
+
+    updated_pane = yaml.safe_load(pane_path.read_text(encoding="utf-8"))
+    assert updated_pane["status"] == "closed"
+    assert updated_pane["close_reason"] == "lapsed"
+    assert "closed_at" in updated_pane
+    assert updated_pane["claim_record_sha256"] == hashlib.sha256(
+        claim_path.read_bytes()
+    ).hexdigest()
+    assert validate_pane_registry_record(updated_pane, pane_path) == []
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ import yaml
 
 from .checks.active_work_ledger_conflicts import validate_active_work_ledger_conflicts
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
+from .checks.pane_registry import validate_pane_registry_record
 from .checks.worktree_lease_schema import validate_worktree_lease_record
 from .reporting import CheckResult
 
@@ -196,6 +197,72 @@ def _atomic_write(path: Path, content: str) -> None:
     tmp = path.parent / f"{path.name}.tmp.{pid}.{nonce}"
     tmp.write_text(content, encoding="utf-8")
     tmp.rename(path)
+
+
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _pane_path(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
+    return ledger_root / "panes" / controller_id / f"{lane_id}.yaml"
+
+
+def _pane_close_fields(release_reason: str) -> tuple[str, str]:
+    if release_reason == "completed":
+        return "closed", "completed"
+    if release_reason == "handed_off":
+        return "closed", "handed_off"
+    if release_reason == "lapsed":
+        return "closed", "lapsed"
+    return "aborted", "aborted"
+
+
+def _terminalized_pane_record(
+    *,
+    pane_path: Path,
+    controller_id: str,
+    lane_id: str,
+    release_reason: str,
+    closed_at: str,
+    claim_ref: str,
+    claim_sha256: str | None,
+) -> str | None:
+    """Return a schema-valid terminal Pane Registry record when one exists."""
+    if not pane_path.is_file():
+        return None
+    try:
+        record = yaml.safe_load(pane_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PcoAllocatorError(
+            f"failed to load pane registry record for release: {exc}"
+        ) from exc
+    if not isinstance(record, dict):
+        raise PcoAllocatorError(
+            "pane registry record for release is not a YAML mapping"
+        )
+
+    if (
+        record.get("controller_id") != controller_id
+        or record.get("lane_id") != lane_id
+        or record.get("claim_ref") != claim_ref
+    ):
+        return None
+
+    status, close_reason = _pane_close_fields(release_reason)
+    if record.get("status") not in ("closed", "aborted"):
+        record["status"] = status
+    record["closed_at"] = record.get("closed_at") or closed_at
+    record["close_reason"] = record.get("close_reason") or close_reason
+    if claim_sha256 is not None and "claim_record_sha256" in record:
+        record["claim_record_sha256"] = claim_sha256
+
+    pane_errors = validate_pane_registry_record(record, pane_path)
+    if pane_errors:
+        raise PcoAllocatorError(
+            "pane registry record for release fails schema validation: "
+            f"{_format_validation_errors(pane_errors)}"
+        )
+    return yaml.safe_dump(record, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------
@@ -921,9 +988,10 @@ def release(
     2. Acquire exclusive advisory lock.
     3. Mark claim released (``released_at`` + ``release_reason``).
        Tolerate missing claim file.
-    4. Remove lease file. Tolerate already-absent lease.
-    5. Append ``claim_released`` event.
-    6. Run ``git worktree remove``. Tolerate already-removed worktree.
+    4. Terminalize any matching Pane Registry record.
+    5. Remove lease file. Tolerate already-absent lease.
+    6. Append ``claim_released`` event.
+    7. Run ``git worktree remove``. Tolerate already-removed worktree.
 
     Does NOT delete the branch. Does NOT push. Does NOT mutate GitHub.
     """
@@ -944,6 +1012,7 @@ def release(
 
         # Step 3: mark claim released (tolerate missing file; raise on read/write failure)
         worktree_path_str: str = ""
+        claim_ref = f"claims/{controller_id}/{lane_id}.yaml"
         if claim_path.is_file():
             try:
                 raw = claim_path.read_text(encoding="utf-8")
@@ -963,27 +1032,60 @@ def release(
                 )
 
             worktree_path_str = str(claim_record.get("worktree_path") or "")
+            effective_release_reason = release_reason
             if not claim_record.get("released_at"):
                 claim_record["released_at"] = now
                 claim_record["release_reason"] = release_reason
-            try:
-                _atomic_write(
-                    claim_path,
-                    yaml.safe_dump(claim_record, sort_keys=True),
+            else:
+                effective_release_reason = str(
+                    claim_record.get("release_reason") or release_reason
                 )
+            claim_dump = yaml.safe_dump(claim_record, sort_keys=True)
+            claim_sha256 = _sha256_text(claim_dump)
+            pane_update = _terminalized_pane_record(
+                pane_path=_pane_path(ledger_root, controller_id, lane_id),
+                controller_id=controller_id,
+                lane_id=lane_id,
+                release_reason=effective_release_reason,
+                closed_at=now,
+                claim_ref=claim_ref,
+                claim_sha256=claim_sha256,
+            )
+            try:
+                _atomic_write(claim_path, claim_dump)
             except Exception as exc:
                 raise PcoAllocatorError(
                     f"failed to write claim release marker: {exc}"
                 ) from exc
+        else:
+            pane_update = _terminalized_pane_record(
+                pane_path=_pane_path(ledger_root, controller_id, lane_id),
+                controller_id=controller_id,
+                lane_id=lane_id,
+                release_reason=release_reason,
+                closed_at=now,
+                claim_ref=claim_ref,
+                claim_sha256=None,
+            )
 
-        # Step 4: remove lease (tolerate already absent; raise on removal failure)
+        # Step 4: terminalize matching Pane Registry record (tolerate absence).
+        if pane_update is not None:
+            pane_path = _pane_path(ledger_root, controller_id, lane_id)
+            try:
+                _atomic_write(pane_path, pane_update)
+            except Exception as exc:
+                raise PcoAllocatorError(
+                    f"failed to write pane registry release marker: {exc}"
+                ) from exc
+
+        # Step 5: remove lease (tolerate already absent; raise on removal failure)
         if lease_path.is_file():
             try:
                 lease_path.unlink()
             except OSError as exc:
                 raise PcoAllocatorError(f"failed to remove lease: {exc}") from exc
 
-        # Step 5: append claim_released event
+        # Step 6: append claim_released event
         event_record: dict[str, Any] = {
             "kind": "active-work-ledger-record",
             "record_type": "event",
@@ -1002,7 +1104,7 @@ def release(
                 f"failed to write claim_released event: {exc}"
             ) from exc
 
-        # Step 6: git worktree remove (tolerate already-removed; raise on failure)
+        # Step 7: git worktree remove (tolerate already-removed; raise on failure)
         if worktree_path_str:
             wt = Path(worktree_path_str)
             if wt.exists():
