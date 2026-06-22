@@ -23,6 +23,17 @@ contention; Worker-Container records remain authoritative for
 container policy and instance state. A Pane Registry record binds to
 those substrates but does not replace them.
 
+Pane identity is therefore evidence, not lane ownership. A
+`pane_id`, `pane_tty`, `pane_pid`, tmux `session_id`, or registry
+`role` can help an operator find the visible process that served a
+claim, but the lane owner remains the live Active-Work Ledger claim
+identified by `controller_id`, `lane_id`, and `claim_ref`. Replacing
+or restarting a pane under the same claim does not transfer
+ownership; handing the lane to another Controller requires the
+ledger/handoff flow described in
+[`./ACTIVE_WORK_LEDGER_PROTOCOL.md`](./ACTIVE_WORK_LEDGER_PROTOCOL.md)
+§g.1.
+
 ## 2. Runtime Directory Shape
 
 Pane Registry records are ignored runtime state under:

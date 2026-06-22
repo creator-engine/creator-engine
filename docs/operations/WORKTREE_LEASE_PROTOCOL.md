@@ -240,6 +240,16 @@ architect lane and an implementer lane on the same physical
 worktree). Lane uniqueness across live claims remains owned by
 Slice 1/2 `PCO-016`.
 
+For ownership interpretation, the lease owner is the Controller named
+by the lease's exact `controller_id`; `lease_id`, `lane_id`, and
+`pane_label` do not transfer that ownership. A receiving Controller
+in a handoff cannot inherit coverage by editing a handoff pointer or
+by reusing the outgoing Controller's lane name. When the lease layer
+is active, the receiving Controller needs its own live lease under
+its own `controller_id` before its claim is covered. This is an
+operator interpretation note only; it does not add a schema field,
+runtime allocator behavior, or additional validator scan.
+
 ## j. PCO-024 Lease signature substrate (Slice 2.5B)
 
 PCO-024 extends the worktree-lease record with an optional

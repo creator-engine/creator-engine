@@ -156,6 +156,40 @@ A `lane_id` is the coordination unit. The recommended convention is
 human-meaningful but Slice 0 does not enforce structure beyond the
 pattern.
 
+### g.1 Identity and ownership interpretation for concurrent seats
+
+Humans and Controllers interpret ledger ownership by exact record
+identity, not by process, terminal, account, or natural-language lane
+names:
+
+* `controller_id` names the Controller seat that owns the live
+  coordination records. It is stable per physical operator+host pair
+  (§f) and is compared as an exact string. It is not a GitHub
+  account, actor id, model id, tmux pane id, app slug, or signing-key
+  alias.
+* `lane_id` names the work lane inside the ledger. The live lane
+  owner is the current live claim for the `(controller_id, lane_id)`
+  pair, subject to the worktree collision rules in §s and the
+  lease cross-reference in §w. A familiar or reused `lane_id` string
+  is not enough to infer ownership without the matching
+  `controller_id` and live claim record.
+* `pane_label` is only a role hint on a ledger claim. Visible pane
+  identity is recorded separately by the Pane Registry, which binds a
+  pane to a claim through `controller_id`, `lane_id`, and `claim_ref`;
+  terminal ids and pane ids are evidence for locating the pane, not
+  authority to own the lane.
+* `handoff_ref` and `subject_handoff_ref` are pointers to handoff
+  documents. A handoff document does not itself transfer live ledger
+  ownership. Operationally, ownership changes only when the outgoing
+  claim is released or lapses and the receiving Controller records
+  its own live claim under its own `controller_id` (and, when the
+  lease layer is active, its own covering Worktree Lease).
+
+This subsection clarifies human/operator interpretation only. It
+does not add schema fields, change validation predicates, launch or
+refuse runtime panes, migrate existing records, or close the broader
+identity-hardening follow-ups.
+
 ## h. Claim record fields
 
 A claim record (`record_type: claim`) carries:
