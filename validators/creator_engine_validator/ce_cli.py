@@ -76,6 +76,7 @@ from . import (
     connector_runtime,
     doctor_runtime,
     fanin_runtime,
+    forge_triage,
     init_runtime,
     integration_queue_dry_run,
     lane_runtime,
@@ -837,6 +838,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "pickup", help="autonomous forge work-pickup poller (read-only; ce-ops#55/#182)"
     )
     pickup_sub = pickup.add_subparsers(dest="pickup_cmd")
+
+    # ce pickup triage — ce-ops#187 bounded forge-triage belt planner. Offline
+    # by default: JSON issue set in, deterministic pickup work-items out. It
+    # never launches lanes; --apply is the sole source-host mutation path.
+    pt = pickup_sub.add_parser("triage", help="emit deterministic claimable pickup work")
+    pt.add_argument("--arc-ticket", required=True, dest="arc_ticket",
+                    help="parent/arc ticket (owner/name#N, URL, or N with --repo)")
+    pt.add_argument("--issues-json", default="-", dest="issues_json",
+                    help="path to GitHub Search/list issues JSON, or '-' for stdin")
+    pt.add_argument("--repo", default=None,
+                    help="owner/name default repo for bare arc tickets or issue payloads")
+    pt.add_argument("--label", default=forge_triage.DEFAULT_PICKUP_LABEL,
+                    help="pickup label to add and expose as a ce pickup poll hint")
+    pt.add_argument("--seat", action="append", dest="triage_seats", default=[],
+                    help="repeatable seat/assignee login; comma-separated allowed")
+    pt.add_argument("--apply", action="store_true",
+                    help="apply planned labels/assignees through gh api after claim collision checks")
+    pt.add_argument("--check-claims", action="store_true", dest="check_claims",
+                    help="dry-run with live work-claim collision checks through gh api")
+    pt.add_argument("--json", action="store_true", dest="json_output",
+                    help="emit machine-readable JSON")
+
     pp = pickup_sub.add_parser("poll", help="one read-only Search API poll → work-items JSON")
     pp.add_argument("--identity", required=True,
                     help="seat identity (e.g. ce-dev-2); selects ~/.ce-keys/<identity>.pat")
@@ -2156,6 +2179,51 @@ def _reviewer_triage_plan(args) -> int:
     return 0
 
 
+def _pickup_triage(args) -> int:
+    try:
+        if args.issues_json == "-":
+            issues_text = sys.stdin.read()
+        else:
+            issues_text = Path(args.issues_json).read_text(encoding="utf-8")
+        issue_payloads = forge_triage.load_issue_payloads(issues_text)
+        apply = getattr(args, "apply", False)
+        check_claims = apply or getattr(args, "check_claims", False)
+        runner = _make_gh_runner() if check_claims else None
+        result = forge_triage.plan_triage(
+            arc_ticket=args.arc_ticket,
+            issues=issue_payloads,
+            repo=args.repo,
+            pickup_label=args.label,
+            assign_to=getattr(args, "triage_seats", ()) or (),
+            gh_runner=runner,
+        )
+        if apply:
+            result = forge_triage.apply_triage_result(result, runner)
+    except (OSError, forge_triage.ForgeTriageError) as exc:
+        payload = {"ok": False, "error": str(exc)}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce pickup triage refused: {exc}", file=sys.stderr)
+        return 2
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        verb = "applied" if result.applied else "planned"
+        print(
+            f"ce pickup triage: {verb} {len(result.items)} pickup item(s); "
+            f"poll with ce pickup poll {result.pickup_query_hint}"
+        )
+        for item in result.items:
+            seat = f" -> {item.seat}" if item.seat else ""
+            print(
+                f"  - {item.issue.repo}#{item.issue.number}{seat} "
+                f"({item.work_class}/{item.mutation_class})"
+            )
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -2736,6 +2804,7 @@ _CLAIM_DISPATCH = {
 
 _PICKUP_DISPATCH = {
     "poll": _pickup_poll,
+    "triage": _pickup_triage,
 }
 
 
