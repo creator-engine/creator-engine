@@ -189,7 +189,7 @@ def test_privacy_fail_closed_for_egress_embedder_over_confidential(tmp_path: Pat
 
     class _EgressEmbedder:
         requires_egress = True
-        model_id = "fake-egress"
+        model_id = "ce-deterministic-fake-embedding-v1"
         dim = 32
 
         def embed(self, texts):
@@ -207,7 +207,7 @@ def test_privacy_egress_allowed_with_explicit_consent(tmp_path: Path):
 
     class _EgressEmbedder:
         requires_egress = True
-        model_id = "fake-egress"
+        model_id = "ce-deterministic-fake-embedding-v1"
         dim = 32
 
         def embed(self, texts):
@@ -355,6 +355,22 @@ def test_recall_same_dim_wrong_model_store_fails_closed(tmp_path: Path):
     matching = DeterministicFakeEmbedding(model_id="ce-model-A", dim=32)
     surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root), embedder=matching)
     assert surf.recall("merge queue prior art", top_k=5).recall_items
+
+
+def test_direct_surface_constructor_same_dim_wrong_model_fails_closed(tmp_path: Path):
+    """Direct in-process construction must not bypass model-identity parity."""
+
+    model_a = DeterministicFakeEmbedding(model_id="ce-model-A", dim=32)
+    state_root, db_path = _ingest_with_embedder(tmp_path, model_a)
+    store = SqliteVecStore(str(db_path), state_root=str(state_root))
+    model_b = DeterministicFakeEmbedding(model_id="ce-model-B", dim=32)
+
+    with pytest.raises(brain_recall.BrainRecallInvalid) as exc:
+        surface.BrainRecallSurface(store=store, embedder=model_b, state_root=str(state_root))
+
+    message = str(exc.value)
+    assert "ce-model-A" in message and "ce-model-B" in message
+    assert "model" in message.lower()
 
 
 def test_open_surface_named_embedder_reuses_ingest_factory(tmp_path: Path):

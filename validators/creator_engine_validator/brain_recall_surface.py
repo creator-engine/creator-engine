@@ -157,6 +157,9 @@ class BrainRecallSurface:
     embedder: Any
     state_root: Path | str = V3_LOCAL_STATE_ROOT
 
+    def __post_init__(self) -> None:
+        _require_embedder_matches_store(self.store, self.embedder)
+
     def recall(
         self,
         context: str,
