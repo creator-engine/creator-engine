@@ -2336,7 +2336,7 @@ def _pickup_claim_and_launch(args, pickup, result, token: str) -> int:
 
     from . import pickup as _pickup
 
-    ledger_root = args.pickup_ledger_root or _os.path.join(_versions.V3_LOCAL_STATE_ROOT, "pickup")
+    ledger_root = args.pickup_ledger_root or _os.path.join(V3_LOCAL_STATE_ROOT, "pickup")
     ledger_path = _os.path.join(ledger_root, _pickup.DEFAULT_LEDGER_NAME)
     run_id = args.pickup_run_id or f"pickup-{args.identity}-{result.last_modified or 'init'}"
     try:
@@ -2415,7 +2415,7 @@ def _pickup_launch_for_outcome(args, pickup, outcome, gh_runner, record) -> dict
         repo_root, ".ce", "state", "active-work-ledger"
     )
     seed_root = getattr(args, "seed_root", None) or _os.path.join(
-        args.pickup_ledger_root or _os.path.join(_versions.V3_LOCAL_STATE_ROOT, "pickup"),
+        args.pickup_ledger_root or _os.path.join(V3_LOCAL_STATE_ROOT, "pickup"),
         "seeds",
     )
     run_id = args.pickup_run_id or f"pickup-{args.identity}"
