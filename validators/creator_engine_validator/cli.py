@@ -253,6 +253,35 @@ def _build_parser() -> argparse.ArgumentParser:
     pco_release.add_argument("--repo-root", default=None, help="repo root path (defaults to cwd)")
     pco_release.add_argument("--release-reason", default="completed", choices=["completed", "aborted", "lapsed", "handed_off"], help="reason for release (default: completed)")
 
+    release_stage = sub.add_parser(
+        "release-stage",
+        help="stage deterministic signed-release Pages artifacts; root signing remains Operator-gated",
+    )
+    release_stage.add_argument("--repo-root", required=True, help="source checkout root to build from")
+    release_stage.add_argument("--version", required=True, help="package semver to stage")
+    release_stage.add_argument(
+        "--build-git-sha",
+        required=True,
+        help="merged main commit SHA baked into _version.py and the staged manifest",
+    )
+    release_stage.add_argument("--out", required=True, help="explicit output directory for the staged Pages mirror")
+    release_stage.add_argument(
+        "--sign-mode",
+        default="placeholder",
+        choices=["placeholder"],
+        help="signing mode; only Operator-gated placeholder staging is supported",
+    )
+    release_stage.add_argument(
+        "--force",
+        action="store_true",
+        help="replace a non-empty explicit output directory atomically",
+    )
+    release_stage.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run build/parity/staging verification without promoting the output directory",
+    )
+
     return parser
 
 
@@ -535,9 +564,52 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _pco_allocate(args)
     if subcommand == "pco-release":
         return _pco_release(args)
+    if subcommand == "release-stage":
+        return _release_stage(args)
 
     parser.print_usage(sys.stderr)
     return 2
+
+
+def _release_stage(args) -> int:
+    from .release_publish import ReleasePublishError, stage_signed_release
+
+    try:
+        result = stage_signed_release(
+            repo_root=args.repo_root,
+            version=args.version,
+            build_git_sha=args.build_git_sha,
+            out=args.out,
+            sign_mode=args.sign_mode,
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except ReleasePublishError as exc:
+        print(f"ERROR: release-stage refused: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "out_dir": str(result.out_dir),
+        "version": result.version,
+        "build_git_sha": result.build_git_sha,
+        "wheel_name": result.wheel_name,
+        "wheel_sha256": result.wheel_sha256,
+        "sha256s_sha256": result.sha256s_sha256,
+        "canonical_spec_sha256": result.canonical_spec_sha256,
+        "signature_placeholder": result.signature_placeholder,
+        "signing_command": result.signing_command,
+        "artifacts": [artifact.__dict__ for artifact in result.artifacts],
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        action = "verified" if args.dry_run else "staged"
+        print(f"release-stage: {action} {result.out_dir}")
+        print(f"wheel: {result.wheel_name} {result.wheel_sha256}")
+        print(f"SHA256SUMS: {result.sha256s_sha256}")
+        print(f"canonical spec: {result.canonical_spec_sha256}")
+        print(f"signature placeholder: {result.signature_placeholder}")
+        print(f"operator signing command: {result.signing_command}")
+    return 0
 
 
 def _openbao_p3_plan(args) -> int:
