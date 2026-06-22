@@ -9,6 +9,7 @@ from creator_engine_validator.secret_identity import (
     BackendAlreadyRegistered,
     FakeSecretIdentityBackend,
     IdentityDescriptor,
+    LocalSecretIdentityBackend,
     OpenBaoConfig,
     OpenBaoRequest,
     OpenBaoResponse,
@@ -59,6 +60,21 @@ def _secret_request(**overrides) -> SecretRequest:
     }
     values.update(overrides)
     return SecretRequest(**values)
+
+
+def _local_secret_ref(**overrides) -> SecretRef:
+    values = {
+        "backend": "local",
+        "mount": "host-local",
+        "path": "forge/github-apps/ce-shared/private-key",
+        "field": "pem",
+        "version": None,
+        "purpose": "github-app-pem",
+        "owner_ref": "github-app:ce-shared",
+        "policy_sha": "b" * 64,
+    }
+    values.update(overrides)
+    return SecretRef(**values)
 
 
 def _secret_zero_request(**overrides) -> SecretZeroRequest:
@@ -272,6 +288,70 @@ def test_fake_backend_refuses_unlisted_capability_before_grant():
 
     with pytest.raises(SecretIdentityRefused):
         backend.issue(_secret_request(requested_capabilities=("mint",)))
+
+
+def test_local_backend_models_existing_behavior_with_injected_materializer_value_free():
+    ref = _local_secret_ref()
+    materialized: list[tuple[str, str]] = []
+    backend = LocalSecretIdentityBackend(
+        identities={
+            "dev-1": IdentityDescriptor(
+                identity_ref="identity:dev-1",
+                seat_id="dev-1",
+                human_id="peer-operator",
+                github_login_ref="github:dev-1",
+                email_ref="email:dev-1",
+                reviewer_persona_ref="reviewer:dev-1",
+                policy_refs=("policy:secret",),
+            )
+        },
+        local_refs={ref: "host-local-ref:github-app-pem"},
+        materializer=lambda source_ref, target_ref: materialized.append(
+            (source_ref, target_ref)
+        ),
+    )
+
+    assert backend.resolve_identity("dev-1").identity_ref == "identity:dev-1"
+    request = _secret_request(secret_ref=ref, requested_capabilities=("read",))
+    grant = backend.issue(request)
+    assert grant.grant_id.startswith("local-grant-run-123-")
+    assert "live-secret-value" not in repr(grant)
+    assert "secret_value" not in grant.to_record()
+
+    materialized_grant = backend.materialize(grant, "tmpfs:/run/ce/secret.pem")
+    assert materialized == [
+        ("host-local-ref:github-app-pem", "tmpfs:/run/ce/secret.pem")
+    ]
+    assert materialized_grant.delivery_ref == "tmpfs:/run/ce/secret.pem"
+    audit = backend.collect_audit(materialized_grant)
+    assert audit["backend"] == "local"
+    assert audit["grant_id"] == grant.grant_id
+
+    revoked = backend.revoke(materialized_grant)
+    assert revoked.revoked_at is not None
+    with pytest.raises(SecretIdentityRefused):
+        backend.materialize(revoked, "tmpfs:/run/ce/other.pem")
+
+
+def test_local_backend_refuses_inline_secret_material_in_source_ref_before_grant():
+    ref = _local_secret_ref()
+    backend = LocalSecretIdentityBackend(
+        local_refs={ref: "-----BEGIN PRIVATE KEY-----\nlive-secret-value"},
+    )
+
+    with pytest.raises(SecretIdentityRefused) as exc:
+        backend.issue(_secret_request(secret_ref=ref))
+
+    assert "live-secret-value" not in str(exc.value)
+
+
+def test_local_backend_refuses_secret_zero_because_openbao_owns_that_flow():
+    backend = LocalSecretIdentityBackend()
+
+    with pytest.raises(SecretIdentityRefused) as exc:
+        backend.issue_secret_zero(_secret_zero_request())
+
+    assert "secret-zero" in str(exc.value)
 
 
 def test_openbao_adapter_performs_no_io_on_init_and_refuses_without_audit():

@@ -371,6 +371,28 @@ def _ref_names_controller_key(ref: SecretRef) -> bool:
     return any(_CONTROLLER_KEY_RE.search(value) for value in fields)
 
 
+def _validate_ref_shape(
+    ref: SecretRef,
+    *,
+    backend_key: str | None = None,
+    kv_mount: str | None = None,
+) -> None:
+    if not _POLICY_SHA_RE.fullmatch(ref.policy_sha):
+        raise SecretIdentityRefused("secret_ref.policy_sha must be a lowercase 64-hex digest")
+    if ref.version is not None and ref.version <= 0:
+        raise SecretIdentityRefused("secret_ref.version must be positive when set")
+    if backend_key is not None and ref.backend != backend_key:
+        raise SecretIdentityRefused(
+            f"secret_ref backend {ref.backend!r} is not bound to {backend_key!r}"
+        )
+    if kv_mount is not None and ref.mount != kv_mount:
+        raise SecretIdentityRefused(
+            f"secret_ref mount {ref.mount!r} is not bound to configured mount {kv_mount!r}"
+        )
+    if _ref_names_controller_key(ref):
+        raise SecretIdentityRefused("controller-key secret classes are forbidden")
+
+
 def _normalize_allowed_capabilities(
     allowed_refs: set[SecretRef],
     allowed_capabilities: _CapabilityPolicy | None,
@@ -397,8 +419,6 @@ def _validate_request_shape(
         raise SecretIdentityRefused(f"unsupported delivery mode {request.delivery!r}")
     if not _REPO_RE.fullmatch(request.repo):
         raise SecretIdentityRefused(f"repo {request.repo!r} is not in owner/name form")
-    if not _POLICY_SHA_RE.fullmatch(request.secret_ref.policy_sha):
-        raise SecretIdentityRefused("secret_ref.policy_sha must be a lowercase 64-hex digest")
     if not request.requested_capabilities:
         raise SecretIdentityRefused("requested_capabilities must not be empty")
     if any(
@@ -408,18 +428,7 @@ def _validate_request_shape(
         raise SecretIdentityRefused(
             "requested_capabilities must contain non-empty capability names"
         )
-    if request.secret_ref.version is not None and request.secret_ref.version <= 0:
-        raise SecretIdentityRefused("secret_ref.version must be positive when set")
-    if backend_key is not None and request.secret_ref.backend != backend_key:
-        raise SecretIdentityRefused(
-            f"secret_ref backend {request.secret_ref.backend!r} is not bound to {backend_key!r}"
-        )
-    if kv_mount is not None and request.secret_ref.mount != kv_mount:
-        raise SecretIdentityRefused(
-            f"secret_ref mount {request.secret_ref.mount!r} is not bound to configured mount {kv_mount!r}"
-        )
-    if _ref_names_controller_key(request.secret_ref):
-        raise SecretIdentityRefused("controller-key secret classes are forbidden")
+    _validate_ref_shape(request.secret_ref, backend_key=backend_key, kv_mount=kv_mount)
 
 
 def _validate_runtime_policy_binding(
@@ -675,6 +684,119 @@ class FakeSecretIdentityBackend:
     def materialize(self, grant: SecretGrant, target_ref: str) -> SecretGrant:
         if grant.revoked_at is not None:
             raise SecretIdentityRefused(f"grant {grant.grant_id!r} is already revoked")
+        return replace(grant, delivery_ref=target_ref)
+
+    def revoke(self, grant: SecretGrant) -> SecretGrant:
+        if grant.revoked_at is not None:
+            return grant
+        return replace(grant, revoked_at=_iso(self._clock()))
+
+    def collect_audit(self, grant: SecretGrant) -> Mapping[str, str]:
+        return self._audit.get(
+            grant.grant_id,
+            {"backend": self.backend_key, "grant_id": grant.grant_id, "audit_ref": grant.audit_ref},
+        )
+
+
+LocalSecretMaterializer = Callable[[str, str], None]
+
+
+class LocalSecretIdentityBackend:
+    """Host-local compatibility backend with all materialization injected."""
+
+    backend_key = "local"
+
+    def __init__(
+        self,
+        *,
+        identities: Mapping[str, IdentityDescriptor] | None = None,
+        local_refs: Mapping[SecretRef, str] | None = None,
+        allowed_capabilities: _CapabilityPolicy | None = None,
+        materializer: LocalSecretMaterializer | None = None,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        self._identities = dict(identities or {})
+        self._local_refs = dict(local_refs or {})
+        self._allowed_refs = set(self._local_refs)
+        self._allowed_capabilities = _normalize_allowed_capabilities(
+            self._allowed_refs, allowed_capabilities
+        )
+        self._materializer = materializer or (lambda _source_ref, _target_ref: None)
+        self._clock = clock
+        self._counter = 0
+        self._audit: dict[str, Mapping[str, str]] = {}
+
+    def validate_config(self) -> None:
+        for ref, source_ref in self._local_refs.items():
+            _validate_ref_shape(ref, backend_key=self.backend_key)
+            if not isinstance(source_ref, str) or not source_ref.strip():
+                raise SecretIdentityRefused("local source refs must be non-empty strings")
+            if "\n" in source_ref or "\r" in source_ref:
+                raise SecretIdentityRefused(
+                    "local source refs must be single-line value-free refs"
+                )
+            if "BEGIN " in source_ref.upper() or "PRIVATE KEY" in source_ref.upper():
+                raise SecretIdentityRefused(
+                    "local source refs must not contain inline secret material"
+                )
+
+    def resolve_identity(self, seat_id: str) -> IdentityDescriptor:
+        try:
+            return self._identities[seat_id]
+        except KeyError:
+            raise SecretIdentityRefused(f"no identity descriptor for seat {seat_id!r}") from None
+
+    def issue(self, request: SecretRequest) -> SecretGrant:
+        _validate_request_shape(request, backend_key=self.backend_key)
+        _validate_runtime_policy_binding(
+            request,
+            allowed_refs=self._allowed_refs,
+            allowed_capabilities=self._allowed_capabilities,
+        )
+        self.validate_config()
+        self._counter += 1
+        now = self._clock()
+        source_ref = self._local_refs[request.secret_ref]
+        grant = SecretGrant(
+            grant_id=f"local-grant-{request.run_id}-{self._counter:03d}",
+            run_id=request.run_id,
+            seat_id=request.seat_id,
+            secret_ref=request.secret_ref,
+            lease_id=None,
+            token_accessor_ref=None,
+            issued_at=_iso(now),
+            expires_at=_iso(now + timedelta(seconds=request.ttl_seconds)),
+            delivery_ref=None,
+            audit_ref=f"local-audit:{request.run_id}:{self._counter:03d}",
+        )
+        self._audit[grant.grant_id] = {
+            "backend": self.backend_key,
+            "grant_id": grant.grant_id,
+            "audit_ref": grant.audit_ref,
+            "source_ref": source_ref,
+        }
+        return grant
+
+    def issue_secret_zero(self, _request: SecretZeroRequest) -> SecretZeroGrant:
+        raise SecretIdentityRefused(
+            f"{self.backend_key!r} backend cannot issue OpenBao secret-zero grants"
+        )
+
+    def materialize(self, grant: SecretGrant, target_ref: str) -> SecretGrant:
+        if grant.revoked_at is not None:
+            raise SecretIdentityRefused(f"grant {grant.grant_id!r} is already revoked")
+        try:
+            source_ref = self._local_refs[grant.secret_ref]
+        except KeyError:
+            raise SecretIdentityRefused(
+                f"local source ref missing for {grant.secret_ref.mount}/{grant.secret_ref.path}"
+            ) from None
+        try:
+            self._materializer(source_ref, target_ref)
+        except Exception:
+            raise SecretMaterializationError(
+                "local secret materialization failed; backend value redacted"
+            ) from None
         return replace(grant, delivery_ref=target_ref)
 
     def revoke(self, grant: SecretGrant) -> SecretGrant:
