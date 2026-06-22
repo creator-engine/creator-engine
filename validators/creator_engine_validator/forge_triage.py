@@ -38,6 +38,18 @@ _OWNER_REPO_REF_RE = re.compile(r"(?<![\w./-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#
 _SHORT_REPO_REF_RE = re.compile(r"(?<![\w./-])([A-Za-z0-9_.-]+)#(\d+)")
 _BARE_ISSUE_REF_RE = re.compile(r"(?<![\w./-])#(\d+)")
 _SHORT_TICKET_RE = re.compile(r"^[A-Za-z0-9_.-]+#(\d+)$")
+_DEPENDENCY_BODY_RE = re.compile(
+    r"\b(?:blocked\s*(?:-|\s+)by|depends\s+on|dependenc(?:y|ies))\b\s*:?\s*"
+    r"(?:"
+    r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(?:issues|pull)/\d+"
+    r"|https?://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/\d+"
+    r"|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+"
+    r"|[A-Za-z0-9_.-]+#\d+"
+    r"|#\d+"
+    r"|\d+"
+    r")",
+    re.IGNORECASE,
+)
 
 _BLOCKING_LABELS = frozenset(
     {
@@ -234,7 +246,12 @@ def plan_triage(
     """
     candidates = normalize_issue_payloads(issues, default_repo=repo)
     arc_key = _parse_arc_ticket(arc_ticket, repo)
-    arc_work_key = arc_key.work_key if arc_key is not None else None
+    if arc_key is None:
+        raise ForgeTriageError(
+            "arc ticket is invalid or ambiguous; use owner/name#N, a GitHub issue URL, "
+            "or N with --repo"
+        )
+    arc_work_key = arc_key.work_key
     candidates = _filter_candidates_by_arc_refs(candidates, arc_work_key)
     normalized_label = _require_label(pickup_label)
     seats = _normalize_seats(assign_to)
@@ -361,20 +378,14 @@ def _filter_candidates_by_arc_refs(
     if not refs_by_repo:
         return tuple(candidates)
 
-    arc_repo = arc_candidate.repo.lower()
     filtered: list[IssueCandidate] = []
     for candidate in candidates:
         if candidate.work_key.work_key == arc_work_key:
             continue
         candidate_repo = candidate.repo.lower()
         referenced_numbers = refs_by_repo.get(candidate_repo)
-        if referenced_numbers is not None:
-            if candidate.number in referenced_numbers:
-                filtered.append(candidate)
-            continue
-        if candidate_repo == arc_repo:
-            continue
-        filtered.append(candidate)
+        if referenced_numbers is not None and candidate.number in referenced_numbers:
+            filtered.append(candidate)
     return tuple(filtered)
 
 
@@ -579,7 +590,7 @@ def readiness_blockers(candidate: IssueCandidate) -> tuple[str, ...]:
         if _non_empty_dependency_value(value):
             reasons.append("blocked_dependency")
             break
-    if re.search(r"\b(blocked by|depends on|dependency:)\s+#?\d+", candidate.body, re.IGNORECASE):
+    if _DEPENDENCY_BODY_RE.search(candidate.body):
         reasons.append("blocked_dependency")
     return tuple(_dedupe_strings(reasons))
 

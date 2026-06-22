@@ -4,6 +4,8 @@ import json
 import re
 import subprocess
 
+import pytest
+
 from creator_engine_validator import ce_cli
 from creator_engine_validator import forge_triage as ft
 from creator_engine_validator import work_claims as wc
@@ -95,6 +97,70 @@ def test_plan_triage_limits_candidates_to_arc_body_issue_refs():
 
     assert [item.issue.number for item in result.items] == [10, 20]
     assert 30 not in {item.issue.number for item in result.items}
+
+
+def test_plan_triage_invalid_arc_ticket_fails_closed_before_planning():
+    payload = {"items": [_issue(1), _issue(2)]}
+
+    with pytest.raises(ft.ForgeTriageError, match="arc ticket is invalid or ambiguous"):
+        ft.plan_triage(arc_ticket="ce-ops#187", issues=payload)
+
+
+def test_cli_apply_invalid_arc_ticket_refuses_before_mutation(tmp_path, monkeypatch, capsys):
+    issues = tmp_path / "issues.json"
+    issues.write_text(json.dumps({"items": [_issue(1), _issue(2)]}), encoding="utf-8")
+    fake = FakeGh()
+    monkeypatch.setattr(ce_cli, "_make_gh_runner", lambda: fake)
+
+    rc = ce_cli.main(
+        [
+            "pickup",
+            "triage",
+            "--arc-ticket",
+            "ce-ops#187",
+            "--issues-json",
+            str(issues),
+            "--apply",
+            "--json",
+        ]
+    )
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert "arc ticket is invalid or ambiguous" in payload["error"]
+    assert fake.calls == []
+
+
+def test_plan_triage_explicit_arc_refs_exclude_unreferenced_cross_repo_candidates():
+    payload = {
+        "items": [
+            _issue(187, title="Arc", body="Do #10 only."),
+            _issue(10),
+            _issue(99, repo="other/repo"),
+        ]
+    }
+
+    result = ft.plan_triage(arc_ticket="creator-engine/ce-ops#187", issues=payload)
+
+    assert [item.issue.work_key.work_key for item in result.items] == [
+        "creator-engine/ce-ops:issue:10"
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Blocked by: #12",
+        "Depends on: #12",
+        "blocked by creator-engine/ce-ops#12",
+        "blocked by https://github.com/creator-engine/ce-ops/issues/12",
+    ],
+)
+def test_readiness_blockers_detect_dependency_syntax_variants(body):
+    candidate = ft.normalize_issue(_issue(1, body=body))
+
+    assert candidate is not None
+    assert ft.readiness_blockers(candidate) == ("blocked_dependency",)
 
 
 def test_blocked_and_dependency_gates_do_not_surface_items():
