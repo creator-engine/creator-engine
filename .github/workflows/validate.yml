@@ -156,13 +156,56 @@ jobs:
           )"
 
           git check-ref-format --branch "${base_ref}" >/dev/null
-          git fetch --no-tags --prune --depth=100 origin \
+
+          fetch_with_shallow_retry() {
+            local attempt arg max_attempts delay output status unshallow_fetch
+            max_attempts=4
+            delay=2
+            output="$(mktemp)"
+            unshallow_fetch=false
+            for arg in "$@"; do
+              if [[ "${arg}" == "--unshallow" ]]; then
+                unshallow_fetch=true
+                break
+              fi
+            done
+
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+              if git fetch "$@" >"${output}" 2>&1; then
+                cat "${output}" >&2
+                rm -f "${output}"
+                return 0
+              fi
+
+              status=$?
+              cat "${output}" >&2
+              if ! grep -Fq "shallow file has changed since we read it" "${output}" ||
+                [[ "${attempt}" -eq "${max_attempts}" ]]; then
+                rm -f "${output}"
+                return "${status}"
+              fi
+              if [[ "${unshallow_fetch}" == "true" &&
+                "$(git rev-parse --is-shallow-repository)" != "true" ]]; then
+                rm -f "${output}"
+                return 0
+              fi
+
+              echo "git fetch hit shallow metadata race; retrying $((attempt + 1))/${max_attempts}" >&2
+              sleep "${delay}"
+              delay=$((delay * 2))
+            done
+
+            rm -f "${output}"
+            return 1
+          }
+
+          fetch_with_shallow_retry --no-tags --prune --depth=100 origin \
             "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
 
           comparison_base="$(git merge-base "origin/${base_ref}" HEAD 2>/dev/null || true)"
           if [[ -z "${comparison_base}" && "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-            git fetch --no-tags --prune --unshallow origin
-            git fetch --no-tags --prune origin \
+            fetch_with_shallow_retry --no-tags --prune --unshallow origin
+            fetch_with_shallow_retry --no-tags --prune origin \
               "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
             comparison_base="$(git merge-base "origin/${base_ref}" HEAD 2>/dev/null || true)"
           fi
