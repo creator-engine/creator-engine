@@ -122,6 +122,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.github_repo_config",
         "forge.merge",
         "forge.plan_approval",
+        # ce-ops#151: rebase-aware stale-review reconciler (auto-dismiss a CR
+        # superseded by an independent approval on the live head). v3 forge
+        # adapter family; injectable GhRunner, no v1 import.
+        "forge.re_review",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
