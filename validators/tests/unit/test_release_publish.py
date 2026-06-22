@@ -108,6 +108,17 @@ artifact_manifest:
       command: uv python install 3.14
 -->
 # Install Creator Engine
+
+```bash
+curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
+curl -fsSL 'https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT' \\
+    -o ce-root-v1.anchor.raw
+grep -Eo 'ce-dev1-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw \\
+    | sed -E 's/[[:space:]]+/=/' > ce-root-v1.anchor
+test "$(cut -d= -f2 ce-root-v1.anchor)" = "$(ssh-keygen -l -f ce-root-v1 -E sha256 \\
+    | awk '$3 == "ce-dev1-root-v1" { print $2; exit }')"
+ssh-keygen -Y verify -f ce-root-v1 -I ce-dev1-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
+```
 """,
         encoding="utf-8",
     )
@@ -391,6 +402,57 @@ def test_stage_signed_release_signs_with_selected_trust_anchor(tmp_path: Path):
         hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         == result.canonical_spec_sha256
     )
+
+
+def test_stage_signed_release_parameterizes_verify_recipe_principal(tmp_path: Path):
+    """The embedded verify recipe must name the chosen signer, not the default.
+
+    Regression for ce-ops#198: staging with a non-default --signing-key-id wrote
+    the signature.key_id correctly but left the verify-recipe prose pointing at
+    ce-dev1-root-v1, so an installer following the spec's own recipe verified
+    against the wrong principal and the install failed.
+    """
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+
+    # Selected anchor: every recipe principal reference must become ce-root-v1.
+    selected_out = tmp_path / "selected"
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=selected_out,
+        signing_key_id="ce-root-v1",
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+    selected_spec = (selected_out / "llms-install.md").read_text(encoding="utf-8")
+    assert "grep -Eo 'ce-root-v1[ =]SHA256:" in selected_spec
+    assert 'awk \'$3 == "ce-root-v1" {' in selected_spec
+    assert "-I ce-root-v1 -n ce-spec-v1" in selected_spec
+    # No leftover default principal anywhere in the rendered spec.
+    assert "ce-dev1-root-v1" not in selected_spec
+    # The signer-independent trust-root key file + anchor record name are kept.
+    assert "https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1" in selected_spec
+    assert "ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1" in selected_spec
+    assert "_ce-root-v1.creator-engine.dev" in selected_spec
+
+    # Default anchor: recipe principals stay ce-dev1-root-v1 (unchanged behavior).
+    default_out = tmp_path / "default"
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=default_out,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+    default_spec = (default_out / "llms-install.md").read_text(encoding="utf-8")
+    assert "grep -Eo 'ce-dev1-root-v1[ =]SHA256:" in default_spec
+    assert 'awk \'$3 == "ce-dev1-root-v1" {' in default_spec
+    assert "-I ce-dev1-root-v1 -n ce-spec-v1" in default_spec
 
 
 def test_stage_signed_release_rejects_unknown_signing_key_id(tmp_path: Path):
