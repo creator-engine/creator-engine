@@ -327,6 +327,118 @@ def test_stage_signed_release_defaults_build_sha_to_checkout_head(tmp_path: Path
     assert f"build_git_sha: {checkout_head}\n" in manifest
 
 
+def test_stage_signed_release_default_signing_key_id_is_dev1(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    out = tmp_path / "stage"
+
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=out,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+
+    spec = (out / "llms-install.md").read_text(encoding="utf-8")
+    canonical = (out / "llms-install.canonical").read_text(encoding="utf-8")
+    manifest = (out / "release-stage-manifest.yml").read_text(encoding="utf-8")
+    instructions = (out / "SIGNING-INSTRUCTIONS.md").read_text(encoding="utf-8")
+
+    assert "  key_id: ce-dev1-root-v1\n" in spec
+    assert "  key_id: ce-dev1-root-v1\n" in canonical
+    assert "signing_key_id: ce-dev1-root-v1\n" in manifest
+    assert "-I ce-dev1-root-v1 " in instructions
+    assert "  key_id: ce-root-v1\n" not in spec
+
+
+def test_stage_signed_release_signs_with_selected_trust_anchor(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    out = tmp_path / "stage"
+
+    result = stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=out,
+        signing_key_id="ce-root-v1",
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+
+    spec = (out / "llms-install.md").read_text(encoding="utf-8")
+    canonical = (out / "llms-install.canonical").read_text(encoding="utf-8")
+    manifest = (out / "release-stage-manifest.yml").read_text(encoding="utf-8")
+    instructions = (out / "SIGNING-INSTRUCTIONS.md").read_text(encoding="utf-8")
+
+    # The chosen anchor must reach the spec, the signed canonical bytes, and the manifest.
+    assert "  key_id: ce-root-v1\n" in spec
+    assert "  key_id: ce-root-v1\n" in canonical
+    assert "signing_key_id: ce-root-v1\n" in manifest
+    assert "-I ce-root-v1 " in instructions
+    assert "-I ce-root-v1 " in result.signing_command
+    # The default anchor must NOT leak through anywhere.
+    assert "ce-dev1-root-v1" not in spec
+    assert "ce-dev1-root-v1" not in canonical
+    assert "signing_key_id: ce-dev1-root-v1" not in manifest
+
+    # key_id is part of the signed bytes: the canonical sha must reflect the chosen anchor.
+    assert (
+        hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        == result.canonical_spec_sha256
+    )
+
+
+def test_stage_signed_release_rejects_unknown_signing_key_id(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    out = tmp_path / "stage"
+    builder_called = False
+
+    def _builder_must_not_run(repo_root: Path, out_dir: Path) -> WheelManifest:
+        nonlocal builder_called
+        builder_called = True
+        raise AssertionError("builder should not run when signing_key_id is rejected")
+
+    with pytest.raises(ReleasePublishError, match="invalid signing_key_id"):
+        stage_signed_release(
+            repo_root=repo,
+            version="0.2.0",
+            build_git_sha=build_sha,
+            out=out,
+            signing_key_id="ce-attacker-v1",
+            force=True,
+            build_wheel=_builder_must_not_run,
+            verify_parity=lambda root: [],
+        )
+
+    assert builder_called is False
+    assert not out.exists()
+
+
+def test_release_stage_cli_rejects_invalid_signing_key_id(tmp_path: Path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "release-stage",
+                "--repo-root",
+                str(tmp_path / "repo"),
+                "--version",
+                "0.2.0",
+                "--out",
+                str(tmp_path / "stage"),
+                "--signing-key-id",
+                "ce-attacker-v1",
+            ]
+        )
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
 def test_release_stage_cli_dispatches_to_pipeline(monkeypatch, tmp_path: Path, capsys):
     calls: dict[str, object] = {}
 
@@ -370,6 +482,7 @@ def test_release_stage_cli_dispatches_to_pipeline(monkeypatch, tmp_path: Path, c
     assert calls["build_git_sha"] == BUILD_SHA
     assert calls["out"] == str(out)
     assert calls["sign_mode"] == "placeholder"
+    assert calls["signing_key_id"] == "ce-dev1-root-v1"
     assert calls["force"] is True
     assert calls["dry_run"] is False
     rendered = capsys.readouterr().out
@@ -410,3 +523,42 @@ def test_release_stage_cli_allows_build_git_sha_to_default(monkeypatch, tmp_path
 
     assert code == 0
     assert calls["build_git_sha"] is None
+    assert calls["signing_key_id"] == "ce-dev1-root-v1"
+
+
+def test_release_stage_cli_threads_selected_signing_key_id(monkeypatch, tmp_path: Path):
+    calls: dict[str, object] = {}
+
+    def _fake_stage(**kwargs):
+        calls.update(kwargs)
+        return ReleaseStageResult(
+            out_dir=Path(kwargs["out"]),
+            version=kwargs["version"],
+            build_git_sha="b" * 40,
+            wheel_name="creator_engine_validator-0.2.0-py3-none-any.whl",
+            wheel_sha256="1" * 64,
+            sha256s_sha256="2" * 64,
+            canonical_spec_sha256="3" * 64,
+            signature_placeholder=PLACEHOLDER_SIGNATURE,
+            signing_command="ssh-keygen -Y sign ...",
+            artifacts=(),
+        )
+
+    monkeypatch.setattr(release_publish, "stage_signed_release", _fake_stage)
+
+    code = cli.main(
+        [
+            "release-stage",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--version",
+            "0.2.0",
+            "--out",
+            str(tmp_path / "stage"),
+            "--signing-key-id",
+            "ce-root-v1",
+        ]
+    )
+
+    assert code == 0
+    assert calls["signing_key_id"] == "ce-root-v1"

@@ -26,6 +26,7 @@ PLACEHOLDER_SIGNATURE = "<RESIGN-REQUIRED-ce-root-v1>"
 SIGNING_KEY_ID = "ce-dev1-root-v1"
 SIGNING_NAMESPACE = "ce-spec-v1"
 TRUST_ROOT_ID = "ce-root-v1"
+ALLOWED_SIGNING_KEY_IDS = ("ce-root-v1", "ce-dev1-root-v1")
 SHA256SUMS = "SHA256SUMS"
 
 SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
@@ -74,13 +75,24 @@ def _require_file(path: Path, label: str) -> None:
         raise ReleasePublishError(f"missing {label}: {path}")
 
 
-def _validate_inputs(version: str, build_git_sha: str | None, out: Path, sign_mode: str) -> None:
+def _validate_inputs(
+    version: str,
+    build_git_sha: str | None,
+    out: Path,
+    sign_mode: str,
+    signing_key_id: str,
+) -> None:
     if not SEMVER_RE.fullmatch(version):
         raise ReleasePublishError(f"invalid release version {version!r}")
     if build_git_sha is not None and not SHA_RE.fullmatch(build_git_sha):
         raise ReleasePublishError(f"invalid build git sha {build_git_sha!r}; expected 40 lowercase hex")
     if sign_mode != "placeholder":
         raise ReleasePublishError("only --sign-mode placeholder is supported; root signing is Operator-gated")
+    if signing_key_id not in ALLOWED_SIGNING_KEY_IDS:
+        raise ReleasePublishError(
+            f"invalid signing_key_id {signing_key_id!r}; "
+            f"allowed trust anchors: {sorted(ALLOWED_SIGNING_KEY_IDS)}"
+        )
     if not str(out).strip():
         raise ReleasePublishError("explicit output directory is required")
 
@@ -268,9 +280,11 @@ def _render_placeholder_spec(
     answers_schema_sha256: str,
     canonical_base_url: str,
     site_url: str,
+    signing_key_id: str = SIGNING_KEY_ID,
 ) -> tuple[str, str]:
     text = source_spec.read_text(encoding="utf-8")
     base_url = f"{canonical_base_url}/downloads/{version}"
+    text = _replace_field(text, "key_id", signing_key_id)
     text = _replace_manifest_scalar(text, "package_version", version)
     text = _replace_manifest_scalar(text, "artifact_base_url", base_url)
     text = _replace_manifest_scalar(text, "sha256s_url", f"{base_url}/SHA256SUMS")
@@ -293,7 +307,11 @@ def _render_placeholder_spec(
     return text, canonical_sha
 
 
-def _render_signing_instructions(canonical_rel: str = "llms-install.canonical") -> str:
+def _render_signing_instructions(
+    canonical_rel: str = "llms-install.canonical",
+    *,
+    signing_key_id: str = SIGNING_KEY_ID,
+) -> str:
     return (
         "# Operator signing seam for ce-root-v1\n\n"
         "The staged install spec intentionally contains the placeholder "
@@ -301,7 +319,7 @@ def _render_signing_instructions(canonical_rel: str = "llms-install.canonical") 
         "signs the canonical spec bytes with the held root key, base64-encodes "
         "the SSHSIG, and replaces only the placeholder value.\n\n"
         "```bash\n"
-        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I {SIGNING_KEY_ID} "
+        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I {signing_key_id} "
         f"-n {SIGNING_NAMESPACE} - < {canonical_rel} > llms-install.md.sig\n"
         "base64 -w0 llms-install.md.sig\n"
         "```\n\n"
@@ -318,6 +336,7 @@ def _stage_manifest(
     sha256s_sha256: str,
     canonical_spec_sha256: str,
     signing_command: str,
+    signing_key_id: str = SIGNING_KEY_ID,
     artifacts: tuple[StagedArtifact, ...],
 ) -> str:
     lines = [
@@ -330,7 +349,7 @@ def _stage_manifest(
         f"sha256s_sha256: {sha256s_sha256}\n",
         f"canonical_spec_sha256: {canonical_spec_sha256}\n",
         f"signature_placeholder: {PLACEHOLDER_SIGNATURE}\n",
-        f"signing_key_id: {SIGNING_KEY_ID}\n",
+        f"signing_key_id: {signing_key_id}\n",
         f"signing_namespace: {SIGNING_NAMESPACE}\n",
         f"signing_command: {signing_command}\n",
         "artifacts:\n",
@@ -384,6 +403,7 @@ def stage_signed_release(
     build_git_sha: str | None = None,
     out: Path | str,
     sign_mode: str = "placeholder",
+    signing_key_id: str = SIGNING_KEY_ID,
     force: bool = False,
     dry_run: bool = False,
     build_wheel: BuildWheelFn = build_app_wheel_from_source,
@@ -404,7 +424,7 @@ def stage_signed_release(
     """
     root = Path(repo_root).resolve()
     output = Path(out).resolve()
-    _validate_inputs(version, build_git_sha, output, sign_mode)
+    _validate_inputs(version, build_git_sha, output, sign_mode, signing_key_id)
     if not root.is_dir():
         raise ReleasePublishError(f"repo root does not exist: {root}")
     selected_build_git_sha = _select_build_git_sha(root, build_git_sha)
@@ -491,6 +511,7 @@ def stage_signed_release(
                     answers_schema_sha256=answers_sha,
                     canonical_base_url=site,
                     site_url=site,
+                    signing_key_id=signing_key_id,
                 )
                 staged_spec = temp_stage / "llms-install.md"
                 staged_spec.write_text(spec_text, encoding="utf-8")
@@ -499,10 +520,10 @@ def stage_signed_release(
                 canonical_path.write_text(canonical_text, encoding="utf-8")
                 if hashlib.sha256(canonical_text.encode("utf-8")).hexdigest() != canonical_sha:
                     raise ReleasePublishError("canonical install spec sha drifted during staging")
-                instructions = _render_signing_instructions()
+                instructions = _render_signing_instructions(signing_key_id=signing_key_id)
                 (temp_stage / "SIGNING-INSTRUCTIONS.md").write_text(instructions, encoding="utf-8")
                 signing_command = (
-                    f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I {SIGNING_KEY_ID} "
+                    f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I {signing_key_id} "
                     f"-n {SIGNING_NAMESPACE} - < llms-install.canonical > llms-install.md.sig"
                 )
                 artifacts = _collect_artifacts(temp_stage)
@@ -515,6 +536,7 @@ def stage_signed_release(
                         sha256s_sha256=sha256s_sha,
                         canonical_spec_sha256=canonical_sha,
                         signing_command=signing_command,
+                        signing_key_id=signing_key_id,
                         artifacts=artifacts,
                     ),
                     encoding="utf-8",
