@@ -20,13 +20,16 @@ Use `ce launch` for a visible Controller-seat session. `ce hud` is only an
 alias for `ce launch`; it is not a separate UI or authority surface.
 
 Run the launcher from the intended repo/worktree, or pass `--repo-root` to the
-intended repo/worktree root. `ce launch` does not allocate or switch
-worktrees. The repo root is the seat `cwd` recorded in lifecycle evidence, the
-base used for relative Controller-seat MCP provisioning, and the allowed root
-for Codex `--add-dir` checks. When `--ledger-root` is omitted, lifecycle
-registration uses `<repo-root>/.ce/state/active-work-ledger`. For a
-pre-allocated claim-bound lane that must bind a prompt pointer, prompt SHA, pane
-registry record, worktree path, and Active-Work claim, use `ce lane launch`.
+intended repo/worktree root. `ce launch` does not allocate, create, switch,
+clean, or validate git worktrees; worktree allocation and branch setup are
+operator/controller responsibilities before launch. The repo root is the seat
+`cwd` recorded in lifecycle evidence, the base used for relative
+Controller-seat MCP provisioning, and the allowed root for Codex `--add-dir`
+checks. A governed seat may author only inside that selected worktree root.
+When `--ledger-root` is omitted, lifecycle registration uses
+`<repo-root>/.ce/state/active-work-ledger`. For a pre-allocated claim-bound lane
+that must bind a prompt pointer, prompt SHA, pane registry record, worktree
+path, and Active-Work claim, use `ce lane launch`.
 
 The operator selects the harness explicitly:
 
@@ -51,7 +54,7 @@ Operator-relevant `ce launch` flags:
 | `--resume` | Attaches an existing launcher session. If the named session does not exist, launch is refused instead of spawning or continuing hidden. |
 | `--dry-run` | Builds the deterministic launch plan at the launch-runtime layer. No tmux spawn, provider login, lifecycle write, or resource-bound launch-confirm occurs; requested `--claim-ticket` acquisition still happens before the runtime call. |
 | `--no-tmux` | Refuse-only request for a non-visible/headless Controller seat. Governed authoring seats require a visible tmux surface, so this refuses before side effects. |
-| `--mcp-config <path>` | Claude-only governed MCP config path. The launcher requires a CE-owned relative path, pins `--strict-mcp-config`, provisions the file under `--repo-root` when absent, and refuses absolute, `~`, or escaping paths. |
+| `--mcp-config <path>` | Claude-only governed MCP config path. The launcher requires a CE-owned repo-relative path, pins `--strict-mcp-config`, provisions the file under `--repo-root` when absent, and refuses absolute, `~`, or escaping paths. |
 | `--completion-report-ref <ref>` | Deterministic completion-report pointer accepted for closeout verification surfaces. The governed Claude command builder does not emit it as a Claude argv flag. |
 | `--closeout-file <path>` | Deterministic closeout text pointer accepted for closeout verification surfaces. The governed Claude command builder does not emit it as a Claude argv flag. |
 | `--runtime-policy <path>` | Reads a ratified runtime policy before launch. When the policy declares governed resource envelopes, the launcher wraps the governed command in the resource-bound runtime and records the applied `resource_bound` evidence; dry-run renders that block offline. |
@@ -79,10 +82,11 @@ then wraps the command with an environment scrub that removes common ambient
 source-host write credentials.
 
 For claim-bound work lanes, use `ce lane launch` with a live Active-Work claim,
-prompt pointer, expected prompt SHA256, repo root, and ledger root. The lane
-primitive writes the Pane Registry binding only after prompt, visibility, claim,
-conflict, and tmux checks pass. A prompt pasted into chat is not a launch
-contract; the contract is the checked path plus expected hash plus live claim.
+prompt pointer, expected prompt SHA256, repo root, ledger root, and the
+pre-allocated worktree path. The lane primitive writes the Pane Registry binding
+only after prompt, visibility, claim, conflict, and tmux checks pass. A prompt
+pasted into chat is not a launch contract; the contract is the checked path plus
+expected hash plus live claim.
 
 ## 2. Operator Provisioning From Zero
 
@@ -117,7 +121,8 @@ tokens.
 
 ## 3. Governance Attachment
 
-The real attachment mechanism is repository evidence, not a chat statement:
+The real attachment mechanism is launch-pinned environment plus repository
+evidence, not a chat statement or prompt convention:
 
 - `ce launch` records a governed seat lifecycle entry under ignored CE state,
   including the launch surface, harness, controller identity, host identity,
@@ -127,15 +132,17 @@ The real attachment mechanism is repository evidence, not a chat statement:
 - `--claim-ticket` is the operator-facing way to tie a Controller-seat launch to
   the intended issue or task before side effects. A foreign active claim refuses
   launch.
-- For governed Claude lanes, the hook attachment path is launch-pinned
-  environment, not prompt text. `lane_runtime.launch` exports the absolute
-  Active-Work Ledger root as `CE_LEDGER_ROOT` into the tmux pane environment.
+- For governed Claude lanes, the hook attachment path is the same
+  launch-pinned environment bridge described in
+  [`GOVERNED_LANE_LAUNCH_PROTOCOL.md`](./GOVERNED_LANE_LAUNCH_PROTOCOL.md), not
+  prompt text. `lane_runtime.launch` exports the absolute Active-Work Ledger
+  root as `CE_LEDGER_ROOT` into the tmux pane environment.
   `.claude/hooks/ce-pretooluse.sh` reads that variable and forwards
   `--ledger-root <value>` to `creator_engine_validator hook-check`. The CLI
-  passes it into `hook_check.build_context(..., ledger_root=...)`; from there
-  `_posture_discovery_root()` scopes governed-posture claim and pane discovery
-  to that real ledger root rather than to arbitrary tracked fixtures or the
-  whole worktree.
+  passes that flag into `hook_check.build_context(..., ledger_root=...)`; from
+  there `_posture_discovery_root()` scopes governed-posture claim and pane
+  discovery to that real ledger root rather than to arbitrary tracked fixtures
+  or the whole worktree.
 - Reviewer mechanics require a reviewer-authority envelope reference carried by
   a distinct reviewer venue. `ce lane launch --role reviewer --lane-kind review
   --reviewer-authority-ref <ref>` validates the envelope before side effects,
@@ -156,10 +163,12 @@ ambiguous, or stale, stop and repair the governance state before continuing.
 ## 4. Isolated Seat Identity And Container Model
 
 Each governed seat has a bounded identity and must run under an isolated
-OS/container identity. Use a separate Linux user, a container identity, or an
+OS/container identity. This is a load-bearing credential boundary, not an
+operator preference. Use a separate Linux user, a container identity, or an
 equivalent containerized execution boundary for the seat. Do not run a governed
-seat as the controller user, because the controller account holds source-host
-and broker credentials; sharing that identity collapses the credential boundary
+seat as the controller user or any same-UID identity that can read the
+controller's source-host or broker credentials. The controller account may hold
+high-blast credentials; sharing that identity collapses the credential boundary
 and expands the blast radius of any compromised seat.
 
 Each governed seat identity includes:
@@ -187,8 +196,11 @@ stop or archive the seat before reusing the surface.
 The controller holds keys. Seats consume bounded references and evidence:
 
 - Governed seats are isolated OS/container identities, never the controller user
-  identity. The controller user may hold source-host and broker credentials; the
-  seat identity must not inherit those ambient credentials or filesystem access.
+  identity. A seat started as the controller user is not a governed seat for
+  authoring purposes; stop it, treat the credential boundary as contaminated,
+  and relaunch under a separate Linux user or container identity. The controller
+  user may hold source-host and broker credentials; the seat identity must not
+  inherit those ambient credentials or filesystem access.
 - Source-host write credentials stay out of tracked files, prompts, command
   lines, transcript bodies, and model context.
 - Codex launches scrub `GH_TOKEN`, `GITHUB_TOKEN`, enterprise token variables,
@@ -227,7 +239,7 @@ spec modules.
 | CDX-D-3 | Codex | `--ephemeral` disables durable transcript identity. | Relaunch without ephemeral mode so the seat has durable transcript and lifecycle evidence. |
 | CDX-D-4 | Codex | Posture bypass flags such as `--dangerously-bypass-hook-trust`, `--ignore-rules`, or `--ignore-user-config`. | Remove bypass flags. If posture needs to change, ratify and encode the new posture in CE governance rather than launch argv. |
 | CDX-D-5 | Codex | `--add-dir` expands writable scope outside the declared worktree root. | Restrict writable scope to the allowed repo/worktree root. Allocate another governed worktree for additional scope. |
-| CDX-D-6 | Codex | Missing explicit or verified bypass mode. | Set the accepted Codex config keys in `~/.codex/config.toml`: `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`, or pass the approved explicit argv bypass flag through the launcher: `--codex-arg=--dangerously-bypass-approvals-and-sandbox`. |
+| CDX-D-6 | Codex | Missing explicit or verified bypass mode. | Set exactly the accepted top-level Codex config keys in `~/.codex/config.toml`: `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`, or use the approved explicit argv path by passing `--codex-arg=--dangerously-bypass-approvals-and-sandbox` through the launcher. Other key names, values, or raw `codex` invocations are not accepted. |
 | CDX-D-7 | Codex | Non-allowlisted Codex launch flags. | Remove the flag. Add support in the pure launch spec only after governance review and tests. |
 <!-- ce-launch-refusal-clauses:end -->
 
