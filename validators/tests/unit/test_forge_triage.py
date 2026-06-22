@@ -55,6 +55,8 @@ class FakeGh:
     def __init__(
         self,
         comments_by_number: dict[int, list[dict]] | None = None,
+        comment_stdout_by_number: dict[int, str] | None = None,
+        comment_failures: set[int] | None = None,
         timeline_by_number: dict[int, object] | None = None,
         timeline_pages_by_number: dict[int, dict[int, object]] | None = None,
         timeline_stdout_by_number: dict[int, str] | None = None,
@@ -62,6 +64,8 @@ class FakeGh:
         timeline_failures: set[int | tuple[int, int]] | None = None,
     ):
         self.comments_by_number = comments_by_number or {}
+        self.comment_stdout_by_number = comment_stdout_by_number or {}
+        self.comment_failures = comment_failures or set()
         self.timeline_by_number = timeline_by_number or {}
         self.timeline_pages_by_number = timeline_pages_by_number or {}
         self.timeline_stdout_by_number = timeline_stdout_by_number or {}
@@ -116,6 +120,20 @@ class FakeGh:
         match = re.search(r"/issues/(\d+)/comments", path)
         if match:
             number = int(match.group(1))
+            if number in self.comment_failures:
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout="",
+                    stderr="comments unavailable",
+                )
+            if number in self.comment_stdout_by_number:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    stdout=self.comment_stdout_by_number[number],
+                    stderr="",
+                )
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -402,7 +420,7 @@ def test_open_pr_lookup_failure_fails_closed():
     )
 
     assert [item.issue.number for item in result.items] == [2]
-    assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert result.skipped[0]["reason"] == "linked_pr_status_unavailable"
     assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
 
 
@@ -422,7 +440,7 @@ def test_open_pr_lookup_full_page_then_next_page_failure_fails_closed():
     )
 
     assert [item.issue.number for item in result.items] == [2]
-    assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert result.skipped[0]["reason"] == "linked_pr_status_unavailable"
     assert any(
         "/issues/1/timeline?per_page=100&page=2" in call[0][-1]
         for call in fake.calls
@@ -439,8 +457,139 @@ def test_open_pr_lookup_malformed_response_fails_closed():
     )
 
     assert [item.issue.number for item in result.items] == [2]
-    assert result.skipped[0]["reason"] == "open_pr_status_unavailable"
+    assert result.skipped[0]["reason"] == "linked_pr_status_unavailable"
     assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
+
+
+def test_merged_pr_reference_is_skipped_as_done_but_still_open():
+    # ce-ops#196: the linked PR merged but the issue stayed open -> not ready.
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99",
+                            "merged_at": "2026-06-22T00:00:00Z",
+                        },
+                    }
+                },
+            }
+        ]
+    }
+
+    fake = FakeGh(timeline_by_number=timeline)
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "done_pr"
+    # Done linked-PR short-circuits before the comment hold-marker lookup.
+    assert not any("/issues/1/comments" in call[0][-1] for call in fake.calls)
+
+
+def test_closed_pr_reference_without_merged_flag_is_skipped_as_done():
+    # A linked PR closed-as-done (state closed, no open flag) is still done work.
+    timeline = {
+        1: [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 99,
+                        "state": "closed",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/creator-engine/ce-ops/pulls/99"
+                        },
+                    }
+                },
+            }
+        ]
+    }
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=FakeGh(timeline_by_number=timeline),
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "done_pr"
+
+
+def test_held_marker_in_body_is_skipped_without_gh_runner():
+    # ce-ops#196: an AWAITING-OPERATOR / ⏸️ body marker means parked work.
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={
+            "items": [
+                _issue(1, body="Plan ready.\n\n⏸️ AWAITING-OPERATOR: confirm scope."),
+                _issue(2),
+            ]
+        },
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "held_marker"
+
+
+def test_held_marker_in_comment_is_skipped_when_gh_runner_is_supplied():
+    comments = {
+        1: [
+            {"id": 1, "body": "Looks good."},
+            {"id": 2, "body": "⏸️ AWAITING-OPERATOR before pickup."},
+        ]
+    }
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=FakeGh(comments_by_number=comments),
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "held_marker"
+
+
+def test_meta_debug_label_issue_is_skipped_as_non_leaf_work():
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1, labels=[{"name": "meta/debug"}]), _issue(2)]},
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "aggregate_issue"
+
+
+def test_comment_hold_marker_lookup_failure_fails_closed():
+    fake = FakeGh(comment_failures={1})
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "hold_marker_status_unavailable"
+    assert any("/issues/1/comments" in call[0][-1] for call in fake.calls)
+
+
+def test_comment_hold_marker_malformed_response_fails_closed():
+    fake = FakeGh(comment_stdout_by_number={1: "{not-json"})
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(1), _issue(2)]},
+        gh_runner=fake,
+    )
+
+    assert [item.issue.number for item in result.items] == [2]
+    assert result.skipped[0]["reason"] == "hold_marker_status_unavailable"
 
 
 def test_items_carry_declared_work_and_mutation_sizing():
