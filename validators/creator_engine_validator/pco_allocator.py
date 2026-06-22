@@ -300,6 +300,127 @@ def _format_validation_errors(errors: list[Any]) -> str:
     return "; ".join(error.format() for error in errors)
 
 
+def _existing_live_lease_covers(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    worktree_path: Path,
+    now: datetime,
+) -> bool:
+    """Return True iff a schema-valid, live (non-expired) Worktree Lease record
+    under the SAME ``(controller_id, normalized worktree_path)`` exists.
+
+    This is the in-place mirror of the conflict check's ``PCO-021`` lease-coverage
+    predicate (``_claim_requires_live_lease``): a live claim is only legitimate
+    when covered by a live lease under the same controller+worktree. Reuses the
+    same schema loader (``validate_worktree_lease_record``), normalization, and
+    ``expires_at`` liveness rule the conflict layer applies, so the idempotency
+    fast-path admits exactly the states ``guard`` would accept.
+    """
+    proposed_norm = _normalize_worktree_path(str(worktree_path))
+    if not proposed_norm:
+        return False
+    leases_dir = ledger_root / "leases" / controller_id
+    if not leases_dir.is_dir():
+        return False
+    for lease_file in leases_dir.glob("*.yaml"):
+        if ".tmp." in lease_file.name:
+            continue
+        try:
+            record = yaml.safe_load(lease_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        # Schema-valid lease only — mirror the conflict layer's PCO-020 gate.
+        if validate_worktree_lease_record(record, lease_file):
+            continue
+        if str(record.get("controller_id") or "") != controller_id:
+            continue
+        if _normalize_worktree_path(str(record.get("worktree_path") or "")) != proposed_norm:
+            continue
+        # Liveness: live when now < expires_at; an unparseable/source-controlled
+        # expires_at defaults to live, matching ``_lease_is_live`` in the
+        # conflict layer.
+        expires_raw = record.get("expires_at")
+        parsed = None
+        if isinstance(expires_raw, str) and not (
+            expires_raw.startswith("commit:") or expires_raw.startswith("source-controlled:")
+        ):
+            text = expires_raw[:-1] + "+00:00" if expires_raw.endswith("Z") else expires_raw
+            try:
+                parsed = datetime.fromisoformat(text)
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+        if parsed is None or now < parsed.astimezone(UTC):
+            return True
+    return False
+
+
+def _assert_existing_claim_is_idempotent_reuse(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    lane_id: str,
+    worktree_path: Path,
+    claim_path: Path,
+    existing: Any,
+) -> None:
+    """Fail-CLOSED idempotency gate (dev-1 review, ce-ops#200).
+
+    An existing claim file at ``claim_path`` is only a legitimate idempotent
+    no-op when it is PROVEN to be a real live claim. If ANY of these fail, raise
+    ``PcoConflictError`` so ``pickup.launch_lane`` catches it (``PcoAllocatorError``)
+    and returns ``launched=False`` WITHOUT spawning a doomed lane that
+    ``ce lane launch`` would then refuse (``G3-CLAIM-MISSING``/schema). Reuses the
+    same schema loader the allocator applies to a fresh claim and the conflict
+    layer's lease-coverage predicate rather than hand-rolling field checks.
+
+    Requirements (all must hold):
+    * loads to a YAML mapping (not malformed/truncated/non-dict);
+    * passes ``validate_active_work_ledger_record`` (same schema as a fresh claim);
+    * ``controller_id``/``lane_id`` match this allocation;
+    * NOT ``released_at`` (a released claim is reallocated, not reused);
+    * lease-covered: a matching live lease exists (``PCO-021`` coverage).
+    """
+    if not isinstance(existing, dict):
+        raise PcoConflictError(
+            f"existing claim at {claim_path} is not a YAML mapping; "
+            "refusing fail-closed (a malformed claim would spawn a lane that "
+            "ce lane launch then rejects)"
+        )
+    schema_errors = validate_active_work_ledger_record(existing, claim_path)
+    if schema_errors:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} fails schema validation: "
+            f"{_format_validation_errors(schema_errors)}; refusing fail-closed"
+        )
+    if str(existing.get("controller_id") or "") != controller_id:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} controller_id "
+            f"{existing.get('controller_id')!r} does not match {controller_id!r}; "
+            "refusing fail-closed"
+        )
+    if str(existing.get("lane_id") or "") != lane_id:
+        raise PcoConflictError(
+            f"existing claim at {claim_path} lane_id {existing.get('lane_id')!r} "
+            f"does not match {lane_id!r}; refusing fail-closed"
+        )
+    if not _existing_live_lease_covers(
+        ledger_root=ledger_root,
+        controller_id=controller_id,
+        worktree_path=worktree_path,
+        now=datetime.now(UTC),
+    ):
+        raise PcoConflictError(
+            f"existing live claim at {claim_path} is not covered by a live "
+            f"worktree-lease under controller {controller_id!r} (PCO-021); "
+            "refusing fail-closed"
+        )
+
+
 def _validate_proposed_allocation_state(
     *,
     ledger_root: Path,
@@ -579,14 +700,44 @@ def allocate_in_place(
     with _checkout_lock(lock_dir, worktree_path), _lane_lock(lock_dir, lane_id):
         claim_path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
 
-        # Idempotency: a live (unreleased) claim already present → no-op.
+        # Idempotency (fail-CLOSED, dev-1 review): an existing claim file is a
+        # legitimate idempotent no-op (return False) ONLY when it is PROVEN to be a
+        # real live claim — schema-valid (same validation a fresh claim gets),
+        # controller_id/lane_id-matching, NOT released, AND lease-covered (PCO-021).
+        # A malformed / truncated / mismatched / lease-uncovered existing claim is
+        # NOT a live claim: silently treating it as live (the old fail-OPEN
+        # short-circuit) spawned a doomed lane that ``ce lane launch`` then refused
+        # (G3-CLAIM-MISSING / schema). So ``_assert_existing_claim_is_idempotent_reuse``
+        # RAISES ``PcoConflictError`` instead, which ``pickup.launch_lane`` catches
+        # (``PcoAllocatorError``) → ``launched=False`` WITHOUT spawning. A released
+        # claim falls through to reallocation.
         if claim_path.is_file():
             try:
                 existing = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
-            except Exception:
-                existing = None
+            except Exception as exc:
+                raise PcoConflictError(
+                    f"existing claim at {claim_path} could not be parsed; "
+                    f"refusing in-place allocation fail-closed: {exc}"
+                ) from exc
             if isinstance(existing, dict) and not existing.get("released_at"):
+                # Present + unreleased → must PROVE it is a real live claim.
+                _assert_existing_claim_is_idempotent_reuse(
+                    ledger_root=ledger_root,
+                    controller_id=controller_id,
+                    lane_id=lane_id,
+                    worktree_path=worktree_path,
+                    claim_path=claim_path,
+                    existing=existing,
+                )
                 return False
+            if not isinstance(existing, dict):
+                # A non-mapping file present at the claim path is malformed claim
+                # state, not a released claim — fail closed rather than reallocate
+                # over an unparsed file.
+                raise PcoConflictError(
+                    f"existing claim at {claim_path} is not a YAML mapping; "
+                    "refusing in-place allocation fail-closed"
+                )
 
         # Preflight conflict check against the existing ledger.
         conflicts = guard(ledger_root)

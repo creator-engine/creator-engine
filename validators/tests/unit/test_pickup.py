@@ -771,6 +771,102 @@ def test_launch_lane_allocation_is_idempotent_on_repoll(tmp_path):
     assert second.launched is True  # idempotent: live claim reused, no refusal/crash
 
 
+def test_launch_lane_allocation_refusal_fails_closed_without_spawn(tmp_path, monkeypatch):
+    """dev-1 review (ce-ops#200): when ``allocate_in_place`` REFUSES (raises), the
+    belt must fail closed — return ``launched=False`` with the allocation-refused
+    note and the correct computed ``lane_id``, and MUST NOT spawn ``ce lane launch``.
+
+    The fail-OPEN bug was: a malformed/lease-uncovered existing claim was silently
+    treated as a live no-op, so ``launch_lane`` proceeded to spawn a doomed lane
+    that ``ce lane launch`` then rejected (G3-CLAIM-MISSING/schema). The fix makes
+    the idempotency path fail closed (RAISE). Here we force the allocator to raise
+    and assert the belt neither spawns nor reports ``launched``.
+    """
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="review_requested", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+
+    spawn_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)  # must never be invoked on a refused allocation
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    # Force the in-place allocator to refuse (raise the conflict/allocation error
+    # type ``launch_lane`` catches). This stands in for a malformed / lease-uncovered
+    # existing claim that the fail-closed idempotency path now rejects.
+    def refusing_allocate(*args, **kwargs):
+        raise pickup.pco_allocator.PcoConflictError(
+            "existing live claim is not lease-covered; refusing fail-closed (PCO-021)"
+        )
+
+    monkeypatch.setattr(pickup.pco_allocator, "allocate_in_place", refusing_allocate)
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="wclaim-abc",
+        harness="claude", seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    # (a) launched=False, allocation-refused note, correct computed lane_id.
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert "lane claim allocation refused" in (result.note or "")
+    assert "PCO-021" in (result.note or "")
+    # (b) the spawn seam was NEVER invoked — no doomed lane spawned.
+    assert spawn_calls == []
+
+
+def test_launch_lane_malformed_existing_claim_fails_closed_without_spawn(tmp_path):
+    """End-to-end (no monkeypatch): a malformed unreleased claim already on disk at
+    the lane's claim path makes the REAL ``allocate_in_place`` fail closed, so the
+    belt does not spawn.
+
+    This proves the fail-closed idempotency change at the allocator boundary, not
+    just the ``launch_lane`` catch: a partial/truncated claim (missing required
+    schema fields) is no longer silently accepted as a live no-op.
+    """
+    from creator_engine_validator import lane_runtime
+
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="assigned", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+
+    # Plant a malformed (schema-invalid: missing required fields), UNRELEASED claim
+    # at exactly the path the lane would use.
+    claim_path = lane_runtime._claim_path(awl, identity, expected_lane_id)
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.write_text(
+        yaml.safe_dump({"kind": "active-work-ledger-record", "record_type": "claim"}),
+        encoding="utf-8",
+    )
+
+    spawn_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "launched"}), stderr="")
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="c",
+        harness="codex", seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert "lane claim allocation refused" in (result.note or "")
+    assert spawn_calls == []  # never spawned a doomed lane
+
+
 def test_mark_thread_read_only_after_launched(tmp_path):
     forge = _FakeForge()
     calls = []
