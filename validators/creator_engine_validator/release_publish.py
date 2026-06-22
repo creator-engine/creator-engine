@@ -212,6 +212,39 @@ def _canonical_install_spec(spec_text: str) -> str:
     )
 
 
+def _replace_recipe_principal(text: str, signing_key_id: str) -> str:
+    """Thread the chosen signer into the embedded verify-recipe prose.
+
+    The recipe in ``docs/llms-install.md`` hardcodes the default principal
+    (``SIGNING_KEY_ID``) in three places: the DNS-anchor ``grep`` regex, the
+    ``awk '$3 == ...'`` fingerprint selector, and the ``ssh-keygen -Y verify
+    -I`` invocation. Every principal reference MUST equal ``signature.key_id``
+    (the staged signer) or an installer following the recipe verifies against
+    the wrong principal and the install fails. The trust-root key FILE name
+    (``ce-root-v1``) and the out-of-band anchor record name
+    (``_ce-root-v1.creator-engine.dev``) are signer-independent and must NOT
+    change, so each pattern is anchored to the principal position only.
+    """
+    if signing_key_id == SIGNING_KEY_ID:
+        return text
+    default = re.escape(SIGNING_KEY_ID)
+    patterns = (
+        # 1. grep -Eo 'ce-dev1-root-v1[ =]SHA256:...' (principal opens the regex)
+        (re.compile(rf"(grep -Eo ')({default})(\[)"), signing_key_id),
+        # 2. awk '$3 == "ce-dev1-root-v1" ...' (fingerprint selector principal)
+        (re.compile(rf"(awk '\$3 == \")({default})(\")"), signing_key_id),
+        # 3. ssh-keygen -Y verify ... -I ce-dev1-root-v1 ... (verify principal)
+        (re.compile(rf"(-I )({default})(\b)"), signing_key_id),
+    )
+    for pattern, replacement in patterns:
+        text, count = pattern.subn(rf"\g<1>{replacement}\g<3>", text)
+        if count != 1:
+            raise ReleasePublishError(
+                f"expected exactly one recipe principal match for {pattern.pattern!r}, found {count}"
+            )
+    return text
+
+
 def _replace_field(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^(  {re.escape(key)}: ).*$", flags=re.MULTILINE)
     replaced, count = pattern.subn(rf"\g<1>{value}", text)
@@ -285,6 +318,7 @@ def _render_placeholder_spec(
     text = source_spec.read_text(encoding="utf-8")
     base_url = f"{canonical_base_url}/downloads/{version}"
     text = _replace_field(text, "key_id", signing_key_id)
+    text = _replace_recipe_principal(text, signing_key_id)
     text = _replace_manifest_scalar(text, "package_version", version)
     text = _replace_manifest_scalar(text, "artifact_base_url", base_url)
     text = _replace_manifest_scalar(text, "sha256s_url", f"{base_url}/SHA256SUMS")
