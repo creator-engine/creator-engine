@@ -7,10 +7,10 @@ is gitignored and local to the canonical checkout), so such a command fails with
 ``.venv/bin/python: No such file or directory`` after an otherwise-valid lane
 allocation.
 
-The sanctioned convention is ``${CE_VALIDATOR_PYTHON:-python}`` (documented in
-``validators/README.md``): the active interpreter by default, overridable via the
-``CE_VALIDATOR_PYTHON`` env var (e.g. an absolute canonical-checkout venv path) when
-running from a worktree that has no active venv.
+The sanctioned convention is to invoke through ``CE_VALIDATOR_PYTHON`` (documented
+in ``validators/README.md``): fresh-clone docs may default the variable to the
+local dependency venv, while isolated worktrees set it to a known interpreter such
+as an absolute canonical-checkout venv path.
 
 This guard keys on a worktree-RELATIVE ``.venv*/bin/python`` *module invocation*
 (``... -m ...``). It deliberately ignores absolute venv paths
@@ -59,7 +59,7 @@ def test_no_worktree_relative_venv_python_in_docs() -> None:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
     assert not offenders, (
         "Worktree-relative `.venv*/bin/python -m ...` found (creator-engine#82); "
-        "use `${CE_VALIDATOR_PYTHON:-python}` instead:\n" + "\n".join(offenders)
+        "invoke through `$CE_VALIDATOR_PYTHON` instead:\n" + "\n".join(offenders)
     )
 
 
@@ -70,7 +70,8 @@ def test_guard_regex_flags_bad_and_ignores_good() -> None:
         ".venv3/bin/python -m creator_engine_validator check",
     ]
     good = [
-        'PYTHONPATH=validators "${CE_VALIDATOR_PYTHON:-python}" -m pytest validators/tests -q',
+        'PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q',
+        'CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv-test/bin/python}"',
         "PYTHONPATH=validators /home/ce/canonical/.venv/bin/python -m pytest",  # absolute path
         "PYTHONPATH=validators python -m pytest validators/tests -q",
         "source .venv-test/bin/activate",  # activation, not a python invocation

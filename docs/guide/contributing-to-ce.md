@@ -53,10 +53,7 @@ cd creator-engine
 git rev-parse --short=7 HEAD
 ```
 
-Install the validator runtime dependencies using the uv-first offline path. The
-validator README defines Python 3.14 as the current floor, source-checkout
-execution, and the checked-in dependency wheelhouse contract
-(`validators/README.md:7-17`):
+Install validator runtime dependencies using the uv-first offline source path:
 
 ```bash
 uv venv --python 3.14
@@ -65,7 +62,7 @@ UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-in
 PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-checks
 ```
 
-If you need the full pytest gate, install the dev/test dependency set from the checked-in dev wheelhouse (`validators/README.md:41-55`):
+If you need the full pytest gate, install the dev/test dependency set:
 
 ```bash
 python3.14 -m venv .venv-test
@@ -99,10 +96,9 @@ fi
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
 > **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
-> `ce-worktrees/*` have no local `.venv` — it is gitignored and lives only in the
-> canonical checkout. When no virtualenv is active, set `CE_VALIDATOR_PYTHON` to a
-> known interpreter (e.g. the canonical checkout's venv) and invoke the validator as
-> `${CE_VALIDATOR_PYTHON:-python}`. See [`../../validators/README.md`](../../validators/README.md).
+> `ce-worktrees/*` have no local `.venv`; set `CE_VALIDATOR_PYTHON` to a known
+> interpreter and invoke the validator through `$CE_VALIDATOR_PYTHON`. See
+> [`../../validators/README.md`](../../validators/README.md).
 
 ## 4. The Governed Cycle
 
