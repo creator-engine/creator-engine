@@ -64,10 +64,14 @@ from .forge.github_repo_config import (
     ForgeConfigRefused,
     GhRunner,
 )
+from .forge.protection_diagnostics import (
+    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+    protection_floor_unenforceable,
+    protection_floor_unenforceable_diagnostic,
+)
 from .forge.ruleset import (
     CE_PROTECTION_RULESET_NAME,
     RulesetPolicy,
-    find_ruleset,
     ruleset_satisfies_policy,
 )
 from .forge.scoped_token import (
@@ -562,6 +566,53 @@ def _looks_like_branch_not_protected(parsed: object, stderr: str) -> bool:
     return "branch not protected" in text
 
 
+def _rulesets_from_payload(parsed: object) -> list[dict[str, Any]]:
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, Mapping):
+        for key in ("rulesets", "items"):
+            value = parsed.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _find_ce_ruleset(
+    runner: GhRunner, repo: str
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    code, parsed, stderr = _gh_get(runner, f"repos/{repo}/rulesets")
+    if code != 0:
+        if protection_floor_unenforceable(parsed, stderr):
+            return None, protection_floor_unenforceable_diagnostic(
+                surface="rulesets", parsed=parsed, stderr=stderr
+            )
+        return None, {"ok": False, "reason": "protection_read_failed", "surface": "rulesets"}
+    for ruleset in _rulesets_from_payload(parsed):
+        if ruleset.get("name") == CE_PROTECTION_RULESET_NAME:
+            return ruleset, None
+    return None, None
+
+
+def _combined_floor_unenforceable(
+    classic: Mapping[str, Any] | None, rulesets: Mapping[str, Any]
+) -> dict[str, Any]:
+    messages = [
+        str(diag.get("message") or "").strip()
+        for diag in (classic, rulesets)
+        if isinstance(diag, Mapping) and str(diag.get("message") or "").strip()
+    ]
+    return {
+        "ok": False,
+        "code": PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+        "reason": PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+        "surface": "classic_and_rulesets" if classic else "rulesets",
+        "message": "; ".join(messages),
+        "remediation": rulesets.get("remediation"),
+        "classic": dict(classic) if isinstance(classic, Mapping) else None,
+        "rulesets": dict(rulesets),
+    }
+
+
 def _valid_sha256(value: str) -> bool:
     return len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value)
 
@@ -849,8 +900,9 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
     def verify_branch_protection(
         self, *, repo: str, branch: str, policy: BranchProtectionPolicy
     ) -> dict[str, Any]:
+        classic_diag: dict[str, Any] | None = None
         try:
-            code, parsed, _ = _gh_get(
+            code, parsed, stderr = _gh_get(
                 self._reader(), f"repos/{repo}/branches/{branch}/protection"
             )
         except Exception:  # noqa: BLE001
@@ -861,14 +913,15 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             # The floor's required checks must ALL be present (a repo with MORE checks still
             # satisfies the floor); a missing CE check fails detection → brownfield defer upstream.
             return {"ok": floor.issubset(live), "contexts": sorted(live), "source": "classic"}
-        try:
-            ruleset = find_ruleset(
-                repo,
-                CE_PROTECTION_RULESET_NAME,
-                gh_runner=self._reader(),
+        if protection_floor_unenforceable(parsed, stderr):
+            classic_diag = protection_floor_unenforceable_diagnostic(
+                surface="classic", parsed=parsed, stderr=stderr
             )
-        except Exception:  # noqa: BLE001
-            return {"ok": False, "reason": "protection_read_failed"}
+        ruleset, ruleset_diag = _find_ce_ruleset(self._reader(), repo)
+        if ruleset_diag:
+            if ruleset_diag.get("reason") == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                return _combined_floor_unenforceable(classic_diag, ruleset_diag)
+            return ruleset_diag
         ruleset_policy = _ruleset_policy_for_branch(policy, branch=branch)
         live = set(_ruleset_required_contexts(ruleset))
         floor = set(policy.required_status_check_contexts)
@@ -876,6 +929,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             "ok": ruleset_satisfies_policy(ruleset, ruleset_policy) and floor.issubset(live),
             "contexts": sorted(live),
             "source": "ruleset",
+            "classic_unavailable": classic_diag is not None,
         }
 
     def existing_branch_protection_contexts(
@@ -890,11 +944,9 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         if code == 0 and isinstance(parsed, dict):
             return _protection_contexts(parsed)
         with contextlib.suppress(Exception):
-            ruleset = find_ruleset(
-                repo,
-                CE_PROTECTION_RULESET_NAME,
-                gh_runner=self._reader(),
-            )
+            ruleset, ruleset_diag = _find_ce_ruleset(self._reader(), repo)
+            if ruleset_diag:
+                return ()
             return _ruleset_required_contexts(ruleset)
         return ()
 
@@ -1439,8 +1491,9 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         required check is genuinely MISSING the repo is NOT fully already-CE → fail closed (no
         PUT). So Phase-1's forge-write blast radius on the happy path is **zero**.
         """
+        classic_diag: dict[str, Any] | None = None
         try:
-            code, parsed, _ = _gh_get(
+            code, parsed, stderr = _gh_get(
                 self._reader(), f"repos/{repo}/branches/{branch}/protection"
             )
         except Exception:  # noqa: BLE001
@@ -1449,14 +1502,15 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         if code == 0 and isinstance(parsed, dict):
             live = set(_protection_contexts(parsed))
         else:
-            try:
-                ruleset = find_ruleset(
-                    repo,
-                    CE_PROTECTION_RULESET_NAME,
-                    gh_runner=self._reader(),
+            if protection_floor_unenforceable(parsed, stderr):
+                classic_diag = protection_floor_unenforceable_diagnostic(
+                    surface="classic", parsed=parsed, stderr=stderr
                 )
-            except Exception:  # noqa: BLE001
-                return {"ok": False, "reason": "protection_read_failed_no_write"}
+            ruleset, ruleset_diag = _find_ce_ruleset(self._reader(), repo)
+            if ruleset_diag:
+                if ruleset_diag.get("reason") == PROTECTION_FLOOR_UNENFORCEABLE_CODE:
+                    return _combined_floor_unenforceable(classic_diag, ruleset_diag)
+                return {"ok": False, "reason": "protection_read_failed_no_write", **ruleset_diag}
             ruleset_policy = _ruleset_policy_for_branch(policy, branch=branch)
             if not ruleset_satisfies_policy(ruleset, ruleset_policy):
                 return {"ok": False, "reason": "branch_protection_ruleset_missing_no_write"}
@@ -1470,7 +1524,14 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 "reason": "branch_protection_mutation_deferred",
                 "would_add": sorted(would_add),
             }
-        return {"ok": True, "already": True, "mutated": False, "contexts": sorted(live), "source": source}
+        return {
+            "ok": True,
+            "already": True,
+            "mutated": False,
+            "contexts": sorted(live),
+            "source": source,
+            "classic_unavailable": classic_diag is not None,
+        }
 
     def configure_merge_settings(self, *, repo: str, squash_only: bool, token: str) -> dict[str, Any]:
         """VERIFY-FIRST, defer-not-mutate for Phase 1 repo merge settings."""
@@ -1944,6 +2005,16 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
             if _looks_like_branch_not_protected(parsed, stderr):
                 # Affirmative 404/not-protected signal → no required checks exist to drop.
                 return {"ok": True, "existing_checks": [], "dropped": []}
+            if protection_floor_unenforceable(parsed, stderr):
+                diagnostic = protection_floor_unenforceable_diagnostic(
+                    surface="classic", parsed=parsed, stderr=stderr
+                )
+                raise onboard_apply.ApplyRefused(
+                    PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                    onboard_apply.protection_floor_unenforceable_detail(
+                        repo=repo, branch=base, diagnostic=diagnostic
+                    ),
+                )
             raise onboard_apply.ApplyRefused(
                 "brownfield_protection_read_failed",
                 f"branch-protection read returned non-404 error (gh rc={code}); refusing to infer clean",

@@ -34,6 +34,9 @@ _REPO = "creator-engine/creator-engine"
 _MINTED = "ghs_fake_minted_value"  # the value the fake mint transport returns
 _BOOTSTRAP_PAT = "ghp_fakeclassicbootstrappatvalue0000000000"  # classic PAT (ghp_ prefix)
 _BOOTSTRAP_PAT_FG = "github_pat_11FAKEfinegrainedbootstrappatvalue00000"  # fine-grained PAT (ce-ops#94)
+_PLAN_403 = json.dumps({
+    "message": "Upgrade to GitHub Pro or make this repository public to enable this feature."
+})
 
 
 def _schema() -> dict[str, Any]:
@@ -68,13 +71,19 @@ class _ModeBForge:
         contents: str | None = None,
         protection: str | None = None,
         protection_status: int = 0,
+        protection_error: str = "",
         rulesets: str | None = None,
+        rulesets_status: int = 0,
+        rulesets_error: str = "",
         user_response: str | None = None,
         contents_by_path: dict[str, str] | None = None,
     ):
         self.repo_json = _fx("repo.json")
         self.protection_status = protection_status
+        self.protection_error = protection_error
         self.protection_json = protection if protection is not None else _fx("protection.json")
+        self.rulesets_status = rulesets_status
+        self.rulesets_error = rulesets_error
         self.rulesets_json = rulesets if rulesets is not None else "[]"
         self.contents_json = contents if contents is not None else _fx(
             "contents_ce_validate_yml_already_ce.json"
@@ -126,8 +135,8 @@ class _ModeBForge:
         assert _BOOTSTRAP_PAT_FG not in " ".join(argv)
         joined = " ".join(argv)
 
-        def done(rc: int, out: str = "") -> subprocess.CompletedProcess:
-            return subprocess.CompletedProcess(list(argv), rc, stdout=out, stderr="")
+        def done(rc: int, out: str = "", err: str = "") -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(list(argv), rc, stdout=out, stderr=err)
 
         if "-X" in argv and "DELETE" in argv and "installation/token" in joined:
             return done(0)  # revoke
@@ -136,10 +145,10 @@ class _ModeBForge:
         if "installation/repositories" in joined:
             return done(0, self.installation_repos)  # App-installation coverage
         if f"repos/{_REPO}/rulesets" in joined:
-            return done(0, self.rulesets_json)
+            return done(self.rulesets_status, self.rulesets_json, self.rulesets_error)
         if "/branches/main/protection" in joined:
             if self.protection_status != 0:
-                return done(self.protection_status)
+                return done(self.protection_status, self.protection_json, self.protection_error)
             return done(0, self.protection_json)
         if "/contents/" in joined:
             if self.contents_by_path is not None:
@@ -265,11 +274,17 @@ def test_verify_branch_protection_accepts_ruleset_floor_when_classic_unavailable
             bypass_actors=(),
         ).to_put_payload(),
     }
-    forge = _ModeBForge(protection_status=1, rulesets=json.dumps([ruleset]))
+    forge = _ModeBForge(
+        protection=_PLAN_403,
+        protection_status=1,
+        protection_error="gh: Upgrade to GitHub Pro or make this repository public (HTTP 403)",
+        rulesets=json.dumps([ruleset]),
+    )
     driver = _driver(forge)
     result = driver.verify_branch_protection(repo=_REPO, branch="main", policy=policy)
     assert result["ok"] is True
     assert result["source"] == "ruleset"
+    assert result["classic_unavailable"] is True
     assert "Validate governance artifacts" in result["contexts"]
     assert "Validate governance artifacts" in driver.existing_branch_protection_contexts(
         repo=_REPO, branch="main"
@@ -279,7 +294,33 @@ def test_verify_branch_protection_accepts_ruleset_floor_when_classic_unavailable
     )
     assert configured["ok"] is True
     assert configured["source"] == "ruleset"
+    assert configured["classic_unavailable"] is True
     assert forge.write_argvs() == []
+
+
+def test_verify_branch_protection_classic_and_rulesets_403_is_unenforceable():
+    policy = DEFAULT_MAIN_PROTECTION.with_contexts(("Validate governance artifacts",))
+    forge = _ModeBForge(
+        protection=_PLAN_403,
+        protection_status=1,
+        protection_error="gh: Upgrade to GitHub Pro or make this repository public (HTTP 403)",
+        rulesets=_PLAN_403,
+        rulesets_status=1,
+        rulesets_error="gh: Upgrade to GitHub Pro or make this repository public (HTTP 403)",
+    )
+    driver = _driver(forge)
+    result = driver.verify_branch_protection(repo=_REPO, branch="main", policy=policy)
+    assert result["ok"] is False
+    assert result["reason"] == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert result["surface"] == "classic_and_rulesets"
+    assert "GitHub Team/Pro" in result["remediation"]
+
+    assert onboard_apply.repo_is_already_ce_governed(
+        driver, repo=_REPO, branch="main", schema=_schema()
+    ) is False
+    probe = driver.last_ce_governance_probe
+    assert probe["reason"] == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert "make the repository public" in probe["detail"]
 
 
 def test_existing_branch_protection_contexts_reads_live():
@@ -1423,6 +1464,20 @@ def test_adoption_preserved_checks_403_refuses_fail_closed():
     with pytest.raises(onboard_apply.ApplyRefused) as exc:
         driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
     assert exc.value.code == "brownfield_protection_read_failed"
+    driver.close()
+
+
+def test_adoption_preserved_checks_plan_403_refuses_with_remediation():
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=_PLAN_403,
+        protection_err="gh: Upgrade to GitHub Pro or make this repository public (HTTP 403)",
+    )
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.read_preserved_checks(repo=_REPO, base="main", expected_checks=["lint"])
+    assert exc.value.code == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert "GitHub Team/Pro" in exc.value.detail
     driver.close()
 
 

@@ -1996,6 +1996,7 @@ def plan_branch_protection(
     desired: Any,
     *,
     floor: dict[str, Any],
+    enforcement: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The branch-protection desired-state DIFF (declarative reconciliation,
     the terraform model): read current state (injected probe; None =
@@ -2006,7 +2007,13 @@ def plan_branch_protection(
     mirroring `forge.github_repo_config.BranchProtectionPolicy.with_contexts`
     — so configuring never silently drops a check someone else registered)."""
     effective = effective_protections(desired, floor=floor)
+    current_was_unprobed = current is None
     current = current or {}
+    enforcement_state = dict(enforcement or {})
+    if not enforcement_state:
+        enforcement_state = {
+            "state": "unprobed" if current_was_unprobed else "verified_classic",
+        }
     drift: list[dict[str, Any]] = []
     for key, want in effective.items():
         have = current.get(key)
@@ -2025,7 +2032,8 @@ def plan_branch_protection(
     return {
         "effective_desired": effective,
         "drift": drift,
-        "converged": not drift,
+        "enforcement": enforcement_state,
+        "converged": not drift and enforcement_state.get("state") != "unenforceable",
         "apply": "only the drift (the live PUT is the deferred forge seam)",
     }
 
@@ -2090,6 +2098,7 @@ def build_github_leg_plan(
       repo_exists           bool | None
       token_scopes          iterable of granted scopes | None
       current_protections   the read current protection state | None
+      protection_enforcement structured enforcement state | None
       actions_enabled       bool | None
       workflow_present      bool | None
     """
@@ -2121,6 +2130,7 @@ def build_github_leg_plan(
         probe.get("current_protections"),
         merged.value("github.protections", "reference"),
         floor=floor,
+        enforcement=probe.get("protection_enforcement"),
     )
     actions_plan = plan_actions_workflow(
         install_validate_workflow=bool(merged.value("github.actions.install_validate_workflow", True)),

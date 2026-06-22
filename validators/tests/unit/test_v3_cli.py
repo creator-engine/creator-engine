@@ -1851,6 +1851,81 @@ def test_onboard_plan_surfaces_plain_join_route_for_already_ce_repo(tmp_path, ca
     payload = json.loads(capsys.readouterr().out)
     assert payload["plain_join"]["route"] == "plain-join"
     assert payload["plain_join"]["already_ce_detected"] is True
+    assert payload["plain_join"]["enforcement"]["state"] == "verified_classic"
+
+
+def test_onboard_plan_refuses_when_protection_floor_unenforceable(tmp_path, capsys, monkeypatch):
+    from validators.tests.unit.test_onboard_apply import FakeDriver
+
+    class UnenforceableDriver(FakeDriver):
+        def verify_branch_protection(self, *, repo, branch, policy):
+            self.calls.append("verify_branch_protection")
+            return {
+                "ok": False,
+                "reason": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                "message": "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+                "remediation": onboard_apply.PROTECTION_FLOOR_REMEDIATION,
+            }
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: UnenforceableDriver(repo_exists=True))
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--plan",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert payload["enforcement"]["state"] == "unenforceable"
+    assert payload["plain_join"]["enforcement"]["state"] == "unenforceable"
+    assert "GitHub Team/Pro" in payload["remediation"]
+
+
+def test_onboard_apply_preflight_refuses_when_protection_floor_unenforceable(
+    tmp_path, capsys, monkeypatch
+):
+    from validators.tests.unit.test_onboard_apply import FakeDriver
+
+    class UnenforceableDriver(FakeDriver):
+        def verify_branch_protection(self, *, repo, branch, policy):
+            self.calls.append("verify_branch_protection")
+            return {
+                "ok": False,
+                "reason": onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE,
+                "message": "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+                "remediation": onboard_apply.PROTECTION_FLOOR_REMEDIATION,
+            }
+
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: UnenforceableDriver(repo_exists=True))
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("unenforceable protection floor must refuse before apply_onboard")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE
+    assert payload["enforcement"]["state"] == "unenforceable"
+    assert "make the repository public" in payload["detail"]
 
 
 def test_onboard_apply_refuses_self_attested_signature(tmp_path, capsys):

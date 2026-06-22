@@ -44,6 +44,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 
 from ._redact import redact_gh_stderr
+from .protection_diagnostics import api_error_text, protection_floor_unenforceable
 
 _SQUASH_ONLY = {
     "allow_squash_merge": True,
@@ -269,40 +270,11 @@ def _read_protection(runner: GhRunner, repo: str, branch: str) -> dict | None:
 
 
 def _api_error_text(parsed: object, stderr: str) -> str:
-    parts: list[str] = []
-    if isinstance(parsed, dict):
-        message = parsed.get("message")
-        if message:
-            parts.append(str(message))
-        errors = parsed.get("errors")
-        if isinstance(errors, list):
-            for item in errors:
-                if isinstance(item, dict):
-                    item_message = item.get("message") or item.get("code")
-                    if item_message:
-                        parts.append(str(item_message))
-                elif item:
-                    parts.append(str(item))
-    if stderr:
-        parts.append(stderr)
-    return " ".join(parts)
+    return api_error_text(parsed, stderr)
 
 
 def _classic_protection_plan_unsupported(parsed: object, stderr: str) -> bool:
-    text = _api_error_text(parsed, stderr).lower()
-    if not text:
-        return False
-    unsupported_markers = (
-        "protected branches are not available",
-        "branch protection rules are not available",
-        "branch protection is not available",
-        "protected branches are available",
-        "upgrade",
-    )
-    plan_markers = ("http 403", "forbidden", "private repositories", "this plan")
-    return any(marker in text for marker in unsupported_markers) and any(
-        marker in text for marker in plan_markers
-    )
+    return protection_floor_unenforceable(parsed, stderr)
 
 
 def _ruleset_policy_from_branch_protection(policy: BranchProtectionPolicy, *, branch: str):
