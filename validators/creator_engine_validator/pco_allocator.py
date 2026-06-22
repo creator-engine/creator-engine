@@ -253,6 +253,31 @@ def _event_id(prefix: str, ts_compact: str) -> str:
     return f"{prefix}-{ts_compact}-{uuid.uuid4().hex[:8]}"
 
 
+def _mint_lease_id(lane_id: str, ts_compact: str) -> str:
+    """Mint a schema-conformant ``lease_id`` bounded INDEPENDENTLY of lane length
+    (ce-ops#203).
+
+    The naive ``lease-<lane_id>-<14-digit stamp>`` overflowed the worktree-lease
+    schema's ``lease_id`` bound (``^[a-z0-9][a-z0-9-]{2,63}$``, max 64 chars)
+    whenever the lane id was long. ``allocate()``'s controller callers pass short
+    lane ids and never tripped it, but pickup's lanes — ``pickup-<repo>-<n>-<run>``
+    (~48 chars; see ``pickup._lane_id``) — pushed the derived id to ~69 chars and
+    PCO-020 fail-closed REFUSED the lease, so ``ce pickup poll --claim
+    --enable-launch`` could claim a lane but never write its lease.
+
+    Hashing ``(lane_id, ts_compact)`` yields a fixed-width, collision-resistant,
+    lane-length-independent id: ``lease-`` (6) + 32 hex (sha256 prefix) == 38
+    chars. It starts with the letter ``l`` and contains only ``[a-z0-9-]``, so it
+    satisfies BOTH the worktree-lease pattern AND the stricter container-instance
+    pattern (``^[a-z][a-z0-9-]{2,63}$``, which requires a leading letter). The
+    ``ts_compact`` salt keeps two leases on the SAME lane distinct. Nothing parses
+    ``lease_id`` back into ``(lane_id, ts)`` — lease record filenames key on
+    ``lane_id``, lease-coverage matches on ``worktree_path``, and the conflict
+    guard only needs the id to satisfy the pattern — so a hashed id is safe."""
+    digest = hashlib.sha256(f"{lane_id}-{ts_compact}".encode("utf-8")).hexdigest()
+    return f"lease-{digest[:32]}"
+
+
 def _expires_at_str(lease_seconds: int) -> str:
     dt = datetime.now(UTC) + timedelta(seconds=lease_seconds)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -557,7 +582,7 @@ def allocate(
         now = _utc_now_str()
         expires_at = _expires_at_str(lease_seconds)
         ts_compact = _event_ts_compact()
-        lease_id = f"lease-{lane_id}-{ts_compact}"
+        lease_id = _mint_lease_id(lane_id, ts_compact)
         event_id = _event_id("claim-created", ts_compact)
 
         lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
@@ -793,7 +818,7 @@ def allocate_in_place(
         now = _utc_now_str()
         expires_at = _expires_at_str(lease_seconds)
         ts_compact = _event_ts_compact()
-        lease_id = f"lease-{lane_id}-{ts_compact}"
+        lease_id = _mint_lease_id(lane_id, ts_compact)
         event_id = _event_id("claim-created", ts_compact)
 
         lease_path = ledger_root / "leases" / controller_id / f"{lane_id}.yaml"
