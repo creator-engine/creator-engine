@@ -180,6 +180,26 @@ def test_semantic_secret_value_in_allowed_metadata_field_rejects_pab_003():
     assert "supersecret" not in errors[0].message
 
 
+def test_semantic_secret_marker_in_allowed_metadata_note_rejects_pab_003():
+    document = _pilot_envelope()
+    document["privileged_action_envelope"]["metadata"]["note"] = "operator supplied secret=supersecret"
+
+    errors = validate_envelope(document)
+
+    assert _codes(errors) == {CODE_SECRET}
+    assert "supersecret" not in errors[0].message
+
+
+def test_semantic_client_secret_marker_in_allowed_metadata_labels_rejects_pab_003():
+    document = _pilot_envelope()
+    document["privileged_action_envelope"]["metadata"]["labels"] = ["client_secret=supersecret"]
+
+    errors = validate_envelope(document)
+
+    assert _codes(errors) == {CODE_SECRET}
+    assert "supersecret" not in errors[0].message
+
+
 def test_transit_decrypt_handoff_rejects_execution_policy_pab_004():
     document = _pilot_envelope()
     env = document["privileged_action_envelope"]

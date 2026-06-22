@@ -92,7 +92,8 @@ _ALLOWED_CAPABILITIES: frozenset[tuple[str, str, str, str]] = frozenset(
 )
 
 _SECRET_KEY_PATTERN = re.compile(
-    r"(password|passwd|private[_ -]?key|wrapping[_ -]?token|openbao[_ -]?token|"
+    r"(password|passwd|client[_ -]?secret|secret[_ -]?key|\bsecret\b|"
+    r"private[_ -]?key|wrapping[_ -]?token|openbao[_ -]?token|"
     r"\botp\b|one[_ -]?time[_ -]?password|dynamic[_ -]?credential|plaintext|"
     r"cookie|recovery[_ -]?code|provider[_ -]?api[_ -]?credential|api[_ -]?key)",
     re.IGNORECASE,
@@ -100,7 +101,8 @@ _SECRET_KEY_PATTERN = re.compile(
 _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE),
     re.compile(
-        r"\b(password|passwd|token|private[_ -]?key|wrapping[_ -]?token|"
+        r"\b(password|passwd|client[_ -]?secret|secret[_ -]?key|secret|token|"
+        r"private[_ -]?key|wrapping[_ -]?token|"
         r"openbao[_ -]?token|\botp\b|one[_ -]?time[_ -]?password|"
         r"dynamic[_ -]?credential|plaintext|cookie|recovery[_ -]?code|"
         r"provider[_ -]?api[_ -]?credential|api[_ -]?key)\b\s*[:=]\s*\S+",
