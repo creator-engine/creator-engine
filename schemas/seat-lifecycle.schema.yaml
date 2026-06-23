@@ -155,8 +155,8 @@ properties:
     properties:
       kind:
         type: string
-        # headless = the CE-owned-PTY surface (ce-ops#207 W2′); no tmux server.
-        enum: [tmux, headless, plain_terminal, unknown]
+        # herdr = the live socket-backed surface (ce-ops#217 U3); no tmux server.
+        enum: [tmux, headless, herdr, plain_terminal, unknown]
       session_id:
         type: string
         minLength: 1
@@ -170,6 +170,15 @@ properties:
         type: string
         minLength: 1
       pane_pid:
+        oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            pattern: "^[0-9]+$"
+      surface_ref:
+        type: string
+        minLength: 1
+      pid:
         oneOf:
           - type: integer
             minimum: 1

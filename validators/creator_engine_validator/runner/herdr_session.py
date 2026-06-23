@@ -1,4 +1,4 @@
-"""CE-side integration seam to the herdr-ce multiplexer fork (ce-ops#217, U1).
+"""CE-side integration seam to the herdr-ce multiplexer fork (ce-ops#217).
 
 This module is the **CE-side adapter stub** that will drive the
 ``creator-engine/herdr-ce`` AGPL fork over its JSON Unix-socket API, replacing
@@ -22,11 +22,11 @@ and retires the ``pty.fork`` path behind the registry; **U4** adds the
 attribution shim (``runtime_operator_steer`` spine-append-before-effect) that
 makes this the *sole* control-path writer to the socket.
 
-**Status — U1 SCAFFOLD ONLY.** Nothing here is wired live. The methods raise
-:class:`NotImplementedError`; no socket is opened, no ``herdr`` binary is
-invoked, nothing is registered against the visibility-backend registry. The
-module exists so U3/U4 have a stable interface to implement against and so the
-seam boundary is documented in code now, before any live wiring exists.
+**Status — U3 LIVE BACKEND CLIENT.** This module is wired for
+``terminal_kind=herdr`` through :mod:`creator_engine_validator.visibility_backend`.
+CE drives the AGPL Rust binary only as a separate process speaking to the herdr
+control socket; it never imports or links Rust code into Python, and herdr never
+imports or links Python code into Rust.
 
 Design invariants this seam will enforce (load-bearing, implemented in U3/U4):
 
@@ -45,9 +45,13 @@ Design invariants this seam will enforce (load-bearing, implemented in U3/U4):
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
 #: The ``terminal.kind`` key the herdr visibility backend will service (U3).
 #: Parallels ``visibility_backend.TMUX_TERMINAL_KIND`` / ``HEADLESS_TERMINAL_KIND``.
@@ -58,13 +62,22 @@ HERDR_TERMINAL_KIND = "herdr"
 #: the documented default, not bound by this scaffold.
 DEFAULT_HERDR_SOCKET = "herdr.sock"
 
+#: Environment carrier used by the herdr CLI client to find the substrate-owned
+#: Unix control socket. The path is carried only in the CE controller process'
+#: subprocess environment, never in the governed seat's pane environment.
+HERDR_SOCKET_ENV = "HERDR_SOCKET"
+
 
 class HerdrSessionError(Exception):
     """A herdr-socket session could not be established or driven."""
 
 
+class HerdrCommandError(HerdrSessionError):
+    """The herdr CLI/socket command failed or returned malformed output."""
+
+
 class HerdrNotWired(HerdrSessionError, NotImplementedError):
-    """Raised by the U1 scaffold: the herdr seam is not yet wired live (U3/U4)."""
+    """Raised by surfaces intentionally deferred past U3 (notably U4 steer)."""
 
 
 @dataclass(frozen=True)
@@ -81,39 +94,185 @@ class HerdrPane:
     pane_id: str
     surface_ref: str
     pid: int | None = None
+    workspace_id: str | None = None
+
+
+class HerdrCommandRunner(Protocol):
+    """A narrow subprocess seam for tests and live CLI execution."""
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``argv`` and return a completed process."""
+
+
+class SubprocessHerdrCommandRunner:
+    """Run herdr CLI commands as subprocesses; no Python/Rust linking occurs."""
+
+    def __init__(self, *, timeout_seconds: float = 30.0) -> None:
+        self._timeout_seconds = timeout_seconds
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        merged_env = dict(os.environ)
+        if env:
+            merged_env.update({str(k): str(v) for k, v in env.items()})
+        return subprocess.run(
+            list(argv),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=self._timeout_seconds,
+            env=merged_env,
+        )
 
 
 class HerdrSession:
     """CE-side client that drives the herdr-ce fork over its JSON Unix socket.
 
-    **U1 scaffold:** the interface (connect / spawn-pane / send / attach /
-    observe) is defined and documented; every method raises :class:`HerdrNotWired`.
-    U3 implements ``connect``/``spawn_pane``/``observe`` against the live socket
-    and wires this behind ``terminal_kind=herdr`` in the visibility-backend
-    registry; U4 implements ``send`` through the attribution shim so it is the
-    sole control-path writer (spine-append-before-effect, fail-closed).
+    The client shells out to the herdr binary and passes the substrate-owned
+    socket path in a private subprocess environment. This gives CE the required
+    socket/process boundary without binding to the Rust crate.
     """
 
     def __init__(
         self,
         *,
         socket_path: str | Path = DEFAULT_HERDR_SOCKET,
+        herdr_binary: str | Path = "herdr",
+        runner: HerdrCommandRunner | None = None,
     ) -> None:
         #: The substrate-owned herdr control socket. Held by the CE
         #: substrate/controller, never handed to a governed seat (§2/§7).
         self._socket_path = Path(socket_path)
+        self._herdr_binary = str(herdr_binary)
+        self._runner = runner if runner is not None else SubprocessHerdrCommandRunner()
         self._connected = False
+
+    @property
+    def socket_path(self) -> Path:
+        """The substrate-owned control socket path (controller-only)."""
+        return self._socket_path
+
+    def _socket_env(self) -> dict[str, str]:
+        return {HERDR_SOCKET_ENV: str(self._socket_path)}
+
+    def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
+        argv = [self._herdr_binary, *args]
+        try:
+            completed = self._runner.run(argv, env=self._socket_env())
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HerdrCommandError(f"herdr command failed to start: {argv!r}: {exc}") from exc
+        if completed.returncode != 0:
+            stderr = (completed.stderr or "").strip()
+            raise HerdrCommandError(
+                f"herdr command exited {completed.returncode}: {argv!r}"
+                + (f": {stderr}" if stderr else "")
+            )
+        stdout = (completed.stdout or "").strip()
+        if not stdout:
+            return {}
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise HerdrCommandError(
+                f"herdr command returned non-JSON output: {argv!r}: {stdout[:200]!r}"
+            ) from exc
+        if not isinstance(data, dict):
+            raise HerdrCommandError(
+                f"herdr command returned a non-object JSON payload: {argv!r}"
+            )
+        return data
+
+    @staticmethod
+    def _first_str(data: Mapping[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _first_pid(data: Mapping[str, Any]) -> int | None:
+        for key in ("pid", "process_id", "pane_pid"):
+            value = data.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit() and int(value) > 0:
+                return int(value)
+        return None
 
     # -- connect ----------------------------------------------------------
     def connect(self) -> None:
         """Open the client connection to the substrate-owned herdr socket.
 
-        U3: dial ``self._socket_path`` and negotiate the JSON protocol. The
-        socket must already be owned by the CE substrate/controller process (U2
-        containment wrapper); this client never *creates* the seat-reachable
-        socket — it connects to the control socket the substrate holds.
+        The herdr CLI is the socket client; this method records that subsequent
+        CLI calls must carry ``HERDR_SOCKET``. It intentionally does not expose
+        the socket path to the governed seat's command or environment.
         """
-        raise HerdrNotWired("HerdrSession.connect is a U1 scaffold; wired in U3")
+        self._connected = True
+
+    def create_workspace(self, *, cwd: str | None = None, label: str | None = None) -> str:
+        """Create a workspace over the herdr socket and return its id."""
+        args = ["workspace", "create"]
+        if cwd:
+            args.extend(["--cwd", cwd])
+        if label:
+            args.extend(["--label", label])
+        args.append("--json")
+        data = self._run_json(args)
+        workspace_id = self._first_str(data, "workspace_id", "workspace", "id")
+        if workspace_id is None:
+            raise HerdrCommandError("herdr workspace create did not return a workspace id")
+        return workspace_id
+
+    def split_pane(self, *, workspace_id: str) -> str:
+        """Split/create a pane in ``workspace_id`` and return its id."""
+        data = self._run_json(["pane", "split", "--workspace", workspace_id, "--json"])
+        pane_id = self._first_str(data, "pane_id", "pane", "id")
+        if pane_id is None:
+            raise HerdrCommandError("herdr pane split did not return a pane id")
+        return pane_id
+
+    def run_pane(
+        self,
+        *,
+        pane_id: str,
+        command: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> int | None:
+        """Run the sentinel-wrapped seat command inside an existing herdr pane."""
+        argv = ["pane", "run", pane_id]
+        if cwd:
+            argv.extend(["--cwd", cwd])
+        for key, value in sorted((env or {}).items()):
+            if key == HERDR_SOCKET_ENV:
+                raise HerdrCommandError(
+                    f"refusing to pass {HERDR_SOCKET_ENV} into a governed seat pane"
+                )
+            argv.extend(["--env", f"{key}={value}"])
+        argv.extend(["--json", "--", *list(command)])
+        data = self._run_json(argv)
+        return self._first_pid(data)
+
+    def wait_agent_status(
+        self,
+        pane: HerdrPane,
+        *,
+        status: str = "ready",
+    ) -> dict[str, Any]:
+        """Wait for herdr's agent-status signal for ``pane``."""
+        return self._run_json(
+            ["wait", "agent-status", "--pane", pane.pane_id, "--status", status, "--json"]
+        )
 
     # -- spawn-pane -------------------------------------------------------
     def spawn_pane(
@@ -126,13 +285,23 @@ class HerdrSession:
     ) -> HerdrPane:
         """Create a herdr pane running the sentinel-wrapped seat ``command``.
 
-        U3: maps to ``herdr workspace create`` / ``herdr pane split`` /
+        Maps to ``herdr workspace create`` / ``herdr pane split`` /
         ``herdr pane run`` over the socket and returns a :class:`HerdrPane`. The
         sentinel wrapper stays OUTERMOST (the #368 contract) so ``events.jsonl``
         lifecycle events are produced identically; the substrate change is *which
         surface owns the PTY*, not the wrapper contract.
         """
-        raise HerdrNotWired("HerdrSession.spawn_pane is a U1 scaffold; wired in U3")
+        if not self._connected:
+            self.connect()
+        workspace_id = self.create_workspace(cwd=cwd, label=label)
+        pane_id = self.split_pane(workspace_id=workspace_id)
+        pid = self.run_pane(pane_id=pane_id, command=command, cwd=cwd, env=env)
+        return HerdrPane(
+            pane_id=pane_id,
+            surface_ref=str(self._socket_path),
+            pid=pid,
+            workspace_id=workspace_id,
+        )
 
     # -- send (steer) -----------------------------------------------------
     def send(self, pane: HerdrPane, data: bytes) -> None:
@@ -168,11 +337,15 @@ class HerdrSession:
     def observe(self, pane: HerdrPane) -> bytes:
         """Read recent pane output for the evidence spine (witnessability).
 
-        U3: maps to ``herdr pane read <id> --source recent-unwrapped`` and feeds
+        Maps to ``herdr pane read <id> --source recent-unwrapped`` and feeds
         the Pane Registry ``events.jsonl`` lifecycle / read-model fold. Observe
         is the read path; it never widens authority.
         """
-        raise HerdrNotWired("HerdrSession.observe is a U1 scaffold; wired in U3")
+        data = self._run_json(
+            ["pane", "read", pane.pane_id, "--source", "recent-unwrapped", "--json"]
+        )
+        text = self._first_str(data, "output", "text", "data", "content")
+        return (text or "").encode()
 
     def close(self) -> None:
         """Release the client connection. Idempotent; never reaps a seat (reaper owns that)."""

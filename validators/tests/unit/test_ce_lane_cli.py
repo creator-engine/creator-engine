@@ -173,15 +173,7 @@ def test_ce_lane_launch_refuses_released_claim_before_side_effects(tmp_path, use
     assert use_fake_tmux.spawned == []
 
 
-def test_ce_lane_launch_headless_no_tmux_satisfies_visibility(tmp_path, use_fake_tmux):
-    # ce-ops#207 W2′: `--no-tmux` is no longer "always refused" — it routes the
-    # lane onto the headless (operator_inspectable) backend, which owns the seat
-    # under a CE-held PTY with no tmux server. The lane reaches LAUNCHED and
-    # writes a headless Pane Registry record; tmux is never spawned.
-    import os
-
-    import yaml as _yaml
-
+def test_ce_lane_launch_no_tmux_headless_is_retired(tmp_path, use_fake_tmux):
     ledger = _ledger(tmp_path)
     _claim(ledger)
     prompt, sha = _prompt(tmp_path)
@@ -189,23 +181,62 @@ def test_ce_lane_launch_headless_no_tmux_satisfies_visibility(tmp_path, use_fake
         _launch_argv(
             tmp_path, ledger, prompt, sha,
             no_tmux=True,
-            command="sh -c 'printf ce-headless-live'",
+            command="sh -c 'printf retired-headless'",
+        )
+    )
+    assert ret != 0
+    assert use_fake_tmux.spawned == []
+    assert not _pane_path(ledger).exists()
+
+
+def test_ce_lane_launch_terminal_kind_herdr_satisfies_visibility(tmp_path, use_fake_tmux, monkeypatch):
+    from creator_engine_validator import visibility_backend as vb
+    from creator_engine_validator.runner.herdr_session import HerdrPane
+
+    class FakeHerdrBackend:
+        terminal_kind = "herdr"
+        visibility_class = vb.OPERATOR_INSPECTABLE
+
+        def is_available(self):
+            return True
+
+        def ensure_surface(self, *, session, window, command, cwd=None, env=None, seat_dir=None):
+            return vb.SurfaceHandle(
+                visibility_class=self.visibility_class,
+                terminal={
+                    "kind": "herdr",
+                    "surface_ref": "/run/ce/herdr/control.sock",
+                    "pane_id": "pane-1",
+                    "pid": 4242,
+                },
+                native=HerdrPane("pane-1", "/run/ce/herdr/control.sock", 4242),
+            )
+
+    monkeypatch.setattr(
+        ce_cli.lane_runtime,
+        "get_visibility_backend",
+        lambda kind: FakeHerdrBackend() if kind == "herdr" else pytest.fail(kind),
+    )
+
+    ledger = _ledger(tmp_path)
+    _claim(ledger)
+    prompt, sha = _prompt(tmp_path)
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path,
+            ledger,
+            prompt,
+            sha,
+            terminal_kind="herdr",
+            command="sh -c 'printf ce-herdr-live'",
         )
     )
     assert ret == 0
-    assert use_fake_tmux.spawned == []  # no tmux anywhere
-    pane_path = _pane_path(ledger)
-    assert pane_path.exists()
-    record = _yaml.safe_load(pane_path.read_text())
+    assert use_fake_tmux.spawned == []
+    record = yaml.safe_load(_pane_path(ledger).read_text())
     assert record["visibility"] == "operator_inspectable"
-    assert record["terminal"]["kind"] == "headless"
-    assert record["terminal"]["surface_ref"].endswith("attach.sock")
-    pid = int(record["terminal"]["pid"])
-    # Reap the real seat process the CLI spawned (test hygiene).
-    try:
-        os.waitpid(pid, 0)
-    except (ChildProcessError, PermissionError):
-        pass
+    assert record["terminal"]["kind"] == "herdr"
+    assert record["terminal"]["surface_ref"] == "/run/ce/herdr/control.sock"
 
 
 def test_ce_lane_launch_refuses_tmux_unavailable_before_pane_write(tmp_path, monkeypatch):

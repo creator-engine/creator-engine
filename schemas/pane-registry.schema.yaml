@@ -79,9 +79,8 @@ properties:
   visibility:
     type: string
     # operator_visible = a tmux pane a human can attach (operator-visible).
-    # operator_inspectable = the headless CE-owned-PTY surface (ce-ops#207 W2′):
-    # no live pane, but an attachable + emitting session bound to the evidence
-    # spine. Both satisfy the visibility contract.
+    # operator_inspectable = a non-tmux attachable + emitting session bound to
+    # the evidence spine: historical headless records or live herdr (ce-ops#217).
     enum: [operator_visible, operator_inspectable]
   terminal:
     type: object
@@ -90,9 +89,9 @@ properties:
     properties:
       kind:
         type: string
-        # headless = the CE-owned-PTY surface (no tmux server). Its identity is a
-        # control-socket ref + the seat pid, not session/window/pane ids.
-        enum: [tmux, headless, plain_terminal, unknown]
+        # herdr = the live socket-backed surface. Its identity is the
+        # controller-owned control-socket ref + herdr pane id + seat pid.
+        enum: [tmux, headless, herdr, plain_terminal, unknown]
       session_id:
         type: string
         minLength: 1
@@ -115,8 +114,8 @@ properties:
         type: string
         minLength: 1
         description: |
-          Per-session control-socket path for the CE-owned PTY (headless kind).
-          Reserved for the attach RPC; the path is recorded here, not bound.
+          Per-session control-socket path. For herdr this is the substrate-owned
+          control socket held by the CE controller, never handed to the seat.
       pid:
         oneOf:
           - type: integer
@@ -180,6 +179,16 @@ allOf:
       properties:
         terminal:
           required: [surface_ref, pid]
+  - if:
+      properties:
+        terminal:
+          properties:
+            kind:
+              const: herdr
+    then:
+      properties:
+        terminal:
+          required: [surface_ref, pane_id, pid]
   - if:
       properties:
         status:

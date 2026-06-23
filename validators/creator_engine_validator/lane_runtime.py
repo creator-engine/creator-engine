@@ -636,7 +636,7 @@ def launch(
     tmux_adapter: Any | None = None,
     # ce-ops#207 W2′: an explicit VisibilityBackend instance overrides the
     # registry lookup for ``terminal_kind`` (the injection seam tests use to pass
-    # a fake-PTY headless backend, mirroring ``tmux_adapter`` for the tmux path).
+    # a fake herdr backend, mirroring ``tmux_adapter`` for the tmux path).
     visibility_backend: Any | None = None,
     now: datetime | None = None,
     mcp_config_path: str | None = None,
@@ -752,8 +752,9 @@ def launch(
     #    in a CE-owned attachable-and-emitting session. The gate is no longer
     #    "tmux only" — it refuses an *unknown* terminal kind OR a backend whose
     #    visibility class does not satisfy the contract. tmux (operator_visible)
-    #    and the headless PTY backend (operator_inspectable) both satisfy it; the
-    #    refusal stays load-bearing for any non-attachable / non-emitting surface.
+    #    and the herdr socket-backed backend (operator_inspectable) both satisfy
+    #    it; the refusal stays load-bearing for any non-attachable / non-emitting
+    #    surface.
     #    Resolved BEFORE any side effect, exactly like the previous tmux refusal.
     if role in VISIBILITY_REQUIRED_ROLES:
         if visibility_backend is not None:
@@ -919,23 +920,28 @@ def launch(
     #     The spawn seam routes through the VisibilityBackend registry instead of
     #     calling tmux directly. The default `terminal_kind` is still tmux, so the
     #     default behaviour is byte-identical. Resolution order: an explicitly
-    #     injected backend (W2′ test seam) > the tmux-adapter wrap (the
+    #     injected backend (test seam) > the tmux-adapter wrap (the
     #     long-standing test seam, only for a tmux lane) > the registry lookup for
     #     `terminal_kind`. The CLI always passes a tmux adapter, so the
     #     adapter-wrap MUST be scoped to `terminal_kind == tmux`; otherwise a
-    #     `--no-tmux` (headless) lane would be mis-routed onto tmux.
+    #     non-tmux lane would be mis-routed onto tmux.
     if visibility_backend is not None:
         backend = visibility_backend
     elif tmux_adapter is not None and terminal_kind == TMUX_TERMINAL_KIND:
         backend = TmuxVisibilityBackend(tmux_adapter)
     else:
         backend = get_visibility_backend(terminal_kind)
-    # tmux must be available for a tmux lane — before pane write (RV1-030). The
-    # headless backend is always available (the no-tmux fallback), so this guard
-    # is correctly scoped to the tmux kind only.
-    if terminal_kind == TMUX_TERMINAL_KIND and not backend.is_available():
-        raise TmuxUnavailableError(
-            "tmux is unavailable; refusing visible lane launch before any side effect"
+    # The selected visibility substrate must be available before any launch
+    # materialization. Preserve the tmux-specific error type for existing callers;
+    # non-tmux backends fail through the visibility gate.
+    if not backend.is_available():
+        if terminal_kind == TMUX_TERMINAL_KIND:
+            raise TmuxUnavailableError(
+                "tmux is unavailable; refusing visible lane launch before any side effect"
+            )
+        raise VisibilityRefused(
+            f"terminal {terminal_kind!r} visibility backend is unavailable; "
+            "refusing lane launch before any side effect"
         )
 
     # --- Side effects begin here ---
@@ -979,8 +985,8 @@ def launch(
             command=sentinel.pane_command,
             cwd=worktree_path or None,
             env=pane_env,
-            # W2′: the headless backend anchors its control-socket ref under the
-            # seat dir; the tmux backend ignores it (signature stays uniform).
+            # Non-tmux backends use the seat dir for containment/surface anchoring;
+            # the tmux backend ignores it (signature stays uniform).
             seat_dir=str(seat_dir),
         )
     except TmuxUnavailable as exc:

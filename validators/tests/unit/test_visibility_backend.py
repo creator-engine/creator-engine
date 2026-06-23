@@ -162,43 +162,58 @@ def test_default_constructed_tmux_backend_uses_real_adapter():
 
 
 # ---------------------------------------------------------------------------
-# Headless backend (ce-ops#207 W2′) — CE owns the seat under its own PTY.
+# Herdr backend (ce-ops#217 U3) — live inspectable surface over herdr socket.
 # ---------------------------------------------------------------------------
-from creator_engine_validator.seat_pty_session import SeatPtySession  # noqa: E402
+from creator_engine_validator.runner.herdr_session import HerdrPane  # noqa: E402
 
 
-class FakePtySpawn:
-    """In-memory PTY spawner double — records the spawn, never forks."""
+class FakeHerdrSession:
+    def __init__(self, *, socket_path, herdr_binary="herdr"):
+        self.socket_path = str(socket_path)
+        self.herdr_binary = herdr_binary
+        self.spawn_calls: list[dict] = []
+        self.observed: list[str] = []
+        self.waited: list[tuple[str, str]] = []
 
-    def __init__(self, *, pid: int = 9191):
-        self._pid = pid
-        self.calls: list[dict] = []
-
-    def __call__(self, *, command, seat_dir, cwd=None, env=None):
-        from pathlib import Path
-
-        self.calls.append(
-            {"command": list(command), "seat_dir": str(seat_dir), "cwd": cwd,
-             "env": dict(env) if env else None}
+    def spawn_pane(self, *, command, cwd=None, env=None, label=None):
+        self.spawn_calls.append({
+            "command": list(command),
+            "cwd": cwd,
+            "env": dict(env) if env else None,
+            "label": label,
+        })
+        return HerdrPane(
+            pane_id="pane-1",
+            surface_ref=self.socket_path,
+            pid=4242,
+            workspace_id="workspace-1",
         )
-        return SeatPtySession(
-            pid=self._pid,
-            master_fd=7,
-            surface_ref=str(Path(seat_dir) / "attach.sock"),
-        )
+
+    def observe(self, pane):
+        self.observed.append(pane.pane_id)
+        return b"recent output"
+
+    def wait_agent_status(self, pane, *, status="ready"):
+        self.waited.append((pane.pane_id, status))
+        return {"pane_id": pane.pane_id, "status": status}
 
 
-def test_headless_backend_is_registered_by_default():
-    assert vb.HEADLESS_TERMINAL_KIND in vb.available_visibility_kinds()
-    backend = vb.get_visibility_backend(vb.HEADLESS_TERMINAL_KIND)
-    assert isinstance(backend, vb.HeadlessVisibilityBackend)
-    assert backend.terminal_kind == "headless"
+def test_herdr_backend_is_registered_by_default():
+    assert vb.HERDR_TERMINAL_KIND in vb.available_visibility_kinds()
+    backend = vb.get_visibility_backend(vb.HERDR_TERMINAL_KIND)
+    assert isinstance(backend, vb.HerdrVisibilityBackend)
+    assert backend.terminal_kind == "herdr"
     assert backend.visibility_class == vb.OPERATOR_INSPECTABLE
 
 
-def test_headless_backend_is_always_available():
-    # The no-tmux fallback: a writable seat dir + pty.fork are the only needs.
-    assert vb.HeadlessVisibilityBackend(FakePtySpawn()).is_available() is True
+def test_headless_pty_backend_is_retired_from_registry():
+    assert vb.HEADLESS_TERMINAL_KIND not in vb.available_visibility_kinds()
+    with pytest.raises(vb.UnknownVisibilityBackend):
+        vb.get_visibility_backend(vb.HEADLESS_TERMINAL_KIND)
+
+
+def test_herdr_backend_availability_uses_injected_session_factory():
+    assert vb.HerdrVisibilityBackend(lambda **kw: FakeHerdrSession(**kw)).is_available() is True
 
 
 def test_headless_backend_inspectable_class_satisfies_the_contract():
@@ -206,9 +221,18 @@ def test_headless_backend_inspectable_class_satisfies_the_contract():
     assert vb.OPERATOR_VISIBLE in vb.SATISFYING_VISIBILITY_CLASSES
 
 
-def test_headless_backend_builds_headless_terminal_record(tmp_path):
-    spawn = FakePtySpawn(pid=4242)
-    backend = vb.HeadlessVisibilityBackend(spawn)
+def test_herdr_backend_builds_terminal_record_and_keeps_socket_controller_owned(tmp_path):
+    sessions: list[FakeHerdrSession] = []
+
+    def factory(**kwargs):
+        session = FakeHerdrSession(**kwargs)
+        sessions.append(session)
+        return session
+
+    backend = vb.HerdrVisibilityBackend(
+        factory,
+        substrate_socket_dir="/run/ce/herdr",
+    )
     handle = backend.ensure_surface(
         session="ce-lane",
         window="gate3-lane",
@@ -218,46 +242,58 @@ def test_headless_backend_builds_headless_terminal_record(tmp_path):
         seat_dir=str(tmp_path),
     )
     assert handle.visibility_class == vb.OPERATOR_INSPECTABLE
-    # The terminal record is the headless surface: a control-socket ref + pid,
-    # NOT session/window/pane ids.
+    # The terminal record is the herdr surface: the controller-owned socket ref,
+    # herdr pane id, and seat pid. No tmux identity is present.
     assert handle.terminal == {
-        "kind": "headless",
-        "surface_ref": str(tmp_path / "attach.sock"),
+        "kind": "herdr",
+        "surface_ref": "/run/ce/herdr/control.sock",
+        "pane_id": "pane-1",
         "pid": 4242,
     }
-    # The native handle is the live CE-owned PTY session (master fd held by CE).
-    assert isinstance(handle.native, SeatPtySession)
-    assert handle.native.master_fd == 7
-    # The spawn received the sentinel-wrapped argv + the seat env (pinned, not echoed).
-    assert spawn.calls == [{
+    assert isinstance(handle.native, HerdrPane)
+    # The socket is held by the controller-side session, not passed to the seat env.
+    assert sessions[0].socket_path == "/run/ce/herdr/control.sock"
+    assert sessions[0].spawn_calls == [{
         "command": ["/bin/sh", "wrapper.sh"],
-        "seat_dir": str(tmp_path),
         "cwd": str(tmp_path),
         "env": {"CE_LEDGER_ROOT": "/abs/ledger"},
+        "label": "gate3-lane",
     }]
+    assert "HERDR_SOCKET" not in sessions[0].spawn_calls[0]["env"]
 
 
-def test_headless_backend_requires_seat_dir():
-    backend = vb.HeadlessVisibilityBackend(FakePtySpawn())
+def test_herdr_backend_observe_and_wait_delegate_to_controller_session(tmp_path):
+    session = FakeHerdrSession(socket_path="/run/ce/herdr/control.sock")
+    backend = vb.HerdrVisibilityBackend(lambda **_kw: session)
+    handle = backend.ensure_surface(
+        session="s", window="w", command=["true"], seat_dir=str(tmp_path)
+    )
+    assert backend.observe(handle.native) == b"recent output"
+    assert backend.wait_agent_status(handle.native) == {
+        "pane_id": "pane-1",
+        "status": "ready",
+    }
+
+
+def test_herdr_backend_requires_seat_dir():
+    backend = vb.HerdrVisibilityBackend(lambda **kw: FakeHerdrSession(**kw))
     with pytest.raises(vb.VisibilityBackendError):
         backend.ensure_surface(
             session="s", window="w", command=["true"], seat_dir=None
         )
 
 
-def test_headless_backend_does_not_persist_pty_bytes(tmp_path):
-    """W2′ invariant: owning the master fd != streaming it. No new byte surface.
-
-    The raw PTY stream is gated behind W2-sec/T1; this unit must NOT write the
-    seat's stdout/stderr (which can carry secrets) to any log/file. The headless
-    spawn must leave no captured-output artifact in the seat dir.
-    """
-    backend = vb.HeadlessVisibilityBackend(FakePtySpawn())
-    before = set(p.name for p in tmp_path.iterdir())
-    backend.ensure_surface(
-        session="s", window="w", command=["true"],
-        env={"CE_LEDGER_ROOT": "/secret/ledger"}, seat_dir=str(tmp_path),
+def test_herdr_backend_honors_u2_socket_overlap_refusal(tmp_path):
+    """§7 invariant: the governed seat cannot reach the herdr control socket."""
+    backend = vb.HerdrVisibilityBackend(
+        lambda **kw: FakeHerdrSession(**kw),
+        substrate_socket_dir=str(tmp_path),
     )
-    after = set(p.name for p in tmp_path.iterdir())
-    # No headless.log / captured-output file was created by the surface.
-    assert not any("log" in name.lower() for name in (after - before))
+    with pytest.raises(vb.VisibilityBackendError) as exc:
+        backend.ensure_surface(
+            session="s",
+            window="w",
+            command=["true"],
+            seat_dir=str(tmp_path),
+        )
+    assert "overlaps" in str(exc.value)
