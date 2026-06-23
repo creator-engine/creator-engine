@@ -14,6 +14,7 @@ ce worker terminate  # revoke broker grants, stop the container, write a stopped
 ce worker gc         # reap container-instance records that outlived a released claim
 ce worker status     # read a local container-instance record
 ce verify-install    # verify a post-install CE release venv provenance
+ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
@@ -75,6 +76,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     ce_event_runtime,
+    ce_onboard,
     ce_provenance,
     connector_runtime,
     doctor_runtime,
@@ -140,6 +142,72 @@ def _build_parser() -> argparse.ArgumentParser:
         help="local-only verification; skip live SHA256SUMS comparison",
     )
     verify_install.add_argument("--json", action="store_true", dest="json_output")
+
+    # ce onboard — the ce-ops#197 first-run one-shot orchestrator. Sequences the
+    # six phases (doctor → install → verify-install → fix-path → bootstrap →
+    # first governed launch), idempotent + resumable + gracefully degrading.
+    onboard = groups.add_parser(
+        "onboard",
+        help="first-run one-shot: verify/install + brain-init + first governed launch (ce-ops#197)",
+    )
+    onboard.add_argument("--repo-root", default=".", help="repo root to onboard (default: cwd)")
+    onboard.add_argument(
+        "--state-root",
+        default=V3_LOCAL_STATE_ROOT,
+        help=f"CE local state root for brain-init (default: {V3_LOCAL_STATE_ROOT})",
+    )
+    onboard.add_argument(
+        "--ledger-root",
+        default=None,
+        help="path to the active-work-ledger for first-launch lifecycle registration",
+    )
+    onboard.add_argument(
+        "--install-mode",
+        default=None,
+        choices=list(ce_onboard.INSTALL_MODES),
+        help=(
+            "install mode (default: auto per §A.5 — hybrid when an agent is present, "
+            "else guided; NEVER print). print = manual fallback; skip = dev override"
+        ),
+    )
+    onboard.add_argument(
+        "--install-root",
+        default=None,
+        help="CE bootstrap install root passed to the verify-install provenance gate",
+    )
+    onboard.add_argument(
+        "--harness",
+        default="claude",
+        help="first-launch Controller-seat harness (default: claude)",
+    )
+    onboard.add_argument(
+        "--no-launch",
+        action="store_true",
+        help="do everything up to (not including) the first governed launch",
+    )
+    onboard.add_argument(
+        "--no-fix-path",
+        action="store_true",
+        help="opt out of the managed CE-marked profile PATH block (Decision 4 default-on)",
+    )
+    onboard.add_argument(
+        "--offline",
+        action="store_true",
+        help="verify provenance against local install-state only (no live SHA256SUMS)",
+    )
+    onboard.add_argument(
+        "--yes",
+        action="store_true",
+        dest="assume_yes",
+        help="non-interactive: refuse with the missing list rather than silently proceed",
+    )
+    onboard.add_argument(
+        "--emit-manifest",
+        action="store_true",
+        dest="emit_manifest",
+        help="emit the machine-readable phase manifest (consequence-class + reversibility) and exit",
+    )
+    onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
     lane_sub = lane.add_subparsers(dest="lane_cmd")
@@ -2000,63 +2068,95 @@ def _brain_init_payload(result_path, *, created: bool, summary) -> dict:
     }
 
 
-def _brain_init(args) -> int:
-    state_root = args.state_root
-    path = brain_runtime.ledger_path(state_root)
-    json_output = getattr(args, "json_output", False)
+class BrainInitError(Exception):
+    """``brain_init`` refused (fail-closed: a corrupt/invalid ledger)."""
 
-    # Idempotent / fail-closed: if a ledger file already exists, only a VALID
-    # one is a no-op. A corrupt/invalid/conflicting ledger is refused (we never
-    # overwrite or append a duplicate genesis on top of a broken ledger).
+    def __init__(self, message: str, *, errors: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.errors = list(errors)
+
+
+class BrainInitOutcome:
+    """Structured, JSON-safe result of the programmatic ``brain_init`` (PR-4).
+
+    The genesis-ledger bootstrap, library-callable for orchestration by
+    ``ce onboard`` (so the orchestrator does not shell out to its own CLI). The
+    CLI handler ``_brain_init`` renders the same outcome.
+    """
+
+    def __init__(self, payload: dict, *, content_hash: str | None) -> None:
+        self.payload = payload
+        self.content_hash = content_hash
+
+    @property
+    def created(self) -> bool:
+        return bool(self.payload.get("created"))
+
+    def to_dict(self) -> dict:
+        return dict(self.payload)
+
+
+def brain_init(state_root=V3_LOCAL_STATE_ROOT) -> BrainInitOutcome:
+    """Idempotently bootstrap a valid genesis brain assertion ledger (ce-ops#206).
+
+    Idempotent / fail-closed: a present VALID ledger is a no-op; a corrupt /
+    invalid / conflicting ledger raises :class:`BrainInitError` (we never
+    overwrite or append a duplicate genesis on top of a broken ledger).
+    """
+    path = brain_runtime.ledger_path(state_root)
     if path.is_file():
         verify = brain_runtime.verify_ledger(state_root)
         if verify.ok:
             payload = _brain_init_payload(verify.ledger_path, created=False, summary=verify.summary)
-            if json_output:
-                print(json.dumps(payload, indent=2, sort_keys=True))
-            else:
-                print(f"ce brain init: already initialized ({path})")
-                print(f"head_content_hash: {verify.summary.get('head_content_hash')}")
-            return 0
-        print(
-            "ERROR: ce brain init refused [CE-BRAIN-INIT-REFUSED]: "
+            return BrainInitOutcome(payload, content_hash=verify.summary.get("head_content_hash"))
+        raise BrainInitError(
             f"existing ledger at {path} is not valid; refusing to overwrite",
-            file=sys.stderr,
+            errors=verify.errors,
         )
-        for error in verify.errors:
-            print(f"  ERROR: {error}", file=sys.stderr)
-        return 1
 
-    # Fresh workspace: write the genesis assertion via the SSOT assert path.
-    try:
-        result = brain_runtime.assert_claim(
-            claim=dict(_BRAIN_INIT_CLAIM),
-            scope=_BRAIN_INIT_SCOPE,
-            evidence_ref=_BRAIN_INIT_EVIDENCE_REF,
-            state_root=state_root,
-            assertion_id=_BRAIN_INIT_ASSERTION_ID,
-        )
-    except brain_runtime.BrainRuntimeError as exc:
-        return _brain_error("init", exc)
-
+    result = brain_runtime.assert_claim(
+        claim=dict(_BRAIN_INIT_CLAIM),
+        scope=_BRAIN_INIT_SCOPE,
+        evidence_ref=_BRAIN_INIT_EVIDENCE_REF,
+        state_root=state_root,
+        assertion_id=_BRAIN_INIT_ASSERTION_ID,
+    )
     verify = brain_runtime.verify_ledger(state_root)
     if not verify.ok:
         # Defensive: the SSOT write path should always land a valid ledger.
-        print(
-            "ERROR: ce brain init refused [CE-BRAIN-INIT-REFUSED]: "
+        raise BrainInitError(
             f"wrote ledger at {result.ledger_path} but it did not verify",
+            errors=verify.errors,
+        )
+    payload = _brain_init_payload(result.ledger_path, created=True, summary=verify.summary)
+    return BrainInitOutcome(payload, content_hash=result.content_hash)
+
+
+def _brain_init(args) -> int:
+    state_root = args.state_root
+    path = brain_runtime.ledger_path(state_root)
+    json_output = getattr(args, "json_output", False)
+    try:
+        outcome = brain_init(state_root)
+    except BrainInitError as exc:
+        print(
+            f"ERROR: ce brain init refused [CE-BRAIN-INIT-REFUSED]: {exc}",
             file=sys.stderr,
         )
-        for error in verify.errors:
+        for error in exc.errors:
             print(f"  ERROR: {error}", file=sys.stderr)
         return 1
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("init", exc)
 
-    payload = _brain_init_payload(result.ledger_path, created=True, summary=verify.summary)
     if json_output:
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps(outcome.payload, indent=2, sort_keys=True))
+    elif outcome.created:
+        print(f"ce brain init: initialized genesis ledger at {outcome.payload['ledger_path']}")
+        print(f"content_hash: {outcome.content_hash}")
     else:
-        print(f"ce brain init: initialized genesis ledger at {result.ledger_path}")
-        print(f"content_hash: {result.content_hash}")
+        print(f"ce brain init: already initialized ({path})")
+        print(f"head_content_hash: {outcome.payload.get('head_content_hash')}")
     return 0
 
 
@@ -3045,6 +3145,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return handler(args)
     if args.group == "verify-install":
         return _verify_install(args)
+    if args.group == "onboard":
+        return ce_onboard.run_cli(args)
     if args.group == "check":
         return _check(args)
     if args.group == "doctor":

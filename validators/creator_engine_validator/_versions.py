@@ -82,6 +82,12 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # module, so the HARD v1<->v3 isolation invariant stays untouched.
         "pickup",
         "ce_event_runtime",
+        # ce-ops#197 PR-5: the `ce onboard` first-run orchestrator. A thin
+        # composition layer over the v1 `ce` kernel surfaces (doctor / init /
+        # brain-init / launch) + the verify-install + profile-PATH legs. It
+        # imports only v1 + shared modules — NO v3 import, so the HARD invariant
+        # stays untouched (driven by the v1 `ce` kernel, classified v1 with them).
+        "ce_onboard",
         "connector_runtime",
         "doctor_runtime",
         "fanin_runtime",

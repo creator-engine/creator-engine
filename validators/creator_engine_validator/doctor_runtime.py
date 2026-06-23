@@ -13,6 +13,7 @@ branches can be tested without a real host.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,56 @@ def _mem_total_bytes(meminfo_path: Path | str = "/proc/meminfo") -> int | None:
     except (OSError, ValueError, IndexError):
         return None
     return None
+
+
+# --- ce-ops#197 PR-4: onboard phase-1 probes ---------------------------------
+# The low-TMPDIR + PATH-gap probes `ce onboard` consumes. Both are pure, offline,
+# side-effect-free, and injectable, mirroring the rest of doctor_runtime.
+
+#: Free-space floor below which a tmpfs $TMPDIR risks exhausting mid-wheelhouse
+#: build (friction #3). The published install.sh stages ~hundreds of MB; 512 MiB
+#: is a conservative margin. Onboard only SURFACES this; install.sh owns the
+#: home-staging fallback (PR-2).
+LOW_TMPDIR_FLOOR_BYTES = 512 * 1024 * 1024
+
+
+def probe_low_tmpdir(
+    tmpdir: str | None = None,
+    *,
+    floor_bytes: int = LOW_TMPDIR_FLOOR_BYTES,
+    disk_usage: Any | None = None,
+) -> bool:
+    """True when $TMPDIR free space is below the wheelhouse-build floor (#3).
+
+    Offline + best-effort: an unreadable / missing path returns ``False`` (the
+    probe never refuses on its own — it surfaces a hint for onboard).
+    """
+    path = tmpdir if tmpdir is not None else (os.environ.get("TMPDIR") or "/tmp")
+    usage = disk_usage if disk_usage is not None else shutil.disk_usage
+    try:
+        return usage(path).free < floor_bytes
+    except (OSError, ValueError):
+        return False
+
+
+def probe_path_gap(
+    *,
+    path_value: str | None = None,
+    home: str | None = None,
+) -> bool:
+    """True when ``~/.local/bin`` is absent from PATH (#2 / #212).
+
+    The governed launcher resolves the harness on the seat's actual launch PATH;
+    a missing ``~/.local/bin`` is the precise drift that yields exit-127. Onboard
+    surfaces this so the profile-PATH writer (phase 4) is run.
+    """
+    resolved_home = home if home is not None else os.environ.get("HOME")
+    if not resolved_home:
+        return False
+    local_bin = str(Path(resolved_home) / ".local" / "bin")
+    raw = path_value if path_value is not None else os.environ.get("PATH", "")
+    entries = {p for p in raw.split(os.pathsep) if p}
+    return local_bin not in entries
 
 
 def _git_tracks_repo(repo_root: Path) -> bool:
@@ -205,6 +256,13 @@ def run_doctor(
         "require_visible_launch": require_visible_launch,
         "require_worker": require_worker,
         "check_packaging": check_packaging,
+    }
+    # ce-ops#197 PR-4: the onboard phase-1 probes. Advisory-only (never refuse on
+    # their own) — `ce onboard` reads these to surface friction #3 (low /tmp) and
+    # to decide whether the profile-PATH writer (phase 4) is warranted (#2/#212).
+    payload["onboard_probes"] = {
+        "low_tmpdir": probe_low_tmpdir(),
+        "path_gap": probe_path_gap(),
     }
     # v3.5-F: the §4.4 host-class default materialization. Doctor EMITS the
     # resource policy fragment for the Operator to ratify INTO the policy file
