@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import containment_probe
+from . import harness_matrix
 from .loader import LoaderError, load_yaml
 
 LIVE_PANE_STATUSES = {"active", "blocked", "closing", "starting"}
@@ -23,6 +24,7 @@ class SeatTarget:
     terminal_kind: str | None = None
     herdr_socket: str | None = None
     herdr_pane_id: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ def probe_fleet(
     *,
     seat_specs: Iterable[str],
     registry_paths: Iterable[str | Path],
+    repo_root: str | Path = ".",
     proc_root: str | Path = "/proc",
     host_pid: str = "1",
     herdr_socket: str | None = None,
@@ -69,7 +72,8 @@ def probe_fleet(
 ) -> FleetStatus:
     direct_specs, requested_names = _parse_seat_specs(seat_specs)
     records = _load_registry_records(registry_paths)
-    registry_targets = _derive_registry_targets(records)
+    matrix_targets = _derive_matrix_targets(repo_root)
+    registry_targets = _derive_registry_targets(records, matrix_targets=matrix_targets)
 
     rows: list[ContainmentStatusRow] = []
     emitted: set[str] = set()
@@ -103,8 +107,8 @@ def probe_fleet(
                 )
             )
             emitted.add(name)
-    elif registry_targets:
-        for target in registry_targets:
+    elif not direct_specs:
+        for target in _bind_registry_targets(matrix_targets, registry_targets):
             if target.seat in emitted:
                 continue
             rows.append(
@@ -213,68 +217,153 @@ def _expand_loaded_records(loaded: Any) -> list[dict[str, Any]]:
     return [loaded]
 
 
-def _derive_registry_targets(records: Iterable[dict[str, Any]]) -> tuple[SeatTarget, ...]:
+def _derive_matrix_targets(repo_root: str | Path) -> tuple[SeatTarget, ...]:
+    matrix = harness_matrix.build_matrix(repo_root=repo_root)
+    return tuple(SeatTarget(seat=row.harness) for row in matrix.rows)
+
+
+def _derive_registry_targets(
+    records: Iterable[dict[str, Any]],
+    *,
+    matrix_targets: Iterable[SeatTarget],
+) -> tuple[SeatTarget, ...]:
+    records_tuple = tuple(records)
+    matrix_harnesses = {target.seat for target in matrix_targets}
+    seat_contract_harnesses = _seat_contract_harnesses(records_tuple, matrix_harnesses)
     targets: list[SeatTarget] = []
-    for record in records:
-        target = _target_from_record(record)
+    for record in records_tuple:
+        target = _target_from_record(
+            record,
+            matrix_harnesses=matrix_harnesses,
+            seat_contract_harnesses=seat_contract_harnesses,
+        )
         if target is not None:
             targets.append(target)
     return tuple(targets)
 
 
-def _target_from_record(record: dict[str, Any]) -> SeatTarget | None:
+def _bind_registry_targets(
+    matrix_targets: Iterable[SeatTarget],
+    registry_targets: Iterable[SeatTarget],
+) -> tuple[SeatTarget, ...]:
+    by_seat = {target.seat: target for target in registry_targets}
+    return tuple(by_seat.get(target.seat, target) for target in matrix_targets)
+
+
+def _seat_contract_harnesses(
+    records: Iterable[dict[str, Any]],
+    matrix_harnesses: set[str],
+) -> dict[str, str]:
+    seat_harnesses: dict[str, str] = {}
+    for record in records:
+        contract = record.get("seat_contract")
+        if not isinstance(contract, dict):
+            continue
+        seat_id = _string_or_none(contract.get("seat_id"))
+        harness = _string_or_none(contract.get("harness"))
+        if seat_id and harness in matrix_harnesses:
+            seat_harnesses[seat_id] = harness
+    return seat_harnesses
+
+
+def _target_from_record(
+    record: dict[str, Any],
+    *,
+    matrix_harnesses: set[str],
+    seat_contract_harnesses: dict[str, str],
+) -> SeatTarget | None:
     if record.get("kind") == "seat-lifecycle-record":
-        return _target_from_lifecycle(record)
+        return _target_from_lifecycle(
+            record,
+            matrix_harnesses=matrix_harnesses,
+            seat_contract_harnesses=seat_contract_harnesses,
+        )
     if record.get("kind") == "pane-registry-record":
-        return _target_from_pane(record)
-    return _target_from_generic(record)
+        return _target_from_pane(
+            record,
+            matrix_harnesses=matrix_harnesses,
+            seat_contract_harnesses=seat_contract_harnesses,
+        )
+    return _target_from_generic(record, matrix_harnesses=matrix_harnesses)
 
 
-def _target_from_lifecycle(record: dict[str, Any]) -> SeatTarget | None:
+def _target_from_lifecycle(
+    record: dict[str, Any],
+    *,
+    matrix_harnesses: set[str],
+    seat_contract_harnesses: dict[str, str],
+) -> SeatTarget | None:
     seat = record.get("seat")
     if not isinstance(seat, dict):
         return None
     seat_id = _string_or_none(seat.get("seat_id"))
     if not seat_id:
         return None
+    harness = _record_harness(
+        record,
+        seat_id=seat_id,
+        matrix_harnesses=matrix_harnesses,
+        seat_contract_harnesses=seat_contract_harnesses,
+    )
+    if not harness:
+        return None
     terminal = record.get("terminal") if isinstance(record.get("terminal"), dict) else {}
     return SeatTarget(
-        seat=seat_id,
+        seat=harness,
         pid=_terminal_pid(terminal),
         terminal_kind=_string_or_none(terminal.get("kind")),
         herdr_socket=_herdr_socket(record, terminal),
         herdr_pane_id=_string_or_none(terminal.get("pane_id")),
+        aliases=_target_aliases(seat_id, harness),
     )
 
 
-def _target_from_pane(record: dict[str, Any]) -> SeatTarget | None:
+def _target_from_pane(
+    record: dict[str, Any],
+    *,
+    matrix_harnesses: set[str],
+    seat_contract_harnesses: dict[str, str],
+) -> SeatTarget | None:
     if record.get("status") not in LIVE_PANE_STATUSES:
         return None
     terminal = record.get("terminal") if isinstance(record.get("terminal"), dict) else {}
-    seat = (
+    seat_id = (
         _string_or_none(record.get("seat_id"))
         or _string_or_none(record.get("pane_id"))
         or _string_or_none(record.get("lane_id"))
     )
-    if not seat:
+    if not seat_id:
+        return None
+    harness = _record_harness(
+        record,
+        seat_id=seat_id,
+        matrix_harnesses=matrix_harnesses,
+        seat_contract_harnesses=seat_contract_harnesses,
+    )
+    if not harness:
         return None
     return SeatTarget(
-        seat=seat,
+        seat=harness,
         pid=_terminal_pid(terminal),
         terminal_kind=_string_or_none(terminal.get("kind")),
         herdr_socket=_herdr_socket(record, terminal),
         herdr_pane_id=_string_or_none(terminal.get("pane_id")),
+        aliases=_target_aliases(seat_id, harness),
     )
 
 
-def _target_from_generic(record: dict[str, Any]) -> SeatTarget | None:
+def _target_from_generic(
+    record: dict[str, Any],
+    *,
+    matrix_harnesses: set[str],
+) -> SeatTarget | None:
     seat = (
         _string_or_none(record.get("seat"))
         or _string_or_none(record.get("seat_id"))
         or _string_or_none(record.get("id"))
         or _string_or_none(record.get("name"))
     )
-    if not seat:
+    if not seat or seat not in matrix_harnesses:
         return None
     terminal = record.get("terminal") if isinstance(record.get("terminal"), dict) else {}
     return SeatTarget(
@@ -286,9 +375,38 @@ def _target_from_generic(record: dict[str, Any]) -> SeatTarget | None:
     )
 
 
+def _record_harness(
+    record: dict[str, Any],
+    *,
+    seat_id: str,
+    matrix_harnesses: set[str],
+    seat_contract_harnesses: dict[str, str],
+) -> str | None:
+    mapped = seat_contract_harnesses.get(seat_id)
+    if mapped in matrix_harnesses:
+        return mapped
+    candidates: list[str | None] = []
+    harness = record.get("harness")
+    if isinstance(harness, dict):
+        candidates.append(_string_or_none(harness.get("kind")))
+        candidates.append(_string_or_none(harness.get("harness")))
+    else:
+        candidates.append(_string_or_none(harness))
+    candidates.append(_string_or_none(record.get("harness_kind")))
+    candidates.append(seat_id if seat_id in matrix_harnesses else None)
+    for candidate in candidates:
+        if candidate in matrix_harnesses:
+            return candidate
+    return None
+
+
+def _target_aliases(seat_id: str, harness: str) -> tuple[str, ...]:
+    return (seat_id,) if seat_id != harness else ()
+
+
 def _match_registry_target(name: str, targets: Iterable[SeatTarget]) -> SeatTarget | None:
     for target in targets:
-        if name == target.seat:
+        if name == target.seat or name in target.aliases:
             return target
     return None
 
@@ -327,6 +445,7 @@ def _with_default_herdr_socket(target: SeatTarget, socket_path: str | None) -> S
         terminal_kind=target.terminal_kind,
         herdr_socket=socket_path,
         herdr_pane_id=target.herdr_pane_id,
+        aliases=target.aliases,
     )
 
 

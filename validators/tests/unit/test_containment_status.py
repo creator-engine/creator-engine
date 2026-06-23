@@ -8,6 +8,7 @@ import yaml
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator import containment_status
+from creator_engine_validator import harness_matrix as hm
 
 
 _FULL_CAP = "000001ffffffffff"
@@ -49,6 +50,12 @@ def _make_proc(tmp_path: Path, pid: str, *, ns: dict[str, str], cgroup: str, sta
     _write(base / "cgroup", cgroup)
     _write(base / "status", status)
     _write(base / "root", root)
+
+
+def _use_target_root(proc_root: Path, pid: str, target_root: Path) -> None:
+    root = proc_root / pid / "root"
+    root.unlink(missing_ok=True)
+    root.symlink_to(target_root, target_is_directory=True)
 
 
 def _host_proc(proc_root: Path) -> None:
@@ -180,7 +187,7 @@ def test_explicit_seat_bindings_probe_each_pid_and_fail_closed(tmp_path: Path):
     ]
 
 
-def test_registry_discovery_uses_live_pane_pid_but_not_contract_for_ring1(tmp_path: Path):
+def test_registry_binding_uses_matrix_harness_and_live_pane_pid_not_contract_for_ring1(tmp_path: Path):
     proc_root = tmp_path / "proc"
     _host_proc(proc_root)
     _contained_proc(proc_root, "6001")
@@ -223,7 +230,7 @@ def test_registry_discovery_uses_live_pane_pid_but_not_contract_for_ring1(tmp_pa
 
     assert [row.payload for row in result.rows] == [
         {
-            "seat": "seat-codex",
+            "seat": "codex",
             "contained": True,
             "backend": "gvisor",
             "herdr_session": "none",
@@ -234,11 +241,13 @@ def test_registry_discovery_uses_live_pane_pid_but_not_contract_for_ring1(tmp_pa
 
 def test_ring1_enforced_only_after_target_shim_denies_probe(tmp_path: Path):
     proc_root = tmp_path / "proc"
+    target_root = tmp_path / "target-root"
     _host_proc(proc_root)
     _contained_proc(proc_root, "6001")
+    _use_target_root(proc_root, "6001", target_root)
 
-    shim_dir = tmp_path / "ring1-shim"
-    shim_dir.mkdir()
+    shim_dir = target_root / "ring1-shim"
+    shim_dir.mkdir(parents=True)
     shim_dir.chmod(0o700)
     _write_executable(
         shim_dir / "git",
@@ -249,7 +258,7 @@ def test_ring1_enforced_only_after_target_shim_denies_probe(tmp_path: Path):
     _write_bytes(
         proc_root / "6001" / "environ",
         (
-            f"PATH={shim_dir}:/usr/bin\0"
+            "PATH=/ring1-shim:/usr/bin\0"
             "CE_RING1_POSTURE=governed\0"
             f"CE_RING1_PROBE_MARKER={tmp_path / 'ring1-args'}\0"
         ).encode("utf-8"),
@@ -276,7 +285,7 @@ def test_ring1_enforced_only_after_target_shim_denies_probe(tmp_path: Path):
     )
 
 
-def test_herdr_registry_session_is_live_only_when_socket_probe_succeeds(tmp_path: Path):
+def test_herdr_registry_binding_is_live_only_when_socket_probe_succeeds(tmp_path: Path):
     proc_root = tmp_path / "proc"
     _host_proc(proc_root)
     _contained_proc(proc_root, "7001")
@@ -307,7 +316,7 @@ def test_herdr_registry_session_is_live_only_when_socket_probe_succeeds(tmp_path
     )
 
     result = containment_status.probe_fleet(
-        seat_specs=[],
+        seat_specs=["codex"],
         registry_paths=[registry],
         proc_root=proc_root,
         host_pid="1",
@@ -316,7 +325,7 @@ def test_herdr_registry_session_is_live_only_when_socket_probe_succeeds(tmp_path
 
     assert [row.payload for row in result.rows] == [
         {
-            "seat": "seat-herdr",
+            "seat": "codex",
             "contained": True,
             "backend": "gvisor",
             "herdr_session": "live",
@@ -351,15 +360,9 @@ def test_unprobeable_and_prose_only_seats_fail_closed_false(tmp_path: Path):
         host_pid="1",
     )
 
-    assert [row.payload for row in result.rows] == [
-        {
-            "seat": "prose-seat",
-            "contained": False,
-            "backend": "none",
-            "herdr_session": "none",
-            "ring1": "none",
-        }
-    ]
+    assert [row.seat for row in result.rows] == list(hm.HARNESSES)
+    assert all(row.contained is False and row.backend == "none" for row in result.rows)
+    assert "prose-seat" not in {row.seat for row in result.rows}
     assert result.ok is False
 
 

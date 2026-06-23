@@ -70,6 +70,12 @@ def _make_proc(
         _write(base / "comm", comm + "\n")
 
 
+def _use_target_root(proc_root, pid: str, target_root) -> None:
+    root = proc_root / pid / "root"
+    root.unlink(missing_ok=True)
+    root.symlink_to(target_root, target_is_directory=True)
+
+
 def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
     return (
         "Name:\ttarget\n"
@@ -382,6 +388,76 @@ def test_verdict_is_pure_and_deterministic(tmp_path):
     assert a == b
 
 
+def test_ring1_probe_resolves_shim_under_target_proc_root(tmp_path):
+    proc_root = tmp_path / "proc"
+    target_root = tmp_path / "target-root"
+    marker = tmp_path / "target-ring1-args"
+    (proc_root / "6001").mkdir(parents=True)
+    target_shim_dir = target_root / "opt" / "ce-ring1"
+    target_shim_dir.mkdir(parents=True)
+    target_shim_dir.chmod(0o700)
+    _write_executable(
+        target_shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _use_target_root(proc_root, "6001", target_root)
+    _write_bytes(
+        proc_root / "6001" / "environ",
+        (
+            "PATH=/opt/ce-ring1:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={marker}\0"
+        ).encode("utf-8"),
+    )
+
+    verdict = containment_probe.probe_ring1_enforcement(
+        "6001",
+        reader=containment_probe.ProcReader(root=str(proc_root)),
+    )
+
+    assert verdict["enforced"] is True
+    assert verdict["shim_path"] == "/opt/ce-ring1/git"
+    assert marker.read_text(encoding="utf-8").strip().startswith("push --dry-run")
+
+
+def test_ring1_probe_ignores_controller_host_shim_when_target_root_lacks_it(tmp_path):
+    proc_root = tmp_path / "proc"
+    target_root = tmp_path / "target-root"
+    marker = tmp_path / "host-ring1-args"
+    (proc_root / "6001").mkdir(parents=True)
+    target_root.mkdir()
+    _use_target_root(proc_root, "6001", target_root)
+
+    host_shim_dir = tmp_path / "host-ring1"
+    host_shim_dir.mkdir()
+    host_shim_dir.chmod(0o700)
+    _write_executable(
+        host_shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _write_bytes(
+        proc_root / "6001" / "environ",
+        (
+            f"PATH={host_shim_dir}:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={marker}\0"
+        ).encode("utf-8"),
+    )
+
+    verdict = containment_probe.probe_ring1_enforcement(
+        "6001",
+        reader=containment_probe.ProcReader(root=str(proc_root)),
+    )
+
+    assert verdict["enforced"] is False
+    assert verdict["reason"] == "guarded tool not found on target PATH"
+    assert not marker.exists()
+
+
 # --------------------------------------------------------------------------- #
 # CLI surface.
 # --------------------------------------------------------------------------- #
@@ -450,6 +526,7 @@ def test_cli_gvisor_process_exits_zero(tmp_path, capsys):
 
 
 def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, capsys):
+    target_root = tmp_path / "target-root"
     _host_proc(tmp_path)
     _make_proc(
         tmp_path,
@@ -464,8 +541,9 @@ def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, c
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/rootfs",
     )
-    shim_dir = tmp_path / "ring1-shim"
-    shim_dir.mkdir()
+    _use_target_root(tmp_path, "5151", target_root)
+    shim_dir = target_root / "ring1-shim"
+    shim_dir.mkdir(parents=True)
     shim_dir.chmod(0o700)
     _write_executable(
         shim_dir / "git",
@@ -476,7 +554,7 @@ def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, c
     _write_bytes(
         tmp_path / "5151" / "environ",
         (
-            f"PATH={shim_dir}:/usr/bin\0"
+            "PATH=/ring1-shim:/usr/bin\0"
             "CE_RING1_POSTURE=governed\0"
             f"CE_RING1_PROBE_MARKER={tmp_path / 'ring1-args'}\0"
         ).encode("utf-8"),

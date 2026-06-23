@@ -449,13 +449,27 @@ def _fail_ring1(
     }
 
 
-def _which_from_path(tool: str, path_value: str) -> str | None:
+def _target_root_exec_path(reader: ProcReader, pid: int | str, target_path: str) -> str | None:
+    if not os.path.isabs(target_path):
+        return None
+    normalized = os.path.normpath(target_path)
+    return str(Path(reader.root) / str(pid) / "root" / normalized.lstrip(os.sep))
+
+
+def _which_from_target_path(
+    tool: str,
+    path_value: str,
+    *,
+    reader: ProcReader,
+    pid: int | str,
+) -> tuple[str, str] | None:
     for entry in path_value.split(os.pathsep):
-        if not entry:
+        if not entry or not os.path.isabs(entry):
             continue
-        candidate = Path(entry) / tool
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+        target_path = os.path.normpath(os.path.join(entry, tool))
+        exec_path = _target_root_exec_path(reader, pid, target_path)
+        if exec_path and Path(exec_path).is_file() and os.access(exec_path, os.X_OK):
+            return target_path, exec_path
     return None
 
 
@@ -493,16 +507,20 @@ def probe_ring1_enforcement(
     path_value = env.get("PATH")
     if not path_value:
         return _fail_ring1("target environment has no PATH", tool=tool)
-    shim_path = _which_from_path(tool, path_value)
-    if shim_path is None:
+    shim = _which_from_target_path(tool, path_value, reader=reader, pid=pid)
+    if shim is None:
         return _fail_ring1("guarded tool not found on target PATH", tool=tool)
-    shim_dir = str(Path(shim_path).parent)
+    shim_path, exec_path = shim
+    shim_dir = str(Path(exec_path).parent)
     if not _private_owned_dir(shim_dir):
         return _fail_ring1(
             "guarded tool path is not in a private owner-only shim directory",
             tool=tool,
             shim_path=shim_path,
-            evidence=[f"shim_dir={shim_dir}"],
+            evidence=[
+                f"target_shim_dir={os.path.dirname(shim_path)}",
+                f"exec_shim_dir={shim_dir}",
+            ],
         )
 
     run = runner or subprocess.run
@@ -510,7 +528,7 @@ def probe_ring1_enforcement(
     run_env.update(env)
     try:
         completed = run(
-            [shim_path, *probe_args],
+            [exec_path, *probe_args],
             env=run_env,
             capture_output=True,
             text=True,
@@ -522,10 +540,15 @@ def probe_ring1_enforcement(
             f"Ring-1 enforcement unprobeable: {exc}",
             tool=tool,
             shim_path=shim_path,
-            evidence=["shim execution failed"],
+            evidence=["shim execution failed", f"exec_path={exec_path}"],
         )
 
-    evidence = ["governed target env", "private shim path", f"exit={completed.returncode}"]
+    evidence = [
+        "governed target env",
+        "private target-root shim path",
+        f"exec_path={exec_path}",
+        f"exit={completed.returncode}",
+    ]
     if completed.returncode == RING1_DENY_EXIT_CODE:
         return {
             "enforced": True,
