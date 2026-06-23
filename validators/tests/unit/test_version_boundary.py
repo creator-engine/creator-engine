@@ -116,7 +116,9 @@ def test_taxonomy_counts_and_disjoint():
     # (``forge.user_install_discovery``): 47 -> 48.
     # ce-ops#151 added the rebase-aware stale-review reconciler
     # (``forge.re_review``): 48 -> 49.
-    assert len(ver.V3_RUNTIME) == 49
+    # ce-ops#216 Unit 1 added integrator eviction detection
+    # (``forge.eviction_detection``): 49 -> 50.
+    assert len(ver.V3_RUNTIME) == 50
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
