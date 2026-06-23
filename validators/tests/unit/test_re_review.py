@@ -159,3 +159,92 @@ def test_gh_error_raises():
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
     with pytest.raises(ForgeConfigError):
         rr.list_reviews("o/r", 7, gh_runner=Boom())
+
+
+# ---- pagination: complete-history guarantee (ce-ops#151, fail-closed) ----
+
+def _page_of(n, *, start_id, state, commit, who):
+    return [
+        {"id": start_id + i, "state": state, "commit_id": commit, "user": {"login": who}}
+        for i in range(n)
+    ]
+
+
+class PagedRunner:
+    """Returns canned pages keyed by the ``page=`` query param.
+
+    Models GitHub's real paginated ``/reviews`` endpoint: a full page (== per_page)
+    signals "more pages follow"; a short/empty page is terminal.
+    """
+
+    def __init__(self, pages):
+        self._pages = pages  # dict[int, list[dict]]
+        self.requested_pages: list[int] = []
+
+    def __call__(self, argv, input_text=None):
+        joined = " ".join(argv)
+        if "dismissals" in joined:
+            return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+        if "/reviews" in joined:
+            # extract page=N
+            page = 1
+            for part in joined.replace("&", " ").split():
+                if part.startswith("page="):
+                    page = int(part.split("=", 1)[1])
+            self.requested_pages.append(page)
+            payload = self._pages.get(page, [])
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unexpected call")
+
+
+def test_list_reviews_walks_all_pages():
+    # A full first page (per_page items) MUST trigger a second-page fetch; the
+    # later page carries the fresh approval that supersedes the page-1 CR.
+    per = rr._REVIEWS_PER_PAGE
+    pages = {
+        1: _page_of(per, start_id=1000, state="CHANGES_REQUESTED", commit="old1", who="ce-dev-3"),
+        2: [{"id": 99, "state": "APPROVED", "commit_id": HEAD, "user": {"login": "ce-dev-1"}}],
+    }
+    runner = PagedRunner(pages)
+    reviews = rr.list_reviews("o/r", 7, gh_runner=runner)
+    assert len(reviews) == per + 1
+    assert runner.requested_pages == [1, 2]  # walked past the full first page
+    assert reviews[-1].reviewer == "ce-dev-1"
+
+
+def test_reconcile_sees_later_page_objection_not_dismissed():
+    # Regression: a stale CR on page 1 must NOT be dismissed when the reviewer's
+    # OWN later (live) objection lives on page 2 — incomplete state must not
+    # leak into apply=True. With full pagination ce-dev-3's effective state is a
+    # live CR on head → CURRENT, nothing dismissed.
+    per = rr._REVIEWS_PER_PAGE
+    page1 = _page_of(per, start_id=2000, state="CHANGES_REQUESTED", commit="old1", who="filler")
+    page1[0] = {"id": 2000, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}}
+    pages = {
+        1: page1,
+        2: [{"id": 50, "state": "CHANGES_REQUESTED", "commit_id": HEAD, "user": {"login": "ce-dev-3"}}],
+    }
+    runner = PagedRunner(pages)
+    report = rr.reconcile_reviews("o/r", 7, HEAD, gh_runner=runner, apply=True)
+    by = {v.review.reviewer: v for v in report.verdicts}
+    assert by["ce-dev-3"].verdict == rr.CURRENT  # live objection on head, complete history
+    assert report.dismissed == ()
+
+
+def test_list_reviews_fails_closed_when_page_ceiling_exceeded(monkeypatch):
+    # An endpoint that never returns a short page cannot be proven complete →
+    # fail closed rather than dismiss from partial state.
+    monkeypatch.setattr(rr, "_MAX_REVIEW_PAGES", 3)
+    per = rr._REVIEWS_PER_PAGE
+    full = _page_of(per, start_id=1, state="COMMENTED", commit="x", who="bot")
+    runner = PagedRunner({p: full for p in range(1, 10)})  # every page is full
+    with pytest.raises(ForgeConfigError):
+        rr.list_reviews("o/r", 7, gh_runner=runner)
+
+
+def test_list_reviews_non_array_body_fails_closed():
+    class BadShape:
+        def __call__(self, argv, input_text=None):
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"message": "x"}), stderr="")
+    with pytest.raises(ForgeConfigError):
+        rr.list_reviews("o/r", 7, gh_runner=BadShape())

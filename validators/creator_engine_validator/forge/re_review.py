@@ -144,23 +144,70 @@ def _gh_json(runner: GhRunner, method: str, path: str, body: Mapping | None = No
     return json.loads(out) if out else None
 
 
+#: Reviews fetched per page. GitHub caps ``per_page`` at 100; we walk every page
+#: explicitly so the classifier always sees the COMPLETE chronological history —
+#: a partial first page could hide a later dismissal / live objection and let
+#: ``apply=True`` dismiss a stale CR from incomplete state (ce-ops#151, fail-closed).
+_REVIEWS_PER_PAGE = 100
+#: Hard ceiling on pages walked, so a misbehaving endpoint that never returns a
+#: short page cannot loop forever. 100 pages * 100/page = 10k reviews — far above
+#: any real PR; hitting it means the history could not be proven complete.
+_MAX_REVIEW_PAGES = 100
+
+
+def _parse_review(item: object) -> Review | None:
+    if not isinstance(item, Mapping):
+        return None
+    rid = item.get("id")
+    if rid is None:
+        return None
+    return Review(
+        review_id=int(rid),
+        state=str(item.get("state") or ""),
+        commit_id=str(item.get("commit_id") or ""),
+        reviewer=str(((item.get("user") or {}) if isinstance(item.get("user"), Mapping) else {}).get("login") or ""),
+    )
+
+
 def list_reviews(repo: str, pr_number: int, *, gh_runner: GhRunner | None = None) -> list[Review]:
-    """Read all reviews on a PR (read-only). Chronological as GitHub returns them."""
+    """Read ALL reviews on a PR (read-only), walking every page.
+
+    Paginates ``per_page=100`` until a short (or empty) page proves the history
+    is complete. The classifier's safety depends on complete latest-per-reviewer
+    state, so a partial read must never reach :func:`reconcile_reviews`; if the
+    page ceiling is hit before a short page, we fail closed.
+
+    Returns reviews chronological as GitHub returns them.
+    """
     runner = gh_runner or _default_gh_runner
-    raw = _gh_json(runner, "GET", f"repos/{repo}/pulls/{pr_number}/reviews")
     reviews: list[Review] = []
-    for item in raw or []:
-        if not isinstance(item, Mapping):
-            continue
-        rid = item.get("id")
-        if rid is None:
-            continue
-        reviews.append(Review(
-            review_id=int(rid),
-            state=str(item.get("state") or ""),
-            commit_id=str(item.get("commit_id") or ""),
-            reviewer=str(((item.get("user") or {}) if isinstance(item.get("user"), Mapping) else {}).get("login") or ""),
-        ))
+    for page in range(1, _MAX_REVIEW_PAGES + 1):
+        raw = _gh_json(
+            runner, "GET",
+            f"repos/{repo}/pulls/{pr_number}/reviews?per_page={_REVIEWS_PER_PAGE}&page={page}",
+        )
+        if not isinstance(raw, list):
+            # A non-list body (e.g. an error object or null) means we cannot
+            # prove the history; treat an empty/None body as a terminal page,
+            # but a malformed mapping as fail-closed.
+            if raw is None:
+                break
+            raise ForgeConfigError(
+                f"reviews page {page} for {repo}#{pr_number} returned a non-array body — "
+                f"cannot prove complete review history (fail-closed)"
+            )
+        for item in raw:
+            parsed = _parse_review(item)
+            if parsed is not None:
+                reviews.append(parsed)
+        if len(raw) < _REVIEWS_PER_PAGE:
+            # Short page → this was the last page; history is complete.
+            break
+    else:
+        raise ForgeConfigError(
+            f"reviews for {repo}#{pr_number} exceeded {_MAX_REVIEW_PAGES} pages — "
+            f"cannot prove complete review history (fail-closed)"
+        )
     return reviews
 
 
