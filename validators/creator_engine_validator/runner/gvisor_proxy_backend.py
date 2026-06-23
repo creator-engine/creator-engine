@@ -59,6 +59,24 @@ DEFAULT_CODEX_BIN_TARGET = "/usr/local/bin/codex"
 
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RUNTIME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_HOST_NETWORK_ARG_RE = re.compile(r"^--?(?:network|net)=host$")
+_ISOLATED_NETWORK_ARG_RE = re.compile(r"^--?(?:network|net)=(?:none|isolated|private|netns)$")
+_EGRESS_POLICY_ARG_RE = re.compile(r"^--?egress[-_]?policy(?:=.+)?$")
+
+_NETWORK_KEYS = {
+    "network",
+    "network_mode",
+    "networkmode",
+    "docker_network",
+    "dockernetwork",
+    "net",
+    "net_mode",
+    "netmode",
+}
+_ISOLATED_NETWORK_VALUES = {"none", "isolated", "private", "netns"}
+_PROXY_MARKERS = ("gvproxy", "egress-proxy", "egress_proxy")
+_PROXY_KEYS = {"proxy", "egress_proxy", "egressproxy", "egress_proxy_config", "egressproxyconfig"}
+_EGRESS_POLICY_KEYS = {"egress_policy", "egresspolicy", "egress_allowlist", "egressallowlist"}
 
 
 class EgressNotEnforceable(BackendUnavailable):
@@ -386,6 +404,17 @@ class SubprocessContainerRunner:
         return shutil.which(self._binary) is not None and self._runtime_registered()
 
     def _runtime_registered(self) -> bool:
+        runtimes = self._docker_runtimes()
+        return runtimes is not None and self._required_runtime in runtimes
+
+    def _registered_runtime_config(self) -> dict[str, Any] | None:
+        runtimes = self._docker_runtimes()
+        if runtimes is None:
+            return None
+        config = runtimes.get(self._required_runtime)
+        return config if isinstance(config, dict) else None
+
+    def _docker_runtimes(self) -> dict[str, Any] | None:
         try:
             completed = subprocess.run(
                 [self._binary, "info", "--format", "{{json .Runtimes}}"],
@@ -394,27 +423,130 @@ class SubprocessContainerRunner:
                 check=False,
             )
         except OSError:
-            return False
+            return None
         if completed.returncode != 0:
-            return False
+            return None
         try:
             runtimes = json.loads(completed.stdout or "{}")
         except json.JSONDecodeError:
-            return False
+            return None
         if not isinstance(runtimes, dict):
-            return False
-        return self._required_runtime in runtimes
+            return None
+        return runtimes
 
     def egress_enforceable(self) -> bool:
-        # The v3 capability-separation proxy enforces egress via the translated
-        # config (unlike the v2 stub, which returns no primitive). The concrete
-        # proxy route is provided by the registered Docker runsc runtime.
-        return True
+        config = self._registered_runtime_config()
+        if config is None or _runtime_declares_host_network(config):
+            return False
+        if _runtime_declares_proxy(config):
+            return True
+        return _runtime_declares_isolated_network(config) and _runtime_declares_egress_policy(config)
 
     def run(self, argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:  # pragma: no cover - requires live Docker
         return subprocess.run(
             list(argv), input=input_text, capture_output=True, text=True, check=False
         )
+
+
+def _runtime_declares_host_network(config: dict[str, Any]) -> bool:
+    for key, value in _walk_runtime_metadata(config):
+        normalized = _normalize_metadata_key(key)
+        if normalized in _NETWORK_KEYS and _metadata_value(value) == "host":
+            return True
+        if _sequence_declares_host_network(value):
+            return True
+        if isinstance(value, str) and _HOST_NETWORK_ARG_RE.match(value.strip().lower()):
+            return True
+    return False
+
+
+def _runtime_declares_proxy(config: dict[str, Any]) -> bool:
+    for key, value in _walk_runtime_metadata(config):
+        normalized_key = _normalize_metadata_key(key)
+        if "no_proxy" in normalized_key:
+            continue
+        if normalized_key in _PROXY_KEYS and _truthy_metadata(value):
+            return True
+        if any(marker in normalized_key for marker in _PROXY_MARKERS) and _truthy_metadata(value):
+            return True
+        if isinstance(value, str) and any(marker in value.lower() for marker in _PROXY_MARKERS):
+            return True
+    return False
+
+
+def _runtime_declares_isolated_network(config: dict[str, Any]) -> bool:
+    for key, value in _walk_runtime_metadata(config):
+        normalized = _normalize_metadata_key(key)
+        if normalized in _NETWORK_KEYS and _metadata_value(value) in _ISOLATED_NETWORK_VALUES:
+            return True
+        if normalized == "netns" and _truthy_metadata(value):
+            return True
+        if _sequence_declares_isolated_network(value):
+            return True
+        if isinstance(value, str) and _ISOLATED_NETWORK_ARG_RE.match(value.strip().lower()):
+            return True
+    return False
+
+
+def _runtime_declares_egress_policy(config: dict[str, Any]) -> bool:
+    for key, value in _walk_runtime_metadata(config):
+        normalized = _normalize_metadata_key(key)
+        if normalized in _EGRESS_POLICY_KEYS and _truthy_metadata(value):
+            return True
+        if isinstance(value, str) and _EGRESS_POLICY_ARG_RE.match(value.strip().lower()):
+            return True
+    return False
+
+
+def _walk_runtime_metadata(value: Any, key: str = ""):
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            child_key_str = str(child_key)
+            yield child_key_str, child_value
+            yield from _walk_runtime_metadata(child_value, child_key_str)
+    elif isinstance(value, (list, tuple)):
+        for child_value in value:
+            yield key, child_value
+            yield from _walk_runtime_metadata(child_value, key)
+
+
+def _sequence_declares_host_network(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)):
+        return False
+    parts = [_metadata_value(part) for part in value]
+    return _sequence_has_network_value(parts, "host") or any(
+        _HOST_NETWORK_ARG_RE.match(part) for part in parts
+    )
+
+
+def _sequence_declares_isolated_network(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)):
+        return False
+    parts = [_metadata_value(part) for part in value]
+    return any(_sequence_has_network_value(parts, network) for network in _ISOLATED_NETWORK_VALUES) or any(
+        _ISOLATED_NETWORK_ARG_RE.match(part) for part in parts
+    )
+
+
+def _sequence_has_network_value(parts: list[str], expected: str) -> bool:
+    for index, part in enumerate(parts[:-1]):
+        if part in {"--network", "network", "--net", "net"} and parts[index + 1] == expected:
+            return True
+    return False
+
+
+def _normalize_metadata_key(value: str) -> str:
+    return value.strip().lower().replace("-", "_")
+
+
+def _metadata_value(value: Any) -> str:
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def _truthy_metadata(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() not in {"0", "false", "no", "off", "none"}
+    return bool(value)
 
 
 # ---------------------------------------------------------------------------

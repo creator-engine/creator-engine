@@ -107,6 +107,17 @@ class FakeRunner:
         return subprocess.CompletedProcess(list(argv), self._rc, stdout=self._out, stderr=self._err)
 
 
+def subprocess_runner_with_docker_info(monkeypatch, stdout: str, returncode: int = 0) -> SubprocessContainerRunner:
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def docker_info(argv, **_kwargs):
+        assert argv == ["docker", "info", "--format", "{{json .Runtimes}}"]
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", docker_info)
+    return SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
+
+
 # ---------------------------------------------------------------------------
 # Pure translation
 # ---------------------------------------------------------------------------
@@ -301,6 +312,65 @@ def test_subprocess_runner_available_when_required_runsc_runtime_registered(monk
     runner = SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
 
     assert runner.available() is True
+
+
+def test_subprocess_runner_egress_not_enforceable_with_host_network(monkeypatch):
+    runner = subprocess_runner_with_docker_info(
+        monkeypatch,
+        (
+            '{"runsc-gvproxy-ptrace": {"path": "runsc", '
+            '"runtimeArgs": ["--network=host", "--egress-proxy=/usr/local/bin/gvproxy"]}}'
+        ),
+    )
+
+    assert runner.egress_enforceable() is False
+
+
+def test_subprocess_runner_egress_not_enforceable_without_proxy(monkeypatch):
+    runner = subprocess_runner_with_docker_info(
+        monkeypatch,
+        '{"runsc-gvproxy-ptrace": {"path": "runsc", "runtimeArgs": ["--platform=ptrace"]}}',
+    )
+
+    assert runner.egress_enforceable() is False
+
+
+def test_subprocess_runner_egress_enforceable_with_proxy_runtime(monkeypatch):
+    runner = subprocess_runner_with_docker_info(
+        monkeypatch,
+        (
+            '{"runsc-gvproxy-ptrace": {"path": "runsc", '
+            '"runtimeArgs": ["--platform=ptrace", "--egress-proxy=/usr/local/bin/gvproxy"]}}'
+        ),
+    )
+
+    assert runner.egress_enforceable() is True
+
+
+def test_subprocess_runner_egress_enforceable_with_isolated_policy(monkeypatch):
+    runner = subprocess_runner_with_docker_info(
+        monkeypatch,
+        (
+            '{"runsc-gvproxy-ptrace": {"path": "runsc", "network": "isolated", '
+            '"egressPolicy": "/etc/creator-engine/egress-policy.json"}}'
+        ),
+    )
+
+    assert runner.egress_enforceable() is True
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode"),
+    [
+        ("not-json", 0),
+        ('{"runc": {"path": "runc"}}', 0),
+        ('{"runsc-gvproxy-ptrace": {"path": "runsc"}}', 1),
+    ],
+)
+def test_subprocess_runner_egress_unprobeable_fails_closed(monkeypatch, stdout, returncode):
+    runner = subprocess_runner_with_docker_info(monkeypatch, stdout, returncode=returncode)
+
+    assert runner.egress_enforceable() is False
 
 
 def test_provision_missing_docker_runsc_inputs_refuses_before_availability_probe():
