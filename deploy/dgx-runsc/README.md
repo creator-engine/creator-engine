@@ -111,6 +111,11 @@ operator explicitly overrides it for diagnostics.
      deploy/dgx-runsc
    ```
 
+   The image builds `herdr` from the pinned herdr-ce source revision in a
+   Debian bookworm builder stage and copies that binary into the matching
+   bookworm runtime image. Do not stage or copy a host-built `herdr` binary
+   into the image; host glibc drift is intentionally excluded from this path.
+
 4. Verify the runtime is actually `runsc` and HTTPS egress follows the DGX
    `gvproxy`/`gvisor-tap-vsock` path:
 
@@ -134,7 +139,14 @@ operator explicitly overrides it for diagnostics.
 
    The printed argv must include `docker run`, `--runtime=runsc-gvproxy-ptrace`, the
    repo bind mount, the `.codex` bind mount, the Codex binary bind mount, and
-   `codex exec`. It must not include a Docker `--network=` flag.
+   the image followed by `exec`. It must include a runtime-owned tmpfs at
+   `/run/creator-engine` for herdr substrate state. It must not include a Docker
+   `--network=` flag, a raw `HERDR_SOCKET_PATH=` container env, or a host bind
+   mount under `/run/creator-engine/herdr`. The launcher passes
+   `CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock` only as
+   entrypoint configuration; the entrypoint uses `HERDR_SOCKET_PATH` privately
+   for `herdr` CLI calls and starts the governed harness with a clean explicit
+   environment that excludes raw and CE_DGX-prefixed socket carriers.
 
 6. Start the interactive Codex TUI in the repo:
 
@@ -149,6 +161,28 @@ operator explicitly overrides it for diagnostics.
      ./deploy/dgx-runsc/run-codex-runsc.sh exec "Summarize the current git status."
    ```
 
+8. Dogfood the herdr terminalized launch and containment probe:
+
+   ```bash
+   docker build \
+     -f deploy/dgx-runsc/Dockerfile \
+     -t creator-engine/codex-runsc:0.141.0-aarch64 \
+     --build-arg CE_DGX_USER="$(id -un)" \
+     --build-arg CE_DGX_UID="$(id -u)" \
+     --build-arg CE_DGX_GID="$(id -g)" \
+     deploy/dgx-runsc
+
+   CE_DGX_REPO="$PWD" \
+     ./deploy/dgx-runsc/run-codex-runsc.sh exec "printf 'herdr runsc dogfood\n'; sleep 300"
+
+   ce containment-probe <container-or-harness-pid> --json
+   ```
+
+   Expected probe result: JSON with `"contained": true` and
+   `"backend": "gvisor"`. Expected terminal marker: the launcher dry-run and
+   harness environment carry `CE_DGX_TERMINAL_KIND=herdr` /
+   `CE_TERMINAL_KIND=herdr`.
+
 ## Runner Defaults
 
 The script is parameterized through environment variables:
@@ -161,6 +195,10 @@ CE_DGX_REPO=$(pwd)
 CE_DGX_CODEX_HOME=/home/cedev4/.codex
 CE_DGX_CODEX_HOME_MODE=rw
 CE_DGX_CODEX_BIN=/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
+CE_DGX_HARNESS=codex
+CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock
+CE_DGX_SUBSTRATE_RUN_DIR=/run/creator-engine
+CE_DGX_TERMINAL_KIND=herdr
 CE_DGX_TTY_FLAGS=-it
 ```
 
@@ -189,6 +227,7 @@ session data under `~/.codex`.
 Local authoring checks:
 
 ```bash
+bash -n deploy/dgx-runsc/herdr-harness-entrypoint.sh
 bash -n deploy/dgx-runsc/run-codex-runsc.sh
 CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--runtime=runsc-gvproxy-ptrace'
 ! CE_DGX_DRY_RUN=1 deploy/dgx-runsc/run-codex-runsc.sh exec "hello" | grep -- '--network='

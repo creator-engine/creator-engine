@@ -64,15 +64,24 @@ def test_controller_tui_dry_run_uses_contained_defaults():
     assert "--runtime=runsc-gvproxy-ptrace" in argv
     assert "--security-opt=no-new-privileges" in argv
     assert "--cap-drop=ALL" in argv
+    assert "--tmpfs" in argv
+    assert "/run/creator-engine:uid=1000,gid=1000,mode=0700" in argv
     assert "--network=bridge" not in argv
     assert "--env" in argv
     assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
     assert "synthetic-secret-token-value" not in result.stdout
     assert "creator-engine/claude-controller-runsc:test" in argv
-    assert argv[-2:] == [
-        "creator-engine/claude-controller-runsc:test",
-        "/usr/local/bin/claude",
-    ]
+    assert argv[-1] == "creator-engine/claude-controller-runsc:test"
+    assert "CE_DGX_HARNESS=claude" in argv
+    assert "CE_DGX_HARNESS_BIN=/usr/local/bin/claude" in argv
+    assert "CE_DGX_HARNESS_HOME=/home/cedev4" in argv
+    assert "CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in argv
+    assert "XDG_CONFIG_HOME=/run/creator-engine/xdg/config" in argv
+    assert "XDG_STATE_HOME=/run/creator-engine/xdg/state" in argv
+    assert "XDG_CACHE_HOME=/run/creator-engine/xdg/cache" in argv
+    assert "CE_DGX_TERMINAL_KIND=herdr" in argv
+    assert "CE_TERMINAL_KIND=herdr" in argv
+    assert not any(arg.startswith("HERDR_SOCKET_PATH=") for arg in argv)
     assert any(
         arg == "type=bind,source=/repo/creator-engine,target=/workspace/creator-engine"
         for arg in argv
@@ -85,6 +94,7 @@ def test_controller_tui_dry_run_uses_contained_defaults():
         arg == "type=bind,source=/opt/claude/bin/claude,target=/usr/local/bin/claude,readonly"
         for arg in argv
     )
+    assert not any("/run/creator-engine/herdr" in arg and arg.startswith("type=bind,") for arg in argv)
 
 
 def test_controller_exec_dry_run_maps_to_claude_print_mode():
@@ -92,9 +102,8 @@ def test_controller_exec_dry_run_maps_to_claude_print_mode():
 
     argv = dry_run_argv(result)
 
-    assert argv[-4:] == [
+    assert argv[-3:] == [
         "creator-engine/claude-controller-runsc:test",
-        "/usr/local/bin/claude",
         "-p",
         "summarize status",
     ]

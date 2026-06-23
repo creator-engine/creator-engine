@@ -8,7 +8,7 @@ Usage:
   run-controller-runsc.sh [--dry-run] exec [claude prompt args...]
 
 Environment:
-  CE_DGX_CONTROLLER_IMAGE       Docker image tag (default: creator-engine/claude-controller-runsc:0.1.0-aarch64)
+  CE_DGX_CONTROLLER_IMAGE       Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
   CE_DGX_IMAGE                  Deprecated alias for CE_DGX_CONTROLLER_IMAGE
   CE_DGX_RUNTIME                Docker runtime (default: runsc-gvproxy-ptrace)
   CE_DGX_DOCKER_NETWORK         Optional Docker --network value (default: unset)
@@ -17,6 +17,8 @@ Environment:
   CE_DGX_CONTROLLER_HOME        Host-contained controller home, not the host home
   CE_DGX_CONTROLLER_HOME_MODE   Mount mode for controller home: rw or ro (default: rw)
   CE_DGX_CLAUDE_BIN             Optional host Claude binary mounted at /usr/local/bin/claude
+  CE_DGX_HERDR_SOCKET_PATH      Container-only herdr socket path (default: /run/creator-engine/herdr/herdr.sock)
+  CE_DGX_SUBSTRATE_RUN_DIR      Container tmpfs root for herdr substrate state (default: /run/creator-engine)
   CE_DGX_SUPERVISOR_SOCKET      Optional future supervisor socket source path
   CE_DGX_CONTAINER_REPO         Container repo path (default: /workspace/creator-engine)
   CE_DGX_CONTAINER_USER         Container seat user name (default: cedev4)
@@ -48,13 +50,15 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
   shift
 fi
 
-CE_DGX_CONTROLLER_IMAGE="${CE_DGX_CONTROLLER_IMAGE:-${CE_DGX_IMAGE:-creator-engine/claude-controller-runsc:0.1.0-aarch64}}"
+CE_DGX_CONTROLLER_IMAGE="${CE_DGX_CONTROLLER_IMAGE:-${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}}"
 CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CONTROLLER_HOME="${CE_DGX_CONTROLLER_HOME:-${HOME:-/home/cedev4}/.ce/controller-home}"
 CE_DGX_CONTROLLER_HOME_MODE="${CE_DGX_CONTROLLER_HOME_MODE:-rw}"
 CE_DGX_CLAUDE_BIN="${CE_DGX_CLAUDE_BIN:-}"
+CE_DGX_HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
+CE_DGX_SUBSTRATE_RUN_DIR="${CE_DGX_SUBSTRATE_RUN_DIR:-/run/creator-engine}"
 CE_DGX_SUPERVISOR_SOCKET="${CE_DGX_SUPERVISOR_SOCKET:-}"
 CE_DGX_CONTAINER_REPO="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
 CE_DGX_CONTAINER_USER="${CE_DGX_CONTAINER_USER:-cedev4}"
@@ -148,7 +152,7 @@ if [ -n "${CE_DGX_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_DGX_TTY_FLAGS}"
 fi
 
-container_cmd=(/usr/local/bin/claude)
+container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(-p)
 fi
@@ -167,9 +171,19 @@ docker_cmd=(
   --cap-drop=ALL
   --user "${CE_DGX_UID}:${CE_DGX_GID}"
   --workdir "${CE_DGX_CONTAINER_REPO}"
+  --tmpfs "${CE_DGX_SUBSTRATE_RUN_DIR}:uid=${CE_DGX_UID},gid=${CE_DGX_GID},mode=0700"
   --env "HOME=${CE_DGX_CONTAINER_HOME}"
+  --env "XDG_CONFIG_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/config"
+  --env "XDG_STATE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/state"
+  --env "XDG_CACHE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/cache"
   --env "TERM=${TERM:-xterm-256color}"
   --env "CLAUDE_CODE_OAUTH_TOKEN"
+  --env "CE_DGX_HARNESS=claude"
+  --env "CE_DGX_HARNESS_BIN=/usr/local/bin/claude"
+  --env "CE_DGX_HARNESS_HOME=${CE_DGX_CONTAINER_HOME}"
+  --env "CE_DGX_HERDR_SOCKET_PATH=${CE_DGX_HERDR_SOCKET_PATH}"
+  --env "CE_DGX_TERMINAL_KIND=herdr"
+  --env "CE_TERMINAL_KIND=herdr"
   --mount "${repo_mount}"
   --mount "${controller_home_mount}"
 )
@@ -193,7 +207,9 @@ fi
 
 docker_cmd+=("${tty_flags[@]}")
 docker_cmd+=("${CE_DGX_CONTROLLER_IMAGE}")
-docker_cmd+=("${container_cmd[@]}")
+if [ "${#container_cmd[@]}" -gt 0 ]; then
+  docker_cmd+=("${container_cmd[@]}")
+fi
 
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"

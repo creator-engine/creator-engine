@@ -2,8 +2,11 @@
 
 This directory is the Gate 2 DGX Controller sibling of the merged
 `deploy/dgx-runsc/` Codex artifact from ce-ops#128 / `3d9e86a`. It provides an
-image, dry-runable Docker argv wrapper, and image-build notes for running the
-Claude Code Controller under the same `runsc-gvproxy-ptrace` containment shape.
+dry-runable Docker argv wrapper and image notes for running the Claude Code
+Controller under the same `runsc-gvproxy-ptrace` containment shape. By default
+the wrapper reuses the `deploy/dgx-runsc/` image because that image bakes the
+shared herdr harness entrypoint; mount the Claude binary at
+`/usr/local/bin/claude`.
 
 This cut does not implement the Gate 3 Controller Supervisor. If
 `CE_DGX_SUPERVISOR_SOCKET` is supplied, the wrapper only mounts that existing
@@ -28,22 +31,32 @@ The corresponding declarative contract is
 
 ## Build Image
 
-From the repo root on the DGX:
+Build the shared herdr entrypoint image from the repo root on the DGX:
 
 ```bash
 docker build \
-  -f deploy/dgx-controller-runsc/Dockerfile \
-  -t creator-engine/claude-controller-runsc:0.1.0-aarch64 \
+  -f deploy/dgx-runsc/Dockerfile \
+  -t creator-engine/codex-runsc:0.141.0-aarch64 \
   --build-arg CE_DGX_USER="$(id -un)" \
   --build-arg CE_DGX_UID="$(id -u)" \
   --build-arg CE_DGX_GID="$(id -g)" \
-  deploy/dgx-controller-runsc
+  deploy/dgx-runsc
 ```
 
+The shared image builds herdr-ce from the pinned source revision inside a
+Debian bookworm builder stage. Do not copy a host-built `herdr` binary into the
+image; the runtime binary must match the image libc.
+
+The wrapper mounts a runtime-owned tmpfs at `/run/creator-engine` for herdr
+socket and XDG state. The substrate entrypoint uses that path to own the herdr
+server, while the governed Claude harness starts with a clean environment that
+does not inherit socket carriers.
+
 The image intentionally does not bake Claude auth, GitHub auth, OpenBao tokens,
-or a private key. Either provide a Claude binary through
-`CE_DGX_CLAUDE_BIN=/path/to/claude`, or build an operator-local image variant
-that places the binary at `/usr/local/bin/claude` without adding credentials.
+or a private key. Provide a Claude binary through
+`CE_DGX_CLAUDE_BIN=/path/to/claude`; the wrapper mounts it at
+`/usr/local/bin/claude` and sets `CE_DGX_HARNESS=claude` for the shared
+entrypoint.
 
 ## Dry-Run Validation
 
