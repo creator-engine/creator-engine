@@ -41,9 +41,10 @@ offensive capability.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 #: The ``terminal.kind`` this containment wrapper services — parallels
@@ -154,13 +155,28 @@ def _egress_allowlist(runtime_policy: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _normalize(path: str) -> PurePosixPath:
+    """Lexically normalize a POSIX container path — PURE, no filesystem access.
+
+    Uses pure-string normalization (``os.path.normpath`` semantics via
+    ``PurePosixPath``-of-``os.path.normpath``): collapses ``.``/``..``/duplicate
+    separators WITHOUT touching the host filesystem or resolving symlinks. This
+    keeps the §7 overlap check deterministic regardless of host fs/symlink state
+    (the planner is a PURE runtime-policy → containment-plan translation).
+    """
+    # os.path.normpath is pure string normalization (no fs/symlink access);
+    # PurePosixPath then gives structural parent/equality comparison.
+    return PurePosixPath(os.path.normpath(path))
+
+
 def _is_within(child: str, parent: str) -> bool:
-    """True when ``child`` is ``parent`` or nested under it (path-prefix, normalized)."""
-    try:
-        cp = Path(child).resolve(strict=False)
-        pp = Path(parent).resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        return False
+    """True when ``child`` is ``parent`` or nested under it (lexical path-prefix).
+
+    PURE: compares lexically-normalized paths with NO filesystem access — the
+    result depends only on the input strings, never on host fs/symlink state.
+    """
+    cp = _normalize(child)
+    pp = _normalize(parent)
     return cp == pp or pp in cp.parents
 
 
@@ -198,7 +214,7 @@ def plan_herdr_containment(
     the U3 live launch (:meth:`HerdrContainmentLaunch.launch`).
     """
     socket_dir = substrate_socket_dir
-    socket_path = str(Path(socket_dir) / socket_name)
+    socket_path = str(PurePosixPath(socket_dir) / socket_name)
     seat_writable = _writable_paths(runtime_policy)
 
     # §7 keystone: the substrate-owned socket dir must not overlap any
