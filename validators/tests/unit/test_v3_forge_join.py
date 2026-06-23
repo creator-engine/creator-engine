@@ -551,6 +551,7 @@ import hashlib as _hashlib
 from creator_engine_validator.forge.github_repo_config import ForgeConfigError as _ForgeConfigError
 
 OLD_HEAD = "d" * 40
+OLDER_HEAD = "e" * 40
 OLD_BASE = "a1" * 20
 NEW_HEAD = "c" * 40
 NEW_BASE = "b2" * 20
@@ -576,7 +577,8 @@ class FakeMergeGh:
 
     def __init__(self, *, review="APPROVED", rollup="SUCCESS", merge_state="CLEAN",
                  mergeable="MERGEABLE", merged=True, commit="f" * 40, put_rc=0, put_stderr="",
-                 live_head=OLD_HEAD, live_base=OLD_BASE, branch=BRANCH, base="main"):
+                 live_head=OLD_HEAD, live_base=OLD_BASE, branch=BRANCH, base="main",
+                 auth_login="reviewer-a", reviews_payload=None):
         self.calls = []
         self.review = review
         self.rollup = rollup
@@ -590,6 +592,9 @@ class FakeMergeGh:
         self.live_base = live_base
         self.branch = branch
         self.base = base
+        self.auth_login = auth_login
+        self.reviews_payload = reviews_payload or []
+        self.review_submissions = []
 
     def __call__(self, argv, input_text=None):
         argv = list(argv)
@@ -598,6 +603,14 @@ class FakeMergeGh:
         if "-X" in argv and "PUT" in argv:
             out = json.dumps({"merged": self.merged, "sha": self.commit}) if self.put_rc == 0 else ""
             return _CP(argv, self.put_rc, stdout=out, stderr=self.put_stderr)
+        if "-X" in argv and "POST" in argv and "/reviews" in joined:
+            self.review_submissions.append(json.loads(input_text or "{}"))
+            self.review = "APPROVED"
+            return _CP(argv, 0, stdout=json.dumps({"id": 9001}), stderr="")
+        if "-X" in argv and "GET" in argv and joined.endswith(" user"):
+            return _CP(argv, 0, stdout=json.dumps({"login": self.auth_login}), stderr="")
+        if "-X" in argv and "GET" in argv and "/reviews?per_page=" in joined:
+            return _CP(argv, 0, stdout=json.dumps(self.reviews_payload), stderr="")
         if "headRefName" in joined:  # the F6 combined pr_state read (checked FIRST)
             return _CP(argv, 0, stdout=json.dumps({"data": {"repository": {"pullRequest": {
                 "number": 7, "headRefName": self.branch, "baseRefName": self.base,
@@ -767,6 +780,130 @@ def test_merge_apply_base_only_restamps_then_merges_new_head(tmp_path):
     merged = [r for r in records if r.get("outcome") == "pr_merged"][0]
     assert merged["change_set"]["head_sha"] == NEW_HEAD
     assert _spine.verify_chain(records) == []
+
+
+def test_merge_apply_base_only_restores_same_reviewer_approval_then_merges(tmp_path):
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(
+        review="REVIEW_REQUIRED",
+        live_head=NEW_HEAD,
+        live_base=NEW_BASE,
+        reviews_payload=[
+            {"id": 44, "state": "APPROVED", "commit_id": OLD_HEAD, "user": {"login": "reviewer-a"}},
+        ],
+    )
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME-DIFF", NEW_HEAD: "SAME-DIFF"},
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+        tree_by_ref={NEW_HEAD: "a" * 40, "f" * 40: "a" * 40},
+    )
+
+    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+
+    assert result.merged is True
+    assert result.review_decision == "APPROVED"
+    assert len(gh.review_submissions) == 1
+    assert gh.review_submissions[0]["event"] == "APPROVE"
+    assert gh.review_submissions[0]["commit_id"] == NEW_HEAD
+
+
+def test_merge_apply_base_only_wrong_reviewer_does_not_restore(tmp_path):
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(
+        review="REVIEW_REQUIRED",
+        live_head=NEW_HEAD,
+        live_base=NEW_BASE,
+        auth_login="operator-not-reviewer",
+        reviews_payload=[
+            {"id": 44, "state": "APPROVED", "commit_id": OLD_HEAD, "user": {"login": "reviewer-a"}},
+        ],
+    )
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME-DIFF", NEW_HEAD: "SAME-DIFF"},
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+    )
+
+    with pytest.raises(MergeRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+
+    assert gh.review == "REVIEW_REQUIRED"
+    assert gh.review_submissions == []
+    assert not gh.did_put()
+
+
+def test_merge_apply_base_only_older_same_reviewer_approval_does_not_restore(tmp_path):
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(
+        review="REVIEW_REQUIRED",
+        live_head=NEW_HEAD,
+        live_base=NEW_BASE,
+        reviews_payload=[
+            {"id": 44, "state": "APPROVED", "commit_id": OLDER_HEAD, "user": {"login": "reviewer-a"}},
+        ],
+    )
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "SAME-DIFF", NEW_HEAD: "SAME-DIFF"},
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+    )
+
+    with pytest.raises(MergeRefused):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+
+    assert gh.review == "REVIEW_REQUIRED"
+    assert gh.review_submissions == []
+    assert not gh.did_put()
+
+
+def test_merge_apply_content_drift_does_not_restore_review_required(tmp_path):
+    paths = ["validators/x.py", CARRIER_PATH]
+    run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
+    gh = FakeMergeGh(
+        review="REVIEW_REQUIRED",
+        live_head=NEW_HEAD,
+        live_base=NEW_BASE,
+        reviews_payload=[
+            {"id": 44, "state": "APPROVED", "commit_id": OLD_HEAD, "user": {"login": "reviewer-a"}},
+        ],
+    )
+    carrier = _carrier_text(paths)
+    git = FakeGitRunner(
+        content_by_head={OLD_HEAD: "DIFF-A", NEW_HEAD: "DIFF-B"},
+        carrier_by_head={OLD_HEAD: carrier, NEW_HEAD: carrier},
+    )
+
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+
+    assert "content_drift_requires_reratification" in str(ei.value)
+    assert gh.review == "REVIEW_REQUIRED"
+    assert gh.review_submissions == []
+    assert not gh.did_put()
+
+
+def test_merge_apply_classifier_uncertain_does_not_restore_review_required(tmp_path):
+    run_id = _collected_author_run(tmp_path, base_sha=None)
+    gh = FakeMergeGh(
+        review="REVIEW_REQUIRED",
+        live_head=NEW_HEAD,
+        live_base=NEW_BASE,
+        reviews_payload=[
+            {"id": 44, "state": "APPROVED", "commit_id": OLD_HEAD, "user": {"login": "reviewer-a"}},
+        ],
+    )
+
+    with pytest.raises(ForgeJoinRefused) as ei:
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=FakeGitRunner())
+
+    assert "restamp_legacy_unprovable" in str(ei.value)
+    assert gh.review == "REVIEW_REQUIRED"
+    assert gh.review_submissions == []
+    assert not gh.did_put()
 
 
 def test_merge_apply_content_drift_refuses_before_put(tmp_path):

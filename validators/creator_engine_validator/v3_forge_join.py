@@ -62,6 +62,7 @@ from .forge.credential_runner import authenticated_gh_runner
 from .forge.github_repo_config import ForgeConfigError, GhRunner
 from .forge.auto_merge import AutoMergeResult, enable_auto_merge
 from .forge.merge import MergeResult, merge
+from .forge import re_review
 from .forge.review_submit import ReviewResult, submit_review
 from .forge.scoped_token import (
     ScopedToken,
@@ -934,7 +935,21 @@ def merge_for_run(
             "requires full re-ratification, never a machine re-stamp"
         )
 
-    # 5) Gated head-pinned squash on the ACTIVE head (the attested or the proven-restamp head).
+    # 5) If GitHub reset reviewDecision after a proven base-only rebase, restore
+    # the prior approval only through the same authenticated reviewer identity.
+    if proven_restamp and live.review_decision == "REVIEW_REQUIRED":
+        _restore_same_reviewer_base_only_approval(
+            repo=repo,
+            pr_number=pr_number,
+            branch=branch,
+            base=base,
+            manifest_paths=manifest_paths,
+            approved_head=attested_head,
+            active_head=active_head,
+            gh_runner=merge_gh_runner,
+        )
+
+    # 6) Gated head-pinned squash on the ACTIVE head (the attested or the proven-restamp head).
     merge_change_ref = ChangeRef(
         repo=repo, branch=branch, base=base, pr_number=pr_number, head_sha=active_head,
         manifest_paths=manifest_paths, plan_ref=plan_ref, changed=True, applied=True, verified=True,
@@ -992,6 +1007,58 @@ def _latest_attested_head(records: list[dict[str, Any]], cs: dict[str, Any]) -> 
             head = str(r.get("new_head_sha") or head)
             base = r.get("new_base_sha") or base
     return head, (str(base) if base else None)
+
+
+def _restore_same_reviewer_base_only_approval(
+    *,
+    repo: str,
+    pr_number: int,
+    branch: str,
+    base: str,
+    manifest_paths: Sequence[str],
+    approved_head: str,
+    active_head: str,
+    gh_runner: GhRunner,
+) -> ReviewResult | None:
+    """Submit APPROVE on ``active_head`` only as the stale approving reviewer.
+
+    The base-only proof is established by the caller before this helper is
+    invoked. This helper only proves same-reviewer semantics from complete
+    review history plus the runner's authenticated login. If the current
+    credential is not the prior approver, it returns ``None`` and the normal
+    merge gate remains closed.
+    """
+    reviewer = re_review._authenticated_login(gh_runner)
+    reviews = re_review.list_reviews(repo, pr_number, gh_runner=gh_runner)
+    prior = re_review.stale_base_only_approval_by_reviewer(
+        reviews,
+        active_head,
+        approved_head,
+        reviewer,
+        base_only_proven=True,
+    )
+    if prior is None:
+        return None
+    return submit_review(
+        ChangeRef(
+            repo=repo,
+            branch=branch,
+            base=base,
+            pr_number=pr_number,
+            head_sha=active_head,
+            manifest_paths=tuple(manifest_paths),
+            plan_ref="",
+            changed=True,
+            applied=True,
+            verified=True,
+        ),
+        body=(
+            f"Auto-restored prior approval after machine-proven base-only rebase "
+            f"from {prior.commit_id[:8]} to {active_head[:8]}."
+        ),
+        apply=True,
+        gh_runner=gh_runner,
+    )
 
 
 def _classify_head_motion(
