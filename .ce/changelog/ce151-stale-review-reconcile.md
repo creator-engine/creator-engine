@@ -19,4 +19,8 @@ the live head. Every other stale review is classified `RE_REQUEST_SCOPED`
 untouched. Every dismissal posts an audit comment naming the superseding
 approval. The pure classifier (`classify_reviews`) is zero-I/O and exhaustively
 unit-tested; all GitHub I/O flows through the injectable `GhRunner`. `apply=False`
-is a read-only dry-run. CLI/belt-poll wiring follows as a separate slice.
+is a read-only dry-run. `list_reviews` paginates the full review history
+(`per_page=100`, walking every page until a short page proves completeness) and
+fails closed on a page-ceiling overrun or a non-array body — incomplete state
+must never reach the auto-dismiss path. CLI/belt-poll wiring follows as a
+separate slice.

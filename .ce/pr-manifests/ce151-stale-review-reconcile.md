@@ -16,7 +16,7 @@ else is re-request-scoped, never auto-dismissed; live objections on head are
 untouched. Pure classifier is zero-I/O + exhaustively unit-tested; GitHub I/O is
 behind the injectable `GhRunner`. CLI/belt-poll wiring is a separate slice.
 
-Per-file purpose (the closed path-set - 4 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 6 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce151-stale-review-reconcile.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce151-stale-review-reconcile.md`** *(A)* - this carrier.
 - **`validators/creator_engine_validator/_versions.py`** *(M)* - classify
@@ -24,9 +24,11 @@ Per-file purpose (the closed path-set - 4 paths; `(A)` add, `(M)` modify):
 - **`validators/creator_engine_validator/forge/re_review.py`** *(A)* - the
   reconciler: pure classifier + `list_reviews`/`dismiss_review`/`reconcile_reviews`
   behind `GhRunner`.
-- **`validators/tests/unit/test_re_review.py`** *(A)* - 14 unit tests (the #309
+- **`validators/tests/unit/test_re_review.py`** *(A)* - 18 unit tests (the #309
   scenario, no-fresh-approval re-request, live-CR-current, latest-per-reviewer,
-  fail-closed, dry-run vs apply, GhRunner errors).
+  fail-closed, dry-run vs apply, GhRunner errors, and the ce-ops#151 review
+  feedback: multi-page pagination walk, a later-page live objection that must
+  not be dismissed, page-ceiling overrun fail-closed, non-array body fail-closed).
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* - bump V3_RUNTIME
   count 48->49 for `forge.re_review`.
 
