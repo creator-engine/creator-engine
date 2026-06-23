@@ -127,12 +127,14 @@ def test_injected_asymmetric_verifier_seam():
 # ---------------------------------------------------------------------------
 import base64 as _b64
 import hashlib as _hashlib
+import os as _os
 import re as _re
 import shutil as _shutil
 import subprocess as _subprocess
 import tempfile as _tempfile
 
 _LLMS_INSTALL = _REPO_ROOT / "docs" / "llms-install.md"
+_INSTALL_SH = _REPO_ROOT / "docs" / "install.sh"
 _KEY_FILE = _REPO_ROOT / "docs" / "keys" / "ce-root-v1"
 _ALLOWED_SIGNERS = "ce-root-v1 ssh-ed25519 AAAAB3Nza-fake-blob"
 
@@ -603,6 +605,98 @@ _SIGNED = (
     and _EMBEDDED_VALUE != inst.SIGNATURE_PLACEHOLDER
     and not _EMBEDDED_VALUE.startswith("<")
 )
+
+
+def _run_installer_script(*, env: dict[str, str], path_prefix: Path | None = None):
+    import os as _os
+
+    run_env = _os.environ.copy()
+    run_env.update(env)
+    if path_prefix is not None:
+        run_env["PATH"] = f"{path_prefix}{_os.pathsep}{run_env['PATH']}"
+    return _subprocess.run(
+        ["bash", str(_INSTALL_SH)],
+        cwd=_REPO_ROOT,
+        env=run_env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_install_tmp_low_space_falls_back_to_home_cache(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf 'fake curl argv: %s\\n' \"$*\" >&2\n"
+        "exit 55\n",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+    tmp_target = tmp_path / "tmp-target"
+    tmp_target.mkdir()
+    home = tmp_path / "home"
+    fallback_parent = home / ".cache" / "creator-engine" / "install-tmp"
+
+    proc = _run_installer_script(
+        path_prefix=fake_bin,
+        env={
+            "CE_INSTALLER_TEST_MODE": "1",
+            "CE_INSTALL_MIN_TMP_KIB": "999999999",
+            "CE_TEST_DF_AVAIL_KIB": "1",
+            "TMPDIR": str(tmp_target),
+            "HOME": str(home),
+            "CE_SITE": "https://creator-engine.example",
+            "CE_TRUST_ANCHOR_URL": "https://dns.example/resolve",
+        },
+    )
+
+    assert proc.returncode != 0
+    assert "INSTALL_REFUSED network_fetch_failed" in proc.stderr
+    assert f"-o {fallback_parent}/" in proc.stderr
+    assert f"-o {tmp_target}/" not in proc.stderr
+
+
+def _run_installer_lock_probe(script: str, bootstrap_root: Path):
+    for marker in ('\ncreate_install_tmpdir\n', '\nTMPDIR_CE="$(mktemp -d)"'):
+        if marker in script:
+            prefix = script.split(marker, 1)[0]
+            break
+    else:
+        raise AssertionError("installer staging marker not found")
+    probe = (
+        prefix
+        + "\n"
+        + f"BOOTSTRAP_ROOT={str(bootstrap_root)!r}\n"
+        + "acquire_lock\n"
+    )
+    return _subprocess.run(
+        ["bash", "-s"],
+        input=probe,
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_install_lock_held_message_names_pid_and_copy_paste_remediation(tmp_path):
+    bootstrap_root = tmp_path / "bootstrap"
+    lock = bootstrap_root / "install.lock"
+    lock.mkdir(parents=True)
+    holder_pid = str(_os.getpid())
+    (lock / "pid").write_text(f"{holder_pid}\n", encoding="utf-8")
+
+    proc = _run_installer_lock_probe(_INSTALL_SH.read_text(encoding="utf-8"), bootstrap_root)
+
+    assert proc.returncode == 1
+    assert "INSTALL_REFUSED install_lock_held" in proc.stderr
+    assert f"pid {holder_pid}" in proc.stderr
+    assert str(lock) in proc.stderr
+    assert f"ps -p {holder_pid} -o pid,ppid,command" in (
+        line.lstrip() for line in proc.stderr.splitlines()
+    )
+    assert f"rm -rf '{lock}'" in proc.stderr
 
 
 @pytest.mark.skipif(_SSH_KEYGEN is None, reason="stock ssh-keygen not available")

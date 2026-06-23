@@ -12,6 +12,7 @@ set -euo pipefail
 CE_SITE="${CE_SITE:-https://creator-engine.dev}"
 CE_ANSWERS="${CE_ANSWERS:-}"
 CE_INSTALL_ROOT="${CE_INSTALL_ROOT:-}"
+CE_INSTALL_MIN_TMP_KIB="${CE_INSTALL_MIN_TMP_KIB:-524288}"
 CE_TRUST_ANCHOR_URL="${CE_TRUST_ANCHOR_URL:-https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT}"
 CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-engine.dev}"
 CE_JSON=0
@@ -97,6 +98,9 @@ done
 if { [ -n "${CE_TEST_UNAME_S:-}" ] || [ -n "${CE_TEST_UNAME_M:-}" ]; } \
   && [ "${CE_INSTALLER_TEST_MODE:-}" != "1" ]; then
   fail test_override_refused "CE_TEST_UNAME_S/CE_TEST_UNAME_M require CE_INSTALLER_TEST_MODE=1; refusing test platform override in real install"
+fi
+if [ -n "${CE_TEST_DF_AVAIL_KIB:-}" ] && [ "${CE_INSTALLER_TEST_MODE:-}" != "1" ]; then
+  fail test_override_refused "CE_TEST_DF_AVAIL_KIB requires CE_INSTALLER_TEST_MODE=1; refusing test disk-space override in real install"
 fi
 
 SPEC_URL="${CE_SITE}/llms-install.md"
@@ -404,6 +408,12 @@ state_value() {
   awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); found = 1; exit } END { if (!found) exit 1 }' "$STATE_FILE"
 }
 
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
 acquire_lock() {
   mkdir -p "$BOOTSTRAP_ROOT"
   lock="$BOOTSTRAP_ROOT/install.lock"
@@ -413,10 +423,68 @@ acquire_lock() {
     return 0
   fi
   holder="$(cat "$lock/pid" 2>/dev/null || true)"
+  quoted_lock="$(shell_quote "$lock")"
   if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-    fail install_lock_held "another install is active (pid $holder, lock $lock)"
+    fail install_lock_held "another install is active (holder pid $holder, lock $lock). Inspect it with:
+ps -p $holder -o pid,ppid,command
+If that PID is not an installer, remove the lock with: rm -rf $quoted_lock"
   fi
-  fail stale_install_lock "stale lock at $lock; remove it after confirming no installer is running"
+  if [ -n "$holder" ]; then
+    fail stale_install_lock "stale lock at $lock (recorded pid $holder is not running). After confirming no installer is running, remove it with: rm -rf $quoted_lock"
+  fi
+  fail stale_install_lock "stale lock at $lock (no holder pid recorded). After confirming no installer is running, remove it with: rm -rf $quoted_lock"
+}
+
+is_unsigned_int() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+install_tmp_free_kib() {
+  path="$1"
+  if [ "${CE_INSTALLER_TEST_MODE:-}" = "1" ] && [ -n "${CE_TEST_DF_AVAIL_KIB:-}" ]; then
+    printf '%s\n' "$CE_TEST_DF_AVAIL_KIB"
+    return 0
+  fi
+  command -v df >/dev/null 2>&1 || return 1
+  df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4; found = 1; exit } END { if (!found) exit 1 }'
+}
+
+install_tmp_fallback_parent() {
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    printf '%s\n' "${XDG_CACHE_HOME%/}/creator-engine/install-tmp"
+    return 0
+  fi
+  [ -n "${HOME:-}" ] \
+    || fail missing_bootstrap_dependency "HOME is not set; cannot fall back from low-space tmp staging"
+  printf '%s\n' "${HOME%/}/.cache/creator-engine/install-tmp"
+}
+
+choose_install_tmp_parent() {
+  tmp_parent="${TMPDIR:-/tmp}"
+  [ -n "$tmp_parent" ] || tmp_parent="/tmp"
+  is_unsigned_int "$CE_INSTALL_MIN_TMP_KIB" \
+    || fail missing_bootstrap_dependency "CE_INSTALL_MIN_TMP_KIB must be an integer KiB threshold"
+  free_kib="$(install_tmp_free_kib "$tmp_parent" || true)"
+  if is_unsigned_int "$free_kib" && [ "$free_kib" -lt "$CE_INSTALL_MIN_TMP_KIB" ]; then
+    fallback_parent="$(install_tmp_fallback_parent)"
+    mkdir -p "$fallback_parent" \
+      || fail missing_bootstrap_dependency "failed to create fallback installer staging directory $fallback_parent"
+    say "warning: tmp target ${tmp_parent} has ${free_kib} KiB free below ${CE_INSTALL_MIN_TMP_KIB} KiB; staging installer artifacts under ${fallback_parent}"
+    printf '%s\n' "$fallback_parent"
+    return 0
+  fi
+  printf '%s\n' "$tmp_parent"
+}
+
+create_install_tmpdir() {
+  parent="$(choose_install_tmp_parent)"
+  parent="${parent%/}"
+  [ -n "$parent" ] || parent="/"
+  TMPDIR_CE="$(mktemp -d "${parent}/ce-install.XXXXXXXXXX")" \
+    || fail missing_bootstrap_dependency "failed to create installer staging directory under $parent"
 }
 
 write_state() {
@@ -553,7 +621,7 @@ PY
   say "PATH block is marked '# >>> creator-engine PATH >>>'; delete that block to undo"
 }
 
-TMPDIR_CE="$(mktemp -d)"
+create_install_tmpdir
 chmod 700 "$TMPDIR_CE"
 SPEC_FILE="$TMPDIR_CE/llms-install.md"
 TRUST_ROOT_FILE="$TMPDIR_CE/ce-root-v1"
