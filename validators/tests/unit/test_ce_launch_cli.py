@@ -7,6 +7,7 @@ or a live provider login.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -158,6 +159,27 @@ def _gvisor_plan_kwargs() -> dict:
     }
 
 
+def _write_claim(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
+    record = {
+        "kind": "active-work-ledger-record",
+        "record_type": "claim",
+        "schema_version": "1",
+        "controller_id": controller_id,
+        "lane_id": lane_id,
+        "record_timestamp": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "worktree_path": "/worktrees/gate3-lane",
+        "envelope_ref": "envelopes/gate3.md",
+        "branch": "implementer/gate3-lane",
+        "lease_seconds": 3600,
+        "claimed_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "last_heartbeat_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+    }
+    path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _isolate_brain_state(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -303,8 +325,20 @@ def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
 
 
 def test_launch_default_backend_live_refuses_before_raw_tmux(
-    use_fake_tmux, tmp_path, capsys
+    use_fake_tmux, tmp_path, capsys, monkeypatch
 ):
+    from creator_engine_validator import runner
+
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.runtime_backend_bridge,
+        "_default_gvisor_plan_kwargs",
+        _gvisor_plan_kwargs,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SubprocessContainerRunner",
+        lambda: FakeContainerRunner(available=False),
+    )
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     policy = _write_runtime_policy(tmp_path, backend=None)
@@ -312,8 +346,7 @@ def test_launch_default_backend_live_refuses_before_raw_tmux(
     assert ret != 0
     assert adapter.spawned == []
     err = capsys.readouterr().err
-    assert "default runtime-policy backend 'gvisor-proxy'" in err
-    assert "raw tmux fallback" in err
+    assert "not available" in err
 
 
 def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
@@ -332,13 +365,28 @@ def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
 
 
 def test_lane_launch_default_backend_refuses_before_raw_tmux(
-    use_fake_tmux, tmp_path, capsys
+    use_fake_tmux, tmp_path, capsys, monkeypatch
 ):
+    from creator_engine_validator import runner
+
+    monkeypatch.setattr(
+        ce_cli.lane_runtime.runtime_backend_bridge,
+        "_default_gvisor_plan_kwargs",
+        _gvisor_plan_kwargs,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SubprocessContainerRunner",
+        lambda: FakeContainerRunner(available=False),
+    )
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     policy = _write_runtime_policy(tmp_path, backend=None)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("lane prompt\n", encoding="utf-8")
+    prompt_sha = hashlib.sha256(prompt.read_bytes()).hexdigest()
+    ledger_root = tmp_path / ".hermes" / "active-work-ledger"
+    _write_claim(ledger_root, "ctrl", "lane")
     ret = ce_cli.main([
         "lane",
         "launch",
@@ -351,19 +399,18 @@ def test_lane_launch_default_backend_refuses_before_raw_tmux(
         "--prompt",
         str(prompt),
         "--prompt-sha",
-        "0" * 64,
+        prompt_sha,
         "--repo-root",
         str(tmp_path),
         "--ledger-root",
-        str(tmp_path / ".hermes" / "active-work-ledger"),
+        str(ledger_root),
         "--runtime-policy",
         str(policy),
     ])
     assert ret != 0
     assert adapter.spawned == []
     err = capsys.readouterr().err
-    assert "default runtime-policy backend 'gvisor-proxy'" in err
-    assert "raw tmux fallback" in err
+    assert "not available" in err
 
 
 def test_hud_dry_run_json_is_alias_of_launch(use_fake_tmux, capsys):
