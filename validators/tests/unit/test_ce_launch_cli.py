@@ -314,6 +314,9 @@ def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, tmp_path, m
     monkeypatch.setattr(
         ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(
+        ce_cli.launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True
+    )
     codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
         "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
@@ -333,6 +336,9 @@ def test_cli_codex_refuses_non_allowlisted_arg(use_fake_tmux, monkeypatch, capsy
     use_fake_tmux(adapter)
     monkeypatch.setattr(
         ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(
+        ce_cli.launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True
     )
     ret = ce_cli.main(["launch", "--harness", "codex", "--codex-arg=--foo"])
     assert ret != 0

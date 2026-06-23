@@ -88,7 +88,9 @@ def test_taxonomy_counts_and_disjoint():
     # orchestrator — thin composition over the v1 kernel surfaces): 28 -> 29.
     # ce-ops#163 REQ-2 adds ``worker_spawn`` as the harness-agnostic worker
     # primitive over launch_runtime: 29 -> 30.
-    assert len(ver.V1_RUNTIME) == 30
+    # ce-ops#219 adds ``codex_pretooluse`` as the Codex managed PreToolUse
+    # adapter over the retained v1 hook-check CLI: 30 -> 31.
+    assert len(ver.V1_RUNTIME) == 31
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

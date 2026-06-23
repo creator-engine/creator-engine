@@ -378,6 +378,7 @@ def test_codex_spawned_launch_injects_foreman_charter_and_worker_spawn(
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     _fake_codex(tmp_path, monkeypatch)
 
     result = launch_runtime.launch(
@@ -564,6 +565,7 @@ def test_codex_launch_builds_governed_env_scrubbed_command(tmp_path, monkeypatch
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     codex = _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(
         harness="codex",
@@ -583,6 +585,7 @@ def test_codex_launch_refuses_unsafe_surface_before_side_effects(monkeypatch):
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     with pytest.raises(launch_runtime.CodexLaunchRefused) as exc:
         launch_runtime.launch(harness="codex", extra_args=["exec"], tmux_adapter=adapter)
     assert "CDX-D-1" in str(exc.value)
@@ -594,6 +597,7 @@ def test_codex_launch_refuses_unresolved_harness_before_side_effects(tmp_path, m
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     monkeypatch.setenv(
         launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV,
         str(tmp_path / "missing" / "codex"),
@@ -614,10 +618,26 @@ def test_codex_launch_refuses_unresolved_harness_before_side_effects(tmp_path, m
     assert not (tmp_path / ".ce" / "state" / "active-work-ledger" / "seats").exists()
 
 
+def test_codex_launch_refuses_unconfirmed_managed_hook_pack_before_side_effects(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: False)
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    _fake_codex(tmp_path, monkeypatch)
+
+    with pytest.raises(launch_runtime.CodexLaunchRefused) as exc:
+        launch_runtime.launch(harness="codex", session="s", repo_root=tmp_path, tmux_adapter=adapter)
+
+    assert launch_runtime.codex_launch_spec.CLAUSE_MANAGED_HOOK_PACK in str(exc.value)
+    assert adapter.spawned == []
+
+
 def test_launch_reconciles_exit_127_sentinel_to_dead_record(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     _fake_codex(tmp_path, monkeypatch)
 
     result = launch_runtime.launch(
@@ -661,6 +681,7 @@ def test_claude_args_do_not_affect_codex_cli_route(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(harness="codex", session="s", tmux_adapter=adapter)
     assert "--dangerously-skip-permissions" not in _inner_argv(result)

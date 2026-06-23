@@ -134,6 +134,17 @@ def _confirm_pack(repo_root: Path | str | None) -> bool:
     return hook_pack_confirm.confirm_hook_pack(Path(repo_root or ".")).confirmed
 
 
+def _confirm_codex_managed_pack(repo_root: Path | str | None) -> bool:
+    """Seam: confirm the committed Codex managed PreToolUse hook-pack.
+
+    Delegates to :func:`hook_pack_confirm.confirm_codex_managed_hook_pack`.
+    Never launches Codex and never makes a network call.
+    """
+    from . import hook_pack_confirm
+
+    return hook_pack_confirm.confirm_codex_managed_hook_pack(Path(repo_root or ".")).confirmed
+
+
 def _default_mcp_config_path(session: str) -> str:
     """CE-owned, repo-relative MCP config path for a Controller-seat launch."""
     return f"{_versions.V3_LOCAL_STATE_ROOT}/launch/{session}/mcp/ce-mcp.json"
@@ -421,11 +432,17 @@ def launch(
             ) from exc
         plan = replace(plan, command=governed)
 
-    # CDX-D Ring 0: Codex has no live Ring-1 hook-pack in this repo. This branch
-    # refuses unsafe Codex launch surfaces and wraps the command with an ambient
-    # repo-write credential scrub before any tmux/resource-bound side effect.
+    # CDX-D Ring 0: Codex launches require the repo-shipped managed PreToolUse
+    # hook-pack to be confirmed before spawn, then refuse unsafe launch surfaces
+    # and wrap the command with an ambient repo-write credential scrub before any
+    # tmux/resource-bound side effect.
     elif harness == "codex":
         requested = list(extra_args) if extra_args else []
+        if not _confirm_codex_managed_pack(repo_root):
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {codex_launch_spec.CLAUSE_MANAGED_HOOK_PACK} "
+                "(managed-hook-pack) — Ring 0 refuses before any side effect"
+            )
         spec = codex_launch_spec.parse_codex_argv(requested)
         config_bypass = (
             None if spec.explicit_bypass else codex_launch_spec.detect_config_bypass_mode()

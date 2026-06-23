@@ -15,6 +15,8 @@ from pathlib import Path
 
 from creator_engine_validator import hook_pack_confirm as hpc
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _write_pack(root: Path, *, executable=True, settings_ok=True):
     hooks = root / ".claude" / "hooks"
@@ -43,6 +45,35 @@ def _write_pack(root: Path, *, executable=True, settings_ok=True):
         p.write_text("#!/usr/bin/env sh\n")
         if executable:
             p.chmod(p.stat().st_mode | stat.S_IXUSR)
+
+
+def _write_codex_pack(
+    root: Path,
+    *,
+    executable=True,
+    matcher=None,
+    hooks_feature=True,
+    managed_only=True,
+):
+    hooks = root / ".codex" / "hooks"
+    hooks.mkdir(parents=True)
+    matcher = matcher or "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
+    (root / ".codex" / "requirements.toml").write_text(
+        f"allow_managed_hooks_only = {str(managed_only).lower()}\n\n"
+        "[features]\n"
+        f"hooks = {str(hooks_feature).lower()}\n\n"
+        "[[hooks.PreToolUse]]\n"
+        f'matcher = "{matcher}"\n\n'
+        "[[hooks.PreToolUse.hooks]]\n"
+        'type = "command"\n'
+        "command = 'python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/ce-pretooluse-codex.py\"'\n"
+        "timeout = 30\n",
+        encoding="utf-8",
+    )
+    script = hooks / "ce-pretooluse-codex.py"
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    if executable:
+        script.chmod(script.stat().st_mode | stat.S_IXUSR)
 
 
 def test_confirm_ok(tmp_path):
@@ -106,3 +137,101 @@ def test_confirm_to_dict_is_json_safe(tmp_path):
     c = hpc.confirm_hook_pack(tmp_path, validator_probe=lambda: True)
     json.dumps(c.to_dict())
     assert c.to_dict()["confirmed"] is True
+
+
+def test_confirm_codex_managed_hook_pack_ok_and_json_safe(tmp_path):
+    _write_codex_pack(tmp_path)
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.confirmed is True
+    assert c.managed_requirements_source is True
+    assert c.hooks_feature_pinned is True
+    assert c.managed_hooks_only_pinned is True
+    assert c.unmanaged_hook_sources_excluded is True
+    assert c.pretooluse_registered is True
+    assert c.hook_command_bound is True
+    json.dumps(c.to_dict())
+
+
+def test_committed_codex_managed_hook_pack_confirms():
+    c = hpc.confirm_codex_managed_hook_pack(REPO_ROOT, validator_probe=lambda: True)
+    assert c.confirmed is True, c.detail
+
+
+def test_confirm_codex_managed_hook_cannot_be_disabled_by_user_config(tmp_path):
+    _write_codex_pack(tmp_path)
+    c = hpc.confirm_codex_managed_hook_pack(
+        tmp_path,
+        validator_probe=lambda: True,
+        user_config_text="[features]\nhooks = false\n",
+    )
+    assert c.confirmed is True
+    assert c.user_disable_blocked is True
+    assert c.managed_hooks_only_pinned is True
+
+
+def test_confirm_codex_managed_hook_requires_managed_only_pin(tmp_path):
+    _write_codex_pack(tmp_path, managed_only=False)
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.managed_hooks_only_pinned is False
+    assert c.unmanaged_hook_sources_excluded is False
+    assert c.confirmed is False
+
+
+def test_confirm_codex_managed_hook_requires_managed_only_key(tmp_path):
+    _write_codex_pack(tmp_path)
+    requirements = tmp_path / ".codex" / "requirements.toml"
+    requirements.write_text(
+        requirements.read_text(encoding="utf-8").replace(
+            "allow_managed_hooks_only = true\n\n", ""
+        ),
+        encoding="utf-8",
+    )
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.managed_hooks_only_pinned is False
+    assert c.unmanaged_hook_sources_excluded is False
+    assert c.confirmed is False
+
+
+def test_confirm_codex_managed_hook_excludes_unmanaged_hook_sources_when_pinned(tmp_path):
+    _write_codex_pack(tmp_path, managed_only=True)
+    c = hpc.confirm_codex_managed_hook_pack(
+        tmp_path,
+        validator_probe=lambda: True,
+        user_config_text=(
+            "[[hooks.PreToolUse]]\n"
+            'matcher = "Bash"\n'
+            "[[hooks.PreToolUse.hooks]]\n"
+            'type = "command"\n'
+            'command = "echo bypass"\n'
+        ),
+        unmanaged_hook_sources={
+            "user": '[[hooks.PreToolUse]]\nmatcher = "Bash"\n',
+            "project": '[[hooks.PreToolUse]]\nmatcher = "apply_patch"\n',
+            "session": '[[hooks.PreToolUse]]\nmatcher = "mcp__.*"\n',
+            "plugin": '[[hooks.PreToolUse]]\nmatcher = "Bash"\n',
+        },
+    )
+    assert c.confirmed is True
+    assert c.managed_hooks_only_pinned is True
+    assert c.unmanaged_hook_sources_excluded is True
+
+
+def test_confirm_codex_managed_hook_fails_without_hooks_feature_pin(tmp_path):
+    _write_codex_pack(tmp_path, hooks_feature=False)
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.hooks_feature_pinned is False
+    assert c.confirmed is False
+
+
+def test_confirm_codex_managed_hook_fails_when_matcher_misses_mcp(tmp_path):
+    _write_codex_pack(tmp_path, matcher="^(Bash|apply_patch|Edit|Write|MultiEdit)$")
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.pretooluse_registered is False
+    assert c.confirmed is False
+
+
+def test_confirm_codex_managed_hook_fails_on_non_executable_script(tmp_path):
+    _write_codex_pack(tmp_path, executable=False)
+    c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
+    assert c.hook_script_executable is False
+    assert c.confirmed is False

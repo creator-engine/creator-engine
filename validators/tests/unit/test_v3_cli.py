@@ -278,7 +278,7 @@ def test_drive_spawn_allows_low_risk_codex_harness(tmp_path, capsys, monkeypatch
     assert calls["spawn"] == [payload["run_id"]]
     data = yaml.safe_load((tmp_path / "dispatches" / payload["run_id"] / "dispatch.yaml").read_text(encoding="utf-8"))
     assert data["harness"] == "codex"
-    assert data["harness_boundary"] == "codex_external_gate"
+    assert data["harness_boundary"] == "codex_managed_pretooluse"
     assert data["transcript_ref"].endswith("codex.jsonl")
 
 

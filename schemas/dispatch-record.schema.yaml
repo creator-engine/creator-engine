@@ -75,15 +75,15 @@ properties:
     enum: [claude, codex]
     description: |
       The seat harness. `claude` remains the default stronger Ring-1-hook-pack
-      path. `codex` is explicit, low-risk guarded, and externally-gate-governed;
-      this schema does not claim Codex Ring-1 parity.
+      path. `codex` is explicit, low-risk guarded, and gated by CE's managed
+      Codex PreToolUse hook-pack plus containment backstops.
   harness_boundary:
     type: string
-    enum: [claude_ring1_hookpack, codex_external_gate]
+    enum: [claude_ring1_hookpack, codex_managed_pretooluse]
     description: |
-      Governance boundary label for the selected harness. `codex_external_gate`
-      means credential scrub + external forge/review/merge gates are load-bearing;
-      it is not a Ring-1-equivalent claim.
+      Governance boundary label for the selected harness. `codex_managed_pretooluse`
+      means the Codex PreToolUse managed hook-pack is launch-confirmed; containment
+      and external forge/review/merge gates remain load-bearing.
   unattended:
     type: boolean
     description: |

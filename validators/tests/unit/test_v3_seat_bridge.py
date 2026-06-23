@@ -318,14 +318,14 @@ def test_spawn_seat_invokes_ce_launch_json_with_policy(tmp_path):
     assert "--mcp-config" in argv
 
 
-def test_materialize_codex_dispatch_records_external_gate_boundary(tmp_path):
+def test_materialize_codex_dispatch_records_managed_pretooluse_boundary(tmp_path):
     import jsonschema
 
     rec = v3_seat_bridge.materialize_dispatch(
         _plan(), tmp_path, harness="codex", now=_FIXED_NOW
     )
     assert rec.data["harness"] == "codex"
-    assert rec.data["harness_boundary"] == "codex_external_gate"
+    assert rec.data["harness_boundary"] == "codex_managed_pretooluse"
     assert "harness_session_id" not in rec.data
     jsonschema.validate(rec.data, _dispatch_schema())
 

@@ -333,6 +333,7 @@ def test_wrap_applies_to_every_harness_identically(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     codex = _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(
         harness="codex",

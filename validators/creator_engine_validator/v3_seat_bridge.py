@@ -22,8 +22,8 @@ in the test envelope (the same discipline as ``run_assembly``).
 
 Scope (G1-codex): the default **claude** path is conserved and remains the
 stronger Ring-1-hook-pack path. The **codex** path is explicitly selected,
-guarded to low-risk classes unless separately ratified, and externally
-gate-governed: no Ring-1 parity is claimed.
+guarded to low-risk classes unless separately ratified, and launch-confirmed
+against CE's managed Codex PreToolUse hook-pack.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ HARNESS_BRIDGES: dict[str, HarnessBridge] = {
         v1_harness="codex",
         unattended_args=(),
         requires_transcript_locator=True,
-        in_band_boundary="codex_external_gate",
+        in_band_boundary="codex_managed_pretooluse",
     ),
 }
 
@@ -296,9 +296,9 @@ def _render_brief(
     vocab = " | ".join(OUTCOME_VOCABULARY)
     if harness == CODEX_BRIDGE_HARNESS:
         boundary = (
-            "Your in-band boundary is weaker than Claude: Codex has no live Ring-1 "
-            "hook-pack equivalent in this repo. The credential-scrubbed launch and "
-            "external `cev3 pr`, `cev3 review`, and `cev3 merge` gates are load-bearing."
+            "Your in-band boundary is CE's managed Codex PreToolUse hook-pack. "
+            "It is a strong native gate for Codex tools, while containment and "
+            "external `cev3 pr`, `cev3 review`, and `cev3 merge` gates remain load-bearing."
         )
     else:
         boundary = "The Ring-1 hook-pack is your enforced boundary."
