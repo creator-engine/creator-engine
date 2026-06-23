@@ -123,15 +123,16 @@ def test_bootstrap_preflight_uses_ce_doctor_json_with_blocked_report(repo_root: 
     data = _bootstrap_template(repo_root)
     preflight = data["preflight"]
     assert preflight["command"] == [
-        "${CE_VALIDATOR_PYTHON:-.venv/bin/python}",
-        "-m",
-        "creator_engine_validator.ce_cli",
+        ".venv/bin/ce",
         "doctor",
+        "--repo-root",
+        ".",
+        "--venv",
+        ".venv",
         "--json",
     ]
     assert preflight["env"] == {
         "CE_VALIDATOR_PYTHON": "${CE_VALIDATOR_PYTHON:-.venv/bin/python}",
-        "PYTHONPATH": "validators",
     }
     assert preflight["requires"] == ["install"]
     assert preflight["on_failure"] == "blocked-report"
@@ -151,21 +152,32 @@ def test_bootstrap_authority_is_one_directional_no_hosted(repo_root: Path):
 def test_bootstrap_install_is_uv_first_with_pip_fallback(repo_root: Path):
     data = _bootstrap_template(repo_root)
     install = data["install"]
-    assert install["contract"] == "source-pythonpath-with-offline-runtime-deps"
+    assert install["contract"] == "source-bootstrap-offline-installed-app"
     assert install["python_floor"] == ">=3.14"
     assert install["validator_python_env"] == "CE_VALIDATOR_PYTHON"
     assert install["validator_python_default"] == ".venv/bin/python"
     assert install["network"] == "forbidden"
     assert install["source_path"] == "validators"
-    # uv-first command and a pip fallback are both present and offline.
+    assert install["installed_scripts"] == ["ce", "cev3"]
+    # uv-first venv creation, pip fallback venv creation, and offline bootstrap are present.
     assert any("uv" in step for step in install["uv_first"])
-    assert any("pip" in step for step in install["pip_fallback"])
-    assert any("--python" in step and "${CE_VALIDATOR_PYTHON:-.venv/bin/python}" in step for step in install["uv_first"])
-    install_steps = [step for step in install["uv_first"] + install["pip_fallback"] if "install" in step]
-    for step in install_steps:
-        assert "--no-index" in step
-        assert "-r" in step
-        assert "validators/requirements.txt" in step
+    assert any("venv" in step for step in install["pip_fallback"])
+    bootstrap = install["bootstrap"]
+    assert bootstrap["command"] == [
+        "${CE_VALIDATOR_PYTHON:-.venv/bin/python}",
+        "-m",
+        "creator_engine_validator.bootstrap_runtime",
+        "bootstrap",
+        "--repo-root",
+        ".",
+        "--venv",
+        ".venv",
+        "--json",
+    ]
+    assert bootstrap["env"]["PYTHONPATH"] == "validators"
+    assert any("uv pip install --python" in step for step in bootstrap["offline_installer_preference"])
+    assert any("ensurepip" in step for step in bootstrap["offline_installer_preference"])
+    assert "ce bootstrap --repo-root . --venv .venv" in bootstrap["remediation"]
 
 
 def test_bootstrap_installs_runtime_deps_before_source_doctor(repo_root: Path):
@@ -180,9 +192,10 @@ def test_bootstrap_doc_references_doctor_and_template(repo_root: Path):
     assert "ce doctor --json" in doc
     assert "templates/hermes/agent-native-bootstrap.yaml" in doc
     assert doc.index("## 3. Install") < doc.index("## 4. Preflight")
-    assert doc.index("uv pip install --python \"$CE_VALIDATOR_PYTHON\" --no-index") < doc.index(
-        "PYTHONPATH=validators \"$CE_VALIDATOR_PYTHON\" -m creator_engine_validator.ce_cli doctor --json"
+    assert doc.index("creator_engine_validator.bootstrap_runtime bootstrap") < doc.index(
+        ".venv/bin/ce doctor --repo-root . --venv .venv --json"
     )
+    assert "ce bootstrap --repo-root . --venv .venv" in doc
     assert "blocked" in doc.lower()
 
 

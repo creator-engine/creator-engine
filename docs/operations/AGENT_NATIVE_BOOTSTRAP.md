@@ -36,44 +36,58 @@ This is the same fail-closed posture as the governed lane-launch primitive
 (`docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md`): visible-or-refuse, no hidden
 fallback.
 
-## 3. Install — offline runtime dependencies + source path
+## 3. Install — offline venv provisioning + installed scripts
 
-The clone-mode contract is `source-pythonpath-with-offline-runtime-deps`: install
-the cp314 runtime dependencies first, then run checkout source with
-`PYTHONPATH=validators`. Clone-mode does not install an app wheel from
-`validators/wheelhouse`.
+The clone-mode contract is `source-bootstrap-offline-installed-app`: create the
+target venv, run the checkout's stdlib-only bootstrap module, install cp314
+runtime dependencies from `validators/wheelhouse`, link the local `validators/`
+source into the venv, and write the `ce`/`cev3` console scripts. Clone-mode does
+not commit or consume a first-party app wheel from `validators/wheelhouse`.
 
-uv-first:
+Create the target venv with uv when available:
 
 ```bash
 uv venv --python 3.14
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-pip fallback (uv-less host):
+Or with the stdlib venv fallback on uv-less hosts:
 
 ```bash
 python3.14 -m venv .venv
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-"$CE_VALIDATOR_PYTHON" -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-All source-backed validator invocations below **MUST** use
-`$CE_VALIDATOR_PYTHON` so the checkout source runs under the same interpreter
-that received the offline runtime dependencies.
+Then provision the venv offline from the source checkout:
 
-## 4. Preflight — source `ce doctor --json`
+```bash
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.bootstrap_runtime bootstrap --repo-root . --venv .venv --json
+```
 
-After dependency install, run the governed-environment guard preflight:
+The installed/controller-facing equivalent is:
+
+```bash
+ce bootstrap --repo-root . --venv .venv
+```
+
+The bootstrap uses `uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index
+--find-links validators/wheelhouse -r validators/requirements.txt` when `uv` is
+on PATH. Otherwise it uses `"$CE_VALIDATOR_PYTHON" -m pip`; if pip is absent it
+tries `"$CE_VALIDATOR_PYTHON" -m ensurepip --upgrade` and then pip. If neither
+path can install, it fails closed with a named remediation.
+
+## 4. Preflight — installed `ce doctor --json`
+
+After bootstrap, run the governed-environment guard preflight through the
+installed script:
 
 ```bash
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli doctor --json
+.venv/bin/ce doctor --repo-root . --venv .venv --json
 ```
 
-The source-backed `ce doctor` evaluates DP-3 and exits **non-zero** on any
-refused clause:
+The installed `ce doctor` evaluates DP-3 plus the target controller/seat env and
+exits **non-zero** on any refused clause:
 
 | Clause | Refusal |
 |---|---|
@@ -83,6 +97,7 @@ refused clause:
 | RED-G-4 | ungoverned `.hermes/` state-path posture (not git-ignored) |
 | RED-G-5 | unsafe hidden continuation (no visible pane / dead-pane) |
 | RED-G-6 | dependency wheelhouse drift from the Option B contract |
+| CE-SEAT-ENV | target app package not importable or `ce`/`cev3` scripts missing |
 
 ## 5. Blocked-report semantics on failed preflight
 
@@ -101,9 +116,9 @@ visible Controller seat:
 
 ```bash
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli launch --json
+.venv/bin/ce launch --json
 # `hud` is an alias/seam label for the same launcher:
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli hud --json
+.venv/bin/ce hud --json
 ```
 
 The launch command opens/attaches a **visible** tmux Controller seat (DP-2 = B).

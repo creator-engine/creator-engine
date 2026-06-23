@@ -14,6 +14,7 @@ ce worker terminate  # revoke broker grants, stop the container, write a stopped
 ce worker gc         # reap container-instance records that outlived a released claim
 ce worker status     # read a local container-instance record
 ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed environment
+ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
@@ -76,6 +77,7 @@ from . import (
     brain_ingest_runtime,
     brain_recall,
     brain_recall_surface,
+    bootstrap_runtime,
     ce_event_runtime,
     ce_onboard,
     ce_provenance,
@@ -215,6 +217,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit the machine-readable phase manifest (consequence-class + reversibility) and exit",
     )
     onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bootstrap = groups.add_parser(
+        "bootstrap",
+        help="provision a source-clone controller/seat venv offline",
+    )
+    bootstrap.add_argument("--repo-root", default=".", help="source checkout root (default: cwd)")
+    bootstrap.add_argument("--venv", default=None, help="target venv directory (default: .venv)")
+    bootstrap.add_argument(
+        "--python",
+        dest="target_python",
+        default=None,
+        help="target interpreter path (overrides --venv)",
+    )
+    bootstrap.add_argument("--json", action="store_true", dest="json_output")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
     lane_sub = lane.add_subparsers(dest="lane_cmd")
@@ -891,6 +907,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "doctor", help="governed-environment guard preflight; refuses ungoverned host drift"
     )
     doctor.add_argument("--repo-root", default=".", help="repo root to preflight (default: cwd)")
+    doctor.add_argument("--venv", default=None, help="target controller/seat venv directory to inspect")
+    doctor.add_argument(
+        "--target-python",
+        dest="target_python",
+        default=None,
+        help="target controller/seat interpreter path to inspect (overrides --venv)",
+    )
+    doctor.add_argument(
+        "--check-seat-env",
+        action="store_true",
+        help="require the target controller/seat env check even when no .venv is discovered",
+    )
     doctor.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
     doctor.add_argument(
         "--require-visible-launch",
@@ -2596,17 +2624,50 @@ def _launch(args, invoked_as: str = "launch") -> int:
 
 
 def _doctor(args) -> int:
+    target_python = _target_python_from_args(args, Path(args.repo_root))
     report = doctor_runtime.run_doctor(
         args.repo_root,
         require_visible_launch=args.require_visible_launch,
         require_worker=args.require_worker,
         check_packaging=not args.no_check_packaging,
+        target_python=target_python,
+        check_seat_env=args.check_seat_env,
     )
     if getattr(args, "json_output", False):
         print(json.dumps(report.payload, indent=2, sort_keys=True))
     else:
         print(doctor_runtime.render_human(report))
     return 0 if report.ok else 1
+
+
+def _target_python_from_args(args, repo_root: Path) -> Path | None:
+    explicit = getattr(args, "target_python", None)
+    if explicit:
+        return Path(explicit)
+    venv = getattr(args, "venv", None)
+    if venv:
+        venv_path = Path(venv)
+        if not venv_path.is_absolute():
+            venv_path = repo_root / venv_path
+        return venv_path / "bin" / "python"
+    return None
+
+
+def _bootstrap(args) -> int:
+    target_python = _target_python_from_args(args, Path(args.repo_root))
+    result = bootstrap_runtime.bootstrap(args.repo_root, target_python)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        changed = "updated" if result.changed else "already provisioned"
+        print(f"ce bootstrap: {changed} ({result.target_python})")
+    else:
+        print(
+            f"ERROR: ce bootstrap refused [{result.reason}]: {result.detail}\n"
+            f"remediation: {result.remediation}",
+            file=sys.stderr,
+        )
+    return 0 if result.ok else 1
 
 
 def _make_gh_runner():
@@ -3199,6 +3260,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _verify_install(args)
     if args.group == "onboard":
         return ce_onboard.run_cli(args)
+    if args.group == "bootstrap":
+        return _bootstrap(args)
     if args.group == "check":
         return _check(args)
     if args.group == "doctor":
