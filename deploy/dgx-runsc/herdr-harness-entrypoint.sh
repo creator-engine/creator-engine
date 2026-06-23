@@ -98,9 +98,10 @@ ROOT_PANE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | json_get_root_pane_id)"
 HARNESS_HOME="${CE_DGX_HARNESS_HOME:-${HOME:-/home/cedev4}}"
 harness_cmd=(
   /usr/bin/env
-  -u HERDR_SOCKET_PATH
-  -u HERDR_SOCKET
+  -i
   "HOME=${HARNESS_HOME}"
+  "PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+  "TERM=${TERM:-xterm-256color}"
   "CE_DGX_HARNESS=${CE_DGX_HARNESS:-codex}"
   "CE_DGX_TERMINAL_KIND=herdr"
   "CE_TERMINAL_KIND=herdr"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -66,6 +67,8 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert "--runtime=runsc-gvproxy-ptrace" in argv
     assert "--security-opt=no-new-privileges" in argv
     assert "--cap-drop=ALL" in argv
+    assert "--tmpfs" in argv
+    assert "/run/creator-engine:uid=1000,gid=1000,mode=0700" in argv
     assert not any(arg.startswith("--network=") for arg in argv)
     assert "creator-engine/codex-runsc:test" in argv
     assert argv[-3:] == [
@@ -77,6 +80,9 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_BIN=/usr/local/bin/codex" in argv
     assert "CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in argv
+    assert "XDG_CONFIG_HOME=/run/creator-engine/xdg/config" in argv
+    assert "XDG_STATE_HOME=/run/creator-engine/xdg/state" in argv
+    assert "XDG_CACHE_HOME=/run/creator-engine/xdg/cache" in argv
     assert "CE_DGX_TERMINAL_KIND=herdr" in argv
     assert "CE_TERMINAL_KIND=herdr" in argv
     assert not any(arg.startswith("HERDR_SOCKET_PATH=") for arg in argv)
@@ -115,20 +121,39 @@ def test_entrypoint_fail_closed_and_uses_herdr_control_path_only_for_cli() -> No
     assert 'herdr_cli workspace create --cwd "${WORKSPACE_CWD}" --label "${WORKSPACE_LABEL}"' in text
     assert "json_get_root_pane_id" in text
     assert 'herdr_cli pane run "${ROOT_PANE_ID}" "$(quote_cmd "${harness_cmd[@]}")"' in text
-    assert "-u HERDR_SOCKET_PATH" in text
-    assert "-u HERDR_SOCKET" in text
+    assert "/usr/bin/env" in text
+    assert "-i" in text
     assert "exec ${HARNESS_BIN}" not in text
     assert "raw harness" not in text.lower()
 
 
-def test_dockerfile_bakes_herdr_entrypoint_and_uses_tini() -> None:
+def test_entrypoint_starts_harness_with_clean_env_without_socket_carriers() -> None:
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+
+    harness_block = text[text.index("harness_cmd=(") : text.index("harness_cmd+=(\"${HARNESS_BIN}\")")]
+
+    assert "/usr/bin/env" in harness_block
+    assert "-i" in harness_block
+    assert "HERDR_SOCKET_PATH" not in harness_block
+    assert "HERDR_SOCKET" not in harness_block
+    assert not re.search(r"CE_DGX_[A-Z0-9_]*SOCKET[A-Z0-9_]*", harness_block)
+    assert "CE_DGX_TERMINAL_KIND=herdr" in harness_block
+    assert "CE_TERMINAL_KIND=herdr" in harness_block
+
+
+def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 
+    assert "FROM rust:1-bookworm AS herdr-builder" in text
+    assert "ARG HERDR_CE_REF=ff924966bd789afabec1a52d74f24392f45838ef" in text
+    assert "ARG ZIG_VERSION=0.15.2" in text
+    assert "cargo build --locked --release --bin herdr" in text
+    assert "COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr" in text
+    assert "COPY herdr /usr/local/bin/herdr" not in text
     assert "bash" in text
     assert "procps" in text
     assert "python3" in text
     assert "tini" in text
-    assert "COPY herdr /usr/local/bin/herdr" in text
     assert (
         'install -d -m 0700 -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /run/creator-engine/herdr'
         in text

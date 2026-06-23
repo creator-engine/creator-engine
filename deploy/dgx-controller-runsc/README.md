@@ -34,7 +34,6 @@ The corresponding declarative contract is
 Build the shared herdr entrypoint image from the repo root on the DGX:
 
 ```bash
-cp /tmp/herdr-share/target/release/herdr deploy/dgx-runsc/herdr
 docker build \
   -f deploy/dgx-runsc/Dockerfile \
   -t creator-engine/codex-runsc:0.141.0-aarch64 \
@@ -43,6 +42,15 @@ docker build \
   --build-arg CE_DGX_GID="$(id -g)" \
   deploy/dgx-runsc
 ```
+
+The shared image builds herdr-ce from the pinned source revision inside a
+Debian bookworm builder stage. Do not copy a host-built `herdr` binary into the
+image; the runtime binary must match the image libc.
+
+The wrapper mounts a runtime-owned tmpfs at `/run/creator-engine` for herdr
+socket and XDG state. The substrate entrypoint uses that path to own the herdr
+server, while the governed Claude harness starts with a clean environment that
+does not inherit socket carriers.
 
 The image intentionally does not bake Claude auth, GitHub auth, OpenBao tokens,
 or a private key. Provide a Claude binary through

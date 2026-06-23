@@ -64,6 +64,8 @@ def test_controller_tui_dry_run_uses_contained_defaults():
     assert "--runtime=runsc-gvproxy-ptrace" in argv
     assert "--security-opt=no-new-privileges" in argv
     assert "--cap-drop=ALL" in argv
+    assert "--tmpfs" in argv
+    assert "/run/creator-engine:uid=1000,gid=1000,mode=0700" in argv
     assert "--network=bridge" not in argv
     assert "--env" in argv
     assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
@@ -74,6 +76,9 @@ def test_controller_tui_dry_run_uses_contained_defaults():
     assert "CE_DGX_HARNESS_BIN=/usr/local/bin/claude" in argv
     assert "CE_DGX_HARNESS_HOME=/home/cedev4" in argv
     assert "CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in argv
+    assert "XDG_CONFIG_HOME=/run/creator-engine/xdg/config" in argv
+    assert "XDG_STATE_HOME=/run/creator-engine/xdg/state" in argv
+    assert "XDG_CACHE_HOME=/run/creator-engine/xdg/cache" in argv
     assert "CE_DGX_TERMINAL_KIND=herdr" in argv
     assert "CE_TERMINAL_KIND=herdr" in argv
     assert not any(arg.startswith("HERDR_SOCKET_PATH=") for arg in argv)

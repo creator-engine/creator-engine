@@ -13,23 +13,23 @@ path-set below. The carrier lists itself.
 Ratified gate:
 ce-ops#217 U-LAUNCHER herdr runsc dogfood path. The container owns the herdr
 server/socket substrate; the governed harness runs inside a herdr root pane and
-does not receive the raw `HERDR_SOCKET_PATH` carrier.
+does not receive raw or CE_DGX-prefixed socket carriers.
 
 The change:
-Add a DGX runsc herdr harness entrypoint, bake it and a staged herdr binary into
+Add a DGX runsc herdr harness entrypoint, build herdr-ce from pinned source in
 the Codex runsc image, route Codex and Controller launchers through the image
-entrypoint with narrow harness-selection env, document exact dogfood commands,
-and add focused dry-run/static tests.
+entrypoint with narrow harness-selection env and runtime-owned substrate tmpfs,
+document exact dogfood commands, and add focused dry-run/static tests.
 
 Per-file purpose (the closed path-set - 10 paths):
 - **`.ce/changelog/ce217-ulauncher-herdr-runsc.md`** *(A)* - per-PR changelog fragment.
 - **`.ce/pr-manifests/ce217-ulauncher-herdr-runsc.md`** *(A)* - this carrier (self-inclusive).
 - **`deploy/dgx-controller-runsc/README.md`** *(M)* - documents the Controller variant reusing the shared herdr entrypoint image with a Claude binary mount.
-- **`deploy/dgx-controller-runsc/run-controller-runsc.sh`** *(M)* - selects the Claude harness through image-default entrypoint env/args without exposing a host herdr socket.
-- **`deploy/dgx-runsc/Dockerfile`** *(M)* - installs entrypoint dependencies, copies staged `herdr` and the entrypoint, pre-creates the socket dir, and runs through `tini`.
+- **`deploy/dgx-controller-runsc/run-controller-runsc.sh`** *(M)* - selects the Claude harness through image-default entrypoint env/args with runtime-owned herdr tmpfs and without exposing a host herdr socket.
+- **`deploy/dgx-runsc/Dockerfile`** *(M)* - builds herdr from pinned source, installs entrypoint dependencies, copies the built `herdr` and the entrypoint, pre-creates the socket dir, and runs through `tini`.
 - **`deploy/dgx-runsc/README.md`** *(M)* - documents herdr staging, Docker build, launcher, dry-run, and containment-probe dogfood commands.
 - **`deploy/dgx-runsc/herdr-harness-entrypoint.sh`** *(A)* - fail-closed in-container herdr server/workspace/root-pane harness launcher.
-- **`deploy/dgx-runsc/run-codex-runsc.sh`** *(M)* - selects the Codex harness through image-default entrypoint env/args without exposing a host herdr socket.
+- **`deploy/dgx-runsc/run-codex-runsc.sh`** *(M)* - selects the Codex harness through image-default entrypoint env/args with runtime-owned herdr tmpfs and without exposing a host herdr socket.
 - **`validators/tests/unit/test_dgx_controller_runsc.py`** *(M)* - updates Controller dry-run expectations for the herdr image-entrypoint shape.
 - **`validators/tests/unit/test_dgx_runsc.py`** *(A)* - adds Codex dry-run, Dockerfile, and entrypoint contract coverage.
 
