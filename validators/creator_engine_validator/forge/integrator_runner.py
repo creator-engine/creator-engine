@@ -75,7 +75,7 @@ class RunnerResolutionPlan:
 
 ExecuteRepair = Callable[[RepairNeededEvent, Any], Any]
 PollRepairNeeded = Callable[..., RepairPollResult]
-PlanFactory = Callable[[ResolverResult, str], Any]
+PlanFactory = Callable[[ResolverResult, str, Mapping[str, str] | None], Any]
 
 
 @dataclass(frozen=True)
@@ -219,14 +219,24 @@ def _handle_event(
             refusal_reason="no_mechanical_resolution",
         )
 
+    batch_result, files = _batch_resolution(resolved)
+    if batch_result.unresolved or not batch_result.resolved:
+        return IntegratorEventOutcome(
+            event=event,
+            resolver_results=resolver_results,
+            execution_results=(),
+            escalation_events=(),
+            status="refused",
+            refusal_reason=batch_result.reason,
+        )
+
     execute, make_plan = _executor_api(execute_repair=execute_repair, plan_factory=plan_factory)
-    execution_results = tuple(
+    execution_results = (
         execute(
             event,
-            make_plan(result, work.expected_base_sha),
+            make_plan(batch_result, work.expected_base_sha, files),
             adapter=work.executor_adapter,
-        )
-        for result in resolved
+        ),
     )
     refused = tuple(
         result for result in execution_results if getattr(result, "refusal_reason", None)
@@ -263,6 +273,60 @@ def _escalatable_result(snapshot: ConflictSnapshot, result: ResolverResult) -> R
     )
 
 
+def _batch_resolution(results: tuple[ResolverResult, ...]) -> tuple[ResolverResult, dict[str, str] | None]:
+    files: dict[str, str] = {}
+    evidence: list[str] = [f"resolved_results={len(results)}"]
+    resolver_names: list[str] = []
+    changed_paths: list[str] = []
+    for result in results:
+        resolver_names.append(result.resolver)
+        paths = tuple(result.changed_paths)
+        changed_paths.extend(paths)
+        if result.content is None or len(paths) != 1:
+            return (
+                ResolverResult(
+                    resolver="integrator_runner_batch",
+                    applicable=True,
+                    resolved=False,
+                    unresolved=True,
+                    changed_paths=tuple(sorted(changed_paths)),
+                    reason="resolved_result_missing_single_file_content",
+                    evidence=tuple(evidence),
+                ),
+                None,
+            )
+        path = paths[0]
+        if path in files:
+            return (
+                ResolverResult(
+                    resolver="integrator_runner_batch",
+                    applicable=True,
+                    resolved=False,
+                    unresolved=True,
+                    changed_paths=tuple(sorted(set(changed_paths))),
+                    reason="duplicate_resolved_path",
+                    evidence=tuple((*evidence, f"path={path}")),
+                ),
+                None,
+            )
+        files[path] = result.content
+    paths = tuple(sorted(files))
+    resolver_summary = ",".join(sorted(set(resolver_names)))
+    return (
+        ResolverResult(
+            resolver="integrator_runner_batch",
+            applicable=True,
+            resolved=True,
+            unresolved=False,
+            changed_paths=paths,
+            reason="aggregated mechanical repair batch",
+            evidence=tuple((*evidence, f"files={len(files)}", f"resolvers={resolver_summary}")),
+            content=None,
+        ),
+        {path: files[path] for path in paths},
+    )
+
+
 def _event_is_live_action_eligible(event: RepairNeededEvent) -> bool:
     evidence = event.to_dict().get("evidence") or {}
     return bool(evidence.get("approved") is True and evidence.get("all_green") is True)
@@ -282,14 +346,19 @@ def _executor_api(
             "forge.integrator_executor is not available on this base; rebase after "
             "ce216-executor-race-guard / PR #383 lands"
         ) from exc
-    return execute_integrator_repair, lambda result, base_sha: ResolutionPlan(
+    return execute_integrator_repair, lambda result, base_sha, files=None: ResolutionPlan(
         resolver_result=result,
         expected_base_sha=base_sha,
+        files=files,
     )
 
 
-def _runner_plan(result: ResolverResult, expected_base_sha: str) -> RunnerResolutionPlan:
-    return RunnerResolutionPlan(resolver_result=result, expected_base_sha=expected_base_sha)
+def _runner_plan(
+    result: ResolverResult,
+    expected_base_sha: str,
+    files: Mapping[str, str] | None = None,
+) -> RunnerResolutionPlan:
+    return RunnerResolutionPlan(resolver_result=result, expected_base_sha=expected_base_sha, files=files)
 
 
 def _to_dict(value: Any) -> Any:

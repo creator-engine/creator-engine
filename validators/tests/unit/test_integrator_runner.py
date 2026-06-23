@@ -56,6 +56,17 @@ V3_RUNTIME = frozenset({{
 '''
 
 
+def _append_only_conflict() -> str:
+    return f"""existing
+{_OURS}
+beta
+{_SEP}
+alpha
+{_THEIRS}
+tail
+"""
+
+
 class FakeRepairAdapter:
     def __init__(self, conflicts: tuple[ir.ConflictSnapshot, ...]):
         self.conflicts = conflicts
@@ -107,7 +118,8 @@ def test_poll_detect_resolve_execute_happy_path():
         calls.append((event, plan, adapter))
         assert plan.expected_base_sha == BASE
         assert plan.resolver_result.resolved is True
-        assert plan.resolver_result.content is not None
+        assert plan.resolver_result.content is None
+        assert set(plan.files or {}) == set(plan.resolver_result.changed_paths)
         return FakeExecutionResult()
 
     result = ir.run_once(
@@ -122,6 +134,47 @@ def test_poll_detect_resolve_execute_happy_path():
     assert result.refused_count == 0
     assert result.outcomes[0].status == "executed"
     assert adapter.events == [_event()]
+    assert len(calls) == 1
+    assert calls[0][2] is adapter.executor_adapter
+
+
+def test_multi_file_mechanical_repair_executes_as_one_atomic_batch():
+    append_path = ".ce/registries/append-only.txt"
+    adapter = FakeRepairAdapter(
+        (
+            ir.ConflictSnapshot(
+                path="validators/creator_engine_validator/_versions.py",
+                conflicted_text=_versions_conflict(),
+            ),
+            ir.ConflictSnapshot(
+                path=append_path,
+                conflicted_text=_append_only_conflict(),
+            ),
+        )
+    )
+    calls = []
+
+    def execute(event, plan, *, adapter):
+        calls.append((event, plan, adapter))
+        assert plan.expected_base_sha == BASE
+        assert plan.resolver_result.resolver == "integrator_runner_batch"
+        assert plan.resolver_result.changed_paths == (
+            ".ce/registries/append-only.txt",
+            "validators/creator_engine_validator/_versions.py",
+        )
+        assert set(plan.files or {}) == set(plan.resolver_result.changed_paths)
+        assert plan.files[append_path] == "existing\nalpha\nbeta\ntail\n"
+        return FakeExecutionResult()
+
+    result = ir.run_once(
+        token="ghp_fake",
+        repair_adapter=adapter,
+        poller=_poller,
+        execute_repair=execute,
+    )
+
+    assert result.executed_count == 1
+    assert result.refused_count == 0
     assert len(calls) == 1
     assert calls[0][2] is adapter.executor_adapter
 
