@@ -38,7 +38,7 @@ def test_live_herdr_binary_can_be_invoked_safely():
         "/tmp/herdr-share/target/release/herdr"
     ),
 )
-def test_live_herdr_pane_read_and_send_text_cli_shapes_reach_socket_layer(tmp_path):
+def test_live_herdr_workspace_run_read_and_send_text_cli_shapes_reach_socket_layer(tmp_path):
     """Exercise real CLI argument parsing without requiring a persistent server.
 
     The task environment does not provide a deterministic herdr server lifecycle
@@ -50,6 +50,35 @@ def test_live_herdr_pane_read_and_send_text_cli_shapes_reach_socket_layer(tmp_pa
     runner = SubprocessHerdrCommandRunner(timeout_seconds=5)
     socket_path = tmp_path / "missing-herdr.sock"
     env = {HERDR_SOCKET_ENV: str(socket_path)}
+
+    create = runner.run(
+        [
+            str(HERDR_LIVE_BINARY),
+            "workspace",
+            "create",
+            "--cwd",
+            str(tmp_path),
+            "--label",
+            "ce-live-shape",
+            "--env",
+            "CE_LEDGER_ROOT=/ledger",
+        ],
+        env=env,
+    )
+    assert create.returncode == 1
+    assert "No such file or directory" in create.stderr
+    assert "usage: herdr workspace create" not in create.stderr
+    assert "--json" not in create.stderr
+
+    run = runner.run(
+        [str(HERDR_LIVE_BINARY), "pane", "run", "pane-1", "printf hello"],
+        env=env,
+    )
+    assert run.returncode == 1
+    assert "No such file or directory" in run.stderr
+    assert "usage: herdr pane run" not in run.stderr
+    assert "--cwd" not in run.stderr
+    assert "--env" not in run.stderr
 
     read = runner.run(
         [

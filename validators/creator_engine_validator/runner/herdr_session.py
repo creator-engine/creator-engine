@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import shlex
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -67,6 +68,8 @@ DEFAULT_HERDR_SOCKET = "herdr.sock"
 #: Unix control socket. The path is carried only in the CE controller process'
 #: subprocess environment, never in the governed seat's pane environment.
 HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
+LEGACY_HERDR_SOCKET_ENV = "HERDR_SOCKET"
+FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV})
 
 
 class HerdrSessionError(Exception):
@@ -96,6 +99,14 @@ class HerdrPane:
     surface_ref: str
     pid: int | None = None
     workspace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class HerdrWorkspace:
+    """The workspace and root pane returned by ``herdr workspace create``."""
+
+    workspace_id: str
+    root_pane_id: str
 
 
 class HerdrCommandRunner(Protocol):
@@ -188,6 +199,7 @@ class HerdrSession:
 
     def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
         completed = self._run(args)
+        argv = [self._herdr_binary, *args]
         stdout = (completed.stdout or "").strip()
         if not stdout:
             return {}
@@ -202,6 +214,23 @@ class HerdrSession:
                 f"herdr command returned a non-object JSON payload: {argv!r}"
             )
         return data
+
+    @staticmethod
+    def _env_args(env: Mapping[str, str] | None, *, context: str) -> list[str]:
+        args: list[str] = []
+        for key, value in sorted((env or {}).items()):
+            key_text = str(key)
+            if key_text in FORBIDDEN_SEAT_ENV_NAMES:
+                raise HerdrCommandError(
+                    f"refusing to pass {key_text} into a governed {context}"
+                )
+            if not key_text or "=" in key_text:
+                raise HerdrCommandError(
+                    f"refusing unsafe herdr env assignment name for governed {context}: "
+                    f"{key_text!r}"
+                )
+            args.extend(["--env", f"{key_text}={value}"])
+        return args
 
     @staticmethod
     def _first_str(data: Mapping[str, Any], *keys: str) -> str | None:
@@ -242,23 +271,58 @@ class HerdrSession:
         """
         self._connected = True
 
-    def create_workspace(self, *, cwd: str | None = None, label: str | None = None) -> str:
-        """Create a workspace over the herdr socket and return its id."""
+    def create_workspace(
+        self,
+        *,
+        cwd: str | None = None,
+        label: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> HerdrWorkspace:
+        """Create a workspace over the herdr socket and return workspace/root pane ids."""
         args = ["workspace", "create"]
         if cwd:
             args.extend(["--cwd", cwd])
         if label:
             args.extend(["--label", label])
-        args.append("--json")
+        args.extend(self._env_args(env, context="workspace"))
         data = self._run_json(args)
-        workspace_id = self._first_str(data, "workspace_id", "workspace", "id")
-        if workspace_id is None:
-            raise HerdrCommandError("herdr workspace create did not return a workspace id")
-        return workspace_id
+        result = data.get("result")
+        if not isinstance(result, Mapping):
+            raise HerdrCommandError("herdr workspace create did not return a result object")
+        if result.get("type") != "workspace_created":
+            raise HerdrCommandError(
+                "herdr workspace create did not return a workspace_created result"
+            )
+        workspace = result.get("workspace")
+        root_pane = result.get("root_pane")
+        if not isinstance(workspace, Mapping) or not isinstance(root_pane, Mapping):
+            raise HerdrCommandError(
+                "herdr workspace create did not return workspace/root_pane objects"
+            )
+        workspace_id = self._first_str(workspace, "workspace_id")
+        root_pane_id = self._first_str(root_pane, "pane_id")
+        if workspace_id is None or root_pane_id is None:
+            raise HerdrCommandError(
+                "herdr workspace create did not return workspace_id/root pane_id"
+            )
+        return HerdrWorkspace(workspace_id=workspace_id, root_pane_id=root_pane_id)
 
-    def split_pane(self, *, workspace_id: str) -> str:
-        """Split/create a pane in ``workspace_id`` and return its id."""
-        data = self._run_json(["pane", "split", "--workspace", workspace_id, "--json"])
+    def split_pane(
+        self,
+        *,
+        pane_id: str,
+        direction: str = "right",
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> str:
+        """Split ``pane_id`` in ``direction`` and return the created pane id."""
+        if direction not in {"right", "down"}:
+            raise HerdrCommandError("herdr pane split direction must be 'right' or 'down'")
+        args = ["pane", "split", pane_id, "--direction", direction]
+        if cwd:
+            args.extend(["--cwd", cwd])
+        args.extend(self._env_args(env, context="seat pane"))
+        data = self._run_json(args)
         pane_id = self._first_str(data, "pane_id", "pane", "id")
         if pane_id is None:
             raise HerdrCommandError("herdr pane split did not return a pane id")
@@ -273,18 +337,20 @@ class HerdrSession:
         env: Mapping[str, str] | None = None,
     ) -> int | None:
         """Run the sentinel-wrapped seat command inside an existing herdr pane."""
-        argv = ["pane", "run", pane_id]
-        if cwd:
-            argv.extend(["--cwd", cwd])
-        for key, value in sorted((env or {}).items()):
-            if key == HERDR_SOCKET_ENV:
-                raise HerdrCommandError(
-                    f"refusing to pass {HERDR_SOCKET_ENV} into a governed seat pane"
-                )
-            argv.extend(["--env", f"{key}={value}"])
-        argv.extend(["--json", "--", *list(command)])
-        data = self._run_json(argv)
-        return self._first_pid(data)
+        self._env_args(env, context="seat pane")
+        if env:
+            raise HerdrCommandError(
+                "herdr pane run does not accept env; pass env to create_workspace"
+            )
+        if cwd is not None:
+            raise HerdrCommandError(
+                "herdr pane run does not accept cwd; pass cwd to create_workspace"
+            )
+        command_text = shlex.join(str(part) for part in command)
+        if not command_text:
+            raise HerdrCommandError("herdr pane run requires a command")
+        self._run_ok(["pane", "run", pane_id, command_text])
+        return None
 
     def wait_agent_status(
         self,
@@ -308,22 +374,24 @@ class HerdrSession:
     ) -> HerdrPane:
         """Create a herdr pane running the sentinel-wrapped seat ``command``.
 
-        Maps to ``herdr workspace create`` / ``herdr pane split`` /
-        ``herdr pane run`` over the socket and returns a :class:`HerdrPane`. The
-        sentinel wrapper stays OUTERMOST (the #368 contract) so ``events.jsonl``
-        lifecycle events are produced identically; the substrate change is *which
-        surface owns the PTY*, not the wrapper contract.
+        Maps to ``herdr workspace create`` / ``herdr pane run`` over the socket
+        and returns a :class:`HerdrPane` for the workspace root pane. The sentinel
+        wrapper stays OUTERMOST (the #368 contract) so ``events.jsonl`` lifecycle
+        events are produced identically; the substrate change is *which surface
+        owns the PTY*, not the wrapper contract.
         """
         if not self._connected:
             self.connect()
-        workspace_id = self.create_workspace(cwd=cwd, label=label)
-        pane_id = self.split_pane(workspace_id=workspace_id)
-        pid = self.run_pane(pane_id=pane_id, command=command, cwd=cwd, env=env)
+        workspace = self.create_workspace(cwd=cwd, label=label, env=env)
+        pid = self.run_pane(pane_id=workspace.root_pane_id, command=command)
         return HerdrPane(
-            pane_id=pane_id,
-            surface_ref=self._surface_ref(workspace_id=workspace_id, pane_id=pane_id),
+            pane_id=workspace.root_pane_id,
+            surface_ref=self._surface_ref(
+                workspace_id=workspace.workspace_id,
+                pane_id=workspace.root_pane_id,
+            ),
             pid=pid,
-            workspace_id=workspace_id,
+            workspace_id=workspace.workspace_id,
         )
 
     # -- send (steer) -----------------------------------------------------

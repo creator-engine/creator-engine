@@ -16,16 +16,18 @@ separate subprocess/socket client; the control socket path is controller-owned
 and never appears in governed seat env or ledger-visible terminal records.
 
 The change:
-Wire `HerdrSession.send()` to `herdr pane send-text`, switch the herdr socket
-carrier to `HERDR_SOCKET_PATH`, and update `observe()` to read raw stdout from
-`herdr pane read --source recent --lines N --format text|ansi`.
+Wire `HerdrSession.spawn_pane()` to the real `workspace create` root-pane
+contract, run commands through `herdr pane run <pane_id> <command>`, wire
+`send()` to `herdr pane send-text`, switch the herdr socket carrier to
+`HERDR_SOCKET_PATH`, and update `observe()` to read raw stdout from `herdr pane
+read --source recent --lines N --format text|ansi`.
 
 Per-file purpose (the closed path-set — 6 paths):
 - **`.ce/changelog/ce217-u3live-herdr-session.md`** *(A)* - per-PR changelog fragment.
 - **`.ce/pr-manifests/ce217-u3live-herdr-session.md`** *(A)* - this carrier (self-inclusive).
-- **`validators/creator_engine_validator/runner/herdr_session.py`** *(M)* - live send/read command helpers, `HERDR_SOCKET_PATH` carrier, and fail-closed non-UTF-8 input.
+- **`validators/creator_engine_validator/runner/herdr_session.py`** *(M)* - live workspace/run/send/read command helpers, `HERDR_SOCKET_PATH` carrier, and fail-closed governed env/socket handling.
 - **`validators/tests/integration/test_herdr_live.py`** *(M)* - opt-in real-binary command-shape probe against `HERDR_LIVE_BINARY` or staged `/tmp/herdr-share/target/release/herdr`.
-- **`validators/tests/unit/test_herdr_session.py`** *(M)* - mock subprocess coverage for send/read and controller-owned socket env.
+- **`validators/tests/unit/test_herdr_session.py`** *(M)* - mock subprocess coverage for spawn/run/send/read, malformed JSON, and controller-owned socket env.
 - **`validators/tests/unit/test_visibility_backend.py`** *(M)* - terminal record/socket ownership assertion for the registered herdr backend.
 
 Canonicalization:
