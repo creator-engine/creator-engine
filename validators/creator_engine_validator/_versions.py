@@ -42,6 +42,9 @@ V1_RUNTIME: frozenset[str] = frozenset(
     {
         "__main__",
         "ce_cli",
+        # ce-ops#197 PR-3: user-scoped shell profile PATH standardization writer.
+        # It is an installer/kernel-adjacent v1 utility; imports no v3 module.
+        "ce_profile_path",
         "lane_runtime",
         "launch_runtime",
         "claude_launch_spec",

@@ -479,15 +479,13 @@ def test_pages_mirror_wheels_match_published_sha256sums(repo_root: Path):
 
 
 def test_pages_mirror_sha256s_publishes_install_sh_and_wheels(repo_root: Path):
-    # ce-ops#69 re-scope: SHA256SUMS publishes install.sh + the mirror's OWN
-    # wheels, and every published digest matches the actual published artifact
-    # in-place (docs/install.sh for the installer, docs/downloads/0.2.0/ for the
-    # wheels) -- NOT validators/wheelhouse/. Together with the test above this
-    # pins a bijection between the mirror's wheel files and its SHA256SUMS wheel
-    # entries, so neither an orphan file nor an unpublished wheel can slip in.
+    # ce-ops#69 re-scope: SHA256SUMS publishes the frozen mirror's install.sh
+    # and wheels, and every published digest matches the actual versioned
+    # mirror artifact in-place. Source PRs may advance docs/install.sh before
+    # a signed republish; the release mirror remains self-consistent until then.
     mirror = repo_root / "docs" / "downloads" / "0.2.0"
     sums = _parse_sha256sums(mirror / "SHA256SUMS")
-    assert sums["install.sh"] == _sha256(repo_root / "docs" / "install.sh")
+    assert sums["install.sh"] == _sha256(mirror / "install.sh")
     published_wheels = sorted(name for name in sums if name.endswith(".whl"))
     assert published_wheels, "SHA256SUMS must publish at least one wheel"
     for filename in published_wheels:

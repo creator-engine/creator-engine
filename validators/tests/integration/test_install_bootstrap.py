@@ -125,6 +125,7 @@ def _run_install(
     install_root: Path | None = None,
     extra_env: dict[str, str] | None = None,
     answers: Path | None = None,
+    extra_args: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = _fake_curl_bin(tmp_path)
     curl_log = tmp_path / "curl.log"
@@ -152,6 +153,7 @@ def _run_install(
     ]
     if answers is not None:
         argv += ["--answers", str(answers)]
+    argv += list(extra_args or [])
     argv.append("--json")
     return subprocess.run(argv, cwd=repo_root, env=env, text=True, capture_output=True, timeout=120)
 
@@ -234,20 +236,46 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
         target = install_root / "venv" / "bin" / command
         assert shim.is_symlink()
         assert shim.resolve() == target.resolve()
+    profile = tmp_path / "home" / ".profile"
+    profile_text = profile.read_text(encoding="utf-8")
+    assert "# >>> creator-engine PATH >>>" in profile_text
+    assert "$HOME/.local/bin" in profile_text
+    assert "npm" in profile_text
     assert not (install_root / "install.lock").exists()
     assert "installed=1" in first.stderr
-    assert f"warning: {local_bin} is not on PATH" in first.stderr
+    assert f"updated shell profile PATH block: {profile}" in first.stderr
 
     second = _run_install(tmp_path, repo_root, site=site, install_root=install_root, answers=answers)
     assert second.returncode == 0, second.stderr
     assert json.loads(second.stdout)["action"] == "onboard_inventory"
     assert "skipped_already_current=1" in second.stderr
-    assert f"warning: {local_bin} is not on PATH" in second.stderr
+    assert f"shell profile PATH block already current: {profile}" in second.stderr
+    assert profile.read_text(encoding="utf-8") == profile_text
     for command in ("cev3", "ce"):
         shim = local_bin / command
         target = install_root / "venv" / "bin" / command
         assert shim.is_symlink()
         assert shim.resolve() == target.resolve()
+
+
+def test_install_sh_no_fix_path_skips_profile_mutation(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    install_root = tmp_path / "install-root"
+    answers = tmp_path / "answers.yaml"
+    answers.write_text("answers_version: 1\nprofile: solo-pilot\n", encoding="utf-8")
+
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        install_root=install_root,
+        answers=answers,
+        extra_args=["--no-fix-path"],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert not (tmp_path / "home" / ".profile").exists()
+    assert "skipped shell profile PATH update (--no-fix-path)" in proc.stderr
 
 
 def test_install_sh_repairs_partial_or_corrupt_verified_venv_state(tmp_path: Path, repo_root: Path):

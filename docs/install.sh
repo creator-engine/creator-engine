@@ -16,6 +16,7 @@ CE_TRUST_ANCHOR_URL="${CE_TRUST_ANCHOR_URL:-https://dns.google/resolve?name=_ce-
 CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-engine.dev}"
 CE_JSON=0
 CE_INVENTORY_ONLY=1
+CE_FIX_PATH=1
 
 downloaded=0
 reused=0
@@ -50,7 +51,7 @@ fail() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: install.sh [--answers PATH] [--inventory-only] [--json] [--install-root PATH] [--site URL]
+Usage: install.sh [--answers PATH] [--inventory-only] [--json] [--install-root PATH] [--site URL] [--no-fix-path]
 EOF
 }
 
@@ -67,6 +68,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --json)
       CE_JSON=1
+      shift
+      ;;
+    --no-fix-path)
+      CE_FIX_PATH=0
       shift
       ;;
     --install-root)
@@ -465,8 +470,87 @@ install_cli_shims() {
   say "exposed CLI shims: ${LOCAL_BIN}/cev3 and ${LOCAL_BIN}/ce"
   case ":${PATH:-}:" in
     *":${LOCAL_BIN}:"*) ;;
-    *) say "warning: ${LOCAL_BIN} is not on PATH; add it to run ce/cev3 without an absolute path" ;;
+    *) say "${LOCAL_BIN} is not on current PATH; shell-profile update below makes future shells see ce/cev3" ;;
   esac
+}
+
+fix_shell_profile_path() {
+  if [ "$CE_FIX_PATH" != "1" ]; then
+    say "skipped shell profile PATH update (--no-fix-path)"
+    return 0
+  fi
+  [ -n "${HOME:-}" ] || fail profile_path_failed "HOME is not set; cannot update shell profile PATH"
+  profile="${HOME}/.profile"
+  notice="$("$PYTHON_BIN" - "$profile" <<'PY'
+from pathlib import Path
+import sys
+
+BEGIN_MARKER = "# >>> creator-engine PATH >>>"
+END_MARKER = "# <<< creator-engine PATH <<<"
+
+
+def build_path_block() -> str:
+    return "\n".join(
+        [
+            BEGIN_MARKER,
+            "# Added by Creator Engine. Delete this whole marked block to undo.",
+            "_ce_path_prepend() {",
+            '  case ":${PATH:-}:" in',
+            '    *":$1:"*) ;;',
+            '    *) PATH="$1${PATH:+:$PATH}" ;;',
+            "  esac",
+            "}",
+            '_ce_path_prepend "$HOME/.local/bin"',
+            '_ce_npm_bin=""',
+            "if command -v npm >/dev/null 2>&1; then",
+            '  _ce_npm_bin="$(npm bin -g 2>/dev/null || true)"',
+            '  if [ -z "$_ce_npm_bin" ]; then',
+            '    _ce_npm_prefix="$(npm prefix -g 2>/dev/null || true)"',
+            '    [ -z "$_ce_npm_prefix" ] || _ce_npm_bin="${_ce_npm_prefix%/}/bin"',
+            "  fi",
+            '  [ -z "$_ce_npm_bin" ] || _ce_path_prepend "$_ce_npm_bin"',
+            "fi",
+            "unset _ce_npm_bin _ce_npm_prefix",
+            "export PATH",
+            "unset -f _ce_path_prepend",
+            END_MARKER,
+            "",
+        ]
+    )
+
+
+def replace_or_append_block(text: str, block: str) -> str:
+    begin = text.find(BEGIN_MARKER)
+    end = text.find(END_MARKER)
+    if begin == -1 and end == -1:
+        prefix = text
+        if prefix and not prefix.endswith("\n"):
+            prefix += "\n"
+        spacer = "\n" if prefix else ""
+        return f"{prefix}{spacer}{block}"
+    if begin == -1 or end == -1 or end < begin:
+        raise RuntimeError("found incomplete creator-engine PATH markers; refusing to guess")
+    end += len(END_MARKER)
+    if end < len(text) and text[end : end + 1] == "\n":
+        end += 1
+    return text[:begin] + block + text[end:]
+
+
+path = Path(sys.argv[1])
+existing = path.read_text(encoding="utf-8") if path.exists() else ""
+updated = replace_or_append_block(existing, build_path_block())
+changed = updated != existing
+if changed:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(updated, encoding="utf-8")
+    print(f"updated shell profile PATH block: {path}")
+else:
+    print(f"shell profile PATH block already current: {path}")
+PY
+  )" \
+    || fail profile_path_failed "failed to update shell profile PATH block at $profile"
+  say "$notice"
+  say "PATH block is marked '# >>> creator-engine PATH >>>'; delete that block to undo"
 }
 
 TMPDIR_CE="$(mktemp -d)"
@@ -711,6 +795,7 @@ fi
 "${VENV_DIR}/bin/cev3" --help >/dev/null 2>&1 \
   || fail entrypoint_missing "verified venv exists but cev3 no longer runs"
 install_cli_shims
+fix_shell_profile_path
 write_state
 
 ONBOARD_ARGS=(
