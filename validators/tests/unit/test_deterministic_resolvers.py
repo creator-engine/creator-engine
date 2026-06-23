@@ -56,6 +56,31 @@ def test_versions_registry_conflict_unions_module_entries_and_verifies():
     assert "V3_RUNTIME=3" in verified.evidence
 
 
+def test_versions_registry_conflict_unions_diff3_add_add_entries():
+    text = f'''from __future__ import annotations
+V1_RUNTIME = frozenset({{
+    "existing",
+{_OURS}
+    "ce_profile_path",
+||||||| base
+{_SEP}
+    "ce_provenance",
+{_THEIRS}
+}})
+V3_RUNTIME = frozenset({{
+    "forge",
+}})
+'''
+
+    result = dr.resolve_conflict("validators/creator_engine_validator/_versions.py", text)
+
+    assert result.applicable is True
+    assert result.resolved is True
+    assert result.unresolved is False
+    assert '"ce_profile_path"' in result.content
+    assert '"ce_provenance"' in result.content
+
+
 def test_versions_registry_conflict_fails_on_v1_v3_id_collision():
     text = f'''from __future__ import annotations
 V1_RUNTIME = frozenset({{
@@ -99,6 +124,31 @@ V3_RUNTIME = frozenset({{"forge"}})
     assert result.applicable is True
     assert result.unresolved is True
     assert "malformed" in result.reason
+
+
+def test_versions_registry_conflict_escalates_delete_keep_from_diff3_base():
+    text = f'''from __future__ import annotations
+V1_RUNTIME = frozenset({{
+    "existing",
+{_OURS}
+||||||| base
+    "legacy_entry",
+{_SEP}
+    "legacy_entry",
+{_THEIRS}
+}})
+V3_RUNTIME = frozenset({{
+    "forge",
+}})
+'''
+
+    result = dr.resolve_conflict("validators/creator_engine_validator/_versions.py", text)
+
+    assert result.applicable is True
+    assert result.resolved is False
+    assert result.unresolved is True
+    assert "registry entry changed or deleted relative to base" in result.reason
+    assert result.content is None
 
 
 def test_version_boundary_count_conflict_uses_post_merge_registry_total():

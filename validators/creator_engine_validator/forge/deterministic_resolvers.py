@@ -49,6 +49,7 @@ class ResolverResult:
 class _ConflictHunk:
     ours: tuple[str, ...]
     theirs: tuple[str, ...]
+    base: tuple[str, ...] | None = None
 
 
 class _MalformedConflict(ValueError):
@@ -166,7 +167,7 @@ def verify_resolution(
 
 def _resolve_versions_registry(path: str, conflicted_text: str) -> ResolverResult:
     try:
-        ours_text, theirs_text = _split_conflict_variants(conflicted_text)
+        ours_text, theirs_text, base_text = _split_conflict_variants_with_base(conflicted_text)
         ours = _extract_registries(ours_text)
         theirs = _extract_registries(theirs_text)
     except (_MalformedConflict, _MalformedRegistry) as exc:
@@ -175,6 +176,24 @@ def _resolve_versions_registry(path: str, conflicted_text: str) -> ResolverResul
             f"malformed _versions.py registry conflict: {exc}",
             changed_paths=(path,),
         )
+
+    if base_text is not None:
+        try:
+            base = _extract_registries(base_text)
+        except _MalformedRegistry as exc:
+            return _unresolved(
+                "versions_module_registry_union",
+                f"malformed _versions.py registry conflict: {exc}",
+                changed_paths=(path,),
+            )
+        unsafe = _registry_base_conflicts(base, ours, theirs)
+        if unsafe:
+            return _unresolved(
+                "versions_module_registry_union",
+                "registry entry changed or deleted relative to base; escalating as unresolved",
+                changed_paths=(path,),
+                evidence=unsafe,
+            )
 
     merged = {name: ours[name] | theirs[name] for name in _REGISTRY_NAMES}
     collision = sorted(merged["V1_RUNTIME"] & merged["V3_RUNTIME"])
@@ -377,17 +396,52 @@ def _format_registry_assignment(name: str, entries: set[str], annotated: bool) -
 
 
 def _split_conflict_variants(text: str) -> tuple[str, str]:
+    ours, theirs, _base = _split_conflict_variants_with_base(text)
+    return ours, theirs
+
+
+def _split_conflict_variants_with_base(text: str) -> tuple[str, str, str | None]:
     parsed = _parse_conflict_stream(text)
     ours: list[str] = []
     theirs: list[str] = []
+    base: list[str] = []
+    saw_base = False
+    missing_base = False
     for item in parsed:
         if isinstance(item, _ConflictHunk):
             ours.extend(item.ours)
             theirs.extend(item.theirs)
+            if item.base is None:
+                missing_base = True
+            else:
+                saw_base = True
+                base.extend(item.base)
         else:
             ours.append(item)
             theirs.append(item)
-    return "".join(ours), "".join(theirs)
+            base.append(item)
+    if saw_base and missing_base:
+        raise _MalformedConflict("mixed diff3 and non-diff3 conflict hunks")
+    return "".join(ours), "".join(theirs), "".join(base) if saw_base else None
+
+
+def _registry_base_conflicts(
+    base: dict[str, set[str]],
+    ours: dict[str, set[str]],
+    theirs: dict[str, set[str]],
+) -> tuple[str, ...]:
+    conflicts: list[str] = []
+    for name in _REGISTRY_NAMES:
+        removed_from_ours = base[name] - ours[name]
+        removed_from_theirs = base[name] - theirs[name]
+        for entry in sorted(removed_from_ours | removed_from_theirs):
+            sides = []
+            if entry in removed_from_ours:
+                sides.append("ours")
+            if entry in removed_from_theirs:
+                sides.append("theirs")
+            conflicts.append(f"{name}:{entry}:missing_from={','.join(sides)}")
+    return tuple(conflicts)
 
 
 def _replace_conflict_hunks(text: str, replacer) -> tuple[str, set[str]]:
@@ -409,6 +463,7 @@ def _parse_conflict_stream(text: str) -> list[str | _ConflictHunk]:
     parsed: list[str | _ConflictHunk] = []
     ours: list[str] = []
     theirs: list[str] = []
+    base: list[str] | None = None
     state = "normal"
     saw_hunk = False
     for line in lines:
@@ -418,12 +473,14 @@ def _parse_conflict_stream(text: str) -> list[str | _ConflictHunk]:
             state = "ours"
             ours = []
             theirs = []
+            base = None
             saw_hunk = True
             continue
         if line.startswith("|||||||"):
             if state != "ours":
                 raise _MalformedConflict("base marker outside ours side")
             state = "base"
+            base = []
             continue
         if line.startswith("======="):
             if state not in {"ours", "base"}:
@@ -433,7 +490,7 @@ def _parse_conflict_stream(text: str) -> list[str | _ConflictHunk]:
         if line.startswith(">>>>>>>"):
             if state != "theirs":
                 raise _MalformedConflict("end marker outside theirs side")
-            parsed.append(_ConflictHunk(tuple(ours), tuple(theirs)))
+            parsed.append(_ConflictHunk(tuple(ours), tuple(theirs), tuple(base) if base is not None else None))
             state = "normal"
             continue
         if state == "normal":
@@ -443,7 +500,9 @@ def _parse_conflict_stream(text: str) -> list[str | _ConflictHunk]:
         elif state == "theirs":
             theirs.append(line)
         elif state == "base":
-            continue
+            if base is None:
+                raise _MalformedConflict("base content outside base side")
+            base.append(line)
     if state != "normal":
         raise _MalformedConflict("unterminated conflict marker")
     if not saw_hunk:
