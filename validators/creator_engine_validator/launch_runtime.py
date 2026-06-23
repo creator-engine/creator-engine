@@ -38,6 +38,7 @@ from . import (
     seat_lifecycle,
     seat_sentinel,
 )
+from .checks import ce_runtime_policy
 from .loader import LoaderError, load_yaml
 
 DEFAULT_HARNESS = "claude"
@@ -100,6 +101,12 @@ class ResourceBoundRefused(LaunchError):
     code = "G6-LAUNCH-RESOURCE-REFUSED"
 
 
+class RuntimePolicyRefused(LaunchError):
+    """Runtime backend/policy resolution refused before launch side effects."""
+
+    code = "G6-LAUNCH-RUNTIME-POLICY-REFUSED"
+
+
 class SeatSurfaceReuseRefused(LaunchError):
     """A target seat events surface already has a launched event; refuse reuse."""
 
@@ -156,6 +163,7 @@ class LaunchPlan:
     # the literal string "none (advisory)" / "none (off)" on an explicit
     # ratified opt-down; None when the policy declares no resource governance.
     resource_bound: dict | str | None = None
+    runtime_policy: dict | None = None
     codex_bypass_mode: str | None = None
     brain_bootstrap_ref: str | None = None
     brain_bootstrap_sha256: str | None = None
@@ -173,6 +181,7 @@ class LaunchPlan:
             "dry_run": self.dry_run,
             "resume": self.resume,
             "resource_bound": self.resource_bound,
+            "runtime_policy": self.runtime_policy,
             "codex_bypass_mode": self.codex_bypass_mode,
             "brain_bootstrap_ref": self.brain_bootstrap_ref,
             "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
@@ -350,6 +359,7 @@ def launch(
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
     runtime_policy: Path | str | None = None,
+    backend: str | None = None,
     launch_cwd: Path | str | None = None,
     launch_env: Mapping[str, str] | None = None,
     systemctl_runner: Any | None = None,
@@ -483,6 +493,7 @@ def launch(
     # Ring 0 builders above — never their input — so the governed tokens stay
     # byte-identical for every harness.
     resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    policy_data: Any | None = None
     if runtime_policy is not None:
         try:
             policy_data = load_yaml(Path(runtime_policy))
@@ -490,6 +501,36 @@ def launch(
             raise ResourceBoundRefused(
                 f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
             ) from exc
+        if not isinstance(policy_data, dict):
+            raise RuntimePolicyRefused(
+                f"runtime policy {str(runtime_policy)!r} must be a YAML mapping"
+            )
+        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        if backend is not None or is_runtime_policy_record:
+            if not is_runtime_policy_record:
+                raise RuntimePolicyRefused(
+                    "--backend requires --runtime-policy to point at a full "
+                    "runtime-policy-record"
+                )
+            policy_errors = ce_runtime_policy.validate_runtime_policy(
+                policy_data, Path(runtime_policy)
+            )
+            if policy_errors:
+                detail = "; ".join(error.format() for error in policy_errors[:3])
+                raise RuntimePolicyRefused(
+                    f"runtime policy {str(runtime_policy)!r} did not validate clean: {detail}"
+                )
+            try:
+                plan = replace(
+                    plan,
+                    runtime_policy=ce_runtime_policy.runtime_policy_launch_stamp(
+                        policy_data,
+                        policy_ref=runtime_policy,
+                        requested_backend=backend,
+                    ),
+                )
+            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
+                raise RuntimePolicyRefused(str(exc)) from exc
         try:
             resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
         except resource_bound_spec.ResourcePolicyError as exc:
@@ -502,6 +543,11 @@ def launch(
         and resource_policy.governed
         and not resource_policy.opted_down
     )
+    if backend is not None and runtime_policy is None:
+        raise RuntimePolicyRefused(
+            "--backend requires --runtime-policy so the launch carries the "
+            "digest-pinned image, mount manifest, and egress allowlist"
+        )
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
@@ -523,6 +569,14 @@ def launch(
                 resource_bound=_resource_stamp(bound, resource_policy),
             )
         return LaunchResult(plan=plan, spawned=False, attached=False)
+
+    if backend is not None:
+        resolved = (plan.runtime_policy or {}).get("resolved_backend")
+        raise RuntimePolicyRefused(
+            f"requested backend {backend!r} resolves to {resolved!r}, but ce launch "
+            "RunnerBackend execution is not wired in this slice; refusing before "
+            "raw tmux fallback"
+        )
 
     if tmux_adapter is None:
         from .tmux_adapter import TmuxAdapter

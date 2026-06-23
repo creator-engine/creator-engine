@@ -52,7 +52,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from copy import deepcopy
+from typing import Any, Iterable, Mapping
 
 from ..loader import LoaderError, load_yaml
 from ..reporting import CheckResult, ValidationError, make_error
@@ -73,6 +74,114 @@ CODE_FORBIDDEN_MOUNT = "runtime_policy_forbidden_mount"
 CODE_RW_WITHOUT_JUSTIFICATION = "runtime_policy_rw_mount_without_justification"
 CODE_SECRET_NAMES_ONLY = "runtime_policy_secret_names_only_violation"
 CODE_EGRESS_NOT_DENY_BY_DEFAULT = "runtime_policy_egress_not_deny_by_default"
+
+DEFAULT_ISOLATION_BACKEND = "gvisor-proxy"
+CLI_BACKEND_CHOICES = ("gvisor", "openshell", "local-noop")
+_BACKEND_ALIASES = {
+    "gvisor": "gvisor-proxy",
+    "gvisor-proxy": "gvisor-proxy",
+    "openshell": "openshell",
+    "local-noop": "local-noop",
+    "os-native": "os-native",
+}
+
+
+class RuntimePolicyResolutionError(ValueError):
+    """A runtime-policy backend selector cannot be resolved or honored."""
+
+
+def _canonical_backend(value: Any, *, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimePolicyResolutionError(f"{field} must be a non-empty backend string")
+    key = value.strip()
+    try:
+        return _BACKEND_ALIASES[key]
+    except KeyError:
+        expected = ", ".join(sorted(_BACKEND_ALIASES))
+        raise RuntimePolicyResolutionError(
+            f"unknown {field} {value!r}: expected one of {expected}"
+        ) from None
+
+
+def resolve_isolation_backend(
+    record: Mapping[str, Any] | None = None,
+    *,
+    explicit: str | None = None,
+    available: Iterable[str] | None = None,
+) -> str:
+    """Resolve the runtime-policy isolation backend, fail-closed.
+
+    The CLI exposes the operator spelling ``gvisor`` while policy records keep
+    the existing canonical key ``gvisor-proxy``. A requested backend must match
+    the policy backend after aliasing; mismatches are refused rather than
+    launching raw under a misleading selector.
+    """
+    policy_value = (
+        record.get("isolation_backend", DEFAULT_ISOLATION_BACKEND)
+        if isinstance(record, Mapping)
+        else DEFAULT_ISOLATION_BACKEND
+    )
+    policy_backend = _canonical_backend(policy_value, field="isolation_backend")
+    if explicit is not None:
+        requested = _canonical_backend(explicit, field="requested backend")
+        if requested != policy_backend:
+            raise RuntimePolicyResolutionError(
+                f"requested backend {explicit!r} resolves to {requested!r}, but "
+                f"runtime policy declares {policy_backend!r}; refusing to fall back"
+            )
+        resolved = requested
+    else:
+        resolved = policy_backend
+
+    if available is None:
+        from ..runner import available_backends
+
+        available = available_backends()
+    available_set = set(available)
+    if resolved not in available_set:
+        choices = ", ".join(sorted(available_set)) or "(none)"
+        raise RuntimePolicyResolutionError(
+            f"runtime policy resolves backend {resolved!r}, but it is not registered; "
+            f"available: {choices}"
+        )
+    return resolved
+
+
+def runtime_policy_launch_stamp(
+    record: Mapping[str, Any],
+    *,
+    policy_ref: Path | str,
+    requested_backend: str | None = None,
+    available: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Return the sanitized launch-boundary runtime-policy stamp.
+
+    This is the value SUB-C can consume when it wires ``RunnerBackend``
+    execution: backend key, policy identity, digest-pinned image, mount manifest,
+    and deny-by-default egress allowlist. It deliberately omits secrets.
+    """
+    resolved_backend = resolve_isolation_backend(
+        record, explicit=requested_backend, available=available
+    )
+    image = record.get("image_ref") if isinstance(record, Mapping) else {}
+    image_ref = image if isinstance(image, Mapping) else {}
+    image_name = image_ref.get("name")
+    image_sha = image_ref.get("sha")
+    stamp: dict[str, Any] = {
+        "policy_ref": str(policy_ref),
+        "policy_id": record.get("policy_id"),
+        "policy_sha": record.get("policy_sha"),
+        "requested_backend": requested_backend,
+        "resolved_backend": resolved_backend,
+        "image_ref": {
+            "name": image_name,
+            "sha": image_sha,
+            "digest": f"{image_name}@{image_sha}" if image_name and image_sha else None,
+        },
+        "mount_manifest": deepcopy(record.get("mount_manifest") or []),
+        "egress_allowlist": deepcopy(record.get("egress_allowlist") or []),
+    }
+    return stamp
 
 # ---- image digest pin (sha256:<hex64>) ----
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")

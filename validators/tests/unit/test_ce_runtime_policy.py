@@ -20,7 +20,10 @@ from creator_engine_validator.checks.ce_runtime_policy import (
     CODE_RW_WITHOUT_JUSTIFICATION,
     CODE_SCHEMA,
     CODE_SECRET_NAMES_ONLY,
+    RuntimePolicyResolutionError,
+    resolve_isolation_backend,
     run,
+    runtime_policy_launch_stamp,
     validate_runtime_policy,
 )
 
@@ -109,6 +112,43 @@ def test_well_formed_openshell_backend_passes(tmp_path):
     assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
 
 
+def test_well_formed_local_noop_backend_passes(tmp_path):
+    record = valid_policy()
+    record["isolation_backend"] = "local-noop"
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+
+
+def test_resolve_isolation_backend_aliases_cli_gvisor_to_policy_key():
+    record = valid_policy()
+    assert resolve_isolation_backend(record, explicit="gvisor") == "gvisor-proxy"
+
+
+def test_resolve_isolation_backend_refuses_requested_policy_mismatch():
+    record = valid_policy()
+    record["isolation_backend"] = "openshell"
+    try:
+        resolve_isolation_backend(record, explicit="gvisor")
+    except RuntimePolicyResolutionError as exc:
+        assert "runtime policy declares 'openshell'" in str(exc)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("backend mismatch must fail closed")
+
+
+def test_runtime_policy_launch_stamp_carries_policy_boundary_data(tmp_path):
+    record = valid_policy()
+    stamp = runtime_policy_launch_stamp(
+        record,
+        policy_ref=tmp_path / "runtime-policy.yaml",
+        requested_backend="gvisor",
+    )
+    assert stamp["requested_backend"] == "gvisor"
+    assert stamp["resolved_backend"] == "gvisor-proxy"
+    assert stamp["policy_id"] == "gvisor-implementer-v1"
+    assert stamp["image_ref"]["digest"].endswith("@sha256:" + "b" * 64)
+    assert stamp["mount_manifest"] == record["mount_manifest"]
+    assert stamp["egress_allowlist"] == record["egress_allowlist"]
+
+
 # ---------------------------------------------------------------------------
 # ce-ops#71 Tranche 1 — the os-native backend is schema-valid, and the
 # default-flip migration is GATED (req-4): omitting isolation_backend keeps the
@@ -131,6 +171,7 @@ def test_default_flip_is_gated_schema_default_stays_gvisor_proxy():
     assert backend_prop["default"] == "gvisor-proxy"
     assert "os-native" in backend_prop["enum"]
     assert "gvisor-proxy" in backend_prop["enum"]
+    assert "local-noop" in backend_prop["enum"]
 
 
 def test_gvisor_proxy_pinned_record_still_validates(tmp_path):

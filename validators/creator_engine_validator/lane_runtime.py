@@ -39,6 +39,7 @@ from . import (
     seat_lifecycle,
     seat_sentinel,
 )
+from .checks import ce_runtime_policy
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -187,6 +188,12 @@ class ResourceBoundRefused(LaneLaunchError):
     code = "G3-RESOURCE-REFUSED"
 
 
+class RuntimePolicyRefused(LaneLaunchError):
+    """Runtime backend/policy resolution refused before lane side effects."""
+
+    code = "G3-RUNTIME-POLICY-REFUSED"
+
+
 class BrainBootstrapLaneRefused(LaneLaunchError):
     """ce-ops#178: Knowledge-SSOT bootstrap refused before lane spawn."""
 
@@ -290,6 +297,7 @@ class LaunchResult:
     # "none (advisory)" / "none (off)" on a ratified opt-down; None when the
     # policy declares no resource governance.
     resource_bound: dict[str, Any] | str | None = None
+    runtime_policy: dict[str, Any] | None = None
     # ce-ops#26: the absolute path to this seat's append-only lifecycle events
     # surface (`<state_root>/dispatches/<lane_id>/events.jsonl`), also recorded in
     # the ignored sidecar. None only if sentinel materialization was skipped.
@@ -650,6 +658,7 @@ def launch(
     reviewer_authority_ref: str | None = None,
     seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
+    backend: str | None = None,
     work_claim: Any | None = None,
     purpose: str | None = None,
     systemctl_runner: Any | None = None,
@@ -711,6 +720,7 @@ def launch(
     #     (load_yaml — the same seam the tenant policy rides). An advisory/off
     #     opt-down without a resource_optout ratification binding is refused here.
     resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    runtime_policy_stamp: dict[str, Any] | None = None
     if runtime_policy is not None:
         try:
             policy_data = load_yaml(Path(runtime_policy))
@@ -718,10 +728,49 @@ def launch(
             raise ResourceBoundRefused(
                 f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
             ) from exc
+        if not isinstance(policy_data, dict):
+            raise RuntimePolicyRefused(
+                f"runtime policy {str(runtime_policy)!r} must be a YAML mapping"
+            )
+        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        if backend is not None or is_runtime_policy_record:
+            if not is_runtime_policy_record:
+                raise RuntimePolicyRefused(
+                    "--backend requires --runtime-policy to point at a full "
+                    "runtime-policy-record"
+                )
+            policy_errors = ce_runtime_policy.validate_runtime_policy(
+                policy_data, Path(runtime_policy)
+            )
+            if policy_errors:
+                detail = "; ".join(error.format() for error in policy_errors[:3])
+                raise RuntimePolicyRefused(
+                    f"runtime policy {str(runtime_policy)!r} did not validate clean: {detail}"
+                )
+            try:
+                runtime_policy_stamp = ce_runtime_policy.runtime_policy_launch_stamp(
+                    policy_data,
+                    policy_ref=runtime_policy,
+                    requested_backend=backend,
+                )
+            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
+                raise RuntimePolicyRefused(str(exc)) from exc
         try:
             resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
         except resource_bound_spec.ResourcePolicyError as exc:
             raise ResourceBoundRefused(str(exc)) from exc
+    elif backend is not None:
+        raise RuntimePolicyRefused(
+            "--backend requires --runtime-policy so the lane carries the "
+            "digest-pinned image, mount manifest, and egress allowlist"
+        )
+    if backend is not None:
+        resolved = (runtime_policy_stamp or {}).get("resolved_backend")
+        raise RuntimePolicyRefused(
+            f"requested backend {backend!r} resolves to {resolved!r}, but ce lane launch "
+            "RunnerBackend execution is not wired in this slice; refusing before "
+            "raw tmux fallback"
+        )
     bounding = (
         resource_policy is not None
         and resource_policy.governed
@@ -1064,6 +1113,8 @@ def launch(
     sidecar_payload: dict[str, Any] = dict(claude_governance) if claude_governance else {}
     if resource_bound_stamp is not None:
         sidecar_payload["resource_bound"] = resource_bound_stamp
+    if runtime_policy_stamp is not None:
+        sidecar_payload["runtime_policy"] = runtime_policy_stamp
     # ce-ops#26: the value-free pointer to this seat's lifecycle events surface.
     sidecar_payload["events_ref"] = str(sentinel.events_path)
     sidecar_payload["brain_bootstrap_ref"] = brain_ref
@@ -1144,6 +1195,7 @@ def launch(
         lane_kind=mode_resolution.lane_kind,
         reviewer_authority_ref=reviewer_authority_ref,
         resource_bound=resource_bound_stamp,
+        runtime_policy=runtime_policy_stamp,
         events_ref=str(sentinel.events_path),
         brain_bootstrap_ref=brain_ref,
         brain_bootstrap_sha256=brain_sha,
