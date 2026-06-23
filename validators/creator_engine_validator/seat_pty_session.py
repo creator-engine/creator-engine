@@ -4,10 +4,9 @@
 
 The #368 hand-rolled PTY byte tap is superseded by the herdr-ce Posture A
 backend. U3 keeps this module only as a compatibility shell for older imports and
-for the ``surface_ref`` helper concept, which now maps to the substrate-owned
-herdr control socket. No production path in this module forks, opens, or owns a
-PTY; callers must use ``terminal_kind=herdr`` through the visibility-backend
-registry.
+for the ``surface_ref`` helper concept, which now maps to an opaque herdr
+surface id. No production path in this module forks, opens, or owns a PTY;
+callers must use ``terminal_kind=herdr`` through the visibility-backend registry.
 """
 from __future__ import annotations
 
@@ -49,7 +48,7 @@ def socket_ref_for(seat_dir: str | Path) -> Path:
     """Return the retired #368 attach-socket path under the seat dir.
 
     Historical helper only. In the live U3 path, Pane Registry ``surface_ref`` is
-    the substrate-owned herdr socket path from ``plan_herdr_containment``.
+    an opaque herdr surface id; the raw herdr socket path stays controller-private.
     """
     return Path(seat_dir) / "attach.sock"
 

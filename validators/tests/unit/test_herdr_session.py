@@ -45,12 +45,12 @@ def test_terminal_kind_constant() -> None:
 def test_pane_handle_shape() -> None:
     pane = hs.HerdrPane(
         pane_id="p0",
-        surface_ref="/run/ce/herdr.sock",
+        surface_ref="herdr-surface-78e9ef9dba13817d88584fe75af1bffe",
         pid=4242,
         workspace_id="w0",
     )
     assert pane.pane_id == "p0"
-    assert pane.surface_ref == "/run/ce/herdr.sock"
+    assert pane.surface_ref == "herdr-surface-78e9ef9dba13817d88584fe75af1bffe"
     assert pane.pid == 4242
     assert pane.workspace_id == "w0"
 
@@ -72,10 +72,11 @@ def test_spawn_pane_drives_workspace_split_and_run_over_socket_env() -> None:
 
     assert pane == hs.HerdrPane(
         pane_id="pane-1",
-        surface_ref="/run/ce/herdr/control.sock",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
         pid=4242,
         workspace_id="workspace-1",
     )
+    assert "/run/ce/herdr/control.sock" not in pane.surface_ref
     assert [call[0] for call in runner.calls] == [
         [
             "/opt/herdr",
@@ -116,7 +117,10 @@ def test_observe_and_wait_agent_status_use_controller_socket() -> None:
         herdr_binary="herdr",
         runner=runner,
     )
-    pane = hs.HerdrPane(pane_id="pane-1", surface_ref="/run/ce/herdr/control.sock")
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
 
     assert session.observe(pane) == b"recent output"
     assert session.wait_agent_status(pane) == {"status": "ready", "pane_id": "pane-1"}
@@ -168,7 +172,10 @@ def test_command_failure_is_reported() -> None:
 
 def test_send_remains_fail_closed_until_u4_attribution() -> None:
     session = hs.HerdrSession()
-    pane = hs.HerdrPane(pane_id="p0", surface_ref="/run/ce/herdr.sock")
+    pane = hs.HerdrPane(
+        pane_id="p0",
+        surface_ref="herdr-surface-78e9ef9dba13817d88584fe75af1bffe",
+    )
     with pytest.raises(hs.HerdrNotWired):
         session.send(pane, b"steer")
 

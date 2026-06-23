@@ -90,7 +90,7 @@ properties:
       kind:
         type: string
         # herdr = the live socket-backed surface. Its identity is the
-        # controller-owned control-socket ref + herdr pane id + seat pid.
+        # opaque controller-owned surface ref + herdr pane id + seat pid.
         enum: [tmux, headless, herdr, plain_terminal, unknown]
       session_id:
         type: string
@@ -114,8 +114,9 @@ properties:
         type: string
         minLength: 1
         description: |
-          Per-session control-socket path. For herdr this is the substrate-owned
-          control socket held by the CE controller, never handed to the seat.
+          Per-session surface reference. For herdr this is an opaque
+          controller-owned handle, never the raw substrate-owned control-socket
+          path because Pane Registry records are seat-readable ledger state.
       pid:
         oneOf:
           - type: integer

@@ -205,11 +205,15 @@ def test_ce_lane_launch_terminal_kind_herdr_satisfies_visibility(tmp_path, use_f
                 visibility_class=self.visibility_class,
                 terminal={
                     "kind": "herdr",
-                    "surface_ref": "/run/ce/herdr/control.sock",
+                    "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
                     "pane_id": "pane-1",
                     "pid": 4242,
                 },
-                native=HerdrPane("pane-1", "/run/ce/herdr/control.sock", 4242),
+                native=HerdrPane(
+                    "pane-1",
+                    "herdr-surface-918aa1506d296ee1a72da70227854392",
+                    4242,
+                ),
             )
 
     monkeypatch.setattr(
@@ -236,7 +240,8 @@ def test_ce_lane_launch_terminal_kind_herdr_satisfies_visibility(tmp_path, use_f
     record = yaml.safe_load(_pane_path(ledger).read_text())
     assert record["visibility"] == "operator_inspectable"
     assert record["terminal"]["kind"] == "herdr"
-    assert record["terminal"]["surface_ref"] == "/run/ce/herdr/control.sock"
+    assert record["terminal"]["surface_ref"] == "herdr-surface-918aa1506d296ee1a72da70227854392"
+    assert "/run/ce/herdr/control.sock" not in repr(record["terminal"])
 
 
 def test_ce_lane_launch_refuses_tmux_unavailable_before_pane_write(tmp_path, monkeypatch):

@@ -362,13 +362,13 @@ def test_herdr_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path):
                 visibility_class=self.visibility_class,
                 terminal={
                     "kind": "herdr",
-                    "surface_ref": "/run/ce/herdr/control.sock",
+                    "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
                     "pane_id": "pane-1",
                     "pid": 4242,
                 },
                 native=HerdrPane(
                     pane_id="pane-1",
-                    surface_ref="/run/ce/herdr/control.sock",
+                    surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
                     pid=4242,
                     workspace_id="workspace-1",
                 ),
@@ -387,7 +387,8 @@ def test_herdr_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path):
     record = result.record
     assert record["visibility"] == "operator_inspectable"
     assert record["terminal"]["kind"] == "herdr"
-    assert record["terminal"]["surface_ref"] == "/run/ce/herdr/control.sock"
+    assert record["terminal"]["surface_ref"] == "herdr-surface-918aa1506d296ee1a72da70227854392"
+    assert "/run/ce/herdr/control.sock" not in repr(record["terminal"])
     assert record["terminal"]["pane_id"] == "pane-1"
     assert record["terminal"]["pid"] == 4242
     assert "session_id" not in record["terminal"]  # no tmux pane identity
@@ -419,11 +420,11 @@ def test_herdr_lane_record_uses_injected_backend(tmp_path):
                 visibility_class=self.visibility_class,
                 terminal={
                     "kind": "herdr",
-                    "surface_ref": "/run/ce/herdr/control.sock",
+                    "surface_ref": "herdr-surface-opaque",
                     "pane_id": "pane-51",
                     "pid": 5151,
                 },
-                native=HerdrPane("pane-51", "/run/ce/herdr/control.sock", 5151),
+                native=HerdrPane("pane-51", "herdr-surface-opaque", 5151),
             )
 
     ledger = _ledger_root(tmp_path)

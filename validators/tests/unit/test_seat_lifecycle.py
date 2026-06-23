@@ -89,7 +89,7 @@ def test_register_spawn_preserves_herdr_terminal_identity(tmp_path):
         launch_surface="ce_lane_launch",
         terminal={
             "kind": "herdr",
-            "surface_ref": "/run/ce/herdr/control.sock",
+            "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
             "pane_id": "pane-1",
             "pid": 4242,
         },
@@ -99,8 +99,9 @@ def test_register_spawn_preserves_herdr_terminal_identity(tmp_path):
     record = yaml.safe_load(result.record_path.read_text(encoding="utf-8"))
     assert record["terminal"] == {
         "kind": "herdr",
-        "surface_ref": "/run/ce/herdr/control.sock",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
         "pane_id": "pane-1",
         "pid": 4242,
         "attached_controller": {"attached": False, "evidence": "not-sampled"},
     }
+    assert "/run/ce/herdr/control.sock" not in repr(record["terminal"])

@@ -190,7 +190,7 @@ def valid_herdr_pane_record() -> dict:
     record["visibility"] = "operator_inspectable"
     record["terminal"] = {
         "kind": "herdr",
-        "surface_ref": "/run/ce/herdr/control.sock",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
         "pane_id": "pane-1",
         "pid": 4242,
     }
@@ -262,7 +262,7 @@ def test_visible_class_with_herdr_terminal_is_refused_pco_049(tmp_path: Path):
     record = valid_pane_record()  # visibility=operator_visible
     record["terminal"] = {
         "kind": "herdr",
-        "surface_ref": "/run/ce/herdr/control.sock",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
         "pane_id": "pane-1",
         "pid": 9,
     }

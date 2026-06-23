@@ -184,7 +184,7 @@ class FakeHerdrSession:
         })
         return HerdrPane(
             pane_id="pane-1",
-            surface_ref=self.socket_path,
+            surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
             pid=4242,
             workspace_id="workspace-1",
         )
@@ -242,16 +242,19 @@ def test_herdr_backend_builds_terminal_record_and_keeps_socket_controller_owned(
         seat_dir=str(tmp_path),
     )
     assert handle.visibility_class == vb.OPERATOR_INSPECTABLE
-    # The terminal record is the herdr surface: the controller-owned socket ref,
-    # herdr pane id, and seat pid. No tmux identity is present.
+    # The terminal record is the herdr surface: an opaque controller-owned
+    # surface ref, herdr pane id, and seat pid. No tmux identity or raw socket
+    # path is present in seat-readable ledger state.
     assert handle.terminal == {
         "kind": "herdr",
-        "surface_ref": "/run/ce/herdr/control.sock",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
         "pane_id": "pane-1",
         "pid": 4242,
     }
+    assert "/run/ce/herdr/control.sock" not in repr(handle.terminal)
     assert isinstance(handle.native, HerdrPane)
-    # The socket is held by the controller-side session, not passed to the seat env.
+    # The raw socket is held by the controller-side session, not passed to the
+    # seat env or leaked into the ledger-visible terminal record.
     assert sessions[0].socket_path == "/run/ce/herdr/control.sock"
     assert sessions[0].spawn_calls == [{
         "command": ["/bin/sh", "wrapper.sh"],

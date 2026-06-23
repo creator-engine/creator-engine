@@ -30,7 +30,7 @@ Per-file purpose (the closed path-set - 20 paths):
 - **`.ce/changelog/ce217-u3-herdr-backend.md`** *(A)* - per-PR changelog fragment.
 - **`.ce/pr-manifests/ce217-u3-herdr-backend.md`** *(A)* - this carrier (self-inclusive).
 - **`schemas/pane-registry.schema.yaml`** *(M)* - add `terminal.kind: herdr` and require `surface_ref`, `pane_id`, and `pid`.
-- **`schemas/seat-lifecycle.schema.yaml`** *(M)* - allow herdr terminal records and their socket/pid identity fields.
+- **`schemas/seat-lifecycle.schema.yaml`** *(M)* - allow herdr terminal records and their opaque surface/pid identity fields.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - add bounded `--terminal-kind herdr` selection and retire the old no-tmux headless PTY route.
 - **`validators/creator_engine_validator/checks/pane_registry.py`** *(M)* - accept herdr as an `operator_inspectable` backing surface.
 - **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - route non-tmux inspectable launch through the registry with pre-side-effect availability refusal.

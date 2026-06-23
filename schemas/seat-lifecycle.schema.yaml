@@ -178,6 +178,10 @@ properties:
       surface_ref:
         type: string
         minLength: 1
+        description: |
+          Per-session surface reference. For herdr this is an opaque
+          controller-owned handle, never the raw substrate-owned control-socket
+          path because lifecycle records are seat-readable ledger state.
       pid:
         oneOf:
           - type: integer

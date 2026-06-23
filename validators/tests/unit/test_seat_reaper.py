@@ -456,7 +456,7 @@ def test_13_herdr_substrate_escalates_until_close_executor_lands(tmp_path):
     disp = _dispatch(run_id)
     disp["terminal"] = {
         "kind": "herdr",
-        "surface_ref": "/run/ce/herdr/control.sock",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
         "pane_id": "pane-1",
         "pid": 4242,
     }

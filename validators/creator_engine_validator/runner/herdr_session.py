@@ -46,6 +46,7 @@ Design invariants this seam will enforce (load-bearing, implemented in U3/U4):
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -86,9 +87,9 @@ class HerdrPane:
 
     Mirrors the shape the U3 :class:`VisibilityBackend` will stamp onto the Pane
     Registry ``terminal`` record (``{kind: herdr, surface_ref, pane_id, pid}``):
-    ``surface_ref`` becomes the herdr control-socket ref (the productized form of
-    #368's reserved ``attach.sock`` ``surface_ref``); ``pane_id`` is herdr's pane
-    identifier; ``pid`` is the seat process herdr owns and the reaper terminates.
+    ``surface_ref`` is an opaque controller-owned surface id, never the raw
+    herdr control-socket path; ``pane_id`` is herdr's pane identifier; ``pid`` is
+    the seat process herdr owns and the reaper terminates.
     """
 
     pane_id: str
@@ -209,6 +210,17 @@ class HerdrSession:
                 return int(value)
         return None
 
+    @staticmethod
+    def _surface_ref(*, workspace_id: str, pane_id: str) -> str:
+        """Return a ledger-safe opaque handle for a herdr pane surface.
+
+        The controller keeps the raw herdr socket path in ``HerdrSession`` and in
+        the private subprocess environment only. Ledger-visible pane records may
+        be read by governed seats, so they carry this opaque id instead.
+        """
+        digest = hashlib.sha256(f"{workspace_id}\0{pane_id}".encode("utf-8")).hexdigest()
+        return f"herdr-surface-{digest[:32]}"
+
     # -- connect ----------------------------------------------------------
     def connect(self) -> None:
         """Open the client connection to the substrate-owned herdr socket.
@@ -298,7 +310,7 @@ class HerdrSession:
         pid = self.run_pane(pane_id=pane_id, command=command, cwd=cwd, env=env)
         return HerdrPane(
             pane_id=pane_id,
-            surface_ref=str(self._socket_path),
+            surface_ref=self._surface_ref(workspace_id=workspace_id, pane_id=pane_id),
             pid=pid,
             workspace_id=workspace_id,
         )

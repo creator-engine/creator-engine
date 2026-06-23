@@ -213,8 +213,9 @@ class HerdrVisibilityBackend(VisibilityBackend):
     CE creates a herdr workspace/pane and runs the sentinel-wrapped seat command
     through :class:`~creator_engine_validator.runner.herdr_session.HerdrSession`.
     The governed seat receives only its normal launch environment; the herdr
-    socket path is held by the controller-side subprocess environment and recorded
-    as the Pane Registry ``surface_ref``.
+    socket path is held by the controller-side subprocess environment only. The
+    Pane Registry ``surface_ref`` is an opaque controller-owned surface id, not
+    the socket path.
     """
 
     terminal_kind = HERDR_TERMINAL_KIND
