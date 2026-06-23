@@ -61,6 +61,13 @@ def _desktop_cfg(*sink_ids):
     )
 
 
+def _webhook_cfg(url="https://hook/x", payload="pointer"):
+    return NotifyConfig(
+        classes={"ratify-needed": "immediate", "clear": "immediate"},
+        sinks=(SinkConfig(id="hook", kind="webhook", payload=payload, url=url),),
+    )
+
+
 class _Recorder:
     """A fake subprocess runner recording argv + kwargs, returning a fixed rc."""
 
@@ -460,6 +467,134 @@ def test_cli_once_sync_failure_is_tolerated(tmp_path, capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert out["sync"]["ok"] is False
     assert out["dispatched"] == 0  # nothing local to fire
+
+
+# ---------------------------------------------------------------------------
+# Webhook sink (v3.5 — contact-on-need first-class; Discord/Slack/NanoClaw)
+# ---------------------------------------------------------------------------
+class _WebhookRecorder:
+    """A fake HTTP poster recording (url, body, headers), returning a fixed status."""
+
+    def __init__(self, status=204, raises=None):
+        self.calls: list[tuple[str, bytes, dict]] = []
+        self.status = status
+        self.raises = raises
+
+    def __call__(self, url, body, headers):
+        self.calls.append((url, body, dict(headers)))
+        if self.raises is not None:
+            raise self.raises
+        return self.status
+
+
+def test_webhook_sink_parses_with_url_and_defaults_pointer():
+    cfg = parse_notify_config(
+        {
+            "sinks": [
+                {"id": "discord", "kind": "webhook", "url": "https://discord/webhooks/x"},
+            ]
+        }
+    )
+    sink = cfg.sinks[0]
+    assert sink.kind == "webhook"
+    assert sink.url == "https://discord/webhooks/x"
+    # confidential-by-default off-host transport ⇒ pointer
+    assert sink.payload == "pointer"
+
+
+def test_webhook_sink_requires_a_url():
+    with pytest.raises(NotifyConfigError) as exc:
+        parse_notify_config({"sinks": [{"id": "x", "kind": "webhook"}]})
+    assert "url" in str(exc.value)
+
+
+def test_webhook_sink_rejects_non_http_url():
+    with pytest.raises(NotifyConfigError) as exc:
+        parse_notify_config(
+            {"sinks": [{"id": "x", "kind": "webhook", "url": "file:///etc/passwd"}]}
+        )
+    assert "http" in str(exc.value).lower()
+
+
+def test_webhook_posts_event_json_and_returns_ok_on_2xx():
+    rec = _WebhookRecorder(status=204)
+    event = fold_notify_feed([_esc("esc-a")], [], _webhook_cfg())["pending_events"][0]
+    assert notify_feed.dispatch_webhook("https://hook/x", event, poster=rec) is True
+    url, body, headers = rec.calls[0]
+    assert url == "https://hook/x"
+    assert json.loads(body.decode("utf-8")) == event
+    assert headers.get("Content-Type") == "application/json"
+
+
+def test_webhook_non_2xx_is_ok_false_not_raise():
+    rec = _WebhookRecorder(status=500)
+    assert notify_feed.dispatch_webhook("https://hook/x", {"x": 1}, poster=rec) is False
+
+
+def test_webhook_down_endpoint_is_ok_false_never_crashes_feed():
+    import urllib.error
+
+    rec = _WebhookRecorder(raises=urllib.error.URLError("connection refused"))
+    assert notify_feed.dispatch_webhook("https://hook/x", {"x": 1}, poster=rec) is False
+
+
+def test_webhook_event_for_pointer_sink_carries_no_prose():
+    cfg = _webhook_cfg()  # pointer by default
+    event = fold_notify_feed([_esc("esc-a")], [], cfg)["pending_events"][0]
+    blob = json.dumps(event)
+    assert "decide-esc-a" not in blob and "title-esc-a" not in blob
+
+
+def test_run_once_dispatches_webhook_sink(tmp_path):
+    poster = _WebhookRecorder(status=200)
+    cfg = _webhook_cfg()
+    out = notify_feed.run_once(
+        tmp_path, config=cfg, escalations=[_esc("esc-a")], poster=poster
+    )
+    assert out["dispatched"] == 1 and out["ok"] == 1
+    assert len(poster.calls) == 1
+    assert json.loads(poster.calls[0][1].decode("utf-8"))["escalation_id"] == "esc-a"
+
+
+# ---------------------------------------------------------------------------
+# REDACTION GUARDRAIL — a webhook is a live secret-leak surface (NON-NEGOTIABLE)
+# ---------------------------------------------------------------------------
+_SECRET = "ghp_SUPERSECRETtoken_must_never_leave_CE_0123456789"
+
+
+def test_webhook_payload_never_carries_injected_secret(tmp_path):
+    """An escalation whose confidential prose contains a secret value must NOT reach
+    the webhook (pointer sink default): the body posted to the wire carries no secret.
+    """
+    poster = _WebhookRecorder(status=204)
+    esc = _esc(
+        "esc-a",
+        title=f"deploy with token {_SECRET}",
+        decision_needed=f"approve secret {_SECRET}",
+        recommendation=f"use {_SECRET}",
+        source_ref="https://forge/issues/7",
+    )
+    notify_feed.run_once(tmp_path, config=_webhook_cfg(), escalations=[esc], poster=poster)
+    assert poster.calls, "webhook must have fired"
+    wire = poster.calls[0][1].decode("utf-8")
+    assert _SECRET not in wire, "the injected secret leaked onto the webhook wire"
+
+
+def test_webhook_full_mode_still_shapes_only_known_fields(tmp_path):
+    """Even a `full`-payload webhook must emit ONLY the shape_payload fields — never a
+    raw escalation record (no extra keys can smuggle a secret-bearing field out)."""
+    poster = _WebhookRecorder(status=204)
+    esc = _esc("esc-a", secret_blob=_SECRET, internal_token=_SECRET)
+    cfg = NotifyConfig(
+        classes={"ratify-needed": "immediate", "clear": "immediate"},
+        sinks=(SinkConfig(id="hook", kind="webhook", payload="full", url="https://hook/x"),),
+    )
+    notify_feed.run_once(tmp_path, config=cfg, escalations=[esc], poster=poster)
+    wire = json.loads(poster.calls[0][1].decode("utf-8"))
+    # the wire is a pending-event wrapper; its payload keys are the shaped allow-list
+    assert "secret_blob" not in json.dumps(wire)
+    assert "internal_token" not in json.dumps(wire)
+    assert _SECRET not in json.dumps(wire)
 
 
 # ---------------------------------------------------------------------------
