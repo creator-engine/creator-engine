@@ -29,6 +29,12 @@ The fix:
   or comm is a `runsc` sentry/gofer host-process (any platform:
   ptrace/systrap/kvm), checked ABOVE the bwrap fallthrough. The existing
   cgroup/mount-root `runsc` markers are still honoured (defense in depth).
+- The argv0/comm match is an EXACT-basename allowlist
+  (`runsc`, `runsc-sandbox`, `runsc-gofer`), never a `startswith` prefix. On
+  this fail-closed attestation surface an unrelated `runsc`-prefixed process
+  (e.g. `runscape`, `runscan`, `runsc-foo`) must NOT classify as gVisor: a false
+  gVisor positive would strip the host-namespace gaps and could yield a false
+  `contained=true`.
 - For a recognized gVisor backend the verdict reflects the gVisor model: the
   isolation boundary is the userspace SENTRY (it intercepts syscalls), so the
   `runsc-sandbox` host-process legitimately SHARES host pid/user namespaces and

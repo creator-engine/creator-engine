@@ -43,6 +43,14 @@ _FULL_CAP_MASKS = {
     0x000001FFFFFFFFFF,  # 41-bit (caps up to CAP_CHECKPOINT_RESTORE)
 }
 
+# The EXACT argv0/comm basenames of the real gVisor sentry/gofer host-processes.
+# This is a fail-closed attestation surface, so the gVisor signal is matched on
+# an exact-basename allowlist (never a `startswith` prefix): an unrelated process
+# like ``runscape`` / ``runscan`` / ``runsc-foo`` must NOT classify as gVisor,
+# because a false gVisor positive strips host-namespace gaps and can produce a
+# false ``contained=True``.
+_RUNSC_SENTRY_BASENAMES = frozenset({"runsc", "runsc-sandbox", "runsc-gofer"})
+
 
 # --------------------------------------------------------------------------- #
 # Proc reader seam (the single point that touches the real filesystem).
@@ -196,16 +204,22 @@ def _cmdline_is_runsc(cmdline: str | None, comm: str | None) -> bool:
     ...``). gVisor's isolation boundary is the userspace SENTRY, so this host
     process legitimately shares host pid/user namespaces and has root=``/`` —
     the cgroup is a plain ``docker-<id>.scope`` with no runsc marker. We match
-    any ``runsc`` argv0/comm across every platform (ptrace/systrap/kvm).
+    the ``runsc``/``runsc-sandbox``/``runsc-gofer`` argv0/comm across every
+    platform (ptrace/systrap/kvm).
     """
     for hay in (cmdline, comm):
         if not hay:
             continue
         token = hay.strip().lower().split(None, 1)[0] if hay.strip() else ""
-        # Match the argv0/comm basename: runsc, runsc-sandbox, runsc-gofer, and
-        # any runsc-* helper, whether bare or path-qualified (e.g. /usr/bin/runsc).
+        # Match the argv0/comm basename EXACTLY against the real gVisor sentry
+        # process names (``runsc``, ``runsc-sandbox``, ``runsc-gofer``), whether
+        # bare or path-qualified (e.g. /usr/bin/runsc-sandbox) and with trailing
+        # args already stripped off the argv0 token. A `startswith` prefix would
+        # be too broad for this fail-closed surface: an unrelated `runscape` /
+        # `runscan` / `runsc-foo` process must NOT classify as gVisor, because a
+        # false gVisor positive strips host-ns gaps into a false "contained".
         base = token.rsplit("/", 1)[-1]
-        if base == "runsc" or base.startswith("runsc-") or base.startswith("runsc"):
+        if base in _RUNSC_SENTRY_BASENAMES:
             return True
     return False
 

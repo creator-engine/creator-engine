@@ -262,6 +262,52 @@ def test_gvisor_systrap_platform_argv_classifies_gvisor(tmp_path):
     assert verdict.contained is True
 
 
+def test_runsc_prefixed_imposter_does_not_classify_gvisor(tmp_path):
+    """A `runscape`-style imposter must NOT be classified as gVisor.
+
+    Regression guard for the over-broad matcher: the old detector treated any
+    argv0/comm basename that merely *started with* `runsc` (e.g. `runscape`,
+    `runscan`, `runsc-foo`) as the gVisor sentry. On this fail-closed
+    attestation surface that is dangerous: a false gVisor positive sends the
+    verdict down the gVisor branch, which strips the ns:pid:host / ns:user:host
+    / root:host gaps and can mark `contained=true` on only a non-host cgroup +
+    dropped caps. Here we give a `runscape` process the otherwise-gVisor-looking
+    shape (host pid/user ns, non-host docker cgroup, dropped caps, root=/) and
+    assert it does NOT classify as gVisor and does NOT receive gVisor
+    gap-stripping — it falls through to the normal namespace-comparison
+    fail-closed path (mnt shared with host -> not contained).
+    """
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "4040",
+        ns={
+            "mnt": "mnt:[4026531840]",  # SHARES host mnt ns (imposter is on host)
+            "pid": "pid:[4026531836]",  # shares host pid ns
+            "net": "net:[4026532742]",
+            "user": "user:[4026531837]",  # shares host user ns
+        },
+        # Otherwise gVisor-looking: non-host docker scope + dropped caps + root=/.
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="/usr/bin/runscape --foo --bar",
+        comm="runscape",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("4040", reader=reader, host_pid="1")
+
+    # The imposter must NOT be classified as gVisor...
+    assert verdict.backend != "gvisor"
+    # ...and must NOT get gVisor gap-stripping: the host-shared namespaces stay
+    # visible as gaps and drive the normal fail-closed decision.
+    assert "ns:pid:host" in verdict.gaps
+    assert "ns:user:host" in verdict.gaps
+    assert "root:host" in verdict.gaps
+    assert verdict.contained is False
+    assert "fail-closed" in verdict.reason
+
+
 def test_undeterminable_process_fails_closed(tmp_path):
     """No readable /proc for the target -> fail-closed contained=false."""
     _host_proc(tmp_path)
