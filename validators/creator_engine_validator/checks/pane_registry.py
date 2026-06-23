@@ -183,7 +183,7 @@ def _role_status_errors(record: dict[str, Any], path: Path) -> list[ValidationEr
 _VISIBILITY_SURFACE_KINDS: dict[str, tuple[str, tuple[str, ...]]] = {
     # visibility class -> (required terminal.kind, required terminal identity fields)
     "operator_visible": ("tmux", ("session_id", "window_id", "pane_id")),
-    "operator_inspectable": ("headless", ("surface_ref",)),
+    "operator_inspectable": ("headless", ("surface_ref", "pid")),
 }
 
 
@@ -192,8 +192,8 @@ def _visibility_surface_errors(record: dict[str, Any], path: Path) -> list[Valid
 
     ce-ops#207 W2′: generalizes the former tmux-only gate. ``operator_visible``
     still requires a tmux pane (session/window/pane ids); ``operator_inspectable``
-    requires a headless surface (a ``surface_ref`` for the CE-owned PTY). An
-    unknown visibility class is refused (fail-closed).
+    requires a headless surface (a ``surface_ref`` and the seat ``pid`` for the
+    CE-owned PTY). An unknown visibility class is refused (fail-closed).
     """
     terminal = record.get("terminal")
     if not isinstance(terminal, dict):

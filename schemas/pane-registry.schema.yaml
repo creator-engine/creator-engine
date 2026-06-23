@@ -179,7 +179,7 @@ allOf:
     then:
       properties:
         terminal:
-          required: [surface_ref]
+          required: [surface_ref, pid]
   - if:
       properties:
         status:

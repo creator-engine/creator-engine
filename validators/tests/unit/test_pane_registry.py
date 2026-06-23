@@ -198,6 +198,21 @@ def test_headless_inspectable_requires_surface_ref_pco_049(tmp_path: Path):
     assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
 
 
+def test_headless_inspectable_requires_pid_pco_046_and_pco_049(tmp_path: Path):
+    # ce-ops#207 W2′ C3: a headless/operator_inspectable PTY record carrying a
+    # surface_ref but NO pid is malformed. The seat pid is part of the headless
+    # surface identity (control-socket ref + pid), so both the schema conditional
+    # and the validator predicate must reject the missing-pid record.
+    record = valid_headless_pane_record()
+    del record["terminal"]["pid"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    # Schema conditional requires terminal.pid for the headless kind.
+    assert any(error.code == CODE_SCHEMA for error in errors)
+    # Validator surface predicate mirrors the schema and flags the missing pid.
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
 def test_inspectable_class_with_tmux_terminal_is_refused_pco_049(tmp_path: Path):
     # The declared visibility class must match its backing terminal kind.
     record = valid_headless_pane_record()
