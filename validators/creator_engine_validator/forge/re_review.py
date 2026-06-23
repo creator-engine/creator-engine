@@ -141,7 +141,14 @@ def _gh_json(runner: GhRunner, method: str, path: str, body: Mapping | None = No
     if proc.returncode != 0:
         raise ForgeConfigError(f"gh api {method} {path} failed: {(proc.stderr or '').strip()[:200]}")
     out = (proc.stdout or "").strip()
-    return json.loads(out) if out else None
+    if not out:
+        raise ForgeConfigError(f"gh api {method} {path} returned empty stdout (fail-closed)")
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise ForgeConfigError(
+            f"gh api {method} {path} returned non-JSON stdout (fail-closed)"
+        ) from exc
 
 
 #: Reviews fetched per page. GitHub caps ``per_page`` at 100; we walk every page
@@ -188,10 +195,8 @@ def list_reviews(repo: str, pr_number: int, *, gh_runner: GhRunner | None = None
         )
         if not isinstance(raw, list):
             # A non-list body (e.g. an error object or null) means we cannot
-            # prove the history; treat an empty/None body as a terminal page,
-            # but a malformed mapping as fail-closed.
-            if raw is None:
-                break
+            # prove the history; only a real JSON array, including [], can be
+            # a terminal reviews page.
             raise ForgeConfigError(
                 f"reviews page {page} for {repo}#{pr_number} returned a non-array body — "
                 f"cannot prove complete review history (fail-closed)"

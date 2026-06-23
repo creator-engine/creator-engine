@@ -180,10 +180,12 @@ class PagedRunner:
     def __init__(self, pages):
         self._pages = pages  # dict[int, list[dict]]
         self.requested_pages: list[int] = []
+        self.dismissals: list[tuple[str, str | None]] = []
 
     def __call__(self, argv, input_text=None):
         joined = " ".join(argv)
         if "dismissals" in joined:
+            self.dismissals.append((joined, input_text))
             return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
         if "/reviews" in joined:
             # extract page=N
@@ -193,6 +195,8 @@ class PagedRunner:
                     page = int(part.split("=", 1)[1])
             self.requested_pages.append(page)
             payload = self._pages.get(page, [])
+            if isinstance(payload, str):
+                return subprocess.CompletedProcess(argv, 0, stdout=payload, stderr="")
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unexpected call")
 
@@ -212,6 +216,18 @@ def test_list_reviews_walks_all_pages():
     assert reviews[-1].reviewer == "ce-dev-1"
 
 
+def test_list_reviews_allows_empty_json_array_terminal_page():
+    per = rr._REVIEWS_PER_PAGE
+    pages = {
+        1: _page_of(per, start_id=1500, state="COMMENTED", commit="old1", who="bot"),
+        2: [],
+    }
+    runner = PagedRunner(pages)
+    reviews = rr.list_reviews("o/r", 7, gh_runner=runner)
+    assert len(reviews) == per
+    assert runner.requested_pages == [1, 2]
+
+
 def test_reconcile_sees_later_page_objection_not_dismissed():
     # Regression: a stale CR on page 1 must NOT be dismissed when the reviewer's
     # OWN later (live) objection lives on page 2 — incomplete state must not
@@ -229,6 +245,30 @@ def test_reconcile_sees_later_page_objection_not_dismissed():
     by = {v.review.reviewer: v for v in report.verdicts}
     assert by["ce-dev-3"].verdict == rr.CURRENT  # live objection on head, complete history
     assert report.dismissed == ()
+
+
+def test_reconcile_apply_fails_closed_on_empty_later_page_stdout_without_dismiss():
+    per = rr._REVIEWS_PER_PAGE
+    page1 = _page_of(per, start_id=3000, state="COMMENTED", commit="old1", who="bot")
+    page1[0] = {"id": 3000, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}}
+    page1[1] = {"id": 3001, "state": "APPROVED", "commit_id": HEAD, "user": {"login": "ce-dev-1"}}
+    runner = PagedRunner({1: page1, 2: ""})
+    with pytest.raises(ForgeConfigError, match="empty stdout"):
+        rr.reconcile_reviews("o/r", 7, HEAD, gh_runner=runner, apply=True)
+    assert runner.requested_pages == [1, 2]
+    assert runner.dismissals == []
+
+
+def test_reconcile_apply_fails_closed_on_non_json_later_page_stdout_without_dismiss():
+    per = rr._REVIEWS_PER_PAGE
+    page1 = _page_of(per, start_id=4000, state="COMMENTED", commit="old1", who="bot")
+    page1[0] = {"id": 4000, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}}
+    page1[1] = {"id": 4001, "state": "APPROVED", "commit_id": HEAD, "user": {"login": "ce-dev-1"}}
+    runner = PagedRunner({1: page1, 2: "not json"})
+    with pytest.raises(ForgeConfigError, match="non-JSON stdout"):
+        rr.reconcile_reviews("o/r", 7, HEAD, gh_runner=runner, apply=True)
+    assert runner.requested_pages == [1, 2]
+    assert runner.dismissals == []
 
 
 def test_list_reviews_fails_closed_when_page_ceiling_exceeded(monkeypatch):
