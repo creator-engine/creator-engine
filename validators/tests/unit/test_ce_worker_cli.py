@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli, worker_runtime
+from creator_engine_validator import worker_spawn
 
 
 _POLICY_SHA = "a" * 64
@@ -58,6 +59,22 @@ class FakeBroker:
     def revoke(self, broker_grant_id):
         self.revoked.append(broker_grant_id)
         return "2026-05-25T06:00:00Z"
+
+
+class FakeSpawnLauncher:
+    def __init__(self):
+        self.calls = []
+
+    def launch(self, plan):
+        self.calls.append(plan)
+        return worker_spawn.WorkerLaunchOutcome(
+            spawned=True,
+            attached=False,
+            terminal={"kind": "tmux", "session_id": plan.worker_id, "window_id": "worker"},
+            events_ref=f"{plan.worktree_path}/.ce/state/workers/{plan.worker_id}/events.jsonl",
+            seat_record_ref=f"{plan.worktree_path}/.ce/state/active-work-ledger/seats/{plan.worker_id}.yaml",
+            seat_lifecycle_state="active",
+        )
 
 
 def _write(path: Path, record: dict) -> Path:
@@ -189,3 +206,63 @@ def test_worker_help_is_reachable():
     with pytest.raises(SystemExit) as exc:
         ce_cli.main(["worker"])
     assert exc.value.code == 0
+
+
+def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    worktree = tmp_path / "worker"
+    worktree.mkdir()
+
+    rc = ce_cli.main([
+        "worker", "spawn",
+        "--role", "researcher",
+        "--harness", "claude",
+        "--worktree", str(worktree),
+        "--scope-id", "ce-ops#163",
+        "--brief", "research without recording this body",
+        "--dry-run",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["written"] is False
+    assert payload["record"]["role"] == "researcher"
+    assert payload["record"]["lane_kind"] == "read-only"
+    assert "research without recording this body" not in str(payload)
+    assert not (worktree / ".ce/state/workers").exists()
+
+
+def test_worker_spawn_live_uses_injected_launcher_and_scrubs_tokens(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    worktree = tmp_path / "worker"
+    worktree.mkdir()
+    launcher = FakeSpawnLauncher()
+    monkeypatch.setattr(ce_cli, "_make_worker_spawn_launcher", lambda: launcher)
+    monkeypatch.setenv("GH_TOKEN", "ghp_super_secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "github_pat_secret")
+
+    rc = ce_cli.main([
+        "worker", "spawn",
+        "--role", "implementer",
+        "--harness", "claude",
+        "--worktree", str(worktree),
+        "--scope-id", "ce-ops#163",
+        "--brief", "build without recording this body",
+        "--parent-id", "ce-dev-4",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["written"] is True
+    assert len(launcher.calls) == 1
+    assert "GH_TOKEN" not in launcher.calls[0].child_env
+    assert "GITHUB_TOKEN" not in launcher.calls[0].child_env
+    record_path = Path(payload["record_path"])
+    record_text = record_path.read_text(encoding="utf-8")
+    assert "ghp_super_secret" not in record_text
+    assert "github_pat_secret" not in record_text
+    assert "build without recording this body" not in record_text

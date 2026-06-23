@@ -98,6 +98,11 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "pcl_runtime",
         "side_effect_ledger_runtime",
         "worker_runtime",
+        # ce-ops#163 REQ-2: first-class worker-spawn primitive. This is a v1
+        # coordination/launcher surface over ``launch_runtime``; it imports no v3
+        # module and leaves later foreman injection/enforcement gates as data
+        # consumers of the worker artifact.
+        "worker_spawn",
     }
 )
 
