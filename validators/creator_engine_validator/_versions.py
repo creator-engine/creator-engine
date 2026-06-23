@@ -102,6 +102,11 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "packaging_runtime",
         "ce_provenance",
         "pcl_runtime",
+        # ce-contained-controller-push-model: host-side publish chokepoint for
+        # contained seats' commit-only branches. Driven by the v1 `ce` kernel;
+        # imports no v3 forge modules, with git push authority behind an
+        # injectable host runner and Side-Effect Ledger audit trail.
+        "publish_gate",
         "side_effect_ledger_runtime",
         "worker_runtime",
         # ce-ops#163 REQ-2: first-class worker-spawn primitive. This is a v1
