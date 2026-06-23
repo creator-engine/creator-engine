@@ -30,8 +30,17 @@ Detection is read-only and side-effect-free; no network call is made.
 """
 from __future__ import annotations
 
+import json
 import os
+import stat
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
+
+HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
+RING1_GOVERNED_POSTURE = "governed"
+RING1_DENY_EXIT_CODE = 121
 
 # A full set of effective capabilities (CapEff) on a 64-cap kernel. A host shell
 # typically carries the full bounding/effective mask; a sandboxed process drops
@@ -101,6 +110,24 @@ class ProcReader:
                 return fh.read()
         except OSError:
             return None
+
+    def environ(self, pid: int | str) -> dict[str, str] | None:
+        path = os.path.join(self.root, str(pid), "environ")
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return None
+        env: dict[str, str] = {}
+        for part in raw.replace(b"\n", b"\0").split(b"\0"):
+            if not part or b"=" not in part:
+                continue
+            key, value = part.split(b"=", 1)
+            try:
+                env[key.decode("utf-8")] = value.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        return env
 
     def root_link(self, pid: int | str) -> str | None:
         """``/proc/<pid>/root`` target (mount root the process sees)."""
@@ -314,6 +341,227 @@ class ContainmentVerdict:
             "gaps": list(self.gaps),
             "reason": self.reason,
         }
+
+
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+DEFAULT_RING1_PROBE_ARGS = (
+    "push",
+    "--dry-run",
+    "origin",
+    "HEAD:refs/heads/__ce_ring1_probe__",
+)
+
+
+def _fail_herdr(reason: str, *, pane_id: str | None = None, evidence: Sequence[str] = ()) -> dict:
+    return {
+        "live": False,
+        "pane_id": pane_id,
+        "evidence": list(evidence),
+        "reason": reason,
+    }
+
+
+def probe_herdr_session(
+    *,
+    socket_path: str | None,
+    pane_id: str | None,
+    herdr_binary: str = "herdr",
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 5.0,
+) -> dict:
+    if not socket_path or not pane_id:
+        return _fail_herdr("missing herdr socket/pane evidence", pane_id=pane_id)
+    run = runner or subprocess.run
+    argv = [
+        herdr_binary,
+        "wait",
+        "agent-status",
+        "--pane",
+        pane_id,
+        "--status",
+        "ready",
+        "--json",
+    ]
+    try:
+        completed = run(
+            argv,
+            env={**os.environ, HERDR_SOCKET_ENV: socket_path},
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _fail_herdr(
+            f"herdr liveness unprobeable: {exc}",
+            pane_id=pane_id,
+            evidence=["herdr command failed to start"],
+        )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        return _fail_herdr(
+            "herdr liveness probe failed" + (f": {detail[:200]}" if detail else ""),
+            pane_id=pane_id,
+            evidence=[f"exit={completed.returncode}"],
+        )
+    try:
+        payload = json.loads((completed.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        return _fail_herdr(
+            "herdr liveness probe returned non-json output",
+            pane_id=pane_id,
+            evidence=["invalid-json"],
+        )
+    if not isinstance(payload, Mapping):
+        return _fail_herdr(
+            "herdr liveness probe returned non-object output",
+            pane_id=pane_id,
+            evidence=["non-object-json"],
+        )
+    observed_pane = payload.get("pane_id") or payload.get("pane") or pane_id
+    if payload.get("status") == "ready" and observed_pane == pane_id:
+        return {
+            "live": True,
+            "pane_id": pane_id,
+            "evidence": ["herdr wait agent-status ready"],
+            "reason": "herdr pane answered ready over controller socket",
+        }
+    return _fail_herdr(
+        "herdr pane did not report ready status",
+        pane_id=pane_id,
+        evidence=[f"status={payload.get('status')!r}", f"pane_id={observed_pane!r}"],
+    )
+
+
+def _fail_ring1(
+    reason: str,
+    *,
+    tool: str,
+    evidence: Sequence[str] = (),
+    shim_path: str | None = None,
+) -> dict:
+    return {
+        "enforced": False,
+        "tool": tool,
+        "shim_path": shim_path,
+        "evidence": list(evidence),
+        "reason": reason,
+    }
+
+
+def _which_from_path(tool: str, path_value: str) -> str | None:
+    for entry in path_value.split(os.pathsep):
+        if not entry:
+            continue
+        candidate = Path(entry) / tool
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def _private_owned_dir(path: str) -> bool:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
+        return False
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return False
+    return (stat.S_IMODE(st.st_mode) & 0o077) == 0
+
+
+def probe_ring1_enforcement(
+    pid: int | str,
+    *,
+    reader: ProcReader | None = None,
+    tool: str = "git",
+    probe_args: Sequence[str] = DEFAULT_RING1_PROBE_ARGS,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 5.0,
+) -> dict:
+    reader = reader or ProcReader()
+    env = reader.environ(pid)
+    if env is None:
+        return _fail_ring1("target environment unreadable", tool=tool)
+    if env.get("CE_RING1_POSTURE") != RING1_GOVERNED_POSTURE:
+        return _fail_ring1(
+            "target environment does not carry governed Ring-1 posture",
+            tool=tool,
+            evidence=[f"posture={env.get('CE_RING1_POSTURE')!r}"],
+        )
+    path_value = env.get("PATH")
+    if not path_value:
+        return _fail_ring1("target environment has no PATH", tool=tool)
+    shim_path = _which_from_path(tool, path_value)
+    if shim_path is None:
+        return _fail_ring1("guarded tool not found on target PATH", tool=tool)
+    shim_dir = str(Path(shim_path).parent)
+    if not _private_owned_dir(shim_dir):
+        return _fail_ring1(
+            "guarded tool path is not in a private owner-only shim directory",
+            tool=tool,
+            shim_path=shim_path,
+            evidence=[f"shim_dir={shim_dir}"],
+        )
+
+    run = runner or subprocess.run
+    run_env = dict(os.environ)
+    run_env.update(env)
+    try:
+        completed = run(
+            [shim_path, *probe_args],
+            env=run_env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _fail_ring1(
+            f"Ring-1 enforcement unprobeable: {exc}",
+            tool=tool,
+            shim_path=shim_path,
+            evidence=["shim execution failed"],
+        )
+
+    evidence = ["governed target env", "private shim path", f"exit={completed.returncode}"]
+    if completed.returncode == RING1_DENY_EXIT_CODE:
+        return {
+            "enforced": True,
+            "tool": tool,
+            "shim_path": shim_path,
+            "evidence": evidence,
+            "reason": "Ring-1 shim denied probe command fail-closed",
+        }
+    detail = (completed.stderr or completed.stdout or "").strip()
+    return _fail_ring1(
+        "Ring-1 probe command was not denied" + (f": {detail[:200]}" if detail else ""),
+        tool=tool,
+        shim_path=shim_path,
+        evidence=evidence,
+    )
+
+
+def attestation_payload(
+    verdict: ContainmentVerdict,
+    *,
+    herdr_session: Mapping[str, object],
+    ring1_enforcement: Mapping[str, object],
+) -> dict:
+    payload = dict(verdict.payload)
+    payload.update(
+        {
+            "attested": (
+                verdict.contained is True
+                and herdr_session.get("live") is True
+                and ring1_enforcement.get("enforced") is True
+            ),
+            "herdr_session": dict(herdr_session),
+            "ring1_enforcement": dict(ring1_enforcement),
+        }
+    )
+    return payload
 
 
 _NAMESPACES = ("mnt", "pid", "net", "user")

@@ -101,6 +101,9 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "integration_queue_dry_run",
         "packaging_runtime",
         "ce_provenance",
+        # ce-ops#222: fleet-wide containment attestation command. A v1 kernel
+        # CLI runtime over shared probe helpers; imports no v3 module.
+        "containment_status",
         "pcl_runtime",
         # ce-contained-controller-push-model: host-side publish chokepoint for
         # contained seats' commit-only branches. Driven by the v1 `ce` kernel;

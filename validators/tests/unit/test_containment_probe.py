@@ -18,6 +18,7 @@ The three load-bearing cases (ce-ops#221):
 from __future__ import annotations
 
 import json
+import stat
 
 import pytest
 
@@ -33,6 +34,16 @@ _DROPPED_CAP = "00000000a80425fb"  # typical docker default-cap effective set
 def _write(path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_bytes(path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def _write_executable(path, content: str) -> None:
+    _write(path, content)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
 def _make_proc(
@@ -436,6 +447,74 @@ def test_cli_gvisor_process_exits_zero(tmp_path, capsys):
     assert rc == 0
     assert out["contained"] is True
     assert out["backend"] == "gvisor"
+
+
+def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, capsys):
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "5151",
+        ns={
+            "mnt": "mnt:[4026532500]",
+            "pid": "pid:[4026532501]",
+            "net": "net:[4026532502]",
+            "user": "user:[4026532503]",
+        },
+        cgroup="0::/system.slice/runsc-sandbox.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/run/runsc/rootfs",
+    )
+    shim_dir = tmp_path / "ring1-shim"
+    shim_dir.mkdir()
+    shim_dir.chmod(0o700)
+    _write_executable(
+        shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _write_bytes(
+        tmp_path / "5151" / "environ",
+        (
+            f"PATH={shim_dir}:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={tmp_path / 'ring1-args'}\0"
+        ).encode("utf-8"),
+    )
+    herdr = tmp_path / "herdr"
+    _write_executable(
+        herdr,
+        "#!/usr/bin/env sh\n"
+        "printf '{\"status\":\"ready\",\"pane_id\":\"%s\"}\\n' \"$4\"\n",
+    )
+
+    rc = ce_cli.main(
+        [
+            "containment-probe",
+            "5151",
+            "--proc-root",
+            str(tmp_path),
+            "--host-pid",
+            "1",
+            "--herdr-socket",
+            str(tmp_path / "control.sock"),
+            "--herdr-pane-id",
+            "pane-1",
+            "--herdr-binary",
+            str(herdr),
+            "--json",
+        ]
+    )
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert out["contained"] is True
+    assert out["attested"] is True
+    assert out["herdr_session"]["live"] is True
+    assert out["ring1_enforcement"]["enforced"] is True
+    assert (tmp_path / "ring1-args").read_text(encoding="utf-8").strip().startswith(
+        "push --dry-run"
+    )
 
 
 def test_cli_undeterminable_fails_closed(tmp_path, capsys):

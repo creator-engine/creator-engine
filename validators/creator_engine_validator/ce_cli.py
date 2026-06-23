@@ -46,6 +46,7 @@ ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
+ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -77,6 +78,7 @@ from . import (
     brain_probe,
     brain_runtime,
     containment_probe,
+    containment_status,
     brain_ingest_runtime,
     brain_recall,
     brain_recall_surface,
@@ -980,6 +982,76 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="json_output",
         help="emit the machine-readable JSON verdict",
+    )
+    containment.add_argument(
+        "--herdr-socket",
+        default=None,
+        help="controller-held herdr socket path to probe for per-seat liveness",
+    )
+    containment.add_argument(
+        "--herdr-pane-id",
+        default=None,
+        help="herdr pane id to probe for agent-status readiness",
+    )
+    containment.add_argument(
+        "--herdr-binary",
+        default="herdr",
+        help="herdr CLI binary used for the liveness probe (default: herdr)",
+    )
+    containment.add_argument(
+        "--ring1-tool",
+        default="git",
+        help="Ring-1 guarded tool to probe via the target process PATH (default: git)",
+    )
+
+    containment_status_cmd = groups.add_parser(
+        "containment-status",
+        help="probe containment for a fleet of seats from live pids (fail-closed)",
+    )
+    containment_status_cmd.add_argument(
+        "--seat",
+        action="append",
+        dest="containment_seats",
+        default=[],
+        help="repeatable seat id or seat=pid binding; comma-separated values allowed",
+    )
+    containment_status_cmd.add_argument(
+        "--registry",
+        action="append",
+        dest="containment_registries",
+        default=[],
+        help="repeatable registry file/dir containing pane or seat-lifecycle records",
+    )
+    containment_status_cmd.add_argument(
+        "--proc-root",
+        default="/proc",
+        help="proc tree root to read (default: /proc; override for fixtures)",
+    )
+    containment_status_cmd.add_argument(
+        "--host-pid",
+        default="1",
+        help="reference host pid to compare namespaces/root against (default: 1)",
+    )
+    containment_status_cmd.add_argument(
+        "--herdr-socket",
+        default=None,
+        help="controller-held herdr socket path to probe herdr seats",
+    )
+    containment_status_cmd.add_argument(
+        "--herdr-binary",
+        default="herdr",
+        help="herdr CLI binary used for liveness probes (default: herdr)",
+    )
+    containment_status_cmd.add_argument(
+        "--ring1-tool",
+        default="git",
+        help="Ring-1 guarded tool to probe via each target PATH (default: git)",
+    )
+    containment_status_cmd.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit the machine-readable JSON fleet status",
     )
 
     publish_branch_cmd = groups.add_parser(
@@ -2795,8 +2867,23 @@ def _containment_probe(args) -> int:
     verdict = containment_probe.probe_containment(
         args.pid, reader=reader, host_pid=args.host_pid
     )
+    herdr = containment_probe.probe_herdr_session(
+        socket_path=getattr(args, "herdr_socket", None),
+        pane_id=getattr(args, "herdr_pane_id", None),
+        herdr_binary=getattr(args, "herdr_binary", "herdr"),
+    )
+    ring1 = containment_probe.probe_ring1_enforcement(
+        args.pid,
+        reader=reader,
+        tool=getattr(args, "ring1_tool", "git"),
+    )
+    payload = containment_probe.attestation_payload(
+        verdict,
+        herdr_session=herdr,
+        ring1_enforcement=ring1,
+    )
     if getattr(args, "json_output", False):
-        print(json.dumps(verdict.payload, indent=2, sort_keys=True))
+        print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(containment_probe.render_human(verdict))
     return 0 if verdict.contained else 1
@@ -2875,6 +2962,23 @@ def _publish_branch(args) -> int:
             file=sys.stderr,
         )
     return 0 if result.ok else 1
+
+
+def _containment_status(args) -> int:
+    status = containment_status.probe_fleet(
+        seat_specs=getattr(args, "containment_seats", ()),
+        registry_paths=getattr(args, "containment_registries", ()),
+        proc_root=args.proc_root,
+        host_pid=args.host_pid,
+        herdr_socket=getattr(args, "herdr_socket", None),
+        herdr_binary=getattr(args, "herdr_binary", "herdr"),
+        ring1_tool=getattr(args, "ring1_tool", "git"),
+    )
+    if getattr(args, "json_output", False):
+        print(containment_status.render_json(status))
+    else:
+        print(containment_status.render_table(status))
+    return 0 if status.ok else 1
 
 
 def _make_gh_runner():
@@ -3477,6 +3581,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _containment_probe(args)
     if args.group == "publish-branch":
         return _publish_branch(args)
+    if args.group == "containment-status":
+        return _containment_status(args)
     if args.group == "init":
         return _init(args)
     if args.group in ("launch", "hud"):
