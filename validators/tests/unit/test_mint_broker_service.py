@@ -5,10 +5,11 @@ The handler is the standing broker's mint endpoint. For each request it:
 1. validates the request shape (repo, installation_id, permissions, caller token);
 2. REJECTS any out-of-ceiling permission BEFORE any GitHub call (G3 — never even attempt an
    admin mint);
-3. runs the S2 binding check (the caller's ``ghu_`` must control the claimed installation);
-4. mints via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition with the
+3. enforces the per-user rate cap;
+4. runs the S2 binding check (the caller's ``ghu_`` must control the claimed installation);
+5. mints via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition with the
    shared-App key behind the openssl signer;
-5. appends a secret-free audit record (reusing ``egress_broker.audit``).
+6. appends a secret-free audit record (reusing ``egress_broker.audit``).
 
 The response carries the minted ``ghs_`` value + expiry; an audit/deny path returns a status
 code and reason. Injectable binding + signer + transport + audit-path seams; ZERO live
@@ -24,9 +25,17 @@ import pytest
 
 from mint_broker.binding import BindingRefused, BindingTransportError
 from mint_broker.config import load_mint_broker_config
+import mint_broker.service as service_mod
 from mint_broker.service import handle_token_request
 
 _MINTED = "ghs_broker_minted_value"
+
+
+@pytest.fixture(autouse=True)
+def _clear_rate_buckets():
+    service_mod._RATE_BUCKETS.clear()
+    yield
+    service_mod._RATE_BUCKETS.clear()
 
 
 def _config(tmp_path, **over):
@@ -180,6 +189,115 @@ def test_out_of_ceiling_scope_is_refused(tmp_path):
     )
     assert resp["status"] == 403
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# rate guard: configured per-user cap enforced before binding/minting
+# ---------------------------------------------------------------------------
+def test_rate_cap_refuses_repeated_mints_beyond_configured_limit(tmp_path):
+    cfg = _config(tmp_path, per_user_rate_cap=2, rate_window_seconds=3600)
+    mint_calls: list = []
+    binding_calls: list = []
+
+    def binding(*_a, **_k):
+        binding_calls.append(1)
+
+    first = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=binding,
+        signer=_signer,
+        transport=_mint_transport(calls=mint_calls),
+    )
+    second = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=binding,
+        signer=_signer,
+        transport=_mint_transport(calls=mint_calls),
+    )
+    third = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=binding,
+        signer=_signer,
+        transport=_mint_transport(calls=mint_calls),
+    )
+
+    assert first["status"] == 200
+    assert second["status"] == 200
+    assert third == {"status": 429, "reason": "rate_limited"}
+    assert len(binding_calls) == 2
+    assert len(mint_calls) == 2
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [r["decision"] for r in records] == ["allow", "allow", "deny"]
+    assert records[-1]["reason"] == "rate_limited"
+
+
+def test_rate_cap_is_per_caller_token_identity(tmp_path):
+    cfg = _config(tmp_path, per_user_rate_cap=1, rate_window_seconds=3600)
+
+    first = handle_token_request(
+        _request(caller_user_token="ghu_caller_one"),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+    second_same_user = handle_token_request(
+        _request(caller_user_token="ghu_caller_one"),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+    other_user = handle_token_request(
+        _request(caller_user_token="ghu_caller_two"),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+
+    assert first["status"] == 200
+    assert second_same_user == {"status": 429, "reason": "rate_limited"}
+    assert other_user["status"] == 200
+
+
+def test_rate_cap_window_expiry_allows_new_mint(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, per_user_rate_cap=1, rate_window_seconds=60)
+    now = [100.0]
+    monkeypatch.setattr(service_mod.time, "monotonic", lambda: now[0])
+
+    first = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+    second = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+    now[0] = 161.0
+    after_window = handle_token_request(
+        _request(),
+        config=cfg,
+        binding_check=_allow_binding,
+        signer=_signer,
+        transport=_mint_transport(),
+    )
+
+    assert first["status"] == 200
+    assert second == {"status": 429, "reason": "rate_limited"}
+    assert after_window["status"] == 200
 
 
 # ---------------------------------------------------------------------------
