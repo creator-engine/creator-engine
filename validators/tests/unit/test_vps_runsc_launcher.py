@@ -98,6 +98,11 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
         "# Nested Codex bubblewrap cannot run inside runsc/gVisor; gVisor is the sandbox.\n"
         'approval_policy = "never"\n'
         'sandbox_mode = "danger-full-access"\n'
+        'model = "gpt-5.5"\n'
+        'model_reasoning_effort = "high"\n'
+        "\n"
+        '[projects."/workspace/creator-engine"]\n'
+        'trust_level = "trusted"\n'
     )
 
 
