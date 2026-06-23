@@ -114,7 +114,9 @@ def test_taxonomy_counts_and_disjoint():
     # (``forge.ruleset``, ``forge.review_submit``, ``forge.auto_merge``): 44 -> 47.
     # ce-ops#157 added the shared-App user-side install discovery
     # (``forge.user_install_discovery``): 47 -> 48.
-    assert len(ver.V3_RUNTIME) == 48
+    # ce-ops#151 added the rebase-aware stale-review reconciler
+    # (``forge.re_review``): 48 -> 49.
+    assert len(ver.V3_RUNTIME) == 49
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
