@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli, worker_runtime
+from creator_engine_validator import worker_spawn
 
 
 _POLICY_SHA = "a" * 64
@@ -58,6 +59,22 @@ class FakeBroker:
     def revoke(self, broker_grant_id):
         self.revoked.append(broker_grant_id)
         return "2026-05-25T06:00:00Z"
+
+
+class FakeSpawnLauncher:
+    def __init__(self):
+        self.calls = []
+
+    def launch(self, plan):
+        self.calls.append(plan)
+        return worker_spawn.WorkerLaunchOutcome(
+            spawned=True,
+            attached=False,
+            terminal={"kind": "tmux", "session_id": plan.worker_id, "window_id": "worker"},
+            events_ref=f"{plan.worktree_path}/.ce/state/workers/{plan.worker_id}/events.jsonl",
+            seat_record_ref=f"{plan.worktree_path}/.ce/state/active-work-ledger/seats/{plan.worker_id}.yaml",
+            seat_lifecycle_state="active",
+        )
 
 
 def _write(path: Path, record: dict) -> Path:
@@ -189,3 +206,82 @@ def test_worker_help_is_reachable():
     with pytest.raises(SystemExit) as exc:
         ce_cli.main(["worker"])
     assert exc.value.code == 0
+
+
+def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    worktree = tmp_path / "worker"
+    worktree.mkdir()
+
+    rc = ce_cli.main([
+        "worker", "spawn",
+        "--role", "researcher",
+        "--harness", "claude",
+        "--worktree", str(worktree),
+        "--scope-id", "ce-ops#163",
+        "--brief", "research without recording this body",
+        "--dry-run",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["written"] is False
+    assert payload["record"]["role"] == "researcher"
+    assert payload["record"]["lane_kind"] == "read-only"
+    assert "research without recording this body" not in str(payload)
+    assert not (worktree / ".ce/state/workers").exists()
+
+
+def test_worker_spawn_live_uses_injected_launcher_and_scrubs_tokens(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    worktree = tmp_path / "worker"
+    worktree.mkdir()
+    controller_home = tmp_path / "controller-home"
+    (controller_home / ".config" / "gh").mkdir(parents=True)
+    (controller_home / ".ssh").mkdir()
+    launcher = FakeSpawnLauncher()
+    monkeypatch.setattr(ce_cli, "_make_worker_spawn_launcher", lambda: launcher)
+    monkeypatch.setenv("HOME", str(controller_home))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(controller_home / ".config" / "gh"))
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(controller_home / ".ssh" / "agent.sock"))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(controller_home / ".aws" / "config"))
+    monkeypatch.setenv("GH_TOKEN", "ghp_super_secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "github_pat_secret")
+
+    rc = ce_cli.main([
+        "worker", "spawn",
+        "--role", "implementer",
+        "--harness", "claude",
+        "--worktree", str(worktree),
+        "--scope-id", "ce-ops#163",
+        "--brief", "build without recording this body",
+        "--parent-id", "ce-dev-4",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["written"] is True
+    assert len(launcher.calls) == 1
+    assert "GH_TOKEN" not in launcher.calls[0].child_env
+    assert "GITHUB_TOKEN" not in launcher.calls[0].child_env
+    assert "GH_CONFIG_DIR" not in launcher.calls[0].child_env
+    assert "SSH_AUTH_SOCK" not in launcher.calls[0].child_env
+    assert "AWS_CONFIG_FILE" not in launcher.calls[0].child_env
+    assert launcher.calls[0].child_env["HOME"] != str(controller_home)
+    assert Path(launcher.calls[0].child_env["HOME"]).is_relative_to(worktree)
+    record_path = Path(payload["record_path"])
+    record_text = record_path.read_text(encoding="utf-8")
+    stdout_text = yaml.safe_dump(payload, sort_keys=True)
+    assert "ghp_super_secret" not in record_text
+    assert "github_pat_secret" not in record_text
+    assert str(controller_home / ".config" / "gh") not in record_text
+    assert str(controller_home / ".ssh" / "agent.sock") not in record_text
+    assert "build without recording this body" not in record_text
+    assert "ghp_super_secret" not in stdout_text
+    assert "github_pat_secret" not in stdout_text
+    assert str(controller_home / ".config" / "gh") not in stdout_text
+    assert str(controller_home / ".ssh" / "agent.sock") not in stdout_text

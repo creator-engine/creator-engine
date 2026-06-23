@@ -13,6 +13,7 @@ ce worker allocate   # start a rootless-Podman worker container bound to a live 
 ce worker terminate  # revoke broker grants, stop the container, write a stopped record
 ce worker gc         # reap container-instance records that outlived a released claim
 ce worker status     # read a local container-instance record
+ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed environment
 ce verify-install    # verify a post-install CE release venv provenance
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
@@ -93,6 +94,7 @@ from . import (
     transcript_archive,
     version,
     work_claims,
+    worker_spawn,
     worker_runtime,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
@@ -115,6 +117,11 @@ def _make_worker_runner():
 def _make_worker_broker():
     """Factory for the worker credential broker (monkeypatchable in tests)."""
     return worker_runtime.NullCredentialBroker()
+
+
+def _make_worker_spawn_launcher():
+    """Factory for the worker-spawn launcher seam (monkeypatchable in tests)."""
+    return worker_spawn.LaunchRuntimeWorkerLauncher()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -405,8 +412,23 @@ def _build_parser() -> argparse.ArgumentParser:
     lv.add_argument("--lane-id", default=None, help="optional: restrict verification to one lane")
     lv.add_argument("--json", action="store_true", dest="json_output")
 
-    worker = groups.add_parser("worker", help="worker isolation runtime (rootless Podman + credential broker)")
+    worker = groups.add_parser("worker", help="worker isolation/spawn runtime")
     worker_sub = worker.add_subparsers(dest="worker_cmd")
+
+    wsp = worker_sub.add_parser("spawn", help="spawn a governed harness-agnostic CE worker")
+    wsp.add_argument("--role", required=True, choices=sorted(worker_spawn.WORKER_ROLES))
+    wsp.add_argument("--harness", required=True, choices=sorted(launch_runtime.SUPPORTED_HARNESSES))
+    wsp.add_argument("--worktree", required=True, help="existing worker worktree path; must differ from the caller cwd")
+    wsp.add_argument("--scope-id", required=True, help="ticket/scope identifier carried into the worker record")
+    prompt = wsp.add_mutually_exclusive_group(required=True)
+    prompt.add_argument("--prompt-file", default=None, help="prompt file consumed by digest/ref; body is not recorded")
+    prompt.add_argument("--brief", default=None, help="inline brief digested but not recorded")
+    wsp.add_argument("--dry-run", action="store_true", help="plan only; no launch and no worker.yaml write")
+    wsp.add_argument("--depth", type=int, default=None, help="worker recursion depth (default: CE_WORKER_DEPTH+1 or 1)")
+    wsp.add_argument("--max-depth", type=int, default=worker_spawn.DEFAULT_MAX_DEPTH, help="fail-closed recursion depth bound")
+    wsp.add_argument("--parent-id", default=None, help="parent/foreman id; defaults from CE_WORKER_ID/CE_FOREMAN_ID/CE_CONTROLLER_ID")
+    wsp.add_argument("--worker-id", default=None, help="optional stable worker id; otherwise derived from value-free inputs")
+    wsp.add_argument("--json", action="store_true", dest="json_output")
 
     wa = worker_sub.add_parser("allocate", help="start a worker container bound to a live claim under a ratified policy")
     wa.add_argument("--policy", required=True, help="path to the ratified worker-container policy record")
@@ -1343,6 +1365,35 @@ def _worker_allocate(args) -> int:
     else:
         print(f"ce worker allocate: started {args.instance_id} -> {result.instance_path}")
         print(f"enforcement_primitive: {result.record['enforcement_primitive']}")
+    return 0
+
+
+def _worker_spawn(args) -> int:
+    try:
+        result = worker_spawn.spawn_worker(
+            role=args.role,
+            harness=args.harness,
+            worktree=args.worktree,
+            scope_id=args.scope_id,
+            prompt_file=args.prompt_file,
+            brief=args.brief,
+            dry_run=args.dry_run,
+            depth=args.depth,
+            max_depth=args.max_depth,
+            parent_id=args.parent_id,
+            worker_id=args.worker_id,
+            parent_worktree=Path.cwd(),
+            launcher=_make_worker_spawn_launcher(),
+        )
+    except worker_spawn.WorkerSpawnError as exc:
+        print(f"ERROR: ce worker spawn refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        verb = "planned" if result.plan.dry_run else "spawned"
+        print(f"ce worker spawn: {verb} {result.plan.worker_id} ({result.plan.role}/{result.plan.harness})")
+        print(f"record: {result.record_path}")
     return 0
 
 
@@ -2987,6 +3038,7 @@ _LEDGER_DISPATCH = {
 }
 
 _WORKER_DISPATCH = {
+    "spawn": _worker_spawn,
     "allocate": _worker_allocate,
     "terminate": _worker_terminate,
     "gc": _worker_gc,

@@ -86,7 +86,9 @@ def test_taxonomy_counts_and_disjoint():
     # substrate the headless backend spawns through) as the 28th: 27 -> 28.
     # ce-ops#197 PR-5 adds ``ce_onboard`` (the ``ce onboard`` first-run
     # orchestrator — thin composition over the v1 kernel surfaces): 28 -> 29.
-    assert len(ver.V1_RUNTIME) == 29
+    # ce-ops#163 REQ-2 adds ``worker_spawn`` as the harness-agnostic worker
+    # primitive over launch_runtime: 29 -> 30.
+    assert len(ver.V1_RUNTIME) == 30
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
@@ -156,6 +158,7 @@ def test_overlap_fires_for_module_in_both_surfaces(monkeypatch, version_boundary
 
 def test_classify_lines():
     assert ver.classify("lane_runtime") == ver.V1
+    assert ver.classify("worker_spawn") == ver.V1
     assert ver.classify("orchestrator") == ver.V3
     assert ver.classify("onboard_apply") == ver.V3
     assert ver.classify("v3_greenfield") == ver.V3

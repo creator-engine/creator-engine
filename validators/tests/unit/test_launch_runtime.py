@@ -93,6 +93,31 @@ class FakeAdapter:
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3", pane_tty="/dev/pts/7", pane_pid=999)
 
 
+class PinningAdapter(FakeAdapter):
+    def __init__(self, *, pane_cwd: str | None = None):
+        super().__init__()
+        self.pane_cwd = pane_cwd
+        self.pinned: dict | None = None
+
+    def ensure_pane(self, *, session, window, command, cwd=None, env=None):
+        self.pinned = {
+            "session": session,
+            "window": window,
+            "command": list(command),
+            "cwd": cwd,
+            "env": dict(env or {}),
+        }
+        self._sessions.add(session)
+        return TmuxPane(
+            session_id="$1",
+            window_id="@2",
+            pane_id="%3",
+            pane_tty="/dev/pts/7",
+            pane_pid=999,
+            pane_cwd=self.pane_cwd,
+        )
+
+
 class Exit127Adapter(FakeAdapter):
     def ensure_pane(self, *, session, window, command):
         pane = super().ensure_pane(session=session, window=window, command=command)
@@ -228,6 +253,40 @@ def test_launch_spawns_visible_controller_seat():
     assert result.spawned is True
     assert adapter.spawned, "controller seat should be spawned in a visible tmux pane"
     assert result.plan.visibility == "operator_visible"
+
+
+def test_launch_pins_cwd_and_env_at_tmux_boundary(tmp_path):
+    adapter = PinningAdapter(pane_cwd=str(tmp_path))
+    result = launch_runtime.launch(
+        harness="claude",
+        session="pinned-seat",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+        launch_cwd=tmp_path,
+        launch_env={"HOME": str(tmp_path / ".ce/state/workers/w/home"), "PATH": "/bin"},
+    )
+
+    assert result.spawned is True
+    assert adapter.pinned is not None
+    assert adapter.pinned["cwd"] == tmp_path
+    assert adapter.pinned["env"] == {
+        "HOME": str(tmp_path / ".ce/state/workers/w/home"),
+        "PATH": "/bin",
+    }
+
+
+def test_launch_refuses_when_pinned_cwd_is_not_verified(tmp_path):
+    adapter = PinningAdapter(pane_cwd=None)
+
+    with pytest.raises(launch_runtime.TmuxPanePinningRefused):
+        launch_runtime.launch(
+            harness="claude",
+            session="unpinned-seat",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            launch_cwd=tmp_path,
+            launch_env={"HOME": str(tmp_path / ".ce/state/workers/w/home")},
+        )
 
 
 def test_launch_refuses_missing_brain_ledger_before_spawn(tmp_path):

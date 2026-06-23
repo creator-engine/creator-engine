@@ -22,10 +22,11 @@ adapter; no secrets or environment values are printed.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from . import (
     _versions,
@@ -56,6 +57,10 @@ class HiddenContinuationRefused(LaunchError):
 
 class TmuxUnavailableError(LaunchError):
     code = "G6-LAUNCH-TMUX-UNAVAILABLE"
+
+
+class TmuxPanePinningRefused(LaunchError):
+    code = "G6-LAUNCH-TMUX-PANE-PINNING-REFUSED"
 
 
 class ResumeTargetMissing(LaunchError):
@@ -345,6 +350,8 @@ def launch(
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
     runtime_policy: Path | str | None = None,
+    launch_cwd: Path | str | None = None,
+    launch_env: Mapping[str, str] | None = None,
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
     cgroupfs_root: Path | str = "/sys/fs/cgroup",
@@ -608,9 +615,27 @@ def launch(
         exports=brain_env,
     )
 
-    pane = tmux_adapter.ensure_pane(
-        session=session, window=window, command=sentinel.pane_command
-    )
+    ensure_kwargs = {"session": session, "window": window, "command": sentinel.pane_command}
+    if launch_cwd is not None:
+        ensure_kwargs["cwd"] = launch_cwd
+    if launch_env is not None:
+        ensure_kwargs["env"] = dict(launch_env)
+    try:
+        pane = tmux_adapter.ensure_pane(**ensure_kwargs)
+    except TypeError as exc:
+        if launch_cwd is not None or launch_env is not None:
+            raise TmuxPanePinningRefused(
+                "tmux adapter does not support launch cwd/env pinning; refusing before "
+                "marking the seat spawned"
+            ) from exc
+        raise
+    if launch_cwd is not None:
+        observed = getattr(pane, "pane_cwd", None)
+        if observed is None or os.path.realpath(str(observed)) != os.path.realpath(str(launch_cwd)):
+            raise TmuxPanePinningRefused(
+                f"tmux pane did not verify requested cwd {str(launch_cwd)!r}; "
+                "refusing before marking the seat spawned"
+            )
     terminal = {
         "kind": "tmux",
         "session_id": pane.session_id,
