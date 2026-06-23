@@ -27,13 +27,14 @@ Per-file purpose:
 - **`validators/creator_engine_validator/runner/__init__.py`** *(M)* - export the new `RunscPlanRejected` API.
 - **`validators/creator_engine_validator/runner/gvisor_proxy_backend.py`** *(M)* - render and validate Docker `runsc-gvproxy-ptrace` plans.
 - **`validators/tests/unit/test_gvisor_proxy_backend.py`** *(M)* - cover Docker argv rendering and fail-closed input validation.
+- **`validators/tests/unit/test_orchestrator.py`** *(M)* - cover registered Docker runtime availability in the orchestrator seam.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=6116ce61d9b965538264a02603123b26ffec1e8e171d59d0bbb744e2a76d458e
+AUTHORIZED_PATHS_SHA256=ffe5bfeb72cfae197484baa920a181541ab58cf02aecf2f5de42feff6010c575
 
 ```text
 .ce/changelog/ce128-docker-runsc-plan.md
@@ -42,4 +43,5 @@ deploy/dgx-runsc/README.md
 validators/creator_engine_validator/runner/__init__.py
 validators/creator_engine_validator/runner/gvisor_proxy_backend.py
 validators/tests/unit/test_gvisor_proxy_backend.py
+validators/tests/unit/test_orchestrator.py
 ```

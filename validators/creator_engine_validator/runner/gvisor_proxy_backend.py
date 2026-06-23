@@ -29,6 +29,7 @@ Defensive only — hardens our own agent runtime; never an offensive capability.
 from __future__ import annotations
 
 import re
+import json
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -377,11 +378,32 @@ class ContainerRunner(Protocol):
 class SubprocessContainerRunner:
     """Default runner: shells out to Docker. Availability-gated; the only live-exec path."""
 
-    def __init__(self, binary: str = DOCKER_BINARY) -> None:
+    def __init__(self, binary: str = DOCKER_BINARY, required_runtime: str = DEFAULT_DOCKER_RUNTIME) -> None:
         self._binary = binary
+        self._required_runtime = required_runtime
 
     def available(self) -> bool:
-        return shutil.which(self._binary) is not None
+        return shutil.which(self._binary) is not None and self._runtime_registered()
+
+    def _runtime_registered(self) -> bool:
+        try:
+            completed = subprocess.run(
+                [self._binary, "info", "--format", "{{json .Runtimes}}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return False
+        if completed.returncode != 0:
+            return False
+        try:
+            runtimes = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(runtimes, dict):
+            return False
+        return self._required_runtime in runtimes
 
     def egress_enforceable(self) -> bool:
         # The v3 capability-separation proxy enforces egress via the translated
@@ -418,7 +440,9 @@ class GvisorProxyBackend(RunnerBackend):
         codex_home_mode: str = "rw",
         tty_flags: Sequence[str] = (),
     ) -> None:
-        self._runner: ContainerRunner = runner if runner is not None else SubprocessContainerRunner()
+        self._runner: ContainerRunner = (
+            runner if runner is not None else SubprocessContainerRunner(required_runtime=runtime_name)
+        )
         self._plans: dict[str, RunscPlan] = {}
         self._plan_kwargs = {
             "uid": uid,
@@ -467,7 +491,11 @@ class GvisorProxyBackend(RunnerBackend):
 
     def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
         plan = self._plans.get(handle.ref)
-        argv = plan.docker_argv(request.command) if plan else (DOCKER_BINARY, "exec", handle.ref, *request.command)
+        if plan is None:
+            raise BackendUnavailable(
+                f"no provisioned Docker/runsc plan for handle {handle.ref!r}; refusing unproven handle"
+            )
+        argv = plan.docker_argv(request.command)
         completed = self._runner.run(argv)
         return RunResult(
             exit_code=completed.returncode,

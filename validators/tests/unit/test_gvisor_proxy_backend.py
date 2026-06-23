@@ -7,6 +7,7 @@ allowlist yields an enforceable deny-by-default proxy config, not a refusal.
 """
 
 import subprocess
+import shutil
 
 import pytest
 
@@ -25,6 +26,7 @@ from creator_engine_validator.runner import (
     RunnerBackend,
     RunscPlan,
     RunscPlanRejected,
+    SubprocessContainerRunner,
     available_backends,
     get_backend,
     translate_to_egress_proxy_config,
@@ -269,6 +271,38 @@ def test_provision_unavailable_runtime_refuses():
         backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-4"))
 
 
+def test_subprocess_runner_unavailable_when_docker_lacks_required_runsc_runtime(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def docker_info_without_runsc(argv, **_kwargs):
+        assert argv == ["docker", "info", "--format", "{{json .Runtimes}}"]
+        return subprocess.CompletedProcess(argv, 0, stdout='{"runc": {"path": "runc"}}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", docker_info_without_runsc)
+
+    runner = SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
+
+    assert runner.available() is False
+
+
+def test_subprocess_runner_available_when_required_runsc_runtime_registered(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def docker_info_with_runsc(argv, **_kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout='{"runc": {"path": "runc"}, "runsc-gvproxy-ptrace": {"path": "runsc"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", docker_info_with_runsc)
+
+    runner = SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
+
+    assert runner.available() is True
+
+
 def test_provision_missing_docker_runsc_inputs_refuses_before_availability_probe():
     fake = FakeRunner(available=True)
     backend = GvisorProxyBackend(runner=fake)
@@ -309,6 +343,22 @@ def test_full_lifecycle_through_injected_runner():
     assert evidence.handle_ref == handle.ref
     teardown = backend.teardown(handle)
     assert teardown.released is True
+
+
+def test_run_unknown_handle_refuses_without_docker_exec_fallback():
+    fake = FakeRunner(returncode=0, stdout="should-not-run")
+    backend = backend_with_inputs(fake)
+    handle = ProvisionedHandle(
+        backend_key=GVISOR_PROXY_BACKEND_KEY,
+        run_id="run-unknown",
+        policy_sha=_POLICY_SHA,
+        ref="gvisor:unknown",
+    )
+
+    with pytest.raises(BackendUnavailable, match="no provisioned Docker/runsc plan"):
+        backend.run(handle, RunRequest(command=("echo", "hi")))
+
+    assert fake.calls == []
 
 
 def test_no_live_subprocess(monkeypatch):
