@@ -55,6 +55,12 @@ from .eviction_detection import (
     poll_repair_needed,
 )
 from .credential_runner import authenticated_gh_runner
+from .deterministic_resolvers import (
+    ResolverResult,
+    resolve_conflict,
+    resolve_non_overlapping_additions,
+    verify_resolution,
+)
 from .github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
     BranchProtectionPolicy,
@@ -112,6 +118,7 @@ __all__ = [
     "RepairPollResult",
     "ReviewResult",
     "ReviewSubmitRefused",
+    "ResolverResult",
     "ReviewState",
     "RulesetBypassActor",
     "RulesetPolicy",
@@ -136,9 +143,12 @@ __all__ = [
     "open_change",
     "plan_approved",
     "poll_repair_needed",
+    "resolve_conflict",
+    "resolve_non_overlapping_additions",
     "review_state",
     "revoke_scoped_token",
     "set_codeowners",
     "submit_review",
     "upsert_ruleset",
+    "verify_resolution",
 ]

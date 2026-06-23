@@ -138,6 +138,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # superseded by an independent approval on the live head). v3 forge
         # adapter family; injectable GhRunner, no v1 import.
         "forge.re_review",
+        # ce-ops#216 Unit 2: deterministic, read-only integrator conflict resolvers
+        # for known mechanical families. Pure data transforms; no executor/push/
+        # credential authority. v3 forge adapter family, imports no v1 module.
+        "forge.deterministic_resolvers",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
