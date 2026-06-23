@@ -127,6 +127,30 @@ class InspectResult:
     issues: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class LiveActionRequest:
+    """Fail-closed live action request delegated to the integrator runner seam."""
+
+    action: str
+    request: Path
+    preview_root: Path
+    repo_root: Path | None
+    preview_id: str
+
+
+@dataclass(frozen=True)
+class LiveActionResult:
+    """Secret-free result from an injected live-action runner."""
+
+    accepted: bool
+    action: str
+    refusal_reason: str | None = None
+    evidence: tuple[str, ...] = ()
+
+
+LiveActionRunner = Callable[[LiveActionRequest], LiveActionResult]
+
+
 # ---------------------------------------------------------------------------
 # Canonical serialization + hashing (deterministic stdlib JSON; no wall-clock)
 # ---------------------------------------------------------------------------
@@ -306,6 +330,7 @@ def build(
     repo_root: Path | str | None = None,
     preview_id: str | None = None,
     live_action: str | None = None,
+    live_action_runner: LiveActionRunner | None = None,
     git_runner: GitRunner | None = None,
 ) -> BuildResult:
     """Reconstruct a deterministic content-hashed serialized landing preview.
@@ -314,16 +339,9 @@ def build(
     fan-in evidence, duplicate landing position, un-ignored root) raises **before
     any preview write**, leaving the output root byte-identical.
     """
-    # 1. No authority — refuse any live enqueue/land/merge before reading.
-    if live_action:
-        raise AuthorityRefused(
-            f"the Integration Queue dry-run seam carries no authority; refusing live action "
-            f"{live_action!r} (live enqueue/land/merge is POST-V1 Slice 6 authority, "
-            "ratified through the governed Source pathway)"
-        )
-
     request = Path(request)
     preview_root = Path(preview_root)
+    repo_root_path = Path(repo_root) if repo_root else None
     runner = git_runner or _default_git_runner
 
     # 2. Parse the request + require a Source-ratification reference.
@@ -334,7 +352,7 @@ def build(
         raise RequestError("request is missing preview_id (and none supplied)")
 
     # 3. The output root must be git-ignored when inside a repository.
-    _require_ignored_preview_root(preview_root, Path(repo_root) if repo_root else None, runner)
+    _require_ignored_preview_root(preview_root, repo_root_path, runner)
 
     # 4. Reconstruct serialized landing order from verified fan-in evidence.
     landing_order = _reconstruct_landing_order(request, data)
@@ -364,6 +382,16 @@ def build(
             + "; ".join(err.format() for err in schema_errors)
         )
 
+    if live_action:
+        _run_live_action(
+            live_action=live_action,
+            request=request,
+            preview_root=preview_root,
+            repo_root=repo_root_path,
+            preview_id=str(resolved_preview_id),
+            live_action_runner=live_action_runner,
+        )
+
     # --- Side effects begin here (content-addressed preview under the root) ---
     preview_path = preview_root / f"{resolved_preview_id}-{content_hash}.json"
     _atomic_write(preview_path, _canonical_bytes(preview))
@@ -374,6 +402,45 @@ def build(
         preview=preview,
         lane_count=len(landing_order),
     )
+
+
+def _run_live_action(
+    *,
+    live_action: str,
+    request: Path,
+    preview_root: Path,
+    repo_root: Path | None,
+    preview_id: str,
+    live_action_runner: LiveActionRunner | None,
+) -> None:
+    if live_action not in LIVE_ACTIONS:
+        raise AuthorityRefused(f"unknown integration queue live action {live_action!r}")
+    if live_action_runner is None:
+        raise AuthorityRefused(
+            f"integration queue live action {live_action!r} requires the Integrator MVP "
+            "runner; refusing fail-closed without an injected runner"
+        )
+    result = live_action_runner(
+        LiveActionRequest(
+            action=live_action,
+            request=request,
+            preview_root=preview_root,
+            repo_root=repo_root,
+            preview_id=preview_id,
+        )
+    )
+    if result.action != live_action:
+        raise AuthorityRefused(
+            f"integration queue live action runner returned action {result.action!r}, "
+            f"expected {live_action!r}"
+        )
+    if not result.accepted:
+        evidence = "; ".join(result.evidence)
+        detail = f": {evidence}" if evidence else ""
+        raise AuthorityRefused(
+            f"integration queue live action {live_action!r} refused by Integrator MVP "
+            f"runner ({result.refusal_reason or 'unknown'}){detail}"
+        )
 
 
 # ---------------------------------------------------------------------------

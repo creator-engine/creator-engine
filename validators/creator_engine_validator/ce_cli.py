@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -74,6 +75,7 @@ from . import (
     brain_bootstrap,
     brain_probe,
     brain_runtime,
+    containment_probe,
     brain_ingest_runtime,
     brain_recall,
     brain_recall_surface,
@@ -101,6 +103,7 @@ from . import (
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
+from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
 from .tmux_adapter import TmuxAdapter
@@ -313,6 +316,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="v3.5-F: path to the ratified runtime policy whose resource_envelopes "
         "bound this seat (systemd-run --user wrap); enforce refuses loudly on an "
         "unsupported host; advisory/off require a resource_optout ratification binding",
+    )
+    launch.add_argument(
+        "--backend",
+        choices=ce_runtime_policy.CLI_BACKEND_CHOICES,
+        default=None,
+        help="runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy)",
     )
     launch.add_argument(
         "--ratification-evidence",
@@ -941,6 +950,36 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip the dependency wheelhouse contract clause (RED-G-6)",
     )
 
+    # ce containment-probe — ce-ops#221 Fix-1. Containment is PROBED from the
+    # live kernel runtime (/proc/<pid>), never self-reported. Fail-closed:
+    # contained=true requires positive kernel-isolation evidence.
+    containment = groups.add_parser(
+        "containment-probe",
+        help="probe live-runtime containment of a pid from /proc (fail-closed; never self-reported)",
+    )
+    containment.add_argument(
+        "pid",
+        nargs="?",
+        default=str(os.getpid()),
+        help="target pid to probe (default: this process)",
+    )
+    containment.add_argument(
+        "--proc-root",
+        default="/proc",
+        help="proc tree root to read (default: /proc; override for fixtures)",
+    )
+    containment.add_argument(
+        "--host-pid",
+        default="1",
+        help="reference host pid to compare namespaces/root against (default: 1)",
+    )
+    containment.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit the machine-readable JSON verdict",
+    )
+
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
     init = groups.add_parser(
         "init", help="idempotently initialize local .hermes/ kernel state (refuses ungoverned state)"
@@ -1102,6 +1141,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "resource_bound block offline",
         )
         p.add_argument(
+            "--backend",
+            choices=ce_runtime_policy.CLI_BACKEND_CHOICES,
+            default=None,
+            help="runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy)",
+        )
+        p.add_argument(
             "--claim-ticket",
             dest="claim_ticket",
             default=None,
@@ -1209,6 +1254,7 @@ def _lane_launch(args) -> int:
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
             seat_env_file=getattr(args, "seat_env_file", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            backend=getattr(args, "backend", None),
             work_claim=_claim_binding(claim_ctx),
             purpose=_claim_purpose(args, claim_ctx),
             tmux_adapter=_make_tmux_adapter(),
@@ -2636,6 +2682,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            backend=getattr(args, "backend", None),
             repo_root=getattr(args, "repo_root", None),
             ledger_root=getattr(args, "ledger_root", None),
             owner_controller_id=getattr(args, "controller_id", None),
@@ -2713,6 +2760,23 @@ def _bootstrap(args) -> int:
             file=sys.stderr,
         )
     return 0 if result.ok else 1
+
+
+def _containment_probe(args) -> int:
+    """ce-ops#221 Fix-1 — emit a live-runtime containment verdict for a pid.
+
+    Exit 0 only when containment is positively proven; non-zero (fail-closed)
+    otherwise. The verdict is never self-reported — it is read from /proc.
+    """
+    reader = containment_probe.ProcReader(root=args.proc_root)
+    verdict = containment_probe.probe_containment(
+        args.pid, reader=reader, host_pid=args.host_pid
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(verdict.payload, indent=2, sort_keys=True))
+    else:
+        print(containment_probe.render_human(verdict))
+    return 0 if verdict.contained else 1
 
 
 def _make_gh_runner():
@@ -3311,6 +3375,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _check(args)
     if args.group == "doctor":
         return _doctor(args)
+    if args.group == "containment-probe":
+        return _containment_probe(args)
     if args.group == "init":
         return _init(args)
     if args.group in ("launch", "hud"):

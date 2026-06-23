@@ -104,14 +104,17 @@ properties:
       additive schema changes; this schema fixes only the three above.
   isolation_backend:
     type: string
-    enum: [gvisor-proxy, openshell, os-native]
+    enum: [gvisor-proxy, openshell, local-noop, os-native]
     default: gvisor-proxy
     description: |
       Runner-backend selector (the G-1.1 adapter axis). `gvisor-proxy`
       is the canonical v3 backend — a hardened gVisor container paired
       with a capability-separation egress proxy (shipped at G-1.2).
       `openshell` is the fast-follow backend behind the same runner
-      abstraction. `os-native` (ce-ops#71 Tranche 1) is the neutral key
+      abstraction. `local-noop` is the inert registered backend used for
+      dry-run/foundation wiring; it enforces the same policy validation
+      boundary but does not allocate a live runtime. `os-native`
+      (ce-ops#71 Tranche 1) is the neutral key
       for the unprivileged, daemonless OS-native backend (bubblewrap
       user-ns / Seatbelt + host deny-by-default proxy) — the no-root
       default DIRECTION; its functional sandbox mechanism (srt vs a

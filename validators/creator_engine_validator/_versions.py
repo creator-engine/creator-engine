@@ -151,6 +151,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # resolver output with PR/base race guards. v3 forge adapter family;
         # live write/push authority stays behind an injectable adapter.
         "forge.integrator_executor",
+        # ce-ops#216 Unit 5: one-shot Integrator MVP runner wiring the landed
+        # detector/resolver/escalation primitives to Unit 3's race-guarded
+        # executor API. No daemon; executor import is lazy and fail-closed.
+        "forge.integrator_runner",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",

@@ -54,6 +54,14 @@ def test_hard_invariant_zero_v1_v3_crossings(version_boundary_modules):
     assert [e for e in errors if e.code == CODE_CROSS] == []
 
 
+def test_runtime_policy_check_does_not_import_v3_runner(version_boundary_modules):
+    errors, _ = evaluate(version_boundary_modules)
+    assert [
+        e for e in errors
+        if e.code == CODE_UNALLOWED and "checks.ce_runtime_policy" in e.message
+    ] == []
+
+
 # --- the baselined allowlist is exactly the 3 derived edges, and minimal ----
 
 def test_allowlist_is_the_three_baselined_edges():
@@ -130,7 +138,9 @@ def test_taxonomy_counts_and_disjoint():
     # (``forge.integrator_escalation``): 51 -> 52.
     # ce-ops#216 Unit 3 added the deterministic executor race guard
     # (``forge.integrator_executor``): 52 -> 53.
-    assert len(ver.V3_RUNTIME) == 53
+    # ce-ops#216 Unit 5 added the one-shot integrator runner
+    # (``forge.integrator_runner``): 53 -> 54.
+    assert len(ver.V3_RUNTIME) == 54
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -177,6 +187,7 @@ def test_classify_lines():
     assert ver.classify("forge.deterministic_resolvers") == ver.V3
     assert ver.classify("forge.integrator_escalation") == ver.V3
     assert ver.classify("forge.integrator_executor") == ver.V3
+    assert ver.classify("forge.integrator_runner") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call

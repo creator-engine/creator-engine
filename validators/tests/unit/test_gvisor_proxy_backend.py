@@ -7,6 +7,7 @@ allowlist yields an enforceable deny-by-default proxy config, not a refusal.
 """
 
 import subprocess
+import shutil
 
 import pytest
 
@@ -24,6 +25,8 @@ from creator_engine_validator.runner import (
     RunResult,
     RunnerBackend,
     RunscPlan,
+    RunscPlanRejected,
+    SubprocessContainerRunner,
     available_backends,
     get_backend,
     translate_to_egress_proxy_config,
@@ -46,7 +49,7 @@ def valid_policy() -> dict:
         "image_ref": {"name": "registry.example/creator-engine/implementer", "sha": _IMAGE_SHA},
         "mount_manifest": [
             {"path": "/runtime/worktree", "mode": "rw", "write_justification": "allocated worktree"},
-            {"path": "governance", "mode": "ro"},
+            {"path": "/runtime/governance", "mode": "ro"},
         ],
         "egress_allowlist": [
             {"host": "model-provider.example", "port": 443, "protocol": "https", "assurance": ["l4"]},
@@ -56,6 +59,30 @@ def valid_policy() -> dict:
         "grant_extensible": False,
         "grant_authority": "controller",
     }
+
+
+def plan_inputs(**overrides) -> dict:
+    inputs = {
+        "uid": 1001,
+        "gid": 1002,
+        "runtime_name": "runsc-gvproxy-ptrace",
+        "host_codex_home": "/host/codex-home",
+        "host_codex_bin": "/host/codex-bin/codex",
+        "container_home": "/home/cedev4",
+        "container_codex_home": "/home/cedev4/.codex",
+        "container_workdir": "/runtime/worktree",
+        "codex_home_mode": "rw",
+    }
+    inputs.update(overrides)
+    return inputs
+
+
+def plan_from(policy: dict | None = None, **overrides) -> RunscPlan:
+    return translate_to_runsc_plan(policy or valid_policy(), **plan_inputs(**overrides))
+
+
+def backend_with_inputs(runner=None, **overrides) -> GvisorProxyBackend:
+    return GvisorProxyBackend(runner=runner or FakeRunner(), **plan_inputs(**overrides))
 
 
 class FakeRunner:
@@ -84,31 +111,89 @@ class FakeRunner:
 # Pure translation
 # ---------------------------------------------------------------------------
 def test_translate_runsc_plan_hardened():
-    plan = translate_to_runsc_plan(valid_policy())
+    plan = plan_from()
     assert isinstance(plan, RunscPlan)
-    assert plan.runtime == "runsc"
-    assert plan.platform == "systrap"  # no KVM
+    assert plan.docker_binary == "docker"
+    assert plan.runtime_name == "runsc-gvproxy-ptrace"
     assert plan.image_ref == f"registry.example/creator-engine/implementer@{_IMAGE_SHA}"
-    assert plan.read_only_root and plan.no_new_privileges and plan.drop_all_capabilities
+    assert plan.uid == 1001 and plan.gid == 1002 and plan.user_spec == "1001:1002"
+    assert plan.no_new_privileges and plan.drop_all_capabilities
     assert plan.network == "proxy"  # has egress
-    modes = {(m.source, m.mode) for m in plan.mounts}
-    assert ("/runtime/worktree", "rw") in modes and ("governance", "ro") in modes
+    assert plan.host_codex_home == "/host/codex-home"
+    assert plan.host_codex_bin == "/host/codex-bin/codex"
+    modes = {(m.source, m.target, m.mode) for m in plan.mounts}
+    assert ("/runtime/worktree", "/runtime/worktree", "rw") in modes
+    assert ("/runtime/governance", "/runtime/governance", "ro") in modes
 
 
-def test_translate_runsc_argv_carries_hardening():
-    argv = translate_to_runsc_plan(valid_policy()).runsc_argv(("echo", "hi"))
-    assert "--platform=systrap" in argv
-    assert "--network=proxy" in argv
-    assert "--read-only" in argv
-    assert "--no-new-privs" in argv
-    assert "--drop-caps=all" in argv
-    assert argv[-2:] == ("echo", "hi")
+def test_translate_docker_argv_carries_dgx_runsc_shape():
+    argv = plan_from().docker_argv(("/usr/local/bin/codex", "exec", "hello"))
+    assert argv[:3] == ("docker", "run", "--rm")
+    assert "--runtime=runsc-gvproxy-ptrace" in argv
+    assert "--security-opt=no-new-privileges" in argv
+    assert "--cap-drop=ALL" in argv
+    assert "--user" in argv and argv[argv.index("--user") + 1] == "1001:1002"
+    assert "--workdir" in argv and argv[argv.index("--workdir") + 1] == "/runtime/worktree"
+    assert "HOME=/home/cedev4" in argv
+    assert "CODEX_HOME=/home/cedev4/.codex" in argv
+    assert "type=bind,source=/host/codex-home,target=/home/cedev4/.codex" in argv
+    assert "type=bind,source=/host/codex-bin/codex,target=/usr/local/bin/codex,readonly" in argv
+    assert "type=bind,source=/runtime/governance,target=/runtime/governance,readonly" in argv
+    assert not any(arg.startswith("--network=") for arg in argv)
+    assert argv[-4:] == (
+        f"registry.example/creator-engine/implementer@{_IMAGE_SHA}",
+        "/usr/local/bin/codex",
+        "exec",
+        "hello",
+    )
+
+
+def test_runsc_argv_alias_renders_docker_shape_for_existing_callers():
+    assert plan_from().runsc_argv(("echo", "hi")) == plan_from().docker_argv(("echo", "hi"))
+
+
+def test_translate_docker_argv_supports_uid_without_gid():
+    argv = plan_from(gid=None).docker_argv(("echo", "hi"))
+    assert "--user" in argv and argv[argv.index("--user") + 1] == "1001"
 
 
 def test_translate_no_egress_network_none():
     policy = valid_policy()
     policy["egress_allowlist"] = []
-    assert translate_to_runsc_plan(policy).network == "none"
+    assert plan_from(policy).network == "none"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"uid": None}, "uid is required"),
+        ({"uid": -1}, "uid must be a non-negative integer"),
+        ({"runtime_name": "runsc"}, "runtime_name must use the DGX ptrace runtime"),
+        ({"runtime_name": "runsc-gvproxy"}, "runtime_name must use the DGX ptrace runtime"),
+        ({"host_codex_home": None}, "host_codex_home is required"),
+        ({"host_codex_home": "relative/.codex"}, "host_codex_home must be"),
+        ({"host_codex_bin": ""}, "host_codex_bin is required"),
+        ({"codex_home_mode": "bad"}, "codex_home_mode must be"),
+        ({"docker_network": "bridge"}, "docker_network must be omitted"),
+    ],
+)
+def test_translate_runsc_plan_rejects_missing_or_unsafe_required_inputs(overrides, message):
+    with pytest.raises(RunscPlanRejected, match=message):
+        translate_to_runsc_plan(valid_policy(), **plan_inputs(**overrides))
+
+
+def test_translate_runsc_plan_rejects_unpinned_image_directly():
+    bad = valid_policy()
+    bad["image_ref"]["sha"] = "latest"
+    with pytest.raises(RunscPlanRejected, match="image_ref.sha"):
+        translate_to_runsc_plan(bad, **plan_inputs())
+
+
+def test_translate_runsc_plan_rejects_relative_docker_mount_directly():
+    bad = valid_policy()
+    bad["mount_manifest"][0]["path"] = "relative-worktree"
+    with pytest.raises(RunscPlanRejected, match=r"mount_manifest\[0\].path"):
+        translate_to_runsc_plan(bad, **plan_inputs())
 
 
 def test_translate_egress_proxy_deny_by_default():
@@ -156,7 +241,7 @@ def test_gvisor_proxy_registered_alongside_local_noop():
 # Backend — deny-guard, availability gate, egress enforceability
 # ---------------------------------------------------------------------------
 def test_provision_clean_policy_binds_policy_sha():
-    backend = GvisorProxyBackend(runner=FakeRunner())
+    backend = backend_with_inputs()
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-1"))
     assert isinstance(handle, ProvisionedHandle)
     assert handle.backend_key == "gvisor-proxy"
@@ -165,7 +250,7 @@ def test_provision_clean_policy_binds_policy_sha():
 
 
 def test_provision_rejects_controller_key_secret():
-    backend = GvisorProxyBackend(runner=FakeRunner())
+    backend = backend_with_inputs()
     bad = valid_policy()
     bad["secret_allowlist"] = ["controller-private-key"]
     with pytest.raises(PolicyRejected):
@@ -173,7 +258,7 @@ def test_provision_rejects_controller_key_secret():
 
 
 def test_provision_rejects_unpinned_image():
-    backend = GvisorProxyBackend(runner=FakeRunner())
+    backend = backend_with_inputs()
     bad = valid_policy()
     del bad["image_ref"]["sha"]
     with pytest.raises(PolicyRejected):
@@ -181,13 +266,53 @@ def test_provision_rejects_unpinned_image():
 
 
 def test_provision_unavailable_runtime_refuses():
-    backend = GvisorProxyBackend(runner=FakeRunner(available=False))
+    backend = backend_with_inputs(FakeRunner(available=False))
     with pytest.raises(BackendUnavailable):
         backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-4"))
 
 
+def test_subprocess_runner_unavailable_when_docker_lacks_required_runsc_runtime(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def docker_info_without_runsc(argv, **_kwargs):
+        assert argv == ["docker", "info", "--format", "{{json .Runtimes}}"]
+        return subprocess.CompletedProcess(argv, 0, stdout='{"runc": {"path": "runc"}}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", docker_info_without_runsc)
+
+    runner = SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
+
+    assert runner.available() is False
+
+
+def test_subprocess_runner_available_when_required_runsc_runtime_registered(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def docker_info_with_runsc(argv, **_kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout='{"runc": {"path": "runc"}, "runsc-gvproxy-ptrace": {"path": "runsc"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", docker_info_with_runsc)
+
+    runner = SubprocessContainerRunner(required_runtime="runsc-gvproxy-ptrace")
+
+    assert runner.available() is True
+
+
+def test_provision_missing_docker_runsc_inputs_refuses_before_availability_probe():
+    fake = FakeRunner(available=True)
+    backend = GvisorProxyBackend(runner=fake)
+    with pytest.raises(BackendUnavailable, match="invalid Docker/runsc plan"):
+        backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-missing-inputs"))
+    assert fake.calls == []
+
+
 def test_provision_non_empty_egress_without_proxy_refuses():
-    backend = GvisorProxyBackend(runner=FakeRunner(available=True, egress_enforceable=False))
+    backend = backend_with_inputs(FakeRunner(available=True, egress_enforceable=False))
     with pytest.raises(EgressNotEnforceable):
         backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-5"))
     assert issubclass(EgressNotEnforceable, BackendUnavailable)
@@ -196,7 +321,7 @@ def test_provision_non_empty_egress_without_proxy_refuses():
 def test_provision_empty_egress_without_proxy_is_allowed():
     policy = valid_policy()
     policy["egress_allowlist"] = []
-    backend = GvisorProxyBackend(runner=FakeRunner(available=True, egress_enforceable=False))
+    backend = backend_with_inputs(FakeRunner(available=True, egress_enforceable=False))
     handle = backend.provision(ProvisionRequest(runtime_policy=policy, run_id="run-6"))
     assert handle.ref.startswith("gvisor:")  # no egress to enforce → provisions fine
 
@@ -206,17 +331,34 @@ def test_provision_empty_egress_without_proxy_is_allowed():
 # ---------------------------------------------------------------------------
 def test_full_lifecycle_through_injected_runner():
     fake = FakeRunner(returncode=0, stdout="hello")
-    backend = GvisorProxyBackend(runner=fake)
+    backend = backend_with_inputs(fake)
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-7"))
     result = backend.run(handle, RunRequest(command=("echo", "hi")))
     assert isinstance(result, RunResult)
     assert result.exit_code == 0 and result.stdout == "hello"
-    assert fake.calls and fake.calls[0][0] == "runsc"  # the injected runner saw a runsc argv
-    assert "--platform=systrap" in fake.calls[0]
+    assert fake.calls and fake.calls[0][0] == "docker"  # the injected runner saw a Docker argv
+    assert "--runtime=runsc-gvproxy-ptrace" in fake.calls[0]
+    assert fake.calls[0][-2:] == ["echo", "hi"]
     evidence = backend.collect(handle)
     assert evidence.handle_ref == handle.ref
     teardown = backend.teardown(handle)
     assert teardown.released is True
+
+
+def test_run_unknown_handle_refuses_without_docker_exec_fallback():
+    fake = FakeRunner(returncode=0, stdout="should-not-run")
+    backend = backend_with_inputs(fake)
+    handle = ProvisionedHandle(
+        backend_key=GVISOR_PROXY_BACKEND_KEY,
+        run_id="run-unknown",
+        policy_sha=_POLICY_SHA,
+        ref="gvisor:unknown",
+    )
+
+    with pytest.raises(BackendUnavailable, match="no provisioned Docker/runsc plan"):
+        backend.run(handle, RunRequest(command=("echo", "hi")))
+
+    assert fake.calls == []
 
 
 def test_no_live_subprocess(monkeypatch):
@@ -225,7 +367,7 @@ def test_no_live_subprocess(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", explode)
     monkeypatch.setattr(subprocess, "Popen", explode)
-    backend = GvisorProxyBackend(runner=FakeRunner())
+    backend = backend_with_inputs()
     handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-8"))
     backend.run(handle, RunRequest(command=("echo", "hi")))
     backend.collect(handle)
