@@ -237,18 +237,28 @@ def test_gvisor_backend_unavailable_raises_backend_unavailable(monkeypatch):
         run_plan(valid_policy("gvisor-proxy"), "run-1", ("echo", "hi"), approved())
 
 
-def test_gvisor_subprocess_runner_available_when_binary_present(tmp_path):
-    # Hermetic positive branch of the same discovery seam: a stub executable at the
-    # injected ``binary=`` path makes ``available()`` True with zero live runsc —
-    # covers the probe both ways without provisioning a real sandbox.
+def test_gvisor_subprocess_runner_available_when_registered_runtime_present(monkeypatch, tmp_path):
+    # Hermetic positive branch of the same discovery seam: Docker on PATH is not
+    # enough. The required DGX runsc runtime must also be registered.
     from creator_engine_validator.runner.gvisor_proxy_backend import (
         SubprocessContainerRunner,
     )
 
-    stub = tmp_path / "runsc"
+    stub = tmp_path / "docker"
     stub.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
     stub.chmod(0o755)
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda argv, **_kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout='{"runc": {"path": "runc"}, "runsc-gvproxy-ptrace": {"path": "runsc"}}',
+            stderr="",
+        ),
+    )
+
     runner = SubprocessContainerRunner(binary=str(stub))
+
     assert runner.available() is True
 
 

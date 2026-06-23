@@ -37,14 +37,17 @@ systrap signal/page-fault path that trips the Rust guard-page setup.
 The local runner evidence is in
 `validators/creator_engine_validator/runner/gvisor_proxy_backend.py`:
 
-- `translate_to_runsc_plan()` selects `runtime="runsc"` and
-  `platform="systrap"`.
-- A policy with egress is rendered as `network="proxy"` in the CE plan, not as
-  Docker bridge networking.
-- The same plan enables read-only root, `no_new_privileges`, and dropped
-  capabilities.
+- `translate_to_runsc_plan()` renders the same Docker shape used by
+  `run-codex-runsc.sh`: `docker run --runtime=runsc-gvproxy-ptrace`.
+- A policy with egress is still recorded as `network="proxy"` in the CE plan,
+  but that is the mediated-egress policy label; the rendered Docker argv omits
+  `--network` by default.
+- The plan renders `--security-opt=no-new-privileges`, `--cap-drop=ALL`, the
+  seat `--user uid:gid`, the policy bind mounts, the host `CODEX_HOME` bind
+  mount, the Codex binary bind mount, and the digest-pinned image reference.
 - `SubprocessContainerRunner.egress_enforceable()` treats the concrete proxy as
-  a deployment overlay. There is no in-repo `gvproxy` process launch.
+  the registered Docker runtime route. There is no in-repo `gvproxy` process
+  launch.
 
 On the DGX, mirror that deployment shape by registering a dedicated Docker
 runtime named `runsc-gvproxy-ptrace`. That runtime keeps the process under
