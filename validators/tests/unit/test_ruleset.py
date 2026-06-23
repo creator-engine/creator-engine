@@ -112,6 +112,78 @@ def test_reference_floor_ruleset_payload_has_required_check_strict_reviews_and_n
     assert pull["parameters"]["require_code_owner_review"] is False
 
 
+# --- creator-engine#368: rebase must NOT dismiss a standing approval -----------
+#
+# Root cause: the CE-emitted ``ce-reference-protection-floor`` ruleset carried
+# GitHub's blunt ``dismiss_stale_reviews_on_push: true``, which wipes EVERY
+# standing review on ANY head-changing push — including a pure mechanical rebase
+# with no net content delta — and silently overrides branch-protection
+# ``dismiss_stale_reviews=false`` (rulesets layer on top, most-restrictive wins).
+# The fix: CE no longer emits the blunt flag by default; re-review-on-content-
+# change is a CE-owned, diff-aware concern (forge.re_review / ce-ops#151).
+
+
+def test_default_policy_does_not_emit_blanket_dismiss_on_push():
+    """REGRESSION (creator-engine#368): the default ruleset must NOT carry GitHub's
+    blunt ``dismiss_stale_reviews_on_push`` flag, so a head-changing push (incl. a
+    pure rebase) does not wipe a standing approval via GitHub's non-diff-aware path."""
+    pull = next(
+        rule for rule in _policy().to_put_payload()["rules"] if rule["type"] == "pull_request"
+    )
+    assert pull["parameters"]["dismiss_stale_reviews_on_push"] is False
+
+
+def test_default_ruleset_does_not_require_dismiss_on_a_live_floor():
+    """A live ruleset with ``dismiss_stale_reviews_on_push: false`` (the rebase-safe
+    posture) still SATISFIES the default policy — CE no longer mandates the blunt
+    flag, so a mechanical-rebase push leaves the live approval standing."""
+    policy = RulesetPolicy(
+        name=CE_PROTECTION_RULESET_NAME,
+        required_status_check_contexts=("Validate governance artifacts",),
+        bypass_actors=(),
+    )
+    rebase_safe_live = {
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "bypass_actors": [],
+        "rules": [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "strict_required_status_checks_policy": True,
+                    "required_status_checks": [{"context": "Validate governance artifacts"}],
+                },
+            },
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 1,
+                    "dismiss_stale_reviews_on_push": False,  # rebase-safe
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": True,
+                    "required_review_thread_resolution": True,
+                    "allowed_merge_methods": ["squash"],
+                },
+            },
+        ],
+    }
+    assert ruleset_satisfies_policy(rebase_safe_live, policy) is True
+
+
+def test_explicit_dismiss_true_still_emits_blunt_flag_for_callers_that_want_it():
+    """A caller may still OPT IN to GitHub's blunt dismissal by passing True —
+    content-change re-review strictness is preserved for those who choose it."""
+    pull = next(
+        rule
+        for rule in RulesetPolicy(
+            name=CE_PROTECTION_RULESET_NAME, dismiss_stale_reviews_on_push=True
+        ).to_put_payload()["rules"]
+        if rule["type"] == "pull_request"
+    )
+    assert pull["parameters"]["dismiss_stale_reviews_on_push"] is True
+
+
 def test_merge_queue_rule_absent_by_default():
     """A policy without merge-queue config emits no merge_queue rule (opt-in only)."""
     payload = _policy().to_put_payload()
