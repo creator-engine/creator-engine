@@ -35,13 +35,28 @@ def _write(path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _make_proc(tmp_path, pid: str, *, ns: dict, cgroup: str, status: str, root: str):
+def _make_proc(
+    tmp_path,
+    pid: str,
+    *,
+    ns: dict,
+    cgroup: str,
+    status: str,
+    root: str,
+    cmdline: str | None = None,
+    comm: str | None = None,
+):
     base = tmp_path / pid
     for name, ident in ns.items():
         _write(base / "ns" / name, ident)
     _write(base / "cgroup", cgroup)
     _write(base / "status", status)
     _write(base / "root", root)
+    if cmdline is not None:
+        # /proc/<pid>/cmdline is NUL-separated with a trailing NUL.
+        _write(base / "cmdline", "\0".join(cmdline.split(" ")) + "\0")
+    if comm is not None:
+        _write(base / "comm", comm + "\n")
 
 
 def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
@@ -153,6 +168,144 @@ def test_bwrap_container_is_contained(tmp_path):
 
     assert verdict.contained is True
     assert verdict.backend == "bwrap"
+
+
+def test_real_gvisor_sandbox_pid_is_contained_by_cmdline(tmp_path):
+    """A REAL gVisor sandbox host-PID is detected from its `runsc` argv.
+
+    This is the live WAVE-2 blind spot: `docker inspect .State.Pid` on a runsc
+    container returns the host PID of the SENTRY process, which is literally
+    `runsc-sandbox --platform=ptrace ...`. gVisor's boundary is the userspace
+    sentry, so this host process LEGITIMATELY shares host pid/user namespaces
+    and has root=`/`, and its cgroup is a plain `docker-<id>.scope` with NO
+    runsc marker. The old cgroup/root-only detector classified it as `bwrap`
+    and reported ns:pid:host / ns:user:host / root:host as gaps. The argv read
+    fixes both: backend==gvisor AND contained==true, with no host-ns/root gaps.
+    """
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "3030",
+        ns={
+            "mnt": "mnt:[4026532700]",  # sentry has its own mnt ns
+            "pid": "pid:[4026531836]",  # SHARES host pid ns (expected)
+            "net": "net:[4026532702]",
+            "user": "user:[4026531837]",  # SHARES host user ns (expected)
+        },
+        # Plain docker scope — NO runsc marker in the cgroup for the sandbox PID.
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",  # the runsc-sandbox host process sees the host root
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("3030", reader=reader, host_pid="1")
+
+    assert verdict.backend == "gvisor"
+    assert verdict.contained is True
+    # The sentry host-process sharing host pid/user ns and root=/ must NOT be
+    # reported as workload-exposure gaps for gVisor.
+    assert "ns:pid:host" not in verdict.gaps
+    assert "ns:user:host" not in verdict.gaps
+    assert "root:host" not in verdict.gaps
+    assert "gvisor" in verdict.reason.lower()
+
+
+def test_gvisor_gofer_argv_classifies_gvisor(tmp_path):
+    """The sibling `runsc-gofer` host-process also classifies as gVisor."""
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "3131",
+        ns={
+            "mnt": "mnt:[4026532710]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026532712]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="runsc-gofer --root=/var/run/docker/runsc gofer --bundle /run/bundle",
+        comm="runsc-gofer",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("3131", reader=reader, host_pid="1")
+
+    assert verdict.backend == "gvisor"
+    assert verdict.contained is True
+
+
+def test_gvisor_systrap_platform_argv_classifies_gvisor(tmp_path):
+    """gVisor sentry on the systrap platform is still detected (any platform)."""
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "3232",
+        ns={
+            "mnt": "mnt:[4026532720]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026532722]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/system.slice/docker-aa11bb.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="runsc --platform=systrap --root=/run/docker/runsc boot --bundle /b",
+        comm="runsc",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("3232", reader=reader, host_pid="1")
+
+    assert verdict.backend == "gvisor"
+    assert verdict.contained is True
+
+
+def test_runsc_prefixed_imposter_does_not_classify_gvisor(tmp_path):
+    """A `runscape`-style imposter must NOT be classified as gVisor.
+
+    Regression guard for the over-broad matcher: the old detector treated any
+    argv0/comm basename that merely *started with* `runsc` (e.g. `runscape`,
+    `runscan`, `runsc-foo`) as the gVisor sentry. On this fail-closed
+    attestation surface that is dangerous: a false gVisor positive sends the
+    verdict down the gVisor branch, which strips the ns:pid:host / ns:user:host
+    / root:host gaps and can mark `contained=true` on only a non-host cgroup +
+    dropped caps. Here we give a `runscape` process the otherwise-gVisor-looking
+    shape (host pid/user ns, non-host docker cgroup, dropped caps, root=/) and
+    assert it does NOT classify as gVisor and does NOT receive gVisor
+    gap-stripping — it falls through to the normal namespace-comparison
+    fail-closed path (mnt shared with host -> not contained).
+    """
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "4040",
+        ns={
+            "mnt": "mnt:[4026531840]",  # SHARES host mnt ns (imposter is on host)
+            "pid": "pid:[4026531836]",  # shares host pid ns
+            "net": "net:[4026532742]",
+            "user": "user:[4026531837]",  # shares host user ns
+        },
+        # Otherwise gVisor-looking: non-host docker scope + dropped caps + root=/.
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="/usr/bin/runscape --foo --bar",
+        comm="runscape",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("4040", reader=reader, host_pid="1")
+
+    # The imposter must NOT be classified as gVisor...
+    assert verdict.backend != "gvisor"
+    # ...and must NOT get gVisor gap-stripping: the host-shared namespaces stay
+    # visible as gaps and drive the normal fail-closed decision.
+    assert "ns:pid:host" in verdict.gaps
+    assert "ns:user:host" in verdict.gaps
+    assert "root:host" in verdict.gaps
+    assert verdict.contained is False
+    assert "fail-closed" in verdict.reason
 
 
 def test_undeterminable_process_fails_closed(tmp_path):
