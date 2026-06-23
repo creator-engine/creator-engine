@@ -97,7 +97,9 @@ def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
     return codex
 
 
-def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> Path:
+def _write_runtime_policy(
+    tmp_path: Path, *, backend: str | None = "gvisor-proxy"
+) -> Path:
     policy = {
         "kind": "runtime-policy-record",
         "record_type": "runtime_policy",
@@ -105,7 +107,6 @@ def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> P
         "policy_id": "gvisor-implementer-v1",
         "policy_sha": "a" * 64,
         "role": "implementer",
-        "isolation_backend": backend,
         "image_ref": {
             "name": "registry.example/creator-engine/implementer",
             "sha": "sha256:" + "b" * 64,
@@ -125,6 +126,8 @@ def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> P
         "grant_extensible": False,
         "grant_authority": "controller",
     }
+    if backend is not None:
+        policy["isolation_backend"] = backend
     path = tmp_path / "runtime-policy.yaml"
     path.write_text(yaml.safe_dump(policy, sort_keys=True), encoding="utf-8")
     return path
@@ -299,6 +302,20 @@ def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
     assert adapter.spawned == []
 
 
+def test_launch_default_backend_live_refuses_before_raw_tmux(
+    use_fake_tmux, tmp_path, capsys
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    policy = _write_runtime_policy(tmp_path, backend=None)
+    ret = ce_cli.main(["launch", "--runtime-policy", str(policy)])
+    assert ret != 0
+    assert adapter.spawned == []
+    err = capsys.readouterr().err
+    assert "default runtime-policy backend 'gvisor-proxy'" in err
+    assert "raw tmux fallback" in err
+
+
 def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
     policy = _write_runtime_policy(tmp_path, backend="openshell")
     ret = ce_cli.main([
@@ -312,6 +329,41 @@ def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
     assert ret != 0
     err = capsys.readouterr().err
     assert "runtime policy declares 'openshell'" in err
+
+
+def test_lane_launch_default_backend_refuses_before_raw_tmux(
+    use_fake_tmux, tmp_path, capsys
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    policy = _write_runtime_policy(tmp_path, backend=None)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("lane prompt\n", encoding="utf-8")
+    ret = ce_cli.main([
+        "lane",
+        "launch",
+        "--controller-id",
+        "ctrl",
+        "--lane-id",
+        "lane",
+        "--role",
+        "implementer",
+        "--prompt",
+        str(prompt),
+        "--prompt-sha",
+        "0" * 64,
+        "--repo-root",
+        str(tmp_path),
+        "--ledger-root",
+        str(tmp_path / ".hermes" / "active-work-ledger"),
+        "--runtime-policy",
+        str(policy),
+    ])
+    assert ret != 0
+    assert adapter.spawned == []
+    err = capsys.readouterr().err
+    assert "default runtime-policy backend 'gvisor-proxy'" in err
+    assert "raw tmux fallback" in err
 
 
 def test_hud_dry_run_json_is_alias_of_launch(use_fake_tmux, capsys):
