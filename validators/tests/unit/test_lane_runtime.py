@@ -51,6 +51,21 @@ class FakeAdapter:
         )
 
 
+class FakeContainerRunner:
+    def __init__(self, *, available: bool = True, egress_enforceable: bool = True):
+        self._available = available
+        self._egress = egress_enforceable
+
+    def available(self) -> bool:
+        return self._available
+
+    def egress_enforceable(self) -> bool:
+        return self._egress
+
+    def run(self, argv, input_text=None):  # pragma: no cover - bridge must not call it
+        raise AssertionError("visible bridge should route runsc argv through tmux")
+
+
 def _write_prompt(tmp_path: Path, text: str = "governed gate prompt body\n") -> tuple[Path, str]:
     prompt = tmp_path / "prompt.md"
     prompt.write_text(text, encoding="utf-8")
@@ -110,6 +125,49 @@ def _write_claim(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> Path:
+    policy = {
+        "kind": "runtime-policy-record",
+        "record_type": "runtime_policy",
+        "schema_version": "1",
+        "policy_id": "gvisor-implementer-v1",
+        "policy_sha": "a" * 64,
+        "role": "implementer",
+        "isolation_backend": backend,
+        "image_ref": {
+            "name": "registry.example/creator-engine/implementer",
+            "sha": "sha256:" + "b" * 64,
+        },
+        "mount_manifest": [
+            {
+                "path": "/runtime/worktree",
+                "mode": "rw",
+                "write_justification": "allocated worktree for this seat",
+            },
+            {"path": "/runtime/governance", "mode": "ro"},
+        ],
+        "egress_allowlist": [
+            {"host": "model-provider.example", "protocol": "https", "assurance": ["l4"]},
+        ],
+        "secret_allowlist": ["model-provider-key"],
+        "grant_extensible": False,
+        "grant_authority": "controller",
+    }
+    path = tmp_path / "runtime-policy.yaml"
+    path.write_text(yaml.safe_dump(policy, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _gvisor_plan_kwargs() -> dict:
+    return {
+        "uid": 1001,
+        "gid": 1002,
+        "host_codex_home": "/host/codex-home",
+        "host_codex_bin": "/host/codex-bin/codex",
+        "container_workdir": "/runtime/worktree",
+    }
 
 
 def _wrapper_inner_argv(result):
@@ -177,6 +235,55 @@ def test_launch_writes_pane_record_bound_to_live_claim(tmp_path):
     assert record["worktree_path"] == "/worktrees/gate3-lane"
     assert record["branch"] == "implementer/gate3-lane"
     assert record["envelope_ref"] == "envelopes/gate3.md"
+
+
+def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    policy = _write_runtime_policy(tmp_path)
+
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        tmux_adapter=adapter,
+        runtime_policy=policy,
+        backend="gvisor",
+        container_runner=FakeContainerRunner(),
+        gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+    )
+
+    assert result.runtime_policy["resolved_backend"] == "gvisor-proxy"
+    assert result.runner_runtime["backend_key"] == "gvisor-proxy"
+    argv = result.runner_runtime["argv"]
+    assert argv[:3] == ["docker", "run", "--rm"]
+    assert "--runtime=runsc-gvproxy-ptrace" in argv
+    assert "registry.example/creator-engine/implementer@sha256:" + "b" * 64 in argv
+    assert adapter.spawned and adapter.spawned[0][2] == argv
+    sidecar = ledger / "panes" / "hermes-primary" / "gate3-lane.claude-governance.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["runner_runtime"]["backend_key"] == "gvisor-proxy"
+
+
+def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    adapter = FakeAdapter()
+    policy = _write_runtime_policy(tmp_path)
+
+    with pytest.raises(lane_runtime.RuntimePolicyRefused, match="not available"):
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            tmux_adapter=adapter,
+            runtime_policy=policy,
+            backend="gvisor",
+            container_runner=FakeContainerRunner(available=False),
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        )
+
+    assert adapter.spawned == []
+    _assert_no_pane(ledger)
 
 
 def test_launch_writes_pane_registry_and_seat_lifecycle_record(tmp_path):
