@@ -159,3 +159,105 @@ def test_default_constructed_tmux_backend_uses_real_adapter():
 
     backend = vb.TmuxVisibilityBackend()
     assert isinstance(backend._adapter, TmuxAdapter)
+
+
+# ---------------------------------------------------------------------------
+# Headless backend (ce-ops#207 W2′) — CE owns the seat under its own PTY.
+# ---------------------------------------------------------------------------
+from creator_engine_validator.seat_pty_session import SeatPtySession  # noqa: E402
+
+
+class FakePtySpawn:
+    """In-memory PTY spawner double — records the spawn, never forks."""
+
+    def __init__(self, *, pid: int = 9191):
+        self._pid = pid
+        self.calls: list[dict] = []
+
+    def __call__(self, *, command, seat_dir, cwd=None, env=None):
+        from pathlib import Path
+
+        self.calls.append(
+            {"command": list(command), "seat_dir": str(seat_dir), "cwd": cwd,
+             "env": dict(env) if env else None}
+        )
+        return SeatPtySession(
+            pid=self._pid,
+            master_fd=7,
+            surface_ref=str(Path(seat_dir) / "attach.sock"),
+        )
+
+
+def test_headless_backend_is_registered_by_default():
+    assert vb.HEADLESS_TERMINAL_KIND in vb.available_visibility_kinds()
+    backend = vb.get_visibility_backend(vb.HEADLESS_TERMINAL_KIND)
+    assert isinstance(backend, vb.HeadlessVisibilityBackend)
+    assert backend.terminal_kind == "headless"
+    assert backend.visibility_class == vb.OPERATOR_INSPECTABLE
+
+
+def test_headless_backend_is_always_available():
+    # The no-tmux fallback: a writable seat dir + pty.fork are the only needs.
+    assert vb.HeadlessVisibilityBackend(FakePtySpawn()).is_available() is True
+
+
+def test_headless_backend_inspectable_class_satisfies_the_contract():
+    assert vb.OPERATOR_INSPECTABLE in vb.SATISFYING_VISIBILITY_CLASSES
+    assert vb.OPERATOR_VISIBLE in vb.SATISFYING_VISIBILITY_CLASSES
+
+
+def test_headless_backend_builds_headless_terminal_record(tmp_path):
+    spawn = FakePtySpawn(pid=4242)
+    backend = vb.HeadlessVisibilityBackend(spawn)
+    handle = backend.ensure_surface(
+        session="ce-lane",
+        window="gate3-lane",
+        command=["/bin/sh", "wrapper.sh"],
+        cwd=str(tmp_path),
+        env={"CE_LEDGER_ROOT": "/abs/ledger"},
+        seat_dir=str(tmp_path),
+    )
+    assert handle.visibility_class == vb.OPERATOR_INSPECTABLE
+    # The terminal record is the headless surface: a control-socket ref + pid,
+    # NOT session/window/pane ids.
+    assert handle.terminal == {
+        "kind": "headless",
+        "surface_ref": str(tmp_path / "attach.sock"),
+        "pid": 4242,
+    }
+    # The native handle is the live CE-owned PTY session (master fd held by CE).
+    assert isinstance(handle.native, SeatPtySession)
+    assert handle.native.master_fd == 7
+    # The spawn received the sentinel-wrapped argv + the seat env (pinned, not echoed).
+    assert spawn.calls == [{
+        "command": ["/bin/sh", "wrapper.sh"],
+        "seat_dir": str(tmp_path),
+        "cwd": str(tmp_path),
+        "env": {"CE_LEDGER_ROOT": "/abs/ledger"},
+    }]
+
+
+def test_headless_backend_requires_seat_dir():
+    backend = vb.HeadlessVisibilityBackend(FakePtySpawn())
+    with pytest.raises(vb.VisibilityBackendError):
+        backend.ensure_surface(
+            session="s", window="w", command=["true"], seat_dir=None
+        )
+
+
+def test_headless_backend_does_not_persist_pty_bytes(tmp_path):
+    """W2′ invariant: owning the master fd != streaming it. No new byte surface.
+
+    The raw PTY stream is gated behind W2-sec/T1; this unit must NOT write the
+    seat's stdout/stderr (which can carry secrets) to any log/file. The headless
+    spawn must leave no captured-output artifact in the seat dir.
+    """
+    backend = vb.HeadlessVisibilityBackend(FakePtySpawn())
+    before = set(p.name for p in tmp_path.iterdir())
+    backend.ensure_surface(
+        session="s", window="w", command=["true"],
+        env={"CE_LEDGER_ROOT": "/secret/ledger"}, seat_dir=str(tmp_path),
+    )
+    after = set(p.name for p in tmp_path.iterdir())
+    # No headless.log / captured-output file was created by the surface.
+    assert not any("log" in name.lower() for name in (after - before))

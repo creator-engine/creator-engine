@@ -315,14 +315,105 @@ def test_launch_refuses_controller_lane_mismatch_before_side_effects(tmp_path):
     assert adapter.spawned == []
 
 
-def test_launch_refuses_headless_for_visibility_required_role(tmp_path):
+def test_launch_refuses_unknown_terminal_kind_for_visibility_required_role(tmp_path):
+    # ce-ops#207 W2′: the C1 gate now refuses an *unknown / non-satisfying*
+    # surface (not "anything but tmux"). An unregistered kind is still refused
+    # before any side effect — the load-bearing refusal survives.
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
     adapter = FakeAdapter()
     with pytest.raises(lane_runtime.VisibilityRefused):
-        _launch(tmp_path, ledger_root=ledger, terminal_kind="headless", tmux_adapter=adapter)
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            terminal_kind="not-a-real-surface",
+            tmux_adapter=None,
+        )
     _assert_no_pane(ledger)
     assert adapter.spawned == []
+
+
+def test_headless_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path):
+    """ce-ops#207 W2′ headline acceptance.
+
+    A visibility-required WORKER lane launches on a host with **no tmux** — the
+    headless backend owns a CE-held PTY over a real seat process — and produces a
+    schema-valid Pane Registry record + an events.jsonl lifecycle. tmux is never
+    consulted (no adapter injected; the registry resolves the headless backend).
+    """
+    from creator_engine_validator.seat_pty_session import SeatPtySession
+
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        terminal_kind="headless",
+        tmux_adapter=None,  # no tmux anywhere
+        # A non-Claude command that runs under the real PTY and exits cleanly,
+        # so the sentinel wrapper produces a launched+exited events.jsonl.
+        command=["sh", "-c", "printf ce-headless-live"],
+    )
+
+    # The lane reached LAUNCHED: a record was written and CE owns a live PTY.
+    record = result.record
+    assert record["visibility"] == "operator_inspectable"
+    assert record["terminal"]["kind"] == "headless"
+    assert record["terminal"]["surface_ref"].endswith("attach.sock")
+    assert record["terminal"]["pid"] > 0
+    assert "session_id" not in record["terminal"]  # no tmux pane identity
+    # CE owns the live PTY session (the master fd is held by the substrate).
+    assert isinstance(result.pane, SeatPtySession)
+
+    # The written record passes the Pane Registry schema + validator (C3).
+    errors = validate_pane_registry_record(record, Path(result.pane_path))
+    assert errors == [], [e.format() for e in errors]
+
+    # The events.jsonl lifecycle surface exists (witnessability, tmux-free).
+    events_path = Path(result.events_ref)
+    assert events_path.is_file()
+
+    # Reap the real seat process CE spawned (test hygiene).
+    import os
+
+    result.pane.close_master()
+    try:
+        os.waitpid(result.pane.pid, 0)
+    except ChildProcessError:
+        pass
+
+
+def test_headless_lane_record_uses_injected_pty_spawn(tmp_path):
+    """Deterministic record shape via an injected fake-PTY headless backend.
+
+    Mirrors the tmux-adapter injection seam: a fake PTY spawner avoids forking a
+    real process, so the record/visibility/terminal fields are asserted exactly.
+    """
+    from creator_engine_validator import visibility_backend as vb
+    from creator_engine_validator.seat_pty_session import SeatPtySession
+
+    def fake_spawn(*, command, seat_dir, cwd=None, env=None):
+        return SeatPtySession(
+            pid=5151, master_fd=11, surface_ref=str(Path(seat_dir) / "attach.sock")
+        )
+
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    backend = vb.HeadlessVisibilityBackend(fake_spawn)
+
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        terminal_kind="headless",
+        tmux_adapter=None,
+        visibility_backend=backend,
+    )
+    assert result.record["visibility"] == "operator_inspectable"
+    assert result.record["terminal"]["kind"] == "headless"
+    assert result.record["terminal"]["pid"] == 5151
+    errors = validate_pane_registry_record(result.record, Path(result.pane_path))
+    assert errors == [], [e.format() for e in errors]
 
 
 def test_launch_refuses_tmux_unavailable_before_pane_write(tmp_path):

@@ -173,14 +173,39 @@ def test_ce_lane_launch_refuses_released_claim_before_side_effects(tmp_path, use
     assert use_fake_tmux.spawned == []
 
 
-def test_ce_lane_launch_refuses_headless_or_non_tmux_for_visibility_required_role(tmp_path, use_fake_tmux):
+def test_ce_lane_launch_headless_no_tmux_satisfies_visibility(tmp_path, use_fake_tmux):
+    # ce-ops#207 W2′: `--no-tmux` is no longer "always refused" — it routes the
+    # lane onto the headless (operator_inspectable) backend, which owns the seat
+    # under a CE-held PTY with no tmux server. The lane reaches LAUNCHED and
+    # writes a headless Pane Registry record; tmux is never spawned.
+    import os
+
+    import yaml as _yaml
+
     ledger = _ledger(tmp_path)
     _claim(ledger)
     prompt, sha = _prompt(tmp_path)
-    ret = ce_cli.main(_launch_argv(tmp_path, ledger, prompt, sha, no_tmux=True))
-    assert ret != 0
-    assert not _pane_path(ledger).exists()
-    assert use_fake_tmux.spawned == []
+    ret = ce_cli.main(
+        _launch_argv(
+            tmp_path, ledger, prompt, sha,
+            no_tmux=True,
+            command="sh -c 'printf ce-headless-live'",
+        )
+    )
+    assert ret == 0
+    assert use_fake_tmux.spawned == []  # no tmux anywhere
+    pane_path = _pane_path(ledger)
+    assert pane_path.exists()
+    record = _yaml.safe_load(pane_path.read_text())
+    assert record["visibility"] == "operator_inspectable"
+    assert record["terminal"]["kind"] == "headless"
+    assert record["terminal"]["surface_ref"].endswith("attach.sock")
+    pid = int(record["terminal"]["pid"])
+    # Reap the real seat process the CLI spawned (test hygiene).
+    try:
+        os.waitpid(pid, 0)
+    except (ChildProcessError, PermissionError):
+        pass
 
 
 def test_ce_lane_launch_refuses_tmux_unavailable_before_pane_write(tmp_path, monkeypatch):

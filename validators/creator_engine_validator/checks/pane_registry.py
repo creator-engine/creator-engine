@@ -175,28 +175,62 @@ def _role_status_errors(record: dict[str, Any], path: Path) -> list[ValidationEr
     return errors
 
 
-def _operator_visible_errors(record: dict[str, Any], path: Path) -> list[ValidationError]:
+# The visibility classes a Pane Registry record may declare, each pinned to the
+# terminal kind that satisfies it (ce-ops#207 W2′). ``operator_visible`` is the
+# tmux pane; ``operator_inspectable`` is the headless CE-owned-PTY surface. The
+# gate stays load-bearing: an unknown visibility class, or a terminal kind that
+# does not match its declared class, is refused.
+_VISIBILITY_SURFACE_KINDS: dict[str, tuple[str, tuple[str, ...]]] = {
+    # visibility class -> (required terminal.kind, required terminal identity fields)
+    "operator_visible": ("tmux", ("session_id", "window_id", "pane_id")),
+    "operator_inspectable": ("headless", ("surface_ref",)),
+}
+
+
+def _visibility_surface_errors(record: dict[str, Any], path: Path) -> list[ValidationError]:
+    """Refuse a record whose terminal does not back its declared visibility class.
+
+    ce-ops#207 W2′: generalizes the former tmux-only gate. ``operator_visible``
+    still requires a tmux pane (session/window/pane ids); ``operator_inspectable``
+    requires a headless surface (a ``surface_ref`` for the CE-owned PTY). An
+    unknown visibility class is refused (fail-closed).
+    """
     terminal = record.get("terminal")
     if not isinstance(terminal, dict):
         return []
-    if terminal.get("kind") != "tmux":
+    visibility = record.get("visibility")
+    spec = _VISIBILITY_SURFACE_KINDS.get(visibility)
+    if spec is None:
+        return [
+            make_error(
+                CODE_OPERATOR_VISIBLE,
+                path,
+                "visibility",
+                f"unknown visibility class {visibility!r}; must be one of "
+                f"{', '.join(sorted(_VISIBILITY_SURFACE_KINDS))}",
+                CONTRACT,
+            )
+        ]
+    required_kind, required_fields = spec
+    if terminal.get("kind") != required_kind:
         return [
             make_error(
                 CODE_OPERATOR_VISIBLE,
                 path,
                 "terminal.kind",
-                "operator-visible Pane Registry records require terminal.kind: tmux",
+                f"{visibility} Pane Registry records require "
+                f"terminal.kind: {required_kind}",
                 CONTRACT,
             )
         ]
-    missing = [field for field in ("session_id", "window_id", "pane_id") if not terminal.get(field)]
+    missing = [field for field in required_fields if not terminal.get(field)]
     if missing:
         return [
             make_error(
                 CODE_OPERATOR_VISIBLE,
                 path,
                 "terminal",
-                f"tmux terminal identity is missing: {', '.join(missing)}",
+                f"{required_kind} terminal identity is missing: {', '.join(missing)}",
                 CONTRACT,
             )
         ]
@@ -219,7 +253,7 @@ def validate_pane_registry_record(record: dict[str, Any], path: Path) -> list[Va
             )
     errors.extend(_id_surface_errors(record, path))
     errors.extend(_role_status_errors(record, path))
-    errors.extend(_operator_visible_errors(record, path))
+    errors.extend(_visibility_surface_errors(record, path))
     return errors
 
 
