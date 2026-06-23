@@ -313,6 +313,52 @@ def test_ce_queue_dry_run_refuses_live_action_nonzero_no_preview(tmp_path, flag)
     assert _previews(root) == []
 
 
+def test_live_action_callback_accepts_only_runner_accepted_result(tmp_path):
+    request, root = _make_request(tmp_path)
+    calls = []
+
+    def runner(action_request: iq.LiveActionRequest) -> iq.LiveActionResult:
+        calls.append(action_request)
+        return iq.LiveActionResult(
+            accepted=True,
+            action=action_request.action,
+            evidence=("approved=true", "all_green=true", "mechanical=true"),
+        )
+
+    result = iq.build(
+        request=request,
+        preview_root=root,
+        live_action="enqueue",
+        live_action_runner=runner,
+    )
+
+    assert result.preview_path.is_file()
+    assert len(calls) == 1
+    assert calls[0].action == "enqueue"
+    assert calls[0].preview_id == "pco-v1-g8-queue-dry-run"
+
+
+def test_live_action_callback_refusal_fails_closed_before_preview_write(tmp_path):
+    request, root = _make_request(tmp_path)
+
+    def runner(action_request: iq.LiveActionRequest) -> iq.LiveActionResult:
+        return iq.LiveActionResult(
+            accepted=False,
+            action=action_request.action,
+            refusal_reason="event_not_approved_green",
+            evidence=("approved=false",),
+        )
+
+    with pytest.raises(iq.AuthorityRefused, match="event_not_approved_green"):
+        iq.build(
+            request=request,
+            preview_root=root,
+            live_action="land",
+            live_action_runner=runner,
+        )
+    assert _previews(root) == []
+
+
 def test_ce_queue_inspect_ok(tmp_path):
     request, root = _make_request(tmp_path)
     built = iq.build(request=request, preview_root=root)
