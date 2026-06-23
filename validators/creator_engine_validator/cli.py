@@ -718,6 +718,18 @@ def _hook_check(args) -> int:
         if "reviewer_authority_ref" not in ce and "reviewer_authority" not in ce:
             ce["reviewer_authority_ref"] = ref
 
+    worker_id = os.environ.get("CE_WORKER_ID")
+    worker_record_ref = os.environ.get("CE_WORKER_RECORD_REF")
+    if worker_id or worker_record_ref:
+        ce = event.get("ce")
+        if not isinstance(ce, dict):
+            ce = {}
+            event["ce"] = ce
+        if worker_id and "worker_id" not in ce:
+            ce["worker_id"] = worker_id
+        if worker_record_ref and "worker_record_ref" not in ce:
+            ce["worker_record_ref"] = worker_record_ref
+
     context = hc.build_context(
         event,
         posture=args.posture,

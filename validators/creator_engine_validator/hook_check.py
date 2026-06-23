@@ -41,7 +41,13 @@ from .checks import completion_report_required_for_envelope, completion_report_s
 from .checks import mutation_class
 from .checks.completion_report_terminal_sections import CANONICAL_HEADERS, _header_positions
 from .checks.path_manifest_fidelity import extract_manifest_paths_from_file
-from .seat_class import classify_work_class, foreman_would_deny, resolve_seat_class
+from .seat_class import (
+    FOREMAN_DELEGATION_REQUIRED_REASON,
+    classify_work_class,
+    foreman_would_deny,
+    resolve_seat_class,
+)
+from .worker_spawn import WORKER_RECORD_REL
 
 # v3.5-B.3 refusal-record seam: the SHARED hash-chain substrate only
 # (V1->shared is the allowed boundary edge). The v3 evidence-persistence sink
@@ -60,7 +66,7 @@ SCOPE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
 
 OUT_OF_MANIFEST_REASON = "tracked path is outside the ratified path manifest"
 NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
-FOREMAN_DELEGATION_REASON = "implementation work requires worker delegation"
+FOREMAN_DELEGATION_REASON = FOREMAN_DELEGATION_REQUIRED_REASON
 DEFAULT_FOREMAN_MUTATION_CLASS = "code"
 
 
@@ -92,6 +98,7 @@ class HookContext:
     side_effect_authority: dict | None = None
     seat_class: str = "foreman"
     seat_class_policy: dict | None = None
+    worker_delegation: dict | None = None
     repo_root: str | None = None
     posture_note: str | None = None
 
@@ -632,6 +639,15 @@ def _mutation_class_from_event(event: dict) -> str:
     return DEFAULT_FOREMAN_MUTATION_CLASS
 
 
+def _worker_delegation_allows_implementation(context: HookContext) -> bool:
+    record = context.worker_delegation
+    return (
+        isinstance(record, dict)
+        and record.get("role") == "implementer"
+        and record.get("lane_kind") == "implementation"
+    )
+
+
 def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
     tool = event.get("tool_name") or event.get("toolName") or ""
     tool_input = event.get("tool_input") or event.get("toolInput") or {}
@@ -653,12 +669,97 @@ def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
         _mutation_class_from_event(event),
         coordination_path_prefixes=coordination_prefixes,
     )
-    return foreman_would_deny(
+    reason = foreman_would_deny(
         context.seat_class,
         work_class,
         _mutation_class_from_event(event),
         policy,
     )
+    if reason is not None and _worker_delegation_allows_implementation(context):
+        return None
+    return reason
+
+
+def _resolve_path_ref(ref: str, root: str | None) -> Path:
+    path = Path(ref)
+    if path.is_absolute() or root is None:
+        return path
+    return Path(root) / path
+
+
+def _valid_worker_delegation_record(
+    path: Path,
+    *,
+    worker_id: str | None,
+    posture_root: str | None,
+) -> dict | None:
+    try:
+        record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    if record.get("kind") != "ce-worker-spawn-record":
+        return None
+    if str(record.get("schema_version") or "") != "1":
+        return None
+    if record.get("role") != "implementer":
+        return None
+    if record.get("lane_kind") != "implementation":
+        return None
+    if record.get("launch_state") != "launched":
+        return None
+    record_worker_id = record.get("worker_id")
+    if not isinstance(record_worker_id, str) or not record_worker_id:
+        return None
+    if worker_id is not None and worker_id != record_worker_id:
+        return None
+    record_path = record.get("record_path")
+    if not isinstance(record_path, str) or not record_path:
+        return None
+    try:
+        expected_record = path.expanduser().resolve(strict=False)
+        actual_record = Path(record_path).expanduser().resolve(strict=False)
+        if actual_record != expected_record:
+            return None
+    except OSError:
+        return None
+    worktree_path = record.get("worktree_path")
+    if not isinstance(worktree_path, str) or not worktree_path:
+        return None
+    if posture_root is not None:
+        try:
+            expected = Path(posture_root).expanduser().resolve(strict=False)
+            actual = Path(worktree_path).expanduser().resolve(strict=False)
+        except OSError:
+            return None
+        if actual != expected:
+            return None
+    return record
+
+
+def _resolve_worker_delegation(ce: dict, posture_root: str | None) -> dict | None:
+    """Resolve a worker-spawn record for delegated implementation, failing closed.
+
+    The hook does not scan for workers. It accepts either an explicit record ref
+    or a launch-pinned worker id that deterministically maps to the merged
+    worker-spawn state file under the current worktree.
+    """
+    ref = ce.get("worker_record_ref")
+    worker_id = ce.get("worker_id")
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        worker_id = None
+    else:
+        worker_id = worker_id.strip()
+    if isinstance(ref, str) and ref.strip():
+        path = _resolve_path_ref(ref.strip(), posture_root)
+    elif worker_id and posture_root:
+        path = Path(posture_root) / WORKER_RECORD_REL / worker_id / "worker.yaml"
+    else:
+        return None
+    return _valid_worker_delegation_record(path, worker_id=worker_id, posture_root=posture_root)
+
+
 
 
 # --------------------------------------------------------------------------
@@ -1176,6 +1277,7 @@ def build_context(
     seat_class_policy = _resolve_seat_class_policy(ce, posture_root)
     policy_seat_class = seat_class_policy.get("seat_class") if isinstance(seat_class_policy, dict) else None
     seat_class = resolve_seat_class(ce.get("seat_class") or policy_seat_class)
+    worker_delegation = _resolve_worker_delegation(ce, posture_root)
 
     closeout_text = ce.get("closeout_text")
     if closeout_file:
@@ -1193,6 +1295,7 @@ def build_context(
         side_effect_authority=side_effect_authority,
         seat_class=seat_class,
         seat_class_policy=seat_class_policy,
+        worker_delegation=worker_delegation,
         repo_root=posture_root,
         posture_note=manifest.posture_note,
     )

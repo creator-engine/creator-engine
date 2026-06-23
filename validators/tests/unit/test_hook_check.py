@@ -402,6 +402,45 @@ def test_ungoverned_secret_read_is_advisory_allow():
 # --- Foreman seat-class enforcement ----------------------------------------
 
 
+def _write_worker_record(
+    root: Path,
+    *,
+    worker_id: str = "worker-implementer-123",
+    role: str = "implementer",
+    lane_kind: str = "implementation",
+    launch_state: str = "launched",
+    worktree_path: Path | None = None,
+) -> Path:
+    import yaml
+
+    path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "kind": "ce-worker-spawn-record",
+        "schema_version": "1",
+        "worker_id": worker_id,
+        "role": role,
+        "lane_kind": lane_kind,
+        "harness": "claude",
+        "scope_id": "ce-ops#163",
+        "parent_id": "ce-dev-4",
+        "worktree_path": str(worktree_path or root),
+        "prompt": {"kind": "brief", "ref": "inline-brief", "sha256": "a" * 64},
+        "depth": 1,
+        "max_depth": 3,
+        "record_path": str(path),
+        "launch_command": ["ce", "launch"],
+        "launch_command_sha256": "b" * 64,
+        "scrubbed_env_names": [],
+        "child_env_names": [],
+        "dry_run": False,
+        "launch_state": launch_state,
+        "seat_refs": {"seat_lifecycle_state": "active"},
+    }
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def test_foreman_implementation_work_denies_with_refusal_record(tmp_path):
     event = _edit_event("validators/creator_engine_validator/hook_check.py")
     event["ce"] = {"mutation_class": "code"}
@@ -419,12 +458,16 @@ def test_foreman_implementation_work_denies_with_refusal_record(tmp_path):
     assert decision.advisory is False
     assert decision.would_have_denied is True
     assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "ce-ops#163 REQ-3" in decision.reason
+    assert "foreman_delegation_required" in decision.reason
     assert "worker delegation" in decision.reason
     records = _load_refusal_records(tmp_path)
     assert len(records) == 1
     assert records[0]["op"] == "file"
     assert records[0]["mutation_class"] == "code"
     assert records[0]["target"] == "validators/creator_engine_validator/hook_check.py"
+    assert "ce-ops#163 REQ-3" in records[0]["decision_reason"]
+    assert "foreman_delegation_required" in records[0]["decision_reason"]
 
 
 def test_foreman_implementation_work_without_mutation_class_denies():
@@ -461,6 +504,96 @@ def test_worker_implementation_work_allows(tmp_path):
     assert decision.would_have_denied is False
     assert "worker delegation" not in decision.reason
     assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_foreman_worker_routed_implementation_allows_with_valid_worker_artifact(tmp_path):
+    worker_ref = _write_worker_record(tmp_path)
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_record_ref": str(worker_ref),
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert ctx.worker_delegation["worker_id"] == "worker-implementer-123"
+    assert decision.decision == "allow"
+    assert decision.advisory is False
+    assert decision.would_have_denied is False
+    assert not _refusal_chain_file(tmp_path).exists()
+
+
+def test_foreman_worker_routed_implementation_allows_with_worker_id_state_ref(tmp_path):
+    _write_worker_record(tmp_path, worker_id="worker-from-env")
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_id": "worker-from-env",
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert decision.decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "record_kwargs",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param({"role": "reviewer", "lane_kind": "review"}, id="wrong_role"),
+        pytest.param({"launch_state": "reserved"}, id="not_launched"),
+        pytest.param({"worktree_path": Path("/tmp/not-this-worktree")}, id="wrong_worktree"),
+    ],
+)
+def test_foreman_worker_context_missing_or_invalid_fails_closed(tmp_path, record_kwargs):
+    worker_ref = tmp_path / ".ce" / "state" / "workers" / "worker-implementer-123" / "worker.yaml"
+    if record_kwargs is not None:
+        worker_ref = _write_worker_record(tmp_path, **record_kwargs)
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_record_ref": str(worker_ref),
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "foreman_delegation_required" in decision.reason
+
+
+def test_foreman_malformed_worker_context_fails_closed(tmp_path):
+    worker_ref = tmp_path / ".ce" / "state" / "workers" / "broken" / "worker.yaml"
+    worker_ref.parent.mkdir(parents=True)
+    worker_ref.write_text("kind: [not valid enough\n", encoding="utf-8")
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_record_ref": str(worker_ref),
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
 
 
 def test_foreman_coordination_work_allows():

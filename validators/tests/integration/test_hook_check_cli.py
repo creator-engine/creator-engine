@@ -54,6 +54,42 @@ def _pin_bootstrap_seat_class(monkeypatch, tmp_path: Path, seat_class: str) -> N
     monkeypatch.setenv(brain_bootstrap.BOOTSTRAP_SHA256_ENV, digest)
 
 
+def _write_worker_record(root: Path, worker_id: str) -> Path:
+    import yaml
+
+    path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "kind": "ce-worker-spawn-record",
+                "schema_version": "1",
+                "worker_id": worker_id,
+                "role": "implementer",
+                "lane_kind": "implementation",
+                "harness": "claude",
+                "scope_id": "ce-ops#163",
+                "parent_id": "ce-dev-4",
+                "worktree_path": str(root),
+                "prompt": {"kind": "brief", "ref": "inline-brief", "sha256": "a" * 64},
+                "depth": 1,
+                "max_depth": 3,
+                "record_path": str(path),
+                "launch_command": ["ce", "launch"],
+                "launch_command_sha256": "b" * 64,
+                "scrubbed_env_names": [],
+                "child_env_names": [],
+                "dry_run": False,
+                "launch_state": "launched",
+                "seat_refs": {"seat_lifecycle_state": "active"},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch):
     # G-i: author-time path-manifest enforcement is ADVISORY under governed
     # posture (scope is enforced post-hoc by the CI path_manifest_fidelity
@@ -71,6 +107,35 @@ def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch)
     assert payload["advisory"] is True
     assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert payload["posture"] == "governed"
+
+
+def test_hook_check_cli_allows_foreman_implementation_with_worker_record_env(capsys, tmp_path, monkeypatch):
+    _write_worker_record(tmp_path, "worker-from-env")
+    monkeypatch.setenv("CE_WORKER_ID", "worker-from-env")
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class": "foreman",
+        },
+    }
+
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture-root", str(tmp_path)],
+        capsys,
+        json.dumps(event),
+        monkeypatch,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["posture"] == "governed"
+    assert payload["decision"] == "allow"
+    assert payload["advisory"] is False
 
 
 def test_hook_check_input_json_file(capsys, tmp_path, monkeypatch):
