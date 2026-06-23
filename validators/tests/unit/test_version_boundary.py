@@ -80,8 +80,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#207 W1 adds ``visibility_backend`` (the v1 launcher's visibility/
     # surface seam — a thin tmux_adapter wrapper consumed only by lane_runtime)
     # as the 25th. ce-ops#197 adds ``ce_profile_path`` as the v1 installer-adjacent
-    # shell-profile PATH writer: 25 -> 26.
-    assert len(ver.V1_RUNTIME) == 26
+    # shell-profile PATH writer: 25 -> 26, and ``ce_provenance`` as the
+    # post-install verifier backing ``ce verify-install``: 26 -> 27.
+    assert len(ver.V1_RUNTIME) == 27
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

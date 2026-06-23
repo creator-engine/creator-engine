@@ -13,6 +13,7 @@ ce worker allocate   # start a rootless-Podman worker container bound to a live 
 ce worker terminate  # revoke broker grants, stop the container, write a stopped record
 ce worker gc         # reap container-instance records that outlived a released claim
 ce worker status     # read a local container-instance record
+ce verify-install    # verify a post-install CE release venv provenance
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
@@ -74,6 +75,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     ce_event_runtime,
+    ce_provenance,
     connector_runtime,
     doctor_runtime,
     fanin_runtime,
@@ -122,6 +124,22 @@ def _build_parser() -> argparse.ArgumentParser:
     # when the flag is passed, never on every command).
     version.add_version_flag(parser)
     groups = parser.add_subparsers(dest="group")
+
+    verify_install = groups.add_parser(
+        "verify-install",
+        help="verify a post-install CE release venv provenance",
+    )
+    verify_install.add_argument(
+        "--install-root",
+        default=None,
+        help="CE bootstrap install root (default: CE_INSTALL_ROOT or the installer default)",
+    )
+    verify_install.add_argument(
+        "--offline",
+        action="store_true",
+        help="local-only verification; skip live SHA256SUMS comparison",
+    )
+    verify_install.add_argument("--json", action="store_true", dest="json_output")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
     lane_sub = lane.add_subparsers(dest="lane_cmd")
@@ -2824,6 +2842,25 @@ def _acquire_launch_claim(args, invoked_as: str) -> tuple[int, object]:
     }
 
 
+def _verify_install(args) -> int:
+    result = ce_provenance.verify_install(
+        args.install_root,
+        offline=args.offline,
+    )
+    payload = result.to_json()
+    if args.json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif result.ok:
+        mode = payload.get("sha256s", {}).get("status", "unknown")
+        print(f"ce verify-install: PASS ({mode})")
+        print(f"install_root: {payload['install_root']}")
+    else:
+        print(f"ERROR: ce verify-install refused: {result.reason}", file=sys.stderr)
+        for problem in result.problems:
+            print(f"  ERROR: {problem}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
 _LANE_DISPATCH = {
     "launch": _lane_launch,
     "status": _lane_status,
@@ -2993,6 +3030,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.parse_args(["claim", "--help"])  # prints claim help, exits
             return 2
         return handler(args)
+    if args.group == "verify-install":
+        return _verify_install(args)
     if args.group == "check":
         return _check(args)
     if args.group == "doctor":

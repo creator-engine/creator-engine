@@ -81,6 +81,7 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "init_runtime",
         "integration_queue_dry_run",
         "packaging_runtime",
+        "ce_provenance",
         "pcl_runtime",
         "side_effect_ledger_runtime",
         "worker_runtime",
