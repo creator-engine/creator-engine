@@ -7,6 +7,7 @@ or a live provider login.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -32,7 +33,7 @@ class FakeAdapter:
     def session_exists(self, session: str) -> bool:
         return session in self._sessions
 
-    def ensure_pane(self, *, session, window, command):
+    def ensure_pane(self, *, session, window, command, cwd=None, env=None):
         self.spawned.append((session, window, list(command)))
         self._sessions.add(session)
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3")
@@ -117,7 +118,7 @@ def _write_runtime_policy(
                 "mode": "rw",
                 "write_justification": "allocated worktree for this seat",
             },
-            {"path": "governance", "mode": "ro"},
+            {"path": "/runtime/governance", "mode": "ro"},
         ],
         "egress_allowlist": [
             {"host": "model-provider.example", "protocol": "https", "assurance": ["l4"]},
@@ -130,6 +131,52 @@ def _write_runtime_policy(
         policy["isolation_backend"] = backend
     path = tmp_path / "runtime-policy.yaml"
     path.write_text(yaml.safe_dump(policy, sort_keys=True), encoding="utf-8")
+    return path
+
+
+class FakeContainerRunner:
+    def __init__(self, *, available: bool = True, egress_enforceable: bool = True):
+        self._available = available
+        self._egress = egress_enforceable
+
+    def available(self) -> bool:
+        return self._available
+
+    def egress_enforceable(self) -> bool:
+        return self._egress
+
+    def run(self, argv, input_text=None):  # pragma: no cover - bridge must not call it
+        raise AssertionError("visible bridge should route runsc argv through tmux")
+
+
+def _gvisor_plan_kwargs() -> dict:
+    return {
+        "uid": 1001,
+        "gid": 1002,
+        "host_codex_home": "/host/codex-home",
+        "host_codex_bin": "/host/codex-bin/codex",
+        "container_workdir": "/runtime/worktree",
+    }
+
+
+def _write_claim(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
+    record = {
+        "kind": "active-work-ledger-record",
+        "record_type": "claim",
+        "schema_version": "1",
+        "controller_id": controller_id,
+        "lane_id": lane_id,
+        "record_timestamp": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "worktree_path": "/worktrees/gate3-lane",
+        "envelope_ref": "envelopes/gate3.md",
+        "branch": "implementer/gate3-lane",
+        "lease_seconds": 3600,
+        "claimed_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+        "last_heartbeat_at": f"source-controlled:claims/{controller_id}/{lane_id}.yaml",
+    }
+    path = ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -206,7 +253,19 @@ def test_launch_backend_refuses_without_runtime_policy(use_fake_tmux, capsys):
     assert "--backend requires --runtime-policy" in err
 
 
-def test_launch_backend_live_refuses_before_raw_tmux(use_fake_tmux, tmp_path, capsys):
+def test_launch_backend_live_refuses_before_raw_tmux(use_fake_tmux, tmp_path, capsys, monkeypatch):
+    from creator_engine_validator import runner
+
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.runtime_backend_bridge,
+        "_default_gvisor_plan_kwargs",
+        _gvisor_plan_kwargs,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SubprocessContainerRunner",
+        lambda: FakeContainerRunner(available=False),
+    )
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     policy = _write_runtime_policy(tmp_path)
@@ -220,12 +279,66 @@ def test_launch_backend_live_refuses_before_raw_tmux(use_fake_tmux, tmp_path, ca
     assert ret != 0
     assert adapter.spawned == []
     err = capsys.readouterr().err
-    assert "RunnerBackend execution is not wired" in err
+    assert "not available" in err
+
+
+def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
+    adapter = FakeAdapter()
+    policy = _write_runtime_policy(tmp_path)
+    result = ce_cli.launch_runtime.launch(
+        harness="hermes",
+        runtime_policy=policy,
+        backend="gvisor",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+        container_runner=FakeContainerRunner(),
+        gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+    )
+
+    assert result.spawned is True
+    assert result.plan.runtime_policy["resolved_backend"] == "gvisor-proxy"
+    assert result.runner_runtime["backend_key"] == "gvisor-proxy"
+    argv = result.runner_runtime["argv"]
+    assert argv[:3] == ["docker", "run", "--rm"]
+    assert "--runtime=runsc-gvproxy-ptrace" in argv
+    assert "registry.example/creator-engine/implementer@sha256:" + "b" * 64 in argv
+    assert adapter.spawned
+    assert adapter.spawned[0][2] == argv
+
+
+def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
+    adapter = FakeAdapter()
+    policy = _write_runtime_policy(tmp_path)
+
+    with pytest.raises(ce_cli.launch_runtime.RuntimePolicyRefused, match="not available"):
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=FakeContainerRunner(available=False),
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        )
+
+    assert adapter.spawned == []
 
 
 def test_launch_default_backend_live_refuses_before_raw_tmux(
-    use_fake_tmux, tmp_path, capsys
+    use_fake_tmux, tmp_path, capsys, monkeypatch
 ):
+    from creator_engine_validator import runner
+
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.runtime_backend_bridge,
+        "_default_gvisor_plan_kwargs",
+        _gvisor_plan_kwargs,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SubprocessContainerRunner",
+        lambda: FakeContainerRunner(available=False),
+    )
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     policy = _write_runtime_policy(tmp_path, backend=None)
@@ -233,8 +346,7 @@ def test_launch_default_backend_live_refuses_before_raw_tmux(
     assert ret != 0
     assert adapter.spawned == []
     err = capsys.readouterr().err
-    assert "default runtime-policy backend 'gvisor-proxy'" in err
-    assert "raw tmux fallback" in err
+    assert "not available" in err
 
 
 def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
@@ -253,13 +365,28 @@ def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
 
 
 def test_lane_launch_default_backend_refuses_before_raw_tmux(
-    use_fake_tmux, tmp_path, capsys
+    use_fake_tmux, tmp_path, capsys, monkeypatch
 ):
+    from creator_engine_validator import runner
+
+    monkeypatch.setattr(
+        ce_cli.lane_runtime.runtime_backend_bridge,
+        "_default_gvisor_plan_kwargs",
+        _gvisor_plan_kwargs,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SubprocessContainerRunner",
+        lambda: FakeContainerRunner(available=False),
+    )
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     policy = _write_runtime_policy(tmp_path, backend=None)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("lane prompt\n", encoding="utf-8")
+    prompt_sha = hashlib.sha256(prompt.read_bytes()).hexdigest()
+    ledger_root = tmp_path / ".hermes" / "active-work-ledger"
+    _write_claim(ledger_root, "ctrl", "lane")
     ret = ce_cli.main([
         "lane",
         "launch",
@@ -272,19 +399,18 @@ def test_lane_launch_default_backend_refuses_before_raw_tmux(
         "--prompt",
         str(prompt),
         "--prompt-sha",
-        "0" * 64,
+        prompt_sha,
         "--repo-root",
         str(tmp_path),
         "--ledger-root",
-        str(tmp_path / ".hermes" / "active-work-ledger"),
+        str(ledger_root),
         "--runtime-policy",
         str(policy),
     ])
     assert ret != 0
     assert adapter.spawned == []
     err = capsys.readouterr().err
-    assert "default runtime-policy backend 'gvisor-proxy'" in err
-    assert "raw tmux fallback" in err
+    assert "not available" in err
 
 
 def test_hud_dry_run_json_is_alias_of_launch(use_fake_tmux, capsys):

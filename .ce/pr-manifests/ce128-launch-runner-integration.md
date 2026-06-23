@@ -1,0 +1,54 @@
+# PR path manifest - ce128-launch-runner-integration
+
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21 convention).
+CI runs:
+
+```bash
+verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref ce128-launch-runner-integration
+```
+
+and requires this PR's `base..HEAD` diff to equal exactly the authorized
+path-set below. This carrier lists itself.
+
+Base:
+`origin/main` after #388/#389/#390 landed.
+
+- **Declared work class:** story
+
+Scope:
+ce-ops#128 SUB-C integration: compose backend-selected launch surfaces through
+`RunnerBackend.provision -> run` and the existing visibility backend so
+`ce launch --backend gvisor` and `ce lane launch --backend gvisor` run via the
+Docker/runsc path without silently falling back to raw tmux.
+
+Per-file purpose:
+- **`.ce/changelog/ce128-launch-runner-integration.md`** *(A)* - changelog fragment.
+- **`.ce/pr-manifests/ce128-launch-runner-integration.md`** *(A)* - this closed path-set carrier.
+- **`validators/creator_engine_validator/_versions.py`** *(M)* - classify the visible runtime bridge as v1 launcher code.
+- **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - route runtime-policy lane launches through the bridge and record runner evidence in the ignored sidecar.
+- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - route controller launches through the bridge and expose runner evidence in the launch result.
+- **`validators/creator_engine_validator/runtime_backend_bridge.py`** *(A)* - visible composition bridge from gVisor `RunnerBackend` to `VisibilityBackend.ensure_surface`.
+- **`validators/creator_engine_validator/visibility_backend.py`** *(M)* - preserve tmux adapter compatibility when no cwd/env pinning is requested.
+- **`validators/tests/unit/test_ce_launch_cli.py`** *(M)* - controller launch success/fail-closed coverage for gVisor Docker/runsc rendering.
+- **`validators/tests/unit/test_lane_runtime.py`** *(M)* - lane launch success/fail-closed coverage for gVisor Docker/runsc rendering and sidecar evidence.
+- **`validators/tests/unit/test_version_boundary.py`** *(M)* - expected v1 taxonomy count update.
+
+Canonicalization:
+`sha256("\n".join(sorted(unique_paths)) + "\n")`.
+
+AUTHORIZED_PATHS_COUNT=10
+
+AUTHORIZED_PATHS_SHA256=20a004e842e007179e3ee19fde6240f25e209e4430559332179c6545a164343e
+
+```text
+.ce/changelog/ce128-launch-runner-integration.md
+.ce/pr-manifests/ce128-launch-runner-integration.md
+validators/creator_engine_validator/_versions.py
+validators/creator_engine_validator/lane_runtime.py
+validators/creator_engine_validator/launch_runtime.py
+validators/creator_engine_validator/runtime_backend_bridge.py
+validators/creator_engine_validator/visibility_backend.py
+validators/tests/unit/test_ce_launch_cli.py
+validators/tests/unit/test_lane_runtime.py
+validators/tests/unit/test_version_boundary.py
+```
