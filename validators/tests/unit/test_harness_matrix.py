@@ -146,6 +146,109 @@ def test_codex_ring1_not_managed_without_the_pin_even_if_config_present(tmp_path
     assert cell.value != hm.RING1_MANAGED
 
 
+def test_codex_ring1_not_managed_when_flag_pinned_false(tmp_path: Path):
+    # FINDING 1 (ce-dev-3): a requirements.toml that pins the key explicitly to
+    # `false` must NOT be reported managed-non-bypassable. The OLD substring check
+    # (`allow_managed_hooks_only` in text) would falsely report managed here; the
+    # fix TOML-parses and requires boolean True (reusing PR #387's predicate).
+    repo = tmp_path / "codex-pinned-false"
+    (repo / ".codex").mkdir(parents=True)
+    (repo / ".codex" / "requirements.toml").write_text(
+        "allow_managed_hooks_only = false\n", encoding="utf-8"
+    )
+    matrix = hm.build_matrix(repo_root=repo)
+    cell = _row(matrix, "codex").cells["ring1"]
+    assert cell.value != hm.RING1_MANAGED
+    if cell.value == hm.RING1_PRESENT:
+        assert cell.verified is False
+
+
+def test_codex_ring1_not_managed_when_key_missing_from_requirements(tmp_path: Path):
+    # FINDING 1: a committed requirements.toml that omits the key entirely must
+    # NOT be reported managed-non-bypassable.
+    repo = tmp_path / "codex-missing-key"
+    (repo / ".codex").mkdir(parents=True)
+    (repo / ".codex" / "requirements.toml").write_text(
+        "[features]\nhooks = true\n", encoding="utf-8"
+    )
+    matrix = hm.build_matrix(repo_root=repo)
+    cell = _row(matrix, "codex").cells["ring1"]
+    assert cell.value != hm.RING1_MANAGED
+
+
+def test_codex_ring1_substring_only_mention_is_not_managed(tmp_path: Path):
+    # FINDING 1: the key name appearing only as a comment / string (not a TOML
+    # boolean-true assignment) must NOT trip managed-non-bypassable — exactly the
+    # false positive the old substring check produced.
+    repo = tmp_path / "codex-comment-only"
+    (repo / ".codex").mkdir(parents=True)
+    (repo / ".codex" / "requirements.toml").write_text(
+        "# allow_managed_hooks_only is intentionally not set here\n"
+        "approval_policy = 'never'\n",
+        encoding="utf-8",
+    )
+    matrix = hm.build_matrix(repo_root=repo)
+    cell = _row(matrix, "codex").cells["ring1"]
+    assert cell.value != hm.RING1_MANAGED
+
+
+# ---------------------------------------------------------------------------
+# Invariant: lane Ring-1 reflects the actual hook invariant, not Ring-0 presence
+# ---------------------------------------------------------------------------
+
+
+def test_lane_ring1_is_present_and_backed_by_the_hook_invariant():
+    # On the real repo the committed PreToolUse pack + the lane's CE_LEDGER_ROOT
+    # env wiring both hold -> lane Ring-1 is a verified `present`, cited by the
+    # backing files (not inferred from Ring-0 / launch presence).
+    matrix = hm.build_matrix(repo_root=REPO_ROOT)
+    cell = _row(matrix, "lane").cells["ring1"]
+    assert cell.value == hm.RING1_PRESENT
+    assert cell.verified is True
+    assert "CE_LEDGER_ROOT" in cell.provenance
+    assert ".claude/settings.json" in cell.provenance
+
+
+def test_lane_ring1_env_wiring_probe_is_not_a_constant():
+    # FINDING 2 (ce-dev-3): the lane Ring-1 invariant is PROBED from the live
+    # lane_runtime.launch source (the CE_LEDGER_ROOT pane-env wiring), not a
+    # hardcoded boolean. On the real source the wiring is present.
+    assert hm._lane_ledger_root_env_wired() is True
+
+
+def test_lane_ring1_flips_when_pretooluse_pack_drifts(tmp_path: Path):
+    # FINDING 2: if the committed PreToolUse hook-pack drifts away, the lane
+    # Ring-1 cell must flip to unverified — even though Ring-0 (launch +
+    # ClaudeLaunchRefused symbols) is unchanged. This proves the cell reflects the
+    # hook invariant, not Ring-0 presence.
+    repo = tmp_path / "lane-no-pretooluse"
+    (repo / ".claude").mkdir(parents=True)
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"hooks": {}}), encoding="utf-8"
+    )
+    matrix = hm.build_matrix(repo_root=repo)
+    ring0 = _row(matrix, "lane").cells["ring0"]
+    ring1 = _row(matrix, "lane").cells["ring1"]
+    # Ring-0 stays present (the launch-spec symbols still import) ...
+    assert ring0.value == "present" and ring0.verified is True
+    # ... but Ring-1 is no longer a silent verified-present: the hook invariant
+    # (committed PreToolUse pack) is gone, so the cell flips to unverified.
+    assert ring1.verified is False
+    assert not (ring1.value == hm.RING1_PRESENT and ring1.verified)
+
+
+def test_lane_ring1_not_inferred_from_ring0_alone(monkeypatch):
+    # FINDING 2: directly assert decoupling — when the env-wiring probe reports
+    # the §7 ledger-root env is NOT wired, lane Ring-1 must NOT be a verified
+    # present, regardless of Ring-0 being present on the real repo.
+    monkeypatch.setattr(hm, "_lane_ledger_root_env_wired", lambda: False)
+    matrix = hm.build_matrix(repo_root=REPO_ROOT)
+    ring0 = _row(matrix, "lane").cells["ring0"]
+    ring1 = _row(matrix, "lane").cells["ring1"]
+    assert ring0.value == "present" and ring0.verified is True
+    assert ring1.verified is False
+
+
 # ---------------------------------------------------------------------------
 # Invariant: never report a capability present without a backing file
 # ---------------------------------------------------------------------------

@@ -227,54 +227,51 @@ def _claude_row(repo_root: Path) -> HarnessRow:
 # ---------------------------------------------------------------------------
 
 
-def _codex_managed_pin_path(repo_root: Path) -> Path | None:
-    """Locate the committed codex managed-hook config, if any.
-
-    Looks for the codex managed-hook-pack requirements/config in the conventional
-    spots. Returns the first existing candidate, else None. This is the probe that
-    decides whether codex Ring-1 is managed-non-bypassable or merely partial/none.
-    """
-    candidates = [
-        repo_root / ".codex" / "requirements.toml",
-        repo_root / ".codex" / "managed-hooks.toml",
-        repo_root / ".codex" / "config.toml",
-    ]
-    return next((c for c in candidates if c.is_file()), None)
-
-
 def _codex_ring1_probe(repo_root: Path) -> Cell:
     """Derive the codex Ring-1 posture from the committed managed-hook config.
 
-    * managed-non-bypassable IFF a managed-hook config pins ``allow_managed_hooks_only``.
-    * present IF a managed-hook confirm predicate exists in-package but no pin is
-      found in committed config.
+    * managed-non-bypassable IFF the committed ``.codex/requirements.toml`` is
+      TOML-parsed and pins ``allow_managed_hooks_only = true`` (boolean True).
+      We REUSE :func:`hook_pack_confirm.confirm_codex_managed_hook_pack` — the
+      same predicate PR #387 uses to gate the managed pack — so the matrix can
+      never fork the managed-only policy. A config that merely mentions the key,
+      or pins it ``false``, or omits it, is NOT managed-non-bypassable.
+    * present IF that confirm predicate exists in-package but the committed config
+      does not pin the flag true (asserted-but-unverifiable middle state).
     * none otherwise (the launch-spec module explicitly does NOT claim a Ring-1
       hook-pack — see its docstring).
     """
-    pin_path = _codex_managed_pin_path(repo_root)
-    if pin_path is not None:
-        try:
-            text = pin_path.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        if CODEX_MANAGED_PIN in text:
-            return Cell(
-                RING1_MANAGED,
-                f"{_rel(pin_path)}: pins {CODEX_MANAGED_PIN} "
-                "(managed PreToolUse hook-pack, non-bypassable)",
-                verified=True,
-            )
-
-    # A confirm predicate may exist on main ahead of a committed config.
+    # Reuse #387's parse/require logic — do NOT fork the policy with a substring
+    # check. The confirm predicate TOML-parses .codex/requirements.toml and only
+    # sets ``managed_hooks_only_pinned`` when ``allow_managed_hooks_only`` is the
+    # boolean True. ``False`` / missing key -> not pinned -> NOT managed.
     confirm_present = _module_has(
         "hook_pack_confirm", "confirm_codex_managed_hook_pack"
     )
+    requirements_path = repo_root / ".codex" / "requirements.toml"
     if confirm_present:
+        try:
+            confirm_mod = import_module("creator_engine_validator.hook_pack_confirm")
+            confirmation = confirm_mod.confirm_codex_managed_hook_pack(repo_root)
+        except Exception:
+            confirmation = None
+        if confirmation is not None and confirmation.managed_hooks_only_pinned:
+            return Cell(
+                RING1_MANAGED,
+                f"{_rel(requirements_path)}: TOML-pins {CODEX_MANAGED_PIN} = true "
+                "(managed PreToolUse hook-pack, non-bypassable) — confirmed via "
+                f"{_rel(_module_file('hook_pack_confirm'))}:"
+                "confirm_codex_managed_hook_pack",
+                verified=True,
+            )
+        # The confirm predicate exists but the committed config does NOT pin
+        # allow_managed_hooks_only = true (missing key, or pinned false, or no
+        # requirements.toml at all) -> present-but-unverifiable, never managed.
         return Cell(
             RING1_PRESENT,
             f"{_rel(_module_file('hook_pack_confirm'))}: "
-            "confirm_codex_managed_hook_pack exists but no committed config pins "
-            f"{CODEX_MANAGED_PIN}",
+            "confirm_codex_managed_hook_pack exists but the committed config does "
+            f"not pin {CODEX_MANAGED_PIN} = true",
             verified=False,
         )
 
@@ -335,6 +332,99 @@ def _codex_row(repo_root: Path) -> HarnessRow:
 # ---------------------------------------------------------------------------
 
 
+def _lane_ledger_root_env_wired() -> bool:
+    """True only when ``lane_runtime.launch`` actually wires the §7 hook env.
+
+    The lane Ring-1 hook is real ONLY because two file-backed facts hold:
+
+    1. the launched harness carries the committed ``.claude/settings.json``
+       PreToolUse hook-pack (probed by ``confirm_hook_pack``), and
+    2. ``lane_runtime.launch`` exports ``CE_LEDGER_ROOT`` into the pane env so
+       that in-band hook can resolve §7 posture from the seat's real claim.
+
+    This probes (2) by inspecting the live ``lane_runtime`` source for the
+    ledger-root env constant being wired into ``pane_env`` and passed through to
+    the surface as ``env=pane_env``. It is NOT inferred from Ring-0 presence: if
+    the env wiring is removed/renamed the probe flips, even though ``launch`` and
+    ``ClaudeLaunchRefused`` (the Ring-0 symbols) still exist.
+    """
+    import inspect
+
+    try:
+        lane_runtime = import_module("creator_engine_validator.lane_runtime")
+    except Exception:
+        return False
+    env_const = getattr(lane_runtime, "CE_LEDGER_ROOT_ENV", None)
+    if not isinstance(env_const, str) or not env_const:
+        return False
+    launch = getattr(lane_runtime, "launch", None)
+    if launch is None:
+        return False
+    try:
+        src = inspect.getsource(launch)
+    except (OSError, TypeError):
+        return False
+    # The §7 ledger-root env must be wired into the pane env AND that env must be
+    # passed through to the launched surface — the wiring that makes the wrapped
+    # harness's in-band Ring-1 hook resolve §7 from the seat's real claim.
+    return (
+        "CE_LEDGER_ROOT_ENV" in src
+        and "pane_env" in src
+        and "env=pane_env" in src
+    )
+
+
+def _lane_ring1_probe(repo_root: Path) -> Cell:
+    """Derive the lane Ring-1 cell from the actual hook invariant, not Ring-0.
+
+    The lane adds no per-call hook of its own; its Ring-1 is real ONLY via the
+    wrapped harness's committed PreToolUse hook-pack PLUS the lane's ledger-root
+    env wiring that lets that hook resolve §7. We probe BOTH independently of
+    Ring-0:
+
+    * ``confirm_hook_pack(repo_root).pretooluse_registered`` — the committed
+      ``.claude/settings.json`` PreToolUse pack the wrapped harness loads.
+    * ``_lane_ledger_root_env_wired()`` — ``lane_runtime.launch`` exports
+      ``CE_LEDGER_ROOT`` into the pane env.
+
+    If either invariant drifts (the PreToolUse pack is removed, or the lane stops
+    wiring the §7 env) the cell flips to ``present``/``none`` + ``verified=False``
+    — never a silent ``present`` inferred from launch presence.
+    """
+    lane_path = _module_file("lane_runtime")
+    settings_path = repo_root / ".claude" / "settings.json"
+
+    pretooluse_ok = False
+    try:
+        confirm_mod = import_module("creator_engine_validator.hook_pack_confirm")
+        pretooluse_ok = confirm_mod.confirm_hook_pack(repo_root).pretooluse_registered
+    except Exception:
+        pretooluse_ok = False
+
+    env_wired = _lane_ledger_root_env_wired()
+
+    if pretooluse_ok and env_wired:
+        return Cell(
+            RING1_PRESENT,
+            f"{_rel(settings_path)}: committed PreToolUse hook-pack + "
+            f"{_rel(lane_path)}: launch() exports CE_LEDGER_ROOT into the pane env "
+            "so the wrapped harness's in-band Ring-1 hook resolves §7 from the "
+            "seat's real claim (probed, not inferred from Ring-0)",
+            verified=True,
+        )
+
+    missing = []
+    if not pretooluse_ok:
+        missing.append("no committed .claude/settings.json PreToolUse hook-pack")
+    if not env_wired:
+        missing.append("lane_runtime.launch does not wire the CE_LEDGER_ROOT pane env")
+    return Cell(
+        RING1_PRESENT if (pretooluse_ok or env_wired) else RING1_NONE,
+        f"{_rel(lane_path)}: lane Ring-1 invariant unconfirmed — {'; '.join(missing)}",
+        verified=False,
+    )
+
+
 def _lane_row(repo_root: Path) -> HarnessRow:
     lane_path = _module_file("lane_runtime")
 
@@ -348,15 +438,9 @@ def _lane_row(repo_root: Path) -> HarnessRow:
         verified=ring0_present,
     )
 
-    # Ring 1: a lane carries whatever Ring-1 the launched harness provides. The
-    # lane itself injects the §7 ledger-root/hook env but does not add a per-call
-    # hook of its own — so its Ring-1 is "present" only via the wrapped harness.
-    ring1 = Cell(
-        RING1_PRESENT,
-        f"{_rel(lane_path)}: exports CE_LEDGER_ROOT env so the wrapped harness's "
-        "in-band Ring-1 hook resolves §7 posture from the seat's real claim",
-        verified=ring0_present,
-    )
+    # Ring 1: PROBED from the actual hook invariant (committed PreToolUse pack +
+    # the lane's CE_LEDGER_ROOT env wiring), NOT inferred from Ring-0 presence.
+    ring1 = _lane_ring1_probe(repo_root)
 
     # Ring 2: verify()/verify_closeout closeout-line + completion-report checks.
     ring2_present = _module_has("lane_runtime", "verify", "verify_closeout")

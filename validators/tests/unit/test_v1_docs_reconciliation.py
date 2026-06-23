@@ -55,6 +55,7 @@ def test_as_built_ce_inventory_matches_expected():
         "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
         "connector", "reviewer-triage", "claim", "pickup", "check", "doctor",
         "init", "launch", "hud", "verify-install", "onboard", "bootstrap",
+        "harness-matrix",
     }
 
 
