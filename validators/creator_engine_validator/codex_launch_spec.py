@@ -9,6 +9,8 @@ Clause identifiers are stable and namespaced ``CDX-D-*``.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,8 @@ CLAUSE_POSTURE_BYPASS = "CDX-D-4"
 CLAUSE_ADD_DIR = "CDX-D-5"
 CLAUSE_BYPASS_MODE = "CDX-D-6"
 CLAUSE_ARG_ALLOWLIST = "CDX-D-7"
+CODEX_HARNESS_ENV = "CE_CODEX_HARNESS"
+KNOWN_GOOD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 HEADLESS_SUBCOMMANDS = frozenset(
     {"exec", "review", "mcp-server", "exec-server", "app-server", "apply"}
@@ -226,11 +230,55 @@ def evaluate_codex_launch(
     return LaunchSpecResult(refusals=tuple(refusals), bypass_mode=bypass_mode)
 
 
-def build_governed_codex_command(base_argv: Sequence[str]) -> list[str]:
+def _composed_path(path: str | None = None) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for chunk in (path if path is not None else os.environ.get("PATH", ""), KNOWN_GOOD_PATH):
+        for part in str(chunk).split(os.pathsep):
+            if part and part not in seen:
+                parts.append(part)
+                seen.add(part)
+    return os.pathsep.join(parts)
+
+
+def resolve_codex_harness_binary(
+    configured: str | None = None,
+    *,
+    path: str | None = None,
+) -> str:
+    """Resolve the Codex harness to an executable absolute path before spawn."""
+    configured = configured if configured is not None else os.environ.get(CODEX_HARNESS_ENV)
+    if configured:
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute():
+            raise GovernedCommandError(
+                f"{CODEX_HARNESS_ENV} must be an absolute Codex harness path"
+            )
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+        raise GovernedCommandError(
+            f"cannot resolve Codex harness at configured path {str(candidate)!r}"
+        )
+
+    found = shutil.which("codex", path=_composed_path(path))
+    if found:
+        return str(Path(found).resolve())
+    raise GovernedCommandError(
+        "cannot resolve Codex harness binary 'codex' on the composed launch PATH; "
+        f"set {CODEX_HARNESS_ENV} to an executable absolute path"
+    )
+
+
+def build_governed_codex_command(
+    base_argv: Sequence[str],
+    *,
+    codex_bin: str | None = None,
+) -> list[str]:
     """Build the governed Codex command with ambient repo-write credentials scrubbed."""
+    resolved = codex_bin or resolve_codex_harness_binary()
     return [
         "env",
         *(part for name in CREDENTIAL_ENV_UNSETS for part in ("-u", name)),
-        "codex",
+        resolved,
         *list(base_argv),
     ]

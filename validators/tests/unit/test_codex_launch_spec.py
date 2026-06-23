@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import codex_launch_spec as spec
 
 
@@ -71,11 +73,41 @@ def test_refuses_non_allowlisted_flags(tmp_path):
 
 
 def test_build_governed_command_scrubs_github_credentials():
-    command = spec.build_governed_codex_command(["--model", "gpt-5"])
+    command = spec.build_governed_codex_command(
+        ["--model", "gpt-5"], codex_bin="/opt/codex/bin/codex"
+    )
     assert command[:2] == ["env", "-u"]
     for name in spec.CREDENTIAL_ENV_UNSETS:
         assert ["-u", name] == command[command.index(name) - 1: command.index(name) + 1]
-    assert command[-3:] == ["codex", "--model", "gpt-5"]
+    assert command[-3:] == ["/opt/codex/bin/codex", "--model", "gpt-5"]
+
+
+def test_resolve_codex_harness_uses_composed_path(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    codex = bindir / "codex"
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+
+    monkeypatch.delenv(spec.CODEX_HARNESS_ENV, raising=False)
+    assert spec.resolve_codex_harness_binary(path=str(bindir)) == str(codex)
+
+
+def test_resolve_codex_harness_refuses_unresolved(monkeypatch):
+    monkeypatch.delenv(spec.CODEX_HARNESS_ENV, raising=False)
+    monkeypatch.setattr(spec, "KNOWN_GOOD_PATH", "")
+    with pytest.raises(spec.GovernedCommandError) as exc:
+        spec.resolve_codex_harness_binary(path="")
+    assert "cannot resolve Codex harness" in str(exc.value)
+
+
+def test_resolve_codex_harness_accepts_configured_absolute_path(tmp_path, monkeypatch):
+    codex = tmp_path / "codex"
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv(spec.CODEX_HARNESS_ENV, str(codex))
+
+    assert spec.resolve_codex_harness_binary(path="") == str(codex)
 
 
 def test_detect_config_bypass_mode(tmp_path):

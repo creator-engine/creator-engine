@@ -64,6 +64,15 @@ def _inner_argv(result):
     return shlex.split(lines[idx - 1])
 
 
+def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
+    codex = tmp_path / "bin" / "codex"
+    codex.parent.mkdir()
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv(launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, str(codex))
+    return codex
+
+
 class FakeAdapter:
     kind = "tmux"
 
@@ -82,6 +91,18 @@ class FakeAdapter:
         self.spawned.append((session, window, list(command)))
         self._sessions.add(session)
         return TmuxPane(session_id="$1", window_id="@2", pane_id="%3", pane_tty="/dev/pts/7", pane_pid=999)
+
+
+class Exit127Adapter(FakeAdapter):
+    def ensure_pane(self, *, session, window, command):
+        pane = super().ensure_pane(session=session, window=window, command=command)
+        events = Path(command[1]).parent / "events.jsonl"
+        events.write_text(
+            json.dumps({"event": "launched", "seat_id": "exec-fail--controller"}) + "\n"
+            + json.dumps({"event": "exited", "seat_id": "exec-fail--controller", "exit_code": 127}) + "\n",
+            encoding="utf-8",
+        )
+        return pane
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +218,8 @@ def test_resume_attaches_existing_session():
     )
     assert result.plan.mode == "resume"
     assert result.attached is True
+    assert result.spawned is False
+    assert adapter.spawned == []
 
 
 def test_launch_spawns_visible_controller_seat():
@@ -422,13 +445,14 @@ def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
     assert "--setting-sources" in inner and "project" in inner
 
 
-def test_codex_launch_builds_governed_env_scrubbed_command(monkeypatch):
+def test_codex_launch_builds_governed_env_scrubbed_command(tmp_path, monkeypatch):
     # Codex does not get the Claude MCP command, but it is no longer raw pass-through:
     # CDX-D Ring 0 wraps it with an ambient GitHub credential scrub.
     adapter = FakeAdapter()
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    codex = _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(
         harness="codex",
         session="s",
@@ -438,7 +462,7 @@ def test_codex_launch_builds_governed_env_scrubbed_command(monkeypatch):
     inner = _inner_argv(result)
     assert inner[:2] == ["env", "-u"]
     assert "GH_TOKEN" in inner and "GITHUB_TOKEN" in inner
-    assert inner[-3:] == ["codex", "--model", "gpt-5"]
+    assert inner[-3:] == [str(codex), "--model", "gpt-5"]
     assert result.plan.codex_bypass_mode == "config"
 
 
@@ -453,11 +477,79 @@ def test_codex_launch_refuses_unsafe_surface_before_side_effects(monkeypatch):
     assert adapter.spawned == []
 
 
-def test_claude_args_do_not_affect_codex_cli_route(monkeypatch):
+def test_codex_launch_refuses_unresolved_harness_before_side_effects(tmp_path, monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setenv(
+        launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV,
+        str(tmp_path / "missing" / "codex"),
+    )
+
+    with pytest.raises(launch_runtime.CodexLaunchRefused) as exc:
+        launch_runtime.launch(
+            harness="codex",
+            session="missing-codex",
+            repo_root=tmp_path,
+            ledger_root=tmp_path / ".ce" / "state" / "active-work-ledger",
+            tmux_adapter=adapter,
+        )
+
+    assert "cannot resolve Codex harness" in str(exc.value)
+    assert adapter.spawned == []
+    assert not (tmp_path / ".ce" / "state" / "dispatches" / "missing-codex--controller").exists()
+    assert not (tmp_path / ".ce" / "state" / "active-work-ledger" / "seats").exists()
+
+
+def test_launch_reconciles_exit_127_sentinel_to_dead_record(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    _fake_codex(tmp_path, monkeypatch)
+
+    result = launch_runtime.launch(
+        harness="codex",
+        session="exec-fail",
+        repo_root=tmp_path,
+        ledger_root=tmp_path / ".ce" / "state" / "active-work-ledger",
+        tmux_adapter=Exit127Adapter(),
+    )
+
+    record = yaml.safe_load(Path(result.seat_record_ref).read_text(encoding="utf-8"))
+    assert result.seat_lifecycle_state == "dead"
+    assert record["lifecycle"]["state"] == "dead"
+    assert record["lifecycle"]["terminal_exit_code"] == 127
+
+
+def test_launch_refuses_existing_launched_events_before_reuse(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / "reuse--controller"
+    seat_dir.mkdir(parents=True)
+    (seat_dir / "events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "reuse--controller"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused):
+        launch_runtime.launch(
+            harness="claude",
+            session="reuse",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert adapter.spawned == []
+    assert not (seat_dir / "sentinel-wrapper.sh").exists()
+
+
+def test_claude_args_do_not_affect_codex_cli_route(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(harness="codex", session="s", tmux_adapter=adapter)
     assert "--dangerously-skip-permissions" not in _inner_argv(result)
 

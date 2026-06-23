@@ -75,6 +75,15 @@ def _inner_argv(result):
     return shlex.split(lines[idx - 1])
 
 
+def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
+    codex = tmp_path / "bin" / "codex"
+    codex.parent.mkdir()
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv(launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, str(codex))
+    return codex
+
+
 class FakeSystemctl:
     """Scripted systemctl runner: unit-name probe + ControlGroup + set-property."""
 
@@ -324,6 +333,7 @@ def test_wrap_applies_to_every_harness_identically(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    codex = _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(
         harness="codex",
         session="codex-seat",
@@ -337,4 +347,4 @@ def test_wrap_applies_to_every_harness_identically(tmp_path, monkeypatch):
     inner = wrapped[sep + 1:]
     assert inner[:2] == ["env", "-u"]
     assert "GH_TOKEN" in inner
-    assert inner[-1:] == ["codex"]
+    assert inner[-1:] == [str(codex)]

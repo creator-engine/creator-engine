@@ -7,8 +7,18 @@ resume-missing-session refusal. No real Controller seat / provider is spawned.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from creator_engine_validator import ce_cli
+
+
+def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
+    codex = tmp_path / "bin" / "codex"
+    codex.parent.mkdir()
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv(ce_cli.launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, str(codex))
+    return codex
 
 
 def test_dry_run_plan_is_deterministic(capsys):
@@ -41,10 +51,11 @@ def test_resume_missing_session_is_refused(capsys):
     assert ret != 0
 
 
-def test_codex_dry_run_is_pure_and_governed(monkeypatch, capsys):
+def test_codex_dry_run_is_pure_and_governed(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
         "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
         "--dry-run", "--json",
@@ -52,5 +63,5 @@ def test_codex_dry_run_is_pure_and_governed(monkeypatch, capsys):
     assert ret == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["spawned"] is False
-    assert payload["plan"]["command"][-3:] == ["codex", "--model", "gpt-5"]
+    assert payload["plan"]["command"][-3:] == [str(codex), "--model", "gpt-5"]
     assert payload["plan"]["codex_bypass_mode"] == "config"
