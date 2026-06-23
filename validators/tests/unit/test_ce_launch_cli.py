@@ -97,6 +97,39 @@ def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
     return codex
 
 
+def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> Path:
+    policy = {
+        "kind": "runtime-policy-record",
+        "record_type": "runtime_policy",
+        "schema_version": "1",
+        "policy_id": "gvisor-implementer-v1",
+        "policy_sha": "a" * 64,
+        "role": "implementer",
+        "isolation_backend": backend,
+        "image_ref": {
+            "name": "registry.example/creator-engine/implementer",
+            "sha": "sha256:" + "b" * 64,
+        },
+        "mount_manifest": [
+            {
+                "path": "/runtime/worktree",
+                "mode": "rw",
+                "write_justification": "allocated worktree for this seat",
+            },
+            {"path": "governance", "mode": "ro"},
+        ],
+        "egress_allowlist": [
+            {"host": "model-provider.example", "protocol": "https", "assurance": ["l4"]},
+        ],
+        "secret_allowlist": ["model-provider-key"],
+        "grant_extensible": False,
+        "grant_authority": "controller",
+    }
+    path = tmp_path / "runtime-policy.yaml"
+    path.write_text(yaml.safe_dump(policy, sort_keys=True), encoding="utf-8")
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _isolate_brain_state(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -138,6 +171,68 @@ def test_launch_dry_run_json(use_fake_tmux, capsys):
     assert payload["plan"]["invoked_as"] == "launch"
     assert payload["plan"]["visibility"] == "operator_visible"
     assert payload["spawned"] is False
+
+
+def test_launch_backend_dry_run_json_carries_runtime_policy(use_fake_tmux, tmp_path, capsys):
+    policy = _write_runtime_policy(tmp_path)
+    ret = ce_cli.main([
+        "launch",
+        "--dry-run",
+        "--json",
+        "--backend",
+        "gvisor",
+        "--runtime-policy",
+        str(policy),
+    ])
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    stamp = payload["plan"]["runtime_policy"]
+    assert stamp["requested_backend"] == "gvisor"
+    assert stamp["resolved_backend"] == "gvisor-proxy"
+    assert stamp["image_ref"]["digest"].endswith("@sha256:" + "b" * 64)
+    assert stamp["mount_manifest"][0]["path"] == "/runtime/worktree"
+    assert stamp["egress_allowlist"] == [
+        {"host": "model-provider.example", "protocol": "https", "assurance": ["l4"]}
+    ]
+
+
+def test_launch_backend_refuses_without_runtime_policy(use_fake_tmux, capsys):
+    ret = ce_cli.main(["launch", "--dry-run", "--backend", "gvisor"])
+    assert ret != 0
+    err = capsys.readouterr().err
+    assert "--backend requires --runtime-policy" in err
+
+
+def test_launch_backend_live_refuses_before_raw_tmux(use_fake_tmux, tmp_path, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    policy = _write_runtime_policy(tmp_path)
+    ret = ce_cli.main([
+        "launch",
+        "--backend",
+        "gvisor",
+        "--runtime-policy",
+        str(policy),
+    ])
+    assert ret != 0
+    assert adapter.spawned == []
+    err = capsys.readouterr().err
+    assert "RunnerBackend execution is not wired" in err
+
+
+def test_launch_backend_mismatch_refuses(use_fake_tmux, tmp_path, capsys):
+    policy = _write_runtime_policy(tmp_path, backend="openshell")
+    ret = ce_cli.main([
+        "launch",
+        "--dry-run",
+        "--backend",
+        "gvisor",
+        "--runtime-policy",
+        str(policy),
+    ])
+    assert ret != 0
+    err = capsys.readouterr().err
+    assert "runtime policy declares 'openshell'" in err
 
 
 def test_hud_dry_run_json_is_alias_of_launch(use_fake_tmux, capsys):

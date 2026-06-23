@@ -86,13 +86,13 @@ All required fields MUST be present. Stricter type rules below apply.
 not listed in the schema is a contract violation.
 
 `isolation_backend` is **optional** (ce-ops#71 MINOR-A): one of
-`gvisor-proxy` (the conservative default), `openshell`, or `os-native`
-(the unprivileged-default scaffold, fail-closed). A Draft 2020-12
+`gvisor-proxy` (the conservative default), `openshell`, `local-noop`
+(the inert registered backend for dry-run/foundation wiring), or
+`os-native` (the unprivileged-default scaffold, fail-closed). A Draft 2020-12
 validator does not inject the schema `default`, so the field is *not*
 required — an omitted field validates clean and
-`v3_installer.resolve_isolation_backend` supplies the fail-closed
-default (`explicit > profile > gvisor-proxy`), which is what actually
-keeps a pre-#71 record on today's backend.
+the runtime resolver supplies the fail-closed default (`gvisor-proxy`),
+which is what actually keeps a pre-#71 record on today's backend.
 
 ## Safety predicates
 

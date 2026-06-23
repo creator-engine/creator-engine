@@ -101,6 +101,7 @@ from . import (
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
+from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
 from .tmux_adapter import TmuxAdapter
@@ -313,6 +314,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="v3.5-F: path to the ratified runtime policy whose resource_envelopes "
         "bound this seat (systemd-run --user wrap); enforce refuses loudly on an "
         "unsupported host; advisory/off require a resource_optout ratification binding",
+    )
+    launch.add_argument(
+        "--backend",
+        choices=ce_runtime_policy.CLI_BACKEND_CHOICES,
+        default=None,
+        help="runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy)",
     )
     launch.add_argument(
         "--ratification-evidence",
@@ -1102,6 +1109,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "resource_bound block offline",
         )
         p.add_argument(
+            "--backend",
+            choices=ce_runtime_policy.CLI_BACKEND_CHOICES,
+            default=None,
+            help="runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy)",
+        )
+        p.add_argument(
             "--claim-ticket",
             dest="claim_ticket",
             default=None,
@@ -1190,6 +1203,7 @@ def _lane_launch(args) -> int:
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
             seat_env_file=getattr(args, "seat_env_file", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            backend=getattr(args, "backend", None),
             work_claim=_claim_binding(claim_ctx),
             purpose=_claim_purpose(args, claim_ctx),
             tmux_adapter=_make_tmux_adapter(),
@@ -2600,6 +2614,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
             runtime_policy=getattr(args, "runtime_policy", None),
+            backend=getattr(args, "backend", None),
             repo_root=getattr(args, "repo_root", None),
             ledger_root=getattr(args, "ledger_root", None),
             owner_controller_id=getattr(args, "controller_id", None),
