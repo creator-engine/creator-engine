@@ -28,11 +28,17 @@ class ScriptedGit:
         fast_forward: bool = True,
         status: str = "",
         author_email: str = AUTHOR_EMAIL,
+        push_returncode: int = 0,
+        push_stderr: str = "",
+        raise_on_push: bool = False,
     ):
         self.remote_head = remote_head
         self.fast_forward = fast_forward
         self.status = status
         self.author_email = author_email
+        self.push_returncode = push_returncode
+        self.push_stderr = push_stderr
+        self.raise_on_push = raise_on_push
         self.pushed = False
         self.calls: list[dict] = []
 
@@ -57,9 +63,15 @@ class ScriptedGit:
             return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
         if "merge-base" in argv and "--is-ancestor" in argv:
             return subprocess.CompletedProcess(argv, 0 if self.fast_forward else 1, stdout="", stderr="")
-        if "push" in argv:
-            self.pushed = True
+        if "add" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if "commit" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if "push" in argv:
+            if self.raise_on_push:
+                raise RuntimeError("push process died")
+            self.pushed = True
+            return subprocess.CompletedProcess(argv, self.push_returncode, stdout="", stderr=self.push_stderr)
         raise AssertionError(f"unexpected git argv: {argv}")  # pragma: no cover
 
     def argv_for(self, verb: str) -> list[str] | None:
@@ -72,6 +84,12 @@ class ScriptedGit:
         for call in self.calls:
             if verb in call["argv"]:
                 return call["env"]
+        return None
+
+    def call_index(self, verb: str) -> int | None:
+        for index, call in enumerate(self.calls):
+            if verb in call["argv"]:
+                return index
         return None
 
 
@@ -161,18 +179,106 @@ def test_attributed_fast_forward_publish_pushes_with_host_helper_and_records_led
     assert f"refs/heads/{BRANCH}:refs/heads/{BRANCH}" in push
     assert "--force" not in push and "--force-with-lease" not in push
     assert "GH_TOKEN" not in git.env_for("push")
+    assert git.call_index("commit") is not None
+    assert git.call_index("commit") < git.call_index("push")
+    records = _ledger_records(tmp_path / "side-effect-ledger")
+    assert len(records) == 2
+    intent = json.loads(records[0].read_text(encoding="utf-8"))
+    terminal = json.loads(records[1].read_text(encoding="utf-8"))
+    assert intent["effect_kind"] == "git_mutation"
+    assert intent["effect_status"] == "started"
+    assert intent["subject_ref"] == f"refs/heads/{BRANCH}"
+    assert intent["subject_git_sha"] == LOCAL
+    assert intent["details"]["actor"] == "host-substrate"
+    assert intent["details"]["seat"] == "ce-dev-1"
+    assert intent["details"]["policy_verdict"] == "allow"
+    assert intent["details"]["publish_phase"] == "intent"
+    assert intent["details"]["sandbox_auth_env_required"] is False
+    assert intent["details"]["sandbox_auth_mount_required"] is False
+    assert terminal["effect_status"] == "succeeded"
+    assert terminal["details"]["publish_phase"] == "terminal"
+    assert terminal["details"]["terminal_status"] == "succeeded"
+
+
+def test_ledger_intent_write_failure_refuses_before_push(tmp_path: Path, monkeypatch):
+    git = ScriptedGit(remote_head=REMOTE, fast_forward=True)
+
+    def fail_record(**_kwargs):
+        raise OSError("ledger unavailable")
+
+    monkeypatch.setattr(publish_gate.side_effect_ledger_runtime, "record", fail_record)
+
+    result = publish_gate.publish_branch(
+        BRANCH,
+        repo=REPO,
+        repo_root=tmp_path,
+        expected_identity=_expected(),
+        ledger_context=_ledger_context(tmp_path),
+        runner=git,
+    )
+
+    assert result.ok is False
+    assert result.refusal_reason == "ledger_intent_write_failed"
+    assert result.pushed is False
+    assert git.argv_for("add") is None
+    assert git.argv_for("commit") is None
+    assert git.argv_for("push") is None
+
+
+def test_push_failure_records_terminal_failed_status(tmp_path: Path):
+    git = ScriptedGit(
+        remote_head=REMOTE,
+        fast_forward=True,
+        push_returncode=1,
+        push_stderr="error: failed to push some refs",
+    )
+
+    result = publish_gate.publish_branch(
+        BRANCH,
+        repo=REPO,
+        repo_root=tmp_path,
+        expected_identity=_expected(),
+        ledger_context=_ledger_context(tmp_path),
+        runner=git,
+    )
+
+    assert result.ok is False
+    assert result.refusal_reason == "push_failed"
+    assert result.pushed is False
+    records = _ledger_records(tmp_path / "side-effect-ledger")
+    assert [json.loads(path.read_text(encoding="utf-8"))["effect_status"] for path in records] == [
+        "started",
+        "failed",
+    ]
+    terminal = json.loads(records[1].read_text(encoding="utf-8"))
+    assert terminal["details"]["publish_phase"] == "terminal"
+    assert terminal["details"]["terminal_status"] == "push_failed"
+
+
+def test_intent_record_is_committed_if_process_dies_mid_push(tmp_path: Path):
+    git = ScriptedGit(remote_head=REMOTE, fast_forward=True, raise_on_push=True)
+
+    try:
+        publish_gate.publish_branch(
+            BRANCH,
+            repo=REPO,
+            repo_root=tmp_path,
+            expected_identity=_expected(),
+            ledger_context=_ledger_context(tmp_path),
+            runner=git,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "push process died"
+    else:  # pragma: no cover
+        raise AssertionError("expected push to abort")
+
+    assert git.call_index("commit") is not None
+    assert git.call_index("commit") < git.call_index("push")
     records = _ledger_records(tmp_path / "side-effect-ledger")
     assert len(records) == 1
     payload = json.loads(records[0].read_text(encoding="utf-8"))
-    assert payload["effect_kind"] == "git_mutation"
-    assert payload["effect_status"] == "succeeded"
-    assert payload["subject_ref"] == f"refs/heads/{BRANCH}"
-    assert payload["subject_git_sha"] == LOCAL
-    assert payload["details"]["actor"] == "host-substrate"
-    assert payload["details"]["seat"] == "ce-dev-1"
-    assert payload["details"]["policy_verdict"] == "allow"
-    assert payload["details"]["sandbox_auth_env_required"] is False
-    assert payload["details"]["sandbox_auth_mount_required"] is False
+    assert payload["effect_status"] == "started"
+    assert payload["details"]["publish_phase"] == "intent"
 
 
 def test_non_fast_forward_is_refused_before_push_and_writes_no_ledger(tmp_path: Path):

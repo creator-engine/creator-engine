@@ -2,8 +2,9 @@
 
 Contained seats author and commit inside the sandbox, but they do not receive
 push credentials. This module is the host-side chokepoint: verify a committed
-branch, apply a fail-closed policy, push through host git credentials, then
-record the publish to the Side-Effect Ledger.
+branch, apply a fail-closed policy, record a committed Side-Effect Ledger
+intent, push through host git credentials, then record the terminal publish
+result to the Side-Effect Ledger.
 """
 from __future__ import annotations
 
@@ -203,7 +204,12 @@ def publish_branch(
     observed: CommitIdentity | None = None
     policy_name = getattr(policy or DefaultPublishPolicy(), "policy_name", "publish_policy")
 
-    def refused(reason: str, *evidence: str, pushed: bool = False) -> PublishBranchResult:
+    def refused(
+        reason: str,
+        *evidence: str,
+        pushed: bool = False,
+        ledger_record_path: str | None = None,
+    ) -> PublishBranchResult:
         return PublishBranchResult(
             repo=repo_value,
             branch=branch,
@@ -219,7 +225,7 @@ def publish_branch(
             up_to_date=False,
             applied=False,
             pushed=pushed,
-            ledger_record_path=None,
+            ledger_record_path=ledger_record_path,
             refusal_reason=reason,
             evidence=tuple(str(item) for item in evidence),
         )
@@ -339,21 +345,7 @@ def publish_branch(
             evidence=("publish verification passed", "dry_run=true"),
         )
 
-    push_error = _push(runner, repo_root, remote_url, branch)
-    if push_error:
-        reason = "remote_moved_before_push" if "non-fast-forward" in push_error else "push_failed"
-        return refused(reason, push_error)
-
-    post_push_remote = _ls_remote(runner, repo_root, remote_url, branch)
-    if post_push_remote is None or post_push_remote.lower() != local_head:
-        return refused(
-            "post_push_verification_failed",
-            f"expected_remote_head={local_head}",
-            f"actual_remote_head={post_push_remote}",
-            pushed=True,
-        )
-
-    record_path = _record_publish(
+    intent_record_path = _record_publish(
         context=ledger_context,
         repo=repo_value,
         branch=branch,
@@ -361,7 +353,104 @@ def publish_branch(
         attribution=attribution,
         policy_name=policy_name,
         remote_head_before=remote_head,
+        status="started",
+        summary=f"Intent to publish {branch} through host substrate publish gate.",
+        terminal_status=None,
     )
+    if intent_record_path is None:
+        return refused("ledger_intent_write_failed", "live publish requires a Side-Effect Ledger intent record")
+    intent_commit_error = _commit_ledger_record(
+        runner,
+        repo_root,
+        ledger_context,
+        intent_record_path,
+        f"chore: record publish intent for {branch}",
+    )
+    if intent_commit_error:
+        return refused("ledger_intent_commit_failed", intent_commit_error, ledger_record_path=str(intent_record_path))
+
+    committed_head = _git_stdout(runner, repo_root, ["rev-parse", "--verify", "HEAD"])
+    if not _valid_sha(committed_head or ""):
+        return refused(
+            "ambiguous_intent_commit_head",
+            "could not resolve HEAD after committing publish intent",
+            ledger_record_path=str(intent_record_path),
+        )
+    local_head = committed_head.lower()
+
+    push_error = _push(runner, repo_root, remote_url, branch)
+    if push_error:
+        reason = "remote_moved_before_push" if "non-fast-forward" in push_error else "push_failed"
+        terminal_path, terminal_error = _record_publish_terminal(
+            runner=runner,
+            repo_root=repo_root,
+            context=ledger_context,
+            repo=repo_value,
+            branch=branch,
+            sha=local_head,
+            attribution=attribution,
+            policy_name=policy_name,
+            remote_head_before=remote_head,
+            status="failed",
+            terminal_status=reason,
+        )
+        evidence = [push_error]
+        if terminal_error:
+            evidence.append(terminal_error)
+        return refused(
+            reason,
+            *evidence,
+            ledger_record_path=str(terminal_path or intent_record_path),
+        )
+
+    post_push_remote = _ls_remote(runner, repo_root, remote_url, branch)
+    if post_push_remote is None or post_push_remote.lower() != local_head:
+        terminal_path, terminal_error = _record_publish_terminal(
+            runner=runner,
+            repo_root=repo_root,
+            context=ledger_context,
+            repo=repo_value,
+            branch=branch,
+            sha=local_head,
+            attribution=attribution,
+            policy_name=policy_name,
+            remote_head_before=remote_head,
+            status="failed",
+            terminal_status="post_push_verification_failed",
+        )
+        evidence = [
+            f"expected_remote_head={local_head}",
+            f"actual_remote_head={post_push_remote}",
+        ]
+        if terminal_error:
+            evidence.append(terminal_error)
+        return refused(
+            "post_push_verification_failed",
+            *evidence,
+            pushed=True,
+            ledger_record_path=str(terminal_path or intent_record_path),
+        )
+
+    record_path, terminal_error = _record_publish_terminal(
+        runner=runner,
+        repo_root=repo_root,
+        context=ledger_context,
+        repo=repo_value,
+        branch=branch,
+        sha=local_head,
+        attribution=attribution,
+        policy_name=policy_name,
+        remote_head_before=remote_head,
+        status="succeeded",
+        terminal_status="succeeded",
+    )
+    if terminal_error:
+        return refused(
+            "ledger_terminal_record_failed",
+            terminal_error,
+            pushed=True,
+            ledger_record_path=str(intent_record_path),
+        )
     return PublishBranchResult(
         repo=repo_value,
         branch=branch,
@@ -377,9 +466,13 @@ def publish_branch(
         up_to_date=False,
         applied=True,
         pushed=True,
-        ledger_record_path=str(record_path) if record_path else None,
+        ledger_record_path=str(record_path) if record_path else str(intent_record_path),
         refusal_reason=None,
-        evidence=("publish verification passed", "push=fast_forward_or_create"),
+        evidence=(
+            "publish verification passed",
+            "push=fast_forward_or_create",
+            f"ledger_intent_record_path={intent_record_path}",
+        ),
     )
 
 
@@ -470,6 +563,43 @@ def _run_git(runner: GitRunner, repo_root: Path, args: Sequence[str]) -> subproc
     return runner(["git", "-C", str(repo_root), *args], None, env)
 
 
+def _commit_ledger_record(
+    runner: GitRunner,
+    repo_root: Path,
+    context: PublishLedgerContext,
+    record_path: Path,
+    message: str,
+) -> str | None:
+    paths_or_error = _ledger_commit_paths(repo_root, context, record_path)
+    if isinstance(paths_or_error, str):
+        return paths_or_error
+    paths = paths_or_error
+    add = _run_git(runner, repo_root, ["add", "--", *paths])
+    if add.returncode != 0:
+        return _redact(add.stderr or add.stdout or "git add failed while committing Side-Effect Ledger record")
+    commit = _run_git(runner, repo_root, ["commit", "--no-verify", "-m", message, "--", *paths])
+    if commit.returncode != 0:
+        return _redact(commit.stderr or commit.stdout or "git commit failed while committing Side-Effect Ledger record")
+    return None
+
+
+def _ledger_commit_paths(
+    repo_root: Path,
+    context: PublishLedgerContext,
+    record_path: Path,
+) -> list[str] | str:
+    root = repo_root.resolve()
+    side_effect_root = Path(context.side_effect_ledger_root).resolve()
+    head_path = side_effect_root / context.controller_id / context.lane_id / "_head.json"
+    paths: list[str] = []
+    for path in (record_path, head_path):
+        try:
+            paths.append(path.resolve().relative_to(root).as_posix())
+        except ValueError:
+            return f"Side-Effect Ledger path is outside repo root: {path}"
+    return paths
+
+
 def _evaluate_policy(policy: PublishPolicy, request: PublishPolicyRequest) -> PublishPolicyVerdict:
     try:
         verdict = policy.evaluate(request)
@@ -493,40 +623,90 @@ def _record_publish(
     attribution: str,
     policy_name: str,
     remote_head_before: str | None,
+    status: str,
+    summary: str,
+    terminal_status: str | None,
 ) -> Path | None:
     if context is None:
         return None
-    result = side_effect_ledger_runtime.record(
-        controller_id=context.controller_id,
-        lane_id=context.lane_id,
-        claim_ref=context.claim_ref,
-        effect_id=f"publish-{uuid.uuid4().hex[:16]}",
-        effect_kind="git_mutation",
-        effect_status="succeeded",
-        summary=f"Published {branch} through host substrate publish gate.",
-        occurred_at=_utc_now_str(context.now),
-        repo_root=context.repo_root,
-        side_effect_ledger_root=context.side_effect_ledger_root,
-        active_work_ledger_root=context.active_work_ledger_root,
-        actor_role=context.actor_role,
-        subject_ref=f"refs/heads/{branch}",
-        subject_git_sha=sha,
-        details={
-            "event": "host_substrate_publish_gate",
-            "repo": repo,
-            "branch": branch,
-            "actor": context.actor,
-            "seat": context.seat_id,
-            "attribution": attribution,
-            "policy_name": policy_name,
-            "policy_verdict": "allow",
-            "remote_head_before": remote_head_before[:12] if remote_head_before else None,
-            "sandbox_auth_env_required": False,
-            "sandbox_auth_mount_required": False,
-        },
-        now=context.now,
-    )
+    details = {
+        "event": "host_substrate_publish_gate",
+        "repo": repo,
+        "branch": branch,
+        "actor": context.actor,
+        "seat": context.seat_id,
+        "attribution": attribution,
+        "policy_name": policy_name,
+        "policy_verdict": "allow",
+        "remote_head_before": remote_head_before[:12] if remote_head_before else None,
+        "sandbox_auth_env_required": False,
+        "sandbox_auth_mount_required": False,
+    }
+    if terminal_status is None:
+        details["publish_phase"] = "intent"
+    else:
+        details["publish_phase"] = "terminal"
+        details["terminal_status"] = terminal_status
+    try:
+        result = side_effect_ledger_runtime.record(
+            controller_id=context.controller_id,
+            lane_id=context.lane_id,
+            claim_ref=context.claim_ref,
+            effect_id=f"publish-{uuid.uuid4().hex[:16]}",
+            effect_kind="git_mutation",
+            effect_status=status,
+            summary=summary,
+            occurred_at=_utc_now_str(context.now),
+            repo_root=context.repo_root,
+            side_effect_ledger_root=context.side_effect_ledger_root,
+            active_work_ledger_root=context.active_work_ledger_root,
+            actor_role=context.actor_role,
+            subject_ref=f"refs/heads/{branch}",
+            subject_git_sha=sha,
+            details=details,
+            now=context.now,
+        )
+    except Exception:
+        return None
     return result.record_path
+
+
+def _record_publish_terminal(
+    *,
+    runner: GitRunner,
+    repo_root: Path,
+    context: PublishLedgerContext,
+    repo: str,
+    branch: str,
+    sha: str,
+    attribution: str,
+    policy_name: str,
+    remote_head_before: str | None,
+    status: str,
+    terminal_status: str,
+) -> tuple[Path | None, str | None]:
+    record_path = _record_publish(
+        context=context,
+        repo=repo,
+        branch=branch,
+        sha=sha,
+        attribution=attribution,
+        policy_name=policy_name,
+        remote_head_before=remote_head_before,
+        status=status,
+        summary=f"Publish {terminal_status} for {branch} through host substrate publish gate.",
+        terminal_status=terminal_status,
+    )
+    if record_path is None:
+        return None, "failed to write terminal Side-Effect Ledger record"
+    commit_error = _commit_ledger_record(
+        runner,
+        repo_root,
+        context,
+        record_path,
+        f"chore: record publish terminal result for {branch}",
+    )
+    return record_path, commit_error
 
 
 def _attribution(identity: CommitIdentity) -> str:
