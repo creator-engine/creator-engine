@@ -1,5 +1,18 @@
 """CE-owned attachable PTY session substrate (ce-ops#207, W2′).
 
+.. note::
+
+   **SUPERSEDED-IN-PRINCIPLE by the herdr-ce fork (ce-ops#217, Posture A).** The
+   ``pty.fork`` byte-tap below is the hand-rolled precursor to herdr's productized
+   pane/socket model; the design-of-record
+   (``.ce/state/research/DESIGN_COCKPIT_ON_HERDR_20260623.md`` §2) routes the
+   forward backend through ``runner/herdr_session.HerdrSession`` over the herdr
+   JSON socket. U3 implements ``terminal_kind=herdr`` against that seam and
+   RETIRES this ``pty.fork`` path behind the visibility-backend registry. This
+   module is **kept live until U3 retires it** (do not delete here); the
+   ``surface_ref`` control-socket concept it reserves becomes the herdr socket ref.
+   TODO(ce-ops#217 U3): retire the ``pty.fork`` backend; keep the registry seam.
+
 The headless visibility backend must hand CE — **not tmux** — ownership of the
 seat process *and its PTY*. This module is that substrate: it spawns the
 sentinel-wrapped seat argv under a PTY whose **master fd CE holds**, so the live
