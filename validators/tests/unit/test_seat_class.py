@@ -90,7 +90,8 @@ def test_foreman_would_deny_only_implementation_for_required_classes():
     reason = foreman_would_deny("foreman", "implementation", "code", POLICY)
     assert reason is not None
     assert "code" not in reason
-    assert "foreman" not in reason
+    assert "ce-ops#163 REQ-3" in reason
+    assert "foreman_delegation_required" in reason
     assert foreman_would_deny("foreman", "coordination", "code", POLICY) is None
     assert foreman_would_deny("foreman", "implementation", "docs", POLICY) is None
     assert foreman_would_deny("worker", "implementation", "code", POLICY) is None

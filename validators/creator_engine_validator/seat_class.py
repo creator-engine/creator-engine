@@ -19,6 +19,10 @@ BASELINE_MUTATION_CLASSES: Final[tuple[str, ...]] = BASELINE_NAMES
 DEFAULT_DELEGATION_REQUIRED_MUTATION_CLASSES: Final[frozenset[str]] = frozenset(
     {"code", "schema", "deploy", "governance", "identity", "security"}
 )
+FOREMAN_DELEGATION_REQUIRED_REASON: Final[str] = (
+    "ce-ops#163 REQ-3 foreman_delegation_required: "
+    "implementation work requires worker delegation"
+)
 
 _COORDINATION_TOOLS: Final[frozenset[str]] = frozenset({"read", "grep", "glob"})
 _MUTATING_TOOLS: Final[frozenset[str]] = frozenset({"edit", "write", "multiedit"})
@@ -180,4 +184,4 @@ def foreman_would_deny(
         return None
     if str(mutation_class or "") not in _policy_required_classes(policy):
         return None
-    return "implementation work requires worker delegation"
+    return FOREMAN_DELEGATION_REQUIRED_REASON
