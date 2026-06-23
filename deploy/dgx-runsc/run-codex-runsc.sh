@@ -16,6 +16,7 @@ Environment:
   CE_DGX_CODEX_HOME         Host codex home (default: /home/cedev4/.codex)
   CE_DGX_CODEX_HOME_MODE    Mount mode for codex home: rw or ro (default: rw)
   CE_DGX_CODEX_BIN          Host standalone codex binary
+  CE_DGX_HERDR_SOCKET_PATH  Container-only herdr socket path (default: /run/creator-engine/herdr/herdr.sock)
   CE_DGX_CONTAINER_REPO     Container repo path (default: /workspace/creator-engine)
   CE_DGX_CONTAINER_USER     Container seat user name (default: cedev4)
   CE_DGX_UID                Container uid (default: id -u)
@@ -53,6 +54,7 @@ CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
 CE_DGX_CODEX_HOME_MODE="${CE_DGX_CODEX_HOME_MODE:-rw}"
 CE_DGX_CODEX_BIN="${CE_DGX_CODEX_BIN:-/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex}"
+CE_DGX_HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 CE_DGX_CONTAINER_REPO="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
 CE_DGX_CONTAINER_USER="${CE_DGX_CONTAINER_USER:-cedev4}"
 CE_DGX_CONTAINER_HOME="/home/${CE_DGX_CONTAINER_USER}"
@@ -120,7 +122,7 @@ if [ -n "${CE_DGX_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_DGX_TTY_FLAGS}"
 fi
 
-container_cmd=(/usr/local/bin/codex)
+container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(exec)
 fi
@@ -143,6 +145,12 @@ docker_cmd=(
   --env "HOME=${CE_DGX_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_DGX_CONTAINER_CODEX_HOME}"
   --env "TERM=${TERM:-xterm-256color}"
+  --env "CE_DGX_HARNESS=codex"
+  --env "CE_DGX_HARNESS_BIN=/usr/local/bin/codex"
+  --env "CE_DGX_HARNESS_HOME=${CE_DGX_CONTAINER_HOME}"
+  --env "CE_DGX_HERDR_SOCKET_PATH=${CE_DGX_HERDR_SOCKET_PATH}"
+  --env "CE_DGX_TERMINAL_KIND=herdr"
+  --env "CE_TERMINAL_KIND=herdr"
   --mount "${repo_mount}"
   --mount "${codex_home_mount}"
   --mount "${codex_bin_mount}"
@@ -154,7 +162,9 @@ fi
 
 docker_cmd+=("${tty_flags[@]}")
 docker_cmd+=("${CE_DGX_IMAGE}")
-docker_cmd+=("${container_cmd[@]}")
+if [ "${#container_cmd[@]}" -gt 0 ]; then
+  docker_cmd+=("${container_cmd[@]}")
+fi
 
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"
