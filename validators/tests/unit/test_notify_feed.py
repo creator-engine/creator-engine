@@ -693,6 +693,26 @@ def test_periodic_report_status_emission_records_and_is_idempotent_per_period(tm
     assert next_period["dispatched"] == 1
 
 
+def test_report_status_default_desktop_sink_records_without_title(tmp_path):
+    runner = _Recorder(returncode=0)
+
+    out = notify_feed.run_report_once(
+        tmp_path,
+        outcome_records=[_outcome("run-a", "no_change")],
+        spend_records=[_spend("run-a", 0.5)],
+        report_key="period-desktop",
+        runner=runner,
+        clock=lambda: "2026-06-23T11:00:00+00:00",
+    )
+
+    assert out["dispatched"] == 1 and out["ok"] == 1
+    assert runner.calls and runner.calls[0][0][0] == "notify-send"
+    assert "status report period-desktop" in runner.calls[0][0][3]
+    ledger = notify_feed.load_ledger(tmp_path)
+    assert ledger[-1]["event"] == notify_feed.EVENT_STATUS_REPORT
+    assert ledger[-1]["sink_id"] == notify_feed.SINK_DESKTOP
+
+
 def test_report_payload_never_carries_injected_secret(tmp_path):
     poster = _WebhookRecorder(status=204)
     cfg = _webhook_cfg(payload="full")

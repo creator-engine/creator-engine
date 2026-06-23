@@ -678,6 +678,7 @@ def _desktop_summary_body(payload: Mapping[str, Any]) -> tuple[str, str]:
             f"completed runs: {report.get('completed_runs') or 0}; "
             f"spend: {spend.get('amount') or 0} {spend.get('unit') or ''}".strip()
         )
+        return summary, body
     elif event == EVENT_EXIT:
         head = f"CE · resolved {esc_id}"
     else:
