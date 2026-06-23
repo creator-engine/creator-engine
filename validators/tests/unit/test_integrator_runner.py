@@ -179,6 +179,67 @@ def test_multi_file_mechanical_repair_executes_as_one_atomic_batch():
     assert calls[0][2] is adapter.executor_adapter
 
 
+def test_multi_file_partial_publish_is_impossible_when_one_file_is_semantic():
+    """Fail-closed: if any file in a multi-file repair set is not mechanically
+    resolvable, the whole event must escalate and the executor must never run,
+    so an earlier (resolvable) file can never be applied/pushed on its own.
+    """
+    adapter = FakeRepairAdapter(
+        (
+            ir.ConflictSnapshot(
+                path="validators/creator_engine_validator/_versions.py",
+                conflicted_text=_versions_conflict(),
+            ),
+            ir.ConflictSnapshot(
+                path="package-lock.json",
+                conflicted_text=(
+                    '{"lockfileVersion": 3,\n'
+                    f"{_OURS}\n"
+                    '"packages": {}\n'
+                    f"{_SEP}\n"
+                    '"dependencies": {}\n'
+                    f"{_THEIRS}\n"
+                    "}\n"
+                ),
+            ),
+        )
+    )
+
+    # A stateful executor that would push the FIRST file if it were ever called.
+    # The all-or-nothing guarantee requires it is never reached for a mixed batch.
+    pushed_paths: list[str] = []
+
+    def execute(_event, plan, *, adapter):  # pragma: no cover - must not be called
+        pushed_paths.extend(plan.files or {})
+        raise AssertionError(
+            "executor must not run when any file in the batch is unresolvable"
+        )
+
+    result = ir.run_once(
+        token="ghp_fake",
+        repair_adapter=adapter,
+        poller=_poller,
+        execute_repair=execute,
+    )
+
+    # No file was applied or pushed: partial publish is impossible.
+    assert pushed_paths == []
+    assert result.executed_count == 0
+    assert result.escalated_count == 1
+    outcome = result.outcomes[0]
+    assert outcome.status == "escalated"
+    assert outcome.refusal_reason == "resolver_unresolved"
+    assert outcome.execution_results == ()
+    # Only the unresolvable file is escalated; the resolvable one is NOT
+    # silently published — the whole set defers to semantic escalation.
+    escalated_paths = {
+        path
+        for event in outcome.escalation_events
+        for path in event.paths
+    }
+    assert "package-lock.json" in escalated_paths
+
+
 def test_semantic_conflict_escalates_and_does_not_execute():
     adapter = FakeRepairAdapter(
         (
