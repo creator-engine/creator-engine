@@ -142,6 +142,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # for known mechanical families. Pure data transforms; no executor/push/
         # credential authority. v3 forge adapter family, imports no v1 module.
         "forge.deterministic_resolvers",
+        # ce-ops#216 Unit 4: data-only escalation seam for unresolved Unit 2
+        # resolver outputs. Produces controller-action event data; no executor,
+        # network, credential, or write authority.
+        "forge.integrator_escalation",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
