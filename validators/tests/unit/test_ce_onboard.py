@@ -17,10 +17,12 @@ so the happy path and every degradation branch run offline with mocked legs:
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from creator_engine_validator import ce_onboard
+from creator_engine_validator import ce_onboard, launch_runtime
 
 
 # --- leg fakes ---------------------------------------------------------------
@@ -29,7 +31,7 @@ def _ok_legs(**overrides) -> ce_onboard.OnboardLegs:
         doctor=lambda repo_root, *, require_visible_launch: ce_onboard.DoctorLegResult(
             ok=True, low_tmpdir=False, path_gap=False, detail="doctor PASS",
         ),
-        install_detect=lambda repo_root: ce_onboard.InstallDetectResult(
+        install_detect=lambda repo_root, *, install_root=None: ce_onboard.InstallDetectResult(
             present=True, command="curl ... | bash", detail="present",
         ),
         verify_install=lambda install_root, *, offline: {"ok": True, "status": "verified", "reason": ""},
@@ -174,6 +176,32 @@ def test_single_controller_assertion_refuses_zero_controllers():
     assert result.reason == "single-controller-assertion-failed"
 
 
+def test_default_launch_counts_single_controller_in_default_ledger(tmp_path, monkeypatch):
+    def fake_launch(*, harness, repo_root, ledger_root, tmux_adapter):
+        del harness, tmux_adapter
+        resolved = (
+            Path(ledger_root)
+            if ledger_root is not None
+            else Path(repo_root) / ".ce" / "state" / "active-work-ledger"
+        )
+        record = resolved / "seats" / "ce-dev-1" / "ce-controller.yaml"
+        record.parent.mkdir(parents=True)
+        record.write_text("lifecycle:\n  state: alive\n", encoding="utf-8")
+        return SimpleNamespace(seat_record_ref=str(record))
+
+    monkeypatch.setattr(launch_runtime, "launch", fake_launch)
+    result = ce_onboard.run_onboard(
+        _config(install_mode="skip", repo_root=str(tmp_path)),
+        legs=_ok_legs(launch=ce_onboard._default_launch_leg),
+    )
+    assert result.ok
+    launch = next(p for p in result.phases if p.id == "launch")
+    assert launch.verify["live_controllers"] == 1
+    assert launch.data["seat_record_ref"].endswith(
+        ".ce/state/active-work-ledger/seats/ce-dev-1/ce-controller.yaml"
+    )
+
+
 # --- offline degradation -----------------------------------------------------
 def test_offline_degradation_notes_local_only():
     seen = {}
@@ -233,7 +261,7 @@ def test_hard_doctor_refusal_stops_immediately():
 # --- install absent → human action -------------------------------------------
 def test_install_absent_yields_human_action_gate():
     legs = _ok_legs(
-        install_detect=lambda repo_root: ce_onboard.InstallDetectResult(
+        install_detect=lambda repo_root, *, install_root=None: ce_onboard.InstallDetectResult(
             present=False, command="curl ... | bash", detail="absent",
         ),
     )
@@ -243,6 +271,26 @@ def test_install_absent_yields_human_action_gate():
     assert install.status == "human_action"
     assert install.decision == "human_action"
     assert install.data["command"] == "curl ... | bash"
+
+
+def test_empty_install_root_uses_human_action_path_not_verify_refusal(tmp_path):
+    empty_install_root = tmp_path / "empty-install"
+    empty_install_root.mkdir()
+    legs = _ok_legs(
+        install_detect=ce_onboard._default_install_detect_leg,
+        verify_install=lambda *a, **k: pytest.fail("verify must not run when install is absent"),
+    )
+    result = ce_onboard.run_onboard(
+        _config(install_mode="guided", install_root=str(empty_install_root)),
+        legs=legs,
+    )
+    assert not result.ok
+    assert result.reason == "install required before onboard can continue"
+    assert [p.id for p in result.phases] == ["doctor", "install"]
+    install = result.phases[-1]
+    assert install.status == "human_action"
+    assert install.data["present"] is False
+    assert "missing_install_state" not in json.dumps(result.to_dict())
 
 
 def test_no_fix_path_skips_profile_block():
@@ -296,3 +344,22 @@ def test_result_to_dict_is_json_serializable():
     assert parsed["install_mode"] == "hybrid"
     assert parsed["ok"] is True
     assert all("consequence_class" in p for p in parsed["phases"])
+
+
+def test_unexpected_bootstrap_exception_yields_bounded_json_refusal():
+    def boom(_state_root):
+        raise RuntimeError("corrupt brain ledger")
+
+    result = ce_onboard.run_onboard(
+        _config(install_mode="skip"),
+        legs=_ok_legs(brain_init=boom),
+    )
+    assert not result.ok
+    assert result.reason == "CE-ONBOARD-BOOTSTRAP-FAILED"
+    bootstrap = result.phases[-1]
+    assert bootstrap.id == "bootstrap"
+    assert bootstrap.status == "refused"
+    assert bootstrap.verify["exception_class"] == "RuntimeError"
+    payload = json.dumps(result.to_dict())
+    assert "corrupt brain ledger" in payload
+    assert "Traceback" not in payload

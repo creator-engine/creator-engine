@@ -29,6 +29,8 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass, field
+from inspect import Parameter, signature
+from pathlib import Path
 from typing import Any, Callable
 
 from ._versions import V3_LOCAL_STATE_ROOT
@@ -66,9 +68,20 @@ STATUS_HUMAN_ACTION = "human_action"
 class OnboardError(Exception):
     """A hard, fail-closed onboard refusal (never a silent proceed)."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        phase_id: str | None = None,
+        verify: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.phase_id = phase_id
+        self.verify = verify or {}
+        self.data = data or {}
 
 
 @dataclass(frozen=True)
@@ -280,20 +293,30 @@ def _default_doctor_leg(repo_root: str, *, require_visible_launch: bool) -> Doct
     )
 
 
-def _default_install_detect_leg(repo_root: str) -> InstallDetectResult:
-    # Detection: a present, importable validator package == a genuine install is
-    # already on this host (onboard runs from inside it). The canonical install
-    # one-liner is printed when absent / when a mode requests it.
+def _default_install_detect_leg(
+    repo_root: str,
+    *,
+    install_root: str | None = None,
+) -> InstallDetectResult:
+    # Detection is rooted in the configured install root, not in this running
+    # package import path. ``ce onboard`` commonly executes from a source tree,
+    # so importing creator_engine_validator would falsely mark an empty
+    # --install-root as installed and bypass the human-action install gate.
+    from . import ce_provenance
+
     one_liner = (
         "curl --proto '=https' --tlsv1.2 -fsSL "
         "https://creator-engine.dev/install.sh | bash"
     )
-    try:
-        import creator_engine_validator  # noqa: F401
+    del repo_root
+    root = Path(install_root) if install_root is not None else ce_provenance.default_install_root()
+    state_path = root / "install-state"
+    present = state_path.is_file()
+    detail = f"install detected under {root}" if present else f"install absent under {root}"
+    return InstallDetectResult(present=present, command=one_liner, detail=detail)
 
-        return InstallDetectResult(present=True, command=one_liner, detail="install detected")
-    except Exception:  # pragma: no cover - defensive
-        return InstallDetectResult(present=False, command=one_liner, detail="install absent")
+def _default_active_work_ledger_root(repo_root: str | Path) -> Path:
+    return Path(repo_root) / V3_LOCAL_STATE_ROOT / "active-work-ledger"
 
 
 def _default_verify_install_leg(install_root: str | None, *, offline: bool) -> dict[str, Any]:
@@ -336,7 +359,7 @@ def _default_launch_leg(
         ledger_root=ledger_root,
         tmux_adapter=None,
     )
-    resolved_ledger = ledger_root if ledger_root is not None else repo_root
+    resolved_ledger = Path(ledger_root) if ledger_root is not None else _default_active_work_ledger_root(repo_root)
     live = _count_live_controllers(seat_lifecycle, resolved_ledger)
     return LaunchLegResult(
         ok=result.seat_record_ref is not None,
@@ -360,7 +383,7 @@ class OnboardLegs:
     """The composed surfaces, each replaceable in a test."""
 
     doctor: Callable[..., DoctorLegResult] = _default_doctor_leg
-    install_detect: Callable[[str], InstallDetectResult] = _default_install_detect_leg
+    install_detect: Callable[..., InstallDetectResult] = _default_install_detect_leg
     verify_install: Callable[..., dict[str, Any]] = _default_verify_install_leg
     fix_path: Callable[[], dict[str, Any]] = _default_fix_path_leg
     init: Callable[[str], dict[str, Any]] = _default_init_leg
@@ -424,6 +447,59 @@ def _record(spec_id: str, *, status: str, detail: str, verify: dict | None = Non
     )
 
 
+def _wrap_leg_failure(phase_id: str, exc: Exception) -> OnboardError:
+    phase = phase_id.replace("_", "-").upper()
+    return OnboardError(
+        f"CE-ONBOARD-{phase}-FAILED",
+        f"{phase_id} failed: {exc.__class__.__name__}: {exc}",
+        phase_id=phase_id,
+        verify={"exception_class": exc.__class__.__name__},
+    )
+
+
+def _run_leg(phase_id: str, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    try:
+        return func(*args, **kwargs)
+    except OnboardError:
+        raise
+    except Exception as exc:
+        raise _wrap_leg_failure(phase_id, exc) from exc
+
+
+def _run_install_detect(
+    func: Callable[..., InstallDetectResult],
+    repo_root: str,
+    install_root: str | None,
+) -> InstallDetectResult:
+    kwargs = {"install_root": install_root}
+    try:
+        params = signature(func).parameters
+    except (TypeError, ValueError):
+        return _run_leg("install", func, repo_root, **kwargs)
+    accepts_install_root = (
+        "install_root" in params
+        or any(param.kind == Parameter.VAR_KEYWORD for param in params.values())
+    )
+    if accepts_install_root:
+        return _run_leg("install", func, repo_root, **kwargs)
+    return _run_leg("install", func, repo_root)
+
+
+def _fail_result(result: OnboardResult, exc: OnboardError) -> OnboardResult:
+    phase_id = exc.phase_id
+    if phase_id in _PHASE_BY_ID:
+        result.phases.append(_record(
+            phase_id,
+            status=STATUS_REFUSED,
+            detail=str(exc),
+            verify={"code": exc.code, **exc.verify},
+            data=exc.data,
+        ))
+    result.ok = False
+    result.reason = exc.code
+    return result
+
+
 def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> OnboardResult:
     """Sequence the six phases, idempotently + gracefully-degrading.
 
@@ -440,7 +516,10 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     # Phase 1 — doctor. A hard refusal here (ungoverned host) STOPS before any
     # mutation. We require the visible-launch clause only when we will launch.
     require_visible = not config.no_launch
-    doctor = legs.doctor(config.repo_root, require_visible_launch=require_visible)
+    try:
+        doctor = _run_leg("doctor", legs.doctor, config.repo_root, require_visible_launch=require_visible)
+    except OnboardError as exc:
+        return _fail_result(result, exc)
     if not doctor.ok:
         # A missing visible tmux terminal is a *soft* boundary: everything up to
         # launch can still run; we mark launch blocked later. Any other refusal
@@ -467,7 +546,10 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     no_visible_terminal = "PCO-049" in doctor.refused_clauses
 
     # Phase 2 — install detect / acquire.
-    detect = legs.install_detect(config.repo_root)
+    try:
+        detect = _run_install_detect(legs.install_detect, config.repo_root, config.install_root)
+    except OnboardError as exc:
+        return _fail_result(result, exc)
     if mode == "skip":
         result.phases.append(_record(
             "install", status=STATUS_SKIPPED,
@@ -505,7 +587,10 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
             detail="provenance check skipped (--install-mode skip)",
         ))
     else:
-        verify = legs.verify_install(config.install_root, offline=config.offline)
+        try:
+            verify = _run_leg("verify_install", legs.verify_install, config.install_root, offline=config.offline)
+        except OnboardError as exc:
+            return _fail_result(result, exc)
         v_ok = bool(verify.get("ok"))
         offline_note = " (offline: local state only)" if config.offline else ""
         if not v_ok:
@@ -530,7 +615,10 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
             detail="profile PATH block skipped (--no-fix-path)",
         ))
     else:
-        path_data = legs.fix_path()
+        try:
+            path_data = _run_leg("fix_path", legs.fix_path)
+        except OnboardError as exc:
+            return _fail_result(result, exc)
         result.phases.append(_record(
             "fix_path", status=STATUS_OK,
             detail="profile PATH block ensured (re-source your shell to apply)",
@@ -539,8 +627,11 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
 
     # Phase 5 — workspace bootstrap (ce init + ce brain init). Idempotent: a
     # re-run is a safe no-op that reports current state.
-    init_data = legs.init(config.repo_root)
-    brain_data = legs.brain_init(config.state_root)
+    try:
+        init_data = _run_leg("bootstrap", legs.init, config.repo_root)
+        brain_data = _run_leg("bootstrap", legs.brain_init, config.state_root)
+    except OnboardError as exc:
+        return _fail_result(result, exc)
     result.phases.append(_record(
         "bootstrap", status=STATUS_OK,
         detail="workspace bootstrapped (init + brain genesis ledger)",
@@ -567,11 +658,16 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
         result.reason = "no-visible-launch"
         return result
 
-    launch = legs.launch(
-        harness=config.harness,
-        repo_root=config.repo_root,
-        ledger_root=config.ledger_root,
-    )
+    try:
+        launch = _run_leg(
+            "launch",
+            legs.launch,
+            harness=config.harness,
+            repo_root=config.repo_root,
+            ledger_root=config.ledger_root,
+        )
+    except OnboardError as exc:
+        return _fail_result(result, exc)
     # The #212 single-controller assertion: exactly ONE live controller after a
     # first launch. More than one => stale/double-spawn; refuse rather than mask.
     if launch.live_controllers != 1:
