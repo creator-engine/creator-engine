@@ -42,6 +42,7 @@ See:
 
 from __future__ import annotations
 
+import http.client
 import json
 import subprocess
 import urllib.error
@@ -556,15 +557,16 @@ def dispatch_webhook(
     The body is EXACTLY the same pending-event wrapper the exec sink writes to stdin —
     it widens nothing (it reuses :func:`shape_payload`'s confidential-by-default shape;
     a ``pointer`` sink carries no confidential prose at all). A non-2xx status, a
-    transport error, or a down endpoint ⇒ ``ok=False`` (recorded, retried) — never
-    raises, so one sick webhook never crashes the loop.
+    transport error, a down endpoint, or a malformed-but-prefix-valid URL (which makes
+    stdlib raise :class:`http.client.InvalidURL`/``HTTPException``) ⇒ ``ok=False``
+    (recorded, retried) — never raises, so one sick webhook never crashes the loop.
     """
     post = poster or _default_poster
     body = json.dumps(event, sort_keys=True).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     try:
         status = post(url, body, headers)
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
         return False
     return 200 <= int(status) < 300
 

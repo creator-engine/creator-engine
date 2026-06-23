@@ -556,6 +556,39 @@ def test_run_once_dispatches_webhook_sink(tmp_path):
     assert json.loads(poster.calls[0][1].decode("utf-8"))["escalation_id"] == "esc-a"
 
 
+def test_webhook_malformed_url_is_ok_false_not_raise():
+    """A URL that passes the sink's ``http(s)://`` prefix check but breaks stdlib URL
+    parsing (e.g. an embedded space) makes ``urllib.request.urlopen`` raise
+    ``http.client.InvalidURL`` — which is NOT a ``URLError``/``OSError``/``ValueError``.
+    It must still be caught and recorded ``ok=False`` (retried), never propagated.
+    """
+    # Drive the REAL stdlib poster (no fake) so the genuine InvalidURL path runs.
+    assert (
+        notify_feed.dispatch_webhook("http://exa mple.com/hook", {"x": 1}) is False
+    )
+
+
+def test_run_once_malformed_webhook_url_records_ok_false_never_crashes(tmp_path):
+    """End-to-end via the composition root: a prefix-valid-but-malformed webhook URL
+    must NOT crash ``run_once`` — it records ``ok:false`` + stays pending for retry,
+    the SAME path a network failure already uses. Uses the real stdlib poster.
+    """
+    cfg = NotifyConfig(
+        classes={"ratify-needed": "immediate", "clear": "immediate"},
+        # space in host ⇒ passes "http://"-prefix config check, breaks stdlib parsing.
+        sinks=(SinkConfig(id="hook", kind="webhook", payload="pointer", url="http://exa mple/x"),),
+    )
+    # No `poster=` override ⇒ exercises `_default_poster` → urllib → InvalidURL.
+    out = notify_feed.run_once(tmp_path, config=cfg, escalations=[_esc("esc-a")])
+    assert out["dispatched"] == 1
+    assert out["ok"] == 0 and out["failed"] == 1
+    ledger = notify_feed.load_ledger(tmp_path)
+    assert ledger and ledger[0]["ok"] is False
+    # stays pending for retry next tick (failed delivery does not settle the event)
+    again = notify_feed.fold_notify_feed([_esc("esc-a")], ledger, cfg)
+    assert again["counts"]["pending_entry"] == 1
+
+
 # ---------------------------------------------------------------------------
 # REDACTION GUARDRAIL — a webhook is a live secret-leak surface (NON-NEGOTIABLE)
 # ---------------------------------------------------------------------------
