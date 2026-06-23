@@ -172,6 +172,30 @@ def test_load_seat_events_groups_by_seat(tmp_path):
 
 # --- E-2: the REAL generated wrapper under /bin/sh -------------------------
 
+# A generous ceiling that won't be reached in practice but tolerates a slow,
+# CPU-contended runner (e.g. the merge-queue runner under pytest-xdist load).
+# We poll for the expected condition at a short interval rather than relying on
+# a tight fixed wall-clock bound (ce-ops#209): the assertion is unchanged, only
+# the timing is hardened. A genuinely hung process still fails at this ceiling.
+_WRAPPER_CEILING_S = 60.0
+_WRAPPER_POLL_S = 0.05
+
+
+def _poll_until(predicate, *, ceiling=_WRAPPER_CEILING_S, interval=_WRAPPER_POLL_S):
+    """Poll ``predicate`` until truthy or the generous ceiling elapses.
+
+    Returns the predicate's truthy value, or ``False`` on timeout. Deterministic
+    in behavior — only the wall-clock budget is generous so a loaded runner has
+    room to make progress.
+    """
+    deadline = time.monotonic() + ceiling
+    while time.monotonic() < deadline:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(interval)
+    return False
+
 
 def _wrapper_env() -> dict[str, str]:
     env = dict(os.environ)
@@ -234,15 +258,17 @@ def test_wrapper_trapped_signal_writes_exit(tmp_path, sig, code):
     proc = subprocess.Popen(
         sentinel.pane_command, env=_wrapper_env(), start_new_session=True
     )
-    # wait for the launched line before signalling
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if sentinel.events_path.is_file() and sentinel.events_path.read_text().strip():
-            break
-        time.sleep(0.05)
+    # wait for the launched line before signalling — poll for the artifact up to
+    # a generous ceiling instead of a tight fixed bound (ce-ops#209).
+    assert _poll_until(
+        lambda: sentinel.events_path.is_file()
+        and bool(sentinel.events_path.read_text().strip())
+    ), "wrapper never wrote its launched line within the ceiling"
     # the pane-kill reality: the signal hits the whole process group
     os.killpg(os.getpgid(proc.pid), sig)
-    proc.wait(timeout=10)
+    # bound the wait by the same generous ceiling: a genuinely hung process still
+    # fails, but a slow loaded runner is tolerated.
+    proc.wait(timeout=_WRAPPER_CEILING_S)
     events = _events(sentinel)
     assert events[-1]["event"] == "exited"
     assert events[-1]["exit_code"] == code
