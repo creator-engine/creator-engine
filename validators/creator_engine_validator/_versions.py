@@ -125,6 +125,7 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.change_push",
         "forge.change_status",
         "forge.credential_runner",
+        "forge.eviction_detection",
         "forge.github_repo_config",
         "forge.merge",
         "forge.plan_approval",

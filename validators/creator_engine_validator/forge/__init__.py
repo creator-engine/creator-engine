@@ -47,6 +47,13 @@ from .change_status import (
     checks_state,
     review_state,
 )
+from .eviction_detection import (
+    EvictionDetectionError,
+    RepairNeededEvent,
+    RepairPollResult,
+    detect_repair_needed,
+    poll_repair_needed,
+)
 from .credential_runner import authenticated_gh_runner
 from .github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
@@ -98,8 +105,11 @@ __all__ = [
     "MergeRefused",
     "MergeResult",
     "OpenChangeRefused",
+    "EvictionDetectionError",
     "AutoMergeRefused",
     "AutoMergeResult",
+    "RepairNeededEvent",
+    "RepairPollResult",
     "ReviewResult",
     "ReviewSubmitRefused",
     "ReviewState",
@@ -118,12 +128,14 @@ __all__ = [
     "configure_squash_only",
     "configure_repo",
     "delete_ruleset",
+    "detect_repair_needed",
     "enable_auto_merge",
     "install_required_checks",
     "merge",
     "mint_scoped_token",
     "open_change",
     "plan_approved",
+    "poll_repair_needed",
     "review_state",
     "revoke_scoped_token",
     "set_codeowners",
