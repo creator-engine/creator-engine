@@ -362,10 +362,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-tmux",
         action="store_true",
         help=(
-            "run the lane on the headless (operator_inspectable) visibility "
-            "backend: CE owns the seat under its own PTY, with no tmux server "
-            "(ce-ops#207). Produces the same evidence spine as a tmux lane."
+            "retired ce-ops#207 headless PTY request; fails closed. Use "
+            "--terminal-kind herdr for the live non-tmux inspectable backend."
         ),
+    )
+    launch.add_argument(
+        "--terminal-kind",
+        choices=["tmux", "herdr"],
+        default=None,
+        help="visibility backend terminal kind for the lane (default: tmux)",
     )
     launch.add_argument(
         "--json",
@@ -1149,7 +1154,11 @@ def _lane_launch(args) -> int:
     claude_arg = getattr(args, "claude_arg", None)
     if command is not None and claude_arg:
         command = [*command, *claude_arg]
-    terminal_kind = "headless" if args.no_tmux else lane_runtime.TMUX_TERMINAL_KIND
+    terminal_kind = (
+        args.terminal_kind
+        if getattr(args, "terminal_kind", None)
+        else ("headless" if args.no_tmux else lane_runtime.TMUX_TERMINAL_KIND)
+    )
     try:
         result = lane_runtime.launch(
             controller_id=args.controller_id,
@@ -1210,8 +1219,8 @@ def _lane_launch(args) -> int:
                 f"pane={term['pane_id']}"
             )
         else:
-            # ce-ops#207 W2′: a headless (CE-owned PTY) lane has no tmux pane ids;
-            # describe it by its kind + surface ref + pid instead.
+            # Non-tmux inspectable lanes have no tmux session/window ids; describe
+            # them by kind + surface ref + pid instead.
             surface = (
                 f"{term.get('kind')} surface={term.get('surface_ref')} "
                 f"pid={term.get('pid')}"

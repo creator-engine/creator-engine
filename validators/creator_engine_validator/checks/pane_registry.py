@@ -176,24 +176,27 @@ def _role_status_errors(record: dict[str, Any], path: Path) -> list[ValidationEr
 
 
 # The visibility classes a Pane Registry record may declare, each pinned to the
-# terminal kind that satisfies it (ce-ops#207 W2′). ``operator_visible`` is the
-# tmux pane; ``operator_inspectable`` is the headless CE-owned-PTY surface. The
-# gate stays load-bearing: an unknown visibility class, or a terminal kind that
-# does not match its declared class, is refused.
-_VISIBILITY_SURFACE_KINDS: dict[str, tuple[str, tuple[str, ...]]] = {
-    # visibility class -> (required terminal.kind, required terminal identity fields)
-    "operator_visible": ("tmux", ("session_id", "window_id", "pane_id")),
-    "operator_inspectable": ("headless", ("surface_ref", "pid")),
+# terminal kind that satisfies it. ``operator_visible`` is the tmux pane;
+# ``operator_inspectable`` is an attachable/emitting non-tmux surface: historical
+# ``headless`` records, or the live herdr socket-backed surface (ce-ops#217 U3).
+# The gate stays load-bearing: an unknown visibility class, or a terminal kind
+# that does not match its declared class, is refused.
+_VISIBILITY_SURFACE_KINDS: dict[str, dict[str, tuple[str, ...]]] = {
+    # visibility class -> terminal.kind -> required terminal identity fields
+    "operator_visible": {"tmux": ("session_id", "window_id", "pane_id")},
+    "operator_inspectable": {
+        "headless": ("surface_ref", "pid"),
+        "herdr": ("surface_ref", "pane_id", "pid"),
+    },
 }
 
 
 def _visibility_surface_errors(record: dict[str, Any], path: Path) -> list[ValidationError]:
     """Refuse a record whose terminal does not back its declared visibility class.
 
-    ce-ops#207 W2′: generalizes the former tmux-only gate. ``operator_visible``
-    still requires a tmux pane (session/window/pane ids); ``operator_inspectable``
-    requires a headless surface (a ``surface_ref`` and the seat ``pid`` for the
-    CE-owned PTY). An unknown visibility class is refused (fail-closed).
+    ``operator_visible`` still requires a tmux pane (session/window/pane ids).
+    ``operator_inspectable`` accepts the historical headless shape or the live
+    herdr shape. An unknown visibility class is refused (fail-closed).
     """
     terminal = record.get("terminal")
     if not isinstance(terminal, dict):
@@ -211,15 +214,17 @@ def _visibility_surface_errors(record: dict[str, Any], path: Path) -> list[Valid
                 CONTRACT,
             )
         ]
-    required_kind, required_fields = spec
-    if terminal.get("kind") != required_kind:
+    terminal_kind = terminal.get("kind")
+    required_fields = spec.get(terminal_kind)
+    if required_fields is None:
+        required_kinds = ", ".join(sorted(spec))
         return [
             make_error(
                 CODE_OPERATOR_VISIBLE,
                 path,
                 "terminal.kind",
                 f"{visibility} Pane Registry records require "
-                f"terminal.kind: {required_kind}",
+                f"terminal.kind to be one of: {required_kinds}",
                 CONTRACT,
             )
         ]
@@ -230,7 +235,7 @@ def _visibility_surface_errors(record: dict[str, Any], path: Path) -> list[Valid
                 CODE_OPERATOR_VISIBLE,
                 path,
                 "terminal",
-                f"{required_kind} terminal identity is missing: {', '.join(missing)}",
+                f"{terminal_kind} terminal identity is missing: {', '.join(missing)}",
                 CONTRACT,
             )
         ]

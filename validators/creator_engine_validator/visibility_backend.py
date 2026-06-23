@@ -17,21 +17,35 @@ Design invariants (deliberate, load-bearing):
   seat with a headless surface), so they get distinct registries. This module
   deliberately copies the proven ``RunnerBackend`` ergonomics (string key,
   factory, fail-closed ``get_*``).
-* **Zero behaviour change in W1.** This slice ships only the registry plus a
-  :class:`TmuxVisibilityBackend` that is a THIN wrapper over the existing
-  ``tmux_adapter.TmuxAdapter`` (untouched). The headless backend and any gate
-  relaxation are later slices (#207 W2+).
+* **Substrate-specific implementations.** ``TmuxVisibilityBackend`` remains a
+  THIN wrapper over ``tmux_adapter.TmuxAdapter``. ``HerdrVisibilityBackend`` is
+  the live non-tmux ``operator_inspectable`` implementation and drives herdr as a
+  separate process over the substrate-owned control socket.
 * **No validator check.** Nothing here is ``@register``-ed; importing this
   module registers no validator check and runs no I/O on import.
 """
 from __future__ import annotations
 
 import abc
+import shutil
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from .seat_pty_session import SeatPtySession, spawn_pty_session
+from .runner.herdr_containment import (
+    DEFAULT_HERDR_BINARY,
+    DEFAULT_HERDR_SOCKET_NAME,
+    DEFAULT_SUBSTRATE_SOCKET_DIR,
+    HerdrContainmentInvariantViolation,
+    plan_herdr_containment,
+)
+from .runner.herdr_session import (
+    HERDR_TERMINAL_KIND,
+    HerdrCommandError,
+    HerdrPane,
+    HerdrSession,
+)
 from .tmux_adapter import TmuxAdapter, TmuxUnavailable
 
 # The terminal kind / visibility class vocabulary. ``operator_visible`` is the
@@ -191,39 +205,55 @@ class TmuxVisibilityBackend(VisibilityBackend):
 
 
 # ---------------------------------------------------------------------------
-# The headless backend — CE owns the seat under its own PTY (no tmux server).
+# The herdr backend — CE owns the socket; herdr owns the live pane/PTY.
 # ---------------------------------------------------------------------------
-class HeadlessVisibilityBackend(VisibilityBackend):
-    """An ``operator_inspectable`` backend that owns the seat under a CE-held PTY.
+class HerdrVisibilityBackend(VisibilityBackend):
+    """An ``operator_inspectable`` backend over herdr's controller-owned socket.
 
-    Unlike the tmux backend (a human attaches a live pane), this backend spawns
-    the sentinel-wrapped argv under a **CE-owned PTY** (``seat_pty_session``) —
-    NOT a log redirect — so CE holds the live byte stream regardless of any
-    renderer. Witnessability is satisfied by the evidence spine the launcher
-    already produces (Pane Registry record + ``events.jsonl`` lifecycle), plus the
-    PTY master CE owns for a future interactive attach (gated behind W2-sec/T1).
-
-    The terminal record is ``{kind: headless, surface_ref, pid}``:
-
-    * ``surface_ref`` — the per-session control-socket path (reserved for the T1
-      attach server; the path is recorded, the socket is not bound here).
-    * ``pid`` — the seat process CE owns and the reaper (W4) terminates.
-
-    ``is_available()`` is always true: a writable seat dir + ``pty.fork`` are the
-    only requirements, making this the correct fallback for a no-tmux host /
-    container. **No raw PTY bytes are exposed on any new surface in this unit** —
-    owning the master fd makes attach possible; streaming it out is W2-sec/T1.
+    CE creates a herdr workspace/pane and runs the sentinel-wrapped seat command
+    through :class:`~creator_engine_validator.runner.herdr_session.HerdrSession`.
+    The governed seat receives only its normal launch environment; the herdr
+    socket path is held by the controller-side subprocess environment only. The
+    Pane Registry ``surface_ref`` is an opaque controller-owned surface id, not
+    the socket path.
     """
 
-    terminal_kind = HEADLESS_TERMINAL_KIND
+    terminal_kind = HERDR_TERMINAL_KIND
     visibility_class = OPERATOR_INSPECTABLE
 
-    def __init__(self, spawn: Callable[..., SeatPtySession] | None = None):
-        # Injection seam for tests; production uses the real PTY spawner.
-        self._spawn = spawn if spawn is not None else spawn_pty_session
+    def __init__(
+        self,
+        session_factory: Callable[..., HerdrSession] | None = None,
+        *,
+        herdr_binary: str = DEFAULT_HERDR_BINARY,
+        substrate_socket_dir: str = DEFAULT_SUBSTRATE_SOCKET_DIR,
+        socket_name: str = DEFAULT_HERDR_SOCKET_NAME,
+        available: bool | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._herdr_binary = herdr_binary
+        self._substrate_socket_dir = substrate_socket_dir
+        self._socket_name = socket_name
+        self._available_override = available
+        self._last_session: HerdrSession | None = None
 
     def is_available(self) -> bool:
-        return True
+        if self._available_override is not None:
+            return self._available_override
+        if self._session_factory is not None:
+            return True
+        binary = Path(self._herdr_binary)
+        if binary.is_absolute() or binary.parent != Path("."):
+            return binary.is_file()
+        return shutil.which(self._herdr_binary) is not None
+
+    def _session(self, *, socket_path: str) -> HerdrSession:
+        if self._session_factory is not None:
+            return self._session_factory(
+                socket_path=socket_path,
+                herdr_binary=self._herdr_binary,
+            )
+        return HerdrSession(socket_path=socket_path, herdr_binary=self._herdr_binary)
 
     def ensure_surface(
         self,
@@ -237,22 +267,91 @@ class HeadlessVisibilityBackend(VisibilityBackend):
     ) -> SurfaceHandle:
         if not seat_dir:
             raise VisibilityBackendError(
-                "the headless visibility backend requires a seat_dir to anchor the "
-                "control-socket ref; none was supplied"
+                "the herdr visibility backend requires a seat_dir so the U2 "
+                "containment overlap invariant can be checked"
             )
-        ptys = self._spawn(
-            command=command,
-            seat_dir=seat_dir,
-            cwd=cwd,
-            env=env,
-        )
-        terminal: dict[str, Any] = {
-            "kind": HEADLESS_TERMINAL_KIND,
-            "surface_ref": str(ptys.surface_ref),
-            "pid": ptys.pid,
+        runtime_policy = {
+            "mount_manifest": [{"path": str(seat_dir), "mode": "rw"}],
+            "egress_allowlist": [],
         }
+        try:
+            plan = plan_herdr_containment(
+                runtime_policy,
+                run_id=f"{session}-{window}",
+                seat_command=command,
+                herdr_binary=self._herdr_binary,
+                substrate_socket_dir=self._substrate_socket_dir,
+                socket_name=self._socket_name,
+            )
+        except HerdrContainmentInvariantViolation as exc:
+            raise VisibilityBackendError(str(exc)) from exc
+        if not self.is_available():
+            raise VisibilityBackendError(
+                f"herdr binary {self._herdr_binary!r} is unavailable; "
+                "refusing herdr visibility launch"
+            )
+        session_client = self._session(socket_path=plan.socket_path)
+        try:
+            pane = session_client.spawn_pane(
+                command=command,
+                cwd=cwd,
+                env=env,
+                label=window or session,
+            )
+        except HerdrCommandError as exc:
+            raise VisibilityBackendError(str(exc)) from exc
+        self._last_session = session_client
+        terminal: dict[str, Any] = {
+            "kind": HERDR_TERMINAL_KIND,
+            "surface_ref": pane.surface_ref,
+            "pane_id": pane.pane_id,
+        }
+        if pane.pid is not None:
+            terminal["pid"] = pane.pid
         return SurfaceHandle(
-            visibility_class=self.visibility_class, terminal=terminal, native=ptys
+            visibility_class=self.visibility_class, terminal=terminal, native=pane
+        )
+
+    def observe(self, pane: HerdrPane) -> bytes:
+        """Read recent pane output through the controller-held herdr session."""
+        if self._last_session is None:
+            raise VisibilityBackendError("herdr pane has no live controller session")
+        return self._last_session.observe(pane)
+
+    def wait_agent_status(self, pane: HerdrPane, *, status: str = "ready") -> dict[str, Any]:
+        """Wait for herdr agent-status through the controller-held session."""
+        if self._last_session is None:
+            raise VisibilityBackendError("herdr pane has no live controller session")
+        return self._last_session.wait_agent_status(pane, status=status)
+
+
+class HeadlessVisibilityBackend(VisibilityBackend):
+    """Retired ``headless`` backend placeholder.
+
+    The #368 ``pty.fork`` byte tap has been retired by ce-ops#217 U3. The
+    historical ``headless`` terminal kind remains schema-valid for old records,
+    but no live backend is registered for it and no production path forks a PTY.
+    """
+
+    terminal_kind = HEADLESS_TERMINAL_KIND
+    visibility_class = OPERATOR_INSPECTABLE
+
+    def is_available(self) -> bool:
+        return False
+
+    def ensure_surface(
+        self,
+        *,
+        session: str,
+        window: str,
+        command: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        seat_dir: str | None = None,
+    ) -> SurfaceHandle:
+        raise VisibilityBackendError(
+            "terminal_kind='headless' is retired; use terminal_kind='herdr' for "
+            "the live operator_inspectable socket-backed surface"
         )
 
 
@@ -300,6 +399,8 @@ def available_visibility_kinds() -> tuple[str, ...]:
 # fresh adapter-backed instance; when the caller injects a tmux adapter (the
 # existing test seam), the launcher constructs the backend directly instead.
 register_visibility_backend(TMUX_TERMINAL_KIND, TmuxVisibilityBackend)
-# The headless backend (W2′): the no-tmux, CE-owned-PTY, operator_inspectable
-# surface. Selected when ``terminal_kind=headless`` (the ``--no-tmux`` mapping).
-register_visibility_backend(HEADLESS_TERMINAL_KIND, HeadlessVisibilityBackend)
+# The herdr backend (ce-ops#217 U3): the live operator_inspectable surface over
+# a controller-owned herdr control socket. The retired #368 headless PTY backend
+# is intentionally NOT registered, so ``terminal_kind=headless`` fails closed
+# before any live ``pty.fork`` path can be reached.
+register_visibility_backend(HERDR_TERMINAL_KIND, HerdrVisibilityBackend)

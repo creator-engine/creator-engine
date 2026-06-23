@@ -71,3 +71,37 @@ def test_reconcile_from_sentinel_exit_zero_marks_spent_and_is_idempotent(tmp_pat
     assert record["lifecycle"]["state"] == "spent"
     assert record["lifecycle"]["state_reason"] == "sentinel-exited-zero"
     assert record["lifecycle"]["terminal_exit_code"] == 0
+
+
+def test_register_spawn_preserves_herdr_terminal_identity(tmp_path):
+    events = tmp_path / ".ce" / "state" / "dispatches" / "seat-herdr" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(
+        json.dumps({"event": "launched", "seat_id": "seat-herdr"}) + "\n",
+        encoding="utf-8",
+    )
+    result = seat_lifecycle.register_spawn(
+        ledger_root=tmp_path / ".ce" / "state" / "active-work-ledger",
+        repo_root=tmp_path,
+        seat_id="seat-herdr",
+        owner_controller_id="controller",
+        host_id="host-a",
+        launch_surface="ce_lane_launch",
+        terminal={
+            "kind": "herdr",
+            "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+            "pane_id": "pane-1",
+            "pid": 4242,
+        },
+        harness_kind="codex",
+        events_ref=str(events),
+    )
+    record = yaml.safe_load(result.record_path.read_text(encoding="utf-8"))
+    assert record["terminal"] == {
+        "kind": "herdr",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+        "pane_id": "pane-1",
+        "pid": 4242,
+        "attached_controller": {"attached": False, "evidence": "not-sampled"},
+    }
+    assert "/run/ce/herdr/control.sock" not in repr(record["terminal"])

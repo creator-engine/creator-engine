@@ -333,38 +333,66 @@ def test_launch_refuses_unknown_terminal_kind_for_visibility_required_role(tmp_p
     assert adapter.spawned == []
 
 
-def test_headless_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path):
-    """ce-ops#207 W2′ headline acceptance.
+def test_herdr_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path):
+    """ce-ops#217 U3 headline acceptance.
 
-    A visibility-required WORKER lane launches on a host with **no tmux** — the
-    headless backend owns a CE-held PTY over a real seat process — and produces a
-    schema-valid Pane Registry record + an events.jsonl lifecycle. tmux is never
-    consulted (no adapter injected; the registry resolves the headless backend).
+    A visibility-required WORKER lane launches on the herdr
+    operator_inspectable backend and produces a schema-valid Pane Registry record
+    + events.jsonl lifecycle. tmux is never consulted.
     """
-    from creator_engine_validator.seat_pty_session import SeatPtySession
+    from creator_engine_validator import visibility_backend as vb
+    from creator_engine_validator.runner.herdr_session import HerdrPane
 
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
 
+    class FakeHerdrBackend:
+        terminal_kind = "herdr"
+        visibility_class = vb.OPERATOR_INSPECTABLE
+
+        def is_available(self):
+            return True
+
+        def ensure_surface(self, *, session, window, command, cwd=None, env=None, seat_dir=None):
+            Path(seat_dir, "events.jsonl").write_text(
+                '{"event":"launched","seat_id":"gate3-lane"}\n',
+                encoding="utf-8",
+            )
+            return vb.SurfaceHandle(
+                visibility_class=self.visibility_class,
+                terminal={
+                    "kind": "herdr",
+                    "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+                    "pane_id": "pane-1",
+                    "pid": 4242,
+                },
+                native=HerdrPane(
+                    pane_id="pane-1",
+                    surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+                    pid=4242,
+                    workspace_id="workspace-1",
+                ),
+            )
+
     result = _launch(
         tmp_path,
         ledger_root=ledger,
-        terminal_kind="headless",
+        terminal_kind="herdr",
         tmux_adapter=None,  # no tmux anywhere
-        # A non-Claude command that runs under the real PTY and exits cleanly,
-        # so the sentinel wrapper produces a launched+exited events.jsonl.
-        command=["sh", "-c", "printf ce-headless-live"],
+        visibility_backend=FakeHerdrBackend(),
+        command=["sh", "-c", "printf ce-herdr-live"],
     )
 
-    # The lane reached LAUNCHED: a record was written and CE owns a live PTY.
+    # The lane reached LAUNCHED: a record was written for herdr, not tmux.
     record = result.record
     assert record["visibility"] == "operator_inspectable"
-    assert record["terminal"]["kind"] == "headless"
-    assert record["terminal"]["surface_ref"].endswith("attach.sock")
-    assert record["terminal"]["pid"] > 0
+    assert record["terminal"]["kind"] == "herdr"
+    assert record["terminal"]["surface_ref"] == "herdr-surface-918aa1506d296ee1a72da70227854392"
+    assert "/run/ce/herdr/control.sock" not in repr(record["terminal"])
+    assert record["terminal"]["pane_id"] == "pane-1"
+    assert record["terminal"]["pid"] == 4242
     assert "session_id" not in record["terminal"]  # no tmux pane identity
-    # CE owns the live PTY session (the master fd is held by the substrate).
-    assert isinstance(result.pane, SeatPtySession)
+    assert isinstance(result.pane, HerdrPane)
 
     # The written record passes the Pane Registry schema + validator (C3).
     errors = validate_pane_registry_record(record, Path(result.pane_path))
@@ -374,43 +402,44 @@ def test_headless_lane_launches_with_no_tmux_to_valid_record_and_events(tmp_path
     events_path = Path(result.events_ref)
     assert events_path.is_file()
 
-    # Reap the real seat process CE spawned (test hygiene).
-    import os
 
-    result.pane.close_master()
-    try:
-        os.waitpid(result.pane.pid, 0)
-    except ChildProcessError:
-        pass
-
-
-def test_headless_lane_record_uses_injected_pty_spawn(tmp_path):
-    """Deterministic record shape via an injected fake-PTY headless backend.
-
-    Mirrors the tmux-adapter injection seam: a fake PTY spawner avoids forking a
-    real process, so the record/visibility/terminal fields are asserted exactly.
-    """
+def test_herdr_lane_record_uses_injected_backend(tmp_path):
+    """Deterministic record shape via an injected fake herdr backend."""
     from creator_engine_validator import visibility_backend as vb
-    from creator_engine_validator.seat_pty_session import SeatPtySession
+    from creator_engine_validator.runner.herdr_session import HerdrPane
 
-    def fake_spawn(*, command, seat_dir, cwd=None, env=None):
-        return SeatPtySession(
-            pid=5151, master_fd=11, surface_ref=str(Path(seat_dir) / "attach.sock")
-        )
+    class FakeHerdrBackend:
+        terminal_kind = "herdr"
+        visibility_class = vb.OPERATOR_INSPECTABLE
+
+        def is_available(self):
+            return True
+
+        def ensure_surface(self, *, session, window, command, cwd=None, env=None, seat_dir=None):
+            return vb.SurfaceHandle(
+                visibility_class=self.visibility_class,
+                terminal={
+                    "kind": "herdr",
+                    "surface_ref": "herdr-surface-opaque",
+                    "pane_id": "pane-51",
+                    "pid": 5151,
+                },
+                native=HerdrPane("pane-51", "herdr-surface-opaque", 5151),
+            )
 
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
-    backend = vb.HeadlessVisibilityBackend(fake_spawn)
 
     result = _launch(
         tmp_path,
         ledger_root=ledger,
-        terminal_kind="headless",
+        terminal_kind="herdr",
         tmux_adapter=None,
-        visibility_backend=backend,
+        visibility_backend=FakeHerdrBackend(),
     )
     assert result.record["visibility"] == "operator_inspectable"
-    assert result.record["terminal"]["kind"] == "headless"
+    assert result.record["terminal"]["kind"] == "herdr"
+    assert result.record["terminal"]["pane_id"] == "pane-51"
     assert result.record["terminal"]["pid"] == 5151
     errors = validate_pane_registry_record(result.record, Path(result.pane_path))
     assert errors == [], [e.format() for e in errors]

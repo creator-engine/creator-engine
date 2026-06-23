@@ -490,7 +490,15 @@ def _claim_record(work_claim: WorkClaimBinding | Mapping[str, Any] | None) -> di
 
 def _terminal_record(terminal: Mapping[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": str(terminal.get("kind") or "unknown")}
-    for key in ("session_id", "window_id", "pane_id", "pane_tty", "pane_pid"):
+    for key in (
+        "session_id",
+        "window_id",
+        "pane_id",
+        "pane_tty",
+        "pane_pid",
+        "surface_ref",
+        "pid",
+    ):
         _maybe_set(out, key, terminal.get(key))
     out["attached_controller"] = {"attached": False, "evidence": "not-sampled"}
     return out

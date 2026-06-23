@@ -447,6 +447,31 @@ def test_13_unknown_substrate_escalates(tmp_path):
     assert rec["escalation_id"].startswith("reaper-unknown-executor-")
 
 
+def test_13_herdr_substrate_escalates_until_close_executor_lands(tmp_path):
+    # U3 wires launch/read/wait only. Do not invent an irreversible
+    # `herdr pane close` API here; until a reviewed executor lands, reaper policy
+    # escalates herdr seats as unsupported instead of guessing teardown.
+    root = tmp_path / "state"
+    run_id = "run-herdr-substrate-20260623T110000Z"
+    disp = _dispatch(run_id)
+    disp["terminal"] = {
+        "kind": "herdr",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+        "pane_id": "pane-1",
+        "pid": 4242,
+    }
+    _write_seat(root, run_id, dispatch=disp, events=[_launched(run_id), _exited(run_id)])
+    out = _reap(
+        root,
+        ledger_root=tmp_path / "ledger",
+        repo_root=tmp_path,
+        executor_for=reaper_executors.default_executor_for,
+    )
+    assert out["escalated"] == 1 and out["reaped"] == 0
+    rec = yaml.safe_load(next((root / "escalations").glob("*.yaml")).read_text())
+    assert rec["escalation_id"].startswith("reaper-unknown-executor-")
+
+
 # ---------------------------------------------------------------------------
 # Determinism + read-only resolution + dedup
 # ---------------------------------------------------------------------------

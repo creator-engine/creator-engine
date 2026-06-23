@@ -185,9 +185,35 @@ def valid_headless_pane_record() -> dict:
     return record
 
 
+def valid_herdr_pane_record() -> dict:
+    record = valid_pane_record()
+    record["visibility"] = "operator_inspectable"
+    record["terminal"] = {
+        "kind": "herdr",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+        "pane_id": "pane-1",
+        "pid": 4242,
+    }
+    return record
+
+
 def test_headless_inspectable_record_validates(tmp_path: Path):
     record = valid_headless_pane_record()
     assert validate_pane_registry_record(record, tmp_path / "pane.yaml") == []
+
+
+def test_herdr_inspectable_record_validates(tmp_path: Path):
+    record = valid_herdr_pane_record()
+    assert validate_pane_registry_record(record, tmp_path / "pane.yaml") == []
+
+
+def test_herdr_inspectable_requires_pane_id_pco_046_and_pco_049(tmp_path: Path):
+    record = valid_herdr_pane_record()
+    del record["terminal"]["pane_id"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_SCHEMA for error in errors)
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
 
 
 def test_headless_inspectable_requires_surface_ref_pco_049(tmp_path: Path):
@@ -227,6 +253,19 @@ def test_inspectable_class_with_tmux_terminal_is_refused_pco_049(tmp_path: Path)
 def test_visible_class_with_headless_terminal_is_refused_pco_049(tmp_path: Path):
     record = valid_pane_record()  # visibility=operator_visible
     record["terminal"] = {"kind": "headless", "surface_ref": "/s/attach.sock", "pid": 9}
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
+def test_visible_class_with_herdr_terminal_is_refused_pco_049(tmp_path: Path):
+    record = valid_pane_record()  # visibility=operator_visible
+    record["terminal"] = {
+        "kind": "herdr",
+        "surface_ref": "herdr-surface-918aa1506d296ee1a72da70227854392",
+        "pane_id": "pane-1",
+        "pid": 9,
+    }
     errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
     assert errors
     assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
