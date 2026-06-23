@@ -1,9 +1,10 @@
 """CDX-D Ring 0 — pure Codex launch-spec evaluator + governed command builder.
 
-This module is deliberately narrower than the Claude launch-spec. It does not
-claim a Codex Ring-1 hook-pack. It refuses obvious posture-defeating Codex
-surfaces before tmux spawn and builds the command through an environment scrub
-that removes common ambient repo-write credentials.
+This module is deliberately narrower than the Claude launch-spec. It refuses
+obvious posture-defeating Codex surfaces before tmux spawn and builds the
+command through an environment scrub that removes common ambient repo-write
+credentials. Codex Ring-1 parity is conditioned on the managed PreToolUse
+hook-pack being confirmed by the launcher before spawn.
 
 Clause identifiers are stable and namespaced ``CDX-D-*``.
 """
@@ -23,6 +24,7 @@ CLAUSE_POSTURE_BYPASS = "CDX-D-4"
 CLAUSE_ADD_DIR = "CDX-D-5"
 CLAUSE_BYPASS_MODE = "CDX-D-6"
 CLAUSE_ARG_ALLOWLIST = "CDX-D-7"
+CLAUSE_MANAGED_HOOK_PACK = "CDX-D-8"
 CODEX_HARNESS_ENV = "CE_CODEX_HARNESS"
 KNOWN_GOOD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

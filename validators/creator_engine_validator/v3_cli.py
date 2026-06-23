@@ -759,7 +759,7 @@ def _drive_spawn(
             if not _valid_hex64(codex_risk_override):
                 return _emit(
                     args, 2,
-                    [f"{_BRAND} · drive --spawn refused: Codex is externally-gate-governed "
+                    [f"{_BRAND} · drive --spawn refused: Codex is managed-PreToolUse gated "
                      f"and may not drive mutation class {plan.mutation_class!r} without "
                      "--codex-risk-override <HEX64>"],
                     {"action": "spawn_refused", "reason": "codex_risk_refused",

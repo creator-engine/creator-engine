@@ -55,6 +55,9 @@ def test_codex_dry_run_is_pure_and_governed(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    monkeypatch.setattr(
+        ce_cli.launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True
+    )
     codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
         "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",

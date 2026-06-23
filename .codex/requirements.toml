@@ -1,0 +1,11 @@
+[features]
+hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.codex/hooks/ce-pretooluse-codex.py"'
+timeout = 30
+statusMessage = "Checking CE Ring-1 policy"

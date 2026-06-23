@@ -211,9 +211,10 @@ Each task entry declares the harness contract the worker must obey:
 - `required_validation`: command ids or command strings to run.
 - `stop_conditions`: conditions that require halt rather than improvisation.
 
-For Codex, this composes with the existing `codex_external_gate` posture in
+For Codex, this composes with the `codex_managed_pretooluse` posture in
 `schemas/dispatch-record.schema.yaml`: Codex can consume low-risk work or work
-with a ratified risk override, but this handoff does not claim Ring-1 parity.
+with a ratified risk override, while containment remains the backstop for tool
+surfaces not covered by Codex PreToolUse.
 
 ## Validator Mapping
 
