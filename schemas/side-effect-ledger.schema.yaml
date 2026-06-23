@@ -111,6 +111,13 @@ properties:
   subject_sha256:
     type: string
     pattern: "^[0-9a-f]{64}$"
+  subject_git_sha:
+    description: |
+      Git object SHA for records whose subject is a commit/ref publish event.
+      Kept top-level so full 40-character commit SHAs do not need to be encoded
+      into redaction-scanned free-form detail strings.
+    type: string
+    pattern: "^[0-9a-f]{7,40}$"
   evidence_refs:
     type: array
     minItems: 1

@@ -17,6 +17,7 @@ ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed 
 ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
+ce publish-branch   # host-side publish gate for contained seats' committed branches
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
@@ -92,6 +93,7 @@ from . import (
     lane_runtime,
     launch_runtime,
     pcl_runtime,
+    publish_gate,
     reviewer_triage,
     seat_lifecycle,
     side_effect_ledger_runtime,
@@ -979,6 +981,27 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="emit the machine-readable JSON verdict",
     )
+
+    publish_branch_cmd = groups.add_parser(
+        "publish-branch",
+        help="host-side publish gate for a contained seat's committed branch",
+    )
+    publish_branch_cmd.add_argument("branch", help="local branch to publish to origin")
+    publish_branch_cmd.add_argument("--repo-root", default=".", help="repo worktree containing the branch")
+    publish_branch_cmd.add_argument("--repo", default=None, help="owner/name repo; default derives from origin URL")
+    publish_branch_cmd.add_argument("--seat-id", required=True, help="contained seat id that authored the branch")
+    publish_branch_cmd.add_argument("--actor", default="host-substrate", help="host actor performing the publish")
+    publish_branch_cmd.add_argument("--expect-author-name", default=None)
+    publish_branch_cmd.add_argument("--expect-author-email", default=None)
+    publish_branch_cmd.add_argument("--expect-committer-name", default=None)
+    publish_branch_cmd.add_argument("--expect-committer-email", default=None)
+    publish_branch_cmd.add_argument("--controller-id", default=None, help="side-effect ledger controller id")
+    publish_branch_cmd.add_argument("--lane-id", default=None, help="side-effect ledger lane id")
+    publish_branch_cmd.add_argument("--claim-ref", default=None, help="active-work claim ref bound to this publish")
+    publish_branch_cmd.add_argument("--side-effect-ledger-root", default=None)
+    publish_branch_cmd.add_argument("--active-work-ledger-root", default=None)
+    publish_branch_cmd.add_argument("--dry-run", action="store_true", help="verify publishability without pushing")
+    publish_branch_cmd.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
     init = groups.add_parser(
@@ -2779,6 +2802,81 @@ def _containment_probe(args) -> int:
     return 0 if verdict.contained else 1
 
 
+def _make_publish_branch_runner():
+    """Factory for host-side publish git runner (monkeypatchable in tests)."""
+    return publish_gate.default_git_runner
+
+
+def _publish_ledger_context(args) -> publish_gate.PublishLedgerContext | None:
+    if getattr(args, "dry_run", False):
+        return None
+    required = (
+        "controller_id",
+        "lane_id",
+        "claim_ref",
+        "side_effect_ledger_root",
+        "active_work_ledger_root",
+    )
+    missing = [name.replace("_", "-") for name in required if not getattr(args, name, None)]
+    if missing:
+        raise ValueError("live publish requires " + ", ".join(f"--{name}" for name in missing))
+    return publish_gate.PublishLedgerContext(
+        controller_id=args.controller_id,
+        lane_id=args.lane_id,
+        claim_ref=args.claim_ref,
+        repo_root=args.repo_root,
+        side_effect_ledger_root=args.side_effect_ledger_root,
+        active_work_ledger_root=args.active_work_ledger_root,
+        actor=args.actor,
+        seat_id=args.seat_id,
+    )
+
+
+def _publish_branch(args) -> int:
+    expected = publish_gate.SeatIdentityExpectation(
+        author_name=args.expect_author_name,
+        author_email=args.expect_author_email,
+        committer_name=args.expect_committer_name,
+        committer_email=args.expect_committer_email,
+    )
+    try:
+        ledger_context = _publish_ledger_context(args)
+    except ValueError as exc:
+        payload = {
+            "ok": False,
+            "branch": args.branch,
+            "refusal_reason": "missing_ledger_context",
+            "evidence": [str(exc)],
+        }
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce publish-branch refused [missing_ledger_context]: {exc}", file=sys.stderr)
+        return 1
+
+    result = publish_gate.publish_branch(
+        args.branch,
+        repo=args.repo,
+        repo_root=args.repo_root,
+        expected_identity=expected,
+        ledger_context=ledger_context,
+        apply=not args.dry_run,
+        runner=_make_publish_branch_runner(),
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        action = "pushed" if result.pushed else ("verified" if args.dry_run else "already published")
+        print(f"ce publish-branch: {action} {result.branch} at {result.local_head}")
+    else:
+        print(
+            f"ERROR: ce publish-branch refused [{result.refusal_reason}]: "
+            + "; ".join(result.evidence),
+            file=sys.stderr,
+        )
+    return 0 if result.ok else 1
+
+
 def _make_gh_runner():
     """Factory for the work-claim gh runner (monkeypatchable in tests)."""
     return work_claims.default_gh_runner
@@ -3377,6 +3475,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _doctor(args)
     if args.group == "containment-probe":
         return _containment_probe(args)
+    if args.group == "publish-branch":
+        return _publish_branch(args)
     if args.group == "init":
         return _init(args)
     if args.group in ("launch", "hud"):
