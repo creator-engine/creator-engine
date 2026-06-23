@@ -87,6 +87,47 @@ def _latest_per_reviewer(reviews: Sequence[Review]) -> list[Review]:
     return list(latest.values())
 
 
+def _authenticated_login(runner: GhRunner) -> str:
+    raw = _gh_json(runner, "GET", "user")
+    if not isinstance(raw, Mapping):
+        raise ForgeConfigError("gh api GET user returned a non-object body (fail-closed)")
+    login = raw.get("login")
+    if not isinstance(login, str) or not login:
+        raise ForgeConfigError("gh api GET user returned no login (fail-closed)")
+    return login
+
+
+def stale_base_only_approval_by_reviewer(
+    reviews: Sequence[Review],
+    head_sha: str,
+    approved_head: str,
+    reviewer: str,
+    *,
+    base_only_proven: bool,
+) -> Review | None:
+    """Return a same-reviewer APPROVED review on the proven old head.
+
+    The base/content proof is deliberately external: this helper only interprets
+    the complete review history using :func:`classify_reviews`. A stale
+    ``APPROVED`` is restorable only when the caller has already proven
+    base-only motion from ``approved_head`` to ``head_sha`` and the
+    authenticated reviewer login matches the approver.
+    """
+    if not base_only_proven:
+        return None
+    for verdict in classify_reviews(reviews, head_sha):
+        review = verdict.review
+        if (
+            verdict.verdict == RE_REQUEST_SCOPED
+            and review.state.upper() == "APPROVED"
+            and review.commit_id != head_sha
+            and review.commit_id == approved_head
+            and review.reviewer == reviewer
+        ):
+            return review
+    return None
+
+
 def classify_reviews(reviews: Sequence[Review], head_sha: str) -> list[ReviewVerdict]:
     """Pure classifier (no I/O). Apply the conservative auto-dismiss rule.
 
