@@ -171,6 +171,67 @@ def test_plain_terminal_does_not_satisfy_operator_visible_pco_049(tmp_path: Path
     assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
 
 
+# ---------------------------------------------------------------------------
+# ce-ops#207 W2′: the headless (operator_inspectable) surface (C3 generalization).
+# ---------------------------------------------------------------------------
+def valid_headless_pane_record() -> dict:
+    record = valid_pane_record()
+    record["visibility"] = "operator_inspectable"
+    record["terminal"] = {
+        "kind": "headless",
+        "surface_ref": "/state/dispatches/pco-slice3-impl/attach.sock",
+        "pid": 4242,
+    }
+    return record
+
+
+def test_headless_inspectable_record_validates(tmp_path: Path):
+    record = valid_headless_pane_record()
+    assert validate_pane_registry_record(record, tmp_path / "pane.yaml") == []
+
+
+def test_headless_inspectable_requires_surface_ref_pco_049(tmp_path: Path):
+    record = valid_headless_pane_record()
+    del record["terminal"]["surface_ref"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
+def test_headless_inspectable_requires_pid_pco_046_and_pco_049(tmp_path: Path):
+    # ce-ops#207 W2′ C3: a headless/operator_inspectable PTY record carrying a
+    # surface_ref but NO pid is malformed. The seat pid is part of the headless
+    # surface identity (control-socket ref + pid), so both the schema conditional
+    # and the validator predicate must reject the missing-pid record.
+    record = valid_headless_pane_record()
+    del record["terminal"]["pid"]
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    # Schema conditional requires terminal.pid for the headless kind.
+    assert any(error.code == CODE_SCHEMA for error in errors)
+    # Validator surface predicate mirrors the schema and flags the missing pid.
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
+def test_inspectable_class_with_tmux_terminal_is_refused_pco_049(tmp_path: Path):
+    # The declared visibility class must match its backing terminal kind.
+    record = valid_headless_pane_record()
+    record["terminal"] = {
+        "kind": "tmux", "session_id": "$1", "window_id": "@2", "pane_id": "%3",
+    }
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
+def test_visible_class_with_headless_terminal_is_refused_pco_049(tmp_path: Path):
+    record = valid_pane_record()  # visibility=operator_visible
+    record["terminal"] = {"kind": "headless", "surface_ref": "/s/attach.sock", "pid": 9}
+    errors = validate_pane_registry_record(record, tmp_path / "pane.yaml")
+    assert errors
+    assert any(error.code == CODE_OPERATOR_VISIBLE for error in errors)
+
+
 def test_terminal_status_requires_close_reason_pco_048(tmp_path: Path):
     record = valid_pane_record()
     record["status"] = "closed"

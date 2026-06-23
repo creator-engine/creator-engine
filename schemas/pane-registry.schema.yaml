@@ -78,7 +78,11 @@ properties:
     $ref: "#/$defs/timestamp"
   visibility:
     type: string
-    enum: [operator_visible]
+    # operator_visible = a tmux pane a human can attach (operator-visible).
+    # operator_inspectable = the headless CE-owned-PTY surface (ce-ops#207 W2′):
+    # no live pane, but an attachable + emitting session bound to the evidence
+    # spine. Both satisfy the visibility contract.
+    enum: [operator_visible, operator_inspectable]
   terminal:
     type: object
     required: [kind]
@@ -86,7 +90,9 @@ properties:
     properties:
       kind:
         type: string
-        enum: [tmux, plain_terminal, unknown]
+        # headless = the CE-owned-PTY surface (no tmux server). Its identity is a
+        # control-socket ref + the seat pid, not session/window/pane ids.
+        enum: [tmux, headless, plain_terminal, unknown]
       session_id:
         type: string
         minLength: 1
@@ -100,6 +106,18 @@ properties:
         type: string
         minLength: 1
       pane_pid:
+        oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            pattern: "^[0-9]+$"
+      surface_ref:
+        type: string
+        minLength: 1
+        description: |
+          Per-session control-socket path for the CE-owned PTY (headless kind).
+          Reserved for the attach RPC; the path is recorded here, not bound.
+      pid:
         oneOf:
           - type: integer
             minimum: 1
@@ -152,6 +170,16 @@ allOf:
       properties:
         terminal:
           required: [session_id, window_id, pane_id]
+  - if:
+      properties:
+        terminal:
+          properties:
+            kind:
+              const: headless
+    then:
+      properties:
+        terminal:
+          required: [surface_ref, pid]
   - if:
       properties:
         status:

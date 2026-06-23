@@ -46,7 +46,12 @@ from .init_runtime import DEFAULT_MCP_CONFIG_PAYLOAD
 from .loader import LoaderError, load_yaml
 from .pco_allocator import guard
 from .tmux_adapter import TmuxPane, TmuxUnavailable
-from .visibility_backend import TmuxVisibilityBackend, get_visibility_backend
+from .visibility_backend import (
+    SATISFYING_VISIBILITY_CLASSES,
+    TmuxVisibilityBackend,
+    UnknownVisibilityBackend,
+    get_visibility_backend,
+)
 
 # Pane Registry role enum is exactly the visibility-required role set.
 VISIBILITY_REQUIRED_ROLES = frozenset({"architect", "implementer", "reviewer", "verification"})
@@ -629,6 +634,10 @@ def launch(
     branch: str | None = None,
     envelope_ref: str | None = None,
     tmux_adapter: Any | None = None,
+    # ce-ops#207 W2′: an explicit VisibilityBackend instance overrides the
+    # registry lookup for ``terminal_kind`` (the injection seam tests use to pass
+    # a fake-PTY headless backend, mirroring ``tmux_adapter`` for the tmux path).
+    visibility_backend: Any | None = None,
     now: datetime | None = None,
     mcp_config_path: str | None = None,
     closeout_file: str | None = None,
@@ -739,12 +748,29 @@ def launch(
                 f"handoff SHA256 mismatch for {handoff}: expected {handoff_sha}, got {actual_handoff_sha}"
             )
 
-    # 3. Visibility: a visibility-required role must use tmux (RV1-030).
-    if role in VISIBILITY_REQUIRED_ROLES and terminal_kind != TMUX_TERMINAL_KIND:
-        raise VisibilityRefused(
-            f"role {role!r} requires an operator-visible tmux lane; "
-            f"terminal {terminal_kind!r} is not permitted"
-        )
+    # 3. Visibility (RV1-030, ce-ops#207 W2′): a visibility-required role must run
+    #    in a CE-owned attachable-and-emitting session. The gate is no longer
+    #    "tmux only" — it refuses an *unknown* terminal kind OR a backend whose
+    #    visibility class does not satisfy the contract. tmux (operator_visible)
+    #    and the headless PTY backend (operator_inspectable) both satisfy it; the
+    #    refusal stays load-bearing for any non-attachable / non-emitting surface.
+    #    Resolved BEFORE any side effect, exactly like the previous tmux refusal.
+    if role in VISIBILITY_REQUIRED_ROLES:
+        if visibility_backend is not None:
+            satisfying_class = visibility_backend.visibility_class
+        elif tmux_adapter is not None and terminal_kind == TMUX_TERMINAL_KIND:
+            satisfying_class = TmuxVisibilityBackend(tmux_adapter).visibility_class
+        else:
+            try:
+                satisfying_class = get_visibility_backend(terminal_kind).visibility_class
+            except UnknownVisibilityBackend:
+                satisfying_class = None
+        if satisfying_class not in SATISFYING_VISIBILITY_CLASSES:
+            raise VisibilityRefused(
+                f"role {role!r} requires an operator-visible or operator-inspectable "
+                f"lane; terminal {terminal_kind!r} is not a satisfying visibility "
+                f"surface"
+            )
 
     # 4. Require a live, unreleased, matching Active-Work claim (RV1-030).
     claim_path = _claim_path(ledger_root, controller_id, lane_id)
@@ -889,18 +915,25 @@ def launch(
         if resource_policy.fleet_memory_max:
             resource_bound_stamp["fleet_memory_max"] = resource_policy.fleet_memory_max
 
-    # 6b. Resolve the visibility backend for this terminal kind (ce-ops#207 W1).
+    # 6b. Resolve the visibility backend for this terminal kind (ce-ops#207 W1+W2′).
     #     The spawn seam routes through the VisibilityBackend registry instead of
     #     calling tmux directly. The default `terminal_kind` is still tmux, so the
-    #     default behaviour is byte-identical. When the caller injects a tmux
-    #     adapter (the long-standing test seam), wrap it in the tmux backend so
-    #     every existing fake-adapter test keeps working unchanged.
-    if tmux_adapter is not None:
-        visibility_backend = TmuxVisibilityBackend(tmux_adapter)
+    #     default behaviour is byte-identical. Resolution order: an explicitly
+    #     injected backend (W2′ test seam) > the tmux-adapter wrap (the
+    #     long-standing test seam, only for a tmux lane) > the registry lookup for
+    #     `terminal_kind`. The CLI always passes a tmux adapter, so the
+    #     adapter-wrap MUST be scoped to `terminal_kind == tmux`; otherwise a
+    #     `--no-tmux` (headless) lane would be mis-routed onto tmux.
+    if visibility_backend is not None:
+        backend = visibility_backend
+    elif tmux_adapter is not None and terminal_kind == TMUX_TERMINAL_KIND:
+        backend = TmuxVisibilityBackend(tmux_adapter)
     else:
-        visibility_backend = get_visibility_backend(terminal_kind)
-    # tmux must be available for a tmux lane — before pane write (RV1-030).
-    if terminal_kind == TMUX_TERMINAL_KIND and not visibility_backend.is_available():
+        backend = get_visibility_backend(terminal_kind)
+    # tmux must be available for a tmux lane — before pane write (RV1-030). The
+    # headless backend is always available (the no-tmux fallback), so this guard
+    # is correctly scoped to the tmux kind only.
+    if terminal_kind == TMUX_TERMINAL_KIND and not backend.is_available():
         raise TmuxUnavailableError(
             "tmux is unavailable; refusing visible lane launch before any side effect"
         )
@@ -940,12 +973,15 @@ def launch(
     )
 
     try:
-        surface = visibility_backend.ensure_surface(
+        surface = backend.ensure_surface(
             session=session_name,
             window=window_name,
             command=sentinel.pane_command,
             cwd=worktree_path or None,
             env=pane_env,
+            # W2′: the headless backend anchors its control-socket ref under the
+            # seat dir; the tmux backend ignores it (signature stays uniform).
+            seat_dir=str(seat_dir),
         )
     except TmuxUnavailable as exc:
         raise TmuxUnavailableError(str(exc)) from exc

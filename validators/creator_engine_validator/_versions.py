@@ -64,6 +64,13 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # Classifying it v1 keeps both edges v1->v1 (no new shared->v1 ratchet
         # edge); it imports NO v3 module, so the HARD invariant is untouched.
         "visibility_backend",
+        # ce-ops#207 W2′: the CE-owned-PTY session substrate — the headless
+        # visibility backend's process-owning surface. Consumed only by
+        # ``visibility_backend`` (v1) → ``lane_runtime`` (v1); imports only
+        # stdlib (``os``/``pty``), no v3 module. Belongs to the v1 launcher's
+        # witnessability/surface seam, exactly like ``visibility_backend`` and
+        # ``tmux_adapter``: both edges stay v1->v1, no shared->v1 ratchet edge.
+        "seat_pty_session",
         "transcript_archive",
         "pco_allocator",
         "hook_check",

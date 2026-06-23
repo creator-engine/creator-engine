@@ -155,7 +155,8 @@ properties:
     properties:
       kind:
         type: string
-        enum: [tmux, plain_terminal, unknown]
+        # headless = the CE-owned-PTY surface (ce-ops#207 W2′); no tmux server.
+        enum: [tmux, headless, plain_terminal, unknown]
       session_id:
         type: string
         minLength: 1

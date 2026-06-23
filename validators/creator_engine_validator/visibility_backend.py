@@ -31,6 +31,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .seat_pty_session import SeatPtySession, spawn_pty_session
 from .tmux_adapter import TmuxAdapter, TmuxUnavailable
 
 # The terminal kind / visibility class vocabulary. ``operator_visible`` is the
@@ -38,8 +39,16 @@ from .tmux_adapter import TmuxAdapter, TmuxUnavailable
 # headless class (a recorded surface, no live pane) reserved for W2. Both satisfy
 # the visibility *contract* — see the C1 gate (W2).
 TMUX_TERMINAL_KIND = "tmux"
+HEADLESS_TERMINAL_KIND = "headless"
 OPERATOR_VISIBLE = "operator_visible"
 OPERATOR_INSPECTABLE = "operator_inspectable"
+
+# The visibility classes that SATISFY the visibility contract (the C1 gate).
+# A visibility-required role may launch onto any backend whose class is here;
+# an unknown / non-satisfying surface is still refused (the load-bearing
+# refusal). ``operator_inspectable`` = the headless attachable-and-emitting
+# class CE owns via a PTY + recorded evidence spine (W2′).
+SATISFYING_VISIBILITY_CLASSES = frozenset({OPERATOR_VISIBLE, OPERATOR_INSPECTABLE})
 
 
 # ---------------------------------------------------------------------------
@@ -110,8 +119,15 @@ class VisibilityBackend(abc.ABC):
         command: Sequence[str],
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        seat_dir: str | None = None,
     ) -> SurfaceHandle:
-        """Spawn/attach the visibility surface running ``command``; return its handle."""
+        """Spawn/attach the visibility surface running ``command``; return its handle.
+
+        ``seat_dir`` is the per-seat state directory (where ``events.jsonl`` and
+        the sentinel wrapper live). The tmux backend ignores it; the headless
+        backend reserves the control-socket ref under it. Optional so the W1
+        signature stays source-compatible.
+        """
         raise NotImplementedError
 
 
@@ -145,6 +161,7 @@ class TmuxVisibilityBackend(VisibilityBackend):
         command: Sequence[str],
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        seat_dir: str | None = None,  # noqa: ARG002 — tmux ignores the seat dir
     ) -> SurfaceHandle:
         try:
             pane = self._adapter.ensure_pane(
@@ -170,6 +187,72 @@ class TmuxVisibilityBackend(VisibilityBackend):
             terminal["pane_pid"] = pane.pane_pid
         return SurfaceHandle(
             visibility_class=self.visibility_class, terminal=terminal, native=pane
+        )
+
+
+# ---------------------------------------------------------------------------
+# The headless backend — CE owns the seat under its own PTY (no tmux server).
+# ---------------------------------------------------------------------------
+class HeadlessVisibilityBackend(VisibilityBackend):
+    """An ``operator_inspectable`` backend that owns the seat under a CE-held PTY.
+
+    Unlike the tmux backend (a human attaches a live pane), this backend spawns
+    the sentinel-wrapped argv under a **CE-owned PTY** (``seat_pty_session``) —
+    NOT a log redirect — so CE holds the live byte stream regardless of any
+    renderer. Witnessability is satisfied by the evidence spine the launcher
+    already produces (Pane Registry record + ``events.jsonl`` lifecycle), plus the
+    PTY master CE owns for a future interactive attach (gated behind W2-sec/T1).
+
+    The terminal record is ``{kind: headless, surface_ref, pid}``:
+
+    * ``surface_ref`` — the per-session control-socket path (reserved for the T1
+      attach server; the path is recorded, the socket is not bound here).
+    * ``pid`` — the seat process CE owns and the reaper (W4) terminates.
+
+    ``is_available()`` is always true: a writable seat dir + ``pty.fork`` are the
+    only requirements, making this the correct fallback for a no-tmux host /
+    container. **No raw PTY bytes are exposed on any new surface in this unit** —
+    owning the master fd makes attach possible; streaming it out is W2-sec/T1.
+    """
+
+    terminal_kind = HEADLESS_TERMINAL_KIND
+    visibility_class = OPERATOR_INSPECTABLE
+
+    def __init__(self, spawn: Callable[..., SeatPtySession] | None = None):
+        # Injection seam for tests; production uses the real PTY spawner.
+        self._spawn = spawn if spawn is not None else spawn_pty_session
+
+    def is_available(self) -> bool:
+        return True
+
+    def ensure_surface(
+        self,
+        *,
+        session: str,
+        window: str,
+        command: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        seat_dir: str | None = None,
+    ) -> SurfaceHandle:
+        if not seat_dir:
+            raise VisibilityBackendError(
+                "the headless visibility backend requires a seat_dir to anchor the "
+                "control-socket ref; none was supplied"
+            )
+        ptys = self._spawn(
+            command=command,
+            seat_dir=seat_dir,
+            cwd=cwd,
+            env=env,
+        )
+        terminal: dict[str, Any] = {
+            "kind": HEADLESS_TERMINAL_KIND,
+            "surface_ref": str(ptys.surface_ref),
+            "pid": ptys.pid,
+        }
+        return SurfaceHandle(
+            visibility_class=self.visibility_class, terminal=terminal, native=ptys
         )
 
 
@@ -217,3 +300,6 @@ def available_visibility_kinds() -> tuple[str, ...]:
 # fresh adapter-backed instance; when the caller injects a tmux adapter (the
 # existing test seam), the launcher constructs the backend directly instead.
 register_visibility_backend(TMUX_TERMINAL_KIND, TmuxVisibilityBackend)
+# The headless backend (W2′): the no-tmux, CE-owned-PTY, operator_inspectable
+# surface. Selected when ``terminal_kind=headless`` (the ``--no-tmux`` mapping).
+register_visibility_backend(HEADLESS_TERMINAL_KIND, HeadlessVisibilityBackend)

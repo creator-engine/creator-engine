@@ -270,7 +270,11 @@ def _build_parser() -> argparse.ArgumentParser:
     launch.add_argument(
         "--no-tmux",
         action="store_true",
-        help="refuse-only flag: request a non-visible terminal (always refused for visible roles)",
+        help=(
+            "run the lane on the headless (operator_inspectable) visibility "
+            "backend: CE owns the seat under its own PTY, with no tmux server "
+            "(ce-ops#207). Produces the same evidence spine as a tmux lane."
+        ),
     )
     launch.add_argument(
         "--json",
@@ -1082,10 +1086,19 @@ def _lane_launch(args) -> int:
         ))
     else:
         term = result.record["terminal"]
-        print(
-            f"ce lane launch: wrote {result.pane_path} "
-            f"(tmux session={term['session_id']} window={term['window_id']} pane={term['pane_id']})"
-        )
+        if term.get("kind") == lane_runtime.TMUX_TERMINAL_KIND:
+            surface = (
+                f"tmux session={term['session_id']} window={term['window_id']} "
+                f"pane={term['pane_id']}"
+            )
+        else:
+            # ce-ops#207 W2′: a headless (CE-owned PTY) lane has no tmux pane ids;
+            # describe it by its kind + surface ref + pid instead.
+            surface = (
+                f"{term.get('kind')} surface={term.get('surface_ref')} "
+                f"pid={term.get('pid')}"
+            )
+        print(f"ce lane launch: wrote {result.pane_path} ({surface})")
     return 0
 
 
