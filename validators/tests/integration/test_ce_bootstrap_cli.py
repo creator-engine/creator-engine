@@ -4,15 +4,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import uuid
 from pathlib import Path
 
 import pytest
 
 from creator_engine_validator import bootstrap_runtime, ce_cli
-
-
-TMP_ROOT = Path("/home/ce-dev-3/tmp-ce148")
 
 
 def _python314() -> str:
@@ -22,14 +18,8 @@ def _python314() -> str:
     return py
 
 
-def _case_root(name: str) -> Path:
-    root = TMP_ROOT / f"{name}-{uuid.uuid4().hex}"
-    root.mkdir(parents=True, exist_ok=False)
-    return root
-
-
-def _venv(name: str) -> Path:
-    root = _case_root(name)
+def _venv(tmp_path: Path) -> Path:
+    root = tmp_path
     venv = root / ".venv"
     subprocess.run([_python314(), "-m", "venv", str(venv)], check=True)
     return venv
@@ -39,8 +29,10 @@ def _load_stdout_json(capsys) -> dict:
     return json.loads(capsys.readouterr().out)
 
 
-def test_bootstrap_empty_venv_installs_app_scripts_and_is_idempotent(repo_root: Path, capsys):
-    venv = _venv("bootstrap-idempotent")
+def test_bootstrap_empty_venv_installs_app_scripts_and_is_idempotent(
+    repo_root: Path, tmp_path: Path, capsys
+):
+    venv = _venv(tmp_path)
 
     rc = ce_cli.main(["bootstrap", "--repo-root", str(repo_root), "--venv", str(venv), "--json"])
     assert rc == 0
@@ -63,8 +55,8 @@ def test_bootstrap_empty_venv_installs_app_scripts_and_is_idempotent(repo_root: 
     assert second["changed"] is False
 
 
-def test_doctor_names_absent_then_present_controller_seat_env(repo_root: Path, capsys):
-    venv = _venv("doctor-seat-env")
+def test_doctor_names_absent_then_present_controller_seat_env(repo_root: Path, tmp_path: Path, capsys):
+    venv = _venv(tmp_path)
 
     rc = ce_cli.main([
         "doctor",

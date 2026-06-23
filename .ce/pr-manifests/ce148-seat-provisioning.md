@@ -18,9 +18,10 @@ app or console scripts are absent.
 Base:
 `0d4ed0e2c6958a2ce80a36fac5e48e2a5bf28388` (`origin/main` at branch creation).
 
-Per-file purpose (closed path-set - 9 paths):
+Per-file purpose (closed path-set - 11 paths):
 - **`.ce/changelog/ce148-seat-provisioning.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce148-seat-provisioning.md`** *(A)* - this carrier.
+- **`README.md`** *(M)* - document the top-level `ce bootstrap` command group.
 - **`docs/operations/AGENT_NATIVE_BOOTSTRAP.md`** *(M)* - source-clone bootstrap prose now provisions an installed target venv before doctor/launch.
 - **`templates/hermes/agent-native-bootstrap.yaml`** *(M)* - machine-readable construction path now creates a venv, invokes the stdlib bootstrap module, and runs installed `ce`.
 - **`validators/creator_engine_validator/bootstrap_runtime.py`** *(A)* - offline bootstrap and target-seat inspection helper.
@@ -28,17 +29,19 @@ Per-file purpose (closed path-set - 9 paths):
 - **`validators/creator_engine_validator/doctor_runtime.py`** *(M)* - append the `CE-SEAT-ENV` target controller/seat check to doctor reports.
 - **`validators/tests/integration/test_ce_bootstrap_cli.py`** *(A)* - bootstrap idempotence and doctor absent/present target-env coverage.
 - **`validators/tests/integration/test_ce_doctor_cli.py`** *(M)* - update agent-native bootstrap template/doc assertions.
+- **`validators/tests/unit/test_v1_docs_reconciliation.py`** *(M)* - include `ce bootstrap` in the expected as-built docs inventory.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=8e6269976d45aa13c664d4522d6968cde3ce9268c5b48d251a0610f1c44e909e
+AUTHORIZED_PATHS_SHA256=74178b11d75694cb8cc97ccfe27e910ca42989cff73a4551bdf4896c1d84734d
 
 ```text
 .ce/changelog/ce148-seat-provisioning.md
 .ce/pr-manifests/ce148-seat-provisioning.md
+README.md
 docs/operations/AGENT_NATIVE_BOOTSTRAP.md
 templates/hermes/agent-native-bootstrap.yaml
 validators/creator_engine_validator/bootstrap_runtime.py
@@ -46,4 +49,5 @@ validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/doctor_runtime.py
 validators/tests/integration/test_ce_bootstrap_cli.py
 validators/tests/integration/test_ce_doctor_cli.py
+validators/tests/unit/test_v1_docs_reconciliation.py
 ```
