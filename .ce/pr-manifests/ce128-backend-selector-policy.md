@@ -31,13 +31,14 @@ Per-file purpose:
 - **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - resolve/stamp runtime policies and fail closed for explicit backend controller launches.
 - **`validators/tests/unit/test_ce_launch_cli.py`** *(M)* - CLI selector parsing, stamp, and fail-closed coverage.
 - **`validators/tests/unit/test_ce_runtime_policy.py`** *(M)* - schema/resolver/stamp coverage.
+- **`validators/tests/unit/test_version_boundary.py`** *(M)* - regression coverage that the shared runtime-policy check does not import v3 runner modules.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=10
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=2555ed2d0ff9549526bc032bf483129998e676ed3487d6b5da5cd87285665abe
+AUTHORIZED_PATHS_SHA256=90ffe39f09450093f1378b6ae03b339e80ae4094333c5cf797f2a57194729825
 
 ```text
 .ce/changelog/ce128-backend-selector-policy.md
@@ -50,4 +51,5 @@ validators/creator_engine_validator/lane_runtime.py
 validators/creator_engine_validator/launch_runtime.py
 validators/tests/unit/test_ce_launch_cli.py
 validators/tests/unit/test_ce_runtime_policy.py
+validators/tests/unit/test_version_boundary.py
 ```

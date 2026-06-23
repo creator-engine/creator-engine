@@ -15,3 +15,5 @@ Add the SUB-A/SUB-D foundation seam for backend-selected launches.
   resolved backend, digest-pinned image, mount manifest, and egress allowlist.
 - Refuses explicit live backend launches before raw tmux fallback until the
   RunnerBackend execution slice consumes the exposed stamp.
+- Keeps the shared runtime-policy validator decoupled from v3 runner imports so
+  the full examples sweep remains well-formed.

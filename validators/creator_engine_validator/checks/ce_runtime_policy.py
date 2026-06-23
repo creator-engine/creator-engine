@@ -84,6 +84,7 @@ _BACKEND_ALIASES = {
     "local-noop": "local-noop",
     "os-native": "os-native",
 }
+_CONTRACT_BACKENDS = tuple(sorted(set(_BACKEND_ALIASES.values())))
 
 
 class RuntimePolicyResolutionError(ValueError):
@@ -134,9 +135,11 @@ def resolve_isolation_backend(
         resolved = policy_backend
 
     if available is None:
-        from ..runner import available_backends
-
-        available = available_backends()
+        # Keep the shared validator check decoupled from the v3 runner package.
+        # Live provisioning still consults the runner registry and fails closed
+        # if a declared backend is unavailable; this resolver only normalizes
+        # policy/CLI backend keys against the runtime-policy contract.
+        available = _CONTRACT_BACKENDS
     available_set = set(available)
     if resolved not in available_set:
         choices = ", ".join(sorted(available_set)) or "(none)"

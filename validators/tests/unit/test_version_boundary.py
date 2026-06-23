@@ -54,6 +54,14 @@ def test_hard_invariant_zero_v1_v3_crossings(version_boundary_modules):
     assert [e for e in errors if e.code == CODE_CROSS] == []
 
 
+def test_runtime_policy_check_does_not_import_v3_runner(version_boundary_modules):
+    errors, _ = evaluate(version_boundary_modules)
+    assert [
+        e for e in errors
+        if e.code == CODE_UNALLOWED and "checks.ce_runtime_policy" in e.message
+    ] == []
+
+
 # --- the baselined allowlist is exactly the 3 derived edges, and minimal ----
 
 def test_allowlist_is_the_three_baselined_edges():
