@@ -1184,6 +1184,25 @@ def _build_parser() -> argparse.ArgumentParser:
     hud = groups.add_parser("hud", help="alias/seam label for `ce launch` (not a CE-native TUI)")
     _add_launch_args(hud)
 
+    # ce harness-matrix — ce-ops#220 PROBED harness-support capability matrix (SSOT).
+    # Emits a HARNESS x CAPABILITY matrix DERIVED from the adapter specs/config at
+    # runtime (never hand-asserted), with a provenance note per cell. The antidote
+    # to the containment-probe incident (ce-ops#221): the matrix shows the PROBED
+    # truth, not a prose claim.
+    harness_matrix_p = groups.add_parser(
+        "harness-matrix",
+        help="emit the PROBED harness-support capability matrix (ce-ops#220 SSOT)",
+    )
+    harness_matrix_p.add_argument(
+        "--repo-root", default=".", help="repo root to probe (default: cwd)"
+    )
+    harness_matrix_p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON instead of Markdown",
+    )
+
     return parser
 
 
@@ -2619,6 +2638,23 @@ def _init(args) -> int:
     return 0
 
 
+def _harness_matrix(args) -> int:
+    """Emit the ce-ops#220 PROBED harness-support capability matrix.
+
+    Every cell is derived by inspecting the live adapter specs / committed config
+    at runtime (never hand-asserted); each carries a provenance note. The antidote
+    to the false 'contained gVisor' prose claim (ce-ops#221).
+    """
+    from . import harness_matrix as _hm
+
+    matrix = _hm.build_matrix(repo_root=args.repo_root)
+    if getattr(args, "json_output", False):
+        print(_hm.render_json(matrix), end="")
+    else:
+        print(_hm.render_markdown(matrix), end="")
+    return 0
+
+
 def _launch(args, invoked_as: str = "launch") -> int:
     brain_code = _preflight_launch_brain_bootstrap(args, invoked_as)
     if brain_code != 0:
@@ -3345,6 +3381,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _init(args)
     if args.group in ("launch", "hud"):
         return _launch(args, invoked_as=args.group)
+    if args.group == "harness-matrix":
+        return _harness_matrix(args)
 
     parser.print_usage(sys.stderr)
     return 2

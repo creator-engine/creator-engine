@@ -65,7 +65,7 @@ platform evolves:
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
-  `pickup`, `bootstrap`, `verify-install`, and `onboard`.
+  `pickup`, `bootstrap`, `verify-install`, `onboard`, and `harness-matrix`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
@@ -82,7 +82,11 @@ platform evolves:
   each phase's blast-radius and consequence-class so a user's own agent can plan
   and gate the install under the governed-install rail). `ce pickup`
   is the ce-ops#55/#182 read-only, Search-API-backed autonomous forge
-  work-pickup poller for fine-grained PAT compatibility. `ce hud` is an alias for the visible `ce launch` Controller-seat
+  work-pickup poller for fine-grained PAT compatibility. `ce harness-matrix`
+  is the ce-ops#220 PROBED harness-support capability matrix: it derives the
+  harness x {Ring-0, Ring-1, Ring-2, containment} support table by inspecting
+  the live adapter specs / committed config at runtime (never hand-asserted in
+  prose), emitting Markdown by default or `--json`. `ce hud` is an alias for the visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
 - **`cev3`** is the v3 work-driving entry point in this repository. It covers the
