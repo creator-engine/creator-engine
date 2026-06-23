@@ -61,14 +61,15 @@ herdr_cli() {
   HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" "$@"
 }
 
-env_scrub_args=(-u HERDR_SOCKET_PATH -u HERDR_SOCKET)
-while IFS='=' read -r name _value; do
-  case "${name}" in
-    CE_DGX*SOCKET*)
-      env_scrub_args+=(-u "${name}")
-      ;;
-  esac
-done < <(env)
+harness_env=(
+  "HOME=${HOME:-/home/ce}"
+  "PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+  "TERM=${TERM:-xterm-256color}"
+  "CE_DGX_HARNESS=${CE_DGX_HARNESS}"
+)
+if [ -n "${CODEX_HOME:-}" ]; then
+  harness_env+=("CODEX_HOME=${CODEX_HOME}")
+fi
 
 workspace_json="$(herdr_cli workspace create --cwd "${PWD}" --label "${HERDR_WORKSPACE_NAME}")" || {
   fail "could not create herdr workspace"
@@ -90,7 +91,7 @@ print(workspace.get("workspace_id", ""), root_pane.get("pane_id", ""))
 [ -n "${workspace_id}" ] || fail "herdr workspace response did not include workspace id"
 [ -n "${root_pane_id}" ] || fail "herdr workspace response did not include root pane id"
 
-governed_harness=(/usr/bin/env "${env_scrub_args[@]}" -- "${harness_bin}" "$@")
+governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")
 quoted_harness="$(printf '%q ' "${governed_harness[@]}")"
 herdr_cli pane run "${root_pane_id}" "${quoted_harness}" || {
   fail "could not start governed harness through herdr"

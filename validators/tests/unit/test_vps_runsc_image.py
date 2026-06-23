@@ -20,16 +20,32 @@ def _entrypoint() -> str:
     return ENTRYPOINT.read_text(encoding="utf-8")
 
 
+def _entrypoint_harness_env_block() -> str:
+    text = _entrypoint()
+    match = re.search(r"\nharness_env=\(\n(?P<block>.*?)\n\)\n", text, re.S)
+    assert match is not None
+    return match.group("block")
+
+
 def test_dockerfile_builds_herdr_from_source_in_compatible_stage() -> None:
     text = _dockerfile()
 
     assert "FROM --platform=linux/amd64 rust:1-bookworm AS herdr-builder" in text
     assert "FROM --platform=linux/amd64 debian:bookworm-slim AS runtime" in text
     assert "ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git" in text
-    assert "ARG HERDR_SOURCE_REF=main" in text
-    assert 'git clone --depth 1 --branch "${HERDR_SOURCE_REF}" "${HERDR_SOURCE_REPO}" .' in text
-    assert "cargo build --locked --release" in text
-    assert "COPY --from=herdr-builder /usr/local/bin/herdr /usr/local/bin/herdr" in text
+    assert "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef" in text
+    assert "ARG ZIG_VERSION=0.15.2" in text
+    assert 'git clone "${HERDR_SOURCE_REPO}" herdr' in text
+    assert 'git checkout --detach "${HERDR_SOURCE_REF}"' in text
+    assert "--branch" not in text
+    assert "HERDR_SOURCE_REF=main" not in text
+    assert "cargo build --locked --release --bin herdr" in text
+    assert "ldd target/release/herdr" in text
+    assert "target/release/herdr --help >/tmp/herdr-help.txt" in text
+    assert (
+        "COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr"
+        in text
+    )
     assert "COPY herdr" in text
     assert not re.search(r"COPY\s+(?:\./)?herdr\s+/usr/local/bin/herdr", text)
 
@@ -81,16 +97,38 @@ def test_entrypoint_selects_harness_from_ce_dgx_harness() -> None:
     assert 'harness_bin="/usr/local/bin/codex"' in text
     assert 'harness_bin="/usr/local/bin/claude"' in text
     assert 'fail "CE_DGX_HARNESS must be codex or claude' in text
-    assert 'governed_harness=(/usr/bin/env "${env_scrub_args[@]}" -- "${harness_bin}" "$@")' in text
+    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")' in text
 
 
-def test_entrypoint_scrubs_raw_and_ce_dgx_socket_carriers_dynamically() -> None:
+def test_entrypoint_runs_governed_harness_with_explicit_safe_env() -> None:
     text = _entrypoint()
+    block = _entrypoint_harness_env_block()
 
-    assert "env_scrub_args=(-u HERDR_SOCKET_PATH -u HERDR_SOCKET)" in text
-    assert "CE_DGX*SOCKET*)" in text
-    assert 'env_scrub_args+=(-u "${name}")' in text
-    assert "CE_DGX_HERDR_SOCKET_PATH" not in text
-    assert "scrubbed_env" not in text
+    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")' in text
+    assert '"HOME=${HOME:-/home/ce}"' in block
+    assert (
+        '"PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"'
+        in block
+    )
+    assert '"TERM=${TERM:-xterm-256color}"' in block
+    assert '"CE_DGX_HARNESS=${CE_DGX_HARNESS}"' in block
+    assert 'if [ -n "${CODEX_HOME:-}" ]; then' in text
+    assert 'harness_env+=("CODEX_HOME=${CODEX_HOME}")' in text
+    assert "env_scrub_args" not in text
+    assert " -u " not in text
+    assert "CE_DGX_HARNESS_MODE" not in text
     assert "--env" not in text
     assert 'herdr_cli pane run "${root_pane_id}"' in text
+
+
+def test_entrypoint_harness_env_has_no_socket_or_ambient_ce_dgx_carriers() -> None:
+    text = _entrypoint()
+    harness_env_region = text[
+        text.index("\nharness_env=(") : text.index("\nworkspace_json=")
+    ]
+
+    assert "HERDR_SOCKET_PATH" not in harness_env_region
+    assert "HERDR_SOCKET" not in harness_env_region
+    assert "SOCKET" not in harness_env_region
+    assert "CE_DGX_HARNESS_MODE" not in harness_env_region
+    assert set(re.findall(r"\bCE_DGX[A-Z0-9_]*", harness_env_region)) == {"CE_DGX_HARNESS"}

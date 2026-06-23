@@ -1,15 +1,41 @@
 FROM --platform=linux/amd64 rust:1-bookworm AS herdr-builder
 
 ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git
-ARG HERDR_SOURCE_REF=main
-
-WORKDIR /src/herdr-ce
+ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef
+ARG ZIG_VERSION=0.15.2
 
 RUN set -eux; \
-    git clone --depth 1 --branch "${HERDR_SOURCE_REF}" "${HERDR_SOURCE_REPO}" .; \
-    cargo build --locked --release; \
-    install -m 0755 target/release/herdr /usr/local/bin/herdr; \
-    test -x /usr/local/bin/herdr
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      arm64) zig_arch="aarch64"; zig_sha256="958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f" ;; \
+      amd64) zig_arch="x86_64"; zig_sha256="02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239" ;; \
+      *) echo "unsupported Zig architecture: ${arch}" >&2; exit 66 ;; \
+    esac; \
+    zig_url="https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"; \
+    curl -fsSL "${zig_url}" -o /tmp/zig.tar.xz; \
+    echo "${zig_sha256}  /tmp/zig.tar.xz" | sha256sum -c -; \
+    mkdir -p /opt/zig; \
+    tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1; \
+    rm /tmp/zig.tar.xz
+
+ENV PATH="/opt/zig:${PATH}"
+
+WORKDIR /build
+
+RUN set -eux; \
+    git clone "${HERDR_SOURCE_REPO}" herdr; \
+    cd herdr; \
+    git checkout --detach "${HERDR_SOURCE_REF}"; \
+    cargo build --locked --release --bin herdr; \
+    ldd target/release/herdr; \
+    target/release/herdr --help >/tmp/herdr-help.txt
 
 FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
 
@@ -43,7 +69,7 @@ RUN set -eux; \
     install -d -m 0700 -o "${CE_VPS_UID}" -g "${CE_VPS_GID}" /run/creator-engine/herdr; \
     git config --system --add safe.directory /workspace/creator-engine
 
-COPY --from=herdr-builder /usr/local/bin/herdr /usr/local/bin/herdr
+COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY herdr-harness-entrypoint.sh /usr/local/bin/herdr-harness-entrypoint.sh
 
 RUN set -eux; \
