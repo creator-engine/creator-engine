@@ -9,13 +9,15 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import io
 import os
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlopen as _stdlib_urlopen
 
-from .bootstrap_manifest import parse_bootstrap_manifest, parse_sha256s
+from .bootstrap_manifest import BootstrapManifest, parse_bootstrap_manifest, parse_sha256s
 
 PUBLISHED_INSTALL_SPEC_URL = "https://creator-engine.dev/llms-install.md"
 
@@ -108,43 +110,104 @@ def _path_inside(path: Path, root: Path) -> bool:
     return True
 
 
-def _verify_record(venv_target: Path, package_version: str) -> tuple[list[str], dict[str, Any]]:
+def _parse_record_rows(record_text: str) -> list[tuple[str, str, str]]:
+    """Parse RECORD CSV text into ``(relpath, digest, size)`` rows with a hash."""
+    rows: list[tuple[str, str, str]] = []
+    for row in csv.reader(io.StringIO(record_text)):
+        if len(row) < 3 or not row[1]:
+            continue
+        rows.append((row[0], row[1], row[2]))
+    return rows
+
+
+def _trusted_record_text_from_wheel(
+    wheel_bytes: bytes, package_version: str
+) -> str | None:
+    """Extract the dist-info RECORD from the trusted published wheel bytes.
+
+    The wheel is a zip; its RECORD is the published release's own file
+    manifest. Anchoring installed-file verification here (rather than the
+    venv's self-referential RECORD) is what defeats a tampered-file-plus-
+    tampered-RECORD attack.
+    """
+    arcname = f"creator_engine_validator-{package_version}.dist-info/RECORD"
+    try:
+        with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+            return archive.read(arcname).decode("utf-8")
+    except (KeyError, zipfile.BadZipFile, UnicodeDecodeError):
+        return None
+
+
+def _verify_record(
+    venv_target: Path,
+    package_version: str,
+    *,
+    trusted_record_text: str | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Verify installed venv bytes against trusted RECORD digests.
+
+    Online (``trusted_record_text`` provided): the digests come from the
+    published wheel's RECORD (trust anchored in the signed SHA256SUMS chain);
+    the installed RECORD is used only as a file map. Offline: the only available
+    source is the installed RECORD, which is a *reduced-assurance* check — it can
+    only attest "matches local install-state", never "matches the published
+    release". Path containment is validated against the VENV ROOT so legitimate
+    venv-owned console scripts (e.g. ``../../../bin/ce``) are accepted.
+    """
     problems: list[str] = []
     record_glob = f"creator_engine_validator-{package_version}.dist-info/RECORD"
     records = sorted(venv_target.glob(f"**/{record_glob}"))
     if not records:
-        return ["venv_record_missing"], {"target": str(venv_target), "record_files_checked": 0}
+        return ["venv_record_missing"], {
+            "target": str(venv_target),
+            "record_files_checked": 0,
+            "anchor": "published_wheel" if trusted_record_text else "installed_record",
+            "assurance": "published_release" if trusted_record_text else "local_install_state_only",
+        }
     record = records[0]
     site_packages = record.parent.parent
+    # site_packages == <venv>/lib/pythonX.Y/site-packages → venv root is 3 up.
+    venv_root = site_packages.parent.parent.parent
+
+    if trusted_record_text is not None:
+        anchor = "published_wheel"
+        assurance = "published_release"
+        rows = _parse_record_rows(trusted_record_text)
+    else:
+        anchor = "installed_record"
+        assurance = "local_install_state_only"
+        rows = _parse_record_rows(record.read_text(encoding="utf-8", newline=""))
+
     checked = 0
-    with record.open("r", encoding="utf-8", newline="") as handle:
-        for row in csv.reader(handle):
-            if len(row) < 3 or not row[1]:
-                continue
-            rel, digest, size = row[0], row[1], row[2]
-            installed = site_packages / rel
-            if not _path_inside(installed, site_packages):
-                problems.append("venv_record_path_escape")
-                continue
-            if not installed.is_file():
-                problems.append("venv_record_file_missing")
-                continue
-            expected = _decode_record_digest(digest)
-            if expected is None:
-                problems.append("venv_record_digest_unsupported")
-                continue
-            data = installed.read_bytes()
-            if _sha256_bytes(data) != expected:
-                problems.append("venv_record_hash_mismatch")
-            if size and size.isdigit() and len(data) != int(size):
-                problems.append("venv_record_size_mismatch")
-            checked += 1
+    for rel, digest, size in rows:
+        installed = site_packages / rel
+        # Console scripts and other venv-owned files legitimately resolve
+        # outside site-packages (e.g. <venv>/bin/ce). Validate containment
+        # against the venv root, only flagging a TRUE escape.
+        if not _path_inside(installed, venv_root):
+            problems.append("venv_record_path_escape")
+            continue
+        if not installed.is_file():
+            problems.append("venv_record_file_missing")
+            continue
+        expected = _decode_record_digest(digest)
+        if expected is None:
+            problems.append("venv_record_digest_unsupported")
+            continue
+        data = installed.read_bytes()
+        if _sha256_bytes(data) != expected:
+            problems.append("venv_record_hash_mismatch")
+        if size and size.isdigit() and len(data) != int(size):
+            problems.append("venv_record_size_mismatch")
+        checked += 1
     if checked == 0:
         problems.append("venv_record_empty")
     return problems, {
         "target": str(venv_target),
         "record": str(record),
         "record_files_checked": checked,
+        "anchor": anchor,
+        "assurance": assurance,
     }
 
 
@@ -175,13 +238,52 @@ def _load_manifest_bytes(
     return _fetch(PUBLISHED_INSTALL_SPEC_URL, opener)
 
 
+def _fetch_trusted_wheel_record(
+    *,
+    manifest: BootstrapManifest,
+    sums: dict[str, str],
+    opener: UrlOpen,
+    problems: list[str],
+) -> str | None:
+    """Fetch the published app wheel, verify it against the trusted SHA256SUMS
+    digest, then return its RECORD text as the file-verification trust anchor.
+
+    The wheel bytes are reproduced from the publisher, hashed locally, and only
+    accepted when the hash matches the (signed-manifest-pinned, live-verified)
+    SHA256SUMS entry. Never transcribe a stored hash — re-derive it.
+    """
+    app_wheel = manifest.wheel_by_filename().get(manifest.app_wheel)
+    if app_wheel is None:
+        problems.append("manifest_app_wheel_missing")
+        return None
+    trusted_digest = sums.get(app_wheel.filename)
+    if not trusted_digest or trusted_digest != app_wheel.sha256:
+        problems.append("live_sha256s_entry_mismatch")
+        return None
+    wheel_bytes = _fetch(app_wheel.url, opener)
+    if _sha256_bytes(wheel_bytes) != trusted_digest:
+        problems.append("published_wheel_hash_mismatch")
+        return None
+    record_text = _trusted_record_text_from_wheel(wheel_bytes, manifest.package_version)
+    if record_text is None:
+        problems.append("published_wheel_record_missing")
+        return None
+    return record_text
+
+
 def _verify_manifest_and_sha256s(
     *,
     state: dict[str, str],
     manifest_bytes: bytes | str | None,
     offline: bool,
     opener: UrlOpen,
-) -> tuple[list[str], dict[str, str], dict[str, str]]:
+) -> tuple[list[str], dict[str, str], dict[str, str], str | None]:
+    """Returns ``(problems, manifest_info, sha_info, trusted_record_text)``.
+
+    ``trusted_record_text`` is the published wheel's RECORD (the file-level
+    trust anchor) and is only ever populated in online mode after the wheel is
+    fetched and verified against the signed SHA256SUMS chain.
+    """
     problems: list[str] = []
     manifest_payload = _load_manifest_bytes(
         manifest_bytes=manifest_bytes,
@@ -189,7 +291,7 @@ def _verify_manifest_and_sha256s(
         opener=opener,
     )
     if manifest_payload is None:
-        return problems, {}, {"mode": "offline", "status": "offline_skipped"}
+        return problems, {}, {"mode": "offline", "status": "offline_skipped"}, None
 
     manifest = parse_bootstrap_manifest(manifest_payload)
     manifest_info = {
@@ -202,7 +304,7 @@ def _verify_manifest_and_sha256s(
     if state.get("sha256s_sha256") != manifest.sha256s_sha256:
         problems.append("sha256s_pin_mismatch")
     if offline:
-        return problems, manifest_info, {"mode": "offline", "status": "offline_skipped"}
+        return problems, manifest_info, {"mode": "offline", "status": "offline_skipped"}, None
 
     live = _fetch(manifest.sha256s_url, opener)
     live_digest = _sha256_bytes(live)
@@ -217,7 +319,17 @@ def _verify_manifest_and_sha256s(
             problems.append("live_sha256s_entry_mismatch")
             sha_info["status"] = "mismatch"
             break
-    return problems, manifest_info, sha_info
+    # Anchor installed-file verification in the trusted published wheel only
+    # when the SHA256SUMS chain itself verified clean.
+    trusted_record_text: str | None = None
+    if sha_info["status"] == "verified":
+        trusted_record_text = _fetch_trusted_wheel_record(
+            manifest=manifest,
+            sums=sums,
+            opener=opener,
+            problems=problems,
+        )
+    return problems, manifest_info, sha_info, trusted_record_text
 
 
 def verify_install(
@@ -260,24 +372,37 @@ def verify_install(
     elif not live_venv.exists():
         problems.append("live_venv_missing")
 
-    venv_info: dict[str, Any] = {"target": str(target), "record_files_checked": 0}
-    if target.is_dir() and version:
-        record_problems, venv_info = _verify_record(target, version)
-        problems.extend(record_problems)
-
+    # Resolve the trust anchor (published wheel RECORD, online) BEFORE verifying
+    # installed bytes, so file verification is rooted in trusted bytes — not the
+    # mutable installed RECORD.
     opener = urlopen or _stdlib_urlopen
+    trusted_record_text: str | None = None
     try:
-        manifest_problems, manifest_info, sha_info = _verify_manifest_and_sha256s(
-            state=state,
-            manifest_bytes=manifest_bytes,
-            offline=offline,
-            opener=opener,
+        manifest_problems, manifest_info, sha_info, trusted_record_text = (
+            _verify_manifest_and_sha256s(
+                state=state,
+                manifest_bytes=manifest_bytes,
+                offline=offline,
+                opener=opener,
+            )
         )
         problems.extend(manifest_problems)
     except Exception as exc:  # network/parser failures are refusals, not tracebacks
         manifest_info = {}
         sha_info = {"mode": "offline" if offline else "online", "status": "error"}
         problems.append(f"manifest_or_sha256s_unavailable:{exc.__class__.__name__}")
+
+    venv_info: dict[str, Any] = {
+        "target": str(target),
+        "record_files_checked": 0,
+        "anchor": "published_wheel" if trusted_record_text else "installed_record",
+        "assurance": "published_release" if trusted_record_text else "local_install_state_only",
+    }
+    if target.is_dir() and version:
+        record_problems, venv_info = _verify_record(
+            target, version, trusted_record_text=trusted_record_text
+        )
+        problems.extend(record_problems)
 
     unique_problems = tuple(dict.fromkeys(problems))
     ok = not unique_problems
