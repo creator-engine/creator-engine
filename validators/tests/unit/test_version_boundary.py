@@ -84,7 +84,9 @@ def test_taxonomy_counts_and_disjoint():
     # post-install verifier backing ``ce verify-install``: 26 -> 27.
     # ce-ops#207 W2′ adds ``seat_pty_session`` (the CE-owned-PTY session
     # substrate the headless backend spawns through) as the 28th: 27 -> 28.
-    assert len(ver.V1_RUNTIME) == 28
+    # ce-ops#197 PR-5 adds ``ce_onboard`` (the ``ce onboard`` first-run
+    # orchestrator — thin composition over the v1 kernel surfaces): 28 -> 29.
+    assert len(ver.V1_RUNTIME) == 29
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

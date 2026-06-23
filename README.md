@@ -64,13 +64,20 @@ platform evolves:
 - **`ce`** is the retained v1 command-line runtime. It wraps the validator and
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
-  `brain`, `connector`, `reviewer-triage`, `claim`, `pickup`, and
-  `verify-install`.
+  `brain`, `connector`, `reviewer-triage`, `claim`, `pickup`,
+  `verify-install`, and `onboard`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
-  `ce reviewer-triage`, `ce claim`, `ce pickup`, and `ce verify-install`
-  (post-install provenance verification for a pinned CE release venv). `ce pickup`
+  `ce reviewer-triage`, `ce claim`, `ce pickup`, `ce verify-install`
+  (post-install provenance verification for a pinned CE release venv), and
+  `ce onboard` (the ce-ops#197 first-run one-shot orchestrator: it sequences the
+  preflight doctor, install detection/acquisition, the `ce verify-install`
+  provenance gate, the managed profile PATH block, `ce init` + `ce brain init`,
+  and exactly one governed first launch — idempotent, resumable, and gracefully
+  degrading; `ce onboard --emit-manifest` emits a machine-readable description of
+  each phase's blast-radius and consequence-class so a user's own agent can plan
+  and gate the install under the governed-install rail). `ce pickup`
   is the ce-ops#55/#182 read-only, Search-API-backed autonomous forge
   work-pickup poller for fine-grained PAT compatibility. `ce hud` is an alias for the visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
