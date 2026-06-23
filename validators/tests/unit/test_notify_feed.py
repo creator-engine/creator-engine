@@ -54,6 +54,34 @@ def _delivery(esc_id, event, sink_id, *, ok=True):
     return {"escalation_id": esc_id, "event": event, "sink_id": sink_id, "ok": ok}
 
 
+def _outcome(run_id, outcome, *, recorded_at="2026-06-23T10:00:00Z", **extra):
+    record = {
+        "kind": "runtime-evidence",
+        "record_type": "runtime_run_outcome",
+        "schema_version": "1",
+        "run_id": run_id,
+        "outcome": outcome,
+        "recorded_at": recorded_at,
+    }
+    record.update(extra)
+    return record
+
+
+def _spend(run_id, amount, *, recorded_at="2026-06-23T10:05:00Z", **extra):
+    record = {
+        "kind": "runtime-evidence",
+        "record_type": "runtime_spend_ledger",
+        "schema_version": "1",
+        "policy_sha": "a" * 64,
+        "run_id": run_id,
+        "recorded_at": recorded_at,
+        "unit": "$",
+        "amount": amount,
+    }
+    record.update(extra)
+    return record
+
+
 def _desktop_cfg(*sink_ids):
     sinks = [SinkConfig(id=s, kind="desktop", payload="full") for s in (sink_ids or ("desktop",))]
     return NotifyConfig(
@@ -587,6 +615,128 @@ def test_run_once_malformed_webhook_url_records_ok_false_never_crashes(tmp_path)
     # stays pending for retry next tick (failed delivery does not settle the event)
     again = notify_feed.fold_notify_feed([_esc("esc-a")], ledger, cfg)
     assert again["counts"]["pending_entry"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Status reports (ce-ops#207 follow-up — run-outcome + spend fold)
+# ---------------------------------------------------------------------------
+def test_report_fold_includes_run_outcomes_and_spend_in_notify_event():
+    cfg = _webhook_cfg()
+    fold = notify_feed.fold_report_notify_feed(
+        [
+            _outcome("run-a", "pr_opened"),
+            _outcome("run-b", "no_change"),
+            _outcome("run-c", "pr_opened"),
+        ],
+        [_spend("run-a", 1.25), _spend("run-b", "2.75")],
+        [],
+        cfg,
+        report_key="2026-06-23T10",
+        since="2026-06-23T10:00:00Z",
+        until="2026-06-23T11:00:00Z",
+    )
+
+    assert fold["counts"]["pending_report"] == 1
+    event = fold["pending_events"][0]
+    assert event["event"] == notify_feed.EVENT_STATUS_REPORT
+    assert event["payload_mode"] == "pointer"
+    report = event["payload"]["report"]
+    assert report["report_key"] == "2026-06-23T10"
+    assert report["completed_runs"] == 3
+    assert report["outcomes"] == {"no_change": 1, "pr_opened": 2}
+    assert report["spend"] == {
+        "unit": "$",
+        "amount": 4.0,
+        "record_count": 2,
+        "run_count": 2,
+        "spend_per_hour": 4.0,
+    }
+
+
+def test_periodic_report_status_emission_records_and_is_idempotent_per_period(tmp_path):
+    poster = _WebhookRecorder(status=204)
+    cfg = _webhook_cfg()
+    outcomes = [_outcome("run-a", "research_delivered")]
+    spends = [_spend("run-a", 0.5)]
+
+    first = notify_feed.run_report_once(
+        tmp_path,
+        config=cfg,
+        outcome_records=outcomes,
+        spend_records=spends,
+        report_key="period-1",
+        poster=poster,
+        clock=lambda: "2026-06-23T11:00:00+00:00",
+    )
+    assert first["dispatched"] == 1 and first["ok"] == 1
+    assert json.loads(poster.calls[0][1].decode("utf-8"))["event"] == notify_feed.EVENT_STATUS_REPORT
+    assert notify_feed.load_ledger(tmp_path)[-1]["event"] == notify_feed.EVENT_STATUS_REPORT
+
+    again = notify_feed.run_report_once(
+        tmp_path,
+        config=cfg,
+        outcome_records=outcomes,
+        spend_records=spends,
+        report_key="period-1",
+        poster=poster,
+    )
+    assert again["dispatched"] == 0
+
+    next_period = notify_feed.run_report_once(
+        tmp_path,
+        config=cfg,
+        outcome_records=outcomes,
+        spend_records=spends,
+        report_key="period-2",
+        poster=poster,
+    )
+    assert next_period["dispatched"] == 1
+
+
+def test_report_status_default_desktop_sink_records_without_title(tmp_path):
+    runner = _Recorder(returncode=0)
+
+    out = notify_feed.run_report_once(
+        tmp_path,
+        outcome_records=[_outcome("run-a", "no_change")],
+        spend_records=[_spend("run-a", 0.5)],
+        report_key="period-desktop",
+        runner=runner,
+        clock=lambda: "2026-06-23T11:00:00+00:00",
+    )
+
+    assert out["dispatched"] == 1 and out["ok"] == 1
+    assert runner.calls and runner.calls[0][0][0] == "notify-send"
+    assert "status report period-desktop" in runner.calls[0][0][3]
+    ledger = notify_feed.load_ledger(tmp_path)
+    assert ledger[-1]["event"] == notify_feed.EVENT_STATUS_REPORT
+    assert ledger[-1]["sink_id"] == notify_feed.SINK_DESKTOP
+
+
+def test_report_payload_never_carries_injected_secret(tmp_path):
+    poster = _WebhookRecorder(status=204)
+    cfg = _webhook_cfg(payload="full")
+    outcome = _outcome(
+        "run-a",
+        "pr_opened",
+        branch=_SECRET,
+        change_set={"head_sha": _SECRET},
+        summary=f"do not leak {_SECRET}",
+    )
+    spend = _spend("run-a", 1, model=_SECRET, vendor_payload={"token": _SECRET})
+
+    notify_feed.run_report_once(
+        tmp_path,
+        config=cfg,
+        outcome_records=[outcome],
+        spend_records=[spend],
+        report_key="period-secret",
+        poster=poster,
+    )
+
+    assert poster.calls, "report webhook must have fired"
+    wire = poster.calls[0][1].decode("utf-8")
+    assert _SECRET not in wire, "the injected secret leaked into the status report payload"
 
 
 # ---------------------------------------------------------------------------
