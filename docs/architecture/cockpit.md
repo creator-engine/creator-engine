@@ -145,13 +145,23 @@ sinks:
     kind: exec
     argv: ["curl", "-fsS", "-d", "@-", "http://ntfy.tailnet:8080/ce-operator"]
     payload: pointer         # confidential-by-default off-host
+  - id: discord
+    kind: webhook
+    url: "https://discord.com/api/webhooks/…/…"
+    payload: pointer         # confidential-by-default off-host
 ```
 
 **Sink contract.** `desktop` shells `notify-send` (`critical` urgency for
 `ratify-needed`, `normal` for `clear`). `exec` invokes a user-supplied **argv
 list** (never a shell string — no injection surface) with the event JSON on the
 child's stdin; it covers ntfy/email/Telegram/tailnet-webhooks without CE shipping
-or vouching for any one integration. Delivery is **at-least-once,
+or vouching for any one integration. `webhook` is the **first-class contact-on-need
+edge** for the ~95% delegate-first user: it POSTs the same shaped event JSON
+(`Content-Type: application/json`) to a configured `url`, making Discord/Slack/
+NanoClaw fan-out first-class instead of requiring an `exec`→`curl` shim. The URL is
+restricted to `http(s)` at config-parse (no `file://`/SSRF surface) and the webhook
+**widens nothing** — it reuses the same `shape_payload` confidential-by-default body
+the exec sink emits (`pointer` by default, off-host). Delivery is **at-least-once,
 deliver-then-record**: a duplicate ping is benign, a lost AWAITING-OPERATOR alert
 is the exact failure this layer exists to prevent. A failed sink is recorded
 `ok: false` and stays pending (retried next tick); it never crashes the loop.
@@ -160,8 +170,8 @@ is the exact failure this layer exists to prevent. A failed sink is recorded
 `event`/`class`/`escalation_id`/`created_at`/`source_ref`/`open_count` — no
 title, decision text, recommendation, or hostname (the value-free off-host shape).
 `full` adds the prose fields. Defaults: `desktop = full` (local transport, content
-never leaves the host), `exec = pointer` (CE cannot see where the command forwards
-— confidential-by-default).
+never leaves the host), `exec = pointer` and `webhook = pointer` (CE cannot see
+where the command/URL forwards — confidential-by-default).
 
 **Surface.** `cev3 notify once` is a single fold→dispatch→record pass (the
 cron-able, testable primitive); `cev3 notify watch [--interval 30]` is the poll

@@ -42,8 +42,11 @@ See:
 
 from __future__ import annotations
 
+import http.client
 import json
 import subprocess
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -80,16 +83,29 @@ _VALID_DIALS = frozenset({DIAL_IMMEDIATE, DIAL_OFF})
 
 SINK_DESKTOP = "desktop"
 SINK_EXEC = "exec"
-_VALID_SINK_KINDS = frozenset({SINK_DESKTOP, SINK_EXEC})
+#: v3.5 — the first-class contact-on-need webhook sink: POSTs the already-shaped,
+#: confidential-by-default notify event JSON to a configured URL, so Discord/Slack/
+#: NanoClaw fan-out is first-class (no exec→curl shim). It widens NOTHING the desktop/
+#: exec sinks don't already emit — it reuses :func:`shape_payload` byte-for-byte.
+SINK_WEBHOOK = "webhook"
+_VALID_SINK_KINDS = frozenset({SINK_DESKTOP, SINK_EXEC, SINK_WEBHOOK})
 
 PAYLOAD_POINTER = "pointer"
 PAYLOAD_FULL = "full"
 _VALID_PAYLOADS = frozenset({PAYLOAD_POINTER, PAYLOAD_FULL})
 
 #: Confidential-by-default per-kind payload default: local D-Bus desktop = full
-#: (content never leaves the host); off-host exec = pointer (CE cannot see where
-#: the command forwards).
-_DEFAULT_PAYLOAD = {SINK_DESKTOP: PAYLOAD_FULL, SINK_EXEC: PAYLOAD_POINTER}
+#: (content never leaves the host); off-host exec/webhook = pointer (CE cannot see
+#: where the command/URL forwards the payload).
+_DEFAULT_PAYLOAD = {
+    SINK_DESKTOP: PAYLOAD_FULL,
+    SINK_EXEC: PAYLOAD_POINTER,
+    SINK_WEBHOOK: PAYLOAD_POINTER,
+}
+
+#: The only URL schemes a webhook sink may target (no ``file://``/``gopher://`` SSRF
+#: surface — a webhook is an off-host HTTP delivery edge, nothing else).
+_WEBHOOK_SCHEMES = ("https://", "http://")
 
 
 class NotifyConfigError(Exception):
@@ -108,6 +124,7 @@ class SinkConfig:
     kind: str
     payload: str
     argv: tuple[str, ...] | None = None
+    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -192,7 +209,8 @@ def parse_notify_config(doc: Any) -> NotifyConfig:
             seen_ids.add(sink_id)
             if sink_kind not in _VALID_SINK_KINDS:
                 errors.append(
-                    f"sink {sink_id!r} kind {sink_kind!r} invalid — must be 'desktop' or 'exec'"
+                    f"sink {sink_id!r} kind {sink_kind!r} invalid — "
+                    "must be 'desktop', 'exec', or 'webhook'"
                 )
                 continue
             payload = raw.get("payload", _DEFAULT_PAYLOAD[sink_kind])
@@ -202,6 +220,7 @@ def parse_notify_config(doc: Any) -> NotifyConfig:
                 )
                 continue
             argv: tuple[str, ...] | None = None
+            url: str | None = None
             if sink_kind == SINK_EXEC:
                 raw_argv = raw.get("argv")
                 if not isinstance(raw_argv, list) or not raw_argv or not all(
@@ -213,7 +232,24 @@ def parse_notify_config(doc: Any) -> NotifyConfig:
                     )
                     continue
                 argv = tuple(raw_argv)
-            sinks.append(SinkConfig(id=sink_id, kind=sink_kind, payload=str(payload), argv=argv))
+            elif sink_kind == SINK_WEBHOOK:
+                raw_url = raw.get("url")
+                if not raw_url or not isinstance(raw_url, str):
+                    errors.append(
+                        f"webhook sink {sink_id!r} requires a string 'url' "
+                        "(the configured Discord/Slack/NanoClaw endpoint)"
+                    )
+                    continue
+                if not raw_url.startswith(_WEBHOOK_SCHEMES):
+                    errors.append(
+                        f"webhook sink {sink_id!r} url {raw_url!r} must be an http(s) URL "
+                        "(no file:// or other scheme — a webhook is an HTTP delivery edge)"
+                    )
+                    continue
+                url = raw_url
+            sinks.append(
+                SinkConfig(id=sink_id, kind=sink_kind, payload=str(payload), argv=argv, url=url)
+            )
 
     if errors:
         raise NotifyConfigError("; ".join(errors))
@@ -368,6 +404,11 @@ def _pending_event(
 #: The injectable subprocess runner shape (mirrors ``subprocess.run``).
 Runner = Callable[..., Any]
 
+#: The injectable HTTP-poster shape ``(url, body, headers) -> status_int``. Tests
+#: inject a fake poster so the unit suite never touches the network; the default
+#: rides stdlib ``urllib.request`` (no third-party dependency).
+WebhookPoster = Callable[[str, bytes, Mapping[str, str]], int]
+
 
 def _ledger_path(root: Path) -> Path:
     return Path(root) / NOTIFICATIONS_SUBDIR / LEDGER_NAME
@@ -493,16 +534,56 @@ def dispatch_exec(
     return getattr(completed, "returncode", 1) == 0
 
 
+def _default_poster(url: str, body: bytes, headers: Mapping[str, str]) -> int:
+    """Default stdlib HTTP POST (I/O edge; no third-party dependency).
+
+    Returns the HTTP status code. Network/transport failure raises (caught by the
+    caller, recorded ``ok: false``) — a down endpoint never crashes the feed.
+    """
+    # Scheme is restricted to http(s) at config-parse — no file:///SSRF surface here.
+    request = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return int(getattr(response, "status", None) or response.getcode() or 0)
+
+
+def dispatch_webhook(
+    url: str,
+    event: Mapping[str, Any],
+    *,
+    poster: WebhookPoster | None = None,
+) -> bool:
+    """POST the (already-shaped) notify event JSON to a webhook URL (I/O edge). Returns ``ok``.
+
+    The body is EXACTLY the same pending-event wrapper the exec sink writes to stdin —
+    it widens nothing (it reuses :func:`shape_payload`'s confidential-by-default shape;
+    a ``pointer`` sink carries no confidential prose at all). A non-2xx status, a
+    transport error, a down endpoint, or a malformed-but-prefix-valid URL (which makes
+    stdlib raise :class:`http.client.InvalidURL`/``HTTPException``) ⇒ ``ok=False``
+    (recorded, retried) — never raises, so one sick webhook never crashes the loop.
+    """
+    post = poster or _default_poster
+    body = json.dumps(event, sort_keys=True).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    try:
+        status = post(url, body, headers)
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+        return False
+    return 200 <= int(status) < 300
+
+
 def _dispatch_event(
     event: Mapping[str, Any],
     sink: SinkConfig,
     *,
     runner: Runner | None,
+    poster: WebhookPoster | None = None,
 ) -> bool:
     if sink.kind == SINK_DESKTOP:
         return dispatch_desktop(event["payload"], str(event.get("class")), runner=runner)
     if sink.kind == SINK_EXEC and sink.argv:
         return dispatch_exec(sink.argv, event, runner=runner)
+    if sink.kind == SINK_WEBHOOK and sink.url:
+        return dispatch_webhook(sink.url, event, poster=poster)
     return False
 
 
@@ -516,6 +597,7 @@ def run_once(
     config: NotifyConfig | None = None,
     escalations: Iterable[Mapping[str, Any]] | None = None,
     runner: Runner | None = None,
+    poster: WebhookPoster | None = None,
     clock: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     """One fold → dispatch → record pass (the composition root; the testable unit).
@@ -541,7 +623,7 @@ def run_once(
         sink = by_id.get(event["sink_id"])
         if sink is None:  # pragma: no cover - fold only emits configured sinks
             continue
-        ok = _dispatch_event(event, sink, runner=runner)
+        ok = _dispatch_event(event, sink, runner=runner, poster=poster)
         dispatched += 1
         ok_count += 1 if ok else 0
         failed += 0 if ok else 1
