@@ -10,21 +10,26 @@ no HTTP server and zero live network. For each request, in this deliberate order
    ``permits()`` is the gate: an ``administration:write`` / unknown-scope / over-level request
    is a ``403`` with reason ``out_of_ceiling`` and NO binding call, NO mint call. The standing
    broker can never even *attempt* an admin mint.
-3. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation
+3. **Rate guard** — enforce the configured per-user mint cap over the configured window.
+4. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation
    and that installation must cover the requested repo; a spoof is a ``403``
    (``binding_refused``) with NOTHING minted.
-4. **Mint** via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition (the
+5. **Mint** via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition (the
    shared-App key stays behind the injected openssl ``signer``); a transport failure is a
    ``502`` (fail-closed).
-5. **Audit** — one secret-free ``egress_broker.audit`` record on EVERY decision (allow or deny).
+6. **Audit** — one secret-free ``egress_broker.audit`` record on EVERY decision (allow or deny).
 
 The minted ``ghs_`` value appears ONLY in the success response (the caller needs it) — never in
 the audit log; the caller's ``ghu_`` token never appears in the response or the audit at all.
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import time
+from collections import deque
 from collections.abc import Callable, Mapping
+from threading import Lock
 from typing import Any
 
 from creator_engine_validator.forge.app_jwt_runner import Signer, app_jwt_gh_runner
@@ -46,6 +51,52 @@ _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 #: The mint TTL ceiling for a broker-issued token (well under GitHub's 1h cap).
 _MINT_TTL_SECONDS = 600
 _SECRET_NAME = "shared_app_broker_mint"
+_RATE_BUCKETS: dict[str, deque[float]] = {}
+_RATE_LOCK = Lock()
+
+
+def _rate_identity(caller_token: str) -> str:
+    """Stable per-user key derived from the caller token without retaining the secret value."""
+    return hashlib.sha256(caller_token.encode("utf-8")).hexdigest()
+
+
+def _prune_bucket(bucket: deque[float], *, now: float, window_seconds: int) -> None:
+    cutoff = now - window_seconds
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+
+
+def _reserve_rate_slot(config: MintBrokerConfig, caller_token: str) -> tuple[str, float] | None:
+    """Reserve one mint slot, or return ``None`` when the configured cap is exhausted."""
+    if config.per_user_rate_cap <= 0:
+        return ("", 0.0)
+    now = time.monotonic()
+    identity = _rate_identity(caller_token)
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS.setdefault(identity, deque())
+        _prune_bucket(bucket, now=now, window_seconds=config.rate_window_seconds)
+        if len(bucket) >= config.per_user_rate_cap:
+            return None
+        bucket.append(now)
+    return identity, now
+
+
+def _release_rate_slot(reservation: tuple[str, float] | None) -> None:
+    if not reservation:
+        return
+    identity, reserved_at = reservation
+    if not identity:
+        return
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS.get(identity)
+        if not bucket:
+            return
+        try:
+            bucket.remove(reserved_at)
+        except ValueError:
+            return
+        if not bucket:
+            _RATE_BUCKETS.pop(identity, None)
 
 
 def _audit(config: MintBrokerConfig, record: Mapping[str, Any]) -> None:
@@ -113,15 +164,22 @@ def handle_token_request(
     if not config.permits(permissions):
         return _deny(config, status=403, reason="out_of_ceiling", repo=repo, installation_id=installation_id)
 
-    # 3. binding check (S2) — the caller must control the installation+repo pair -------------
+    # 3. rate guard — refuse before binding/minting once this caller is at cap ---------------
+    rate_reservation = _reserve_rate_slot(config, caller_token)
+    if rate_reservation is None:
+        return _deny(config, status=429, reason="rate_limited", repo=repo, installation_id=installation_id)
+
+    # 4. binding check (S2) — the caller must control the installation+repo pair -------------
     try:
         binding_check(caller_token, installation_id=installation_id, repo_full_name=repo)
     except BindingRefused:
+        _release_rate_slot(rate_reservation)
         return _deny(config, status=403, reason="binding_refused", repo=repo, installation_id=installation_id)
     except BindingTransportError:
+        _release_rate_slot(rate_reservation)
         return _deny(config, status=502, reason="binding_transport_error", repo=repo, installation_id=installation_id)
 
-    # 4. mint via the frozen App-JWT -> scoped-token composition (key behind the signer) ------
+    # 5. mint via the frozen App-JWT -> scoped-token composition (key behind the signer) ------
     try:
         mint_runner = app_jwt_gh_runner(config.app_client_id, signer=signer, transport=transport)
         token = mint_scoped_token(
@@ -141,11 +199,13 @@ def handle_token_request(
         )
     except (TokenMintRefused, ForgeConfigRefused):
         # The frozen minter's own ceiling refused (defence-in-depth behind config.permits).
+        _release_rate_slot(rate_reservation)
         return _deny(config, status=403, reason="mint_refused", repo=repo, installation_id=installation_id)
     except ForgeConfigError:
+        _release_rate_slot(rate_reservation)
         return _deny(config, status=502, reason="mint_transport_error", repo=repo, installation_id=installation_id)
 
-    # 5. audit the allow (secret-free — the minted value is NOT recorded) --------------------
+    # 6. audit the allow (secret-free — the minted value is NOT recorded) --------------------
     _audit(
         config,
         {
