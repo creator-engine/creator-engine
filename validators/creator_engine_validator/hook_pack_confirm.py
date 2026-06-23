@@ -86,12 +86,14 @@ class CodexManagedHookPackConfirmation:
     requirements_parsed: bool
     managed_requirements_source: bool
     hooks_feature_pinned: bool
+    managed_hooks_only_pinned: bool
     pretooluse_registered: bool
     hook_command_bound: bool
     hook_script_present: bool
     hook_script_executable: bool
     validator_reachable: bool
     user_disable_blocked: bool
+    unmanaged_hook_sources_excluded: bool
     detail: tuple[str, ...] = ()
 
     @property
@@ -102,12 +104,14 @@ class CodexManagedHookPackConfirmation:
                 self.requirements_parsed,
                 self.managed_requirements_source,
                 self.hooks_feature_pinned,
+                self.managed_hooks_only_pinned,
                 self.pretooluse_registered,
                 self.hook_command_bound,
                 self.hook_script_present,
                 self.hook_script_executable,
                 self.validator_reachable,
                 self.user_disable_blocked,
+                self.unmanaged_hook_sources_excluded,
             )
         )
 
@@ -118,12 +122,14 @@ class CodexManagedHookPackConfirmation:
             "requirements_parsed": self.requirements_parsed,
             "managed_requirements_source": self.managed_requirements_source,
             "hooks_feature_pinned": self.hooks_feature_pinned,
+            "managed_hooks_only_pinned": self.managed_hooks_only_pinned,
             "pretooluse_registered": self.pretooluse_registered,
             "hook_command_bound": self.hook_command_bound,
             "hook_script_present": self.hook_script_present,
             "hook_script_executable": self.hook_script_executable,
             "validator_reachable": self.validator_reachable,
             "user_disable_blocked": self.user_disable_blocked,
+            "unmanaged_hook_sources_excluded": self.unmanaged_hook_sources_excluded,
             "detail": list(self.detail),
         }
 
@@ -281,6 +287,7 @@ def confirm_codex_managed_hook_pack(
     *,
     validator_probe: ValidatorProbe | None = None,
     user_config_text: str | None = None,
+    unmanaged_hook_sources: dict[str, str] | None = None,
 ) -> CodexManagedHookPackConfirmation:
     """Confirm CE's repo-shipped Codex managed hook-pack representation.
 
@@ -288,9 +295,10 @@ def confirm_codex_managed_hook_pack(
     managed-configuration contract, hooks sourced from requirements are managed,
     trusted by policy, and cannot be disabled from the user hook browser. This
     predicate validates that the repo carries that managed source, that it pins
-    hooks on, that its PreToolUse matcher covers CE's required Codex surfaces,
-    and that a local ``[features].hooks = false`` config would not disable the
-    managed pack under the requirements precedence model.
+    hooks on, that it pins managed-only mode so other hook sources are excluded,
+    that its PreToolUse matcher covers CE's required Codex surfaces, and that a
+    local ``[features].hooks = false`` config would not disable the managed pack
+    under the requirements precedence model.
     """
     root = Path(repo_root)
     requirements_path = root / CODEX_REQUIREMENTS_PATH
@@ -319,6 +327,11 @@ def confirm_codex_managed_hook_pack(
     hooks_feature_pinned = isinstance(features, dict) and features.get("hooks") is True
     if requirements_parsed and not hooks_feature_pinned:
         detail.append("[features].hooks must be pinned true in requirements.toml")
+    managed_hooks_only_pinned = (
+        requirements_parsed and requirements_doc.get("allow_managed_hooks_only") is True
+    )
+    if requirements_parsed and not managed_hooks_only_pinned:
+        detail.append("allow_managed_hooks_only must be pinned true in requirements.toml")
 
     hooks_cfg = requirements_doc.get("hooks", {}) if requirements_parsed else {}
     if not isinstance(hooks_cfg, dict):
@@ -351,6 +364,11 @@ def confirm_codex_managed_hook_pack(
     )
     if requirements_parsed and not user_disable_blocked:
         detail.append("managed hooks could be disabled by user config in the requirements model")
+    unmanaged_hook_sources_excluded = bool(managed_hooks_only_pinned)
+    if requirements_parsed and unmanaged_hook_sources and not unmanaged_hook_sources_excluded:
+        detail.append(
+            "unmanaged hook sources are present but allow_managed_hooks_only is not pinned"
+        )
 
     probe = validator_probe or _default_validator_probe
     try:
@@ -366,11 +384,13 @@ def confirm_codex_managed_hook_pack(
         requirements_parsed=requirements_parsed,
         managed_requirements_source=managed_requirements_source,
         hooks_feature_pinned=hooks_feature_pinned,
+        managed_hooks_only_pinned=managed_hooks_only_pinned,
         pretooluse_registered=pretooluse_registered,
         hook_command_bound=hook_command_bound,
         hook_script_present=hook_script_present,
         hook_script_executable=hook_script_executable,
         validator_reachable=validator_reachable,
         user_disable_blocked=user_disable_blocked,
+        unmanaged_hook_sources_excluded=unmanaged_hook_sources_excluded,
         detail=tuple(detail),
     )
