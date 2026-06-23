@@ -239,8 +239,15 @@ def test_worker_spawn_live_uses_injected_launcher_and_scrubs_tokens(
     monkeypatch.chdir(tmp_path)
     worktree = tmp_path / "worker"
     worktree.mkdir()
+    controller_home = tmp_path / "controller-home"
+    (controller_home / ".config" / "gh").mkdir(parents=True)
+    (controller_home / ".ssh").mkdir()
     launcher = FakeSpawnLauncher()
     monkeypatch.setattr(ce_cli, "_make_worker_spawn_launcher", lambda: launcher)
+    monkeypatch.setenv("HOME", str(controller_home))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(controller_home / ".config" / "gh"))
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(controller_home / ".ssh" / "agent.sock"))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(controller_home / ".aws" / "config"))
     monkeypatch.setenv("GH_TOKEN", "ghp_super_secret")
     monkeypatch.setenv("GITHUB_TOKEN", "github_pat_secret")
 
@@ -261,8 +268,20 @@ def test_worker_spawn_live_uses_injected_launcher_and_scrubs_tokens(
     assert len(launcher.calls) == 1
     assert "GH_TOKEN" not in launcher.calls[0].child_env
     assert "GITHUB_TOKEN" not in launcher.calls[0].child_env
+    assert "GH_CONFIG_DIR" not in launcher.calls[0].child_env
+    assert "SSH_AUTH_SOCK" not in launcher.calls[0].child_env
+    assert "AWS_CONFIG_FILE" not in launcher.calls[0].child_env
+    assert launcher.calls[0].child_env["HOME"] != str(controller_home)
+    assert Path(launcher.calls[0].child_env["HOME"]).is_relative_to(worktree)
     record_path = Path(payload["record_path"])
     record_text = record_path.read_text(encoding="utf-8")
+    stdout_text = yaml.safe_dump(payload, sort_keys=True)
     assert "ghp_super_secret" not in record_text
     assert "github_pat_secret" not in record_text
+    assert str(controller_home / ".config" / "gh") not in record_text
+    assert str(controller_home / ".ssh" / "agent.sock") not in record_text
     assert "build without recording this body" not in record_text
+    assert "ghp_super_secret" not in stdout_text
+    assert "github_pat_secret" not in stdout_text
+    assert str(controller_home / ".config" / "gh") not in stdout_text
+    assert str(controller_home / ".ssh" / "agent.sock") not in stdout_text

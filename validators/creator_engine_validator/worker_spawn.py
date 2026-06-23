@@ -54,7 +54,17 @@ _EXACT_CREDENTIAL_ENV = frozenset(
     }
 )
 _SECRET_ENV_TOKENS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "PRIVATE_KEY", "API_KEY", "CREDENTIAL", "AUTH")
-_SAFE_ENV_NAMES = frozenset({"PATH", "HOME", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR"})
+_SAFE_BASE_ENV_NAMES = frozenset({"PATH", "SHELL", "TERM", "LANG"})
+_SAFE_CE_METADATA_ENV_NAMES = frozenset(
+    {
+        "CE_CONTROLLER_ID",
+        "CE_FOREMAN_ID",
+        "CE_HOST_ID",
+        "CE_RUN_ID",
+        "CE_SEAT_ID",
+    }
+)
+_SAFE_TMPDIR_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")
 
 
 class WorkerSpawnError(Exception):
@@ -83,6 +93,10 @@ class InvalidWorkerPrompt(WorkerSpawnError):
 
 class WorkerRecordCollision(WorkerSpawnError):
     code = "CE163-WORKER-RECORD-COLLISION"
+
+
+class WorkerRecordReservationFailed(WorkerSpawnError):
+    code = "CE163-WORKER-RECORD-RESERVATION-FAILED"
 
 
 class WorkerLaunchFailed(WorkerSpawnError):
@@ -138,6 +152,7 @@ class WorkerSpawnPlan:
             "scrubbed_env_names": list(self.scrubbed_env_names),
             "child_env_names": sorted(self.child_env),
             "dry_run": self.dry_run,
+            "launch_state": "dry_run" if self.dry_run else "planned",
             "seat_refs": {},
         }
 
@@ -187,6 +202,8 @@ class LaunchRuntimeWorkerLauncher:
                 repo_root=plan.worktree_path,
                 owner_controller_id=plan.parent_id,
                 purpose=f"worker:{plan.role}:{plan.scope_id}",
+                launch_cwd=plan.worktree_path,
+                launch_env=plan.child_env,
             )
         finally:
             os.environ.clear()
@@ -239,9 +256,38 @@ def _is_credential_env_name(name: str) -> bool:
     upper = name.upper()
     if upper in _EXACT_CREDENTIAL_ENV:
         return True
-    if upper in _SAFE_ENV_NAMES:
-        return False
     return any(token in upper for token in _SECRET_ENV_TOKENS)
+
+
+def _is_safe_tmpdir(value: str, *, controller_home: str | None) -> bool:
+    try:
+        resolved = Path(value).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    if controller_home:
+        try:
+            home = Path(controller_home).expanduser().resolve(strict=False)
+        except OSError:
+            home = None
+        if home is not None and (resolved == home or home in resolved.parents):
+            return False
+    return any(
+        str(resolved) == prefix or str(resolved).startswith(f"{prefix}/")
+        for prefix in _SAFE_TMPDIR_PREFIXES
+    )
+
+
+def _allowed_child_env_name(name: str, value: str, *, controller_home: str | None) -> bool:
+    upper = name.upper()
+    if _is_credential_env_name(upper):
+        return False
+    if upper in _SAFE_BASE_ENV_NAMES:
+        return True
+    if upper.startswith("LC_"):
+        return True
+    if upper == "TMPDIR":
+        return _is_safe_tmpdir(value, controller_home=controller_home)
+    return upper in _SAFE_CE_METADATA_ENV_NAMES
 
 
 def scrub_worker_environment(
@@ -252,16 +298,23 @@ def scrub_worker_environment(
     scope_id: str,
     depth: int,
     parent_id: str | None,
+    home_path: Path | str,
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     source = dict(os.environ if environ is None else environ)
-    scrubbed = sorted(name for name in source if _is_credential_env_name(name))
-    child = {name: value for name, value in source.items() if name not in scrubbed}
+    controller_home = source.get("HOME")
+    child = {
+        name: value
+        for name, value in source.items()
+        if _allowed_child_env_name(name, value, controller_home=controller_home)
+    }
+    scrubbed = sorted(name for name in source if name not in child)
     child.update(
         {
             "CE_WORKER_ID": worker_id,
             "CE_WORKER_ROLE": role,
             "CE_WORKER_SCOPE_ID": scope_id,
             "CE_WORKER_DEPTH": str(depth),
+            "HOME": str(home_path),
         }
     )
     if parent_id:
@@ -363,6 +416,8 @@ def plan_worker_spawn(
         depth=resolved_depth,
         supplied=worker_id,
     )
+    record_path = resolved_worktree / WORKER_RECORD_REL / resolved_worker_id / "worker.yaml"
+    home_path = record_path.parent / "home"
     child_env, scrubbed = scrub_worker_environment(
         env,
         worker_id=resolved_worker_id,
@@ -370,8 +425,8 @@ def plan_worker_spawn(
         scope_id=scope_id,
         depth=resolved_depth,
         parent_id=resolved_parent_id,
+        home_path=home_path,
     )
-    record_path = resolved_worktree / WORKER_RECORD_REL / resolved_worker_id / "worker.yaml"
     launch_command = (
         "ce",
         "launch",
@@ -414,6 +469,25 @@ def _atomic_write_yaml(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _reserve_worker_record(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as fh:
+            fh.write(yaml.safe_dump(payload, sort_keys=True))
+    except FileExistsError as exc:
+        raise WorkerRecordCollision(f"worker record already exists at {path}") from exc
+    except OSError as exc:
+        raise WorkerRecordReservationFailed(f"could not reserve worker record at {path}: {exc}") from exc
+
+
+def _prepare_worker_home(plan: WorkerSpawnPlan) -> None:
+    home = Path(plan.child_env["HOME"])
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkerRecordReservationFailed(f"could not create isolated worker HOME {home}: {exc}") from exc
+
+
 def spawn_worker(
     *,
     role: str,
@@ -449,8 +523,9 @@ def spawn_worker(
     record = plan.to_record()
     if dry_run:
         return WorkerSpawnResult(plan=plan, record=record, record_path=plan.record_path, written=False)
-    if plan.record_path.exists():
-        raise WorkerRecordCollision(f"worker record already exists at {plan.record_path}")
+    record["launch_state"] = "reserved"
+    _prepare_worker_home(plan)
+    _reserve_worker_record(plan.record_path, record)
     live_launcher = launcher or LaunchRuntimeWorkerLauncher()
     try:
         outcome = live_launcher.launch(plan)
@@ -464,6 +539,7 @@ def spawn_worker(
         "seat_lifecycle_state": outcome.seat_lifecycle_state,
         "terminal": outcome.terminal,
     }
+    record["launch_state"] = "launched"
     _atomic_write_yaml(plan.record_path, record)
     return WorkerSpawnResult(
         plan=plan,

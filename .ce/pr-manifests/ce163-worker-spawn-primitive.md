@@ -28,10 +28,15 @@ Per-file purpose:
   `worker_spawn` as v1 runtime and updates the boundary count.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* — wires
   `ce worker spawn` into the existing worker subcommand group.
+- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* — pins
+  worker-spawn cwd/env at the tmux adapter boundary and fails closed when the
+  cwd cannot be verified.
 - **`validators/creator_engine_validator/worker_spawn.py`** *(A)* — pure
   worker-spawn planning, env scrub, artifact, and injectable launch seam.
 - **`validators/tests/unit/test_ce_worker_cli.py`** *(M)* — CLI tests for
   dry-run/no-side-effect and injected live spawn token scrub.
+- **`validators/tests/unit/test_launch_runtime.py`** *(M)* — adapter-boundary
+  regression coverage for worker-spawn cwd/env pinning.
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* — v1 taxonomy
   count/classification updates.
 - **`validators/tests/unit/test_worker_spawn.py`** *(A)* — runtime unit tests
@@ -41,17 +46,19 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=5a5ff26ea404f5d52ebf5235ef92f4879c5a3037f32cbfb02535f654c485f8e7
+AUTHORIZED_PATHS_SHA256=baa04d1cfa3cb14ba8514bdfaaa997678a2f0a2712b105b25877982da6870171
 
 ```text
 .ce/changelog/ce163-worker-spawn-primitive.md
 .ce/pr-manifests/ce163-worker-spawn-primitive.md
 validators/creator_engine_validator/_versions.py
 validators/creator_engine_validator/ce_cli.py
+validators/creator_engine_validator/launch_runtime.py
 validators/creator_engine_validator/worker_spawn.py
 validators/tests/unit/test_ce_worker_cli.py
+validators/tests/unit/test_launch_runtime.py
 validators/tests/unit/test_version_boundary.py
 validators/tests/unit/test_worker_spawn.py
 ```
