@@ -28,6 +28,7 @@ Per-file purpose:
 - **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - route runtime-policy lane launches through the bridge and record runner evidence in the ignored sidecar.
 - **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - route controller launches through the bridge and expose runner evidence in the launch result.
 - **`validators/creator_engine_validator/runtime_backend_bridge.py`** *(A)* - visible composition bridge from gVisor `RunnerBackend` to `VisibilityBackend.ensure_surface`.
+- **`validators/creator_engine_validator/visibility_backend.py`** *(M)* - preserve tmux adapter compatibility when no cwd/env pinning is requested.
 - **`validators/tests/unit/test_ce_launch_cli.py`** *(M)* - controller launch success/fail-closed coverage for gVisor Docker/runsc rendering.
 - **`validators/tests/unit/test_lane_runtime.py`** *(M)* - lane launch success/fail-closed coverage for gVisor Docker/runsc rendering and sidecar evidence.
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* - expected v1 taxonomy count update.
@@ -35,9 +36,9 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=0c1d56b3d299d47849082e5109859fc99147e369dde8316aab5337036e465210
+AUTHORIZED_PATHS_SHA256=20a004e842e007179e3ee19fde6240f25e209e4430559332179c6545a164343e
 
 ```text
 .ce/changelog/ce128-launch-runner-integration.md
@@ -46,6 +47,7 @@ validators/creator_engine_validator/_versions.py
 validators/creator_engine_validator/lane_runtime.py
 validators/creator_engine_validator/launch_runtime.py
 validators/creator_engine_validator/runtime_backend_bridge.py
+validators/creator_engine_validator/visibility_backend.py
 validators/tests/unit/test_ce_launch_cli.py
 validators/tests/unit/test_lane_runtime.py
 validators/tests/unit/test_version_boundary.py

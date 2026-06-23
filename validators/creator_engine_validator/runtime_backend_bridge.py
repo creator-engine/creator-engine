@@ -142,9 +142,11 @@ def run_visible_runtime(
             "the v1 visibility surface; refusing raw fallback"
         )
 
-    plan_kwargs = _default_gvisor_plan_kwargs()
-    if gvisor_plan_kwargs:
-        plan_kwargs.update(dict(gvisor_plan_kwargs))
+    plan_kwargs = dict(gvisor_plan_kwargs or {})
+    if not {"uid", "gid", "host_codex_home", "host_codex_bin"}.issubset(plan_kwargs):
+        defaults = _default_gvisor_plan_kwargs()
+        defaults.update(plan_kwargs)
+        plan_kwargs = defaults
 
     delegate = container_runner if container_runner is not None else runner_pkg.SubprocessContainerRunner()
     surface_runner = _SurfaceBoundContainerRunner(
