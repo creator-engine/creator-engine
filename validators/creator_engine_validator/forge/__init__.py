@@ -61,6 +61,13 @@ from .deterministic_resolvers import (
     resolve_non_overlapping_additions,
     verify_resolution,
 )
+from .integrator_escalation import (
+    ControllerEscalationEvent,
+    EscalationContext,
+    IntegratorEscalationRefused,
+    escalate_unresolved_results,
+    escalation_for_result,
+)
 from .github_repo_config import (
     DEFAULT_MAIN_PROTECTION,
     BranchProtectionPolicy,
@@ -105,9 +112,12 @@ __all__ = [
     "ChecksState",
     "ConfigResult",
     "ConflictState",
+    "ControllerEscalationEvent",
+    "EscalationContext",
     "ForgeConfigError",
     "ForgeConfigRefused",
     "GhRunner",
+    "IntegratorEscalationRefused",
     "MergeRefused",
     "MergeResult",
     "OpenChangeRefused",
@@ -137,6 +147,8 @@ __all__ = [
     "delete_ruleset",
     "detect_repair_needed",
     "enable_auto_merge",
+    "escalate_unresolved_results",
+    "escalation_for_result",
     "install_required_checks",
     "merge",
     "mint_scoped_token",
