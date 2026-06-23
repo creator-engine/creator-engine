@@ -146,6 +146,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # resolver outputs. Produces controller-action event data; no executor,
         # network, credential, or write authority.
         "forge.integrator_escalation",
+        # ce-ops#216 Unit 3: write-authority executor for applying deterministic
+        # resolver output with PR/base race guards. v3 forge adapter family;
+        # live write/push authority stays behind an injectable adapter.
+        "forge.integrator_executor",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",

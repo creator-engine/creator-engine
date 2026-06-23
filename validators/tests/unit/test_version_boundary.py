@@ -126,7 +126,9 @@ def test_taxonomy_counts_and_disjoint():
     # (``forge.deterministic_resolvers``): 50 -> 51.
     # ce-ops#216 Unit 4 added the unresolved integrator escalation seam
     # (``forge.integrator_escalation``): 51 -> 52.
-    assert len(ver.V3_RUNTIME) == 52
+    # ce-ops#216 Unit 3 added the deterministic executor race guard
+    # (``forge.integrator_executor``): 52 -> 53.
+    assert len(ver.V3_RUNTIME) == 53
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -172,6 +174,7 @@ def test_classify_lines():
     assert ver.classify("runner.ring1_tool_guard") == ver.V3
     assert ver.classify("forge.deterministic_resolvers") == ver.V3
     assert ver.classify("forge.integrator_escalation") == ver.V3
+    assert ver.classify("forge.integrator_executor") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call
