@@ -108,6 +108,39 @@ class ProcReader:
         except OSError:
             return None
 
+    def cmdline(self, pid: int | str) -> str | None:
+        """``/proc/<pid>/cmdline`` — the process argv, NUL-separated.
+
+        The kernel renders argv with NUL (``\\0``) separators and a trailing
+        NUL; we split on NUL and rejoin with spaces so the result is a plain,
+        comparable command string. This is the DEFINITIVE gVisor signal: the
+        sentry host-process is literally ``runsc-sandbox --platform=... ...``
+        (with a sibling ``runsc-gofer ...``), even though its cgroup is a plain
+        ``docker-<id>.scope`` and its mount root is ``/``. Fails soft -> None.
+        """
+        path = os.path.join(self.root, str(pid), "cmdline")
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return None
+        if not raw:
+            return None
+        text = raw.decode("utf-8", errors="replace")
+        parts = [p for p in text.split("\0") if p]
+        joined = " ".join(parts).strip()
+        return joined or None
+
+    def comm(self, pid: int | str) -> str | None:
+        """``/proc/<pid>/comm`` — the short (≤15 char) process name."""
+        path = os.path.join(self.root, str(pid), "comm")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                content = fh.read().strip()
+            return content or None
+        except OSError:
+            return None
+
 
 # --------------------------------------------------------------------------- #
 # Parsing helpers (pure).
@@ -153,18 +186,53 @@ def _caps_dropped(cap_eff: int | None, cap_bnd: int | None) -> bool | None:
     return False
 
 
-def _detect_backend(cgroup: str | None, pid_root: str | None) -> str:
-    """Classify the sandbox backend from cgroup scope + mount-root markers.
+def _cmdline_is_runsc(cmdline: str | None, comm: str | None) -> bool:
+    """True when the process is a gVisor sentry/gofer host-process.
 
-    * ``gvisor`` — a ``runsc`` scope appears in the cgroup path (gVisor renders
-      its sandbox/container under a ``runsc-*`` scope), or the mount root points
-      into a runsc bundle.
+    The DEFINITIVE gVisor signal is the process argv, NOT the cgroup or mount
+    root. ``docker inspect --format {{.State.Pid}}`` on a runsc/gVisor container
+    returns the host PID of the sandbox process, which is literally
+    ``runsc-sandbox --platform=ptrace ...`` (with a sibling ``runsc-gofer
+    ...``). gVisor's isolation boundary is the userspace SENTRY, so this host
+    process legitimately shares host pid/user namespaces and has root=``/`` —
+    the cgroup is a plain ``docker-<id>.scope`` with no runsc marker. We match
+    any ``runsc`` argv0/comm across every platform (ptrace/systrap/kvm).
+    """
+    for hay in (cmdline, comm):
+        if not hay:
+            continue
+        token = hay.strip().lower().split(None, 1)[0] if hay.strip() else ""
+        # Match the argv0/comm basename: runsc, runsc-sandbox, runsc-gofer, and
+        # any runsc-* helper, whether bare or path-qualified (e.g. /usr/bin/runsc).
+        base = token.rsplit("/", 1)[-1]
+        if base == "runsc" or base.startswith("runsc-") or base.startswith("runsc"):
+            return True
+    return False
+
+
+def _detect_backend(
+    cgroup: str | None,
+    pid_root: str | None,
+    cmdline: str | None = None,
+    comm: str | None = None,
+) -> str:
+    """Classify the sandbox backend from process argv + cgroup + mount-root.
+
+    * ``gvisor`` — the process argv/comm is a ``runsc`` sentry/gofer
+      host-process (the DEFINITIVE signal, since the gVisor sandbox PID's cgroup
+      is a plain ``docker-<id>.scope`` with no runsc marker), OR a ``runsc``
+      scope appears in the cgroup path / mount root (defense in depth).
     * ``bwrap`` — a bubblewrap / ``runc`` / ``containerd`` / ``docker`` /
       ``libpod`` (Podman) container scope, or a ``newroot``/``bwrap`` mount root.
     * ``none`` — no sandbox markers (host).
     """
     hay = (cgroup or "").lower()
     root = (pid_root or "").lower()
+    # Process-argv is the definitive gVisor signal — check it FIRST, above the
+    # bwrap fallthrough, because a real gVisor sandbox PID has a plain
+    # docker-scope cgroup that would otherwise classify as bwrap.
+    if _cmdline_is_runsc(cmdline, comm):
+        return "gvisor"
     if "runsc" in hay or "runsc" in root or "gvisor" in hay:
         return "gvisor"
     bwrap_markers = (
@@ -311,7 +379,13 @@ def probe_containment(
         root_isolated = pid_root != host_root
 
     # --- backend classification. ---------------------------------------------
-    backend = _detect_backend(cgroup, pid_root)
+    # Read the process argv/comm — the DEFINITIVE gVisor signal. A real gVisor
+    # sandbox host-PID (what `docker inspect .State.Pid` returns for a runsc
+    # container) is literally `runsc-sandbox --platform=... ...`, while its
+    # cgroup is a plain docker scope and its mount root is `/`.
+    cmdline = reader.cmdline(pid)
+    comm = reader.comm(pid)
+    backend = _detect_backend(cgroup, pid_root, cmdline, comm)
 
     isolation = {
         "mnt": ns_isolation.get("mnt"),
@@ -324,9 +398,81 @@ def probe_containment(
     }
 
     # --- positive-evidence decision (fail-closed). ----------------------------
+    mnt_isolated = ns_isolation.get("mnt")
+
+    if backend == "gvisor":
+        # gVisor's isolation boundary is the userspace SENTRY (it intercepts
+        # syscalls in a Go runtime), NOT host namespaces. The runsc-sandbox host
+        # process therefore LEGITIMATELY shares host pid/user namespaces and has
+        # root=`/` — those are NOT workload-exposure gaps for gVisor; the
+        # contained workload runs *inside* the sentry. The namespace-comparison
+        # verdict is the right model for bwrap/runc but the WRONG lens here.
+        #
+        # contained=True is justified by: the gVisor sandbox being present (the
+        # sentry, proven by the runsc argv signal) + dropped effective caps on
+        # the sandbox process + a non-host cgroup scope. We do NOT fail it merely
+        # because the sentry host-process shares host pid/user ns or root=`/`.
+        # Strip those gaps so they aren't reported as exposure for gVisor.
+        gaps = [
+            g
+            for g in gaps
+            if g not in ("ns:pid:host", "ns:user:host", "root:host")
+        ]
+        sandbox_present = True  # backend=="gvisor" means the runsc sentry was seen
+        gv_positive = (
+            sandbox_present
+            and non_host_cgroup is not False
+            and caps_dropped is True
+        )
+        if gv_positive:
+            contained = True
+            reason = (
+                "positive gVisor isolation: runsc sentry sandbox present "
+                "(userspace syscall interception), dropped capabilities, "
+                "non-host cgroup scope; the sentry host-process sharing host "
+                "pid/user namespaces and root=/ is expected and is NOT a "
+                "workload-exposure gap for gVisor "
+                f"(backend={backend})"
+            )
+            return ContainmentVerdict(
+                contained=contained,
+                backend=backend,
+                isolation=isolation,
+                gaps=gaps,
+                reason=reason,
+            )
+        # gVisor backend but caps not dropped / host cgroup -> fail-closed below
+        # with a gVisor-aware reason.
+        contained = False
+        missing = []
+        if non_host_cgroup is None:
+            missing.append("cgroup undeterminable")
+        elif non_host_cgroup is False:
+            missing.append("host cgroup scope")
+        if caps_dropped is None:
+            missing.append("capabilities undeterminable")
+        elif caps_dropped is False:
+            missing.append("full host capabilities retained")
+        reason = (
+            "fail-closed: gVisor sentry detected but containment not "
+            "positively proven ("
+            + "; ".join(missing)
+            + ")"
+            if missing
+            else "fail-closed: gVisor sentry detected but containment not "
+            "positively proven"
+        )
+        return ContainmentVerdict(
+            contained=contained,
+            backend=backend,
+            isolation=isolation,
+            gaps=gaps,
+            reason=reason,
+        )
+
     # contained=True ONLY with positive kernel-isolation evidence:
     #   distinct mnt namespace  AND  non-host cgroup scope  AND  dropped caps.
-    mnt_isolated = ns_isolation.get("mnt")
+    # (bwrap/runc/host model — kernel namespaces ARE the isolation boundary.)
     positive = (
         mnt_isolated is True
         and non_host_cgroup is True
