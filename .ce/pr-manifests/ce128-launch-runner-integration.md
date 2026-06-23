@@ -11,7 +11,7 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized
 path-set below. This carrier lists itself.
 
 Base:
-`137909c456d7adf57ccb24a6f9772e24d5b07bc0` (`ce128-launch-runner-integration-base`: current `origin/main` plus #389 and fixed #390 sibling heads).
+`58252f7b85074ff19d388030e12adfbea5c01aa8` (`ce128-launch-runner-integration-base`: current `origin/main` plus #389 and updated #390 sibling heads).
 
 - **Declared work class:** story
 
