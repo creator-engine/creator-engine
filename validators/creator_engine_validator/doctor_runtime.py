@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from . import bootstrap_runtime
 from . import environment_guard as guard
 from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
@@ -185,6 +186,8 @@ def run_doctor(
     require_visible_launch: bool = False,
     require_worker: bool = False,
     check_packaging: bool = True,
+    target_python: Path | str | None = None,
+    check_seat_env: bool = False,
     version_info: Sequence[int] | None = None,
     facts: guard.EnvironmentFacts | None = None,
     tmux_adapter: Any | None = None,
@@ -209,6 +212,26 @@ def run_doctor(
     )
     payload = result.to_dict()
     payload["repo_root"] = str(Path(repo_root))
+    resolved_target_python = (
+        Path(target_python)
+        if target_python is not None
+        else bootstrap_runtime.default_target_python(Path(repo_root))
+    )
+    seat_env_applicable = (
+        check_seat_env
+        or target_python is not None
+        or resolved_target_python.is_file()
+    )
+    seat_env_check = bootstrap_runtime.doctor_check(
+        resolved_target_python,
+        applicable=seat_env_applicable,
+    )
+    payload["checks"].append(seat_env_check)
+    if seat_env_check["applicable"] and not seat_env_check["ok"]:
+        payload["refused_clauses"].append(seat_env_check["clause"])
+    payload["ok"] = payload["ok"] and not (
+        seat_env_check["applicable"] and not seat_env_check["ok"]
+    )
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).
     payload["ce_version"] = ce_version(repo_root)
@@ -251,11 +274,18 @@ def run_doctor(
         "dependency_wheelhouse_offline": dependency_wheelhouse_ok,
         "dependency_wheelhouse_violations": dependency_wheelhouse_violations,
         "first_party_app_wheel_committed": first_party_app_wheel_committed,
+        "target_python": str(resolved_target_python),
+        "target_python_exists": resolved_target_python.is_file(),
+        "controller_seat_app_installed": (
+            bool(seat_env_check["ok"]) if seat_env_check["applicable"] else None
+        ),
     }
     payload["requested"] = {
         "require_visible_launch": require_visible_launch,
         "require_worker": require_worker,
         "check_packaging": check_packaging,
+        "check_seat_env": check_seat_env,
+        "target_python": str(resolved_target_python),
     }
     # ce-ops#197 PR-4: the onboard phase-1 probes. Advisory-only (never refuse on
     # their own) — `ce onboard` reads these to surface friction #3 (low /tmp) and
@@ -272,7 +302,7 @@ def run_doctor(
     payload["resource_policy_recommendation"] = (
         resource_bound_spec.host_class_defaults(mem_total) if mem_total else None
     )
-    return DoctorReport(ok=result.ok, payload=payload)
+    return DoctorReport(ok=bool(payload["ok"]), payload=payload)
 
 
 def render_human(report: DoctorReport) -> str:
