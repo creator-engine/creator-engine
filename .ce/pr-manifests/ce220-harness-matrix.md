@@ -31,28 +31,36 @@ The changes:
   never present without a backing file; containment is deferred/unverified while
   the herdr live launch is the fail-closed U2 stub).
 - Add a changelog fragment and this path-manifest carrier.
+- Document the new `ce harness-matrix` command in `README.md` and add it to the
+  as-built `ce` inventory reconciliation test.
 
-Per-file purpose (the closed path-set - 5 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 7 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce220-harness-matrix.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce220-harness-matrix.md`** *(A)* - this carrier.
+- **`README.md`** *(M)* - document the `ce harness-matrix` command in the v1 CLI
+  inventory.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - wire the
   `ce harness-matrix` subcommand + handler.
 - **`validators/creator_engine_validator/harness_matrix.py`** *(A)* - the
   probed matrix runtime + renderers.
 - **`validators/tests/unit/test_harness_matrix.py`** *(A)* - derived-not-hardcoded
   unit coverage.
+- **`validators/tests/unit/test_v1_docs_reconciliation.py`** *(M)* - add
+  `harness-matrix` to the expected as-built `ce` command inventory.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=8c5611859d69b6bc1f17f5052bde182cd3a4b08c1e4535581d94e0745c89c594
+AUTHORIZED_PATHS_SHA256=fc70f8d1343cb996b7108c9084c9e44aa58b7b9727a20421225907cfed660ff8
 
 ```text
 .ce/changelog/ce220-harness-matrix.md
 .ce/pr-manifests/ce220-harness-matrix.md
+README.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/harness_matrix.py
 validators/tests/unit/test_harness_matrix.py
+validators/tests/unit/test_v1_docs_reconciliation.py
 ```
