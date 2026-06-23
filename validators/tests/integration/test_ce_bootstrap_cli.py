@@ -29,6 +29,21 @@ def _load_stdout_json(capsys) -> dict:
     return json.loads(capsys.readouterr().out)
 
 
+def _link_validators_source(source_root: Path, repo_root: Path) -> None:
+    try:
+        (source_root / "validators").symlink_to(repo_root / "validators", target_is_directory=True)
+    except OSError:
+        shutil.copytree(
+            repo_root / "validators",
+            source_root / "validators",
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
+        )
+
+
+def _script_shebang(script: Path) -> str:
+    return script.read_text(encoding="utf-8").splitlines()[0]
+
+
 def test_bootstrap_empty_venv_installs_app_scripts_and_is_idempotent(
     repo_root: Path, tmp_path: Path, capsys
 ):
@@ -53,6 +68,36 @@ def test_bootstrap_empty_venv_installs_app_scripts_and_is_idempotent(
     second = _load_stdout_json(capsys)
     assert second["ok"] is True
     assert second["changed"] is False
+
+
+def test_bootstrap_relative_paths_write_absolute_shebangs_and_scripts_run(
+    repo_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    source_root = tmp_path / "checkout"
+    source_root.mkdir()
+    _link_validators_source(source_root, repo_root)
+    venv = _venv(source_root)
+
+    monkeypatch.chdir(source_root)
+    rc = ce_cli.main(["bootstrap", "--repo-root", ".", "--venv", ".venv", "--json"])
+
+    assert rc == 0
+    result = _load_stdout_json(capsys)
+    assert result["ok"] is True
+
+    ce = venv / "bin" / "ce"
+    cev3 = venv / "bin" / "cev3"
+    for script in (ce, cev3):
+        shebang = _script_shebang(script)
+        assert shebang.startswith("#!")
+        assert Path(shebang.removeprefix("#!")).is_absolute()
+
+    unrelated_cwd = tmp_path / "unrelated"
+    unrelated_cwd.mkdir()
+    subprocess.run([str(ce), "--version"], cwd=unrelated_cwd, check=True, capture_output=True, text=True)
 
 
 def test_doctor_names_absent_then_present_controller_seat_env(repo_root: Path, tmp_path: Path, capsys):

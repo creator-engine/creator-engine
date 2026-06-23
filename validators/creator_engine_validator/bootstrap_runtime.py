@@ -203,8 +203,9 @@ def _installer_command(
 
 def _entrypoint_script(target_python: Path, module_func: str) -> str:
     module, _, func = module_func.partition(":")
+    shebang_python = os.path.abspath(target_python)
     return (
-        f"#!{target_python}\n"
+        f"#!{shebang_python}\n"
         "import sys\n"
         f"from {module} import {func}\n\n"
         "if __name__ == '__main__':\n"
