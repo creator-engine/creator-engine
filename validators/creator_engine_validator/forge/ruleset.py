@@ -70,7 +70,19 @@ class RulesetPolicy:
     required_status_check_contexts: tuple[str, ...] = ()
     strict_required_status_checks_policy: bool = True
     required_approving_review_count: int = 1
-    dismiss_stale_reviews_on_push: bool = True
+    # GitHub's ``dismiss_stale_reviews_on_push`` is a BLUNT, non-diff-aware flag:
+    # it wipes EVERY standing review on ANY head-changing push, including a pure
+    # mechanical rebase that carries no net content delta. That breaks CE's
+    # rebase-preserves-approval doctrine ([[ce-base-only-refresh-microauth]],
+    # ce-ops#151) and silently overrides a repo's branch-protection
+    # ``dismiss_stale_reviews=false`` (rulesets layer on top, most-restrictive
+    # wins) — observed live on creator-engine#368 where each rebase force-push
+    # had the App dismiss dev-3's APPROVED review. CE therefore does NOT emit this
+    # blanket flag by default; re-review-on-content-change is a CE-OWNED,
+    # diff-aware concern (the ``forge.re_review`` lane / ce-ops#151), which
+    # dismisses only when the actual diff changes and never on a pure rebase.
+    # A caller that genuinely wants GitHub's blunt behavior may still pass True.
+    dismiss_stale_reviews_on_push: bool = False
     require_code_owner_review: bool = False
     require_last_push_approval: bool = True
     required_review_thread_resolution: bool = True

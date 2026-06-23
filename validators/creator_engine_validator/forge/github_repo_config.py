@@ -286,7 +286,12 @@ def _ruleset_policy_from_branch_protection(policy: BranchProtectionPolicy, *, br
         required_status_check_contexts=policy.required_status_check_contexts,
         strict_required_status_checks_policy=policy.strict,
         required_approving_review_count=max(1, policy.required_approving_review_count),
-        dismiss_stale_reviews_on_push=policy.dismiss_stale_reviews,
+        # Do NOT propagate the branch-protection ``dismiss_stale_reviews`` floor
+        # into GitHub's blunt ruleset flag: it would wipe approvals on every push
+        # including pure rebases (creator-engine#368). Re-review-on-content-change
+        # is a CE-owned, diff-aware concern (forge.re_review / ce-ops#151), so the
+        # ruleset leaves ``dismiss_stale_reviews_on_push`` at its diff-aware-safe
+        # default (False). The classic-protection PUT still carries the floor flag.
         require_last_push_approval=policy.require_last_push_approval,
         required_review_thread_resolution=policy.required_conversation_resolution,
         bypass_actors=(),
