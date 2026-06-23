@@ -164,7 +164,7 @@ def test_default_constructed_tmux_backend_uses_real_adapter():
 # ---------------------------------------------------------------------------
 # Herdr backend (ce-ops#217 U3) — live inspectable surface over herdr socket.
 # ---------------------------------------------------------------------------
-from creator_engine_validator.runner.herdr_session import HerdrPane  # noqa: E402
+from creator_engine_validator.runner.herdr_session import HERDR_SOCKET_ENV, HerdrPane  # noqa: E402
 
 
 class FakeHerdrSession:
@@ -262,6 +262,7 @@ def test_herdr_backend_builds_terminal_record_and_keeps_socket_controller_owned(
         "env": {"CE_LEDGER_ROOT": "/abs/ledger"},
         "label": "gate3-lane",
     }]
+    assert HERDR_SOCKET_ENV not in sessions[0].spawn_calls[0]["env"]
     assert "HERDR_SOCKET" not in sessions[0].spawn_calls[0]["env"]
 
 

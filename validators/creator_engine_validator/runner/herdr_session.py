@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import shlex
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -66,7 +67,9 @@ DEFAULT_HERDR_SOCKET = "herdr.sock"
 #: Environment carrier used by the herdr CLI client to find the substrate-owned
 #: Unix control socket. The path is carried only in the CE controller process'
 #: subprocess environment, never in the governed seat's pane environment.
-HERDR_SOCKET_ENV = "HERDR_SOCKET"
+HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
+LEGACY_HERDR_SOCKET_ENV = "HERDR_SOCKET"
+FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV})
 
 
 class HerdrSessionError(Exception):
@@ -96,6 +99,14 @@ class HerdrPane:
     surface_ref: str
     pid: int | None = None
     workspace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class HerdrWorkspace:
+    """The workspace and root pane returned by ``herdr workspace create``."""
+
+    workspace_id: str
+    root_pane_id: str
 
 
 class HerdrCommandRunner(Protocol):
@@ -165,7 +176,7 @@ class HerdrSession:
     def _socket_env(self) -> dict[str, str]:
         return {HERDR_SOCKET_ENV: str(self._socket_path)}
 
-    def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
+    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         argv = [self._herdr_binary, *args]
         try:
             completed = self._runner.run(argv, env=self._socket_env())
@@ -177,6 +188,18 @@ class HerdrSession:
                 f"herdr command exited {completed.returncode}: {argv!r}"
                 + (f": {stderr}" if stderr else "")
             )
+        return completed
+
+    def _run_ok(self, args: Sequence[str]) -> None:
+        self._run(args)
+
+    def _run_text(self, args: Sequence[str]) -> str:
+        completed = self._run(args)
+        return completed.stdout or ""
+
+    def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
+        completed = self._run(args)
+        argv = [self._herdr_binary, *args]
         stdout = (completed.stdout or "").strip()
         if not stdout:
             return {}
@@ -191,6 +214,23 @@ class HerdrSession:
                 f"herdr command returned a non-object JSON payload: {argv!r}"
             )
         return data
+
+    @staticmethod
+    def _env_args(env: Mapping[str, str] | None, *, context: str) -> list[str]:
+        args: list[str] = []
+        for key, value in sorted((env or {}).items()):
+            key_text = str(key)
+            if key_text in FORBIDDEN_SEAT_ENV_NAMES:
+                raise HerdrCommandError(
+                    f"refusing to pass {key_text} into a governed {context}"
+                )
+            if not key_text or "=" in key_text:
+                raise HerdrCommandError(
+                    f"refusing unsafe herdr env assignment name for governed {context}: "
+                    f"{key_text!r}"
+                )
+            args.extend(["--env", f"{key_text}={value}"])
+        return args
 
     @staticmethod
     def _first_str(data: Mapping[str, Any], *keys: str) -> str | None:
@@ -226,28 +266,63 @@ class HerdrSession:
         """Open the client connection to the substrate-owned herdr socket.
 
         The herdr CLI is the socket client; this method records that subsequent
-        CLI calls must carry ``HERDR_SOCKET``. It intentionally does not expose
-        the socket path to the governed seat's command or environment.
+        CLI calls must carry ``HERDR_SOCKET_PATH``. It intentionally does not
+        expose the socket path to the governed seat's command or environment.
         """
         self._connected = True
 
-    def create_workspace(self, *, cwd: str | None = None, label: str | None = None) -> str:
-        """Create a workspace over the herdr socket and return its id."""
+    def create_workspace(
+        self,
+        *,
+        cwd: str | None = None,
+        label: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> HerdrWorkspace:
+        """Create a workspace over the herdr socket and return workspace/root pane ids."""
         args = ["workspace", "create"]
         if cwd:
             args.extend(["--cwd", cwd])
         if label:
             args.extend(["--label", label])
-        args.append("--json")
+        args.extend(self._env_args(env, context="workspace"))
         data = self._run_json(args)
-        workspace_id = self._first_str(data, "workspace_id", "workspace", "id")
-        if workspace_id is None:
-            raise HerdrCommandError("herdr workspace create did not return a workspace id")
-        return workspace_id
+        result = data.get("result")
+        if not isinstance(result, Mapping):
+            raise HerdrCommandError("herdr workspace create did not return a result object")
+        if result.get("type") != "workspace_created":
+            raise HerdrCommandError(
+                "herdr workspace create did not return a workspace_created result"
+            )
+        workspace = result.get("workspace")
+        root_pane = result.get("root_pane")
+        if not isinstance(workspace, Mapping) or not isinstance(root_pane, Mapping):
+            raise HerdrCommandError(
+                "herdr workspace create did not return workspace/root_pane objects"
+            )
+        workspace_id = self._first_str(workspace, "workspace_id")
+        root_pane_id = self._first_str(root_pane, "pane_id")
+        if workspace_id is None or root_pane_id is None:
+            raise HerdrCommandError(
+                "herdr workspace create did not return workspace_id/root pane_id"
+            )
+        return HerdrWorkspace(workspace_id=workspace_id, root_pane_id=root_pane_id)
 
-    def split_pane(self, *, workspace_id: str) -> str:
-        """Split/create a pane in ``workspace_id`` and return its id."""
-        data = self._run_json(["pane", "split", "--workspace", workspace_id, "--json"])
+    def split_pane(
+        self,
+        *,
+        pane_id: str,
+        direction: str = "right",
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> str:
+        """Split ``pane_id`` in ``direction`` and return the created pane id."""
+        if direction not in {"right", "down"}:
+            raise HerdrCommandError("herdr pane split direction must be 'right' or 'down'")
+        args = ["pane", "split", pane_id, "--direction", direction]
+        if cwd:
+            args.extend(["--cwd", cwd])
+        args.extend(self._env_args(env, context="seat pane"))
+        data = self._run_json(args)
         pane_id = self._first_str(data, "pane_id", "pane", "id")
         if pane_id is None:
             raise HerdrCommandError("herdr pane split did not return a pane id")
@@ -262,18 +337,20 @@ class HerdrSession:
         env: Mapping[str, str] | None = None,
     ) -> int | None:
         """Run the sentinel-wrapped seat command inside an existing herdr pane."""
-        argv = ["pane", "run", pane_id]
-        if cwd:
-            argv.extend(["--cwd", cwd])
-        for key, value in sorted((env or {}).items()):
-            if key == HERDR_SOCKET_ENV:
-                raise HerdrCommandError(
-                    f"refusing to pass {HERDR_SOCKET_ENV} into a governed seat pane"
-                )
-            argv.extend(["--env", f"{key}={value}"])
-        argv.extend(["--json", "--", *list(command)])
-        data = self._run_json(argv)
-        return self._first_pid(data)
+        self._env_args(env, context="seat pane")
+        if env:
+            raise HerdrCommandError(
+                "herdr pane run does not accept env; pass env to create_workspace"
+            )
+        if cwd is not None:
+            raise HerdrCommandError(
+                "herdr pane run does not accept cwd; pass cwd to create_workspace"
+            )
+        command_text = shlex.join(str(part) for part in command)
+        if not command_text:
+            raise HerdrCommandError("herdr pane run requires a command")
+        self._run_ok(["pane", "run", pane_id, command_text])
+        return None
 
     def wait_agent_status(
         self,
@@ -297,42 +374,48 @@ class HerdrSession:
     ) -> HerdrPane:
         """Create a herdr pane running the sentinel-wrapped seat ``command``.
 
-        Maps to ``herdr workspace create`` / ``herdr pane split`` /
-        ``herdr pane run`` over the socket and returns a :class:`HerdrPane`. The
-        sentinel wrapper stays OUTERMOST (the #368 contract) so ``events.jsonl``
-        lifecycle events are produced identically; the substrate change is *which
-        surface owns the PTY*, not the wrapper contract.
+        Maps to ``herdr workspace create`` / ``herdr pane run`` over the socket
+        and returns a :class:`HerdrPane` for the workspace root pane. The sentinel
+        wrapper stays OUTERMOST (the #368 contract) so ``events.jsonl`` lifecycle
+        events are produced identically; the substrate change is *which surface
+        owns the PTY*, not the wrapper contract.
         """
         if not self._connected:
             self.connect()
-        workspace_id = self.create_workspace(cwd=cwd, label=label)
-        pane_id = self.split_pane(workspace_id=workspace_id)
-        pid = self.run_pane(pane_id=pane_id, command=command, cwd=cwd, env=env)
+        workspace = self.create_workspace(cwd=cwd, label=label, env=env)
+        pid = self.run_pane(pane_id=workspace.root_pane_id, command=command)
         return HerdrPane(
-            pane_id=pane_id,
-            surface_ref=self._surface_ref(workspace_id=workspace_id, pane_id=pane_id),
+            pane_id=workspace.root_pane_id,
+            surface_ref=self._surface_ref(
+                workspace_id=workspace.workspace_id,
+                pane_id=workspace.root_pane_id,
+            ),
             pid=pid,
-            workspace_id=workspace_id,
+            workspace_id=workspace.workspace_id,
         )
 
     # -- send (steer) -----------------------------------------------------
-    def send(self, pane: HerdrPane, data: bytes) -> None:
+    def send(self, pane: HerdrPane, data: bytes | str) -> None:
         """Inject input/keystrokes into ``pane`` — the governed control path.
 
-        U4 (NOT U3): this is the steer path and is the §7-boundary keystone. It
-        MUST route through the CE attribution shim, which appends a
-        ``runtime_operator_steer`` record (actor / target_lane / bytes_digest /
-        ts) to the evidence spine BEFORE the bytes reach the PTY, and fail
-        CLOSED if the spine append fails (the steer does not execute). This
-        :class:`HerdrSession` is the *only* control-path writer to the socket;
-        the governed seat never holds the socket, so ``herdr pane run`` cannot
-        become a §7 bypass. No-new-authority holds: a steer injects input, it
-        cannot widen the seat's envelope — the seat's own tool-calls still pass
-        its Ring-1 hook and the §7 hard-denies still fire.
+        U3 wires ordinary text input through ``herdr pane send-text``. The CLI
+        only accepts text, so non-UTF-8 bytes remain fail-closed until a later
+        narrow key/control helper is explicitly backed by the herdr source.
+        This :class:`HerdrSession` is the *only* control-path writer to the
+        socket; the governed seat never holds the socket, so ``herdr pane run``
+        cannot become a §7 bypass. U4 layers attribution ahead of this write.
         """
-        raise HerdrNotWired(
-            "HerdrSession.send is a U1 scaffold; the attribution shim is wired in U4"
-        )
+        if isinstance(data, str):
+            text = data
+        else:
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise HerdrCommandError(
+                    "herdr pane send-text only accepts UTF-8 text; "
+                    "non-text/control input remains fail-closed"
+                ) from exc
+        self._run_ok(["pane", "send-text", pane.pane_id, text])
 
     # -- attach -----------------------------------------------------------
     def attach(self, pane: HerdrPane) -> None:
@@ -346,18 +429,38 @@ class HerdrSession:
         raise HerdrNotWired("HerdrSession.attach is a U1 scaffold; wired in U3/U8")
 
     # -- observe ----------------------------------------------------------
-    def observe(self, pane: HerdrPane) -> bytes:
+    def observe(
+        self,
+        pane: HerdrPane,
+        *,
+        lines: int = 200,
+        output_format: str = "text",
+    ) -> bytes:
         """Read recent pane output for the evidence spine (witnessability).
 
-        Maps to ``herdr pane read <id> --source recent-unwrapped`` and feeds
-        the Pane Registry ``events.jsonl`` lifecycle / read-model fold. Observe
-        is the read path; it never widens authority.
+        Maps to ``herdr pane read <id> --source recent --lines N --format ...``
+        and feeds the Pane Registry ``events.jsonl`` lifecycle / read-model
+        fold. ``pane read`` prints text/ANSI directly to stdout; it is not a
+        JSON command. Observe is the read path; it never widens authority.
         """
-        data = self._run_json(
-            ["pane", "read", pane.pane_id, "--source", "recent-unwrapped", "--json"]
+        if lines <= 0:
+            raise HerdrCommandError("herdr pane read lines must be positive")
+        if output_format not in {"text", "ansi"}:
+            raise HerdrCommandError("herdr pane read format must be 'text' or 'ansi'")
+        text = self._run_text(
+            [
+                "pane",
+                "read",
+                pane.pane_id,
+                "--source",
+                "recent",
+                "--lines",
+                str(lines),
+                "--format",
+                output_format,
+            ]
         )
-        text = self._first_str(data, "output", "text", "data", "content")
-        return (text or "").encode()
+        return text.encode("utf-8")
 
     def close(self) -> None:
         """Release the client connection. Idempotent; never reaps a seat (reaper owns that)."""
