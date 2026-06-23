@@ -95,6 +95,12 @@ class ResourceBoundRefused(LaunchError):
     code = "G6-LAUNCH-RESOURCE-REFUSED"
 
 
+class SeatSurfaceReuseRefused(LaunchError):
+    """A target seat events surface already has a launched event; refuse reuse."""
+
+    code = "G6-LAUNCH-SEAT-SURFACE-REUSE"
+
+
 class BrainBootstrapLaunchRefused(LaunchError):
     """ce-ops#178: Knowledge-SSOT bootstrap refused before controller spawn."""
 
@@ -283,6 +289,14 @@ def _brain_state_root(repo_root: Path | str | None) -> Path:
     return Path(repo_root or ".") / _versions.V3_LOCAL_STATE_ROOT
 
 
+def _has_launched_event(seat_dir: Path | str) -> bool:
+    events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
+    return any(
+        event.get("event") == seat_sentinel.EVENT_LAUNCHED
+        for event in seat_sentinel.iter_events_file(events_path)
+    )
+
+
 def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str, Any]:
     try:
         return brain_bootstrap.build_bootstrap_payload(
@@ -421,9 +435,18 @@ def launch(
                 f"refusing governed Codex launch: {codes} ({surfaces}) — "
                 "Ring 0 refuses before any side effect"
             )
+        try:
+            codex_bin = codex_launch_spec.resolve_codex_harness_binary()
+        except codex_launch_spec.GovernedCommandError as exc:
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {exc} — "
+                "Ring 0 refuses before any side effect"
+            ) from exc
         plan = replace(
             plan,
-            command=codex_launch_spec.build_governed_codex_command(base_argv=requested),
+            command=codex_launch_spec.build_governed_codex_command(
+                base_argv=requested, codex_bin=codex_bin
+            ),
             codex_bypass_mode=spec_result.bypass_mode,
         )
 
@@ -509,6 +532,16 @@ def launch(
             raise ResumeTargetMissing(
                 f"no live launcher session {session!r} to resume; refusing to spawn a hidden seat"
             )
+        return LaunchResult(plan=plan, spawned=False, attached=True)
+
+    seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
+        repo_root=repo_root, session=session, window=window, runtime_policy=runtime_policy
+    )
+    if _has_launched_event(seat_dir):
+        raise SeatSurfaceReuseRefused(
+            f"seat surface {str(seat_dir)!r} already has a launched sentinel event; "
+            "refusing to reuse it before spawn"
+        )
 
     # v3.5-F live bounding — still BEFORE any side effect: refuse loudly when
     # user-level bounding is unavailable under `enforce` (Fork F-2), resolve a
@@ -557,9 +590,6 @@ def launch(
     # lifecycle event — including an OOM group-kill the wrapper OUTSIDE the seat
     # scope survives to record — is machine-watchable; the seat's model never
     # writes the file (silence≠success).
-    seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
-        repo_root=repo_root, session=session, window=window, runtime_policy=runtime_policy
-    )
     brain_env, brain_ref, brain_sha = _materialize_brain_bootstrap(
         seat_dir=seat_dir,
         payload=brain_payload,
@@ -655,6 +685,9 @@ def launch(
         )
         seat_record_ref = str(registration.record_path)
         seat_lifecycle_state = registration.state
+        if seat_lifecycle.reconcile_from_sentinel_events(registration.record_path):
+            reconciled = seat_lifecycle.load_record(registration.record_path)
+            seat_lifecycle_state = str(reconciled["lifecycle"]["state"])
     except seat_lifecycle.SeatLifecycleError as exc:
         escalation_ref = seat_lifecycle.write_registration_failure_escalation(
             state_root=state_root,

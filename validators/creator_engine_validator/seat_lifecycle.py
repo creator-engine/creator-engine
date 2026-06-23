@@ -23,6 +23,7 @@ from typing import Any, Protocol
 
 import yaml
 
+from . import seat_sentinel
 from .schema import validate_with_schema
 
 SCHEMA = "schemas/seat-lifecycle.schema.yaml"
@@ -187,6 +188,60 @@ def iter_records(ledger_root: Path | str) -> list[tuple[Path, dict[str, Any]]]:
         except SeatLifecycleError:
             continue
     return out
+
+
+def reconcile_from_sentinel_events(
+    record_path: Path | str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Update a lifecycle record from terminal sentinel exit evidence.
+
+    Returns True only when the record was changed. Exit 0 means the seat is
+    terminally spent; any nonzero exit, including exec-fail 127, means dead.
+    """
+    path = Path(record_path)
+    record = load_record(path)
+    events_ref = record.get("dispatch", {}).get("events_ref")
+    if not isinstance(events_ref, str) or not events_ref:
+        return False
+
+    exit_code: int | None = None
+    for event in seat_sentinel.iter_events_file(events_ref):
+        if event.get("event") != seat_sentinel.EVENT_EXITED:
+            continue
+        raw_code = event.get("exit_code")
+        if isinstance(raw_code, int):
+            exit_code = raw_code
+    if exit_code is None:
+        return False
+
+    next_state = STATE_SPENT if exit_code == 0 else STATE_DEAD
+    reason = "sentinel-exited-zero" if exit_code == 0 else "sentinel-exited-nonzero"
+    lifecycle = record.get("lifecycle")
+    if not isinstance(lifecycle, dict):
+        raise SeatLifecycleError(f"seat lifecycle record has no lifecycle mapping: {path}")
+    if (
+        lifecycle.get("state") == next_state
+        and lifecycle.get("terminal_exit_code") == exit_code
+        and lifecycle.get("state_reason") == reason
+    ):
+        return False
+
+    timestamp = _utc_now_str(now)
+    lifecycle["state"] = next_state
+    lifecycle["state_reason"] = reason
+    lifecycle["state_since"] = timestamp
+    lifecycle["last_activity_at"] = timestamp
+    lifecycle["terminal_exit_code"] = exit_code
+
+    errors = validate_record(record, path)
+    if errors:
+        raise SeatLifecycleSchemaError(
+            "reconciled seat lifecycle record is invalid: " + "; ".join(errors)
+        )
+    _atomic_write(path, yaml.safe_dump(record, sort_keys=True))
+    return True
 
 
 def validate_record(record: dict[str, Any], path: Path | str) -> list[str]:

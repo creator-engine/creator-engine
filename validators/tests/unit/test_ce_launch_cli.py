@@ -88,6 +88,15 @@ def _write_brain_ledger(state_root: Path) -> None:
     path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
 
 
+def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
+    codex = tmp_path / "bin" / "codex"
+    codex.parent.mkdir()
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv(ce_cli.launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, str(codex))
+    return codex
+
+
 @pytest.fixture(autouse=True)
 def _isolate_brain_state(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -299,12 +308,13 @@ def test_cli_launch_dry_run_still_pure(use_fake_tmux):
     assert adapter.spawned == []
 
 
-def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, monkeypatch, capsys):
+def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, tmp_path, monkeypatch, capsys):
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
     monkeypatch.setattr(
         ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
     )
+    codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
         "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
         "--claude-arg=--bare", "--dry-run", "--json",
@@ -313,7 +323,7 @@ def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, monkeypatch
     payload = json.loads(capsys.readouterr().out)
     command = payload["plan"]["command"]
     assert command[:2] == ["env", "-u"]
-    assert command[-3:] == ["codex", "--model", "gpt-5"]
+    assert command[-3:] == [str(codex), "--model", "gpt-5"]
     assert "--bare" not in command
     assert payload["plan"]["codex_bypass_mode"] == "config"
 
