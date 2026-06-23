@@ -91,7 +91,7 @@ print(workspace.get("workspace_id", ""), root_pane.get("pane_id", ""))
 [ -n "${workspace_id}" ] || fail "herdr workspace response did not include workspace id"
 [ -n "${root_pane_id}" ] || fail "herdr workspace response did not include root pane id"
 
-governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")
+governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")
 quoted_harness="$(printf '%q ' "${governed_harness[@]}")"
 herdr_cli pane run "${root_pane_id}" "${quoted_harness}" || {
   fail "could not start governed harness through herdr"

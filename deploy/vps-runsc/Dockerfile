@@ -54,6 +54,7 @@ RUN set -eux; \
       curl \
       git \
       less \
+      nodejs \
       procps \
       psmisc \
       python3 \
@@ -73,9 +74,18 @@ COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY herdr-harness-entrypoint.sh /usr/local/bin/herdr-harness-entrypoint.sh
 
 RUN set -eux; \
+    install -d -m 0755 /usr/local/lib/node_modules/@openai; \
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'exec node /usr/local/lib/node_modules/@openai/codex/bin/codex.js "$@"' \
+      >/usr/local/bin/codex; \
     chmod 0755 /usr/local/bin/herdr /usr/local/bin/herdr-harness-entrypoint.sh; \
+    chmod 0755 /usr/local/bin/codex; \
     test -x /usr/local/bin/herdr; \
-    test -x /usr/local/bin/herdr-harness-entrypoint.sh
+    test -x /usr/local/bin/herdr-harness-entrypoint.sh; \
+    test -x /usr/local/bin/codex; \
+    node --version
 
 USER ${CE_VPS_UID}:${CE_VPS_GID}
 WORKDIR /workspace/creator-engine

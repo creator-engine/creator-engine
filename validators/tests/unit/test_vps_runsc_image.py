@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VPS_DIR = REPO_ROOT / "deploy" / "vps-runsc"
 DOCKERFILE = VPS_DIR / "Dockerfile"
 ENTRYPOINT = VPS_DIR / "herdr-harness-entrypoint.sh"
+README = VPS_DIR / "README.md"
 
 
 def _dockerfile() -> str:
@@ -18,6 +19,10 @@ def _dockerfile() -> str:
 
 def _entrypoint() -> str:
     return ENTRYPOINT.read_text(encoding="utf-8")
+
+
+def _readme() -> str:
+    return README.read_text(encoding="utf-8")
 
 
 def _entrypoint_harness_env_block() -> str:
@@ -58,8 +63,13 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
     assert "ENV HERDR_SOCKET_PATH" not in text
     assert "USER ${CE_VPS_UID}:${CE_VPS_GID}" in text
     assert "tini" in text
+    assert "nodejs" in text
     assert "python3" in text
     assert "procps" in text
+    assert "install -d -m 0755 /usr/local/lib/node_modules/@openai" in text
+    assert 'exec node /usr/local/lib/node_modules/@openai/codex/bin/codex.js "$@"' in text
+    assert "test -x /usr/local/bin/codex" in text
+    assert "node --version" in text
     assert "test -x /usr/local/bin/herdr" in text
     assert "test -x /usr/local/bin/herdr-harness-entrypoint.sh" in text
     assert (
@@ -97,14 +107,14 @@ def test_entrypoint_selects_harness_from_ce_dgx_harness() -> None:
     assert 'harness_bin="/usr/local/bin/codex"' in text
     assert 'harness_bin="/usr/local/bin/claude"' in text
     assert 'fail "CE_DGX_HARNESS must be codex or claude' in text
-    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")' in text
+    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")' in text
 
 
 def test_entrypoint_runs_governed_harness_with_explicit_safe_env() -> None:
     text = _entrypoint()
     block = _entrypoint_harness_env_block()
 
-    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" -- "${harness_bin}" "$@")' in text
+    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")' in text
     assert '"HOME=${HOME:-/home/ce}"' in block
     assert (
         '"PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"'
@@ -132,3 +142,17 @@ def test_entrypoint_harness_env_has_no_socket_or_ambient_ce_dgx_carriers() -> No
     assert "SOCKET" not in harness_env_region
     assert "CE_DGX_HARNESS_MODE" not in harness_env_region
     assert set(re.findall(r"\bCE_DGX[A-Z0-9_]*", harness_env_region)) == {"CE_DGX_HARNESS"}
+
+
+def test_readme_documents_contained_codex_config_and_node_package_mount() -> None:
+    text = _readme()
+
+    assert 'approval_policy = "never"' in text
+    assert 'sandbox_mode = "danger-full-access"' in text
+    assert "`workspace-write` mode starts an inner sandbox using bubblewrap/Landlock" in text
+    assert "nested bubblewrap or Landlock cannot run inside runsc/gVisor" in text
+    assert "container is the sandbox boundary for this recipe" in text
+    assert "CE_VPS_CONTAINED_CODEX_CONFIG" in text
+    assert "CE_VPS_CODEX_PACKAGE_ROOT" in text
+    assert "/usr/local/lib/node_modules/@openai/codex" in text
+    assert "standalone Codex bundles" in text

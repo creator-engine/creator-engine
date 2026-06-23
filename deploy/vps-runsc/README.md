@@ -18,7 +18,9 @@ CE_VPS_DOCKER_NETWORK=host
 CE_VPS_HARNESS=codex
 CE_VPS_REPO=$(pwd)
 CE_VPS_CODEX_HOME=$HOME/.codex
+CE_VPS_CONTAINED_CODEX_CONFIG=/tmp/creator-engine-vps-runsc-codex-config-<uid>-<user>.toml
 CE_VPS_CODEX_BIN=$(command -v codex)
+CE_VPS_CODEX_PACKAGE_ROOT=<autodetected for npm @openai/codex installs>
 CE_VPS_CONTAINER_REPO=/workspace/creator-engine
 CE_VPS_UID=$(id -u)
 CE_VPS_GID=$(id -g)
@@ -35,8 +37,44 @@ The launcher always applies:
 - `--security-opt=no-new-privileges`
 - `--cap-drop=ALL`
 - `--user uid:gid`
-- repo, Codex home, and Codex binary bind mounts
+- repo, Codex home, contained Codex config, and Codex binary/package bind mounts
 - `CODEX_HOME`, `TERM`, and `CE_DGX_HARNESS` for the image entrypoint
+
+## Contained Codex Config
+
+The launcher generates a per-seat contained Codex config and bind-mounts it over
+`${CODEX_HOME}/config.toml` inside the container:
+
+```toml
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+This is deliberate for the VPS runsc recipe. Codex' default
+`workspace-write` mode starts an inner sandbox using bubblewrap/Landlock, and
+nested bubblewrap or Landlock cannot run inside runsc/gVisor. The gVisor
+container is the sandbox boundary for this recipe, so Codex runs in bypass mode
+only inside that containment. Host auth stays in the mounted Codex home; the
+contained config is generated separately and can be redirected with
+`CE_VPS_CONTAINED_CODEX_CONFIG`.
+
+## Codex Binary Mounts
+
+The image installs `nodejs` and provides `/usr/local/bin/codex` as a wrapper for
+mounted npm Codex packages. When `CE_VPS_CODEX_BIN` resolves to the common npm
+layout:
+
+```text
+.../lib/node_modules/@openai/codex/bin/codex.js
+```
+
+the launcher mounts that package root read-only at
+`/usr/local/lib/node_modules/@openai/codex`, so `/usr/local/bin/codex` can run
+the real host package and its platform binary inside the container.
+
+For standalone Codex bundles, leave `CE_VPS_CODEX_PACKAGE_ROOT` unset and point
+`CE_VPS_CODEX_BIN` at the executable. The launcher then bind-mounts that binary
+directly at `/usr/local/bin/codex`.
 
 ## Harness Selection
 
@@ -95,9 +133,10 @@ deploy/vps-runsc/run-vps-runsc.sh exec "hello"
 
 The printed argv must include `docker run`, `--runtime=runsc-gvproxy-ptrace`,
 `--network=host`, `--security-opt=no-new-privileges`, `--cap-drop=ALL`,
-`--user uid:gid`, the repo bind mount, the `.codex` bind mount, the Codex binary
-bind mount, and `CE_DGX_HARNESS=codex`. For `tui`, the image must be the final
-argv element; no literal `tui` subcommand is passed to the entrypoint.
+`--user uid:gid`, the repo bind mount, the `.codex` bind mount, the contained
+Codex config bind mount, a Codex binary or npm package-root bind mount, and
+`CE_DGX_HARNESS=codex`. For `tui`, the image must be the final argv element; no
+literal `tui` subcommand is passed to the entrypoint.
 
 Render the controller/Claude variant:
 
@@ -126,4 +165,5 @@ image entrypoint default only.
   harness markers to that entrypoint; only exec launches pass an `exec`
   subcommand after the image.
 - Auth and config stay on the host and enter the container only through explicit
-  mounts or named environment forwarding. Do not bake them into the image.
+  mounts or named environment forwarding. The image has Node plus a Codex
+  package wrapper, but no baked Codex package, auth, or user config.
