@@ -54,6 +54,14 @@ def test_hard_invariant_zero_v1_v3_crossings(version_boundary_modules):
     assert [e for e in errors if e.code == CODE_CROSS] == []
 
 
+def test_runtime_policy_check_does_not_import_v3_runner(version_boundary_modules):
+    errors, _ = evaluate(version_boundary_modules)
+    assert [
+        e for e in errors
+        if e.code == CODE_UNALLOWED and "checks.ce_runtime_policy" in e.message
+    ] == []
+
+
 # --- the baselined allowlist is exactly the 3 derived edges, and minimal ----
 
 def test_allowlist_is_the_three_baselined_edges():
@@ -90,7 +98,10 @@ def test_taxonomy_counts_and_disjoint():
     # primitive over launch_runtime: 29 -> 30.
     # ce-ops#219 adds ``codex_pretooluse`` as the Codex managed PreToolUse
     # adapter over the retained v1 hook-check CLI: 30 -> 31.
-    assert len(ver.V1_RUNTIME) == 31
+    # ce-ops#128 SUB-C adds ``runtime_backend_bridge`` as the v1 launcher bridge
+    # from a RunnerBackend-rendered container argv to a VisibilityBackend surface:
+    # 31 -> 32.
+    assert len(ver.V1_RUNTIME) == 32
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

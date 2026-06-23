@@ -35,10 +35,14 @@ from . import (
     codex_launch_spec,
     hermes_launch_spec,
     resource_bound_spec,
+    runtime_backend_bridge,
     seat_lifecycle,
     seat_sentinel,
 )
+from .checks import ce_runtime_policy
 from .loader import LoaderError, load_yaml
+from .tmux_adapter import TmuxUnavailable
+from .visibility_backend import TmuxVisibilityBackend, VisibilityBackendError
 
 DEFAULT_HARNESS = "claude"
 DEFAULT_SESSION = "ce-controller"
@@ -98,6 +102,12 @@ class ResourceBoundRefused(LaunchError):
     failed launch-confirm (fleet cap / ``memory.oom.group``). Fail-closed."""
 
     code = "G6-LAUNCH-RESOURCE-REFUSED"
+
+
+class RuntimePolicyRefused(LaunchError):
+    """Runtime backend/policy resolution refused before launch side effects."""
+
+    code = "G6-LAUNCH-RUNTIME-POLICY-REFUSED"
 
 
 class SeatSurfaceReuseRefused(LaunchError):
@@ -167,6 +177,7 @@ class LaunchPlan:
     # the literal string "none (advisory)" / "none (off)" on an explicit
     # ratified opt-down; None when the policy declares no resource governance.
     resource_bound: dict | str | None = None
+    runtime_policy: dict | None = None
     codex_bypass_mode: str | None = None
     brain_bootstrap_ref: str | None = None
     brain_bootstrap_sha256: str | None = None
@@ -184,6 +195,7 @@ class LaunchPlan:
             "dry_run": self.dry_run,
             "resume": self.resume,
             "resource_bound": self.resource_bound,
+            "runtime_policy": self.runtime_policy,
             "codex_bypass_mode": self.codex_bypass_mode,
             "brain_bootstrap_ref": self.brain_bootstrap_ref,
             "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
@@ -208,6 +220,7 @@ class LaunchResult:
     # failed and proceeded ungoverned with an AWAITING-OPERATOR escalation.
     seat_record_ref: str | None = None
     seat_lifecycle_state: str | None = None
+    runner_runtime: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -219,6 +232,7 @@ class LaunchResult:
             "events_ref": self.events_ref,
             "seat_record_ref": self.seat_record_ref,
             "seat_lifecycle_state": self.seat_lifecycle_state,
+            "runner_runtime": self.runner_runtime,
         }
 
 
@@ -361,8 +375,11 @@ def launch(
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
     runtime_policy: Path | str | None = None,
+    backend: str | None = None,
     launch_cwd: Path | str | None = None,
     launch_env: Mapping[str, str] | None = None,
+    container_runner: Any | None = None,
+    gvisor_plan_kwargs: Mapping[str, Any] | None = None,
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
     cgroupfs_root: Path | str = "/sys/fs/cgroup",
@@ -500,6 +517,8 @@ def launch(
     # Ring 0 builders above — never their input — so the governed tokens stay
     # byte-identical for every harness.
     resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    policy_data: Any | None = None
+    runtime_policy_record: dict[str, Any] | None = None
     if runtime_policy is not None:
         try:
             policy_data = load_yaml(Path(runtime_policy))
@@ -507,6 +526,37 @@ def launch(
             raise ResourceBoundRefused(
                 f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
             ) from exc
+        if not isinstance(policy_data, dict):
+            raise RuntimePolicyRefused(
+                f"runtime policy {str(runtime_policy)!r} must be a YAML mapping"
+            )
+        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        if backend is not None or is_runtime_policy_record:
+            if not is_runtime_policy_record:
+                raise RuntimePolicyRefused(
+                    "--backend requires --runtime-policy to point at a full "
+                    "runtime-policy-record"
+                )
+            policy_errors = ce_runtime_policy.validate_runtime_policy(
+                policy_data, Path(runtime_policy)
+            )
+            if policy_errors:
+                detail = "; ".join(error.format() for error in policy_errors[:3])
+                raise RuntimePolicyRefused(
+                    f"runtime policy {str(runtime_policy)!r} did not validate clean: {detail}"
+                )
+            try:
+                plan = replace(
+                    plan,
+                    runtime_policy=ce_runtime_policy.runtime_policy_launch_stamp(
+                        policy_data,
+                        policy_ref=runtime_policy,
+                        requested_backend=backend,
+                    ),
+                )
+            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
+                raise RuntimePolicyRefused(str(exc)) from exc
+            runtime_policy_record = dict(policy_data)
         try:
             resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
         except resource_bound_spec.ResourcePolicyError as exc:
@@ -519,6 +569,11 @@ def launch(
         and resource_policy.governed
         and not resource_policy.opted_down
     )
+    if backend is not None and runtime_policy is None:
+        raise RuntimePolicyRefused(
+            "--backend requires --runtime-policy so the launch carries the "
+            "digest-pinned image, mount manifest, and egress allowlist"
+        )
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
@@ -541,6 +596,12 @@ def launch(
             )
         return LaunchResult(plan=plan, spawned=False, attached=False)
 
+    if plan.runtime_policy is not None and resume:
+        raise RuntimePolicyRefused(
+            "--backend/--runtime-policy cannot be combined with --resume until the "
+            "runtime backend exposes attach semantics; refusing raw fallback"
+        )
+
     if tmux_adapter is None:
         from .tmux_adapter import TmuxAdapter
 
@@ -550,6 +611,7 @@ def launch(
         raise TmuxUnavailableError(
             "tmux is unavailable; refusing visible Controller-seat launch before any side effect"
         )
+    visibility_backend = TmuxVisibilityBackend(tmux_adapter)
 
     if resume:
         if not _session_exists(tmux_adapter, session):
@@ -637,8 +699,38 @@ def launch(
         ensure_kwargs["cwd"] = launch_cwd
     if launch_env is not None:
         ensure_kwargs["env"] = dict(launch_env)
+    ensure_kwargs["seat_dir"] = str(seat_dir)
+    runner_runtime: dict | None = None
     try:
-        pane = tmux_adapter.ensure_pane(**ensure_kwargs)
+        if plan.runtime_policy is not None:
+            if runtime_policy_record is None:
+                raise RuntimePolicyRefused(
+                    "runtime backend launch requires a full runtime-policy-record"
+                )
+            execution = runtime_backend_bridge.run_visible_runtime(
+                resolved_backend=str(plan.runtime_policy["resolved_backend"]),
+                runtime_policy=runtime_policy_record,
+                run_id=seat_run_id or seat_id,
+                command=sentinel.pane_command,
+                visibility_backend=visibility_backend,
+                session=session,
+                window=window,
+                cwd=str(launch_cwd) if launch_cwd is not None else None,
+                env=dict(launch_env) if launch_env is not None else None,
+                seat_dir=str(seat_dir),
+                container_runner=container_runner,
+                gvisor_plan_kwargs=gvisor_plan_kwargs,
+            )
+            surface = execution.surface
+            runner_runtime = execution.to_dict()
+        else:
+            surface = visibility_backend.ensure_surface(**ensure_kwargs)
+    except runtime_backend_bridge.RuntimeBackendBridgeError as exc:
+        raise RuntimePolicyRefused(str(exc)) from exc
+    except TmuxUnavailable as exc:
+        raise TmuxUnavailableError(str(exc)) from exc
+    except VisibilityBackendError as exc:
+        raise TmuxUnavailableError(str(exc)) from exc
     except TypeError as exc:
         if launch_cwd is not None or launch_env is not None:
             raise TmuxPanePinningRefused(
@@ -646,6 +738,7 @@ def launch(
                 "marking the seat spawned"
             ) from exc
         raise
+    pane = surface.native
     if launch_cwd is not None:
         observed = getattr(pane, "pane_cwd", None)
         if observed is None or os.path.realpath(str(observed)) != os.path.realpath(str(launch_cwd)):
@@ -653,16 +746,7 @@ def launch(
                 f"tmux pane did not verify requested cwd {str(launch_cwd)!r}; "
                 "refusing before marking the seat spawned"
             )
-    terminal = {
-        "kind": "tmux",
-        "session_id": pane.session_id,
-        "window_id": pane.window_id,
-        "pane_id": pane.pane_id,
-    }
-    if getattr(pane, "pane_tty", None):
-        terminal["pane_tty"] = pane.pane_tty
-    if getattr(pane, "pane_pid", None) is not None:
-        terminal["pane_pid"] = pane.pane_pid
+    terminal = dict(surface.terminal)
 
     # v3.5-F launch-confirm: the seat scope must materialize. Write
     # memory.oom.group=1 (kernel kills the SEAT, never a random child) and
@@ -754,4 +838,5 @@ def launch(
         events_ref=str(sentinel.events_path),
         seat_record_ref=seat_record_ref,
         seat_lifecycle_state=seat_lifecycle_state,
+        runner_runtime=runner_runtime,
     )

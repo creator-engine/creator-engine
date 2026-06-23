@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -36,9 +36,11 @@ from . import (
     brain_bootstrap,
     claude_launch_spec,
     resource_bound_spec,
+    runtime_backend_bridge,
     seat_lifecycle,
     seat_sentinel,
 )
+from .checks import ce_runtime_policy
 from .checks import operating_mode_policy as _omp
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.pane_registry import validate_pane_registry_record
@@ -187,6 +189,12 @@ class ResourceBoundRefused(LaneLaunchError):
     code = "G3-RESOURCE-REFUSED"
 
 
+class RuntimePolicyRefused(LaneLaunchError):
+    """Runtime backend/policy resolution refused before lane side effects."""
+
+    code = "G3-RUNTIME-POLICY-REFUSED"
+
+
 class BrainBootstrapLaneRefused(LaneLaunchError):
     """ce-ops#178: Knowledge-SSOT bootstrap refused before lane spawn."""
 
@@ -290,6 +298,7 @@ class LaunchResult:
     # "none (advisory)" / "none (off)" on a ratified opt-down; None when the
     # policy declares no resource governance.
     resource_bound: dict[str, Any] | str | None = None
+    runtime_policy: dict[str, Any] | None = None
     # ce-ops#26: the absolute path to this seat's append-only lifecycle events
     # surface (`<state_root>/dispatches/<lane_id>/events.jsonl`), also recorded in
     # the ignored sidecar. None only if sentinel materialization was skipped.
@@ -303,6 +312,9 @@ class LaunchResult:
     # ungoverned with an AWAITING-OPERATOR escalation.
     seat_record_ref: str | None = None
     seat_lifecycle_state: str | None = None
+    # Runtime backend evidence for --backend/--runtime-policy launches. Written
+    # to the ignored sidecar, not the schema-locked Pane Registry record.
+    runner_runtime: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -650,6 +662,9 @@ def launch(
     reviewer_authority_ref: str | None = None,
     seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
+    backend: str | None = None,
+    container_runner: Any | None = None,
+    gvisor_plan_kwargs: Mapping[str, Any] | None = None,
     work_claim: Any | None = None,
     purpose: str | None = None,
     systemctl_runner: Any | None = None,
@@ -711,6 +726,8 @@ def launch(
     #     (load_yaml — the same seam the tenant policy rides). An advisory/off
     #     opt-down without a resource_optout ratification binding is refused here.
     resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    runtime_policy_stamp: dict[str, Any] | None = None
+    runtime_policy_record: dict[str, Any] | None = None
     if runtime_policy is not None:
         try:
             policy_data = load_yaml(Path(runtime_policy))
@@ -718,10 +735,43 @@ def launch(
             raise ResourceBoundRefused(
                 f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
             ) from exc
+        if not isinstance(policy_data, dict):
+            raise RuntimePolicyRefused(
+                f"runtime policy {str(runtime_policy)!r} must be a YAML mapping"
+            )
+        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        if backend is not None or is_runtime_policy_record:
+            if not is_runtime_policy_record:
+                raise RuntimePolicyRefused(
+                    "--backend requires --runtime-policy to point at a full "
+                    "runtime-policy-record"
+                )
+            policy_errors = ce_runtime_policy.validate_runtime_policy(
+                policy_data, Path(runtime_policy)
+            )
+            if policy_errors:
+                detail = "; ".join(error.format() for error in policy_errors[:3])
+                raise RuntimePolicyRefused(
+                    f"runtime policy {str(runtime_policy)!r} did not validate clean: {detail}"
+                )
+            try:
+                runtime_policy_stamp = ce_runtime_policy.runtime_policy_launch_stamp(
+                    policy_data,
+                    policy_ref=runtime_policy,
+                    requested_backend=backend,
+                )
+            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
+                raise RuntimePolicyRefused(str(exc)) from exc
+            runtime_policy_record = dict(policy_data)
         try:
             resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
         except resource_bound_spec.ResourcePolicyError as exc:
             raise ResourceBoundRefused(str(exc)) from exc
+    elif backend is not None:
+        raise RuntimePolicyRefused(
+            "--backend requires --runtime-policy so the lane carries the "
+            "digest-pinned image, mount manifest, and egress allowlist"
+        )
     bounding = (
         resource_policy is not None
         and resource_policy.governed
@@ -926,15 +976,15 @@ def launch(
     #     adapter-wrap MUST be scoped to `terminal_kind == tmux`; otherwise a
     #     non-tmux lane would be mis-routed onto tmux.
     if visibility_backend is not None:
-        backend = visibility_backend
+        surface_backend = visibility_backend
     elif tmux_adapter is not None and terminal_kind == TMUX_TERMINAL_KIND:
-        backend = TmuxVisibilityBackend(tmux_adapter)
+        surface_backend = TmuxVisibilityBackend(tmux_adapter)
     else:
-        backend = get_visibility_backend(terminal_kind)
+        surface_backend = get_visibility_backend(terminal_kind)
     # The selected visibility substrate must be available before any launch
     # materialization. Preserve the tmux-specific error type for existing callers;
     # non-tmux backends fail through the visibility gate.
-    if not backend.is_available():
+    if runtime_policy_stamp is None and not surface_backend.is_available():
         if terminal_kind == TMUX_TERMINAL_KIND:
             raise TmuxUnavailableError(
                 "tmux is unavailable; refusing visible lane launch before any side effect"
@@ -978,17 +1028,42 @@ def launch(
         exports=brain_env,
     )
 
+    runner_runtime: dict[str, Any] | None = None
     try:
-        surface = backend.ensure_surface(
-            session=session_name,
-            window=window_name,
-            command=sentinel.pane_command,
-            cwd=worktree_path or None,
-            env=pane_env,
-            # Non-tmux backends use the seat dir for containment/surface anchoring;
-            # the tmux backend ignores it (signature stays uniform).
-            seat_dir=str(seat_dir),
-        )
+        if runtime_policy_stamp is not None:
+            if runtime_policy_record is None:
+                raise RuntimePolicyRefused(
+                    "runtime backend lane launch requires a full runtime-policy-record"
+                )
+            execution = runtime_backend_bridge.run_visible_runtime(
+                resolved_backend=str(runtime_policy_stamp["resolved_backend"]),
+                runtime_policy=runtime_policy_record,
+                run_id=lane_id,
+                command=sentinel.pane_command,
+                visibility_backend=surface_backend,
+                session=session_name,
+                window=window_name,
+                cwd=worktree_path or None,
+                env=pane_env,
+                seat_dir=str(seat_dir),
+                container_runner=container_runner,
+                gvisor_plan_kwargs=gvisor_plan_kwargs,
+            )
+            surface = execution.surface
+            runner_runtime = execution.to_dict()
+        else:
+            surface = surface_backend.ensure_surface(
+                session=session_name,
+                window=window_name,
+                command=sentinel.pane_command,
+                cwd=worktree_path or None,
+                env=pane_env,
+                # Non-tmux backends use the seat dir for containment/surface anchoring;
+                # the tmux backend ignores it (signature stays uniform).
+                seat_dir=str(seat_dir),
+            )
+    except runtime_backend_bridge.RuntimeBackendBridgeError as exc:
+        raise RuntimePolicyRefused(str(exc)) from exc
     except TmuxUnavailable as exc:
         raise TmuxUnavailableError(str(exc)) from exc
 
@@ -1064,6 +1139,10 @@ def launch(
     sidecar_payload: dict[str, Any] = dict(claude_governance) if claude_governance else {}
     if resource_bound_stamp is not None:
         sidecar_payload["resource_bound"] = resource_bound_stamp
+    if runtime_policy_stamp is not None:
+        sidecar_payload["runtime_policy"] = runtime_policy_stamp
+    if runner_runtime is not None:
+        sidecar_payload["runner_runtime"] = runner_runtime
     # ce-ops#26: the value-free pointer to this seat's lifecycle events surface.
     sidecar_payload["events_ref"] = str(sentinel.events_path)
     sidecar_payload["brain_bootstrap_ref"] = brain_ref
@@ -1144,11 +1223,13 @@ def launch(
         lane_kind=mode_resolution.lane_kind,
         reviewer_authority_ref=reviewer_authority_ref,
         resource_bound=resource_bound_stamp,
+        runtime_policy=runtime_policy_stamp,
         events_ref=str(sentinel.events_path),
         brain_bootstrap_ref=brain_ref,
         brain_bootstrap_sha256=brain_sha,
         seat_record_ref=seat_record_ref,
         seat_lifecycle_state=seat_lifecycle_state,
+        runner_runtime=runner_runtime,
     )
 
 

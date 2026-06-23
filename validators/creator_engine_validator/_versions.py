@@ -56,6 +56,11 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # Reads the v3 runtime-policy resource fragment as DATA through the
         # existing policy-read seam (loader.load_yaml); imports no v3 module.
         "resource_bound_spec",
+        # ce-ops#128 SUB-C: v1 launch composition bridge that binds the v3
+        # gVisor runner's container-runner seam to a v1 VisibilityBackend surface.
+        # It uses runtime import by package string for the runner side so the
+        # static v1<->v3 boundary remains free of direct imports.
+        "runtime_backend_bridge",
         "tmux_adapter",
         # ce-ops#207 W1: the visibility-backend registry — the v1 launcher's
         # witnessability/surface seam. A THIN wrapper over ``tmux_adapter`` (v1),

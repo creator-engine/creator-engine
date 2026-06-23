@@ -177,14 +177,17 @@ class TmuxVisibilityBackend(VisibilityBackend):
         env: Mapping[str, str] | None = None,
         seat_dir: str | None = None,  # noqa: ARG002 — tmux ignores the seat dir
     ) -> SurfaceHandle:
+        pane_kwargs: dict[str, Any] = {
+            "session": session,
+            "window": window,
+            "command": command,
+        }
+        if cwd is not None:
+            pane_kwargs["cwd"] = cwd
+        if env is not None:
+            pane_kwargs["env"] = env
         try:
-            pane = self._adapter.ensure_pane(
-                session=session,
-                window=window,
-                command=command,
-                cwd=cwd,
-                env=env,
-            )
+            pane = self._adapter.ensure_pane(**pane_kwargs)
         except TmuxUnavailable:
             # Preserve the existing exception type so the caller's translation to
             # TmuxUnavailableError is byte-identical.
