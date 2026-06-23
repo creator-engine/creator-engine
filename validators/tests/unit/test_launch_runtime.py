@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import brain_runtime, launch_runtime
+from creator_engine_validator import brain_bootstrap, brain_runtime, launch_runtime
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -62,6 +62,27 @@ def _inner_argv(result):
     lines = wrapper.read_text().splitlines()
     idx = next(i for i, line in enumerate(lines) if line == "code=$?")
     return shlex.split(lines[idx - 1])
+
+
+def _brain_payload(result):
+    ref = Path(result.plan.brain_bootstrap_ref)
+    assert ref.is_file()
+    return json.loads(ref.read_text(encoding="utf-8"))
+
+
+def _assert_foreman_charter_and_worker_spawn(payload):
+    operating_mode = payload["operating_mode"]
+    charter = operating_mode["foreman_charter"]
+    worker_spawn = operating_mode["capabilities"]["worker_spawn"]
+    assert charter["id"] == brain_bootstrap.FOREMAN_CHARTER_ID
+    assert charter["mandatory"] is True
+    assert charter["enforcement"] == "launcher-injected-non-optional"
+    assert "delegate-substantive-implementation-review-and-build-work" in charter["directives"]
+    assert worker_spawn["id"] == brain_bootstrap.WORKER_SPAWN_CAPABILITY_ID
+    assert worker_spawn["mandatory"] is True
+    assert worker_spawn["enforcement"] == "launcher-injected-non-optional"
+    assert worker_spawn["surface"]["cli"] == "ce worker spawn"
+    assert worker_spawn["surface"]["module"] == "creator_engine_validator.worker_spawn"
 
 
 def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
@@ -328,13 +349,45 @@ def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     ref = Path(result.plan.brain_bootstrap_ref)
     assert ref.is_file()
     assert result.plan.brain_bootstrap_sha256 == hashlib.sha256(ref.read_bytes()).hexdigest()
-    payload = json.loads(ref.read_text(encoding="utf-8"))
+    payload = _brain_payload(result)
     assert payload["kind"] == "brain-bootstrap-context"
     assert payload["context"]["role"] == "controller"
     assert payload["context"]["seat_class"] == "foreman"
     wrapper = (Path(result.events_ref).parent / "sentinel-wrapper.sh").read_text(encoding="utf-8")
     assert f"export CE_BRAIN_BOOTSTRAP_REF={shlex.quote(str(ref))}" in wrapper
     assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.plan.brain_bootstrap_sha256}" in wrapper
+
+
+@pytest.mark.parametrize("harness", ["claude", "hermes", "openclaw"])
+def test_spawned_launch_injects_foreman_charter_and_worker_spawn_for_harnesses(
+    tmp_path, harness
+):
+    result = launch_runtime.launch(
+        harness=harness,
+        session=f"charter-{harness}",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+    )
+
+    _assert_foreman_charter_and_worker_spawn(_brain_payload(result))
+
+
+def test_codex_spawned_launch_injects_foreman_charter_and_worker_spawn(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    _fake_codex(tmp_path, monkeypatch)
+
+    result = launch_runtime.launch(
+        harness="codex",
+        session="charter-codex",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+    )
+
+    _assert_foreman_charter_and_worker_spawn(_brain_payload(result))
 
 
 def test_launch_writes_seat_lifecycle_record_and_event(tmp_path):

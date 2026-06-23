@@ -29,6 +29,40 @@ DEFAULT_SEAT_CLASS = "foreman"
 GLOBAL_SCOPE = "global"
 BOOTSTRAP_REF_ENV = "CE_BRAIN_BOOTSTRAP_REF"
 BOOTSTRAP_SHA256_ENV = "CE_BRAIN_BOOTSTRAP_SHA256"
+FOREMAN_CHARTER_ID = "ce-ops#163-born-a-foreman"
+WORKER_SPAWN_CAPABILITY_ID = "ce-ops#163-worker-spawn"
+
+FOREMAN_CHARTER = {
+    "id": FOREMAN_CHARTER_ID,
+    "mandatory": True,
+    "mode": "born-a-foreman",
+    "enforcement": "launcher-injected-non-optional",
+    "directives": [
+        "plan-dispatch-monitor-triage",
+        "delegate-substantive-implementation-review-and-build-work",
+        "preserve-controller-context",
+        "do-not-self-review-or-self-merge",
+    ],
+}
+
+WORKER_SPAWN_CAPABILITY = {
+    "id": WORKER_SPAWN_CAPABILITY_ID,
+    "mandatory": True,
+    "enforcement": "launcher-injected-non-optional",
+    "surface": {
+        "cli": "ce worker spawn",
+        "module": "creator_engine_validator.worker_spawn",
+        "entrypoints": ["plan_worker_spawn", "spawn_worker"],
+    },
+    "roles": ["implementer", "researcher", "reviewer", "verification"],
+    "required_inputs": ["role", "harness", "worktree", "scope-id", "prompt-file-or-brief"],
+    "guarantees": [
+        "bounded-recursion-depth",
+        "credential-scrubbed-child-environment",
+        "value-free-worker-record",
+        "launch-runtime-governed-seat",
+    ],
+}
 
 
 class BrainBootstrapRefused(brain_runtime.BrainRuntimeError):
@@ -135,6 +169,7 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
             "seat_class": seat_class,
             "scope": normalized_scope,
         },
+        "operating_mode": _foreman_operating_mode(),
         "knowledge_ssot": {
             "ledger_path": str(ledger_path),
             "record_count": len(records),
@@ -146,6 +181,15 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
     }
     _assert_json_serializable(payload)
     return payload
+
+
+def _foreman_operating_mode() -> dict[str, Any]:
+    return {
+        "foreman_charter": copy.deepcopy(FOREMAN_CHARTER),
+        "capabilities": {
+            "worker_spawn": copy.deepcopy(WORKER_SPAWN_CAPABILITY),
+        },
+    }
 
 
 def _require_non_empty_string(name: str, value: str) -> str:
