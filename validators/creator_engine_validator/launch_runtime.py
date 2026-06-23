@@ -570,10 +570,16 @@ def launch(
             )
         return LaunchResult(plan=plan, spawned=False, attached=False)
 
-    if backend is not None:
+    if plan.runtime_policy is not None:
         resolved = (plan.runtime_policy or {}).get("resolved_backend")
+        requested = (plan.runtime_policy or {}).get("requested_backend")
+        selector = (
+            f"requested backend {backend!r}"
+            if requested is not None
+            else f"default runtime-policy backend {resolved!r}"
+        )
         raise RuntimePolicyRefused(
-            f"requested backend {backend!r} resolves to {resolved!r}, but ce launch "
+            f"{selector} resolves to {resolved!r}, but ce launch "
             "RunnerBackend execution is not wired in this slice; refusing before "
             "raw tmux fallback"
         )

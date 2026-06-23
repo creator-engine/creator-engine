@@ -18,7 +18,8 @@ Base:
 Scope:
 ce-ops#128 SUB-A/SUB-D foundation: launch backend selector parsing, existing
 runtime-policy backend resolution, launch-boundary policy stamping, and
-fail-closed explicit backend refusal until RunnerBackend execution is wired.
+fail-closed explicit/default backend refusal until RunnerBackend execution is
+wired.
 
 Per-file purpose:
 - **`.ce/changelog/ce128-backend-selector-policy.md`** *(A)* - changelog fragment.
@@ -27,8 +28,8 @@ Per-file purpose:
 - **`schemas/runtime-policy.schema.yaml`** *(M)* - admit `local-noop` as a schema-valid backend.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - add `--backend` parser choices and pass-through for launch surfaces.
 - **`validators/creator_engine_validator/checks/ce_runtime_policy.py`** *(M)* - add backend resolution and sanitized launch stamp helper.
-- **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - resolve/stamp runtime policies and fail closed for explicit backend lane launches.
-- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - resolve/stamp runtime policies and fail closed for explicit backend controller launches.
+- **`validators/creator_engine_validator/lane_runtime.py`** *(M)* - resolve/stamp runtime policies and fail closed for explicit/default backend lane launches.
+- **`validators/creator_engine_validator/launch_runtime.py`** *(M)* - resolve/stamp runtime policies and fail closed for explicit/default backend controller launches.
 - **`validators/tests/unit/test_ce_launch_cli.py`** *(M)* - CLI selector parsing, stamp, and fail-closed coverage.
 - **`validators/tests/unit/test_ce_runtime_policy.py`** *(M)* - schema/resolver/stamp coverage.
 - **`validators/tests/unit/test_version_boundary.py`** *(M)* - regression coverage that the shared runtime-policy check does not import v3 runner modules.
