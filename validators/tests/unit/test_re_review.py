@@ -161,6 +161,28 @@ def test_gh_error_raises():
         rr.list_reviews("o/r", 7, gh_runner=Boom())
 
 
+def test_reconcile_apply_fails_closed_on_non_mapping_review_item_without_dismiss():
+    runner = FakeRunner([
+        {"id": 11, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}},
+        {"id": 22, "state": "APPROVED", "commit_id": HEAD, "user": {"login": "ce-dev-1"}},
+        "not an object",
+    ])
+    with pytest.raises(ForgeConfigError, match="not an object"):
+        rr.reconcile_reviews("o/r", 7, HEAD, gh_runner=runner, apply=True)
+    assert runner.dismissals == []
+
+
+def test_reconcile_apply_fails_closed_on_review_item_missing_id_without_dismiss():
+    runner = FakeRunner([
+        {"id": 11, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}},
+        {"id": 22, "state": "APPROVED", "commit_id": HEAD, "user": {"login": "ce-dev-1"}},
+        {"state": "COMMENTED", "commit_id": HEAD, "user": {"login": "ce-dev-2"}},
+    ])
+    with pytest.raises(ForgeConfigError, match="missing required field id"):
+        rr.reconcile_reviews("o/r", 7, HEAD, gh_runner=runner, apply=True)
+    assert runner.dismissals == []
+
+
 # ---- pagination: complete-history guarantee (ce-ops#151, fail-closed) ----
 
 def _page_of(n, *, start_id, state, commit, who):

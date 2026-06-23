@@ -162,17 +162,36 @@ _REVIEWS_PER_PAGE = 100
 _MAX_REVIEW_PAGES = 100
 
 
-def _parse_review(item: object) -> Review | None:
+def _parse_review(item: object, *, page: int, index: int, repo: str, pr_number: int) -> Review:
+    where = f"reviews page {page} item {index} for {repo}#{pr_number}"
     if not isinstance(item, Mapping):
-        return None
+        raise ForgeConfigError(f"{where} is not an object (fail-closed)")
     rid = item.get("id")
     if rid is None:
-        return None
+        raise ForgeConfigError(f"{where} is missing required field id (fail-closed)")
+    try:
+        review_id = int(rid)
+    except (TypeError, ValueError) as exc:
+        raise ForgeConfigError(f"{where} has invalid required field id (fail-closed)") from exc
+
+    state = item.get("state")
+    if not isinstance(state, str) or not state:
+        raise ForgeConfigError(f"{where} is missing required field state (fail-closed)")
+    commit_id = item.get("commit_id")
+    if not isinstance(commit_id, str) or not commit_id:
+        raise ForgeConfigError(f"{where} is missing required field commit_id (fail-closed)")
+    user = item.get("user")
+    if not isinstance(user, Mapping):
+        raise ForgeConfigError(f"{where} is missing required field user.login (fail-closed)")
+    login = user.get("login")
+    if not isinstance(login, str) or not login:
+        raise ForgeConfigError(f"{where} is missing required field user.login (fail-closed)")
+
     return Review(
-        review_id=int(rid),
-        state=str(item.get("state") or ""),
-        commit_id=str(item.get("commit_id") or ""),
-        reviewer=str(((item.get("user") or {}) if isinstance(item.get("user"), Mapping) else {}).get("login") or ""),
+        review_id=review_id,
+        state=state,
+        commit_id=commit_id,
+        reviewer=login,
     )
 
 
@@ -201,10 +220,10 @@ def list_reviews(repo: str, pr_number: int, *, gh_runner: GhRunner | None = None
                 f"reviews page {page} for {repo}#{pr_number} returned a non-array body — "
                 f"cannot prove complete review history (fail-closed)"
             )
-        for item in raw:
-            parsed = _parse_review(item)
-            if parsed is not None:
-                reviews.append(parsed)
+        for index, item in enumerate(raw):
+            reviews.append(
+                _parse_review(item, page=page, index=index, repo=repo, pr_number=pr_number)
+            )
         if len(raw) < _REVIEWS_PER_PAGE:
             # Short page → this was the last page; history is complete.
             break
