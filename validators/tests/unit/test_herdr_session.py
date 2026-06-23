@@ -30,7 +30,9 @@ class FakeRunner:
         elif args[1:3] == ["pane", "run"]:
             payload = {"pid": 4242}
         elif args[1:3] == ["pane", "read"]:
-            payload = {"output": "recent output"}
+            return subprocess.CompletedProcess(args, 0, "recent output", "")
+        elif args[1:3] == ["pane", "send-text"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
         elif args[1:3] == ["wait", "agent-status"]:
             payload = {"status": "ready", "pane_id": "pane-1"}
         else:  # pragma: no cover - protects test fixtures if the command map drifts
@@ -110,7 +112,7 @@ def test_spawn_pane_drives_workspace_split_and_run_over_socket_env() -> None:
     )
 
 
-def test_observe_and_wait_agent_status_use_controller_socket() -> None:
+def test_observe_uses_pane_read_recent_text_stdout_and_wait_uses_controller_socket() -> None:
     runner = FakeRunner()
     session = hs.HerdrSession(
         socket_path="/run/ce/herdr/control.sock",
@@ -122,7 +124,7 @@ def test_observe_and_wait_agent_status_use_controller_socket() -> None:
         surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
     )
 
-    assert session.observe(pane) == b"recent output"
+    assert session.observe(pane, lines=40, output_format="ansi") == b"recent output"
     assert session.wait_agent_status(pane) == {"status": "ready", "pane_id": "pane-1"}
 
     assert runner.calls[0][0] == [
@@ -131,8 +133,11 @@ def test_observe_and_wait_agent_status_use_controller_socket() -> None:
         "read",
         "pane-1",
         "--source",
-        "recent-unwrapped",
-        "--json",
+        "recent",
+        "--lines",
+        "40",
+        "--format",
+        "ansi",
     ]
     assert runner.calls[1][0] == [
         "herdr",
@@ -148,6 +153,45 @@ def test_observe_and_wait_agent_status_use_controller_socket() -> None:
         env == {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"}
         for _, env in runner.calls
     )
+
+
+def test_send_text_uses_controller_socket_and_does_not_expose_socket_to_seat_env_or_terminal() -> None:
+    runner = FakeRunner()
+    session = hs.HerdrSession(
+        socket_path="/run/ce/herdr/control.sock",
+        herdr_binary="/opt/herdr",
+        runner=runner,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    terminal = {
+        "kind": hs.HERDR_TERMINAL_KIND,
+        "surface_ref": pane.surface_ref,
+        "pane_id": pane.pane_id,
+    }
+
+    session.send(pane, b"printf hello\\n")
+
+    assert runner.calls == [
+        (
+            ["/opt/herdr", "pane", "send-text", "pane-1", "printf hello\\n"],
+            {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
+        )
+    ]
+    assert "/run/ce/herdr/control.sock" not in repr(terminal)
+    assert hs.HERDR_SOCKET_ENV not in terminal
+
+
+def test_send_non_utf8_bytes_remain_fail_closed() -> None:
+    session = hs.HerdrSession(runner=FakeRunner())
+    pane = hs.HerdrPane(
+        pane_id="p0",
+        surface_ref="herdr-surface-78e9ef9dba13817d88584fe75af1bffe",
+    )
+    with pytest.raises(hs.HerdrCommandError, match="only accepts UTF-8 text"):
+        session.send(pane, b"\xff")
 
 
 def test_socket_env_is_never_passed_into_governed_seat() -> None:
@@ -168,16 +212,6 @@ def test_command_failure_is_reported() -> None:
     session = hs.HerdrSession(runner=Boom())
     with pytest.raises(hs.HerdrCommandError):
         session.create_workspace(cwd="/worktree", label="lane")
-
-
-def test_send_remains_fail_closed_until_u4_attribution() -> None:
-    session = hs.HerdrSession()
-    pane = hs.HerdrPane(
-        pane_id="p0",
-        surface_ref="herdr-surface-78e9ef9dba13817d88584fe75af1bffe",
-    )
-    with pytest.raises(hs.HerdrNotWired):
-        session.send(pane, b"steer")
 
 
 def test_not_wired_is_a_notimplementederror() -> None:

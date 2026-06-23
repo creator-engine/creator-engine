@@ -66,7 +66,7 @@ DEFAULT_HERDR_SOCKET = "herdr.sock"
 #: Environment carrier used by the herdr CLI client to find the substrate-owned
 #: Unix control socket. The path is carried only in the CE controller process'
 #: subprocess environment, never in the governed seat's pane environment.
-HERDR_SOCKET_ENV = "HERDR_SOCKET"
+HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
 
 
 class HerdrSessionError(Exception):
@@ -165,7 +165,7 @@ class HerdrSession:
     def _socket_env(self) -> dict[str, str]:
         return {HERDR_SOCKET_ENV: str(self._socket_path)}
 
-    def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
+    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         argv = [self._herdr_binary, *args]
         try:
             completed = self._runner.run(argv, env=self._socket_env())
@@ -177,6 +177,17 @@ class HerdrSession:
                 f"herdr command exited {completed.returncode}: {argv!r}"
                 + (f": {stderr}" if stderr else "")
             )
+        return completed
+
+    def _run_ok(self, args: Sequence[str]) -> None:
+        self._run(args)
+
+    def _run_text(self, args: Sequence[str]) -> str:
+        completed = self._run(args)
+        return completed.stdout or ""
+
+    def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
+        completed = self._run(args)
         stdout = (completed.stdout or "").strip()
         if not stdout:
             return {}
@@ -226,8 +237,8 @@ class HerdrSession:
         """Open the client connection to the substrate-owned herdr socket.
 
         The herdr CLI is the socket client; this method records that subsequent
-        CLI calls must carry ``HERDR_SOCKET``. It intentionally does not expose
-        the socket path to the governed seat's command or environment.
+        CLI calls must carry ``HERDR_SOCKET_PATH``. It intentionally does not
+        expose the socket path to the governed seat's command or environment.
         """
         self._connected = True
 
@@ -316,23 +327,27 @@ class HerdrSession:
         )
 
     # -- send (steer) -----------------------------------------------------
-    def send(self, pane: HerdrPane, data: bytes) -> None:
+    def send(self, pane: HerdrPane, data: bytes | str) -> None:
         """Inject input/keystrokes into ``pane`` — the governed control path.
 
-        U4 (NOT U3): this is the steer path and is the §7-boundary keystone. It
-        MUST route through the CE attribution shim, which appends a
-        ``runtime_operator_steer`` record (actor / target_lane / bytes_digest /
-        ts) to the evidence spine BEFORE the bytes reach the PTY, and fail
-        CLOSED if the spine append fails (the steer does not execute). This
-        :class:`HerdrSession` is the *only* control-path writer to the socket;
-        the governed seat never holds the socket, so ``herdr pane run`` cannot
-        become a §7 bypass. No-new-authority holds: a steer injects input, it
-        cannot widen the seat's envelope — the seat's own tool-calls still pass
-        its Ring-1 hook and the §7 hard-denies still fire.
+        U3 wires ordinary text input through ``herdr pane send-text``. The CLI
+        only accepts text, so non-UTF-8 bytes remain fail-closed until a later
+        narrow key/control helper is explicitly backed by the herdr source.
+        This :class:`HerdrSession` is the *only* control-path writer to the
+        socket; the governed seat never holds the socket, so ``herdr pane run``
+        cannot become a §7 bypass. U4 layers attribution ahead of this write.
         """
-        raise HerdrNotWired(
-            "HerdrSession.send is a U1 scaffold; the attribution shim is wired in U4"
-        )
+        if isinstance(data, str):
+            text = data
+        else:
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise HerdrCommandError(
+                    "herdr pane send-text only accepts UTF-8 text; "
+                    "non-text/control input remains fail-closed"
+                ) from exc
+        self._run_ok(["pane", "send-text", pane.pane_id, text])
 
     # -- attach -----------------------------------------------------------
     def attach(self, pane: HerdrPane) -> None:
@@ -346,18 +361,38 @@ class HerdrSession:
         raise HerdrNotWired("HerdrSession.attach is a U1 scaffold; wired in U3/U8")
 
     # -- observe ----------------------------------------------------------
-    def observe(self, pane: HerdrPane) -> bytes:
+    def observe(
+        self,
+        pane: HerdrPane,
+        *,
+        lines: int = 200,
+        output_format: str = "text",
+    ) -> bytes:
         """Read recent pane output for the evidence spine (witnessability).
 
-        Maps to ``herdr pane read <id> --source recent-unwrapped`` and feeds
-        the Pane Registry ``events.jsonl`` lifecycle / read-model fold. Observe
-        is the read path; it never widens authority.
+        Maps to ``herdr pane read <id> --source recent --lines N --format ...``
+        and feeds the Pane Registry ``events.jsonl`` lifecycle / read-model
+        fold. ``pane read`` prints text/ANSI directly to stdout; it is not a
+        JSON command. Observe is the read path; it never widens authority.
         """
-        data = self._run_json(
-            ["pane", "read", pane.pane_id, "--source", "recent-unwrapped", "--json"]
+        if lines <= 0:
+            raise HerdrCommandError("herdr pane read lines must be positive")
+        if output_format not in {"text", "ansi"}:
+            raise HerdrCommandError("herdr pane read format must be 'text' or 'ansi'")
+        text = self._run_text(
+            [
+                "pane",
+                "read",
+                pane.pane_id,
+                "--source",
+                "recent",
+                "--lines",
+                str(lines),
+                "--format",
+                output_format,
+            ]
         )
-        text = self._first_str(data, "output", "text", "data", "content")
-        return (text or "").encode()
+        return text.encode("utf-8")
 
     def close(self) -> None:
         """Release the client connection. Idempotent; never reaps a seat (reaper owns that)."""
