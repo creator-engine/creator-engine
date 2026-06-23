@@ -764,10 +764,16 @@ def launch(
             "--backend requires --runtime-policy so the lane carries the "
             "digest-pinned image, mount manifest, and egress allowlist"
         )
-    if backend is not None:
+    if runtime_policy_stamp is not None:
         resolved = (runtime_policy_stamp or {}).get("resolved_backend")
+        requested = (runtime_policy_stamp or {}).get("requested_backend")
+        selector = (
+            f"requested backend {backend!r}"
+            if requested is not None
+            else f"default runtime-policy backend {resolved!r}"
+        )
         raise RuntimePolicyRefused(
-            f"requested backend {backend!r} resolves to {resolved!r}, but ce lane launch "
+            f"{selector} resolves to {resolved!r}, but ce lane launch "
             "RunnerBackend execution is not wired in this slice; refusing before "
             "raw tmux fallback"
         )
