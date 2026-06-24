@@ -78,8 +78,13 @@ The launcher generates a per-seat contained Codex config and bind-mounts it over
 `${CODEX_HOME}/config.toml` inside the container:
 
 ```toml
+model = "gpt-5.5"
+model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+[projects."/workspace/creator-engine"]
+trust_level = "trusted"
 ```
 
 This is deliberate for the VPS runsc recipe. Codex' default
