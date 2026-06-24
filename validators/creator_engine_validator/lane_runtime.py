@@ -665,6 +665,8 @@ def launch(
     backend: str | None = None,
     container_runner: Any | None = None,
     gvisor_plan_kwargs: Mapping[str, Any] | None = None,
+    containment_proc_root: Path | str = "/proc",
+    containment_host_pid: int | str = 1,
     work_claim: Any | None = None,
     purpose: str | None = None,
     systemctl_runner: Any | None = None,
@@ -1048,6 +1050,8 @@ def launch(
                 seat_dir=str(seat_dir),
                 container_runner=container_runner,
                 gvisor_plan_kwargs=gvisor_plan_kwargs,
+                containment_proc_root=containment_proc_root,
+                containment_host_pid=containment_host_pid,
             )
             surface = execution.surface
             runner_runtime = execution.to_dict()

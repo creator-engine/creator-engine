@@ -229,6 +229,7 @@ def test_gvisor_launch_spawns_harness_inside_runsc_and_probe_proves_containment(
         tmux_adapter=adapter,
         container_runner=runner,
         gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        containment_proc_root=proc_root,
     )
 
     assert result.spawned is True
@@ -310,3 +311,40 @@ def test_gvisor_launch_refuses_unhonored_backend_before_raw_visibility_spawn(
     assert runner.available_calls == 1
     assert runner.raw_run_calls == 0
     assert adapter.spawned == []
+
+
+def test_gvisor_launch_refuses_when_post_launch_probe_sees_raw_host_pid(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _raw_host_proc(proc_root, "4242")
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter(pane_pid=4242)
+    runner = ProofContainerRunner()
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-raw-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+            containment_proc_root=proc_root,
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        text = str(exc)
+        assert "failed containment probe" in text
+        assert "mnt namespace shared with host" in text
+    else:  # pragma: no cover - assertion above is the proof
+        raise AssertionError("contained launch must refuse a raw host pid")
+
+    assert runner.available_calls == 1
+    assert runner.egress_calls == 1
+    assert runner.raw_run_calls == 0
+    assert adapter.spawned

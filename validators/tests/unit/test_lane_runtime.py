@@ -23,6 +23,9 @@ from creator_engine_validator.tmux_adapter import TmuxPane
 # Test doubles + fixtures
 # ---------------------------------------------------------------------------
 
+_FULL_CAP = "000001ffffffffff"
+_DROPPED_CAP = "00000000a80425fb"
+
 
 class FakeAdapter:
     """In-memory tmux adapter double: records spawns, never touches tmux."""
@@ -160,6 +163,66 @@ def _write_runtime_policy(tmp_path: Path, *, backend: str = "gvisor-proxy") -> P
     return path
 
 
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
+    return (
+        "Name:\tproof\n"
+        f"NoNewPrivs:\t{nnp}\n"
+        f"CapEff:\t{cap_eff}\n"
+        f"CapBnd:\t{cap_bnd}\n"
+    )
+
+
+def _make_proc(
+    tmp_path: Path,
+    pid: str,
+    *,
+    ns: dict[str, str],
+    cgroup: str,
+    status: str,
+    root: str,
+) -> None:
+    base = tmp_path / pid
+    for name, ident in ns.items():
+        _write(base / "ns" / name, ident)
+    _write(base / "cgroup", cgroup)
+    _write(base / "status", status)
+    _write(base / "root", root)
+
+
+def _contained_proc(tmp_path: Path, pid: str) -> None:
+    _make_proc(
+        tmp_path,
+        "1",
+        ns={
+            "mnt": "mnt:[4026531840]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026531992]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/init.scope\n",
+        status=_status(_FULL_CAP, _FULL_CAP),
+        root="/",
+    )
+    _make_proc(
+        tmp_path,
+        pid,
+        ns={
+            "mnt": "mnt:[4026532500]",
+            "pid": "pid:[4026532501]",
+            "net": "net:[4026532502]",
+            "user": "user:[4026532503]",
+        },
+        cgroup="0::/system.slice/runsc-sandbox-proof.scope/runsc/container\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/run/runsc/proof/rootfs",
+    )
+
+
 def _gvisor_plan_kwargs() -> dict:
     return {
         "uid": 1001,
@@ -240,6 +303,8 @@ def test_launch_writes_pane_record_bound_to_live_claim(tmp_path):
 def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")
+    proc_root = tmp_path / "proc"
+    _contained_proc(proc_root, "4242")
     adapter = FakeAdapter()
     policy = _write_runtime_policy(tmp_path)
 
@@ -251,10 +316,12 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
         backend="gvisor",
         container_runner=FakeContainerRunner(),
         gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        containment_proc_root=proc_root,
     )
 
     assert result.runtime_policy["resolved_backend"] == "gvisor-proxy"
     assert result.runner_runtime["backend_key"] == "gvisor-proxy"
+    assert result.runner_runtime["containment_attestation"]["contained"] is True
     argv = result.runner_runtime["argv"]
     assert argv[:3] == ["docker", "run", "--rm"]
     assert "--runtime=runsc-gvproxy-ptrace" in argv
@@ -263,6 +330,7 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
     sidecar = ledger / "panes" / "hermes-primary" / "gate3-lane.claude-governance.json"
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["runner_runtime"]["backend_key"] == "gvisor-proxy"
+    assert payload["runner_runtime"]["containment_attestation"]["contained"] is True
 
 
 def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
