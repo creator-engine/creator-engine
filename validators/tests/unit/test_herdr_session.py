@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 from collections.abc import Mapping, Sequence
 
@@ -12,8 +13,9 @@ from creator_engine_validator.runner import herdr_session as hs
 
 
 class FakeRunner:
-    def __init__(self) -> None:
+    def __init__(self, *, read_outputs: Sequence[str] | None = None) -> None:
         self.calls: list[tuple[list[str], dict[str, str]]] = []
+        self.read_outputs = list(read_outputs or [])
 
     def run(
         self,
@@ -36,8 +38,11 @@ class FakeRunner:
         elif args[1:3] == ["pane", "run"]:
             return subprocess.CompletedProcess(args, 0, "", "")
         elif args[1:3] == ["pane", "read"]:
-            return subprocess.CompletedProcess(args, 0, "recent output", "")
+            stdout = self.read_outputs.pop(0) if self.read_outputs else "recent output"
+            return subprocess.CompletedProcess(args, 0, stdout, "")
         elif args[1:3] == ["pane", "send-text"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        elif args[1:3] == ["pane", "send-keys"]:
             return subprocess.CompletedProcess(args, 0, "", "")
         elif args[1:3] == ["wait", "agent-status"]:
             payload = {"status": "ready", "pane_id": "pane-1"}
@@ -114,7 +119,7 @@ def test_dispatcher_run_and_send_target_workspace_root_pane() -> None:
     )
 
     pane = session.spawn_pane(command=["/bin/sh", "wrapper.sh"], cwd="/worktree")
-    session.send(pane, "printf ready\\n")
+    session.send(pane, "printf ready\\n", submit_settle_s=0, submit_poll_interval_s=0)
 
     run_call = runner.calls[1][0]
     send_call = runner.calls[2][0]
@@ -224,16 +229,149 @@ def test_send_text_uses_controller_socket_and_does_not_expose_socket_to_seat_env
         "pane_id": pane.pane_id,
     }
 
-    session.send(pane, b"printf hello\\n")
+    session.send(pane, b"printf hello\\n", submit_settle_s=0, submit_poll_interval_s=0)
 
     assert runner.calls == [
         (
             ["/opt/herdr", "pane", "send-text", "pane-1", "printf hello\\n"],
             {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
-        )
+        ),
+        (
+            ["/opt/herdr", "pane", "send-keys", "pane-1", "Enter"],
+            {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
+        ),
+        (
+            [
+                "/opt/herdr",
+                "pane",
+                "read",
+                "pane-1",
+                "--source",
+                "recent-unwrapped",
+                "--format",
+                "text",
+            ],
+            {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
+        ),
     ]
     assert "/run/ce/herdr/control.sock" not in repr(terminal)
     assert hs.HERDR_SOCKET_ENV not in terminal
+
+
+def test_send_issues_enter_after_send_text_and_confirms_pending_input_left() -> None:
+    runner = FakeRunner(read_outputs=["prompt cleared"])
+    session = hs.HerdrSession(
+        socket_path="/run/ce/herdr/control.sock",
+        herdr_binary="/opt/herdr",
+        runner=runner,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    session.send(pane, "printf ready", submit_settle_s=0, submit_poll_interval_s=0)
+
+    assert [call[0] for call in runner.calls] == [
+        ["/opt/herdr", "pane", "send-text", "pane-1", "printf ready"],
+        ["/opt/herdr", "pane", "send-keys", "pane-1", "Enter"],
+        [
+            "/opt/herdr",
+            "pane",
+            "read",
+            "pane-1",
+            "--source",
+            "recent-unwrapped",
+            "--format",
+            "text",
+        ],
+    ]
+
+
+def test_send_fails_closed_when_pending_input_remains_after_enter_retries() -> None:
+    runner = FakeRunner(
+        read_outputs=[
+            "input\nprintf ready",
+            "input\nprintf ready",
+            "input\nprintf ready",
+        ]
+    )
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="did not commit"):
+        session.send(pane, "printf ready", submit_settle_s=0, submit_poll_interval_s=0)
+
+    assert [call[0] for call in runner.calls].count(
+        ["/opt/herdr", "pane", "send-keys", "pane-1", "Enter"]
+    ) == hs.HERDR_SEND_SUBMIT_MAX_ATTEMPTS
+
+
+def test_deliver_brief_verifies_marker_rendered_after_commit() -> None:
+    body = "Wave-B brief\nDo the focused work."
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner = FakeRunner(read_outputs=["prompt cleared", f"rendered\n{marker}"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        body,
+        render_timeout_s=0,
+        render_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == marker
+
+    send_text_call = runner.calls[0][0]
+    assert send_text_call[:4] == ["/opt/herdr", "pane", "send-text", "pane-1"]
+    assert send_text_call[4].endswith(f"\n{marker}")
+
+
+def test_deliver_brief_fails_closed_when_marker_does_not_render() -> None:
+    runner = FakeRunner(read_outputs=["prompt cleared", "rendered without marker"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="brief marker did not render"):
+        session.deliver_brief(
+            pane,
+            "brief body",
+            render_timeout_s=0,
+            render_poll_interval_s=0,
+            sleep=lambda _seconds: None,
+        )
+
+
+def test_deliver_brief_marker_hash_matches_brief_body_before_marker() -> None:
+    body = "line one\nline two\n"
+    runner = FakeRunner(read_outputs=["prompt cleared", "rendered"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner.read_outputs[1] = f"rendered\n{marker}"
+
+    session.deliver_brief(
+        pane,
+        body,
+        render_timeout_s=0,
+        render_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    )
+
+    payload = runner.calls[0][0][4]
+    assert payload == f"{body}{marker}"
 
 
 def test_send_non_utf8_bytes_remain_fail_closed() -> None:
