@@ -126,6 +126,7 @@ def test_validate_workflow_runs_path_manifest_gate_from_live_base_and_head_ref()
     assert '--base "${comparison_base}"' in run
     assert "--manifest-dir .ce/pr-manifests" in run
     assert '--head-ref "${GITHUB_HEAD_REF}"' in run
+    assert "--require-carrier" in run
     assert "github.event.pull_request.base.sha" not in run
     assert "PR_BASE_SHA" not in run
 

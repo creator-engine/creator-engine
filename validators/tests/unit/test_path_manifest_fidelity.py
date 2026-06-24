@@ -460,12 +460,69 @@ def test_per_pr_zero_carrier_is_neutral(tmp_path: Path):
     assert result.errors == ()
 
 
+def test_per_pr_required_mode_fails_on_zero_carrier_and_changelog(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/app.py")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "no carrier")
+
+    result = run_with_base(
+        [repo],
+        base,
+        manifest_dir=MANIFEST_DIR,
+        head_ref="ce21-feature",
+        require_carrier=True,
+    )
+
+    assert not result.ok
+    codes = {e.code for e in result.errors}
+    assert "path_manifest_carrier_required" in codes, [e.format() for e in result.errors]
+    assert "path_manifest_changelog_required" in codes, [e.format() for e in result.errors]
+
+
 def test_per_pr_active_pass_self_inclusive(tmp_path: Path):
     repo, base = _init_repo(tmp_path)
     slug = branch_slug("ce21-feature")
     manifest = [_carrier_rel(slug), "src/app.py", "src/util.py"]
     _commit_per_pr(repo, slug, manifest)
     result = run_with_base([repo], base, manifest_dir=MANIFEST_DIR, head_ref="ce21-feature")
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_per_pr_required_mode_fails_without_matching_changelog(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    slug = branch_slug("ce21-feature")
+    manifest = [_carrier_rel(slug), "src/app.py"]
+    _commit_per_pr(repo, slug, manifest)
+
+    result = run_with_base(
+        [repo],
+        base,
+        manifest_dir=MANIFEST_DIR,
+        head_ref="ce21-feature",
+        require_carrier=True,
+    )
+
+    assert not result.ok
+    codes = {e.code for e in result.errors}
+    assert codes == {"path_manifest_changelog_required"}, [e.format() for e in result.errors]
+
+
+def test_per_pr_required_mode_passes_with_carrier_and_changelog(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    slug = branch_slug("ce21-feature")
+    changelog = f".ce/changelog/{slug}.md"
+    manifest = [_carrier_rel(slug), changelog, "src/app.py"]
+    _commit_per_pr(repo, slug, manifest)
+
+    result = run_with_base(
+        [repo],
+        base,
+        manifest_dir=MANIFEST_DIR,
+        head_ref="ce21-feature",
+        require_carrier=True,
+    )
+
     assert result.ok, [e.format() for e in result.errors]
 
 
