@@ -599,7 +599,7 @@ def discover_daemon_candidates(
     parsed = _gh_graphql(
         runner,
         _DAEMON_SEARCH_QUERY,
-        {"query": search, "first": first},
+        {"searchQuery": search, "first": first},
         purpose="discover daemon PR candidates",
     )
     search_node = ((parsed.get("data") or {}).get("search") or {})
@@ -618,8 +618,8 @@ def discover_daemon_candidates(
 
 
 _DAEMON_SEARCH_QUERY = (
-    "query($query:String!,$first:Int!){"
-    "search(type:ISSUE,query:$query,first:$first){pageInfo{hasNextPage endCursor}nodes{"
+    "query($searchQuery:String!,$first:Int!){"
+    "search(type:ISSUE,query:$searchQuery,first:$first){pageInfo{hasNextPage endCursor}nodes{"
     "... on PullRequest{"
     "number title url isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
     "repository{nameWithOwner} "
@@ -630,7 +630,7 @@ _DAEMON_SEARCH_QUERY = (
     "... on StatusContext{context state}"
     "}}}}}} "
     "files(first:100){pageInfo{hasNextPage}nodes{path}}"
-    "}}}}}"
+    "}}}}"
 )
 
 
