@@ -30,6 +30,12 @@ reachable only on the tailnet. Do not expose OpenBao on a public listener.
 - `openbao/emergency-revoke-openbao.sh` provides tested plan/execute commands
   for lease revocation, lease-prefix revocation, AppRole SecretID/token accessor
   revocation, and emergency seal, using the same per-dev role/policy naming.
+- `openbao/secret-migration-inventory.tsv` is a value-free Operator template
+  for source refs, target OpenBao refs, owners, rotation refs, rollback refs,
+  and evidence refs. It contains no real secret values.
+- `openbao/verify-secret-migration-inventory.sh` validates the migration
+  inventory shape and rejects common token, key, password, and PEM patterns
+  before any migration window is approved.
 
 ## Host Provisioning
 
@@ -102,6 +108,95 @@ instance, set `OPENBAO_RESTORE_DRILL_UNSEAL_KEY_FILE` to a local drill-only file
 containing the restored-state unseal key. These are drill-only credentials and
 must not be production custody material.
 
+## Secret Migration Gate
+
+Live migration is allowed only after Operator bringup, audit activation,
+fail-closed probing, encrypted snapshot, restore drill, and emergency revocation
+rehearsal all have value-free evidence. Agents and containers must not receive
+OpenBao root/admin tokens, unseal shares, RoleIDs, SecretIDs, wrapping tokens,
+PEMs, model-provider keys, bootstrap tokens, reviewer tokens, signing keys, or
+runtime secret values.
+
+Migration is one approved window per secret family. The Operator records only
+refs and evidence handles in the inventory:
+
+```bash
+docs/devops/openbao/verify-secret-migration-inventory.sh \
+  docs/devops/openbao/secret-migration-inventory.tsv
+```
+
+For a real window, use an Operator-controlled copy of the same TSV shape outside
+the repo. The live inventory may name source custody handles and target OpenBao
+logical paths, but it must not contain literal secret material and must not be
+committed back to this repository. Each row must have:
+
+- `source_ref`: where the Operator can retrieve the current value, expressed as
+  a handle such as `source-ref:legacy-host/dev-1/runtime-token`.
+- `target_ref`: the intended OpenBao logical ref, such as
+  `openbao-ref:ce-kv/forge/github-apps/primary/private-key`.
+- `owner_ref`, `rotation_ref`, `rollback_ref`, and `evidence_ref`: value-free
+  governance handles.
+- `status`: one of `planned`, `imported`, `verified`, `cutover`,
+  `rolled-back`, or `decommissioned`.
+
+Before import:
+
+1. Freeze new broker secret materialization for the target family.
+2. Take and copy an encrypted off-host snapshot.
+3. Run a restore drill from the current snapshot into a throwaway instance.
+4. Validate the value-free inventory with
+   `verify-secret-migration-inventory.sh`.
+5. Confirm the migration importer token is time-limited, scoped only to the
+   listed target paths, and revoked after the window.
+
+The verifier is a preflight guard, not a sanitizer. If it fails, discard the
+working copy or move it back to Operator custody; do not edit secret-bearing
+material in an agent container to make the file pass.
+
+During import, secret values may be materialized only in an Operator-controlled
+terminal or tmpfs on the trusted host. Do not write values to git, issue
+comments, shell history, persistent temp files, container layers, CI logs, or
+chat. Use OpenBao commands with Operator-provided stdin or tmpfs files and
+record only target refs, metadata refs, accessors, policy names, and audit refs.
+
+After import:
+
+1. Verify metadata for every target ref with `bao kv metadata get` or the
+   equivalent OpenBao API call.
+2. Verify a broker-mediated materialization path using a canary or already
+   authorized low-risk row before migrating higher-risk material.
+3. Cut over consumers by ref, not by copying values back out of OpenBao.
+4. Revoke the migration importer token, revoke any one-use wrappers, and record
+   value-free audit/accessor refs.
+5. Take a post-import encrypted snapshot and run a restore drill before
+   decommissioning the source.
+
+## Rollback And Restore
+
+Rollback is chosen by failure class:
+
+- Inventory or preflight failure: abort the window. No OpenBao state mutation is
+  allowed.
+- Import failure before cutover: freeze broker issuance for the affected target
+  refs, revoke importer and wrapper credentials, delete or quarantine only the
+  newly imported target refs, and keep consumers on the legacy source handles.
+- Cutover failure with OpenBao healthy: move consumers back to the previous
+  value-free source refs, revoke OpenBao tokens and dynamic leases issued during
+  the window, and keep imported refs disabled until rotation or reimport.
+- OpenBao state corruption: freeze all broker issuance, preserve audit logs,
+  seal OpenBao if compromise is suspected, and restore production only from the
+  last encrypted snapshot that passed a throwaway restore drill and Operator
+  quorum approval.
+- Source compromise discovered during migration: stop migration for that family,
+  rotate at the upstream provider first, import only the rotated value through
+  Operator custody, then decommission the compromised source handle.
+
+Restore to production is a break-glass Operator act. Never restore a snapshot
+over production from this repository or from an agent/container lane. Evidence
+for rollback or restore must remain value-free: snapshot id, encrypted artifact
+digest, restore drill proof id, target refs, revoked accessors, lease ids, and
+Operator ratification refs.
+
 ## Emergency Revocation
 
 Every emergency action is bound to a per-dev identity:
@@ -150,4 +245,6 @@ The following actions are not performed by these artifacts:
 - Initial root token use and revocation.
 - AppRole creation with live policy grants.
 - Response-wrapped secret-zero token minting and injection.
-- Live secret migration.
+- Live secret value migration. This runbook defines gates, inventory shape, and
+  rollback/restore handling only; the actual value import is Operator-executed
+  during a ratified window.

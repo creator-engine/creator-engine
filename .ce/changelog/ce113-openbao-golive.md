@@ -25,3 +25,9 @@ Follow-on fix: changed the audit stanza to OpenBao 2.5.x's required
 `options = { ... }` map syntax, made provision/apply and Operator bringup
 reload the service so declarative audit devices activate, and extended the
 2.5.5 smoke to prove `bao audit list` shows the file audit device after reload.
+
+Track B update: added the no-real-secrets migration gate, value-free migration
+inventory template, inventory verifier, rollback/restore workflow, and Operator
+bringup checklist additions. The workflow documents secret refs and governance
+evidence only; live secret value import remains an Operator-ratified action
+outside the repo and outside agent/container custody.

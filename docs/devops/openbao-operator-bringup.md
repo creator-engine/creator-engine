@@ -132,6 +132,18 @@ Operator records value-free evidence for:
 - Restore drill into a throwaway instance passes and writes proof JSON.
 - Emergency revocation plan has been rehearsed by lease, AppRole accessor, and
   emergency seal.
+- The migration inventory validates with
+  `docs/devops/openbao/verify-secret-migration-inventory.sh` and contains only
+  source refs, target refs, owner refs, rotation refs, rollback refs, evidence
+  refs, statuses, and notes.
+- The migration importer policy/token for the first window is time-limited,
+  scoped only to listed target refs, denies broad list/readback outside those
+  refs, and has a recorded revocation step.
+- Initial root-token revocation is complete or the remaining root-token custody
+  exception has explicit Operator quorum approval; migration approval does not
+  grant agents or CI access to root/admin credentials.
 
 Only after those checks pass may the Operator separately ratify live secret
-migration.
+migration. Migration is performed by the Operator from controlled custody only:
+do not place secret values in this repository, shell history, issue comments,
+PRs, chat transcripts, persistent temp files, container layers, or CI logs.
