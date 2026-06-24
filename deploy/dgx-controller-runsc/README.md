@@ -84,6 +84,52 @@ The wrapper refuses `CE_DGX_RUNTIME=runsc`, `CE_DGX_RUNTIME=runsc-gvproxy`, and
 Docker `--network` by default. Those overrides exist only for
 operator-directed diagnostics and mirror the `deploy/dgx-runsc/` DGX evidence.
 
+## Detached Launch (canonical)
+
+The canonical way to keep the contained Controller alive is detached mode, via
+either the `--detach` flag or `CE_DGX_CONTROLLER_DETACH=1`:
+
+```bash
+CE_DGX_REPO=/path/to/creator-engine \
+CE_DGX_CONTROLLER_HOME=/home/cedev4/.ce/controller-home \
+CE_DGX_CLAUDE_BIN=/home/cedev4/.local/bin/claude \
+deploy/dgx-controller-runsc/run-controller-runsc.sh --detach tui
+```
+
+Detached mode runs `docker run -d` under a deterministic, named, persistent
+container (`--name`, default `ce-dgx-controller`, overridable via
+`CE_DGX_CONTROLLER_CONTAINER_NAME`). It deliberately drops `--rm`: a crashed or
+stopped controller stays inspectable for forensics. A prior live outage was
+worsened because `--rm` deleted the container before its logs and exit code
+could be read.
+
+After the container starts, the wrapper polls
+`docker exec <name> herdr pane read w1:p1` in a bounded loop (up to ~60 tries,
+0.5s apart). If herdr never responds, the wrapper fails loudly with a non-zero
+exit, naming the container and the teardown command. On success it prints the
+canonical drive path and the retire command, then returns 0 without blocking:
+
+```bash
+# Attach to drive the controller (canonical):
+docker exec -it ce-dgx-controller herdr
+
+# Retire the controller:
+docker stop ce-dgx-controller && docker rm ce-dgx-controller
+```
+
+The Claude controller TUI still renders into the herdr pane (the `-it` TTY
+flags are kept in detached mode), so attaching with `herdr` gives the live
+interactive controller.
+
+> **tmux is DEPRECATED / legacy** for keeping the Controller alive. The old
+> pattern of wrapping the controller in a host tmux session is superseded by
+> detached mode: the named persistent container plus the herdr attach path
+> removes the tmux crutch entirely. Use `--detach` and
+> `docker exec -it ce-dgx-controller herdr`, not tmux.
+
+The foreground (non-`--detach`) path is unchanged: it keeps `docker run --rm`
+and `exec`s Docker so the controller runs in the calling terminal.
+
 ## Runtime Registration
 
 Use the same Docker runtime family as the merged Codex DGX artifact:

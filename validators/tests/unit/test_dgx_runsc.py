@@ -109,6 +109,55 @@ def test_codex_tui_dry_run_lets_image_entrypoint_select_default_harness() -> Non
     assert argv[-1] == "creator-engine/codex-runsc:test"
 
 
+def test_codex_detach_flag_dry_run_uses_detached_lifecycle_flags() -> None:
+    result = run_wrapper("--detach", "exec", "hello")
+
+    argv = dry_run_argv(result)
+
+    assert argv[:2] == ["docker", "run"]
+    assert "-d" in argv
+    assert "--name" in argv
+    assert "ce-dgx-codex" in argv
+    assert argv[argv.index("--name") + 1] == "ce-dgx-codex"
+    assert "--rm" not in argv
+    # Posture invariants preserved in detached mode.
+    assert "--runtime=runsc-gvproxy-ptrace" in argv
+    assert "--security-opt=no-new-privileges" in argv
+    assert "--cap-drop=ALL" in argv
+
+
+def test_codex_detach_custom_container_name_propagates_to_name_flag() -> None:
+    result = run_wrapper("--detach", "exec", "hello", CE_DGX_CONTAINER_NAME="my-seat")
+
+    argv = dry_run_argv(result)
+
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "my-seat"
+    assert "ce-dgx-codex" not in argv
+    assert "--rm" not in argv
+
+
+def test_codex_default_dry_run_keeps_rm_and_no_detach_flags() -> None:
+    result = run_wrapper("exec", "hello")
+
+    argv = dry_run_argv(result)
+
+    assert "--rm" in argv
+    assert "-d" not in argv
+    assert "--name" not in argv
+
+
+def test_codex_detach_env_without_flag_triggers_detached_argv() -> None:
+    result = run_wrapper("exec", "hello", CE_DGX_DETACH="1")
+
+    argv = dry_run_argv(result)
+
+    assert "-d" in argv
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "ce-dgx-codex"
+    assert "--rm" not in argv
+
+
 def test_entrypoint_fail_closed_and_uses_herdr_control_path_only_for_cli() -> None:
     text = ENTRYPOINT.read_text(encoding="utf-8")
 
