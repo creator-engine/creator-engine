@@ -40,14 +40,51 @@ The launcher always applies:
 - repo, Codex home, contained Codex config, and Codex binary/package bind mounts
 - `CODEX_HOME`, `TERM`, and `CE_DGX_HARNESS` for the image entrypoint
 
+## Operations
+
+VPS contained seats need host Docker access before launch. Add the seat user to
+the Docker group, then start a fresh tmux server so new shells inherit the group
+membership:
+
+```bash
+sudo usermod -aG docker <seat-user>
+```
+
+Stage a clean home before launching the contained TUI:
+
+```bash
+deploy/vps-runsc/run-vps-runsc.sh tui
+```
+
+The generated contained config must pre-trust `/workspace/creator-engine` and
+set the model and effort. The readonly config overlay shadows the home config
+inside the container, so these values must be present in the generated config;
+the launcher fix for this is tracked in PR 401.
+
+After launch, the containment probe should report `backend=gvisor` and
+`contained=true`. A reported `ns:net:host` value is the documented
+`--network=host` egress gap for this recipe; the probe is now fail-closed for
+unexpected containment state per PR 402.
+
+For in-box exec acceptance, run `git log` inside the box. It should succeed and
+confirms the `danger-full-access` sandbox fix for nested execution under runsc.
+
+Contained seats are currently commit-only. They can create commits, but cannot
+submit PR reviews yet.
+
 ## Contained Codex Config
 
 The launcher generates a per-seat contained Codex config and bind-mounts it over
 `${CODEX_HOME}/config.toml` inside the container:
 
 ```toml
+model = "gpt-5.5"
+model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+[projects."/workspace/creator-engine"]
+trust_level = "trusted"
 ```
 
 This is deliberate for the VPS runsc recipe. Codex' default
