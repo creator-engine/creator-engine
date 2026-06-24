@@ -4,11 +4,12 @@ Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention). 
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=b62c132eb0bc0acd7acb04ae21007839d58456df6d5c73f32801865f622eff34
+AUTHORIZED_PATHS_SHA256=7d291366155f4721166a5bffeb0f1d0a9dd6e861d1279f8524fd2df422b47b97
 
 ```text
+.ce/changelog/ce229-live-action-scope-guard.md
 .ce/pr-manifests/ce229-live-action-scope-guard.md
 validators/creator_engine_validator/forge/eviction_detection.py
 validators/creator_engine_validator/forge/review_pickup.py
