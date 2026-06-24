@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from creator_engine_validator import codex_pretooluse as cpt
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_normalize_maps_bash_tool_input_command():
@@ -154,3 +158,138 @@ def test_run_fails_closed_on_hook_check_runner_exception_without_details(tmp_pat
     assert "hook-check invocation failed" in reason
     assert "synthetic-secret-token-value" not in out
     assert "synthetic-secret-token-value" not in reason
+
+
+def test_hook_check_cli_pretooluse_without_pyyaml_allows_and_denies(tmp_path):
+    script = r'''
+import contextlib
+import importlib.abc
+import io
+import json
+import sys
+
+
+class BlockYaml(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "yaml" or fullname.startswith("yaml."):
+            raise ModuleNotFoundError("blocked yaml")
+        return None
+
+
+sys.meta_path.insert(0, BlockYaml())
+for name in list(sys.modules):
+    if name == "yaml" or name.startswith("yaml."):
+        del sys.modules[name]
+
+from creator_engine_validator.cli import main
+
+assert "yaml" not in sys.modules
+
+
+def call(command):
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "ce": {"posture": "governed", "seat_class": "worker"},
+    }
+    old_stdin = sys.stdin
+    out = io.StringIO()
+    sys.stdin = io.StringIO(json.dumps(event))
+    try:
+        with contextlib.redirect_stdout(out):
+            code = main(["hook-check", "--stdin", "--format", "claude", "--posture", "governed"])
+    finally:
+        sys.stdin = old_stdin
+    return {
+        "code": code,
+        "payload": json.loads(out.getvalue()),
+        "yaml_imported": "yaml" in sys.modules,
+    }
+
+
+print(json.dumps([call("git status --short"), call("git push origin main")]))
+'''
+    env = dict(os.environ)
+    validators_root = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = str(validators_root)
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        text=True,
+        capture_output=True,
+        cwd=tmp_path,
+        env=env,
+        check=True,
+    )
+    allow, deny = json.loads(completed.stdout)
+    assert allow["code"] == 0
+    assert allow["payload"]["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert allow["yaml_imported"] is False
+    assert deny["code"] == 0
+    assert deny["payload"]["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "restricted mechanic (deploy)" in deny["payload"]["hookSpecificOutput"]["permissionDecisionReason"]
+    assert deny["yaml_imported"] is False
+
+
+def test_codex_wrapper_without_pyyaml_allows_ls_and_denies_git_push(tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.mkdir()
+    (blocker / "sitecustomize.py").write_text(
+        """
+import importlib.abc
+
+
+class BlockYaml(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "yaml" or fullname.startswith("yaml."):
+            raise ModuleNotFoundError("blocked yaml")
+        return None
+
+
+import sys
+sys.meta_path.insert(0, BlockYaml())
+for name in list(sys.modules):
+    if name == "yaml" or name.startswith("yaml."):
+        del sys.modules[name]
+""",
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    validators_root = REPO_ROOT / "validators"
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(blocker)
+        + os.pathsep
+        + str(validators_root)
+        + (os.pathsep + existing if existing else "")
+    )
+    wrapper = REPO_ROOT / ".codex" / "hooks" / "ce-pretooluse-codex.py"
+
+    def run(command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(wrapper)],
+            input=json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "cwd": str(tmp_path),
+                    "ce": {"posture": "governed", "seat_class": "worker"},
+                }
+            ),
+            text=True,
+            capture_output=True,
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+        )
+
+    allow = run("ls")
+    assert allow.stdout == ""
+    assert allow.stderr == ""
+
+    deny = run("git push origin main")
+    assert deny.stderr == ""
+    payload = json.loads(deny.stdout)
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "restricted mechanic (deploy)" in payload["hookSpecificOutput"]["permissionDecisionReason"]

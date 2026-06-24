@@ -200,6 +200,7 @@ container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(exec)
 fi
+container_cmd+=(--dangerously-bypass-hook-trust)
 container_cmd+=("$@")
 
 repo_mount="type=bind,source=${CE_DGX_REPO},target=${CE_DGX_CONTAINER_REPO}"

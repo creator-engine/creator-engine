@@ -1145,7 +1145,7 @@ def test_deny_stands_when_refusal_writer_raises(tmp_path, monkeypatch):
     def _boom(*_args, **_kwargs):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(hc.yaml, "safe_dump", _boom)
+    monkeypatch.setattr(hc, "_yaml_safe_dump_document", _boom)
     decision = hook_check.evaluate(_bash_event("git push origin main"), _governed_ctx(tmp_path))
     assert decision.decision == "deny"  # the deny STANDS; no exception escaped
     assert not _refusal_chain_file(tmp_path).exists()

@@ -36,19 +36,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-import yaml
-
-from .checks import completion_report_required_for_envelope, completion_report_schema
-from .checks import mutation_class
-from .checks.completion_report_terminal_sections import CANONICAL_HEADERS, _header_positions
-from .checks.path_manifest_fidelity import extract_manifest_paths_from_file
 from .seat_class import (
     FOREMAN_DELEGATION_REQUIRED_REASON,
     classify_work_class,
     foreman_would_deny,
     resolve_seat_class,
 )
-from .worker_spawn import WORKER_RECORD_REL
 
 # v3.5-B.3 refusal-record seam: the SHARED hash-chain substrate only
 # (V1->shared is the allowed boundary edge). The v3 evidence-persistence sink
@@ -69,6 +62,7 @@ OUT_OF_MANIFEST_REASON = "tracked path is outside the ratified path manifest"
 NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
 FOREMAN_DELEGATION_REASON = FOREMAN_DELEGATION_REQUIRED_REASON
 DEFAULT_FOREMAN_MUTATION_CLASS = "code"
+WORKER_RECORD_REL = Path(".ce/state/workers")
 
 
 # --------------------------------------------------------------------------
@@ -262,6 +256,28 @@ _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
         "merge-base",
     }
 )
+
+
+def _yaml_safe_load_text(text: str) -> Any:
+    import yaml
+
+    return yaml.safe_load(text)
+
+
+def _yaml_safe_dump_document(document: Any) -> str:
+    import yaml
+
+    return yaml.safe_dump(document, sort_keys=True, allow_unicode=True)
+
+
+def _extract_manifest_paths_from_file(path: Path) -> tuple[str, ...]:
+    try:
+        from .checks.path_manifest_fidelity import extract_manifest_paths_from_file
+    except Exception:
+        return ()
+    return tuple(extract_manifest_paths_from_file(path))
+
+
 _GIT_BUILTINS = _GIT_SAFE_READONLY_SUBCOMMANDS | frozenset(
     {
         # Restricted outward/binding side effects.
@@ -969,8 +985,8 @@ def _valid_worker_delegation_record(
     posture_root: str | None,
 ) -> dict | None:
     try:
-        record = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        record = _yaml_safe_load_text(path.read_text(encoding="utf-8"))
+    except Exception:
         return None
     if not isinstance(record, dict):
         return None
@@ -1058,6 +1074,11 @@ def _closeout_violation(text: str) -> str | None:
     canonical section may be satisfied either by its header or by an explicit
     no-next-gate statement in the body.
     """
+    try:
+        from .checks.completion_report_terminal_sections import CANONICAL_HEADERS, _header_positions
+    except Exception:
+        return None
+
     positions = _header_positions(text)
     present = {header for header, _ in positions}
     missing = [header for header in CANONICAL_HEADERS if header not in present]
@@ -1070,6 +1091,11 @@ def _closeout_violation(text: str) -> str | None:
 
 
 def _completion_report_block(report_path: str) -> str | None:
+    try:
+        from .checks import completion_report_required_for_envelope, completion_report_schema
+    except Exception as exc:
+        return f"referenced completion report could not be checked: {exc}"
+
     results = [
         completion_report_schema.run([Path(report_path)]),
         completion_report_required_for_envelope.run([Path(report_path)]),
@@ -1207,7 +1233,7 @@ def _record_refusal(event: dict, context: HookContext, decision: HookDecision) -
         path = Path(root).joinpath(*_REFUSAL_CHAIN_DIRPARTS) / _REFUSAL_CHAIN_FILENAME
         records: list[dict[str, Any]] = []
         if path.exists():
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = _yaml_safe_load_text(path.read_text(encoding="utf-8"))
             if not isinstance(doc, dict):
                 return  # unreadable chain: skip recording, never overwrite evidence
             existing = doc.get("records")
@@ -1225,7 +1251,7 @@ def _record_refusal(event: dict, context: HookContext, decision: HookDecision) -
                 "the deny decision NEVER depends on this file."
             ),
         }
-        text = yaml.safe_dump(chain_doc, sort_keys=True, allow_unicode=True)
+        text = _yaml_safe_dump_document(chain_doc)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     except Exception:
@@ -1430,7 +1456,10 @@ def _resolve_posture(
         # unallocated / unpinned seat. Fail to ungoverned (advisory floor); a
         # tracked examples/** fixture can no longer flip it to governed.
         return "ungoverned", None
-    from .checks.pane_registry import evaluate_posture
+    try:
+        from .checks.pane_registry import evaluate_posture
+    except Exception:
+        return "ungoverned", None
 
     result = evaluate_posture([discovery_root])
     return result.posture, result.claim
@@ -1438,7 +1467,7 @@ def _resolve_posture(
 
 def _resolve_manifest(manifest_doc, ce, posture_root, bound_claim) -> ResolvedManifest:
     if manifest_doc:
-        paths = extract_manifest_paths_from_file(Path(manifest_doc))
+        paths = _extract_manifest_paths_from_file(Path(manifest_doc))
         if paths:
             return ResolvedManifest(tuple(paths))
     ce_paths = ce.get("manifest_paths")
@@ -1451,7 +1480,7 @@ def _resolve_manifest(manifest_doc, ce, posture_root, bound_claim) -> ResolvedMa
         if isinstance(envelope_ref, str) and envelope_ref:
             for candidate in (Path(posture_root) / envelope_ref, Path(envelope_ref)):
                 if candidate.is_file():
-                    paths = extract_manifest_paths_from_file(candidate)
+                    paths = _extract_manifest_paths_from_file(candidate)
                     if paths:
                         return ResolvedManifest(tuple(paths))
     return ResolvedManifest()
@@ -1465,11 +1494,14 @@ def _resolve_side_effect_authority(ce: dict, posture_root: str | None) -> dict |
     schema-valid ``reviewer_authority_envelope`` is. Fail-closed: any load/validation
     problem yields ``None`` (no authority).
     """
-    from .checks.reviewer_authority_envelope import (
-        KEY as _RVA_KEY,
-        validate_reviewer_authority_envelope_record,
-    )
-    from .loader import LoaderError, load_yaml
+    try:
+        from .checks.reviewer_authority_envelope import (
+            KEY as _RVA_KEY,
+            validate_reviewer_authority_envelope_record,
+        )
+        from .loader import LoaderError, load_yaml
+    except Exception:
+        return None
 
     candidate: Any = None
     inline = ce.get("reviewer_authority")

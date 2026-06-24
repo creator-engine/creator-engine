@@ -258,8 +258,8 @@ def test_send_text_uses_controller_socket_and_does_not_expose_socket_to_seat_env
     assert hs.HERDR_SOCKET_ENV not in terminal
 
 
-def test_send_issues_enter_after_send_text_and_confirms_pending_input_left() -> None:
-    runner = FakeRunner(read_outputs=["prompt cleared"])
+def test_send_treats_submitted_text_in_scrollback_with_empty_input_as_committed() -> None:
+    runner = FakeRunner(read_outputs=["printf ready\n"])
     session = hs.HerdrSession(
         socket_path="/run/ce/herdr/control.sock",
         herdr_binary="/opt/herdr",
@@ -288,12 +288,12 @@ def test_send_issues_enter_after_send_text_and_confirms_pending_input_left() -> 
     ]
 
 
-def test_send_fails_closed_when_pending_input_remains_after_enter_retries() -> None:
+def test_send_fails_closed_when_submitted_text_remains_on_active_input_line() -> None:
     runner = FakeRunner(
         read_outputs=[
-            "input\nprintf ready",
-            "input\nprintf ready",
-            "input\nprintf ready",
+            "scrollback\nprintf ready",
+            "scrollback\nprintf ready",
+            "scrollback\nprintf ready",
         ]
     )
     session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
