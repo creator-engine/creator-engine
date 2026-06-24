@@ -274,6 +274,192 @@ def test_poll_requires_a_token():
         pickup.poll(token="", transport=_fake_transport([_empty_search()]))
 
 
+class _FakeReviewPickupForge:
+    def __init__(self, *, author="author-a", head="h" * 40, requested=None, reviews=None):
+        self.author = author
+        self.head = head
+        self.requested = list(requested or [])
+        self.reviews = list(reviews or [])
+        self.review_requests: list[tuple[str, str | None]] = []
+        self.dismissals: list[tuple[str, str | None]] = []
+
+    def runner(self, argv, input_text=None):
+        args = list(argv)
+        method = "GET"
+        path = ""
+        i = 2
+        while i < len(args):
+            tok = args[i]
+            if tok in ("--method", "-X"):
+                method = args[i + 1]
+                i += 2
+                continue
+            if tok in ("--input", "-f"):
+                i += 2
+                continue
+            if not tok.startswith("-") and not path:
+                path = tok
+            i += 1
+        bare_path = path.split("?", 1)[0]
+        body = json.loads(input_text) if input_text else {}
+
+        if bare_path.endswith("/requested_reviewers") and method == "POST":
+            self.review_requests.append((path, input_text))
+            for reviewer in body.get("reviewers", []):
+                if reviewer not in self.requested:
+                    self.requested.append(reviewer)
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({}), stderr="")
+        if bare_path.endswith("/dismissals") and method == "PUT":
+            self.dismissals.append((path, input_text))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({}), stderr="")
+        if bare_path.endswith("/reviews") and method == "GET":
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.reviews), stderr="")
+        if "/pulls/" in bare_path and method == "GET":
+            payload = {
+                "user": {"login": self.author},
+                "head": {"sha": self.head},
+                "requested_reviewers": [{"login": r} for r in self.requested],
+            }
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr=f"unexpected {method} {path}")
+
+
+def test_review_pickup_query_is_typed_and_scoped():
+    spec = pickup.review_pickup_query(repo="o/r")
+    assert spec.reason == "awaiting_review"
+    assert spec.query == "is:open is:pull-request repo:o/r"
+    _assert_explicit_search_type(spec.query)
+
+
+def test_poll_review_pickup_routes_awaiting_pr_to_distinct_non_author():
+    head = "a" * 40
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head=head)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=7, pr=True)))])
+
+    result = pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-2", "ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item["kind"] == "review_request"
+    assert item["reason"] == "awaiting_review"
+    assert item["author"] == "ce-dev-2"
+    assert item["assigned_reviewer"] == "ce-dev-3"
+    assert item["requested"] is True
+    assert item["thread_id"] == f"review-pickup:o/r:review_request:7:{head[:12]}"
+    assert len(forge.review_requests) == 1
+    assert '"ce-dev-3"' in (forge.review_requests[0][1] or "")
+
+
+def test_poll_review_pickup_reports_existing_non_author_request_without_duplicate_apply():
+    forge = _FakeReviewPickupForge(author="ce-dev-2", requested=["ce-dev-3"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=8, pr=True)))])
+
+    result = pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        apply=True,
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0]["reason"] == "review_already_requested"
+    assert result.items[0]["assigned_reviewer"] == "ce-dev-3"
+    assert result.items[0]["requested"] is False
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_dismisses_superseded_cr_and_rerequests_reviewer():
+    head = "b" * 40
+    reviews = [
+        {"id": 11, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}},
+        {"id": 22, "state": "APPROVED", "commit_id": head, "user": {"login": "ce-dev-4"}},
+    ]
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head=head, reviews=reviews)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=9, pr=True)))])
+
+    result = pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3", "ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        apply=True,
+    )
+
+    # The fresh non-author approval means the PR is no longer awaiting pickup,
+    # but the stale CHANGES_REQUESTED review is still deterministically dismissed
+    # with the ce-ops#151 audit trail before the item is skipped.
+    assert result.items == ()
+    assert len(forge.dismissals) == 1
+    assert "reviews/11/dismissals" in forge.dismissals[0][0]
+    assert "ce-ops#151" in (forge.dismissals[0][1] or "")
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_rerequests_stale_reviewer_when_no_fresh_approval():
+    head = "c" * 40
+    reviews = [
+        {"id": 11, "state": "CHANGES_REQUESTED", "commit_id": "old1", "user": {"login": "ce-dev-3"}},
+    ]
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head=head, reviews=reviews)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=10, pr=True)))])
+
+    result = pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        apply=True,
+    )
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item["reason"] == "stale_review_rerequest"
+    assert item["assigned_reviewer"] == "ce-dev-3"
+    assert item["re_request_review_ids"] == [11]
+    assert forge.dismissals == []
+    assert len(forge.review_requests) == 1
+    assert '"ce-dev-3"' in (forge.review_requests[0][1] or "")
+
+
+def test_cli_pickup_reviews_routes_with_json(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    pat = tmp_path / "controller.pat"
+    pat.write_text("ghp_t\n", encoding="utf-8")
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head="d" * 40)
+    monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_pickup_transport",
+        lambda: _fake_transport([(200, {}, _body(_hit(repo="o/r", number=12, pr=True)))]),
+    )
+    monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity, token=None: forge.runner)
+
+    code = ce_cli.main([
+        "pickup", "reviews",
+        "--identity", "controller",
+        "--keys-dir", str(tmp_path),
+        "--repo", "o/r",
+        "--seat", "ce-dev-2,ce-dev-3",
+        "--apply",
+        "--json",
+    ])
+
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+    assert out["items"][0]["assigned_reviewer"] == "ce-dev-3"
+    assert out["items"][0]["requested"] is True
+
+
 def test_fake_transport_rejects_untyped_query_like_github_422():
     """The fake transport mirrors GitHub's 422: a query lacking a type qualifier
     is rejected (this is what let the ce-ops#182 bug ship — the fake was lenient).
