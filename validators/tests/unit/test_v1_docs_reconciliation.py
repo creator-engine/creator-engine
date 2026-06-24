@@ -56,6 +56,7 @@ def test_as_built_ce_inventory_matches_expected():
         "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "check", "doctor", "init", "launch", "hud",
         "verify-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",
+        "containment-status",
     }
 
 

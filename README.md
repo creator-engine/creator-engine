@@ -65,8 +65,8 @@ platform evolves:
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
-  `pickup`, `bootstrap`, `verify-install`, `onboard`, `publish-branch`, and
-  `harness-matrix`.
+  `pickup`, `bootstrap`, `verify-install`, `onboard`, `publish-branch`,
+  `harness-matrix`, and `containment-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
@@ -91,7 +91,12 @@ platform evolves:
   is the ce-ops#220 PROBED harness-support capability matrix: it derives the
   harness x {Ring-0, Ring-1, Ring-2, containment} support table by inspecting
   the live adapter specs / committed config at runtime (never hand-asserted in
-  prose), emitting Markdown by default or `--json`. `ce hud` is an alias for the visible `ce launch` Controller-seat
+  prose), emitting Markdown by default or `--json`. `ce containment-status`
+  is the ce-ops#222 fleet-wide containment attestation: it probes each requested
+  seat's live PID with `ce containment-probe` semantics and reports
+  `{seat, contained, backend, herdr_session, ring1}` as JSON or a table, failing
+  closed for unprobeable seats and never deriving containment from config or
+  prose. `ce hud` is an alias for the visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
 - **`cev3`** is the v3 work-driving entry point in this repository. It covers the

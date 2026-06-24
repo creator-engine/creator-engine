@@ -18,6 +18,8 @@ The three load-bearing cases (ce-ops#221):
 from __future__ import annotations
 
 import json
+import stat
+from pathlib import Path
 
 import pytest
 
@@ -33,6 +35,16 @@ _DROPPED_CAP = "00000000a80425fb"  # typical docker default-cap effective set
 def _write(path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_bytes(path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def _write_executable(path, content: str) -> None:
+    _write(path, content)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
 def _make_proc(
@@ -57,6 +69,12 @@ def _make_proc(
         _write(base / "cmdline", "\0".join(cmdline.split(" ")) + "\0")
     if comm is not None:
         _write(base / "comm", comm + "\n")
+
+
+def _use_target_root(proc_root, pid: str, target_root) -> None:
+    root = proc_root / pid / "root"
+    root.unlink(missing_ok=True)
+    root.symlink_to(target_root, target_is_directory=True)
 
 
 def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
@@ -371,6 +389,78 @@ def test_verdict_is_pure_and_deterministic(tmp_path):
     assert a == b
 
 
+def test_ring1_probe_resolves_shim_under_target_proc_root(tmp_path):
+    proc_root = tmp_path / "proc"
+    target_root = tmp_path / "target-root"
+    marker = tmp_path / "target-ring1-args"
+    target_path_dir = "/__ce_target_only_ring1__/shim"
+    (proc_root / "6001").mkdir(parents=True)
+    target_shim_dir = target_root / target_path_dir.lstrip("/")
+    target_shim_dir.mkdir(parents=True)
+    target_shim_dir.chmod(0o700)
+    assert not (Path(target_path_dir) / "git").exists()
+    _write_executable(
+        target_shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _use_target_root(proc_root, "6001", target_root)
+    _write_bytes(
+        proc_root / "6001" / "environ",
+        (
+            f"PATH={target_path_dir}:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={marker}\0"
+        ).encode("utf-8"),
+    )
+
+    verdict = containment_probe.probe_ring1_enforcement(
+        "6001",
+        reader=containment_probe.ProcReader(root=str(proc_root)),
+    )
+
+    assert verdict["enforced"] is True
+    assert verdict["shim_path"] == f"{target_path_dir}/git"
+    assert marker.read_text(encoding="utf-8").strip().startswith("push --dry-run")
+
+
+def test_ring1_probe_ignores_controller_host_shim_when_target_root_lacks_it(tmp_path):
+    proc_root = tmp_path / "proc"
+    target_root = tmp_path / "target-root"
+    marker = tmp_path / "host-ring1-args"
+    (proc_root / "6001").mkdir(parents=True)
+    target_root.mkdir()
+    _use_target_root(proc_root, "6001", target_root)
+
+    host_shim_dir = tmp_path / "host-ring1"
+    host_shim_dir.mkdir()
+    host_shim_dir.chmod(0o700)
+    _write_executable(
+        host_shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _write_bytes(
+        proc_root / "6001" / "environ",
+        (
+            f"PATH={host_shim_dir}:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={marker}\0"
+        ).encode("utf-8"),
+    )
+
+    verdict = containment_probe.probe_ring1_enforcement(
+        "6001",
+        reader=containment_probe.ProcReader(root=str(proc_root)),
+    )
+
+    assert verdict["enforced"] is False
+    assert verdict["reason"] == "guarded tool not found on target PATH"
+    assert not marker.exists()
+
+
 # --------------------------------------------------------------------------- #
 # CLI surface.
 # --------------------------------------------------------------------------- #
@@ -436,6 +526,76 @@ def test_cli_gvisor_process_exits_zero(tmp_path, capsys):
     assert rc == 0
     assert out["contained"] is True
     assert out["backend"] == "gvisor"
+
+
+def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, capsys):
+    target_root = tmp_path / "target-root"
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "5151",
+        ns={
+            "mnt": "mnt:[4026532500]",
+            "pid": "pid:[4026532501]",
+            "net": "net:[4026532502]",
+            "user": "user:[4026532503]",
+        },
+        cgroup="0::/system.slice/runsc-sandbox.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/run/runsc/rootfs",
+    )
+    _use_target_root(tmp_path, "5151", target_root)
+    shim_dir = target_root / "ring1-shim"
+    shim_dir.mkdir(parents=True)
+    shim_dir.chmod(0o700)
+    _write_executable(
+        shim_dir / "git",
+        "#!/usr/bin/env sh\n"
+        "printf '%s\\n' \"$*\" > \"$CE_RING1_PROBE_MARKER\"\n"
+        "exit 121\n",
+    )
+    _write_bytes(
+        tmp_path / "5151" / "environ",
+        (
+            "PATH=/ring1-shim:/usr/bin\0"
+            "CE_RING1_POSTURE=governed\0"
+            f"CE_RING1_PROBE_MARKER={tmp_path / 'ring1-args'}\0"
+        ).encode("utf-8"),
+    )
+    herdr = tmp_path / "herdr"
+    _write_executable(
+        herdr,
+        "#!/usr/bin/env sh\n"
+        "printf '{\"status\":\"ready\",\"pane_id\":\"%s\"}\\n' \"$4\"\n",
+    )
+
+    rc = ce_cli.main(
+        [
+            "containment-probe",
+            "5151",
+            "--proc-root",
+            str(tmp_path),
+            "--host-pid",
+            "1",
+            "--herdr-socket",
+            str(tmp_path / "control.sock"),
+            "--herdr-pane-id",
+            "pane-1",
+            "--herdr-binary",
+            str(herdr),
+            "--json",
+        ]
+    )
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert out["contained"] is True
+    assert out["attested"] is True
+    assert out["herdr_session"]["live"] is True
+    assert out["ring1_enforcement"]["enforced"] is True
+    assert (tmp_path / "ring1-args").read_text(encoding="utf-8").strip().startswith(
+        "push --dry-run"
+    )
 
 
 def test_cli_undeterminable_fails_closed(tmp_path, capsys):
