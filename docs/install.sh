@@ -18,6 +18,7 @@ CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-en
 CE_JSON=0
 CE_INVENTORY_ONLY=1
 CE_FIX_PATH=1
+UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
 downloaded=0
 reused=0
@@ -113,6 +114,82 @@ need_cmd() {
   fi
 }
 
+is_root() {
+  [ "$(id -u 2>/dev/null || printf 99999)" = "0" ]
+}
+
+can_sudo_noninteractive() {
+  command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+run_privileged_or_remediate() {
+  root_command="$1"
+  sudo_command="$2"
+  if is_root; then
+    sh -c "$root_command"
+    return $?
+  fi
+  if can_sudo_noninteractive; then
+    sh -c "$sudo_command"
+    return $?
+  fi
+  return 125
+}
+
+ssh_keygen_install_plan() {
+  if command -v apt-get >/dev/null 2>&1; then
+    printf '%s\t%s\n' \
+      "apt-get update && apt-get install -y openssh-client" \
+      "sudo apt-get update && sudo apt-get install -y openssh-client"
+  elif command -v dnf >/dev/null 2>&1; then
+    printf '%s\t%s\n' "dnf install -y openssh-clients" "sudo dnf install -y openssh-clients"
+  elif command -v yum >/dev/null 2>&1; then
+    printf '%s\t%s\n' "yum install -y openssh-clients" "sudo yum install -y openssh-clients"
+  elif command -v apk >/dev/null 2>&1; then
+    printf '%s\t%s\n' "apk add openssh-client" "sudo apk add openssh-client"
+  elif command -v pacman >/dev/null 2>&1; then
+    printf '%s\t%s\n' "pacman -Sy --needed openssh" "sudo pacman -Sy --needed openssh"
+  elif command -v brew >/dev/null 2>&1; then
+    printf '%s\t%s\n' "brew install openssh" "brew install openssh"
+  else
+    return 1
+  fi
+}
+
+remediate_ssh_keygen() {
+  command -v ssh-keygen >/dev/null 2>&1 && return 0
+  plan="$(ssh_keygen_install_plan || true)"
+  if [ -z "$plan" ]; then
+    fail missing_bootstrap_dependency "required command missing: ssh-keygen
+
+Install OpenSSH client, then re-run this installer.
+Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y openssh-client
+Fedora/RHEL/CentOS: sudo dnf install -y openssh-clients
+Alpine: sudo apk add openssh-client
+Arch: sudo pacman -Sy --needed openssh
+macOS/Homebrew: brew install openssh"
+  fi
+  OLDIFS="$IFS"
+  IFS=$'\t'
+  read -r root_command sudo_command <<EOF
+$plan
+EOF
+  IFS="$OLDIFS"
+  say "ssh-keygen not found; attempting OpenSSH client install"
+  set +e
+  run_privileged_or_remediate "$root_command" "$sudo_command"
+  status="$?"
+  set -e
+  if [ "$status" -ne 0 ] || ! command -v ssh-keygen >/dev/null 2>&1; then
+    fail missing_bootstrap_dependency "required command missing: ssh-keygen
+
+Automatic OpenSSH client install was not possible or did not provide ssh-keygen.
+Run this exact remediation command, then re-run this installer:
+  $sudo_command"
+  fi
+  say "ssh-keygen installed"
+}
+
 append_word() {
   if [ -n "$1" ]; then
     printf '%s %s\n' "$1" "$2"
@@ -122,8 +199,9 @@ append_word() {
 }
 
 preflight_bootstrap_commands() {
+  remediate_ssh_keygen
   missing_cmds=""
-  for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar; do
+  for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar sh; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       missing_cmds="$(append_word "$missing_cmds" "$cmd")"
     fi
@@ -142,13 +220,13 @@ Fedora/RHEL/CentOS:
 Alpine:
   sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep
 
-Python 3.14 and uv are not host prerequisites: after stock ssh-keygen verifies the signed spec, CE fetches the manifest-pinned uv tarball, verifies its hash, and installs CPython 3.14 in user space if no compatible Python is already present. E1 will not auto-sudo before trust verification."
+Python 3.14 and uv are remediated after stock ssh-keygen verifies the signed spec: CE installs uv with the official Astral installer when needed, then runs uv python install 3.14 in user space if no compatible Python is already present. If auto-provisioning is not possible, the installer prints the exact command to run and fails closed."
   fi
 }
 
 preflight_bootstrap_commands
 
-for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar; do
+for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar sh; do
   need_cmd "$cmd"
 done
 
@@ -435,6 +513,64 @@ find_host_python() {
     fi
   done
   return 1
+}
+
+prepend_path_dir() {
+  dir="$1"
+  case ":${PATH:-}:" in
+    *":${dir}:"*) ;;
+    *) PATH="${dir}${PATH:+:$PATH}"; export PATH ;;
+  esac
+}
+
+find_uv() {
+  for candidate in "${UV:-}" uv "${BOOTSTRAP_ROOT:-}/bin/uv" "${HOME:-}/.local/bin/uv" "${HOME:-}/.cargo/bin/uv"; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+uv_remediation() {
+  if [ -n "${HOME:-}" ]; then
+    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; export PATH=\"%s/.local/bin:\$PATH\"; uv --version\n" "$UV_INSTALLER_URL" "$HOME"
+  else
+    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; uv --version\n" "$UV_INSTALLER_URL"
+  fi
+}
+
+ensure_uv_available() {
+  UV_BIN="$(find_uv || true)"
+  if [ -n "$UV_BIN" ]; then
+    prepend_path_dir "$(dirname "$UV_BIN")"
+    return 0
+  fi
+  [ -n "${BOOTSTRAP_ROOT:-}" ] || fail uv_acquisition_failed "internal error: BOOTSTRAP_ROOT not set before uv acquisition"
+  UV_INSTALL_DIR="${BOOTSTRAP_ROOT}/bin"
+  mkdir -p "$UV_INSTALL_DIR" \
+    || fail uv_acquisition_failed "failed to create uv install directory $UV_INSTALL_DIR. Remediation: $(uv_remediation)"
+  say "uv not found; installing uv with the official Astral installer"
+  err="${TMPDIR_CE}/uv-installer.err"
+  rm -f "$err"
+  set +e
+  UV_INSTALL_DIR="$UV_INSTALL_DIR" sh -c "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" 2>"$err"
+  status="$?"
+  set -e
+  if [ "$status" -ne 0 ]; then
+    detail="$(tr '\n' ' ' <"$err" | sed 's/[[:space:]]\+/ /g')"
+    fail uv_acquisition_failed "uv is missing and official installer failed. Remediation: $(uv_remediation) detail=${detail:-uv installer failed}"
+  fi
+  UV_BIN="$(find_uv || true)"
+  [ -n "$UV_BIN" ] \
+    || fail uv_acquisition_failed "official uv installer completed but uv is not discoverable. Remediation: export PATH=\"${UV_INSTALL_DIR}:\$PATH\"; uv --version"
+  prepend_path_dir "$(dirname "$UV_BIN")"
 }
 
 state_value() {
@@ -780,21 +916,13 @@ ARTIFACT_CACHE="${BOOTSTRAP_ROOT}/artifacts/${SHA256S_SHA}"
 PYTHON_BIN="$(find_host_python || true)"
 if [ -z "$PYTHON_BIN" ]; then
   [ "$UV_TOOL" = "uv" ] || fail missing_bootstrap_dependency "no compatible Python and signed manifest does not permit uv acquisition"
-  need_cmd tar
-  UV_TARBALL="$TMPDIR_CE/uv.tar.gz"
-  UV_EXTRACT="$TMPDIR_CE/uv"
-  mkdir "$UV_EXTRACT"
-  say "no CPython >=3.14 found; acquiring uv ${UV_VERSION} from signed manifest"
-  fetch_url "$UV_URL" "$UV_TARBALL" python_acquisition_failed
-  verify_hash "$UV_SHA" "$UV_TARBALL" "uv-${UV_VERSION}"
-  tar -xzf "$UV_TARBALL" -C "$UV_EXTRACT" || fail python_acquisition_failed "uv extraction failed"
-  UV_BIN="$UV_EXTRACT/$UV_BIN_REL"
-  [ -x "$UV_BIN" ] || fail python_acquisition_failed "uv executable missing after extraction"
+  ensure_uv_available
+  say "no CPython >=3.14 found; installing CPython 3.14 with uv"
   "$UV_BIN" python install 3.14 >/dev/null 2>&1 \
-    || fail python_acquisition_failed "uv python install 3.14 failed (${UV_COMMAND})"
+    || fail python_acquisition_failed "uv python install 3.14 failed (${UV_COMMAND}). Remediation: uv python install 3.14"
   PYTHON_BIN="$("$UV_BIN" python find 3.14 2>/dev/null || true)"
   [ -n "$PYTHON_BIN" ] && compatible_python "$PYTHON_BIN" \
-    || fail python_acquisition_failed "uv installed Python but no compatible interpreter was found"
+    || fail python_acquisition_failed "uv installed Python but no compatible interpreter was found. Remediation: uv python find 3.14"
 fi
 say "using Python: ${PYTHON_BIN}"
 

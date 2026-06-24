@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
+from . import install_prereqs
+
 
 SOURCE_PTH = "creator_engine_validator_source.pth"
 FAIL_NO_TARGET_PYTHON = "CE-BOOTSTRAP-NO-TARGET-PYTHON"
@@ -25,6 +27,7 @@ FAIL_NO_INSTALLER = "CE-BOOTSTRAP-NO-INSTALLER"
 FAIL_INSTALL_FAILED = "CE-BOOTSTRAP-INSTALL-FAILED"
 FAIL_LAYOUT = "CE-BOOTSTRAP-LAYOUT"
 FAIL_VERIFY = "CE-BOOTSTRAP-VERIFY"
+FAIL_PREREQ = "CE-BOOTSTRAP-PREREQ"
 DOCTOR_CLAUSE = "CE-SEAT-ENV"
 DOCTOR_CHECK_NAME = "controller-seat-app-install"
 
@@ -104,6 +107,77 @@ def _run(argv: Sequence[str], *, env: dict[str, str] | None = None) -> CommandRe
     )
 
 
+def _publish_tool_path(tool_path: str) -> None:
+    os.environ.update(install_prereqs.env_with_tool_on_path(tool_path))
+
+
+def _ensure_uv_available(*, prefer_uv: bool) -> tuple[str | None, list[CommandResult], str | None]:
+    if not prefer_uv:
+        return None, [], None
+    uv = install_prereqs.find_uv()
+    if uv:
+        _publish_tool_path(uv)
+        return uv, [], None
+    install_dir = install_prereqs.default_uv_install_dir()
+    if install_dir is None:
+        return None, [], "HOME is not set. " + install_prereqs.uv_install_remediation()
+    if shutil.which("curl") is None or shutil.which("sh") is None:
+        return None, [], install_prereqs.uv_install_remediation()
+    install_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["UV_INSTALL_DIR"] = str(install_dir)
+    command = _run(["sh", "-c", install_prereqs.UV_INSTALL_SNIPPET], env=env)
+    if command.returncode != 0:
+        detail = (command.stderr or command.stdout or "uv installer failed").strip()
+        return None, [command], f"{install_prereqs.uv_install_remediation(env)}. Installer detail: {detail}"
+    uv = install_prereqs.find_uv(env=env)
+    if not uv:
+        return None, [command], (
+            "official uv installer completed but uv is not discoverable. "
+            + install_prereqs.uv_install_remediation(env)
+        )
+    _publish_tool_path(uv)
+    return uv, [command], None
+
+
+def _ensure_python314_with_uv(uv: str, target: Path) -> tuple[list[CommandResult], str | None]:
+    commands: list[CommandResult] = []
+    find = _run([uv, "python", "find", install_prereqs.PYTHON_VERSION])
+    commands.append(find)
+    if find.returncode != 0:
+        install = _run([uv, "python", "install", install_prereqs.PYTHON_VERSION])
+        commands.append(install)
+        if install.returncode != 0:
+            detail = (install.stderr or install.stdout or "uv python install failed").strip()
+            return commands, f"{install_prereqs.python314_remediation(target)}. Installer detail: {detail}"
+        find = _run([uv, "python", "find", install_prereqs.PYTHON_VERSION])
+        commands.append(find)
+    if find.returncode != 0:
+        detail = (find.stderr or find.stdout or "uv could not resolve Python 3.14").strip()
+        return commands, f"{install_prereqs.python314_remediation(target)}. Resolver detail: {detail}"
+    return commands, None
+
+
+def _create_target_venv_with_uv(uv: str, target: Path) -> tuple[list[CommandResult], str | None]:
+    commands, failure = _ensure_python314_with_uv(uv, target)
+    if failure is not None:
+        return commands, failure
+    venv_dir = install_prereqs.venv_dir_for_target_python(target)
+    if venv_dir is None:
+        return commands, (
+            f"Target interpreter {target} is not a venv bin/python path. "
+            f"{install_prereqs.python314_remediation(target)}."
+        )
+    venv = _run([uv, "venv", "--python", install_prereqs.PYTHON_VERSION, str(venv_dir)])
+    commands.append(venv)
+    if venv.returncode != 0:
+        detail = (venv.stderr or venv.stdout or "uv venv failed").strip()
+        return commands, f"Create the target venv with: uv venv --python 3.14 {venv_dir}. Detail: {detail}"
+    if not target.is_file():
+        return commands, f"uv venv completed but target interpreter is still missing: {target}"
+    return commands, None
+
+
 def _offline_env(wheelhouse: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.update(
@@ -163,7 +237,7 @@ def _installer_command(
     prefer_uv: bool = True,
 ) -> tuple[str | None, list[str] | None, CommandResult | None]:
     requirements = validators_root / "requirements.txt"
-    uv = shutil.which("uv") if prefer_uv else None
+    uv = install_prereqs.find_uv() if prefer_uv else None
     if uv:
         return (
             "uv",
@@ -350,23 +424,52 @@ def bootstrap(
             remediation="Run ce bootstrap from a Creator Engine source checkout with validators/wheelhouse present.",
             detail=f"missing validators source or wheelhouse under {root}",
         )
-    if not target.is_file():
+    uv, prereq_commands, uv_failure = _ensure_uv_available(prefer_uv=prefer_uv)
+    commands: list[CommandResult] = list(prereq_commands)
+    if uv_failure is not None:
         return BootstrapResult(
             ok=False,
             target_python=str(target),
             repo_root=str(root),
             installer=None,
             changed=False,
-            reason=FAIL_NO_TARGET_PYTHON,
-            remediation=(
-                f"Create the target venv first, for example: python3.14 -m venv {target.parent.parent}; "
-                f"then run ce bootstrap --python {target}"
-            ),
-            detail=f"target interpreter not found: {target}",
+            commands=tuple(commands),
+            reason=FAIL_PREREQ,
+            remediation=uv_failure,
+            detail="uv is required but is not available and could not be auto-provisioned",
         )
+    if not target.is_file():
+        if uv is None:
+            return BootstrapResult(
+                ok=False,
+                target_python=str(target),
+                repo_root=str(root),
+                installer=None,
+                changed=False,
+                commands=tuple(commands),
+                reason=FAIL_NO_TARGET_PYTHON,
+                remediation=(
+                    f"Create the target venv first, for example: python3.14 -m venv {target.parent.parent}; "
+                    f"then run ce bootstrap --python {target}"
+                ),
+                detail=f"target interpreter not found: {target}",
+            )
+        venv_commands, venv_failure = _create_target_venv_with_uv(uv, target)
+        commands.extend(venv_commands)
+        if venv_failure is not None:
+            return BootstrapResult(
+                ok=False,
+                target_python=str(target),
+                repo_root=str(root),
+                installer=None,
+                changed=False,
+                commands=tuple(commands),
+                reason=FAIL_NO_TARGET_PYTHON,
+                remediation=venv_failure,
+                detail=f"target interpreter not found and auto-provision failed: {target}",
+            )
 
     installer, argv, ensure = _installer_command(target, validators_root, wheelhouse, prefer_uv=prefer_uv)
-    commands: list[CommandResult] = []
     if ensure is not None:
         commands.append(ensure)
     if argv is None or installer is None:

@@ -340,16 +340,15 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     )
     assert proc.returncode != 0
     assert "missing_bootstrap_dependency" in proc.stderr
-    assert "required command(s) missing:" in proc.stderr
     assert "ssh-keygen" in proc.stderr
-    assert "tar" in proc.stderr
-    assert "sudo apt-get update && sudo apt-get install -y ca-certificates curl openssh-client tar coreutils sed gawk grep" in proc.stderr
-    assert "sudo dnf install -y ca-certificates curl openssh-clients tar coreutils sed gawk grep" in proc.stderr
-    assert "sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep" in proc.stderr
+    assert "Install OpenSSH client, then re-run this installer." in proc.stderr
+    assert "sudo apt-get update && sudo apt-get install -y openssh-client" in proc.stderr
+    assert "sudo dnf install -y openssh-clients" in proc.stderr
+    assert "sudo apk add openssh-client" in proc.stderr
+    assert "sudo pacman -Sy --needed openssh" in proc.stderr
+    assert "brew install openssh" in proc.stderr
     assert "openssh-client" in proc.stderr
     assert "openssh-clients" in proc.stderr
-    assert "Python 3.14 and uv are not host prerequisites" in proc.stderr
-    assert "E1 will not auto-sudo before trust verification" in proc.stderr
 
 
 @requires_ssh_keygen
@@ -437,8 +436,8 @@ def test_install_sh_fetch_hardening_and_uv_path_are_declared(repo_root: Path):
     script = (repo_root / "docs" / "install.sh").read_text(encoding="utf-8")
     assert "CURL_FLAGS=(--proto '=https' --tlsv1.2 -fsSL)" in script
     assert "mktemp -d" in script and "chmod 700" in script
+    assert "UV_INSTALLER_URL=\"https://astral.sh/uv/install.sh\"" in script
+    assert "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" in script
+    assert "official uv installer completed but uv is not discoverable" in script
     assert "uv python install 3.14" in script
-    assert "verify_hash \"$UV_SHA\" \"$UV_TARBALL\"" in script
-    assert "tar -xzf \"$UV_TARBALL\"" in script
-    assert "uv-x86_64-unknown-linux-gnu/uv" in script
-    assert "uv-aarch64-unknown-linux-gnu/uv" in script
+    assert "Remediation: uv python find 3.14" in script
