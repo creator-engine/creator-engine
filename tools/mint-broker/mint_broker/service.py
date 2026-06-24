@@ -1,4 +1,4 @@
-"""The mint-broker ``POST /v1/token`` handler (ce-ops#157, S4) — bind, ceiling, mint, audit.
+"""The mint-broker ``POST /v1/token`` handler (ce-ops#157, S4) — bind, grants, mint, audit.
 
 This is the standing shared-App broker's mint endpoint, factored as a pure
 :func:`handle_token_request` (request mapping -> response mapping) so it is fully testable with
@@ -6,18 +6,21 @@ no HTTP server and zero live network. For each request, in this deliberate order
 
 1. **Validate the shape** — repo (``owner/name``), positive installation_id, non-empty
    permissions, a caller ``ghu_`` token (a malformed request is a ``400``, never a mint).
-2. **Reject out-of-ceiling permissions BEFORE any GitHub call** (G3). The config's
-   ``permits()`` is the gate: an ``administration:write`` / unknown-scope / over-level request
-   is a ``403`` with reason ``out_of_ceiling`` and NO binding call, NO mint call. The standing
-   broker can never even *attempt* an admin mint.
-3. **Rate guard** — enforce the configured per-user mint cap over the configured window.
-4. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation
+2. **Reject out-of-ceiling permissions BEFORE any GitHub call** (G3 defence-in-depth). The
+   config's ``permits()`` is the installation/broker maximum gate: an ``administration:write`` /
+   unknown-scope / over-level request is a ``403`` with reason ``out_of_ceiling`` and NO binding
+   call, NO mint call. The standing broker can never even *attempt* an admin mint.
+3. **Reject permissions outside the declared minimum grant BEFORE any GitHub call**. The config's
+   ``within_declared_minimum()`` is the task contract gate: an in-ceiling over-ask is a ``403``
+   with reason ``requested_permissions_exceed_declared_minimum`` and NO binding call, NO mint call.
+4. **Rate guard** — enforce the configured per-user mint cap over the configured window.
+5. **Binding check** (S2) — the caller's ``ghu_`` token must control the claimed installation
    and that installation must cover the requested repo; a spoof is a ``403``
    (``binding_refused``) with NOTHING minted.
-5. **Mint** via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition (the
+6. **Mint** via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition (the
    shared-App key stays behind the injected openssl ``signer``); a transport failure is a
    ``502`` (fail-closed).
-6. **Audit** — one secret-free ``egress_broker.audit`` record on EVERY decision (allow or deny).
+7. **Audit** — one secret-free ``egress_broker.audit`` record on EVERY decision (allow or deny).
 
 The minted ``ghs_`` value appears ONLY in the success response (the caller needs it) — never in
 the audit log; the caller's ``ghu_`` token never appears in the response or the audit at all.
@@ -164,12 +167,22 @@ def handle_token_request(
     if not config.permits(permissions):
         return _deny(config, status=403, reason="out_of_ceiling", repo=repo, installation_id=installation_id)
 
-    # 3. rate guard — refuse before binding/minting once this caller is at cap ---------------
+    # 3. declared minimum check BEFORE rate, binding, or minting ----------------------------
+    if not config.within_declared_minimum(permissions):
+        return _deny(
+            config,
+            status=403,
+            reason="requested_permissions_exceed_declared_minimum",
+            repo=repo,
+            installation_id=installation_id,
+        )
+
+    # 4. rate guard — refuse before binding/minting once this caller is at cap ---------------
     rate_reservation = _reserve_rate_slot(config, caller_token)
     if rate_reservation is None:
         return _deny(config, status=429, reason="rate_limited", repo=repo, installation_id=installation_id)
 
-    # 4. binding check (S2) — the caller must control the installation+repo pair -------------
+    # 5. binding check (S2) — the caller must control the installation+repo pair -------------
     try:
         binding_check(caller_token, installation_id=installation_id, repo_full_name=repo)
     except BindingRefused:
@@ -179,7 +192,7 @@ def handle_token_request(
         _release_rate_slot(rate_reservation)
         return _deny(config, status=502, reason="binding_transport_error", repo=repo, installation_id=installation_id)
 
-    # 5. mint via the frozen App-JWT -> scoped-token composition (key behind the signer) ------
+    # 6. mint via the frozen App-JWT -> scoped-token composition (key behind the signer) ------
     try:
         mint_runner = app_jwt_gh_runner(config.app_client_id, signer=signer, transport=transport)
         token = mint_scoped_token(
@@ -205,7 +218,7 @@ def handle_token_request(
         _release_rate_slot(rate_reservation)
         return _deny(config, status=502, reason="mint_transport_error", repo=repo, installation_id=installation_id)
 
-    # 6. audit the allow (secret-free — the minted value is NOT recorded) --------------------
+    # 7. audit the allow (secret-free — the minted value is NOT recorded) --------------------
     _audit(
         config,
         {
