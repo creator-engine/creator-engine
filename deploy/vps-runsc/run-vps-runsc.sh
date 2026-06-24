@@ -213,6 +213,9 @@ container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(exec)
 fi
+if [ "${image_harness}" = "codex" ]; then
+  container_cmd+=(--dangerously-bypass-hook-trust)
+fi
 container_cmd+=("$@")
 
 repo_mount="type=bind,source=${CE_VPS_REPO},target=${CE_VPS_CONTAINER_REPO}"

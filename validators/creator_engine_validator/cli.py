@@ -10,8 +10,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .checks import registered_checks, run_registered
-from .reporting import CheckResult, ValidationError
+from .reporting import CheckResult
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -304,6 +303,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _print_checks(json_output: bool) -> int:
+    from .checks import registered_checks
+
     checks = registered_checks()
     if json_output:
         print(json.dumps({"checks": {name: list(defn.frs) for name, defn in checks.items()}}, indent=2, sort_keys=True))
@@ -333,11 +334,16 @@ def _emit_results(results: list[CheckResult], json_output: bool) -> int:
 
 
 def _check(paths: Sequence[str], json_output: bool) -> int:
+    from .checks import run_registered
+
     return _emit_results(run_registered([Path(p) for p in paths]), json_output)
 
 
 def _check_examples(json_output: bool) -> int:
     """Validate bundled well-formed examples and expected-failing malformed examples."""
+    from .checks import run_registered
+    from .reporting import ValidationError
+
     expectations = [
         ("well-formed", Path("examples/well-formed"), True, None),
         ("malformed", Path("examples/malformed/identity-record.missing-fields.yml"), False, "FR-001"),
@@ -764,10 +770,8 @@ def _launch_pinned_seat_class_from_env() -> str:
     closed to ``foreman`` so event-local seat-class claims cannot weaken the live
     hook posture.
     """
-    from . import brain_bootstrap
-
-    ref = os.environ.get(brain_bootstrap.BOOTSTRAP_REF_ENV)
-    expected = os.environ.get(brain_bootstrap.BOOTSTRAP_SHA256_ENV)
+    ref = os.environ.get("CE_BRAIN_BOOTSTRAP_REF")
+    expected = os.environ.get("CE_BRAIN_BOOTSTRAP_SHA256")
     if not ref and not expected:
         return "foreman"
     if not ref or not expected:

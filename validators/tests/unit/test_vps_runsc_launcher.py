@@ -106,7 +106,12 @@ def test_codex_dry_run_uses_vps_containment_defaults() -> None:
     assert "--user" in argv
     assert "1234:5678" in argv
     assert "creator-engine/codex-runsc:x86_64" in argv
-    assert argv[-3:] == ["creator-engine/codex-runsc:x86_64", "exec", "summarize status"]
+    assert argv[-4:] == [
+        "creator-engine/codex-runsc:x86_64",
+        "exec",
+        "--dangerously-bypass-hook-trust",
+        "summarize status",
+    ]
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=exec" in argv
     assert "CODEX_HOME=/home/seat/.codex" in argv
@@ -130,12 +135,20 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     assert "[[hooks.PreToolUse]]" in text
     assert HOOK_COMMAND in text
     assert HOOK.is_file()
+    assert "--dangerously-bypass-hook-trust" in argv
+    assert (
+        argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
+        == ["--dangerously-bypass-hook-trust"]
+    )
 
 
 def test_codex_tui_dry_run_ends_at_image_without_literal_tui_subcommand() -> None:
     argv = dry_run_argv(run_wrapper("tui"))
 
-    assert argv[-1] == "creator-engine/codex-runsc:x86_64"
+    assert argv[-2:] == [
+        "creator-engine/codex-runsc:x86_64",
+        "--dangerously-bypass-hook-trust",
+    ]
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
     assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
@@ -195,6 +208,7 @@ def test_controller_variant_uses_claude_harness_marker_without_secret_value() ->
     assert argv[-1] == "creator-engine/codex-runsc:x86_64"
     assert "CE_DGX_HARNESS=claude" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
+    assert "--dangerously-bypass-hook-trust" not in argv
     assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
     assert "synthetic-secret-token-value" not in result.stdout
     assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]

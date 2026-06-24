@@ -11,10 +11,35 @@ import shlex
 from collections.abc import Mapping
 from typing import Any, Final
 
-from .checks.mutation_class import BASELINE_NAMES, BASELINE_NAMES_SET, RESERVED_RESTRICTED
-
 WORK_CLASSES: Final[frozenset[str]] = frozenset({"coordination", "implementation", "restricted"})
 SEAT_CLASSES: Final[frozenset[str]] = frozenset({"foreman", "worker"})
+BASELINE_NAMES: Final[tuple[str, ...]] = (
+    "docs",
+    "code",
+    "schema",
+    "deploy",
+    "governance",
+    "identity",
+    "security",
+    "attestation",
+    "redaction",
+)
+BASELINE_NAMES_SET: Final[frozenset[str]] = frozenset(BASELINE_NAMES)
+RESERVED_RESTRICTED: Final[frozenset[str]] = frozenset(
+    {
+        "merge",
+        "deploy",
+        "publish",
+        "issue_credential",
+        "revoke_credential",
+        "alter_org_settings",
+        "alter_tenant_settings",
+        "alter_repo_settings",
+        "approve_redaction",
+        "weaken_attestation_gate",
+        "weaken_redaction_gate",
+    }
+)
 BASELINE_MUTATION_CLASSES: Final[tuple[str, ...]] = BASELINE_NAMES
 DEFAULT_DELEGATION_REQUIRED_MUTATION_CLASSES: Final[frozenset[str]] = frozenset(
     {"code", "schema", "deploy", "governance", "identity", "security"}
@@ -27,6 +52,8 @@ FOREMAN_DELEGATION_REQUIRED_REASON: Final[str] = (
 _COORDINATION_TOOLS: Final[frozenset[str]] = frozenset({"read", "grep", "glob"})
 _MUTATING_TOOLS: Final[frozenset[str]] = frozenset({"edit", "write", "multiedit"})
 _COORDINATION_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"status", "log", "diff", "show"})
+_COORDINATION_SHELL_COMMANDS: Final[frozenset[str]] = frozenset({"ls", "pwd"})
+_SHELL_METACHARS: Final[frozenset[str]] = frozenset({"$", "`", ";", "&", "|", "<", ">", "(", ")"})
 _IMPLEMENTATION_MARKERS: Final[frozenset[str]] = frozenset(
     {
         "pytest",
@@ -80,6 +107,10 @@ def _git_subcommand(tokens: tuple[str, ...]) -> str | None:
 def _is_coordination_command(tokens: tuple[str, ...]) -> bool:
     if not tokens:
         return False
+    if tokens[0] in _COORDINATION_SHELL_COMMANDS and not any(
+        any(char in token for char in _SHELL_METACHARS) for token in tokens
+    ):
+        return True
     git_subcommand = _git_subcommand(tokens)
     if git_subcommand in _COORDINATION_GIT_SUBCOMMANDS:
         return True

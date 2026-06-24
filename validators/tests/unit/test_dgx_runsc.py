@@ -104,8 +104,8 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert not any(arg.startswith("--network=") for arg in argv)
     assert "creator-engine/codex-runsc:test" in argv
     assert argv[-3:] == [
-        "creator-engine/codex-runsc:test",
         "exec",
+        "--dangerously-bypass-hook-trust",
         "print working tree status",
     ]
     assert "/usr/local/bin/codex" not in argv[argv.index("creator-engine/codex-runsc:test") + 1 :]
@@ -156,6 +156,11 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     assert "[[hooks.PreToolUse]]" in text
     assert HOOK_COMMAND in text
     assert HOOK.is_file()
+    assert "--dangerously-bypass-hook-trust" in argv
+    assert (
+        argv[argv.index("creator-engine/codex-runsc:test") + 1 :]
+        == ["--dangerously-bypass-hook-trust"]
+    )
 
 
 def test_codex_tui_dry_run_lets_image_entrypoint_select_default_harness() -> None:
@@ -163,7 +168,10 @@ def test_codex_tui_dry_run_lets_image_entrypoint_select_default_harness() -> Non
 
     argv = dry_run_argv(result)
 
-    assert argv[-1] == "creator-engine/codex-runsc:test"
+    assert argv[-2:] == [
+        "creator-engine/codex-runsc:test",
+        "--dangerously-bypass-hook-trust",
+    ]
 
 
 def test_codex_detach_flag_dry_run_uses_detached_lifecycle_flags() -> None:

@@ -74,7 +74,6 @@ FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV}
 HERDR_SEND_SUBMIT_SETTLE_S = 1.0
 HERDR_SEND_POLL_INTERVAL_S = 0.5
 HERDR_SEND_SUBMIT_MAX_ATTEMPTS = 3
-HERDR_SEND_PROMPT_TAIL_LINES = 8
 HERDR_BRIEF_RENDER_TIMEOUT_S = 5.0
 HERDR_BRIEF_RENDER_POLL_INTERVAL_S = 0.5
 BRIEF_MARKER_PREFIX = "==CE-BRIEF-SHA256:"
@@ -291,13 +290,17 @@ class HerdrSession:
                 return needle
         return text.strip()
 
+    @staticmethod
+    def _active_input_region(pane_text: str) -> str:
+        normalized = pane_text.replace("\r\n", "\n").replace("\r", "\n")
+        return normalized.split("\n")[-1]
+
     @classmethod
     def _input_line_pending(cls, pane_text: str, submitted_text: str) -> bool:
         needle = cls._pending_input_needle(submitted_text)
         if not needle:
             return False
-        tail = pane_text.splitlines()[-HERDR_SEND_PROMPT_TAIL_LINES:]
-        return any(needle in row for row in tail)
+        return needle in cls._active_input_region(pane_text)
 
     @staticmethod
     def _brief_marker(brief_body: str) -> str:
