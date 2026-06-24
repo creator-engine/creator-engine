@@ -114,7 +114,12 @@ def test_run_fails_closed_on_malformed_input():
 
 def test_run_fails_closed_on_hook_check_invocation_failure(tmp_path):
     def runner(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 2, stdout="", stderr="bad input")
+        return subprocess.CompletedProcess(
+            argv,
+            2,
+            stdout="synthetic-secret-token-value in stdout",
+            stderr="synthetic-secret-token-value in stderr",
+        )
 
     code, out, _err = cpt.run_codex_pretooluse(
         json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": str(tmp_path)}),
@@ -124,4 +129,28 @@ def test_run_fails_closed_on_hook_check_invocation_failure(tmp_path):
     assert code == 0
     payload = json.loads(out)
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "hook-check invocation failed" in payload["hookSpecificOutput"]["permissionDecisionReason"]
+    reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "failed closed" in reason
+    assert "hook-check invocation failed" in reason
+    assert "synthetic-secret-token-value" not in out
+    assert "synthetic-secret-token-value" not in reason
+
+
+def test_run_fails_closed_on_hook_check_runner_exception_without_details(tmp_path):
+    def runner(argv, **kwargs):
+        raise RuntimeError("synthetic-secret-token-value")
+
+    code, out, _err = cpt.run_codex_pretooluse(
+        json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": str(tmp_path)}),
+        adapter_path=Path("/repo/.codex/hooks/ce-pretooluse-codex.py"),
+        runner=runner,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "failed closed" in reason
+    assert "hook-check invocation failed" in reason
+    assert "synthetic-secret-token-value" not in out
+    assert "synthetic-secret-token-value" not in reason

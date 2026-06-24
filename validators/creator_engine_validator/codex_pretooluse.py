@@ -19,6 +19,7 @@ from typing import Any, Mapping, Sequence
 DENY_EVENT = "PreToolUse"
 DEFAULT_EVIDENCE_ROOT = ".hermes"
 HOOK_CHECK_FORMAT = "claude"
+HOOK_CHECK_INVOCATION_FAILED = "hook-check invocation failed"
 
 
 class CodexHookInputError(ValueError):
@@ -212,19 +213,20 @@ def run_codex_pretooluse(
         cwd = Path(cwd_raw).expanduser() if isinstance(cwd_raw, str) and cwd_raw else Path.cwd()
         repo_root = _repo_root_from_adapter(adapter_path)
         invocation = build_hook_check_invocation(normalized, repo_root=repo_root, cwd=cwd)
-        completed = runner(
-            list(invocation.argv),
-            input=invocation.input_json,
-            text=True,
-            capture_output=True,
-            cwd=str(invocation.cwd),
-            env=dict(invocation.env),
-            check=False,
-        )
+        try:
+            completed = runner(
+                list(invocation.argv),
+                input=invocation.input_json,
+                text=True,
+                capture_output=True,
+                cwd=str(invocation.cwd),
+                env=dict(invocation.env),
+                check=False,
+            )
+        except Exception as exc:
+            raise CodexHookInputError(HOOK_CHECK_INVOCATION_FAILED) from exc
         if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()
-            suffix = f": {stderr}" if stderr else ""
-            raise CodexHookInputError(f"hook-check invocation failed{suffix}")
+            raise CodexHookInputError(HOOK_CHECK_INVOCATION_FAILED)
         decision, reason = _decision_from_hook_check(completed.stdout or "")
         if decision == "allow":
             return 0, "", ""
