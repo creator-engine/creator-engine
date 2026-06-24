@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 
 from creator_engine_validator import v3_cli
+from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge import integrator_belt as belt
 from creator_engine_validator.forge.eviction_detection import RepairNeededEvent, RepairPollResult
 from creator_engine_validator.forge.integrator_executor import ExecutorPublishResult, ExecutorRefs
@@ -23,6 +24,17 @@ CARRIER_2 = ".ce/pr-manifests/feature-integrator-2.md"
 _OURS = "<" * 7 + " ours"
 _SEP = "=" * 7
 _THEIRS = ">" * 7 + " theirs"
+
+
+def _test_limiter(tmp_path, clock=None):
+    return SearchRateLimiter(
+        tmp_path / "search-rate.json",
+        rate_per_minute=6000,
+        burst=1,
+        jitter_seconds=0,
+        clock=clock or (lambda: 0.0),
+        random_float=lambda: 0.0,
+    )
 
 
 def _event(**overrides) -> RepairNeededEvent:
@@ -336,6 +348,66 @@ def test_discover_daemon_candidates_uses_non_query_search_variable():
     assert len(query_fields) == 1
     assert f"searchQuery=repo:{REPO} is:pr is:open" in argv
     assert f"query=repo:{REPO} is:pr is:open" not in argv
+
+
+def test_discover_daemon_candidates_retries_graphql_search_rate_limit(tmp_path):
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+    now = {"value": 100.0}
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now["value"] += seconds
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(
+                list(argv),
+                1,
+                stdout="",
+                stderr="HTTP 429: Search API rate limit exceeded\nRetry-After: 4",
+            )
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout='{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}',
+            stderr="",
+        )
+
+    assert belt.discover_daemon_candidates(
+        repo=REPO,
+        gh_runner=gh,
+        rate_limiter=_test_limiter(tmp_path, clock=lambda: now["value"]),
+        sleep=sleep,
+    ) == ()
+    assert len(calls) == 2
+    assert sleeps == [5.0]
+
+
+def test_daemon_loop_does_not_crash_after_exhausted_search_rate_limit(tmp_path):
+    logs = []
+
+    def gh(argv, input_text=None):
+        return subprocess.CompletedProcess(
+            list(argv),
+            1,
+            stdout="",
+            stderr="HTTP 429: Search API rate limit exceeded\nRetry-After: 4",
+        )
+
+    result = belt.run_daemon_loop(
+        token="ghp_fake",
+        repo=REPO,
+        once=True,
+        gh_runner=gh,
+        sleep=lambda seconds: None,
+        log_sink=logs.append,
+        rate_limiter=_test_limiter(tmp_path),
+    )
+
+    assert result.ticks[0].result.decisions == ()
+    assert any(log["action"] == "daemon_rate_limited" for log in logs)
 
 
 def _assert_valid_daemon_search_query(query: str) -> None:

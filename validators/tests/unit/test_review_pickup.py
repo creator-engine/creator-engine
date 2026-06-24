@@ -16,6 +16,7 @@ import urllib.parse
 
 import pytest
 
+from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge import review_pickup
 
 
@@ -68,6 +69,17 @@ def _fake_transport(responses, calls=None):
         return status, dict(resp_headers), resp_body
 
     return transport
+
+
+def _test_limiter(tmp_path, clock=None):
+    return SearchRateLimiter(
+        tmp_path / "search-rate.json",
+        rate_per_minute=6000,
+        burst=1,
+        jitter_seconds=0,
+        clock=clock or (lambda: 0.0),
+        random_float=lambda: 0.0,
+    )
 
 
 class _FakeReviewPickupForge:
@@ -188,6 +200,40 @@ def test_poll_review_pickup_routes_awaiting_pr_to_distinct_non_author():
     assert item["thread_id"] == f"review-pickup:o/r:review_request:7:{head[:12]}"
     assert len(forge.review_requests) == 1
     assert '"ce-dev-3"' in (forge.review_requests[0][1] or "")
+
+
+def test_poll_review_pickup_retries_search_rate_limit(tmp_path):
+    calls = []
+    sleeps: list[float] = []
+    now = {"value": 100.0}
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now["value"] += seconds
+
+    transport = _fake_transport(
+        [
+            (429, {"Retry-After": "2"}, "{}"),
+            (200, {"X-RateLimit-Remaining": "28"}, _body()),
+        ],
+        calls=calls,
+    )
+    forge = _FakeReviewPickupForge()
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["dev-2"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="creator-engine/ce-ops",
+        rate_limiter=_test_limiter(tmp_path, clock=lambda: now["value"]),
+        sleep=sleep,
+    )
+
+    assert result.items == ()
+    assert result.rate_limit == {"remaining": 28}
+    assert len(calls) == 2
+    assert sleeps == [5.0]
 
 
 def test_poll_review_pickup_never_routes_author_to_self():

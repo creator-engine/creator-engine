@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +29,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .search_rate_limiter import (
+    SearchRateLimiter,
+    call_with_search_api_headroom,
+    default_search_rate_limiter,
+)
 
 #: HTTPS transport: ``(method, url, headers, body) -> (status, headers, body_text)``.
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
@@ -327,6 +334,33 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
 
 
 def _search_once(
+    *,
+    token: str,
+    transport: Transport,
+    query: SearchQuery,
+    per_page: int,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if rate_limiter is not None:
+        return call_with_search_api_headroom(
+            lambda: _search_once_unlimited(
+                token=token,
+                transport=transport,
+                query=query,
+                per_page=per_page,
+            ),
+            limiter=rate_limiter,
+            is_rate_limited=lambda exc: isinstance(exc, PickupRateLimited),
+            retry_after_seconds=lambda exc: (
+                exc.retry_after_seconds if isinstance(exc, PickupRateLimited) else None
+            ),
+            sleep=sleep,
+        )
+    return _search_once_unlimited(token=token, transport=transport, query=query, per_page=per_page)
+
+
+def _search_once_unlimited(
     *,
     token: str,
     transport: Transport,

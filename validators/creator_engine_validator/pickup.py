@@ -43,6 +43,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,7 @@ from .pickup_search import (  # noqa: F401  (re-exported for the v1 CLI + caller
     PickupError,
     PickupRateLimited,
     SearchQuery,
+    SearchRateLimiter,
     SearchScope,
     TOKEN_ENV,
     Transport,
@@ -77,6 +79,7 @@ from .pickup_search import (  # noqa: F401  (re-exported for the v1 CLI + caller
     _default_transport,
     _issue_number,
     _search_once,
+    default_search_rate_limiter,
     make_gh_runner,
     resolve_search_hit,
     resolve_token,
@@ -165,6 +168,8 @@ def poll(
     repo: str | None = None,
     org: str | None = None,
     per_page: int = DEFAULT_SEARCH_PER_PAGE,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> PollResult:
     """One READ-ONLY Search API poll → a :class:`PollResult` (observe-only).
 
@@ -175,6 +180,9 @@ def poll(
     if not token or not token.strip():
         raise PickupError("poll requires a non-empty token")
     _transport = transport or _default_transport
+    _rate_limiter = rate_limiter
+    if _rate_limiter is None and (transport is None or transport is _default_transport):
+        _rate_limiter = default_search_rate_limiter()
     queries = build_queries(labels=labels, repo=repo, org=org)
     items: list[dict[str, Any]] = []
     rate_limit: dict[str, Any] = {}
@@ -185,6 +193,8 @@ def poll(
             transport=_transport,
             query=query,
             per_page=per_page,
+            rate_limiter=_rate_limiter,
+            sleep=sleep,
         )
         items.extend(page_items)
 
