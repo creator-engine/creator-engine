@@ -3812,10 +3812,15 @@ def _build_parser() -> argparse.ArgumentParser:
                                  help="PAT directory (default: ~/.ce-keys)")
     p_review_pickup.add_argument("--allow-ambient-gh", action="store_true", dest="allow_ambient_gh",
                                  help="allow fallback to ambient gh auth token after CE_PICKUP_TOKEN and PAT file")
-    p_review_pickup.add_argument("--repo", default=None,
-                                 help="restrict Search API queries and reviewer routing to one owner/name repo")
-    p_review_pickup.add_argument("--org", default=None,
-                                 help="restrict Search API queries to one GitHub org/user slug")
+    # Scope is REQUIRED: with --apply, an unscoped review-pickup would request
+    # reviewers and auto-dismiss stale reviews across the first page of EVERY open
+    # PR the controller token can see. Fail closed if unscoped (ce-ops#188 review,
+    # same fail-closed class as the ce-ops#218 queue-poll belt).
+    rp_scope = p_review_pickup.add_mutually_exclusive_group(required=True)
+    rp_scope.add_argument("--repo", default=None,
+                          help="restrict Search API queries and reviewer routing to one owner/name repo")
+    rp_scope.add_argument("--org", default=None,
+                          help="restrict Search API queries to one GitHub org/user slug")
     p_review_pickup.add_argument("--seat", action="append", default=[], dest="reviewer_seats",
                                  help="repeatable reviewer seat/login; comma-separated allowed")
     p_review_pickup.add_argument("--apply", action="store_true",

@@ -55,6 +55,15 @@ def review_pickup_query(*, repo: str | None = None, org: str | None = None) -> S
     """Build the controller feed query for open PRs that may need review routing."""
     if repo and org:
         raise PickupError("--repo and --org are mutually exclusive search scopes")
+    if not repo and not org:
+        # Fail closed: an unscoped query builds `is:open is:pull-request` across every
+        # open PR the token can see; with --apply that would request reviewers and
+        # auto-dismiss stale reviews fleet-wide. Require exactly one explicit scope
+        # (ce-ops#188 review, same fail-closed class as the ce-ops#218 queue-poll belt).
+        raise PickupError(
+            "review pickup refuses an unscoped query; supply repo or org "
+            "(must not act across every PR a token can see)"
+        )
     scope_terms: list[str] = []
     if repo:
         if not _REPO_SCOPE_RE.match(repo):

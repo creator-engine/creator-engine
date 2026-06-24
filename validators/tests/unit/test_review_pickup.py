@@ -127,6 +127,23 @@ def test_review_pickup_query_is_typed_and_scoped():
     _assert_explicit_search_type(spec.query)
 
 
+def test_review_pickup_refuses_unscoped_query_fail_closed():
+    # ce-ops#188 review: an unscoped review-pickup would request reviewers and
+    # auto-dismiss stale reviews across every open PR a token can see. Both the
+    # query builder and poll loop must fail closed when neither repo nor org is set.
+    with pytest.raises(review_pickup.PickupError, match="unscoped"):
+        review_pickup.review_pickup_query()
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head="a" * 40)
+    with pytest.raises(review_pickup.PickupError, match="unscoped"):
+        review_pickup.poll_review_pickup(
+            token="ghp_fake",
+            reviewer_seats=("ce-dev-3",),
+            gh_runner=forge.runner,
+            transport=_fake_transport([]),
+            apply=True,
+        )
+
+
 def test_poll_review_pickup_routes_awaiting_pr_to_distinct_non_author():
     head = "a" * 40
     forge = _FakeReviewPickupForge(author="ce-dev-2", head=head)
@@ -162,6 +179,7 @@ def test_poll_review_pickup_reports_existing_non_author_request_without_duplicat
         reviewer_seats=["ce-dev-3"],
         gh_runner=forge.runner,
         transport=transport,
+        repo="o/r",
         apply=True,
     )
 
@@ -186,6 +204,7 @@ def test_poll_review_pickup_dismisses_superseded_cr_and_rerequests_reviewer():
         reviewer_seats=["ce-dev-3", "ce-dev-4"],
         gh_runner=forge.runner,
         transport=transport,
+        repo="o/r",
         apply=True,
     )
 
@@ -212,6 +231,7 @@ def test_poll_review_pickup_rerequests_stale_reviewer_when_no_fresh_approval():
         reviewer_seats=["ce-dev-4"],
         gh_runner=forge.runner,
         transport=transport,
+        repo="o/r",
         apply=True,
     )
 
