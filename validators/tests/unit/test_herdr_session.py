@@ -105,6 +105,27 @@ def test_spawn_pane_drives_workspace_create_root_pane_and_run_over_socket_env() 
     )
 
 
+def test_dispatcher_run_and_send_target_workspace_root_pane() -> None:
+    runner = FakeRunner()
+    session = hs.HerdrSession(
+        socket_path="/run/ce/herdr/control.sock",
+        herdr_binary="/opt/herdr",
+        runner=runner,
+    )
+
+    pane = session.spawn_pane(command=["/bin/sh", "wrapper.sh"], cwd="/worktree")
+    session.send(pane, "printf ready\\n")
+
+    run_call = runner.calls[1][0]
+    send_call = runner.calls[2][0]
+
+    assert pane.pane_id == "pane-1"
+    assert run_call == ["/opt/herdr", "pane", "run", "pane-1", "/bin/sh wrapper.sh"]
+    assert send_call == ["/opt/herdr", "pane", "send-text", "pane-1", "printf ready\\n"]
+    assert run_call[3] == pane.pane_id
+    assert send_call[3] == pane.pane_id
+
+
 def test_create_workspace_returns_nested_workspace_and_root_pane_ids() -> None:
     runner = FakeRunner()
     session = hs.HerdrSession(

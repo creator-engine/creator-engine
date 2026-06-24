@@ -13,16 +13,14 @@ from creator_engine_validator.runner.herdr_session import (
 )
 
 
-HERDR_LIVE_BINARY = Path(
-    os.environ.get("HERDR_LIVE_BINARY", "/tmp/herdr-share/target/release/herdr")
-)
+HERDR_LIVE_BINARY = Path(os.environ.get("HERDR_LIVE_BINARY", "/usr/local/bin/herdr"))
 
 
 @pytest.mark.skipif(
     not HERDR_LIVE_BINARY.is_file(),
     reason=(
         "live herdr binary is unavailable; set HERDR_LIVE_BINARY or stage "
-        "/tmp/herdr-share/target/release/herdr"
+        "/usr/local/bin/herdr"
     ),
 )
 def test_live_herdr_binary_can_be_invoked_safely():
@@ -35,7 +33,7 @@ def test_live_herdr_binary_can_be_invoked_safely():
     not HERDR_LIVE_BINARY.is_file(),
     reason=(
         "live herdr binary is unavailable; set HERDR_LIVE_BINARY or stage "
-        "/tmp/herdr-share/target/release/herdr"
+        "/usr/local/bin/herdr"
     ),
 )
 def test_live_herdr_workspace_run_read_and_send_text_cli_shapes_reach_socket_layer(tmp_path):
