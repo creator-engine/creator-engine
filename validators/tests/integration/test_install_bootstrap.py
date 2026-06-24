@@ -335,6 +335,9 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     assert proc.returncode != 0
     assert "missing_bootstrap_dependency" in proc.stderr
     assert "ssh-keygen" in proc.stderr
+    assert "openssh-client" in proc.stderr
+    assert "openssh-clients" in proc.stderr
+    assert "will not auto-sudo before trust verification" in proc.stderr
 
 
 @pytest.mark.parametrize("extra_env", [{"CE_TEST_UNAME_S": "Darwin"}, {"CE_TEST_UNAME_M": "sparc64"}])

@@ -117,6 +117,13 @@ and the `version_boundary` validator check.
 CE currently has two supported install paths, both documented by
 [`docs/contracts/installer.md`](./docs/contracts/installer.md).
 
+Bootstrap prerequisite: the host must already have the OpenSSH client
+`ssh-keygen` available before running either verified install path. On fresh
+Linux images this is usually the `openssh-client` package on Debian/Ubuntu/Alpine
+or `openssh-clients` on Fedora/RHEL/CentOS. Install it only after reviewing the
+package action; the E1 installer will not run `sudo` before it has verified the
+signed spec.
+
 1. **Public one-liner.**
 
    ```bash
@@ -129,7 +136,9 @@ CE currently has two supported install paths, both documented by
    needed, installs `creator-engine-validator==0.2.0` offline, proves `cev3`,
    and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
    automate the GitHub App click, mutate branch protection, or create/adopt a
-   project.
+   project. A successful E1 run is inventory-only; a full governed seat still
+   needs host and GitHub answers, an explicit `ce onboard --plan`, and a later
+   governed `ce onboard --apply`.
 
 2. **Clone plus offline dependency wheelhouse.**
 

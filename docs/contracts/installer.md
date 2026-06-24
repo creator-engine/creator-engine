@@ -31,6 +31,12 @@ or reuse the venv and proves the `cev3` entry point before inventory.
 where the human approves sudo-scoped host changes and the GitHub-App
 authorization click.
 
+**Bootstrap prerequisite:** E1 requires stock OpenSSH `ssh-keygen` before it can
+verify the spec. Fresh Linux hosts should install the OpenSSH client package
+first (`openssh-client` on Debian/Ubuntu/Alpine; `openssh-clients` on
+Fedora/RHEL/CentOS). The installer must only report this missing dependency; it
+must not auto-sudo before trust verification.
+
 ## E1 real bootstrap
 
 `docs/install.sh` is the shell I/O edge. Its ordered contract is:
@@ -57,6 +63,11 @@ authorization click.
    ```text
    <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
    ```
+
+This is the E1 stopping point. The inventory output is the handoff artifact for
+the later governed-seat path: prepare/confirm the host and GitHub answers, run
+`ce onboard --plan`, have the operator review the plan, and only then run the
+explicit governed `ce onboard --apply`.
 
 The Pages mirror lives under `docs/downloads/0.2.0/`. Its `SHA256SUMS` publishes
 the wheel hashes and the `install.sh` hash; the signed spec pins the

@@ -109,6 +109,10 @@ CURL_FLAGS=(--proto '=https' --tlsv1.2 -fsSL)
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
+    if [ "$1" = "ssh-keygen" ]; then
+      fail missing_bootstrap_dependency \
+        "required command missing: ssh-keygen (install the OpenSSH client package first; examples: sudo apt-get install openssh-client, sudo dnf install openssh-clients, sudo yum install openssh-clients, sudo apk add openssh-client). Re-run this installer only after you have reviewed and approved that package install; E1 will not auto-sudo before trust verification."
+    fi
     fail missing_bootstrap_dependency "required command missing: $1"
   fi
 }
