@@ -83,6 +83,35 @@ def test_p3_controller_pilot_plan_flags_operator_only_steps():
     assert plan.record["backup_restore"]["restore_test_required"] is True
 
 
+def test_p3_controller_pilot_bootstrap_plan_allows_empty_secret_refs():
+    config = OpenBaoDeploymentConfig.controller_pilot(
+        host_ref="controller-vps:ce-pilot-1",
+        address="https://openbao.internal.example",
+        ca_bundle_ref="secret-ref:openbao-ca",
+        allowed_secret_refs=(),
+    )
+
+    plan = build_p3_deployment_plan(config)
+
+    assert plan.ready_for_local_execution is False
+    assert "operator-inject-wrapping-token" in plan.operator_required_steps
+    assert plan.record["cotenancy"]["allowed_refs"] == []
+    assert "root_token" not in json.dumps(plan.record)
+
+
+def test_p3_local_execution_requires_explicit_allowed_secret_refs():
+    config = OpenBaoDeploymentConfig.local_ephemeral(
+        address="http://127.0.0.1:18200",
+        allowed_secret_refs=(),
+    )
+
+    with pytest.raises(
+        SecretIdentityRefused,
+        match="local execution requires explicit allowed SecretRefs",
+    ):
+        build_p3_deployment_plan(config)
+
+
 def test_p3_plan_refuses_public_or_non_tls_controller_topology():
     with pytest.raises(SecretIdentityRefused):
         build_p3_deployment_plan(
@@ -151,6 +180,20 @@ def test_p3_migration_readiness_requires_value_free_evidence_and_secret_refs():
                 operator_ratification_ref=readiness.operator_ratification_ref,
                 per_dev_secret_refs=readiness.per_dev_secret_refs,
                 production_writes_enabled=True,
+            )
+        )
+
+    with pytest.raises(SecretIdentityRefused, match="per-dev SecretRefs"):
+        validate_openbao_migration_readiness(
+            OpenBaoMigrationReadiness(
+                source_inventory_ref=readiness.source_inventory_ref,
+                path_mapping_ref=readiness.path_mapping_ref,
+                restore_drill_proof_ref=readiness.restore_drill_proof_ref,
+                audit_fail_closed_evidence_ref=readiness.audit_fail_closed_evidence_ref,
+                encrypted_snapshot_ref=readiness.encrypted_snapshot_ref,
+                rollback_plan_ref=readiness.rollback_plan_ref,
+                operator_ratification_ref=readiness.operator_ratification_ref,
+                per_dev_secret_refs=(),
             )
         )
 

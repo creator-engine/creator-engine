@@ -163,8 +163,6 @@ def _validate_deployment_config(config: OpenBaoDeploymentConfig) -> None:
         raise SecretIdentityRefused("OpenBao P3 requires encrypted backup plus restore drill")
     if not config.audit_fail_closed_probe:
         raise SecretIdentityRefused("OpenBao P3 requires audit-fail-closed verification")
-    if not config.allowed_secret_refs:
-        raise SecretIdentityRefused("OpenBao P3 requires explicit allowed SecretRefs")
     for ref in config.allowed_secret_refs:
         validate_secret_ref(ref, backend_key="openbao")
         if _ref_violates_p3_cotenancy(ref):
@@ -172,6 +170,10 @@ def _validate_deployment_config(config: OpenBaoDeploymentConfig) -> None:
                 f"SecretRef {ref.mount}/{ref.path} is forbidden in the P3 runtime-token instance"
             )
     if config.profile == "local-ephemeral":
+        if not config.allowed_secret_refs:
+            raise SecretIdentityRefused(
+                "OpenBao P3 local execution requires explicit allowed SecretRefs"
+            )
         if config.network_exposure != "local-loopback-only":
             raise SecretIdentityRefused("local OpenBao P3 tests must be loopback-only")
         if not config.address.startswith(_LOCAL_LOOPBACK_PREFIXES):
