@@ -55,6 +55,7 @@ import inspect
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -292,6 +293,16 @@ def _git_read(root: Path, *args: str) -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
+
+
+def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
 
 
 def _github_repo_from_remote(remote: str | None) -> str | None:
@@ -4056,6 +4067,20 @@ def _build_parser() -> argparse.ArgumentParser:
                            help=f"v3 local-state root for apply ledger/lock (default: {V3_LOCAL_STATE_ROOT})")
     p_onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    p_carrier = sub.add_parser(
+        "carrier",
+        help="write, stage, and verify the PR path-manifest carrier files",
+    )
+    p_carrier.add_argument("--slug", required=True, help="canonical branch/carrier slug")
+    p_carrier.add_argument("--issue", required=True, help="issue reference for the carrier")
+    p_carrier.add_argument("--title", required=True, help="carrier title")
+    p_carrier.add_argument("--kind", required=True, help="declared work kind/class")
+    p_carrier.add_argument("--scope", required=True, help="closed scope summary")
+    p_carrier.add_argument("--body-file", required=True, dest="body_file", help="path to the PR body/source text")
+    p_carrier.add_argument("--base", default="origin/main", help="base ref for path-manifest verification")
+    p_carrier.add_argument("--date", default=None, help="carrier date stamp override")
+    p_carrier.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     p_guide = sub.add_parser("guide", help="print the in-product CE guide (what CE is + the five stages)")
     p_guide.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
@@ -4301,6 +4326,293 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, payload)
 
 
+def _path_manifest_against_index(
+    repo_root: Path,
+    *,
+    base: str,
+    manifest_dir: str,
+    head_ref: str,
+):
+    from .checks import path_manifest_fidelity
+
+    original_run_git = path_manifest_fidelity._run_git
+
+    def _run_git_from_index(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
+        if argv == ["diff", "--name-status", "--no-renames", f"{base}..HEAD"]:
+            proc = subprocess.run(
+                ["git", "diff", "--cached", "--name-status", "--no-renames", base],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        if argv == ["diff", "--name-only", f"{base}..HEAD"]:
+            proc = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", base],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        return original_run_git(argv, cwd)
+
+    try:
+        path_manifest_fidelity._run_git = _run_git_from_index
+        return path_manifest_fidelity.run_with_base(
+            [repo_root],
+            base,
+            manifest_dir=manifest_dir,
+            head_ref=head_ref,
+            require_carrier=True,
+        )
+    finally:
+        path_manifest_fidelity._run_git = original_run_git
+
+
+def _carrier_output_paths(slug: str) -> tuple[Path, Path]:
+    from .checks import path_manifest_fidelity
+
+    return (
+        Path(path_manifest_fidelity.MANIFEST_DIR) / f"{slug}.md",
+        Path(".ce/changelog") / f"{slug}.md",
+    )
+
+
+def _porcelain_path(raw_path: str) -> str:
+    path = raw_path
+    if " -> " in path:
+        path = path.rsplit(" -> ", 1)[1]
+    if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
+        path = path[1:-1]
+    return path
+
+
+def _unstaged_non_carrier_paths(status: str, carrier_paths: set[str]) -> list[str]:
+    blocked: list[str] = []
+    for raw_line in status.splitlines():
+        if not raw_line:
+            continue
+        code = raw_line[:2]
+        path = _porcelain_path(raw_line[3:])
+        if path in carrier_paths:
+            continue
+        if code == "??" or len(code) == 2 and code[1] not in {" ", "?"}:
+            blocked.append(path)
+    return sorted(set(blocked))
+
+
+def _cmd_carrier(args: argparse.Namespace) -> int:
+    from .checks import path_manifest_fidelity
+
+    slug = str(args.slug)
+    canonical_slug = path_manifest_fidelity.branch_slug(slug)
+    if slug != canonical_slug:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · carrier REFUSED (input): --slug must be canonical; expected {canonical_slug!r}"],
+            {"error": "carrier_input", "detail": "--slug must be canonical", "expected_slug": canonical_slug},
+        )
+
+    repo_root_raw = _git_read(Path.cwd(), "rev-parse", "--show-toplevel")
+    if not repo_root_raw:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: not inside a git repository"],
+            {"error": "carrier_git_repository", "detail": "not inside a git repository"},
+        )
+    repo_root = Path(repo_root_raw).resolve()
+
+    try:
+        from .carrier_gen import CarrierSpec, write_carriers
+    except ImportError as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: generator module unavailable ({exc})"],
+            {"error": "carrier_generator_unavailable", "detail": str(exc)},
+        )
+
+    carrier_path, changelog_path = _carrier_output_paths(slug)
+    staged_paths = (carrier_path, changelog_path)
+    status_proc = _git_run(repo_root, "status", "--porcelain", "--untracked-files=all")
+    if status_proc.returncode != 0:
+        detail = (status_proc.stderr or status_proc.stdout or "git status failed").strip()
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: could not inspect worktree status: {detail}"],
+            {"error": "carrier_status_failed", "detail": detail},
+        )
+    unstaged = _unstaged_non_carrier_paths(
+        status_proc.stdout,
+        {path.as_posix() for path in staged_paths},
+    )
+    if unstaged:
+        preview = ", ".join(unstaged[:8])
+        if len(unstaged) > 8:
+            preview = f"{preview}, ... (+{len(unstaged) - 8} more)"
+        add_hint = " ".join(shlex.quote(path) for path in unstaged[:8])
+        return _emit(
+            args,
+            1,
+            [
+                f"{_BRAND} · carrier REFUSED (worktree): stage or remove unstaged/untracked non-carrier paths first",
+                f"    run: git add -- {add_hint}",
+                f"    carrier may write/stage: {carrier_path.as_posix()}, {changelog_path.as_posix()}",
+                f"    blocked: {preview}",
+            ],
+            {
+                "error": "carrier_unstaged_non_carrier_paths",
+                "detail": "stage or remove unstaged/untracked non-carrier paths before running ce carrier",
+                "paths": unstaged,
+                "allowed_carrier_outputs": [path.as_posix() for path in staged_paths],
+            },
+        )
+
+    body_file = Path(args.body_file)
+    try:
+        body = body_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: could not read --body-file ({exc})"],
+            {"error": "carrier_body_file", "detail": str(exc), "body_file": str(body_file)},
+        )
+
+    date = args.date or datetime.now(timezone.utc).date().isoformat()
+    spec_values = {
+        "slug": slug,
+        "head_ref": slug,
+        "issue": args.issue,
+        "title": args.title,
+        "kind": args.kind,
+        "scope": args.scope,
+        "body_file": body_file,
+        "body": body,
+        "base": args.base,
+        "date": date,
+    }
+    try:
+        spec_params = inspect.signature(CarrierSpec).parameters
+        spec = CarrierSpec(**{name: spec_values[name] for name in spec_params if name in spec_values})
+    except Exception as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: could not build generator spec ({exc})"],
+            {"error": "carrier_spec_failed", "detail": str(exc)},
+        )
+
+    def _generator_git_runner(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
+        if argv == ["diff", "--name-only", f"{args.base}..HEAD"]:
+            proc = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", args.base],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        proc = subprocess.run(
+            ["git", *argv],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    try:
+        write_params = inspect.signature(write_carriers).parameters
+        write_kwargs: dict[str, Any] = {}
+        if "git_runner" in write_params:
+            write_kwargs["git_runner"] = _generator_git_runner
+        first_param = next(iter(write_params), None)
+        if first_param in {"repo_root", "root"}:
+            write_carriers(repo_root, spec, **write_kwargs)
+        else:
+            write_carriers(spec, **write_kwargs)
+    except Exception as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: generator refused ({exc})"],
+            {"error": "carrier_generator_failed", "detail": str(exc)},
+        )
+
+    missing = [path.as_posix() for path in staged_paths if not (repo_root / path).is_file()]
+    if missing:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: generator did not write expected file(s): {', '.join(missing)}"],
+            {"error": "carrier_missing_outputs", "missing": missing},
+        )
+
+    add_proc = _git_run(repo_root, "add", "--", *(path.as_posix() for path in staged_paths))
+    if add_proc.returncode != 0:
+        detail = (add_proc.stderr or add_proc.stdout or "git add failed").strip()
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: could not stage generated files: {detail}"],
+            {"error": "carrier_stage_failed", "detail": detail, "files": [p.as_posix() for p in staged_paths]},
+        )
+
+    result = _path_manifest_against_index(
+        repo_root,
+        base=args.base,
+        manifest_dir=path_manifest_fidelity.MANIFEST_DIR,
+        head_ref=slug,
+    )
+    identity = path_manifest_fidelity.parse_carrier_file(repo_root / carrier_path)
+    manifest_summary = {
+        "carrier": carrier_path.as_posix(),
+        "changelog": changelog_path.as_posix(),
+        "base": args.base,
+        "head_ref": slug,
+        "paths_count": len(identity.paths) if identity else None,
+        "paths_sha256": identity.normalized_sha256 if identity else None,
+        "consistent": identity.consistent if identity else False,
+    }
+    payload = {
+        "action": "carrier",
+        "files": [path.as_posix() for path in staged_paths],
+        "manifest": manifest_summary,
+        "verification": result.to_dict(),
+    }
+
+    if not result.ok or not identity or not identity.consistent:
+        errors = [error.format() for error in result.errors]
+        if not identity:
+            errors.append(f"{carrier_path.as_posix()}: no structured path manifest found")
+        elif not identity.consistent:
+            errors.append(f"{carrier_path.as_posix()}: declared manifest count/hash do not match canonical paths")
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier FAIL path_manifest_fidelity", *errors],
+            {**payload, "error": "carrier_path_manifest_fidelity"},
+        )
+
+    lines = [
+        f"{_BRAND} · carrier PASS path_manifest_fidelity",
+        f"    carrier: {carrier_path.as_posix()}",
+        f"    changelog: {changelog_path.as_posix()}",
+        f"    manifest: count={identity.declared_count} sha256={identity.normalized_sha256}",
+    ]
+    return _emit(args, 0, lines, payload)
+
+
 _DISPATCH = {
     "scope": _cmd_scope,
     "shape": _cmd_shape,
@@ -4326,6 +4638,7 @@ _DISPATCH = {
     "guide": _cmd_guide,
     "session": _cmd_session,
     "cockpit": _cmd_cockpit,
+    "carrier": _cmd_carrier,
     "queue-poll": _cmd_queue_poll,
     "queue-daemon": _cmd_queue_daemon,
 }
