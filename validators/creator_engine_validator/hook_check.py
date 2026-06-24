@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 import yaml
 
@@ -345,6 +346,13 @@ def _git_branch_deletes(args: tuple[str, ...]) -> bool:
     return False
 
 
+def _git_push_deletes_ref(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in {"-d", "--delete"} or arg.startswith("--delete="):
+            return True
+    return False
+
+
 # Conceptual restricted "verbs" for the abbreviation guard: a directly-typed
 # unknown subcommand that is a UNIQUE prefix of exactly one of these maps to that
 # verb's mechanic (e.g. ``git pus`` -> push -> deploy), which removes the
@@ -408,10 +416,11 @@ def _classify_git_subcommand(
     """Map a resolved git subcommand to a restricted mechanic.
 
     Git built-ins take precedence over same-named aliases. Restricted built-ins
-    are ``push`` / ``send-pack`` (deploy), branch deletion (alter_repo_settings),
-    and the foreign-VCS bridges' outward sub-verb (``p4 submit`` / ``svn
-    dcommit`` -> deploy); ordinary local built-ins return ``None``. Inline aliases
-    are resolved only for non-built-in names. Unparseable alias shapes stay
+    are ``push`` / ``send-pack`` (deploy, except push ref deletion ->
+    alter_repo_settings), branch deletion (alter_repo_settings), and the
+    foreign-VCS bridges' outward sub-verb (``p4 submit`` / ``svn dcommit`` ->
+    deploy); ordinary local built-ins return ``None``. Inline aliases are
+    resolved only for non-built-in names. Unparseable alias shapes stay
     conservative (``git_opaque``). A directly-typed unknown subcommand is run
     through the abbreviation guard (unique prefix of a restricted verb), else
     ``None`` because git itself will reject it.
@@ -444,6 +453,8 @@ def _classify_git_subcommand(
         subcommand = alias_tokens[0]
         args = (*alias_tokens[1:], *args)
 
+    if subcommand == "push" and _git_push_deletes_ref(args):
+        return "alter_repo_settings"
     if subcommand in {"push", "send-pack"}:
         return "deploy"
     if subcommand == "branch":
@@ -512,6 +523,267 @@ def _classify_git_mechanics(command: str) -> str | None:
     return None
 
 
+def _is_gh_executable(token: str) -> bool:
+    return token == "gh" or token.endswith("/gh")
+
+
+def _is_curl_executable(token: str) -> bool:
+    return token == "curl" or token.endswith("/curl")
+
+
+def _token_value(token: str, prefixes: Iterable[str]) -> str | None:
+    for prefix in prefixes:
+        marker = f"{prefix}="
+        if token.startswith(marker):
+            return token[len(marker) :]
+    return None
+
+
+_GH_API_OPTIONS_WITH_VALUE = frozenset(
+    {
+        "-H",
+        "--header",
+        "--hostname",
+        "--input",
+        "-p",
+        "--preview",
+        "-q",
+        "--jq",
+        "-t",
+        "--template",
+        "--cache",
+    }
+)
+_GH_API_FIELD_OPTIONS = frozenset({"-f", "--field", "-F", "--raw-field"})
+_GH_API_METHOD_OPTIONS = frozenset({"-X", "--method"})
+_GH_API_OPTIONS_NO_VALUE = frozenset(
+    {"-i", "--include", "--paginate", "--silent", "--slurp", "--verbose"}
+)
+
+_CURL_METHOD_OPTIONS = frozenset({"-X", "--request"})
+_CURL_URL_OPTIONS = frozenset({"--url"})
+_CURL_OPTIONS_WITH_VALUE = frozenset(
+    {
+        "-A",
+        "--user-agent",
+        "-b",
+        "--cookie",
+        "-d",
+        "--data",
+        "--data-raw",
+        "--data-binary",
+        "--data-urlencode",
+        "-H",
+        "--header",
+        "-o",
+        "--output",
+        "-u",
+        "--user",
+    }
+)
+
+
+def _github_api_path_from_url(value: str) -> str | None:
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or parsed.netloc.lower() != "api.github.com":
+        return None
+    return parsed.path or "/"
+
+
+def _normalize_github_api_path(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme == "https" and parsed.netloc.lower() == "api.github.com":
+        path = parsed.path
+    else:
+        path = value.split("?", 1)[0].split("#", 1)[0]
+    return path if path.startswith("/") else f"/{path}"
+
+
+def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
+    method: str | None = None
+    field_implies_post = False
+    path: str | None = None
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in _SHELL_SEPARATORS:
+            break
+        if token in _GH_API_METHOD_OPTIONS:
+            if i + 1 >= len(args):
+                return None
+            method = args[i + 1].upper()
+            i += 2
+            continue
+        method_value = _token_value(token, ("--method",))
+        if method_value is not None:
+            method = method_value.upper()
+            i += 1
+            continue
+        if token.startswith("-X") and token != "-X":
+            method = token[2:].upper()
+            i += 1
+            continue
+        if token in _GH_API_FIELD_OPTIONS:
+            field_implies_post = True
+            i += 2 if i + 1 < len(args) else 1
+            continue
+        if _token_value(token, ("--field", "--raw-field")) is not None:
+            field_implies_post = True
+            i += 1
+            continue
+        if (token.startswith("-f") or token.startswith("-F")) and token not in {"-f", "-F"}:
+            field_implies_post = True
+            i += 1
+            continue
+        if token in _GH_API_OPTIONS_WITH_VALUE:
+            i += 2 if i + 1 < len(args) else 1
+            continue
+        if _token_value(token, _GH_API_OPTIONS_WITH_VALUE) is not None:
+            i += 1
+            continue
+        if token in _GH_API_OPTIONS_NO_VALUE:
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if path is None:
+            path = token
+        i += 1
+    if path is None:
+        return None
+    return ((method or ("POST" if field_implies_post else "GET")).upper(), _normalize_github_api_path(path))
+
+
+def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
+    method: str | None = None
+    url: str | None = None
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in _SHELL_SEPARATORS:
+            break
+        if token in _CURL_METHOD_OPTIONS:
+            if i + 1 >= len(args):
+                return None
+            method = args[i + 1].upper()
+            i += 2
+            continue
+        request_value = _token_value(token, ("--request",))
+        if request_value is not None:
+            method = request_value.upper()
+            i += 1
+            continue
+        if token.startswith("-X") and token != "-X":
+            method = token[2:].upper()
+            i += 1
+            continue
+        if token in _CURL_URL_OPTIONS:
+            if i + 1 >= len(args):
+                return None
+            candidate = _github_api_path_from_url(args[i + 1])
+            if candidate is not None:
+                url = args[i + 1]
+            i += 2
+            continue
+        if _token_value(token, _CURL_URL_OPTIONS) is not None:
+            candidate_url = _token_value(token, _CURL_URL_OPTIONS) or ""
+            if _github_api_path_from_url(candidate_url) is not None:
+                url = candidate_url
+            i += 1
+            continue
+        candidate = _github_api_path_from_url(token)
+        if candidate is not None:
+            url = token
+            i += 1
+            continue
+        if token in _CURL_OPTIONS_WITH_VALUE:
+            i += 2 if i + 1 < len(args) else 1
+            continue
+        if _token_value(token, _CURL_OPTIONS_WITH_VALUE) is not None:
+            i += 1
+            continue
+        i += 1
+    if url is None:
+        return None
+    return ((method or "GET").upper(), _github_api_path_from_url(url) or "/")
+
+
+def _repo_path_tail(path: str) -> tuple[str, ...] | None:
+    parts = tuple(part for part in path.split("/") if part)
+    if len(parts) < 3 or parts[0] != "repos":
+        return None
+    return parts[3:]
+
+
+_GITHUB_REPO_SETTINGS_SEGMENTS = frozenset(
+    {
+        "actions",
+        "autolinks",
+        "branches",
+        "collaborators",
+        "codespaces",
+        "dependabot",
+        "environments",
+        "git",
+        "hooks",
+        "keys",
+        "pages",
+        "properties",
+        "rules",
+        "rulesets",
+        "secret-scanning",
+        "secrets",
+        "security-and-analysis",
+        "refs",
+        "settings",
+        "teams",
+        "vulnerability-alerts",
+    }
+)
+
+
+def _classify_github_api_request(method: str, path: str) -> str | None:
+    method = method.upper()
+    if method in {"GET", "HEAD"}:
+        return None
+    if method not in {"DELETE", "PATCH", "PUT", "POST"}:
+        return None
+    tail = _repo_path_tail(path)
+    if tail is None:
+        return None
+    if not tail:
+        return "alter_repo_settings"
+    if tail[0] == "contents":
+        return "deploy"
+    if tail[0] in _GITHUB_REPO_SETTINGS_SEGMENTS:
+        return "alter_repo_settings"
+    if "protection" in tail or any(part.endswith("secrets") for part in tail):
+        return "alter_repo_settings"
+    return None
+
+
+def _classify_github_api_mechanics(command: str) -> str | None:
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return "alter_repo_settings" if "api.github.com/repos/" in command else None
+    for index, token in enumerate(tokens):
+        if _is_gh_executable(token) and index + 1 < len(tokens) and tokens[index + 1] == "api":
+            parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
+            if parsed is not None:
+                action = _classify_github_api_request(*parsed)
+                if action is not None:
+                    return action
+        if _is_curl_executable(token):
+            parsed = _parse_curl_api_call(tuple(tokens[index + 1 :]))
+            if parsed is not None:
+                action = _classify_github_api_request(*parsed)
+                if action is not None:
+                    return action
+    return None
+
+
 def classify_mechanics(command: Any) -> str | None:
     """Return the restricted classification for ``command``, or ``None``.
 
@@ -524,6 +796,9 @@ def classify_mechanics(command: Any) -> str | None:
     git_action = _classify_git_mechanics(command)
     if git_action is not None:
         return git_action
+    github_api_action = _classify_github_api_mechanics(command)
+    if github_api_action is not None:
+        return github_api_action
     for pattern, action in _MECHANIC_RULES + _MECHANIC_RULES_NONVOCAB:
         if pattern.search(command):
             return action
