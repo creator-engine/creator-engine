@@ -29,6 +29,7 @@ from creator_engine_validator.secret_identity import (
     get_backend,
     redeem_wrapped_secret_zero,
     register_backend,
+    validate_secret_ref,
 )
 
 
@@ -117,6 +118,17 @@ def test_secret_identity_value_objects_are_frozen_and_value_free():
     assert record["path"] == "forge/github-apps/ce-shared/private-key"
     assert "value" not in record
     assert "live-secret-value" not in repr(record)
+
+
+def test_validate_secret_ref_rejects_inline_secret_shaped_material():
+    validate_secret_ref(_secret_ref(), backend_key="openbao", kv_mount="ce-kv")
+
+    with pytest.raises(SecretIdentityRefused, match="value-free reference"):
+        validate_secret_ref(
+            _secret_ref(field="token_value=hvs.placeholdertokenvalue123"),
+            backend_key="openbao",
+            kv_mount="ce-kv",
+        )
 
 
 def test_secret_ref_and_grant_schemas_reject_values(repo_root):
