@@ -82,7 +82,7 @@ def discover_seats(
     events_seen: set[Path] = set()
     for ledger_root in ledger_roots or default_ledger_roots(root):
         for lifecycle_path in _iter_lifecycle_paths(Path(ledger_root)):
-            ref = _ref_from_lifecycle_path(lifecycle_path)
+            ref = _ref_from_lifecycle_path(lifecycle_path, state_root=root)
             key = _ref_key(ref)
             refs[key] = _merge_ref(refs.get(key), ref)
             if ref.events_path is not None:
@@ -118,7 +118,10 @@ def read_seat_state(ref: SeatRef) -> SeatStatus:
 
     seat_id = _first_text(record_seat.get("seat_id"), ref.seat_id)
     host_id = _first_text(record_seat.get("host_id"), ref.host_id)
-    events_path = ref.events_path or _path_or_none(record_dispatch.get("events_ref"))
+    events_path = ref.events_path or _events_path_from_ref(
+        record_dispatch.get("events_ref"),
+        lifecycle_path=ref.lifecycle_path,
+    )
     events, events_reason = _load_events(events_path)
     latest_event = events[-1] if events else {}
 
@@ -226,7 +229,7 @@ def _iter_lifecycle_paths(ledger_root: Path) -> list[Path]:
     return sorted(base.glob("*/*.yaml"))
 
 
-def _ref_from_lifecycle_path(path: Path) -> SeatRef:
+def _ref_from_lifecycle_path(path: Path, *, state_root: Path) -> SeatRef:
     record, _reason = _load_mapping(path)
     seat = record.get("seat", {}) if record else {}
     dispatch = record.get("dispatch", {}) if record else {}
@@ -236,7 +239,11 @@ def _ref_from_lifecycle_path(path: Path) -> SeatRef:
         seat_id=seat_id,
         host_id=host_id,
         lifecycle_path=path,
-        events_path=_path_or_none(dispatch.get("events_ref")),
+        events_path=_events_path_from_ref(
+            dispatch.get("events_ref"),
+            lifecycle_path=path,
+            state_root=state_root,
+        ),
     )
 
 
@@ -353,6 +360,31 @@ def _first_text(*values: Any) -> str | None:
 def _path_or_none(value: Any) -> Path | None:
     if isinstance(value, str) and value:
         return Path(value)
+    return None
+
+
+def _events_path_from_ref(
+    value: Any,
+    *,
+    lifecycle_path: Path | None,
+    state_root: Path | None = None,
+) -> Path | None:
+    path = _path_or_none(value)
+    if path is None or path.is_absolute():
+        return path
+    if state_root is not None and path.parts[:1] == (DISPATCHES_SUBDIR,):
+        return state_root / path
+    if lifecycle_path is not None:
+        ledger_root = _ledger_root_from_lifecycle_path(lifecycle_path)
+        if ledger_root is not None and path.parts[:1] == (DISPATCHES_SUBDIR,):
+            return ledger_root.parent / path
+    return path
+
+
+def _ledger_root_from_lifecycle_path(path: Path) -> Path | None:
+    # <ledger_root>/seats/<host_id>/<seat_id>.yaml
+    if len(path.parents) >= 3 and path.parents[1].name == SEATS_SUBDIR:
+        return path.parents[2]
     return None
 
 

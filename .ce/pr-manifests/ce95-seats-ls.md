@@ -9,6 +9,8 @@ carrier lists itself.
 Base:
 `559c41980d5dc6e15e11e60fcc3921666225a4fe` (`origin/main` at branch creation).
 
+- **Declared work class:** story
+
 Per-file purpose (closed path-set - 7 paths):
 - **`.ce/changelog/ce95-seats-ls.md`** *(A)* - changelog fragment for ce-ops#95.
 - **`.ce/pr-manifests/ce95-seats-ls.md`** *(A)* - this carrier.
