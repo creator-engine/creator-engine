@@ -147,7 +147,10 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#218 added the belt-poller (``forge.integrator_belt``) — the bounded
     # merge-queue repair poll over the Unit 2-5 primitives; pure-forge v3, live
     # actions behind injectable adapters + the merge gate: 54 -> 55.
-    assert len(ver.V3_RUNTIME) == 55
+    # ce-ops#188 decoupled review-pickup to v3 (``forge.review_pickup``) — routes
+    # awaiting-review PRs to non-author seats; shares the boundary-neutral Search
+    # core (``pickup_search``, classified ``shared``): 55 -> 56.
+    assert len(ver.V3_RUNTIME) == 56
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
