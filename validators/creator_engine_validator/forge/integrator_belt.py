@@ -623,7 +623,7 @@ _DAEMON_SEARCH_QUERY = (
     "... on PullRequest{"
     "number title url isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
     "repository{nameWithOwner} "
-    "latestReviews(first:20){nodes{state commit{oid}}} "
+    "latestOpinionatedReviews(first:20){nodes{state commit{oid}}} "
     "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
     "pageInfo{hasNextPage} nodes{__typename "
     "... on CheckRun{name conclusion status} "
@@ -645,7 +645,14 @@ def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
     contexts = ((rollup.get("contexts") or {}) if isinstance(rollup, dict) else {})
     checks = tuple(_parse_status_check(raw) for raw in contexts.get("nodes") or ())
     files = (node.get("files") or {}) if isinstance(node.get("files"), dict) else {}
-    reviews = (node.get("latestReviews") or {}) if isinstance(node.get("latestReviews"), dict) else {}
+    # GitHub's ``latestReviews`` is EMPTY for reviewers who were never formally
+    # *requested* (e.g. a controller running ``gh pr review --approve``); the
+    # approval + its commit oid live in ``latestOpinionatedReviews`` instead.
+    reviews = (
+        (node.get("latestOpinionatedReviews") or {})
+        if isinstance(node.get("latestOpinionatedReviews"), dict)
+        else {}
+    )
     approving = tuple(
         str(((review.get("commit") or {}).get("oid") or "")).lower()
         for review in reviews.get("nodes") or ()

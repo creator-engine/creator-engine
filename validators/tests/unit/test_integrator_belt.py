@@ -359,6 +359,34 @@ def test_daemon_search_query_is_balanced_and_avoids_query_variable_name():
     _assert_valid_daemon_search_query(query)
 
 
+def test_daemon_search_query_uses_latest_opinionated_reviews():
+    # ``latestReviews`` is EMPTY for reviewers never formally requested, so the
+    # gate must read approval commits from ``latestOpinionatedReviews`` instead.
+    query = belt._DAEMON_SEARCH_QUERY
+    assert "latestOpinionatedReviews(" in query
+    assert "latestReviews(" not in query
+
+
+def test_parse_daemon_pr_reads_approval_from_latest_opinionated_reviews():
+    head = "a" * 40
+    node = {
+        "repository": {"nameWithOwner": REPO},
+        "number": 7,
+        "headRefOid": head,
+        "headRefName": "feature",
+        "baseRefName": "main",
+        "reviewDecision": "APPROVED",
+        # As GitHub returns it for a non-requested approver: latestReviews empty,
+        # the approval (with its head commit oid) only in latestOpinionatedReviews.
+        "latestReviews": {"nodes": []},
+        "latestOpinionatedReviews": {
+            "nodes": [{"state": "APPROVED", "commit": {"oid": head}}]
+        },
+    }
+    pr = belt._parse_daemon_pr(node)
+    assert pr.approving_review_commits == (head.lower(),)
+
+
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     gh = FakeDaemonGh()
     stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
