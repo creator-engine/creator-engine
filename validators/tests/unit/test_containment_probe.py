@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -392,10 +393,12 @@ def test_ring1_probe_resolves_shim_under_target_proc_root(tmp_path):
     proc_root = tmp_path / "proc"
     target_root = tmp_path / "target-root"
     marker = tmp_path / "target-ring1-args"
+    target_path_dir = "/__ce_target_only_ring1__/shim"
     (proc_root / "6001").mkdir(parents=True)
-    target_shim_dir = target_root / "opt" / "ce-ring1"
+    target_shim_dir = target_root / target_path_dir.lstrip("/")
     target_shim_dir.mkdir(parents=True)
     target_shim_dir.chmod(0o700)
+    assert not (Path(target_path_dir) / "git").exists()
     _write_executable(
         target_shim_dir / "git",
         "#!/usr/bin/env sh\n"
@@ -406,7 +409,7 @@ def test_ring1_probe_resolves_shim_under_target_proc_root(tmp_path):
     _write_bytes(
         proc_root / "6001" / "environ",
         (
-            "PATH=/opt/ce-ring1:/usr/bin\0"
+            f"PATH={target_path_dir}:/usr/bin\0"
             "CE_RING1_POSTURE=governed\0"
             f"CE_RING1_PROBE_MARKER={marker}\0"
         ).encode("utf-8"),
@@ -418,7 +421,7 @@ def test_ring1_probe_resolves_shim_under_target_proc_root(tmp_path):
     )
 
     assert verdict["enforced"] is True
-    assert verdict["shim_path"] == "/opt/ce-ring1/git"
+    assert verdict["shim_path"] == f"{target_path_dir}/git"
     assert marker.read_text(encoding="utf-8").strip().startswith("push --dry-run")
 
 
