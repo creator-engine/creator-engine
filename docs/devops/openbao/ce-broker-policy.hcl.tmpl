@@ -1,0 +1,27 @@
+# Broker policy for response-wrapped AppRole secret-zero issuance.
+# This policy lets the broker mint one-use wrapped SecretIDs and inspect audit
+# posture. It does not grant root, unseal, policy write, or broad KV reads.
+
+path "sys/health" {
+  capabilities = ["read"]
+}
+
+path "sys/audit" {
+  capabilities = ["read", "sudo"]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+
+path "auth/approle/role/ce-dev-*/role-id" {
+  capabilities = ["read"]
+}
+
+path "auth/approle/role/ce-dev-*/secret-id" {
+  capabilities = ["update"]
+}

@@ -11,8 +11,11 @@ from creator_engine_validator.openbao_golive import (
     read_go_live_artifact,
     validate_emergency_revoke_script,
     validate_migration_gate_evidence,
+    openbao_live_env_expectations,
+    resolve_live_openbao_binary,
     validate_per_dev_policy_template,
     validate_policy_renderer,
+    validate_live_openbao_binary,
     validate_provision_script,
     validate_restore_drill_proof,
     validate_secret_migration_inventory_tsv,
@@ -50,6 +53,34 @@ def _write_executable(path: Path, text: str) -> Path:
 def test_openbao_golive_artifacts_exist(repo_root: Path):
     missing = [path for path in GO_LIVE_ARTIFACTS if not (repo_root / path).is_file()]
     assert missing == []
+
+
+def test_openbao_live_env_expectations_are_operator_facing():
+    production = openbao_live_env_expectations("production-config")
+    restore = openbao_live_env_expectations("restore-drill")
+
+    assert "CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE=1" in production
+    assert "curl, openssl, sha256sum, tar" in production
+    assert "CE_OPENBAO_BIN" in restore
+    assert "no production BAO_ADDR, BAO_TOKEN, unseal key, or secret value" in restore
+
+
+def test_openbao_live_binary_prerequisite_validation(tmp_path: Path):
+    assert "CE_OPENBAO_BIN" in validate_live_openbao_binary({})[0]
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(tmp_path / "missing-bao")}) == [
+        f"CE_OPENBAO_BIN must point to a file, got {str(tmp_path / 'missing-bao')!r}"
+    ]
+
+    not_executable = tmp_path / "not-executable-bao"
+    not_executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(not_executable)}) == [
+        f"CE_OPENBAO_BIN must point to an executable bao binary, got {str(not_executable)!r}"
+    ]
+
+    bao_bin = _write_executable(tmp_path / "bao", "#!/usr/bin/env bash\nexit 0\n")
+
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(bao_bin)}) == []
+    assert resolve_live_openbao_binary({"CE_OPENBAO_BIN": str(bao_bin)}) == bao_bin
 
 
 def test_openbao_hcl_is_raft_tailnet_tls_and_audit_fail_closed(repo_root: Path):

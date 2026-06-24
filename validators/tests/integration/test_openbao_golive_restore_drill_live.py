@@ -9,6 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator.openbao_golive import (
+    openbao_live_env_expectations,
+    resolve_live_openbao_binary,
+    validate_live_openbao_binary,
+)
+
+
+_RESTORE_DRILL_LIVE_EXPECTATIONS = openbao_live_env_expectations("restore-drill")
+
 
 def _free_port() -> int:
     sock = socket.socket()
@@ -34,15 +43,26 @@ def _wait_tcp(port: int, proc: subprocess.Popen, log_path: Path) -> None:
     pytest.fail(f"OpenBao server did not listen on {port}:\n{log_path.read_text(encoding='utf-8')}")
 
 
+def _safe_bao_args(args: tuple[str, ...]) -> str:
+    if len(args) >= 3 and args[:2] == ("operator", "unseal"):
+        return "operator unseal <synthetic-local-unseal-key>"
+    return " ".join(args)
+
+
 def _run_bao(bao_bin: Path, env: dict[str, str], *args: str) -> str:
     completed = subprocess.run(
         [str(bao_bin), *args],
         env=env,
-        check=True,
+        check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    if completed.returncode != 0:
+        pytest.fail(
+            "bao command failed during disposable OpenBao restore drill "
+            f"({_safe_bao_args(args)}):\n{completed.stderr}"
+        )
     return completed.stdout
 
 
@@ -87,12 +107,16 @@ listener "tcp" {{ address = "127.0.0.1:{api_port}" cluster_address = "127.0.0.1:
     return proc, f"http://127.0.0.1:{api_port}"
 
 
-@pytest.mark.skipif(not os.environ.get("CE_OPENBAO_BIN"), reason="CE_OPENBAO_BIN not set")
 def test_openbao_golive_restore_drill_script_against_throwaway_raft(
     repo_root: Path,
     tmp_path: Path,
 ):
-    bao_bin = Path(os.environ["CE_OPENBAO_BIN"])
+    prerequisite_violations = validate_live_openbao_binary(os.environ)
+    if prerequisite_violations:
+        if not os.environ.get("CE_OPENBAO_BIN"):
+            pytest.skip(_RESTORE_DRILL_LIVE_EXPECTATIONS)
+        pytest.fail("; ".join(prerequisite_violations))
+    bao_bin = resolve_live_openbao_binary(os.environ)
     source_proc: subprocess.Popen | None = None
     target_proc: subprocess.Popen | None = None
     try:
@@ -186,15 +210,20 @@ cp "$input" "$out"
             "RESTORE_DRILL_PROOF": str(proof),
         }
 
-        subprocess.run(
+        completed = subprocess.run(
             [str(repo_root / "docs/devops/openbao/restore-drill-openbao.sh")],
             env=env,
-            check=True,
+            check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             timeout=60,
         )
+        if completed.returncode != 0:
+            pytest.fail(
+                "restore-drill-openbao.sh failed against disposable single-node OpenBao; "
+                f"{_RESTORE_DRILL_LIVE_EXPECTATIONS}\n{completed.stderr}"
+            )
 
         assert '"ok": true' in proof.read_text(encoding="utf-8")
     finally:

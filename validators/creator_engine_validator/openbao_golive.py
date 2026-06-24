@@ -7,6 +7,7 @@ templates/scripts for the hardening properties required before Operator bringup.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,11 +18,15 @@ GO_LIVE_ARTIFACTS = (
     "docs/devops/openbao/openbao.hcl.tmpl",
     "docs/devops/openbao/openbao.service",
     "docs/devops/openbao/provision-openbao.sh",
+    "docs/devops/openbao/bringup-container-openbao.sh",
     "docs/devops/openbao/snapshot-openbao.sh",
     "docs/devops/openbao/restore-drill-openbao.sh",
     "docs/devops/openbao/emergency-revoke-openbao.sh",
     "docs/devops/openbao/ce-dev-policy.hcl.tmpl",
+    "docs/devops/openbao/ce-broker-policy.hcl.tmpl",
+    "docs/devops/openbao/ce-operator-import-policy.hcl.tmpl",
     "docs/devops/openbao/render-dev-policy.sh",
+    "docs/devops/openbao/openbao-secret-path-map.tsv",
     "docs/devops/openbao/verify-production-config-openbao-2.5.5.sh",
     "docs/devops/openbao-production-golive.md",
     "docs/devops/openbao-operator-bringup.md",
@@ -113,12 +118,62 @@ _MIGRATION_INVENTORY_REF_PATTERNS = {
     "rollback_ref": re.compile(r"^rollback-ref:[A-Za-z0-9._/:-]+$"),
     "evidence_ref": re.compile(r"^evidence-ref:[A-Za-z0-9._/:-]+$"),
 }
+_LIVE_ENV_EXPECTATIONS = {
+    "production-config": (
+        "CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE=1 opts into the networked OpenBao 2.5.5 download smoke",
+        "curl, openssl, sha256sum, tar, and PYTHON_BIN/python3 must be available",
+        "optional OPENBAO_RELEASE_BASE_URL may point at a trusted OpenBao release mirror",
+        "optional OPENBAO_VERIFY_WORKDIR keeps the downloaded binary and logs for inspection",
+    ),
+    "restore-drill": (
+        "CE_OPENBAO_BIN must point to an executable bao binary for OpenBao 2.5.x",
+        "the test starts disposable loopback raft servers and initializes synthetic local-only tokens",
+        "no production BAO_ADDR, BAO_TOKEN, unseal key, or secret value should be supplied",
+    ),
+}
 
 
 def read_go_live_artifact(repo_root: Path, relative_path: str) -> str:
     """Read a go-live artifact by repo-relative path."""
 
     return (repo_root / relative_path).read_text(encoding="utf-8")
+
+
+def openbao_live_env_expectations(kind: str) -> str:
+    """Return an operator-facing prerequisite message for opt-in live tests."""
+
+    try:
+        expectations = _LIVE_ENV_EXPECTATIONS[kind]
+    except KeyError:
+        supported = ", ".join(sorted(_LIVE_ENV_EXPECTATIONS))
+        raise ValueError(f"unknown OpenBao live test kind {kind!r}; expected one of: {supported}") from None
+    return f"OpenBao go-live {kind} live test requires: " + "; ".join(expectations)
+
+
+def validate_live_openbao_binary(env: Mapping[str, str] | None = None) -> list[str]:
+    """Return prerequisite violations for tests that need a local ``bao`` binary."""
+
+    source = os.environ if env is None else env
+    raw_path = source.get("CE_OPENBAO_BIN")
+    if not raw_path:
+        return [openbao_live_env_expectations("restore-drill")]
+    bao_bin = Path(raw_path)
+    violations: list[str] = []
+    if not bao_bin.is_file():
+        violations.append(f"CE_OPENBAO_BIN must point to a file, got {raw_path!r}")
+    elif not os.access(bao_bin, os.X_OK):
+        violations.append(f"CE_OPENBAO_BIN must point to an executable bao binary, got {raw_path!r}")
+    return violations
+
+
+def resolve_live_openbao_binary(env: Mapping[str, str] | None = None) -> Path:
+    """Resolve ``CE_OPENBAO_BIN`` or raise a value-free prerequisite error."""
+
+    source = os.environ if env is None else env
+    violations = validate_live_openbao_binary(source)
+    if violations:
+        raise ValueError("; ".join(violations))
+    return Path(source["CE_OPENBAO_BIN"])
 
 
 def _strip_shell_value(raw: str) -> str:

@@ -39,3 +39,11 @@ Operator bringup docs now state that the repository inventory is a template
 only, live import remains Operator-only outside repo/container custody, and
 rollback/restore requires audit, encrypted snapshot, restore-drill, and
 value-free revocation evidence.
+
+Track B completion: added the canonical dry-run-first single-node container
+bring-up script, broker/import policy templates, a name-only OpenBao path map
+for per-dev PATs, Claude OAuth, GitHub App config/key families, reviewer app
+names, and deferred `ce-root-v1`, plus unit and live-test prerequisite coverage.
+The runbooks now name `docs/devops/openbao/bringup-container-openbao.sh` as the
+container dogfood path and document opt-in live validator prerequisites through
+`CE_OPENBAO_BIN` and `CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE`.
