@@ -327,6 +327,60 @@ def test_governed_bash_safe_command_allows():
     assert decision.decision == "allow"
 
 
+def test_gh_api_delete_ref_matches_git_push_delete_class():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    expected = hook_check.classify_mechanics("git push --delete origin main")
+    command = "gh api -X DELETE /repos/o/r/git/refs/heads/main"
+
+    assert expected == "alter_repo_settings"
+    assert hook_check.classify_mechanics(command) == expected
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert f"restricted mechanic ({expected})" in decision.reason
+
+
+def test_gh_api_patch_repo_settings_classifies_alter_repo_settings():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    command = "gh api --method PATCH /repos/o/r"
+
+    assert hook_check.classify_mechanics(command) == "alter_repo_settings"
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert "restricted mechanic (alter_repo_settings)" in decision.reason
+
+
+def test_gh_api_field_after_endpoint_defaults_to_post():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    command = "gh api /repos/o/r -f private=true"
+
+    assert hook_check.classify_mechanics(command) == "alter_repo_settings"
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert "restricted mechanic (alter_repo_settings)" in decision.reason
+
+
+def test_gh_api_get_repo_allows():
+    ctx = hook_check.HookContext(
+        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+    )
+    command = "gh api /repos/o/r"
+
+    assert hook_check.classify_mechanics(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+def test_curl_api_delete_ref_matches_git_push_delete_class():
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+    expected = hook_check.classify_mechanics("git push --delete origin main")
+    command = "curl -X DELETE https://api.github.com/repos/o/r/git/refs/heads/main"
+
+    assert expected == "alter_repo_settings"
+    assert hook_check.classify_mechanics(command) == expected
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+    assert decision.decision == "deny"
+    assert f"restricted mechanic ({expected})" in decision.reason
+
+
 def test_mechanics_classification_reuses_reserved_restricted():
     # The mechanics seam must anchor to the shared mutation-class
     # reserved-restricted vocabulary rather than a bespoke parallel list.
