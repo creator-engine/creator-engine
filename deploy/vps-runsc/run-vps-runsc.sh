@@ -106,6 +106,12 @@ CE_VPS_TTY_FLAGS="${CE_VPS_TTY_FLAGS:--it}"
 CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-ce-vps-${harness}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
+herdr_socket_path="/run/creator-engine/herdr/herdr.sock"
+
+container_term="${TERM:-}"
+if [ -z "${container_term}" ] || [ "${container_term}" = "dumb" ]; then
+  container_term="xterm-256color"
+fi
 
 if [ -z "${CE_VPS_CODEX_PACKAGE_ROOT}" ] && [ -n "${CE_VPS_CODEX_BIN}" ]; then
   codex_bin_realpath="$(realpath "${CE_VPS_CODEX_BIN}" 2>/dev/null || true)"
@@ -234,7 +240,7 @@ docker_cmd=(
   --workdir "${CE_VPS_CONTAINER_REPO}"
   --env "HOME=${CE_VPS_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_VPS_CONTAINER_CODEX_HOME}"
-  --env "TERM=${TERM:-xterm-256color}"
+  --env "TERM=${container_term}"
   --env "CE_DGX_HARNESS=${image_harness}"
   --env "CE_DGX_HARNESS_MODE=${mode}"
   --mount "${repo_mount}"
@@ -277,9 +283,43 @@ if [ "${detach}" = "1" ]; then
   # Named-persistent detached launch: start the container, then poll herdr for
   # readiness. Do NOT exec docker here (docker run -d returns immediately).
   "${docker_cmd[@]}"
+  herdr_pane_list_has_entries() {
+    python3 -c '
+import json
+import sys
+
+text = sys.stdin.read().strip()
+if not text:
+    raise SystemExit(1)
+try:
+    data = json.loads(text)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+
+def has_pane(value):
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        for key in ("result", "panes", "pane", "items"):
+            if key in value and has_pane(value[key]):
+                return True
+        return False
+    return bool(value)
+
+raise SystemExit(0 if has_pane(data) else 1)
+'
+  }
+
+  herdr_ready() {
+    local pane_list
+    docker exec "${CE_VPS_CONTAINER_NAME}" test -S "${herdr_socket_path}" >/dev/null 2>&1 || return 1
+    pane_list="$(docker exec --env "HERDR_SOCKET_PATH=${herdr_socket_path}" "${CE_VPS_CONTAINER_NAME}" herdr pane list 2>/dev/null)" || return 1
+    herdr_pane_list_has_entries <<<"${pane_list}"
+  }
+
   ready=0
   for _ in $(seq 1 60); do
-    if docker exec "${CE_VPS_CONTAINER_NAME}" herdr pane read w1:p1 >/dev/null 2>&1; then
+    if herdr_ready; then
       ready=1
       break
     fi
