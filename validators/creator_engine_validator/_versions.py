@@ -152,6 +152,11 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # superseded by an independent approval on the live head). v3 forge
         # adapter family; injectable GhRunner, no v1 import.
         "forge.re_review",
+        # ce-ops#188: controller review-pickup leg — routes awaiting-review PRs
+        # to distinct non-author seats via forge.re_review. v3 forge adapter
+        # family; shares the boundary-neutral Search core (pickup_search) with
+        # the v1 poller, so no v1<->v3 import edge is created.
+        "forge.review_pickup",
         # ce-ops#216 Unit 2: deterministic, read-only integrator conflict resolvers
         # for known mechanical families. Pure data transforms; no executor/push/
         # credential authority. v3 forge adapter family, imports no v1 module.

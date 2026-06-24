@@ -18,9 +18,13 @@ Adopted design (ce-ops#55, amended by ce-ops#182):
   ``{repo, kind, number, url, reason, thread_id}``. Search has no notification
   thread id, so the thread id is stable and synthetic:
   ``search:{reason}:{repo}:{kind}:{number}``.
-* Honor Search API rate limiting by failing closed on HTTP ``403``/``429`` and
-  carrying ``Retry-After`` / ``X-RateLimit-Reset`` metadata to the CLI. The
-  default poll interval is five minutes, which is within the Search API budget.
+* Honor Search API rate limiting by failing closed on HTTP ``403``/``429``.
+
+The deterministic Search/transport/token primitives live in the boundary-neutral
+``pickup_search`` core (shared with the v3 controller review-pickup,
+``forge/review_pickup.py``, so neither runtime crosses the v1⊥v3 boundary). This
+module keeps the **v1** legs: the work-query poll (S1), the forge-arbitrated claim
++ dedup ledger (S2), and the gated ``ce lane launch`` (S3).
 
 **Hard Ring-0 constraint (verified in code):** CE refuses headless authoring —
 ``claude_launch_spec.CLAUSE_PRINT`` (``CC-D-2``: ``-p``/``--print``) and
@@ -30,97 +34,50 @@ governed lane via ``ce lane launch`` (S3), fed a seed-file; the poller only
 observes (S1), claims via the forge (S2), and triggers the lane (S3, gated OFF
 by default).
 
-The live network touch lives behind an injectable ``transport`` seam (a stdlib
-``urllib`` HTTPS call by default), mirroring ``forge/app_jwt_runner.py``; tests
-inject fakes and perform ZERO live network / subprocess. Importing this module
-performs no I/O and registers no validator check.
-
+Importing this module performs no I/O and registers no validator check.
 Defensive only — it picks up the Creator Engine's own work; never offensive.
 """
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from . import pco_allocator, seat_lifecycle, work_claims
-from .forge import re_review
-from .forge.github_repo_config import ForgeConfigError
 
-#: HTTPS transport: ``(method, url, headers, body) -> (status, headers, body_text)``.
-Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
-
-_API_ROOT = "https://api.github.com"
-_API_VERSION = "2022-11-28"
-_ACCEPT = "application/vnd.github+json"
-
-#: The default seat PAT location (per-identity, one file per dev).
-DEFAULT_KEYS_DIR = Path.home() / ".ce-keys"
-#: The env override for the seat token (takes precedence over the PAT file).
-TOKEN_ENV = "CE_PICKUP_TOKEN"
-#: Explicit opt-in for falling back to the local ``gh auth token`` store.
-AMBIENT_GH_TOKEN_ENV = "CE_PICKUP_ALLOW_AMBIENT_GH"
-
-#: Search API pickup cadence. Three queries plus optional labels every five
-#: minutes stays within the documented Search API budget for one seat.
-DEFAULT_POLL_INTERVAL = 300
-DEFAULT_SEARCH_PER_PAGE = 100
-
-_PR_SEARCH_TYPE = "is:pull-request"
-_ISSUE_SEARCH_TYPE = "is:issue"
-
-_REPO_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_ORG_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-
-
-class PickupError(Exception):
-    """Bad local input / missing credential / unreachable forge (CLI exit 2)."""
-
-    code = "PICKUP-INPUT"
-
-
-class PickupRateLimited(PickupError):
-    """Search API refused the poll with a rate-limit/backoff response."""
-
-    code = "PICKUP-RATE-LIMITED"
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: int,
-        retry_after_seconds: int | None = None,
-        rate_limit_reset: str | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.retry_after_seconds = retry_after_seconds
-        self.rate_limit_reset = rate_limit_reset
-
-    def to_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "status": self.status,
-            "retry_after_seconds": self.retry_after_seconds,
-            "rate_limit_reset": self.rate_limit_reset,
-        }
-        return {k: v for k, v in payload.items() if v is not None}
-
-
-@dataclass(frozen=True)
-class SearchQuery:
-    """One GitHub Search query and the pickup reason assigned to its hits."""
-
-    reason: str
-    query: str
+# The deterministic Search/transport/token primitives are shared (boundary-neutral)
+# with the v3 controller review-pickup; re-exported here so the v1 ``ce pickup``
+# CLI surface and existing callers keep their ``pickup.<name>`` references.
+from .pickup_search import (  # noqa: F401  (re-exported for the v1 CLI + callers)
+    AMBIENT_GH_TOKEN_ENV,
+    DEFAULT_KEYS_DIR,
+    _ACCEPT,
+    _API_ROOT,
+    _API_VERSION,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_SEARCH_PER_PAGE,
+    GhRunner,
+    PickupError,
+    PickupRateLimited,
+    SearchQuery,
+    TOKEN_ENV,
+    Transport,
+    _ISSUE_SEARCH_TYPE,
+    _ORG_SCOPE_RE,
+    _PR_SEARCH_TYPE,
+    _REPO_SCOPE_RE,
+    _default_transport,
+    _issue_number,
+    _search_once,
+    make_gh_runner,
+    resolve_search_hit,
+    resolve_token,
+)
 
 
 @dataclass(frozen=True)
@@ -137,92 +94,6 @@ class PollResult:
     poll_interval: int = DEFAULT_POLL_INTERVAL
     not_modified: bool = False
     rate_limit: Mapping[str, Any] | None = None
-
-
-def _default_transport(  # pragma: no cover - the lone live HTTPS shell; tests inject a fake
-    method: str, url: str, headers: dict[str, str], body: str | None
-) -> tuple[int, dict[str, str], str]:
-    data = body.encode("utf-8") if body is not None else None
-    request = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=60) as resp:
-            return resp.status, dict(resp.headers), resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, dict(exc.headers or {}), exc.read().decode("utf-8", "replace")
-
-
-def resolve_token(
-    *,
-    keys_dir: Path | str | None = None,
-    identity: str,
-    environ: Mapping[str, str] | None = None,
-    allow_ambient_gh: bool = False,
-    gh_token_runner: Callable[[], subprocess.CompletedProcess] | None = None,
-) -> str:
-    """Resolve the per-identity PAT without ever logging its value.
-
-    Order:
-
-    1. ``$CE_PICKUP_TOKEN``.
-    2. ``<keys_dir>/<identity>.pat`` (default ``~/.ce-keys/<identity>.pat``).
-    3. Ambient ``gh auth token`` only when explicitly enabled by local convention
-       (``allow_ambient_gh`` or ``CE_PICKUP_ALLOW_AMBIENT_GH=1``).
-
-    Per-identity auth keeps the pickup loop running as the dev's OWN account (the
-    #137 identity model), never a shared/overwatch token. A missing credential
-    raises :class:`PickupError` (fail-closed).
-    """
-    env = os.environ if environ is None else environ
-    env_token = env.get(TOKEN_ENV)
-    if env_token and env_token.strip():
-        return env_token.strip()
-    base = Path(keys_dir) if keys_dir is not None else DEFAULT_KEYS_DIR
-    pat = base / f"{identity}.pat"
-    if pat.is_file():
-        text = pat.read_text(encoding="utf-8").strip()
-        if text:
-            return text
-    if allow_ambient_gh or _truthy(env.get(AMBIENT_GH_TOKEN_ENV)):
-        ambient_env = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN")
-        if ambient_env and ambient_env.strip():
-            return ambient_env.strip()
-        ambient = _ambient_gh_token(gh_token_runner)
-        if ambient:
-            return ambient
-    raise PickupError(
-        f"no pickup token for identity {identity!r}: set ${TOKEN_ENV}, write {pat}, "
-        f"or opt into ambient gh auth with ${AMBIENT_GH_TOKEN_ENV}=1"
-    )
-
-
-def _truthy(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _ambient_gh_token(
-    gh_token_runner: Callable[[], subprocess.CompletedProcess] | None = None,
-) -> str | None:
-    runner = gh_token_runner or _default_gh_token_runner
-    try:
-        proc = runner()
-    except Exception:
-        return None
-    if getattr(proc, "returncode", 1) != 0:
-        return None
-    token = (getattr(proc, "stdout", "") or "").strip()
-    return token or None
-
-
-def _default_gh_token_runner() -> subprocess.CompletedProcess:  # pragma: no cover - local gh seam
-    return subprocess.run(["gh", "auth", "token"], check=False, capture_output=True, text=True, timeout=30)
-
-
-def _header(headers: Mapping[str, str], name: str) -> str | None:
-    """Case-insensitive header lookup (HTTP header names are case-insensitive)."""
-    for key, value in headers.items():
-        if key.lower() == name.lower():
-            return value
-    return None
 
 
 def build_queries(
@@ -326,444 +197,6 @@ def poll(
     )
 
 
-# ===========================================================================
-# Controller review-pickup leg (ce-ops#188).
-# ===========================================================================
-
-DEFAULT_REVIEW_PICKUP_PER_PAGE = 100
-
-
-@dataclass(frozen=True)
-class ReviewPickupResult:
-    """Controller-side review pickup result.
-
-    ``items`` are the review work-items surfaced to the belt/controller. When
-    ``apply=True`` they also record the reviewer request mutation outcome and
-    stale-review reconciliation summary.
-    """
-
-    items: tuple[dict[str, Any], ...] = ()
-    skipped: tuple[dict[str, Any], ...] = ()
-    rate_limit: Mapping[str, Any] | None = None
-
-
-def review_pickup_query(*, repo: str | None = None, org: str | None = None) -> SearchQuery:
-    """Build the controller feed query for open PRs that may need review routing."""
-    if repo and org:
-        raise PickupError("--repo and --org are mutually exclusive search scopes")
-    scope_terms: list[str] = []
-    if repo:
-        if not _REPO_SCOPE_RE.match(repo):
-            raise PickupError(f"--repo must be owner/name, got {repo!r}")
-        scope_terms.append(f"repo:{repo}")
-    if org:
-        if not _ORG_SCOPE_RE.match(org):
-            raise PickupError(f"--org must be a GitHub organization/user slug, got {org!r}")
-        scope_terms.append(f"org:{org}")
-    return SearchQuery("awaiting_review", " ".join(["is:open", _PR_SEARCH_TYPE, *scope_terms]))
-
-
-def poll_review_pickup(
-    *,
-    token: str,
-    reviewer_seats: Sequence[str],
-    gh_runner: GhRunner,
-    transport: Transport | None = None,
-    repo: str | None = None,
-    org: str | None = None,
-    per_page: int = DEFAULT_REVIEW_PICKUP_PER_PAGE,
-    apply: bool = False,
-    apply_stale: bool = True,
-) -> ReviewPickupResult:
-    """Route awaiting-review PRs to distinct non-author reviewer seats.
-
-    This is the controller-side review leg missing from the per-seat belt. It
-    scans open PRs, reconciles objectively stale reviews through
-    :mod:`forge.re_review`, and emits/optionally applies one non-author review
-    request per PR that lacks a live non-author reviewer signal.
-
-    All I/O is injectable: Search uses ``transport`` and PR/review mutations use
-    ``gh_runner``. Tests run entirely offline.
-    """
-    if not token or not token.strip():
-        raise PickupError("review pickup requires a non-empty token")
-    seats = _normalize_reviewer_seats(reviewer_seats)
-    if not seats:
-        raise PickupError("review pickup requires at least one --seat reviewer")
-
-    _transport = transport or _default_transport
-    query = review_pickup_query(repo=repo, org=org)
-    page_items, rate_limit = _search_once(
-        token=token.strip(),
-        transport=_transport,
-        query=query,
-        per_page=per_page,
-    )
-
-    items: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    for hit in page_items:
-        if hit.get("subject_type") != "PullRequest":
-            continue
-        try:
-            item = plan_review_pickup_item(
-                hit,
-                reviewer_seats=seats,
-                gh_runner=gh_runner,
-                apply=apply,
-                apply_stale=apply_stale,
-            )
-        except (PickupError, ForgeConfigError) as exc:
-            skipped.append({
-                "repo": hit.get("repo"),
-                "number": hit.get("number"),
-                "reason": "review_pickup_refused",
-                "note": str(exc),
-            })
-            continue
-        if item is None:
-            skipped.append({
-                "repo": hit.get("repo"),
-                "number": hit.get("number"),
-                "reason": "review_not_awaiting_pickup",
-            })
-        else:
-            items.append(item)
-
-    return ReviewPickupResult(items=tuple(items), skipped=tuple(skipped), rate_limit=rate_limit or None)
-
-
-def _normalize_reviewer_seats(seats: Sequence[str]) -> tuple[str, ...]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in seats or ():
-        for part in str(raw).split(","):
-            seat = part.strip()
-            if seat and seat not in seen:
-                seen.add(seat)
-                out.append(seat)
-    return tuple(out)
-
-
-def plan_review_pickup_item(
-    hit: Mapping[str, Any],
-    *,
-    reviewer_seats: Sequence[str],
-    gh_runner: GhRunner,
-    apply: bool = False,
-    apply_stale: bool = True,
-) -> dict[str, Any] | None:
-    """Plan/apply review routing for one PR Search hit.
-
-    Returns ``None`` when the PR already has a live non-author reviewer signal
-    (fresh approval, current non-author review request, or live CHANGES_REQUESTED
-    on head). Otherwise returns a work-item-shaped routing record.
-    """
-    repo = str(hit.get("repo") or "")
-    number = _issue_number(hit.get("number"))
-    if not repo or number is None:
-        raise PickupError("review pickup hit lacks repo/number")
-
-    pr = _read_pull_request(repo, number, gh_runner)
-    author = _login(pr.get("user"))
-    head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
-    head_sha = str(head.get("sha") or "")
-    if not author or not head_sha:
-        raise PickupError(f"{repo}#{number} lacks author/head_sha; refusing fail-closed")
-
-    requested = tuple(
-        login for login in (
-            _login(r) for r in pr.get("requested_reviewers", []) if isinstance(r, Mapping)
-        )
-        if login
-    )
-    non_author_requested = tuple(r for r in requested if r != author)
-
-    report = re_review.reconcile_reviews(
-        repo,
-        number,
-        head_sha,
-        gh_runner=gh_runner,
-        apply=bool(apply and apply_stale),
-    )
-
-    if _has_current_non_author_approval(report, author):
-        return None
-    if _has_current_non_author_objection(report, author):
-        return None
-    if non_author_requested:
-        return _review_pickup_item(
-            hit,
-            author=author,
-            head_sha=head_sha,
-            reviewer=non_author_requested[0],
-            reason="review_already_requested",
-            requested=False,
-            report=report,
-        )
-
-    stale_reviewers = tuple(
-        v.review.reviewer
-        for v in report.re_request_needed
-        if v.review.reviewer and v.review.reviewer != author
-    )
-    reviewer = _choose_reviewer(author=author, reviewer_seats=reviewer_seats, preferred=stale_reviewers)
-    if reviewer is None:
-        raise PickupError(f"{repo}#{number} has no distinct non-author reviewer candidate")
-
-    reason = "stale_review_rerequest" if stale_reviewers else "awaiting_review"
-    requested_now = False
-    if apply:
-        _request_pull_request_reviewer(repo, number, reviewer, gh_runner)
-        requested_now = True
-
-    return _review_pickup_item(
-        hit,
-        author=author,
-        head_sha=head_sha,
-        reviewer=reviewer,
-        reason=reason,
-        requested=requested_now,
-        report=report,
-    )
-
-
-def _login(user: object) -> str | None:
-    if not isinstance(user, Mapping):
-        return None
-    login = user.get("login")
-    return login if isinstance(login, str) and login else None
-
-
-def _choose_reviewer(
-    *,
-    author: str,
-    reviewer_seats: Sequence[str],
-    preferred: Sequence[str] = (),
-) -> str | None:
-    candidates = [*preferred, *_normalize_reviewer_seats(reviewer_seats)]
-    seen: set[str] = set()
-    for candidate in candidates:
-        if not candidate or candidate == author or candidate in seen:
-            seen.add(candidate)
-            continue
-        return candidate
-    return None
-
-
-def _has_current_non_author_approval(report: re_review.ReconcileReport, author: str) -> bool:
-    return any(
-        v.verdict == re_review.CURRENT
-        and v.review.state.upper() == "APPROVED"
-        and v.review.reviewer != author
-        for v in report.verdicts
-    )
-
-
-def _has_current_non_author_objection(report: re_review.ReconcileReport, author: str) -> bool:
-    return any(
-        v.verdict == re_review.CURRENT
-        and v.review.state.upper() == "CHANGES_REQUESTED"
-        and v.review.reviewer != author
-        for v in report.verdicts
-    )
-
-
-def _review_pickup_item(
-    hit: Mapping[str, Any],
-    *,
-    author: str,
-    head_sha: str,
-    reviewer: str,
-    reason: str,
-    requested: bool,
-    report: re_review.ReconcileReport,
-) -> dict[str, Any]:
-    repo = str(hit.get("repo") or "")
-    number = int(hit.get("number") or 0)
-    return {
-        "repo": repo,
-        "kind": "review_request",
-        "number": number,
-        "url": hit.get("url") or f"https://github.com/{repo}/pull/{number}",
-        "reason": reason,
-        "thread_id": f"review-pickup:{repo}:review_request:{number}:{head_sha[:12]}",
-        "title": hit.get("title"),
-        "subject_type": "PullRequest",
-        "author": author,
-        "assigned_reviewer": reviewer,
-        "head_sha": head_sha,
-        "requested": requested,
-        "dismissed_review_ids": list(report.dismissed),
-        "re_request_review_ids": [v.review.review_id for v in report.re_request_needed],
-    }
-
-
-def _pickup_gh_json(
-    runner: GhRunner,
-    method: str,
-    path: str,
-    body: Mapping[str, Any] | None = None,
-) -> object:
-    argv = ["gh", "api", "--method", method, path]
-    input_text = None
-    if body is not None:
-        argv += ["--input", "-"]
-        input_text = json.dumps(body)
-    proc = runner(argv, input_text)
-    if getattr(proc, "returncode", 1) != 0:
-        raise PickupError(f"gh api {method} {path} failed: {(getattr(proc, 'stderr', '') or '').strip()[:200]}")
-    out = (getattr(proc, "stdout", "") or "").strip()
-    if not out:
-        raise PickupError(f"gh api {method} {path} returned empty stdout")
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError as exc:
-        raise PickupError(f"gh api {method} {path} returned non-JSON stdout") from exc
-
-
-def _read_pull_request(repo: str, number: int, gh_runner: GhRunner) -> Mapping[str, Any]:
-    raw = _pickup_gh_json(gh_runner, "GET", f"repos/{repo}/pulls/{number}")
-    if not isinstance(raw, Mapping):
-        raise PickupError(f"GET repos/{repo}/pulls/{number} returned non-object body")
-    return raw
-
-
-def _request_pull_request_reviewer(repo: str, number: int, reviewer: str, gh_runner: GhRunner) -> None:
-    _pickup_gh_json(
-        gh_runner,
-        "POST",
-        f"repos/{repo}/pulls/{number}/requested_reviewers",
-        {"reviewers": [reviewer]},
-    )
-
-
-def _search_once(
-    *,
-    token: str,
-    transport: Transport,
-    query: SearchQuery,
-    per_page: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": _ACCEPT,
-        "X-GitHub-Api-Version": _API_VERSION,
-    }
-    params = urllib.parse.urlencode({
-        "q": query.query,
-        "per_page": str(per_page),
-        "sort": "updated",
-        "order": "desc",
-    })
-    url = f"{_API_ROOT}/search/issues?{params}"
-    status, resp_headers, body = transport("GET", url, headers, None)
-
-    if status in (403, 429):
-        raise _rate_limited(status, resp_headers)
-    if not (200 <= status < 300):
-        raise PickupError(f"search poll failed (HTTP {status})")
-
-    try:
-        payload = json.loads(body) if body and body.strip() else {}
-    except (ValueError, TypeError) as exc:
-        raise PickupError(f"unparseable search payload: {exc}") from exc
-    hits = payload.get("items", []) if isinstance(payload, Mapping) else []
-
-    items: list[dict[str, Any]] = []
-    for raw in hits if isinstance(hits, list) else []:
-        item = resolve_search_hit(raw, query.reason) if isinstance(raw, Mapping) else None
-        if item is not None:
-            items.append(item)
-    return items, _rate_limit_payload(resp_headers)
-
-
-def _rate_limited(status: int, headers: Mapping[str, str]) -> PickupRateLimited:
-    retry_after = _parse_positive_int(_header(headers, "Retry-After"))
-    reset = _header(headers, "X-RateLimit-Reset")
-    return PickupRateLimited(
-        f"search poll failed closed (HTTP {status}); retry later",
-        status=status,
-        retry_after_seconds=retry_after,
-        rate_limit_reset=reset,
-    )
-
-
-def _rate_limit_payload(headers: Mapping[str, str]) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for header, key in (
-        ("X-RateLimit-Limit", "limit"),
-        ("X-RateLimit-Remaining", "remaining"),
-        ("X-RateLimit-Reset", "reset"),
-        ("Retry-After", "retry_after_seconds"),
-    ):
-        value = _header(headers, header)
-        if value is not None:
-            payload[key] = _parse_positive_int(value) if key != "reset" else value
-    return payload
-
-
-def _parse_positive_int(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    try:
-        value = int(str(raw).strip())
-    except (ValueError, TypeError):
-        return None
-    return value if value > 0 else None
-
-
-def resolve_search_hit(raw: Mapping[str, Any], reason: str) -> dict[str, Any] | None:
-    """Normalize one Search API issue/PR hit into the belt work-item shape."""
-    repo = _repo_from_search_hit(raw)
-    number = _issue_number(raw.get("number"))
-    if not repo or number is None:
-        return None
-    is_pr = isinstance(raw.get("pull_request"), Mapping)
-    subject_type = "PullRequest" if is_pr else "Issue"
-    url = str(raw.get("html_url") or "").strip()
-    if not url:
-        web_kind = "pull" if is_pr else "issues"
-        url = f"https://github.com/{repo}/{web_kind}/{number}"
-    kind = reason
-    return {
-        "repo": repo,
-        "kind": kind,
-        "number": number,
-        "url": url,
-        "reason": reason,
-        "thread_id": f"search:{reason}:{repo}:{kind}:{number}",
-        "title": raw.get("title"),
-        "subject_type": subject_type,
-        "updated_at": raw.get("updated_at"),
-    }
-
-
-def _repo_from_search_hit(raw: Mapping[str, Any]) -> str | None:
-    repo_url = str(raw.get("repository_url") or "")
-    marker = "/repos/"
-    if marker in repo_url:
-        slug = repo_url.split(marker, 1)[1].strip("/")
-        parts = slug.split("/")
-        if len(parts) >= 2:
-            return f"{parts[0]}/{parts[1]}"
-    html = str(raw.get("html_url") or "")
-    marker = "github.com/"
-    if marker in html:
-        slug = html.split(marker, 1)[1].split("/")
-        if len(slug) >= 2:
-            return f"{slug[0]}/{slug[1]}"
-    return None
-
-
-def _issue_number(value: Any) -> int | None:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number > 0 else None
-
-
 def _dedupe_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, int]] = set()
@@ -788,10 +221,6 @@ DEFAULT_LEDGER_NAME = "ledger.ndjson"
 
 #: The single pickup ``action`` recorded today (one per picked-up thread).
 ACTION_CLAIM = "claim"
-
-#: A GhRunner runs a ``gh`` invocation (argv incl. the leading "gh") with an
-#: optional stdin body — the same shape as ``work_claims.GhRunner``.
-GhRunner = Callable[[Sequence[str], "str | None"], "subprocess.CompletedProcess"]
 
 #: A PR-author lookup: ``(item, gh_runner) -> author_login`` (the independent-
 #: reviewer fence input). Injectable so tests perform zero live forge reads.
@@ -1019,31 +448,6 @@ def _claim_marker_time(result: work_claims.ClaimResult) -> str | None:
     """The GitHub server-time of the winning claim marker (never the local clock)."""
     active = result.state.active if result.state else None
     return active.claimed_at if active else None
-
-
-#: Ambient auth env vars dropped from the child ``gh`` env so the per-identity
-#: ``GH_TOKEN`` is unambiguous (``GH_TOKEN`` already wins by precedence; dropping
-#: these is defense-in-depth — the same hygiene the v3 credential_runner applies).
-_AMBIENT_AUTH_ENV = ("GITHUB_TOKEN", "GH_CONFIG_DIR", "GH_HOST")
-
-
-def make_gh_runner(token: str) -> GhRunner:
-    """Return a :data:`GhRunner` that runs ``gh`` AS ``identity`` (token in the child env ONLY).
-
-    The per-identity PAT lands in a per-call child ``GH_TOKEN`` env — never the
-    argv, a log, the returned process, or disk — so the pickup loop authenticates
-    as the dev's OWN account (the #137 identity model), never ambient/overwatch auth.
-    """
-    def runner(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
-        env = dict(os.environ)
-        for var in _AMBIENT_AUTH_ENV:
-            env.pop(var, None)
-        env["GH_TOKEN"] = token
-        return subprocess.run(
-            list(argv), check=False, capture_output=True, text=True,
-            input=input_text, env=env, timeout=60,
-        )
-    return runner
 
 
 # ===========================================================================

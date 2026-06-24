@@ -1169,29 +1169,6 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="re-read backoff for the fail-closed acquire race (default: 1.0)")
     pp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    prp = pickup_sub.add_parser(
-        "reviews",
-        help="controller review-pickup: route awaiting-review PRs to non-author seats",
-    )
-    prp.add_argument("--identity", required=True,
-                     help="controller identity used to resolve the pickup token")
-    prp.add_argument("--keys-dir", default=None, dest="keys_dir",
-                     help="PAT directory (default: ~/.ce-keys)")
-    prp.add_argument("--allow-ambient-gh", action="store_true", dest="allow_ambient_gh",
-                     help="allow fallback to ambient gh auth token after CE_PICKUP_TOKEN and PAT file")
-    prp.add_argument("--repo", default=None,
-                     help="restrict Search API queries and reviewer routing to one owner/name repo")
-    prp.add_argument("--org", default=None,
-                     help="restrict Search API queries to one GitHub org/user slug")
-    prp.add_argument("--seat", action="append", default=[], dest="reviewer_seats",
-                     help="repeatable reviewer seat/login; comma-separated allowed")
-    prp.add_argument("--apply", action="store_true",
-                     help="request selected reviewers and auto-dismiss objectively stale reviews")
-    prp.add_argument("--no-stale-apply", action="store_true", dest="no_stale_apply",
-                     help="with --apply, do not auto-dismiss stale superseded reviews")
-    prp.add_argument("--json", action="store_true", dest="json_output",
-                     help="emit machine-readable JSON")
-
     # ce launch / ce hud — deterministic visible Controller-seat launcher
     # (DP-2 = B, RV1-063). ce hud is an alias/seam label for the same launcher.
     def _add_launch_args(p: argparse.ArgumentParser) -> None:
@@ -3154,69 +3131,6 @@ def _pickup_poll(args) -> int:
     return 0
 
 
-def _pickup_reviews(args) -> int:
-    from . import pickup
-
-    try:
-        pickup.review_pickup_query(repo=getattr(args, "repo", None), org=getattr(args, "org", None))
-    except pickup.PickupError as exc:
-        return _emit_pickup(args, 2, f"ce pickup reviews refused (input): {exc}", None)
-
-    try:
-        token = pickup.resolve_token(
-            keys_dir=args.keys_dir,
-            identity=args.identity,
-            allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
-        )
-    except pickup.PickupError as exc:
-        return _emit_pickup(args, 2, f"ce pickup reviews refused (input): {exc}", None)
-
-    try:
-        gh_runner = _make_pickup_gh_runner(args.identity, token)
-    except TypeError:
-        gh_runner = _make_pickup_gh_runner(args.identity)
-
-    try:
-        result = pickup.poll_review_pickup(
-            token=token,
-            reviewer_seats=getattr(args, "reviewer_seats", ()) or (),
-            gh_runner=gh_runner,
-            transport=_make_pickup_transport(),
-            repo=getattr(args, "repo", None),
-            org=getattr(args, "org", None),
-            apply=bool(getattr(args, "apply", False)),
-            apply_stale=not bool(getattr(args, "no_stale_apply", False)),
-        )
-    except pickup.PickupRateLimited as exc:
-        return _emit_pickup(
-            args,
-            2,
-            f"ce pickup reviews failed closed: {exc}",
-            {"backoff": exc.to_payload()},
-        )
-    except pickup.PickupError as exc:
-        return _emit_pickup(args, 2, f"ce pickup reviews failed: {exc}", None)
-
-    payload = {
-        "ok": True,
-        "apply": bool(getattr(args, "apply", False)),
-        "rate_limit": result.rate_limit,
-        "items": list(result.items),
-        "skipped": list(result.skipped),
-        "count": len(result.items),
-        "skipped_count": len(result.skipped),
-    }
-    if getattr(args, "json_output", False):
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        action = "applied" if payload["apply"] else "planned"
-        print(f"ce pickup reviews: {action} {len(result.items)} review route(s)")
-        for item in result.items:
-            reviewer = item.get("assigned_reviewer")
-            print(f"  - {item['repo']}#{item['number']} -> {reviewer} ({item['reason']})")
-    return 0
-
-
 def _pickup_claim_and_launch(args, pickup, result, token: str) -> int:
     """S2/S3: forge-arbitrate a claim per actionable item, then (S3, gated) launch a lane.
 
@@ -3548,7 +3462,6 @@ _CLAIM_DISPATCH = {
 
 _PICKUP_DISPATCH = {
     "poll": _pickup_poll,
-    "reviews": _pickup_reviews,
     "triage": _pickup_triage,
 }
 

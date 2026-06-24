@@ -3802,6 +3802,29 @@ def _build_parser() -> argparse.ArgumentParser:
                               help="enable auto-merge (default: plan-only)")
     _add_root(p_auto_merge)
 
+    p_review_pickup = sub.add_parser(
+        "review-pickup",
+        help="controller review-pickup: route awaiting-review PRs to distinct non-author seats (ce-ops#188)",
+    )
+    p_review_pickup.add_argument("--identity", required=True,
+                                 help="controller identity used to resolve the pickup token")
+    p_review_pickup.add_argument("--keys-dir", default=None, dest="keys_dir",
+                                 help="PAT directory (default: ~/.ce-keys)")
+    p_review_pickup.add_argument("--allow-ambient-gh", action="store_true", dest="allow_ambient_gh",
+                                 help="allow fallback to ambient gh auth token after CE_PICKUP_TOKEN and PAT file")
+    p_review_pickup.add_argument("--repo", default=None,
+                                 help="restrict Search API queries and reviewer routing to one owner/name repo")
+    p_review_pickup.add_argument("--org", default=None,
+                                 help="restrict Search API queries to one GitHub org/user slug")
+    p_review_pickup.add_argument("--seat", action="append", default=[], dest="reviewer_seats",
+                                 help="repeatable reviewer seat/login; comma-separated allowed")
+    p_review_pickup.add_argument("--apply", action="store_true",
+                                 help="request selected reviewers and auto-dismiss objectively stale reviews")
+    p_review_pickup.add_argument("--no-stale-apply", action="store_true", dest="no_stale_apply",
+                                 help="with --apply, do not auto-dismiss stale superseded reviews")
+    p_review_pickup.add_argument("--json", action="store_true", dest="json_output",
+                                 help="emit machine-readable JSON")
+
     p_escalation = sub.add_parser(
         "escalation",
         help="manage local AWAITING-OPERATOR escalation records",
@@ -4116,6 +4139,78 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
     return 0 if result.escalated_count == 0 and result.refused_count == 0 else 1
 
 
+def _review_pickup_transport():
+    """Search-API HTTPS transport seam (monkeypatchable in tests)."""
+    from . import pickup_search
+    return pickup_search._default_transport
+
+
+def _review_pickup_gh_runner(identity: str, token: str):
+    """Per-identity gh runner seam (monkeypatchable in tests) — token in child env only."""
+    from . import pickup_search
+    return pickup_search.make_gh_runner(token)
+
+
+def _cmd_review_pickup(args: argparse.Namespace) -> int:
+    """ce-ops#188 controller review-pickup: route awaiting-review PRs to distinct
+    non-author reviewer seats, reconciling objectively stale reviews fail-closed."""
+    from . import pickup_search
+    from .forge import review_pickup
+
+    try:
+        review_pickup.review_pickup_query(repo=getattr(args, "repo", None), org=getattr(args, "org", None))
+    except pickup_search.PickupError as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
+                     {"error": "review_pickup_input", "detail": str(exc)})
+
+    try:
+        token = pickup_search.resolve_token(
+            keys_dir=getattr(args, "keys_dir", None),
+            identity=args.identity,
+            allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
+        )
+    except pickup_search.PickupError as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
+                     {"error": "review_pickup_token", "detail": str(exc)})
+
+    gh_runner = _review_pickup_gh_runner(args.identity, token)
+
+    try:
+        result = review_pickup.poll_review_pickup(
+            token=token,
+            reviewer_seats=getattr(args, "reviewer_seats", ()) or (),
+            gh_runner=gh_runner,
+            transport=_review_pickup_transport(),
+            repo=getattr(args, "repo", None),
+            org=getattr(args, "org", None),
+            apply=bool(getattr(args, "apply", False)),
+            apply_stale=not bool(getattr(args, "no_stale_apply", False)),
+        )
+    except pickup_search.PickupRateLimited as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup failed closed: {exc}"],
+                     {"error": "rate_limited", "backoff": exc.to_payload()})
+    except pickup_search.PickupError as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup failed: {exc}"],
+                     {"error": "review_pickup_failed", "detail": str(exc)})
+
+    applied = bool(getattr(args, "apply", False))
+    lines = [f"{_BRAND} · review-pickup: {'applied' if applied else 'planned'} "
+             f"{len(result.items)} review route(s)"]
+    for item in result.items:
+        lines.append(f"    - {item['repo']}#{item['number']} -> "
+                     f"{item.get('assigned_reviewer')} ({item['reason']})")
+    payload = {
+        "action": "review_pickup",
+        "apply": applied,
+        "rate_limit": result.rate_limit,
+        "items": list(result.items),
+        "skipped": list(result.skipped),
+        "count": len(result.items),
+        "skipped_count": len(result.skipped),
+    }
+    return _emit(args, 0, lines, payload)
+
+
 _DISPATCH = {
     "scope": _cmd_scope,
     "shape": _cmd_shape,
@@ -4127,6 +4222,7 @@ _DISPATCH = {
     "ruleset": _cmd_ruleset,
     "review-submit": _cmd_review_submit,
     "auto-merge": _cmd_auto_merge,
+    "review-pickup": _cmd_review_pickup,
     "review": _cmd_review,
     "merge": _cmd_merge,
     "escalation": _cmd_escalation,
