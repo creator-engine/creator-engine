@@ -630,7 +630,7 @@ _DAEMON_SEARCH_QUERY = (
     "... on StatusContext{context state}"
     "}}}}}} "
     "files(first:100){pageInfo{hasNextPage}nodes{path}}"
-    "}}}}}"
+    "}}}}"
 )
 
 

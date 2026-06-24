@@ -338,6 +338,27 @@ def test_discover_daemon_candidates_uses_non_query_search_variable():
     assert f"query=repo:{REPO} is:pr is:open" not in argv
 
 
+def _assert_valid_daemon_search_query(query: str) -> None:
+    assert query.count("{") == query.count("}")
+    assert "$query" not in query
+
+
+def _assert_invalid_daemon_search_query(query: str) -> None:
+    try:
+        _assert_valid_daemon_search_query(query)
+    except AssertionError:
+        return
+    raise AssertionError("invalid daemon search query unexpectedly passed")
+
+
+def test_daemon_search_query_is_balanced_and_avoids_query_variable_name():
+    query = belt._DAEMON_SEARCH_QUERY
+
+    _assert_invalid_daemon_search_query(query + "}")
+    _assert_invalid_daemon_search_query(query.replace("$searchQuery", "$query", 1))
+    _assert_valid_daemon_search_query(query)
+
+
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     gh = FakeDaemonGh()
     stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
