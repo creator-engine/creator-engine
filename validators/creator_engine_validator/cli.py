@@ -167,6 +167,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="the PR head branch name (e.g. $GITHUB_HEAD_REF); resolves the expected carrier slug in --manifest-dir mode",
     )
+    verify_path_manifest.add_argument(
+        "--require-carrier",
+        action="store_true",
+        help="fail when --manifest-dir mode finds no added per-PR carrier or matching .ce/changelog fragment; intended for CI",
+    )
     verify_path_manifest.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
     verify_work_sizing_floor = sub.add_parser(
@@ -561,6 +566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.manifest,
             manifest_dir=args.manifest_dir,
             head_ref=args.head_ref,
+            require_carrier=args.require_carrier,
         )
         return _emit_results([result], args.json_output)
     if subcommand == "verify-work-sizing-floor":

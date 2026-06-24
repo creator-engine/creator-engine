@@ -537,6 +537,7 @@ def run_with_base(
     *,
     manifest_dir: str | None = None,
     head_ref: str | None = None,
+    require_carrier: bool = False,
 ) -> CheckResult:
     """``verify-path-manifest --base <commit>`` PR-diff gate — two modes.
 
@@ -564,7 +565,9 @@ def run_with_base(
     errors: list[ValidationError] = []
 
     if manifest_dir is not None:
-        return _run_with_base_per_pr(repo_root, base, manifest_dir, head_ref)
+        return _run_with_base_per_pr(
+            repo_root, base, manifest_dir, head_ref, require_carrier=require_carrier
+        )
 
     if manifest is None:
         # Transition-safe neutral: no PR-carried manifest → nothing to enforce.
@@ -632,13 +635,19 @@ def run_with_base(
 
 
 def _run_with_base_per_pr(
-    repo_root: Path, base: str, manifest_dir: str, head_ref: str | None
+    repo_root: Path,
+    base: str,
+    manifest_dir: str,
+    head_ref: str | None,
+    *,
+    require_carrier: bool = False,
 ) -> CheckResult:
     """Per-PR carrier mode (ce-ops#21): exactly one ADDED carrier per PR.
 
     Classify the ``git diff --name-status <base>..HEAD`` paths under ``manifest_dir``:
 
-    * **zero** carriers → NEUTRAL pass (transition-safe for docs-only / non-gate PRs);
+    * **zero** carriers → NEUTRAL pass unless ``require_carrier`` is enabled;
+    * **zero** carriers with ``require_carrier`` → ``path_manifest_carrier_required``;
     * **two or more** → ``path_manifest_multiple_carriers`` (each carrier reported);
     * **one**, stem ≠ ``branch_slug(head_ref)`` → ``path_manifest_carrier_slug_mismatch``;
     * **one**, status M/D on the matching slug → ``path_manifest_carrier_not_added``
@@ -710,12 +719,42 @@ def _run_with_base_per_pr(
             )
         )
 
+    expected_stem = branch_slug(head_ref)
+    changelog_path = f".ce/changelog/{expected_stem}.md"
+    if require_carrier and status_by_path.get(changelog_path) != "A":
+        status = status_by_path.get(changelog_path)
+        errors.append(
+            make_error(
+                "path_manifest_changelog_required",
+                changelog_path,
+                "",
+                (
+                    f"CI required-mode expects an ADDED changelog fragment at "
+                    f"'{changelog_path}' (status A); got status {status or 'missing'}"
+                ),
+                DIFF_GATE_CONTRACT,
+            )
+        )
+
     prefix = manifest_dir.rstrip("/") + "/"
     carrier_paths = sorted(p for p in changed if p.startswith(prefix))
 
     if not carrier_paths:
-        # No per-PR carrier in the diff → NEUTRAL, unless the legacy rule flagged a
-        # resurrection (a PR that re-adds/edits the old shared path but carries none).
+        if require_carrier:
+            expected_carrier = f"{prefix}{expected_stem}.md"
+            errors.append(
+                make_error(
+                    "path_manifest_carrier_required",
+                    expected_carrier,
+                    "",
+                    (
+                        f"CI required-mode expects an ADDED per-PR carrier at "
+                        f"'{expected_carrier}' for head ref {head_ref!r}; none was present "
+                        f"under '{manifest_dir}/' in {base}..HEAD"
+                    ),
+                    DIFF_GATE_CONTRACT,
+                )
+            )
         if errors:
             return CheckResult(name=CHECK_NAME, errors=tuple(errors))
         return CheckResult(name=CHECK_NAME, warnings=())
@@ -738,7 +777,6 @@ def _run_with_base_per_pr(
         return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
     carrier = carrier_paths[0]
-    expected_stem = branch_slug(head_ref)
     actual_stem = _carrier_stem(carrier)
     if actual_stem != expected_stem:
         errors.append(

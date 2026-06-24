@@ -122,6 +122,8 @@ verifier and the controller use to disambiguate failures:
 | `path_manifest_missing_declaration` | The document contains a fenced manifest block but no `*_PATHS_COUNT=` or `*_PATHS_SHA256=` line that precedes it. |
 | `path_manifest_missing_block` | A `*_PATHS_COUNT=` or `*_PATHS_SHA256=` declaration is present but no fenced manifest block follows. |
 | `path_manifest_init_py_corruption` | A fenced manifest line, or a free-text path reference in the document body, is the literal string `<package>/checks/init.py`. This is the regression class motivated by [`./NO_COPY_PASTE_PATTERN.md`](./NO_COPY_PASTE_PATTERN.md) §i; the validator emits this code whether or not the count/hash also fail. |
+| `path_manifest_carrier_required` | CI required-mode (`--require-carrier`) found no added `.ce/pr-manifests/<branch-slug>.md` carrier in `<base>..HEAD`. |
+| `path_manifest_changelog_required` | CI required-mode (`--require-carrier`) found no added `.ce/changelog/<branch-slug>.md` fragment in `<base>..HEAD`. |
 
 `path_manifest_init_py_corruption` is intentionally emitted at the
 ERROR level even when the declared count/hash happen to match, because
@@ -194,18 +196,33 @@ PYTHONPATH=validators python -m creator_engine_validator \
   verify-path-manifest --base <PR base sha> \
   --manifest-dir .ce/pr-manifests --head-ref <PR head branch>
 
+# CI required-mode, used by Validate:
+PYTHONPATH=validators python -m creator_engine_validator \
+  verify-path-manifest --base <PR base sha> \
+  --manifest-dir .ce/pr-manifests --head-ref <PR head branch> \
+  --require-carrier
+
 # Single-doc mode (ad-hoc / local verification of one carrier):
 PYTHONPATH=validators python -m creator_engine_validator \
   verify-path-manifest --base <PR base sha> [--manifest <path-manifest doc>]
 ```
 
 `--manifest` and `--manifest-dir` are **mutually exclusive**, and
-`--manifest-dir` **requires** `--head-ref`.
+`--manifest-dir` **requires** `--head-ref`. `--require-carrier` is the
+CI posture: it is used by the required Validate workflow and turns absent
+governance carriers into hard failures. When `--require-carrier` is absent,
+the verifier keeps its transition-neutral behavior for local and legacy callers.
 
 - **`--manifest-dir` supplied** (per-PR mode) → the gate discovers this PR's
   own carrier from the diff and enforces it:
-  - **zero** carrier files under the directory → **NEUTRAL** (a passing
-    `CheckResult`; transition-safe — docs-only / non-gate PRs are not failed);
+  - **zero** carrier files under the directory → **NEUTRAL only when
+    `--require-carrier` is absent** (a passing `CheckResult`; transition-safe
+    for local / legacy callers);
+  - **zero** carrier files under the directory with `--require-carrier` →
+    `path_manifest_carrier_required`;
+  - with `--require-carrier`, the diff must also add
+    `.ce/changelog/<branch-slug>.md`; missing or non-added changelog status →
+    `path_manifest_changelog_required`;
   - **exactly one**, status **A** (added), filename stem ==
     `branch_slug(<head ref>)` → **active**: the carrier's path-set is enforced
     against the diff with the same `path_manifest_diff_outside_manifest` /
@@ -234,11 +251,11 @@ PYTHONPATH=validators python -m creator_engine_validator \
     declares no fenced manifest at all.
 - **neither supplied** → the gate is **NEUTRAL** (a passing `CheckResult` with
   no errors). The gate runs as a step of the **required** `Validate governance
-  artifacts` status check (which runs both the pytest suite and this diff-gate),
-  so a *gate* PR that carries its per-PR carrier cannot merge with a diff that
-  drifts from it. Wiring that required check + the reviewer policy that pins the
-  non-author approver is the work of **G-iii** — see
-  `GITHUB_NATIVE_COORDINATION_PROTOCOL.md`.
+  artifacts` status check (which runs both the pytest suite and this diff-gate).
+  Validate uses `--require-carrier`, so a pull request cannot pass that required
+  check unless `<base>..HEAD` contains both the added per-PR path-manifest
+  carrier and the matching added changelog fragment, and the diff equals the
+  carrier's closed path-set.
 
 ### Per-PR-carrier convention (the standard for gate PRs)
 
@@ -249,9 +266,12 @@ path-manifest file committed at **`.ce/pr-manifests/<branch-slug>.md`**, where
 shape — `AUTHORIZED_PATHS_COUNT=` / `AUTHORIZED_PATHS_SHA256=` + a ```` ```text ````
 block listing the authorized paths; **the carrier lists itself**. The CI workflow
 (`.github/workflows/validate.yml`) runs the gate on `pull_request` events against
-`github.event.pull_request.base.sha` with
-`--manifest-dir .ce/pr-manifests --head-ref <head ref>`; a PR with no carrier
-under that directory runs neutral. This **supersedes the single shared
+the resolved live comparison base with
+`--manifest-dir .ce/pr-manifests --head-ref <head ref> --require-carrier`; a PR
+with no added carrier under that directory fails Validate, and a PR without the
+matching added `.ce/changelog/<branch-slug>.md` fragment also fails Validate.
+Neutral zero-carrier behavior remains available only when `--require-carrier` is
+not passed. This **supersedes the single shared
 `.ce/pr-path-manifest.md`**: because every PR's carrier has a distinct path, two
 concurrently-open PRs never conflict on the carrier file regardless of real
 overlap, and merged carriers accumulate as a per-PR scope-audit ledger. The

@@ -291,12 +291,13 @@ jobs:
           # Per-PR carrier convention (ce-ops#21): each gate PR carries its ratified
           # closed manifest as its OWN file `.ce/pr-manifests/<branch-slug>.md`. The
           # validator discovers this PR's carrier from the diff (exactly one, ADDED,
-          # slug == branch_slug(head)) and enforces diff == its path-set; a PR with no
-          # carrier under that directory is NEUTRAL (transition-safe). Discovery lives
-          # in the validator (pytest-tested), so this step is one unconditional call.
+          # slug == branch_slug(head)) and enforces diff == its path-set. CI runs
+          # required-mode so a PR missing that carrier, or its matching
+          # `.ce/changelog/<branch-slug>.md` fragment, fails closed.
           PYTHONPATH=validators python -m creator_engine_validator \
             verify-path-manifest --base "${comparison_base}" \
-            --manifest-dir .ce/pr-manifests --head-ref "${GITHUB_HEAD_REF}"
+            --manifest-dir .ce/pr-manifests --head-ref "${GITHUB_HEAD_REF}" \
+            --require-carrier
 
       - name: Workflow permissions audit (no write permissions present)
         run: |
