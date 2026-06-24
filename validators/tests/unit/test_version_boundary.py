@@ -144,7 +144,10 @@ def test_taxonomy_counts_and_disjoint():
     # (``forge.integrator_executor``): 52 -> 53.
     # ce-ops#216 Unit 5 added the one-shot integrator runner
     # (``forge.integrator_runner``): 53 -> 54.
-    assert len(ver.V3_RUNTIME) == 54
+    # ce-ops#218 added the belt-poller (``forge.integrator_belt``) — the bounded
+    # merge-queue repair poll over the Unit 2-5 primitives; pure-forge v3, live
+    # actions behind injectable adapters + the merge gate: 54 -> 55.
+    assert len(ver.V3_RUNTIME) == 55
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

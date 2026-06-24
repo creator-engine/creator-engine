@@ -111,7 +111,6 @@ from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
-from .forge import integrator_belt
 from .tmux_adapter import TmuxAdapter
 
 
@@ -570,46 +569,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     qd.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
     qd.add_argument("--preview-id", default=None, help="override the request's preview_id")
-    qd.add_argument(
-        "--enqueue",
-        action="store_true",
-        help="run one live Integrator enqueue/requeue tick before writing the preview",
-    )
-    qd.add_argument(
-        "--land",
-        action="store_true",
-        help="run one live Integrator land/requeue tick before writing the preview",
-    )
-    qd.add_argument(
-        "--merge",
-        action="store_true",
-        help="run one live Integrator merge tick before writing the preview",
-    )
-    qd.add_argument("--live-repo", default=None, help="owner/name scope for live Integrator action")
-    qd.add_argument("--live-org", default=None, help="org/user scope for live Integrator action")
-    qd.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
-    qd.add_argument("--work-root", default=integrator_belt.DEFAULT_WORK_ROOT, help="Integrator scratch work root")
     qd.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     qi = queue_sub.add_parser("inspect", help="verify a preview's content hash + shape (read-only)")
     qi.add_argument("--preview", required=True, help="path to an existing dry-run landing preview")
     qi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
-
-    qp = queue_sub.add_parser("poll", help="run a bounded Integrator merge-queue repair poll")
-    scope = qp.add_mutually_exclusive_group()
-    scope.add_argument("--repo", default=None, help="owner/name repository scope")
-    scope.add_argument("--org", default=None, help="org/user search scope")
-    qp.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
-    qp.add_argument("--work-root", default=integrator_belt.DEFAULT_WORK_ROOT, help="Integrator scratch work root")
-    qp.add_argument("--iterations", type=int, default=1, help="bounded poll iterations")
-    qp.add_argument("--interval-seconds", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between iterations")
-    qp.add_argument(
-        "--action",
-        choices=("enqueue", "land", "merge"),
-        default="enqueue",
-        help="publish action after a deterministic repair",
-    )
-    qp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    # ce-ops#218: the belt-driven live merge-queue repair poll lives in the v3 CLI
+    # (`cev3 queue-poll`) — it imports the v3 forge belt, which must not be reached
+    # from this v1 CLI (v1⊥v3 isolation, docs/architecture/VERSION_BOUNDARY.md).
 
     # ce event — G2.003.1 CE-event runtime. Local, daemonless, network-free
     # append-only signed-block chains under the ignored .ce/ce-events/spool/
@@ -1758,32 +1725,14 @@ def _fanin_inspect(args) -> int:
 
 
 def _queue_dry_run(args) -> int:
-    live_action = next(
-        (name for name in ("enqueue", "land", "merge") if getattr(args, name, False)), None
-    )
-    live_action_runner = None
-    if live_action:
-        try:
-            token = integrator_belt.token_from_env(args.token_env)
-            live_action_runner = integrator_belt.make_live_action_runner(
-                action=live_action,
-                token=token,
-                repo=args.live_repo,
-                org=args.live_org,
-                work_root=args.work_root,
-                log_sink=integrator_belt.JsonLineLogger(sys.stderr),
-            )
-        except integrator_belt.IntegratorBeltError as exc:
-            print(f"ERROR: ce queue dry-run refused [G8-QUEUE-AUTHORITY-REFUSED]: {exc}", file=sys.stderr)
-            return 1
+    # Preview-only (v1). The live belt-driven actions moved to `cev3 queue-poll`
+    # (v3) to keep this v1 CLI free of any v3 forge import (ce-ops#218).
     try:
         result = integration_queue_dry_run.build(
             request=args.request,
             preview_root=args.preview_root,
             repo_root=args.repo_root,
             preview_id=args.preview_id,
-            live_action=live_action,
-            live_action_runner=live_action_runner,
         )
     except integration_queue_dry_run.QueueBuildError as exc:
         print(f"ERROR: ce queue dry-run refused [{exc.code}]: {exc}", file=sys.stderr)
@@ -1808,46 +1757,6 @@ def _queue_dry_run(args) -> int:
             "mode=dry-run has_authority=false"
         )
     return 0
-
-
-def _queue_poll(args) -> int:
-    try:
-        token = integrator_belt.token_from_env(args.token_env)
-        logger = integrator_belt.JsonLineLogger(sys.stderr)
-        gh_runner = integrator_belt.gh_runner_with_token(token)
-        adapter = integrator_belt.LiveGitHubRepairAdapter(
-            work_root=args.work_root,
-            publish_action=args.action,
-            gh_runner=gh_runner,
-            git_env=integrator_belt.git_env_with_token(token),
-            log_sink=logger,
-        )
-        result = integrator_belt.run_poll_loop(
-            token=token,
-            repair_adapter=adapter,
-            repo=args.repo,
-            org=args.org,
-            iterations=args.iterations,
-            interval_seconds=args.interval_seconds,
-            gh_runner=gh_runner,
-            log_sink=logger,
-        )
-    except (integrator_belt.IntegratorBeltError, integration_queue_dry_run.QueueDryRunError) as exc:
-        print(f"ERROR: ce queue poll refused: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:
-        print(f"ERROR: ce queue poll failed closed: {exc}", file=sys.stderr)
-        return 1
-
-    if getattr(args, "json_output", False):
-        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
-    else:
-        print(
-            "ce queue poll: "
-            f"events={result.event_count} executed={result.executed_count} "
-            f"escalated={result.escalated_count} refused={result.refused_count}"
-        )
-    return 0 if result.escalated_count == 0 and result.refused_count == 0 else 1
 
 
 def _queue_inspect(args) -> int:
@@ -3503,7 +3412,6 @@ _FANIN_DISPATCH = {
 _QUEUE_DISPATCH = {
     "dry-run": _queue_dry_run,
     "inspect": _queue_inspect,
-    "poll": _queue_poll,
 }
 
 _EVENT_DISPATCH = {

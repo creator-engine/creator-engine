@@ -41,7 +41,7 @@ GitSpawn = Callable[[Sequence[str], str | None, Mapping[str, str] | None], subpr
 LogSink = Callable[[Mapping[str, Any]], None]
 
 DEFAULT_TOKEN_ENV = "GH_TOKEN"
-DEFAULT_WORK_ROOT = ".hermes/integrator-belt"
+DEFAULT_WORK_ROOT = ".ce/integrator-belt"
 DEFAULT_INTERVAL_SECONDS = 60.0
 
 
@@ -103,6 +103,29 @@ class PullRequestIdentity:
     head_ref: str
     head_sha: str
     head_repo: str
+
+
+@dataclass(frozen=True)
+class LiveActionRequest:
+    """Belt-local live-action request. Structurally mirrors the v1 dry-run seam's
+    request so the belt's injected runner is duck-typed across the v1/v3 boundary —
+    the belt imports no v1 module."""
+
+    action: str
+    request: Path
+    preview_root: Path
+    repo_root: Path | None
+    preview_id: str
+
+
+@dataclass(frozen=True)
+class LiveActionResult:
+    """Belt-local secret-free live-action result (structurally mirrors the v1 seam)."""
+
+    accepted: bool
+    action: str
+    refusal_reason: str | None = None
+    evidence: tuple[str, ...] = ()
 
 
 def token_from_env(name: str = DEFAULT_TOKEN_ENV) -> str:
@@ -467,9 +490,9 @@ def make_live_action_runner(
     repair_adapter: IntegratorRepairAdapter | None = None,
     log_sink: LogSink | None = None,
 ):
-    """Return an ``integration_queue_dry_run`` live-action runner."""
-
-    from ..integration_queue_dry_run import LiveActionRequest, LiveActionResult
+    """Return a live-action runner. The returned ``run`` is duck-typed: the v1
+    dry-run seam injects it and calls it with its own structurally-identical
+    ``LiveActionRequest``; the belt itself imports no v1 module."""
 
     if action not in {"enqueue", "land", "merge"}:
         raise IntegratorBeltError(f"unknown live action {action!r}")

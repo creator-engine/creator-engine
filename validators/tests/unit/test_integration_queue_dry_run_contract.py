@@ -300,18 +300,11 @@ def test_ce_queue_dry_run_json_reports_hash_and_path(tmp_path, capsys):
     assert payload["content_hash"] in payload["preview_path"]
 
 
-@pytest.mark.parametrize("flag", ["--enqueue", "--land", "--merge"])
-def test_ce_queue_dry_run_refuses_live_action_nonzero_no_preview(tmp_path, flag, monkeypatch):
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-    request, root = _make_request(tmp_path)
-    ret = ce_cli.main([
-        "queue", "dry-run",
-        "--request", str(request),
-        "--preview-root", str(root),
-        flag,
-    ])
-    assert ret != 0
-    assert _previews(root) == []
+# ce-ops#218: the v1 `ce queue dry-run --enqueue/--land/--merge` live-tick wiring was
+# removed (it imported the v3 forge belt from the v1 CLI → v1⊥v3 boundary violation).
+# Live belt actions now run via `cev3 queue-poll` (v3, fail-closed; covered by
+# test_integrator_belt). The v1 build's INJECTED live-action-runner contract is unchanged
+# and still covered by the two callback tests below.
 
 
 def test_live_action_callback_accepts_only_runner_accepted_result(tmp_path):

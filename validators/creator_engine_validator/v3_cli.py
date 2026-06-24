@@ -57,6 +57,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,6 +92,7 @@ from .forge import (
     delete_ruleset,
     upsert_ruleset,
 )
+from .forge import integrator_belt
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
@@ -4053,7 +4055,63 @@ def _build_parser() -> argparse.ArgumentParser:
     p_session.add_argument("--backend", default="—", help="runtime backend label for the banner")
     _add_root(p_session)
 
+    p_queue_poll = sub.add_parser(
+        "queue-poll",
+        help="run a bounded, witnessable Integrator merge-queue repair poll (ce-ops#218)",
+    )
+    qp_scope = p_queue_poll.add_mutually_exclusive_group()
+    qp_scope.add_argument("--repo", default=None, help="owner/name repository scope")
+    qp_scope.add_argument("--org", default=None, help="org/user search scope")
+    p_queue_poll.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
+    p_queue_poll.add_argument("--work-root", default=integrator_belt.DEFAULT_WORK_ROOT, help="Integrator scratch work root")
+    p_queue_poll.add_argument("--iterations", type=int, default=1, help="bounded poll iterations")
+    p_queue_poll.add_argument("--interval-seconds", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between iterations")
+    p_queue_poll.add_argument("--action", choices=("enqueue", "land", "merge"), default="enqueue", help="publish action after a deterministic repair")
+    _add_root(p_queue_poll)  # adds --root + --json
+
     return parser
+
+
+def _cmd_queue_poll(args: argparse.Namespace) -> int:
+    """ce-ops#218 belt-poller: bounded, witnessable Integrator merge-queue repair poll.
+    Belt-native (pure v3 forge); live actions stay behind the injectable adapter and
+    the merge gate, fail-closed."""
+    try:
+        token = integrator_belt.token_from_env(args.token_env)
+        logger = integrator_belt.JsonLineLogger(sys.stderr)
+        gh_runner = integrator_belt.gh_runner_with_token(token)
+        adapter = integrator_belt.LiveGitHubRepairAdapter(
+            work_root=args.work_root,
+            publish_action=args.action,
+            gh_runner=gh_runner,
+            git_env=integrator_belt.git_env_with_token(token),
+            log_sink=logger,
+        )
+        result = integrator_belt.run_poll_loop(
+            token=token,
+            repair_adapter=adapter,
+            repo=args.repo,
+            org=args.org,
+            iterations=args.iterations,
+            interval_seconds=args.interval_seconds,
+            gh_runner=gh_runner,
+            log_sink=logger,
+        )
+    except integrator_belt.IntegratorBeltError as exc:
+        print(f"ERROR: {CE_CMD} queue-poll refused: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive fail-closed
+        print(f"ERROR: {CE_CMD} queue-poll failed closed: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            f"{CE_CMD} queue-poll: "
+            f"events={result.event_count} executed={result.executed_count} "
+            f"escalated={result.escalated_count} refused={result.refused_count}"
+        )
+    return 0 if result.escalated_count == 0 and result.refused_count == 0 else 1
 
 
 _DISPATCH = {
@@ -4080,6 +4138,7 @@ _DISPATCH = {
     "guide": _cmd_guide,
     "session": _cmd_session,
     "cockpit": _cmd_cockpit,
+    "queue-poll": _cmd_queue_poll,
 }
 
 

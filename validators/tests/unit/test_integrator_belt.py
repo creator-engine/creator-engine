@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import v3_cli
 from creator_engine_validator.forge import integrator_belt as belt
 from creator_engine_validator.forge.eviction_detection import RepairNeededEvent, RepairPollResult
 from creator_engine_validator.forge.integrator_executor import ExecutorPublishResult, ExecutorRefs
 from creator_engine_validator.forge.integrator_runner import ConflictSnapshot, RepairWorkItem
-from creator_engine_validator.integration_queue_dry_run import LiveActionRequest
 
 REPO = "creator-engine/creator-engine"
 PR = 218
@@ -136,7 +135,7 @@ def test_live_action_runner_refuses_semantic_conflict_without_execute(tmp_path: 
     )
 
     result = runner(
-        LiveActionRequest(
+        belt.LiveActionRequest(
             action="enqueue",
             request=tmp_path / "request.yaml",
             preview_root=tmp_path / "preview",
@@ -173,19 +172,19 @@ class _CliResult:
 def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
     captured = {}
 
-    monkeypatch.setattr(ce_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
-    monkeypatch.setattr(ce_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
-    monkeypatch.setattr(ce_cli.integrator_belt, "git_env_with_token", lambda token: {})
-    monkeypatch.setattr(ce_cli.integrator_belt, "LiveGitHubRepairAdapter", lambda **kwargs: object())
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
+    monkeypatch.setattr(v3_cli.integrator_belt, "git_env_with_token", lambda token: {})
+    monkeypatch.setattr(v3_cli.integrator_belt, "LiveGitHubRepairAdapter", lambda **kwargs: object())
 
     def fake_loop(**kwargs):
         captured.update(kwargs)
         return _CliResult()
 
-    monkeypatch.setattr(ce_cli.integrator_belt, "run_poll_loop", fake_loop)
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_poll_loop", fake_loop)
 
-    ret = ce_cli.main([
-        "queue", "poll",
+    ret = v3_cli.main([
+        "queue-poll",
         "--repo", REPO,
         "--iterations", "1",
         "--interval-seconds", "0",
