@@ -4,8 +4,20 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  run-controller-runsc.sh [--dry-run] [tui] [claude args...]
-  run-controller-runsc.sh [--dry-run] exec [claude prompt args...]
+  run-controller-runsc.sh [--dry-run] [--detach] [tui] [claude args...]
+  run-controller-runsc.sh [--dry-run] [--detach] exec [claude prompt args...]
+
+Detached mode:
+  --detach                      Launch with `docker run -d` under a named
+                                persistent container (default name:
+                                ce-dgx-controller) instead of the foreground
+                                `docker run --rm`. The script polls for herdr
+                                readiness, prints attach/teardown commands, and
+                                returns 0 without blocking. A crashed controller
+                                is left inspectable (`docker logs`, exit code)
+                                because the detached container is NOT removed
+                                with --rm. Detached mode removes the tmux crutch
+                                for keeping the controller alive.
 
 Environment:
   CE_DGX_CONTROLLER_IMAGE       Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
@@ -25,6 +37,9 @@ Environment:
   CE_DGX_UID                    Container uid (default: id -u)
   CE_DGX_GID                    Container gid (default: id -g)
   CE_DGX_TTY_FLAGS              Docker TTY flags (default: -it; set to -i for non-TTY callers)
+  CE_DGX_CONTROLLER_DETACH      Launch detached (docker run -d, named container) when set to 1
+  CE_DGX_CONTROLLER_CONTAINER_NAME
+                                 Detached container name (default: ce-dgx-controller)
   CE_DGX_DRY_RUN                Print docker argv instead of executing when set to 1
   CE_DGX_ALLOW_PLAIN_RUNSC      Allow CE_DGX_RUNTIME=runsc despite DGX root-netns failure (default: 0)
   CE_DGX_ALLOW_SYSTRAP_CONTROLLER
@@ -37,6 +52,11 @@ EOF
 dry_run="${CE_DGX_DRY_RUN:-0}"
 if [ "${1:-}" = "--dry-run" ]; then
   dry_run=1
+  shift
+fi
+detach="${CE_DGX_CONTROLLER_DETACH:-0}"
+if [ "${1:-}" = "--detach" ]; then
+  detach=1
   shift
 fi
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -67,6 +87,7 @@ CE_DGX_CONTAINER_SUPERVISOR_SOCKET="/run/ce-supervisor.sock"
 CE_DGX_UID="${CE_DGX_UID:-$(id -u)}"
 CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
 CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
+CE_DGX_CONTROLLER_CONTAINER_NAME="${CE_DGX_CONTROLLER_CONTAINER_NAME:-ce-dgx-controller}"
 
 if [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "rw" ] && [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "ro" ]; then
   printf 'CE_DGX_CONTROLLER_HOME_MODE must be rw or ro, got %s\n' "${CE_DGX_CONTROLLER_HOME_MODE}" >&2
@@ -164,8 +185,13 @@ if [ "${CE_DGX_CONTROLLER_HOME_MODE}" = "ro" ]; then
   controller_home_mount="${controller_home_mount},readonly"
 fi
 
+run_flags=(--rm)
+if [ "${detach}" = "1" ]; then
+  run_flags=(-d --name "${CE_DGX_CONTROLLER_CONTAINER_NAME}")
+fi
+
 docker_cmd=(
-  docker run --rm
+  docker run "${run_flags[@]}"
   "--runtime=${CE_DGX_RUNTIME}"
   --security-opt=no-new-privileges
   --cap-drop=ALL
@@ -214,6 +240,43 @@ fi
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"
   printf '\n'
+  exit 0
+fi
+
+if [ "${detach}" = "1" ]; then
+  "${docker_cmd[@]}"
+
+  ready=0
+  for _ in $(seq 1 60); do
+    if docker exec "${CE_DGX_CONTROLLER_CONTAINER_NAME}" herdr pane read w1:p1 >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.5
+  done
+
+  if [ "${ready}" != "1" ]; then
+    cat >&2 <<EOF
+Detached controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME} did not become herdr-ready.
+
+The container was started but herdr never responded on w1:p1 within the
+readiness window. Inspect forensic state and tear it down:
+
+  docker logs ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+EOF
+    exit 69
+  fi
+
+  cat <<EOF
+Detached controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME} is herdr-ready.
+
+Attach to drive the controller:
+  docker exec -it ${CE_DGX_CONTROLLER_CONTAINER_NAME} herdr
+
+Retire the controller:
+  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+EOF
   exit 0
 fi
 

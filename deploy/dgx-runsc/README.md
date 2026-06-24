@@ -183,6 +183,77 @@ operator explicitly overrides it for diagnostics.
    harness environment carry `CE_DGX_TERMINAL_KIND=herdr` /
    `CE_TERMINAL_KIND=herdr`.
 
+## Detached launch (canonical)
+
+The canonical way to drive a DGX Codex seat is a detached, named-persistent
+container. Foreground `tui`/`exec` blocks the caller's terminal and uses
+`docker run --rm`; detached mode instead runs `docker run -d`, names the
+container deterministically, polls for herdr readiness, prints the
+attach/teardown commands, and returns so the operator drives the seat through
+herdr.
+
+Launch detached with the flag or the env var:
+
+```bash
+CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --detach tui
+# or
+CE_DGX_DETACH=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
+```
+
+What detached mode changes versus foreground:
+
+- The docker argv drops `--rm` and adds `-d --name "${CE_DGX_CONTAINER_NAME}"`
+  (default `ce-dgx-codex`, overridable via `CE_DGX_CONTAINER_NAME`). Every other
+  posture invariant is unchanged: `--runtime`, `--security-opt=no-new-privileges`,
+  `--cap-drop=ALL`, `--user`, `--workdir`, `--tmpfs`, all `--env`, all `--mount`,
+  the TTY flags (`-it`, kept so the Codex TUI renders into the herdr pane), and
+  the network-refusal logic.
+- **Deliberate `--rm` decision:** detached containers are NOT removed with
+  `--rm`. A crashed or stopped seat must stay inspectable — `docker logs` and the
+  recorded exit code are the forensic record. A live outage was worsened because
+  `--rm` deleted that state on exit. Foreground mode keeps `--rm` unchanged.
+- **Readiness poll:** after `docker run -d` returns, the script polls
+  `docker exec "${CE_DGX_CONTAINER_NAME}" herdr pane read w1:p1` in a bounded loop
+  (up to ~60 tries, 0.5s apart). If herdr never responds, the script fails loudly,
+  names the container, and prints the teardown command. The poll is skipped under
+  `CE_DGX_DRY_RUN=1`.
+
+Attach to the running seat (the canonical drive path):
+
+```bash
+docker exec -it ce-dgx-codex herdr
+```
+
+Retire the seat when done:
+
+```bash
+docker stop ce-dgx-codex && docker rm ce-dgx-codex
+```
+
+### Host-config pre-trust prerequisite (REQUIRED for detached)
+
+This launcher bind-mounts the host `~/.codex` directory **read-write**
+(`CE_DGX_CODEX_HOME`), so the host's own `config.toml` is the source of trust and
+sandbox configuration. Unlike the VPS launcher, this script does NOT generate a
+contained config and must NOT clobber the host one. For a detached,
+non-interactive launch to avoid a trust-write loop, the operator must ensure the
+host `~/.codex/config.toml` already pre-trusts the workspace before launching:
+
+```toml
+[projects."/workspace/creator-engine"]
+trust_level = "trusted"
+
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+Codex running inside gVisor MUST use `sandbox_mode = "danger-full-access"`
+(bypass): the inner bubblewrap sandbox cannot nest inside gVisor, so attempting
+to sandbox inside the container deadlocks the harness. gVisor IS the sandbox
+boundary here. Without this pre-trust + bypass, a detached seat will block on a
+trust/approval prompt that no one is attached to answer, and the readiness poll
+will fail.
+
 ## Runner Defaults
 
 The script is parameterized through environment variables:
@@ -200,6 +271,8 @@ CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock
 CE_DGX_SUBSTRATE_RUN_DIR=/run/creator-engine
 CE_DGX_TERMINAL_KIND=herdr
 CE_DGX_TTY_FLAGS=-it
+CE_DGX_DETACH=0
+CE_DGX_CONTAINER_NAME=ce-dgx-codex
 ```
 
 `CE_DGX_NETWORK` remains as a deprecated alias for `CE_DGX_DOCKER_NETWORK`.
@@ -246,8 +319,12 @@ CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 
 ## Caveats
 
-- Run the interactive form from a real TTY, including inside tmux. If a caller
-  is non-interactive, set `CE_DGX_TTY_FLAGS=-i` or use the dry-run check.
+- The canonical launch is detached (`--detach` / `CE_DGX_DETACH=1`): the seat
+  runs in a named-persistent container and the operator drives it through
+  `docker exec -it ce-dgx-codex herdr`. Detached mode removes the need for tmux.
+  **tmux is legacy/DEPRECATED** for this path; do not start the seat inside tmux.
+- For the legacy foreground form, run from a real TTY. If a caller is
+  non-interactive, set `CE_DGX_TTY_FLAGS=-i` or use the dry-run check.
 - Do not use Docker bridge, Docker none, or the plain `runsc` runtime on the
   nested DGX. The `runsc-gvproxy-ptrace` runtime owns networking, and egress
   should prove out with the HTTPS `git ls-remote` check above.

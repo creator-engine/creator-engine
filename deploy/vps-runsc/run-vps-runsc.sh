@@ -4,8 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [tui] [harness args...]
-  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] exec [harness exec args...]
+  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach] [tui] [harness args...]
+  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach] exec [harness exec args...]
 
 Environment:
   CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64)
@@ -13,6 +13,9 @@ Environment:
   CE_VPS_DOCKER_NETWORK        Docker --network value (default: host)
   CE_VPS_HARNESS               Harness: codex, claude, or controller (default: codex)
   CE_DGX_HARNESS               Deprecated alias for CE_VPS_HARNESS
+  CE_VPS_DETACH                Launch detached (docker run -d, named-persistent) when set to 1
+  CE_VPS_CONTAINER_NAME        Container --name for detached launch
+                                (default: ce-vps-<harness>, e.g. ce-vps-codex)
   CE_VPS_REPO                  Host repo path (default: current directory)
   CE_VPS_CODEX_HOME            Host codex home (default: $HOME/.codex)
   CE_VPS_CODEX_HOME_MODE       Mount mode for codex home: rw or ro (default: rw)
@@ -41,6 +44,14 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
+# --detach is parsed early (like --dry-run) so it works whether placed before
+# or after the optional --harness, as long as it precedes the tui/exec token.
+detach="${CE_VPS_DETACH:-0}"
+if [ "${1:-}" = "--detach" ]; then
+  detach=1
+  shift
+fi
+
 harness="${CE_VPS_HARNESS:-${CE_DGX_HARNESS:-codex}}"
 if [ "${1:-}" = "--harness" ]; then
   if [ -z "${2:-}" ]; then
@@ -49,6 +60,12 @@ if [ "${1:-}" = "--harness" ]; then
   fi
   harness="$2"
   shift 2
+fi
+
+# Allow --detach after --harness as well (parse order tolerance).
+if [ "${1:-}" = "--detach" ]; then
+  detach=1
+  shift
 fi
 
 mode="tui"
@@ -86,6 +103,7 @@ CE_VPS_CONTAINER_CODEX_HOME="${CE_VPS_CONTAINER_HOME}/.codex"
 CE_VPS_UID="${CE_VPS_UID:-$(id -u)}"
 CE_VPS_GID="${CE_VPS_GID:-$(id -g)}"
 CE_VPS_TTY_FLAGS="${CE_VPS_TTY_FLAGS:--it}"
+CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-ce-vps-${harness}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
 
@@ -195,8 +213,19 @@ else
   )
 fi
 
+# Foreground = ephemeral (--rm). Detached = named-persistent (no --rm, add -d
+# and --name) so a crashed/stopped seat is inspectable via docker logs/exit
+# code; --rm previously deleted forensic state on a live outage.
+docker_run_flags=()
+if [ "${detach}" = "1" ]; then
+  docker_run_flags+=(-d --name "${CE_VPS_CONTAINER_NAME}")
+else
+  docker_run_flags+=(--rm)
+fi
+
 docker_cmd=(
-  docker run --rm
+  docker run
+  "${docker_run_flags[@]}"
   "--runtime=${CE_VPS_RUNTIME}"
   "--network=${CE_VPS_DOCKER_NETWORK}"
   --security-opt=no-new-privileges
@@ -230,6 +259,30 @@ docker_cmd+=("${container_cmd[@]}")
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"
   printf '\n'
+  exit 0
+fi
+
+if [ "${detach}" = "1" ]; then
+  # Named-persistent detached launch: start the container, then poll herdr for
+  # readiness. Do NOT exec docker here (docker run -d returns immediately).
+  "${docker_cmd[@]}"
+  ready=0
+  for _ in $(seq 1 60); do
+    if docker exec "${CE_VPS_CONTAINER_NAME}" herdr pane read w1:p1 >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "${ready}" != "1" ]; then
+    printf 'herdr never became ready in container %s\n' "${CE_VPS_CONTAINER_NAME}" >&2
+    printf 'inspect: docker logs %s\n' "${CE_VPS_CONTAINER_NAME}" >&2
+    printf 'teardown: docker stop %s && docker rm %s\n' "${CE_VPS_CONTAINER_NAME}" "${CE_VPS_CONTAINER_NAME}" >&2
+    exit 69
+  fi
+  printf 'container %s is ready.\n' "${CE_VPS_CONTAINER_NAME}"
+  printf 'attach: docker exec -it %s herdr\n' "${CE_VPS_CONTAINER_NAME}"
+  printf 'retire: docker stop %s && docker rm %s\n' "${CE_VPS_CONTAINER_NAME}" "${CE_VPS_CONTAINER_NAME}"
   exit 0
 fi
 

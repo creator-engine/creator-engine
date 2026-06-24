@@ -30,7 +30,7 @@ CE_VPS_TTY_FLAGS=-it
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
 Docker runtime still uses `runsc-gvproxy-ptrace` for process containment.
 
-The launcher always applies:
+The launcher always applies (in both foreground and detached mode):
 
 - `--runtime=runsc-gvproxy-ptrace`
 - `--network=host` by default
@@ -40,17 +40,70 @@ The launcher always applies:
 - repo, Codex home, contained Codex config, and Codex binary/package bind mounts
 - `CODEX_HOME`, `TERM`, and `CE_DGX_HARNESS` for the image entrypoint
 
+## Detached launch (canonical)
+
+The canonical way to drive a contained VPS seat is a detached, named-persistent
+launch. Pass `--detach` (or set `CE_VPS_DETACH=1`):
+
+```bash
+CE_VPS_REPO="$PWD" deploy/vps-runsc/run-vps-runsc.sh --detach tui
+```
+
+Detached mode runs `docker run -d --name <name>` instead of `docker run --rm`:
+
+- The container name is harness-aware and deterministic:
+  `CE_VPS_CONTAINER_NAME=ce-vps-<harness>` (so `ce-vps-codex`, `ce-vps-claude`,
+  `ce-vps-controller`), overridable via the `CE_VPS_CONTAINER_NAME` env.
+- It is deliberately **not** `--rm`. A detached seat is named-persistent so a
+  crashed or stopped seat stays inspectable (`docker logs <name>`, exit code).
+  An earlier live outage was worsened because `--rm` deleted forensic state on
+  exit. Foreground mode keeps `--rm` unchanged.
+- All posture invariants (`--runtime`, `--network=host`,
+  `--security-opt=no-new-privileges`, `--cap-drop=ALL`, `--user`, every mount
+  and env, the generated contained config) are identical to foreground mode.
+- TTY flags (`-it` by default) are preserved so the harness TUI renders into the
+  herdr pane.
+
+After `docker run -d` returns, the launcher polls
+`docker exec <name> herdr pane read w1:p1` in a bounded loop (up to ~60 tries,
+0.5s apart). If herdr never responds it fails loudly, naming the container and
+printing the teardown command. On success it prints the attach hint and the
+retire command.
+
+The **canonical drive path** is then to attach to herdr:
+
+```bash
+docker exec -it ce-vps-codex herdr
+```
+
+Retire the seat when done:
+
+```bash
+docker stop ce-vps-codex && docker rm ce-vps-codex
+```
+
+The generated contained Codex config pre-trusts `/workspace/creator-engine`
+(`trust_level = "trusted"`, `approval_policy = "never"`,
+`sandbox_mode = "danger-full-access"`), so a detached, non-interactive launch is
+fully self-trusting: Codex never prompts and never tries to persist trust into
+the readonly config mount. Codex must run with `danger-full-access`/bypass
+because its inner bubblewrap/Landlock sandbox cannot nest inside runsc/gVisor;
+the gVisor container is the sandbox boundary.
+
+> **tmux is DEPRECATED/legacy** for driving these seats. The herdr pane via
+> `docker exec -it <name> herdr` is the supported attach surface.
+
 ## Operations
 
 VPS contained seats need host Docker access before launch. Add the seat user to
-the Docker group, then start a fresh tmux server so new shells inherit the group
-membership:
+the Docker group so new shells inherit the group membership:
 
 ```bash
 sudo usermod -aG docker <seat-user>
 ```
 
-Stage a clean home before launching the contained TUI:
+Stage a clean home before launching the contained TUI (foreground form shown;
+prefer the detached launch above for durable seats):
 
 ```bash
 deploy/vps-runsc/run-vps-runsc.sh tui
