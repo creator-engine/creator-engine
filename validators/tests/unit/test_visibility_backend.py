@@ -8,6 +8,9 @@ launcher built before the seam existed.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from creator_engine_validator import visibility_backend as vb
@@ -206,10 +209,12 @@ def test_herdr_backend_is_registered_by_default():
     assert backend.visibility_class == vb.OPERATOR_INSPECTABLE
 
 
-def test_headless_pty_backend_is_retired_from_registry():
-    assert vb.HEADLESS_TERMINAL_KIND not in vb.available_visibility_kinds()
-    with pytest.raises(vb.UnknownVisibilityBackend):
-        vb.get_visibility_backend(vb.HEADLESS_TERMINAL_KIND)
+def test_headless_backend_is_registered_by_default():
+    assert vb.HEADLESS_TERMINAL_KIND in vb.available_visibility_kinds()
+    backend = vb.get_visibility_backend(vb.HEADLESS_TERMINAL_KIND)
+    assert isinstance(backend, vb.HeadlessVisibilityBackend)
+    assert backend.terminal_kind == "headless"
+    assert backend.visibility_class == vb.OPERATOR_INSPECTABLE
 
 
 def test_herdr_backend_availability_uses_injected_session_factory():
@@ -219,6 +224,36 @@ def test_herdr_backend_availability_uses_injected_session_factory():
 def test_headless_backend_inspectable_class_satisfies_the_contract():
     assert vb.OPERATOR_INSPECTABLE in vb.SATISFYING_VISIBILITY_CLASSES
     assert vb.OPERATOR_VISIBLE in vb.SATISFYING_VISIBILITY_CLASSES
+
+
+def test_headless_backend_builds_logged_surface(tmp_path):
+    backend = vb.HeadlessVisibilityBackend()
+    handle = backend.ensure_surface(
+        session="ce-lane",
+        window="gate3-lane",
+        command=["sh", "-c", "printf hello; printf err >&2"],
+        cwd=str(tmp_path),
+        env={"CE_HEADLESS_TEST": "1"},
+        seat_dir=str(tmp_path / "seat"),
+    )
+    process = handle.native
+    assert process.wait(timeout=5) == 0
+    assert handle.visibility_class == vb.OPERATOR_INSPECTABLE
+    assert handle.terminal["kind"] == "headless"
+    assert handle.terminal["pid"] == process.pid
+    manifest = Path(handle.terminal["surface_ref"])
+    assert manifest.is_file()
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["surface_ref"] == str(manifest)
+    assert payload["pid"] == process.pid
+    stream = Path(payload["stream_ref"])
+    assert stream.read_text(encoding="utf-8") == "helloerr"
+
+
+def test_headless_backend_requires_seat_dir():
+    backend = vb.HeadlessVisibilityBackend()
+    with pytest.raises(vb.VisibilityBackendError):
+        backend.ensure_surface(session="s", window="w", command=["true"], seat_dir=None)
 
 
 def test_herdr_backend_builds_terminal_record_and_keeps_socket_controller_owned(tmp_path):

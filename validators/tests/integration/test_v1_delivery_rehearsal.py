@@ -5,13 +5,13 @@ using only **dry-run-safe** paths: no live tmux spawn, no live container, no
 network, no GitHub/landing, no secret leakage. Every command either runs to a
 benign success (`ce init` / `ce check` / `ce ledger verify` / `ce fanin` /
 `ce queue dry-run` / `ce launch --dry-run`) or refuses fail-closed
-(`ce lane launch --no-tmux`, `ce worker status` on a missing record).
+(`ce lane launch` without a claim, `ce worker status` on a missing record).
 
 After the full pipeline, the tracked tree must remain clean: every byte of
 runtime output lands under the ignored ``.hermes/`` root or pytest temp dirs.
 
-``ce lane launch`` has no ``--dry-run`` flag (only the refuse-only ``--no-tmux``),
-so the lane step is rehearsed as a dry-run-safe refusal that leaves no pane
+``ce lane launch`` has no ``--dry-run`` flag, so the lane step is rehearsed
+without an Active-Work claim as a dry-run-safe refusal that leaves no pane
 record — the safe equivalent of a dry-run, honoring the no-live-spawn boundary.
 The committed cp314 wheel predates ``ce fanin`` (G7) and ``ce queue`` (G8); the
 offline-install proof for those surfaces is documented in
@@ -102,8 +102,8 @@ def test_rehearsal_lane_launch_dry_run_safe_refusal(governed_repo: Path, capsys)
     ledger_root = governed_repo / ".hermes" / "active-work-ledger"
     prompt = governed_repo / "PROMPT.md"
     prompt.write_text("rehearsal prompt\n", encoding="utf-8")
-    # --no-tmux requests a non-visible terminal for a visibility-required role:
-    # refused fail-closed, leaving no pane record (the dry-run-safe lane smoke).
+    # No Active-Work claim exists, so launch refuses before writing a pane record
+    # even though --no-tmux now selects the headless inspectable backend.
     ret = ce_cli.main([
         "lane", "launch",
         "--controller-id", "ce-controller",

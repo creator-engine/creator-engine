@@ -552,6 +552,29 @@ def test_herdr_lane_record_uses_injected_backend(tmp_path):
     assert errors == [], [e.format() for e in errors]
 
 
+def test_headless_lane_launches_with_no_tmux_to_logged_surface(tmp_path):
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        terminal_kind="headless",
+        tmux_adapter=None,
+        command=["true"],
+    )
+    assert result.pane.wait(timeout=5) == 0
+    assert result.record["visibility"] == "operator_inspectable"
+    assert result.record["terminal"]["kind"] == "headless"
+    assert "session_id" not in result.record["terminal"]
+    surface_ref = Path(result.record["terminal"]["surface_ref"])
+    assert surface_ref.is_file()
+    manifest = json.loads(surface_ref.read_text(encoding="utf-8"))
+    assert manifest["surface_ref"] == str(surface_ref)
+    assert Path(manifest["stream_ref"]).is_file()
+    errors = validate_pane_registry_record(result.record, Path(result.pane_path))
+    assert errors == [], [e.format() for e in errors]
+
+
 def test_launch_refuses_tmux_unavailable_before_pane_write(tmp_path):
     ledger = _ledger_root(tmp_path)
     _write_claim(ledger, "hermes-primary", "gate3-lane")

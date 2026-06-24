@@ -173,7 +173,7 @@ def test_ce_lane_launch_refuses_released_claim_before_side_effects(tmp_path, use
     assert use_fake_tmux.spawned == []
 
 
-def test_ce_lane_launch_no_tmux_headless_is_retired(tmp_path, use_fake_tmux):
+def test_ce_lane_launch_no_tmux_uses_headless_logged_surface(tmp_path, use_fake_tmux):
     ledger = _ledger(tmp_path)
     _claim(ledger)
     prompt, sha = _prompt(tmp_path)
@@ -181,12 +181,19 @@ def test_ce_lane_launch_no_tmux_headless_is_retired(tmp_path, use_fake_tmux):
         _launch_argv(
             tmp_path, ledger, prompt, sha,
             no_tmux=True,
-            command="sh -c 'printf retired-headless'",
+            command="true",
         )
     )
-    assert ret != 0
+    assert ret == 0
     assert use_fake_tmux.spawned == []
-    assert not _pane_path(ledger).exists()
+    record = yaml.safe_load(_pane_path(ledger).read_text(encoding="utf-8"))
+    assert record["visibility"] == "operator_inspectable"
+    assert record["terminal"]["kind"] == "headless"
+    assert "session_id" not in record["terminal"]
+    surface_ref = Path(record["terminal"]["surface_ref"])
+    assert surface_ref.is_file()
+    payload = json.loads(surface_ref.read_text(encoding="utf-8"))
+    assert payload["stream_ref"].endswith("/stream.log")
 
 
 def test_ce_lane_launch_terminal_kind_herdr_satisfies_visibility(tmp_path, use_fake_tmux, monkeypatch):
