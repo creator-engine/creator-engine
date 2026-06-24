@@ -23,6 +23,24 @@ from creator_engine_validator.openbao_golive import (
 )
 
 
+def _fake_openbao_token(prefix: str = "hvs", suffix: str = "deterministic-placeholder-token") -> str:
+    return prefix + "." + suffix
+
+
+def _fake_private_key_block() -> str:
+    return "\n".join(
+        (
+            "-----BEGIN " + "PRIVATE " + "KEY-----",
+            "deterministic-placeholder",
+            "-----END " + "PRIVATE " + "KEY-----",
+        )
+    )
+
+
+def _fake_password_assignment() -> str:
+    return "password" + "=deterministic-placeholder"
+
+
 def _write_executable(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
@@ -152,7 +170,7 @@ def test_operator_runbooks_keep_secret_exports_as_placeholders(repo_root: Path):
     )
 
     assert validate_secret_placeholders_in_runbook(runbooks) == []
-    assert validate_secret_placeholders_in_runbook('export BAO_TOKEN="bao.placeholdertokenvalue123"') == [
+    assert validate_secret_placeholders_in_runbook(f'export BAO_TOKEN="{_fake_openbao_token("ba" + "o")}"') == [
         "BAO_TOKEN must be documented as a placeholder or SecretRef, not an inline value"
     ]
 
@@ -169,8 +187,8 @@ def test_restore_drill_proof_is_value_free_and_rejects_secret_shaped_material():
     violations = validate_restore_drill_proof(
         proof
         | {
-            "token": "hvs.placeholdertokenvalue123",
-            "canary_value": "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----",
+            "token": _fake_openbao_token(),
+            "canary_value": _fake_private_key_block(),
         }
     )
     assert "restore proof must not include secret-bearing field token" in violations
@@ -199,8 +217,8 @@ def test_migration_gate_requires_inventory_restore_rollback_and_ratification_evi
         record
         | {
             "live_secret_migration_enabled": True,
-            "restore_drill_proof_ref": "hvs.placeholdertokenvalue123",
-            "secret_refs": ["secret-ref:hvs.placeholdertokenvalue123"],
+            "restore_drill_proof_ref": _fake_openbao_token(),
+            "secret_refs": [f"secret-ref:{_fake_openbao_token()}"],
         }
     )
     assert "restore proof evidence is required before migration" in leaked
@@ -224,13 +242,55 @@ def test_secret_migration_inventory_validator_rejects_values_and_bad_refs():
     assert validate_secret_migration_inventory_tsv(inventory) == []
 
     violations = validate_secret_migration_inventory_tsv(
-        inventory.replace("source-ref:legacy/dev-1", "hvs.placeholdertokenvalue123").replace(
-            "value-free", "password=placeholder"
+        inventory.replace("source-ref:legacy/dev-1", _fake_openbao_token()).replace(
+            "value-free", _fake_password_assignment()
         )
     )
     assert "line 2: invalid source_ref" in violations
     assert "line 2: source_ref contains inline secret-shaped material" in violations
     assert "line 2: notes contains inline secret-shaped material" in violations
+
+
+def test_secret_migration_inventory_validator_rejects_shell_parity_secret_markers():
+    header = (
+        "record_id\tsecret_class\tsource_ref\ttarget_ref\towner_ref\trotation_ref\t"
+        "rollback_ref\tevidence_ref\tstatus\tnotes"
+    )
+    base_row = (
+        "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1\t"
+        "openbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\t"
+        "rotation-ref:dev-1\trollback-ref:legacy/dev-1\tevidence-ref:issue-113\t"
+        "planned\t{notes}"
+    )
+
+    for marker in (
+        _fake_openbao_token(suffix="x"),
+        _fake_openbao_token(prefix="hv" + "b", suffix="x"),
+        _fake_openbao_token(prefix="ba" + "o", suffix="x"),
+        "client" + "_secret=placeholder",
+        "credential" + "=placeholder",
+        "-----BEGIN " + "CERTIFICATE-----",
+    ):
+        violations = validate_secret_migration_inventory_tsv(
+            "\n".join((header, base_row.format(notes=marker)))
+        )
+
+        assert "line 2: notes contains inline secret-shaped material" in violations
+
+
+def test_secret_migration_inventory_validator_rejects_duplicate_ids_and_targets():
+    inventory = "\n".join(
+        (
+            "record_id\tsecret_class\tsource_ref\ttarget_ref\towner_ref\trotation_ref\trollback_ref\tevidence_ref\tstatus\tnotes",
+            "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1\topenbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\trotation-ref:dev-1\trollback-ref:legacy/dev-1\tevidence-ref:issue-113\tplanned\tvalue-free",
+            "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1-next\topenbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\trotation-ref:dev-1\trollback-ref:legacy/dev-1-next\tevidence-ref:issue-113\tplanned\tvalue-free",
+        )
+    )
+
+    violations = validate_secret_migration_inventory_tsv(inventory)
+
+    assert "line 3: duplicate record_id" in violations
+    assert "line 3: duplicate target_ref" in violations
 
 
 def test_secret_migration_inventory_shell_verifier_accepts_template(repo_root: Path):

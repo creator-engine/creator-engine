@@ -47,16 +47,22 @@ SECRET_EXPORT_NAMES = frozenset(
 _EXPORT_RE = re.compile(r"^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(.+?)\s*$", re.MULTILINE)
 _INLINE_SECRET_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
-    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
-    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"),
-    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"\b(?:hvs|hvb|bao)\.[A-Za-z0-9_-]{16,}\b"),
-    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"-----BEGIN CERTIFICATE-----", re.IGNORECASE),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]+\b", re.IGNORECASE),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{2,}\b", re.IGNORECASE),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]+\b", re.IGNORECASE),
+    re.compile(r"(?<![A-Za-z0-9_])(?:hvs|hvb|bao)\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])", re.IGNORECASE),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]+\b", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]+\b", re.IGNORECASE),
+    re.compile(r"\bAKIA[0-9A-Z]{4,}\b", re.IGNORECASE),
     re.compile(r"\bage-secret-key-[A-Za-z0-9_-]{12,}\b", re.IGNORECASE),
     re.compile(
-        r"\b(?:password|passwd|secret_value|token_value|private_key)\s*[=:]\s*\S{4,}",
+        r"\b(?:password|passwd|passphrase|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)"
+        r"\s*[=:]\s*\S{4,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:value|credential)\s*[=:]\s*\S{4,}",
         re.IGNORECASE,
     ),
 )
@@ -221,6 +227,8 @@ def validate_secret_migration_inventory_tsv(inventory: str) -> list[str]:
     if header != _MIGRATION_INVENTORY_HEADER:
         violations.append("migration inventory header does not match the expected value-free template")
     data_rows = 0
+    seen_record_ids: set[str] = set()
+    seen_target_refs: set[str] = set()
     for line_number, line in enumerate(lines[1:], start=2):
         if not line.strip():
             continue
@@ -233,6 +241,12 @@ def validate_secret_migration_inventory_tsv(inventory: str) -> list[str]:
         for field_name, pattern in _MIGRATION_INVENTORY_REF_PATTERNS.items():
             if not pattern.fullmatch(row[field_name]):
                 violations.append(f"line {line_number}: invalid {field_name}")
+        if row["record_id"] in seen_record_ids:
+            violations.append(f"line {line_number}: duplicate record_id")
+        seen_record_ids.add(row["record_id"])
+        if row["target_ref"] in seen_target_refs:
+            violations.append(f"line {line_number}: duplicate target_ref")
+        seen_target_refs.add(row["target_ref"])
         if row["secret_class"] not in _MIGRATION_INVENTORY_SECRET_CLASSES:
             violations.append(f"line {line_number}: invalid secret_class")
         if row["status"] not in _MIGRATION_INVENTORY_STATUSES:

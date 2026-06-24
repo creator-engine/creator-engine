@@ -31,3 +31,11 @@ inventory template, inventory verifier, rollback/restore workflow, and Operator
 bringup checklist additions. The workflow documents secret refs and governance
 evidence only; live secret value import remains an Operator-ratified action
 outside the repo and outside agent/container custody.
+
+Track B hardening: the migration inventory verifier now rejects duplicate
+`record_id` and `target_ref` rows plus OpenBao token-shaped values, PEM
+armoring, password assignments, and common API key patterns. The go-live and
+Operator bringup docs now state that the repository inventory is a template
+only, live import remains Operator-only outside repo/container custody, and
+rollback/restore requires audit, encrypted snapshot, restore-drill, and
+value-free revocation evidence.

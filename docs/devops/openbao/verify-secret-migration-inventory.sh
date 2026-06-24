@@ -11,7 +11,7 @@ usage: verify-secret-migration-inventory.sh <inventory.tsv>
 Validates the value-free OpenBao migration inventory shape. The inventory is
 allowed to contain refs, owners, rollback handles, and evidence handles only.
 It must not contain secret values, PEM blocks, raw tokens, passwords, or private
-keys.
+keys. record_id and target_ref values must be unique.
 EOF
 }
 
@@ -60,6 +60,12 @@ NR == 1 { next }
     printf("line %d: invalid record_id %s\n", NR, $1) > "/dev/stderr"
     bad = 1
   }
+  if ($1 in seen_record_id) {
+    printf("line %d: duplicate record_id %s first seen on line %d\n", NR, $1, seen_record_id[$1]) > "/dev/stderr"
+    bad = 1
+  } else {
+    seen_record_id[$1] = NR
+  }
   if (!($2 in allowed_secret_class)) {
     printf("line %d: invalid secret_class %s\n", NR, $2) > "/dev/stderr"
     bad = 1
@@ -71,6 +77,12 @@ NR == 1 { next }
   if ($4 !~ /^openbao-ref:ce-(kv|transit)\/[A-Za-z0-9._\/:-]+$/) {
     printf("line %d: target_ref must be openbao-ref:ce-kv/... or openbao-ref:ce-transit/...\n", NR) > "/dev/stderr"
     bad = 1
+  }
+  if ($4 in seen_target_ref) {
+    printf("line %d: duplicate target_ref %s first seen on line %d\n", NR, $4, seen_target_ref[$4]) > "/dev/stderr"
+    bad = 1
+  } else {
+    seen_target_ref[$4] = NR
   }
   if ($5 !~ /^owner-ref:[A-Za-z0-9._\/:-]+$/) {
     printf("line %d: owner_ref must be owner-ref:<value-free-handle>\n", NR) > "/dev/stderr"
@@ -95,16 +107,19 @@ NR == 1 { next }
 
   lower = tolower($0)
   possible_secret = 0
-  if (lower ~ /-----begin.*private key-----/) possible_secret = 1
-  if (lower ~ /-----begin certificate-----/) possible_secret = 1
+  if (lower ~ /-----begin [a-z0-9 -]+-----/) possible_secret = 1
+  if (lower ~ /-----end [a-z0-9 -]+-----/) possible_secret = 1
   if (lower ~ /github_pat_/) possible_secret = 1
   if (lower ~ /gh[pousr]_[a-z0-9_][a-z0-9_]+/) possible_secret = 1
   if (lower ~ /glpat-/) possible_secret = 1
   if (lower ~ /xox[baprs]-/) possible_secret = 1
   if (lower ~ /sk-[a-z0-9]/) possible_secret = 1
+  if (lower ~ /sk_(live|test)_[a-z0-9]/) possible_secret = 1
   if (lower ~ /akia[0-9a-z][0-9a-z][0-9a-z][0-9a-z]/) possible_secret = 1
+  if (lower ~ /aiza[0-9a-z_-]{20,}/) possible_secret = 1
+  if (lower ~ /(^|[^a-z0-9_])((hvs|hvb|bao)\.[a-z0-9_-]+)($|[^a-z0-9_-])/) possible_secret = 1
   if (lower ~ /age-secret-key-/) possible_secret = 1
-  if (lower ~ /(password|passwd|passphrase|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)[[:space:]]*[=:]/) possible_secret = 1
+  if (lower ~ /(password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|client[ _-]?secret)[[:space:]]*[=:]/) possible_secret = 1
   if (lower ~ /(value|credential)[[:space:]]*[=:][[:space:]]*[^[:space:]]{4,}/) possible_secret = 1
   if (possible_secret) {
     printf("line %d: possible secret material detected; inventory must contain refs only\n", NR) > "/dev/stderr"

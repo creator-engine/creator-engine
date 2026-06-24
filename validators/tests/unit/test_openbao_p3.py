@@ -26,6 +26,10 @@ from creator_engine_validator.secret_identity import (
 )
 
 
+def _fake_openbao_token() -> str:
+    return "hv" + "s." + "deterministic-placeholder-token"
+
+
 def _runtime_ref(**overrides) -> SecretRef:
     values = {
         "backend": "openbao",
@@ -157,7 +161,7 @@ def test_p3_migration_readiness_rejects_secret_shaped_refs_and_cotenancy():
             OpenBaoMigrationReadiness(
                 source_inventory_ref="inventory-ref:openbao/migration-window-001",
                 path_mapping_ref="mapping-ref:openbao/migration-window-001",
-                restore_drill_proof_ref="hvs.placeholdertokenvalue123",
+                restore_drill_proof_ref=_fake_openbao_token(),
                 audit_fail_closed_evidence_ref="evidence-ref:openbao/audit-fail-closed-001",
                 encrypted_snapshot_ref="snapshot-ref:openbao/pre-migration-001",
                 rollback_plan_ref="rollback-ref:openbao/migration-window-001",

@@ -32,10 +32,13 @@ reachable only on the tailnet. Do not expose OpenBao on a public listener.
   revocation, and emergency seal, using the same per-dev role/policy naming.
 - `openbao/secret-migration-inventory.tsv` is a value-free Operator template
   for source refs, target OpenBao refs, owners, rotation refs, rollback refs,
-  and evidence refs. It contains no real secret values.
+  and evidence refs. It is not a live import file and must remain a template
+  with no real secret values.
 - `openbao/verify-secret-migration-inventory.sh` validates the migration
-  inventory shape and rejects common token, key, password, and PEM patterns
-  before any migration window is approved.
+  inventory shape, rejects duplicate `record_id` and `target_ref` rows, and
+  rejects OpenBao token-shaped values (`hvs.`, `hvb.`, `bao.`), common API key
+  shapes, password assignments, and PEM armoring before any migration window is
+  approved.
 
 ## Host Provisioning
 
@@ -117,8 +120,10 @@ OpenBao root/admin tokens, unseal shares, RoleIDs, SecretIDs, wrapping tokens,
 PEMs, model-provider keys, bootstrap tokens, reviewer tokens, signing keys, or
 runtime secret values.
 
-Migration is one approved window per secret family. The Operator records only
-refs and evidence handles in the inventory:
+Migration is one approved window per secret family. The repository inventory is
+a template only; it proves the value-free TSV shape and must not be edited into
+the live import plan. The Operator records only refs and evidence handles in the
+inventory:
 
 ```bash
 docs/devops/openbao/verify-secret-migration-inventory.sh \
@@ -126,14 +131,17 @@ docs/devops/openbao/verify-secret-migration-inventory.sh \
 ```
 
 For a real window, use an Operator-controlled copy of the same TSV shape outside
-the repo. The live inventory may name source custody handles and target OpenBao
-logical paths, but it must not contain literal secret material and must not be
-committed back to this repository. Each row must have:
+the repo and outside agent/container custody. The live inventory may name source
+custody handles and target OpenBao logical paths, but it must not contain
+literal secret material and must not be committed back to this repository. Each
+row must have:
 
 - `source_ref`: where the Operator can retrieve the current value, expressed as
   a handle such as `source-ref:legacy-host/dev-1/runtime-token`.
 - `target_ref`: the intended OpenBao logical ref, such as
-  `openbao-ref:ce-kv/forge/github-apps/primary/private-key`.
+  `openbao-ref:ce-kv/forge/github-apps/primary/private-key`; no two rows may
+  use the same target ref.
+- `record_id`: a stable value-free row id; no two rows may use the same id.
 - `owner_ref`, `rotation_ref`, `rollback_ref`, and `evidence_ref`: value-free
   governance handles.
 - `status`: one of `planned`, `imported`, `verified`, `cutover`,
@@ -142,11 +150,13 @@ committed back to this repository. Each row must have:
 Before import:
 
 1. Freeze new broker secret materialization for the target family.
-2. Take and copy an encrypted off-host snapshot.
-3. Run a restore drill from the current snapshot into a throwaway instance.
-4. Validate the value-free inventory with
+2. Confirm audit is active with `bao audit list` and audit fail-closed evidence
+   has been recorded for the production sink.
+3. Take and copy an encrypted off-host snapshot.
+4. Run a restore drill from the current snapshot into a throwaway instance.
+5. Validate the value-free inventory with
    `verify-secret-migration-inventory.sh`.
-5. Confirm the migration importer token is time-limited, scoped only to the
+6. Confirm the migration importer token is time-limited, scoped only to the
    listed target paths, and revoked after the window.
 
 The verifier is a preflight guard, not a sanitizer. If it fails, discard the
