@@ -71,11 +71,24 @@ def _fake_transport(responses, calls=None):
 
 
 class _FakeReviewPickupForge:
-    def __init__(self, *, author="author-a", head="h" * 40, requested=None, reviews=None):
+    def __init__(
+        self,
+        *,
+        author="author-a",
+        head="h" * 40,
+        requested=None,
+        reviews=None,
+        draft=False,
+        combined_status=None,
+        check_runs=None,
+    ):
         self.author = author
         self.head = head
         self.requested = list(requested or [])
         self.reviews = list(reviews or [])
+        self.draft = draft
+        self.combined_status = combined_status if combined_status is not None else {"state": "success", "statuses": []}
+        self.check_runs = check_runs if check_runs is not None else {"total_count": 0, "check_runs": []}
         self.review_requests: list[tuple[str, str | None]] = []
         self.dismissals: list[tuple[str, str | None]] = []
 
@@ -108,6 +121,10 @@ class _FakeReviewPickupForge:
         if bare_path.endswith("/dismissals") and method == "PUT":
             self.dismissals.append((path, input_text))
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({}), stderr="")
+        if bare_path.endswith("/status") and "/commits/" in bare_path and method == "GET":
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.combined_status), stderr="")
+        if bare_path.endswith("/check-runs") and "/commits/" in bare_path and method == "GET":
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.check_runs), stderr="")
         if bare_path.endswith("/reviews") and method == "GET":
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.reviews), stderr="")
         if "/pulls/" in bare_path and method == "GET":
@@ -115,6 +132,7 @@ class _FakeReviewPickupForge:
                 "user": {"login": self.author},
                 "head": {"sha": self.head},
                 "requested_reviewers": [{"login": r} for r in self.requested],
+                "draft": self.draft,
             }
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr=f"unexpected {method} {path}")
@@ -170,6 +188,154 @@ def test_poll_review_pickup_routes_awaiting_pr_to_distinct_non_author():
     assert item["thread_id"] == f"review-pickup:o/r:review_request:7:{head[:12]}"
     assert len(forge.review_requests) == 1
     assert '"ce-dev-3"' in (forge.review_requests[0][1] or "")
+
+
+def test_poll_review_pickup_never_routes_author_to_self():
+    forge = _FakeReviewPickupForge(author="ce-dev-2")
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=6, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-2"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    assert result.skipped[0]["reason"] == "review_pickup_refused"
+    assert "no distinct non-author reviewer" in result.skipped[0]["note"]
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_spreads_multiple_prs_by_load():
+    forge = _FakeReviewPickupForge(author="ce-dev-2")
+    transport = _fake_transport([
+        (200, {}, _body(
+            _hit(repo="o/r", number=13, pr=True),
+            _hit(repo="o/r", number=14, pr=True),
+        )),
+    ])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3", "ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=False,
+    )
+
+    assert [item["assigned_reviewer"] for item in result.items] == ["ce-dev-3", "ce-dev-4"]
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_skips_current_non_author_approval():
+    head = "e" * 40
+    reviews = [{"id": 33, "state": "APPROVED", "commit_id": head, "user": {"login": "ce-dev-3"}}]
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head=head, reviews=reviews)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=15, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    assert result.skipped[0]["reason"] == "review_not_awaiting_pickup"
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_skips_draft_pr_fail_closed():
+    forge = _FakeReviewPickupForge(author="ce-dev-2", draft=True)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=16, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    assert result.skipped[0]["reason"] == "draft_pull_request"
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_skips_failed_ci_fail_closed():
+    forge = _FakeReviewPickupForge(author="ce-dev-2", combined_status={"state": "failure", "statuses": []})
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=17, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    assert result.skipped[0]["reason"] == "ci_failed"
+    assert forge.review_requests == []
+
+
+def test_poll_review_pickup_dry_run_assigns_nothing():
+    forge = _FakeReviewPickupForge(author="ce-dev-2")
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=18, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+        dry_run=True,
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0]["assigned_reviewer"] == "ce-dev-3"
+    assert result.items[0]["requested"] is False
+    assert result.items[0]["dry_run"] is True
+    assert forge.review_requests == []
+
+
+def test_run_review_pickup_loop_is_bounded_and_logs_decisions():
+    forge = _FakeReviewPickupForge(author="ce-dev-2")
+    transport = _fake_transport([
+        (200, {}, _body(_hit(repo="o/r", number=19, pr=True))),
+        (200, {}, _body(_hit(repo="o/r", number=20, pr=True))),
+    ])
+    sleeps: list[float] = []
+    logs: list[dict] = []
+
+    result = review_pickup.run_review_pickup_loop(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=False,
+        dry_run=True,
+        iterations=2,
+        interval=5,
+        sleep=sleeps.append,
+        log_sink=logs.append,
+    )
+
+    assert len(result.passes) == 2
+    assert result.item_count == 2
+    assert sleeps == [5]
+    assert [log["event"] for log in logs].count("review_pickup_decision") == 2
+    assert forge.review_requests == []
 
 
 def test_poll_review_pickup_reports_existing_non_author_request_without_duplicate_apply():
@@ -230,7 +396,7 @@ def test_poll_review_pickup_rerequests_stale_reviewer_when_no_fresh_approval():
 
     result = review_pickup.poll_review_pickup(
         token="ghp_fake",
-        reviewer_seats=["ce-dev-4"],
+        reviewer_seats=["ce-dev-3", "ce-dev-4"],
         gh_runner=forge.runner,
         transport=transport,
         repo="o/r",
@@ -245,6 +411,34 @@ def test_poll_review_pickup_rerequests_stale_reviewer_when_no_fresh_approval():
     assert forge.dismissals == []
     assert len(forge.review_requests) == 1
     assert '"ce-dev-3"' in (forge.review_requests[0][1] or "")
+
+
+def test_poll_review_pickup_does_not_route_stale_reviewer_outside_governed_seats():
+    head = "f" * 40
+    reviews = [
+        {"id": 12, "state": "CHANGES_REQUESTED", "commit_id": "old2", "user": {"login": "ce-dev-3"}},
+    ]
+    forge = _FakeReviewPickupForge(author="ce-dev-2", head=head, reviews=reviews)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=11, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item["reason"] == "awaiting_review"
+    assert item["assigned_reviewer"] == "ce-dev-4"
+    assert item["re_request_review_ids"] == [12]
+    assert forge.dismissals == []
+    assert len(forge.review_requests) == 1
+    assert '"ce-dev-4"' in (forge.review_requests[0][1] or "")
+    assert '"ce-dev-3"' not in (forge.review_requests[0][1] or "")
 
 
 def test_poll_review_pickup_requires_seat_and_token():
@@ -282,11 +476,34 @@ def test_cev3_review_pickup_routes_with_json(monkeypatch, tmp_path, capsys):
         "--repo", "o/r",
         "--seat", "ce-dev-2,ce-dev-3",
         "--apply",
+        "--once",
+        "--interval", "0",
         "--json",
     ])
 
     assert code == 0
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is True
+    assert out["mode"] == "once"
     assert out["items"][0]["assigned_reviewer"] == "ce-dev-3"
     assert out["items"][0]["requested"] is True
+
+
+def test_cev3_review_pickup_loop_requires_positive_interval(capsys):
+    from creator_engine_validator import v3_cli
+
+    code = v3_cli.main([
+        "review-pickup",
+        "--identity", "controller",
+        "--repo", "o/r",
+        "--seat", "ce-dev-3",
+        "--loop",
+        "--interval", "0",
+        "--json",
+    ])
+
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert out["mode"] == "loop"
+    assert out["error"] == "review_pickup_input"

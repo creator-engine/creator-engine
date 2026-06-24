@@ -3825,6 +3825,16 @@ def _build_parser() -> argparse.ArgumentParser:
                                  help="repeatable reviewer seat/login; comma-separated allowed")
     p_review_pickup.add_argument("--apply", action="store_true",
                                  help="request selected reviewers and auto-dismiss objectively stale reviews")
+    rp_mode = p_review_pickup.add_mutually_exclusive_group(required=False)
+    rp_mode.add_argument("--once", action="store_true",
+                         help="run one review-pickup pass (default when no mode is supplied)")
+    rp_mode.add_argument("--loop", action="store_true",
+                         help="run continuously until interrupted")
+    p_review_pickup.add_argument("--interval", type=float,
+                                 default=None,
+                                 help="seconds between --loop passes (must be > 0)")
+    p_review_pickup.add_argument("--dry-run", action="store_true", dest="dry_run",
+                                 help="log planned routing decisions without requesting reviewers")
     p_review_pickup.add_argument("--no-stale-apply", action="store_true", dest="no_stale_apply",
                                  help="with --apply, do not auto-dismiss stale superseded reviews")
     p_review_pickup.add_argument("--json", action="store_true", dest="json_output",
@@ -4168,6 +4178,17 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
         return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
                      {"error": "review_pickup_input", "detail": str(exc)})
 
+    loop_mode = bool(getattr(args, "loop", False))
+    mode = "loop" if loop_mode else "once"
+    interval = (
+        float(getattr(args, "interval"))
+        if getattr(args, "interval", None) is not None
+        else review_pickup.DEFAULT_REVIEW_PICKUP_INTERVAL_SECONDS
+    )
+    if loop_mode and interval <= 0:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): --loop requires --interval > 0"],
+                     {"error": "review_pickup_input", "detail": "--loop requires --interval > 0", "mode": mode})
+
     try:
         token = pickup_search.resolve_token(
             keys_dir=getattr(args, "keys_dir", None),
@@ -4179,18 +4200,29 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
                      {"error": "review_pickup_token", "detail": str(exc)})
 
     gh_runner = _review_pickup_gh_runner(args.identity, token)
+    dry_run = bool(getattr(args, "dry_run", False))
+    applied = bool(getattr(args, "apply", False) and not dry_run)
+    logger = review_pickup.JsonLineLogger(sys.stderr)
 
     try:
-        result = review_pickup.poll_review_pickup(
+        loop_result = review_pickup.run_review_pickup_loop(
             token=token,
             reviewer_seats=getattr(args, "reviewer_seats", ()) or (),
             gh_runner=gh_runner,
             transport=_review_pickup_transport(),
             repo=getattr(args, "repo", None),
             org=getattr(args, "org", None),
-            apply=bool(getattr(args, "apply", False)),
+            apply=applied,
             apply_stale=not bool(getattr(args, "no_stale_apply", False)),
+            dry_run=dry_run,
+            iterations=None if loop_mode else 1,
+            interval=interval,
+            log_sink=logger,
         )
+        result = loop_result.passes[-1] if loop_result.passes else review_pickup.ReviewPickupResult()
+    except KeyboardInterrupt:
+        return _emit(args, 0, [f"{_BRAND} · review-pickup loop stopped"],
+                     {"action": "review_pickup", "mode": mode, "loop": loop_mode, "stopped": True, "dry_run": dry_run})
     except pickup_search.PickupRateLimited as exc:
         return _emit(args, 2, [f"{_BRAND} · review-pickup failed closed: {exc}"],
                      {"error": "rate_limited", "backoff": exc.to_payload()})
@@ -4198,8 +4230,8 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
         return _emit(args, 2, [f"{_BRAND} · review-pickup failed: {exc}"],
                      {"error": "review_pickup_failed", "detail": str(exc)})
 
-    applied = bool(getattr(args, "apply", False))
-    lines = [f"{_BRAND} · review-pickup: {'applied' if applied else 'planned'} "
+    verb = "dry-run" if dry_run else ("applied" if applied else "planned")
+    lines = [f"{_BRAND} · review-pickup {mode}: {verb} "
              f"{len(result.items)} review route(s)"]
     for item in result.items:
         lines.append(f"    - {item['repo']}#{item['number']} -> "
@@ -4207,6 +4239,10 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     payload = {
         "action": "review_pickup",
         "apply": applied,
+        "dry_run": dry_run,
+        "mode": mode,
+        "loop": loop_mode,
+        "interval": interval if loop_mode else None,
         "rate_limit": result.rate_limit,
         "items": list(result.items),
         "skipped": list(result.skipped),
