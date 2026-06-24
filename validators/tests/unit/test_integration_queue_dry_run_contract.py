@@ -301,7 +301,8 @@ def test_ce_queue_dry_run_json_reports_hash_and_path(tmp_path, capsys):
 
 
 @pytest.mark.parametrize("flag", ["--enqueue", "--land", "--merge"])
-def test_ce_queue_dry_run_refuses_live_action_nonzero_no_preview(tmp_path, flag):
+def test_ce_queue_dry_run_refuses_live_action_nonzero_no_preview(tmp_path, flag, monkeypatch):
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     request, root = _make_request(tmp_path)
     ret = ce_cli.main([
         "queue", "dry-run",
