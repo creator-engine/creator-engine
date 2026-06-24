@@ -50,7 +50,8 @@ import hashlib
 import os
 import shlex
 import subprocess
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -70,6 +71,14 @@ DEFAULT_HERDR_SOCKET = "herdr.sock"
 HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
 LEGACY_HERDR_SOCKET_ENV = "HERDR_SOCKET"
 FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV})
+HERDR_SEND_SUBMIT_SETTLE_S = 1.0
+HERDR_SEND_POLL_INTERVAL_S = 0.5
+HERDR_SEND_SUBMIT_MAX_ATTEMPTS = 3
+HERDR_SEND_PROMPT_TAIL_LINES = 8
+HERDR_BRIEF_RENDER_TIMEOUT_S = 5.0
+HERDR_BRIEF_RENDER_POLL_INTERVAL_S = 0.5
+BRIEF_MARKER_PREFIX = "==CE-BRIEF-SHA256:"
+BRIEF_MARKER_SUFFIX = "=="
 
 
 class HerdrSessionError(Exception):
@@ -197,6 +206,19 @@ class HerdrSession:
         completed = self._run(args)
         return completed.stdout or ""
 
+    def _read_recent_unwrapped_text(self, pane: HerdrPane) -> str:
+        return self._run_text(
+            [
+                "pane",
+                "read",
+                pane.pane_id,
+                "--source",
+                "recent-unwrapped",
+                "--format",
+                "text",
+            ]
+        )
+
     def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
         completed = self._run(args)
         argv = [self._herdr_binary, *args]
@@ -260,6 +282,33 @@ class HerdrSession:
         """
         digest = hashlib.sha256(f"{workspace_id}\0{pane_id}".encode("utf-8")).hexdigest()
         return f"herdr-surface-{digest[:32]}"
+
+    @staticmethod
+    def _pending_input_needle(text: str) -> str:
+        for line in reversed(text.splitlines()):
+            needle = line.strip()
+            if needle:
+                return needle
+        return text.strip()
+
+    @classmethod
+    def _input_line_pending(cls, pane_text: str, submitted_text: str) -> bool:
+        needle = cls._pending_input_needle(submitted_text)
+        if not needle:
+            return False
+        tail = pane_text.splitlines()[-HERDR_SEND_PROMPT_TAIL_LINES:]
+        return any(needle in row for row in tail)
+
+    @staticmethod
+    def _brief_marker(brief_body: str) -> str:
+        digest = hashlib.sha256(brief_body.encode("utf-8")).hexdigest()
+        return f"{BRIEF_MARKER_PREFIX}{digest}{BRIEF_MARKER_SUFFIX}"
+
+    @classmethod
+    def _brief_payload(cls, brief_body: str) -> tuple[str, str]:
+        marker = cls._brief_marker(brief_body)
+        separator = "" if brief_body.endswith("\n") else "\n"
+        return f"{brief_body}{separator}{marker}", marker
 
     # -- connect ----------------------------------------------------------
     def connect(self) -> None:
@@ -395,12 +444,24 @@ class HerdrSession:
         )
 
     # -- send (steer) -----------------------------------------------------
-    def send(self, pane: HerdrPane, data: bytes | str) -> None:
+    def send(
+        self,
+        pane: HerdrPane,
+        data: bytes | str,
+        *,
+        submit_settle_s: float = HERDR_SEND_SUBMIT_SETTLE_S,
+        submit_poll_interval_s: float = HERDR_SEND_POLL_INTERVAL_S,
+        submit_max_attempts: int = HERDR_SEND_SUBMIT_MAX_ATTEMPTS,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         """Inject input/keystrokes into ``pane`` — the governed control path.
 
         U3 wires ordinary text input through ``herdr pane send-text``. The CLI
         only accepts text, so non-UTF-8 bytes remain fail-closed until a later
         narrow key/control helper is explicitly backed by the herdr source.
+        After the text is placed in the input box, CE commits it with a bounded
+        ``herdr pane send-keys <pane_id> Enter`` loop and confirms via
+        ``recent-unwrapped`` reads that the pending input line left the prompt.
         This :class:`HerdrSession` is the *only* control-path writer to the
         socket; the governed seat never holds the socket, so ``herdr pane run``
         cannot become a §7 bypass. U4 layers attribution ahead of this write.
@@ -416,6 +477,50 @@ class HerdrSession:
                     "non-text/control input remains fail-closed"
                 ) from exc
         self._run_ok(["pane", "send-text", pane.pane_id, text])
+        sleep(submit_settle_s)
+        submitted = False
+        for _attempt in range(submit_max_attempts):
+            self._run_ok(["pane", "send-keys", pane.pane_id, "Enter"])
+            sleep(submit_poll_interval_s)
+            pane_text = self._read_recent_unwrapped_text(pane)
+            if not self._input_line_pending(pane_text, text):
+                submitted = True
+                break
+        if not submitted:
+            raise HerdrCommandError(
+                f"herdr pane send did not commit after {submit_max_attempts} "
+                f"Enter attempt(s): pane {pane.pane_id} still shows pending input"
+            )
+
+    def deliver_brief(
+        self,
+        pane: HerdrPane,
+        brief_body: str,
+        *,
+        render_timeout_s: float = HERDR_BRIEF_RENDER_TIMEOUT_S,
+        render_poll_interval_s: float = HERDR_BRIEF_RENDER_POLL_INTERVAL_S,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> str:
+        """Deliver a brief with a SHA-256 render marker and fail closed if absent."""
+        payload, marker = self._brief_payload(brief_body)
+        self.send(
+            pane,
+            payload,
+            submit_settle_s=HERDR_SEND_SUBMIT_SETTLE_S,
+            submit_poll_interval_s=render_poll_interval_s,
+            submit_max_attempts=HERDR_SEND_SUBMIT_MAX_ATTEMPTS,
+            sleep=sleep,
+        )
+        deadline = clock() + render_timeout_s
+        while True:
+            if marker in self._read_recent_unwrapped_text(pane):
+                return marker
+            if clock() >= deadline:
+                raise HerdrCommandError(
+                    f"herdr brief marker did not render on pane {pane.pane_id}: {marker}"
+                )
+            sleep(render_poll_interval_s)
 
     # -- attach -----------------------------------------------------------
     def attach(self, pane: HerdrPane) -> None:
