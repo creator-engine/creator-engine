@@ -58,6 +58,8 @@ from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 # frozen sibling modules stay byte-unchanged and ``change.py`` couples to none of them.
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _POLICY_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+_WORK_CLASSES = ("tiny", "story", "feature", "epic")
+_DEFAULT_DECLARED_WORK_CLASS = "epic"
 
 
 class OpenChangeRefused(ForgeConfigRefused):
@@ -152,7 +154,23 @@ def _gh_api_method(
     return proc.returncode, parsed, proc.stderr or ""
 
 
-def _render_pr_body(branch: str, base: str, plan_ref: str, manifest_paths: tuple[str, ...]) -> str:
+def _carrier_line(paths: tuple[str, ...], prefix: str, fallback: str) -> str:
+    matches = [p for p in sorted(set(paths)) if p.startswith(prefix) and p.endswith(".md")]
+    if len(matches) == 1:
+        return f"`{matches[0]}`"
+    if len(matches) > 1:
+        rendered = ", ".join(f"`{p}`" for p in matches)
+        return f"{fallback} (found multiple candidates: {rendered})"
+    return fallback
+
+
+def _render_pr_body(
+    branch: str,
+    base: str,
+    plan_ref: str,
+    manifest_paths: tuple[str, ...],
+    declared_work_class: str,
+) -> str:
     """Compose the PR body — an OPTIONAL human/audit mirror, NOT the CI carrier-gate feed.
 
     Embeds the ``plan_ref`` as a ``ce-policy-sha`` marker (parseable by the merged
@@ -160,12 +178,43 @@ def _render_pr_body(branch: str, base: str, plan_ref: str, manifest_paths: tuple
     ``manifest_paths`` as a fenced audit list. The PR's own per-PR carrier
     ``.ce/pr-manifests/<branch-slug>.md`` in the diff — never this text — is what the
     ``path_manifest_fidelity`` gate parses.
+
+    ``declared_work_class`` is a caller-owned contract value. Callers that have
+    computed the G5 work-sizing floor should pass the floor-satisfying class they
+    intend to declare. The default is only a conservative scaffold fallback so
+    the generated body never omits the required governance line.
     """
-    paths_block = "\n".join(sorted(set(manifest_paths)))
+    paths = tuple(sorted(set(manifest_paths)))
+    paths_block = "\n".join(paths)
+    path_manifest = _carrier_line(
+        paths,
+        ".ce/pr-manifests/",
+        "`.ce/pr-manifests/<branch-slug>.md`",
+    )
+    changelog = _carrier_line(
+        paths,
+        ".ce/changelog/",
+        "`.ce/changelog/<branch-slug>.md`",
+    )
     return (
         f"ce-policy-sha: {plan_ref}\n\n"
         f"Opens/updates a single PR for branch `{branch}` targeting `{base}` "
         f"(push = claim: exactly one open PR per branch).\n\n"
+        f"## Scope / Changed Boundary\n\n"
+        f"- **Mutation class:** governed\n"
+        f"- **Declared work class:** {declared_work_class}\n"
+        f"- **Files changed:** see the authorized path manifest below\n"
+        f"- **Files explicitly NOT changed:** deploy run scripts, OpenBao files, "
+        f"`install.sh`, and validator version registries unless listed in the "
+        f"authorized path manifest\n\n"
+        f"## Governance Carriers\n\n"
+        f"- **Path manifest carrier:** {path_manifest}\n"
+        f"- **Changelog fragment:** {changelog}\n\n"
+        f"Before marking the PR ready, ensure the committed carrier files use the "
+        f"current branch slug and replace the scaffold fallback with the "
+        f"`verify-work-sizing-floor` / computed G5 floor result when known. The "
+        f"declared work class must be at least that floor (`tiny`, `story`, "
+        f"`feature`, or `epic`).\n\n"
         f"Authorized path manifest (audit mirror — the CI gate parses this PR's "
         f"`.ce/pr-manifests/<branch-slug>.md` carrier in the diff, NOT this body):\n\n"
         f"```text\n{paths_block}\n```\n"
@@ -173,7 +222,12 @@ def _render_pr_body(branch: str, base: str, plan_ref: str, manifest_paths: tuple
 
 
 def _validate(
-    repo: str, branch: str, base: str, manifest_paths: tuple[str, ...], plan_ref: str
+    repo: str,
+    branch: str,
+    base: str,
+    manifest_paths: tuple[str, ...],
+    plan_ref: str,
+    declared_work_class: str,
 ) -> None:
     """Refuse a malformed / unbound request BEFORE any forge call."""
     if not _REPO_RE.match(repo or ""):
@@ -194,6 +248,11 @@ def _validate(
         raise OpenChangeRefused("plan_ref (the ratified plan/policy reference) is required")
     if not _POLICY_SHA_RE.match(plan_ref):
         raise OpenChangeRefused(f"plan_ref {plan_ref!r} is not a 64-hex policy/plan digest")
+    if declared_work_class not in _WORK_CLASSES:
+        allowed = ", ".join(_WORK_CLASSES)
+        raise OpenChangeRefused(
+            f"declared_work_class {declared_work_class!r} must be one of: {allowed}"
+        )
 
 
 def _read_open_pr(
@@ -220,6 +279,7 @@ def open_change(
     plan_ref: str,
     *,
     apply: bool = False,
+    declared_work_class: str = _DEFAULT_DECLARED_WORK_CLASS,
     gh_runner: GhRunner | None = None,
 ) -> ChangeRef:
     """Open (or idempotently claim) exactly one PR for ``branch`` -> ``base`` (plan-by-default).
@@ -230,9 +290,15 @@ def open_change(
     create-or-claim plan. With ``apply=True`` it POSTs exactly one PR when none exists (then
     re-reads to verify) and is a verified no-op when a PR already claims the branch. A
     transport failure raises :class:`ForgeConfigError`.
+
+    ``declared_work_class`` is the PR-body declaration consumed by the G5 CI gate.
+    Production callers should pass the class derived from ``verify-work-sizing-floor``
+    or the same computed floor. When omitted, ``open_change`` emits the valid
+    conservative scaffold fallback ``epic``; that fallback is intentionally not a
+    claim that this helper computed the diff floor.
     """
     paths = tuple(manifest_paths or ())
-    _validate(repo, branch, base, paths, plan_ref)
+    _validate(repo, branch, base, paths, plan_ref, declared_work_class)
     runner = gh_runner or _default_gh_runner
     owner = repo.split("/", 1)[0]
 
@@ -261,7 +327,7 @@ def open_change(
         "title": f"[ce] {branch} -> {base}",
         "head": branch,
         "base": base,
-        "body": _render_pr_body(branch, base, plan_ref, paths),
+        "body": _render_pr_body(branch, base, plan_ref, paths, declared_work_class),
     }
     code, parsed, stderr = _gh_api_method(runner, "POST", f"repos/{repo}/pulls", body)
     if code != 0 or not isinstance(parsed, dict) or not parsed.get("number"):
