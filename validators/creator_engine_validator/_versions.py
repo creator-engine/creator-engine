@@ -117,6 +117,12 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # module and leaves later foreman injection/enforcement gates as data
         # consumers of the worker artifact.
         "worker_spawn",
+        # ce-ops#200: dispatch/launch mechanics composing only v1 primitives
+        # (``pco_allocator``, ``work_claims``, ``worker_spawn``), sibling to
+        # ``pickup``/``lane_runtime``. ``v3_cli`` imports it lazily via
+        # ``_dispatch_worktree_runtime`` so the v1<->v3 boundary is not crossed
+        # at import time; it imports no v3 module.
+        "dispatch_worktree",
     }
 )
 

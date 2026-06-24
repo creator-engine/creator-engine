@@ -622,9 +622,10 @@ def _dispatch_worktree_runtime() -> Any:
     command-local: the rest of ``ce`` remains importable if that module is absent
     in a partial worktree.
     """
-    from . import dispatch_worktree
-
-    return dispatch_worktree
+    return __import__(
+        "creator_engine_validator.dispatch_worktree",
+        fromlist=["dispatch"],
+    )
 
 
 # ---------------------------------------------------------------------------
