@@ -1,21 +1,17 @@
-# PR path manifest - ce188-belt-reviews-pickup
+# PR path manifest — ce-ops#188 · belt reviews-pickup — route awaiting-review PRs to non-author seats
 
-## Summary
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention). CI runs `verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref ce188-belt-reviews-pickup` and requires this PR's `origin/main..HEAD` diff to equal exactly the authorized path-set below (the carrier lists itself).
 
-Implements ce-ops#188 review-pickup routing for the autonomous belt.
+Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-## Paths
+AUTHORIZED_PATHS_COUNT=5
 
-- `.ce/changelog/ce188-belt-reviews-pickup.md` *(A)* - changelog fragment.
-- `.ce/pr-manifests/ce188-belt-reviews-pickup.md` *(A)* - this manifest.
-- `validators/creator_engine_validator/pickup.py` *(M)* - review-pickup planner/apply path and stale-review reconciliation wiring.
-- `validators/creator_engine_validator/ce_cli.py` *(M)* - `ce pickup reviews` command.
-- `validators/tests/unit/test_pickup.py` *(M)* - offline deterministic review-pickup tests.
-
-## Verification
+AUTHORIZED_PATHS_SHA256=355cbdad8e8d1b0570397aa1b29f4b6d980c3acdc41ed274b05d868e6134ea74
 
 ```text
-PYTHONPATH=/home/ce-dev-3/ce188-reviews/validators:/workspace/creator-engine/.venv-test/lib/python3.14/site-packages python3 -m pytest validators/tests/unit/test_pickup.py -k 'review_pickup or pickup_reviews' validators/tests/unit/test_re_review.py
-PYTHONPATH=/home/ce-dev-3/ce188-reviews/validators:/workspace/creator-engine/.venv-test/lib/python3.14/site-packages python3 -m pytest validators/tests/unit/test_re_review.py
-python3 -m py_compile validators/creator_engine_validator/pickup.py validators/creator_engine_validator/ce_cli.py validators/tests/unit/test_pickup.py
+.ce/changelog/ce188-belt-reviews-pickup.md
+.ce/pr-manifests/ce188-belt-reviews-pickup.md
+validators/creator_engine_validator/ce_cli.py
+validators/creator_engine_validator/pickup.py
+validators/tests/unit/test_pickup.py
 ```
