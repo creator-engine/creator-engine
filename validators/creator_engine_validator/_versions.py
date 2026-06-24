@@ -168,6 +168,11 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # detector/resolver/escalation primitives to Unit 3's race-guarded
         # executor API. No daemon; executor import is lazy and fail-closed.
         "forge.integrator_runner",
+        # ce-ops#218 belt-poller: chains the landed detector/resolver/executor/
+        # escalation primitives behind a bounded merge-queue repair poll loop.
+        # Pure-forge v3 adapter family; live actions stay behind injectable
+        # adapters + the merge gate, fail-closed; imports no v1 module.
+        "forge.integrator_belt",
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",

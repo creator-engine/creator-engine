@@ -22,6 +22,7 @@ ce fanin build       # aggregate local evidence into a deterministic fan-in pack
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
 ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
+ce queue poll        # run a bounded Integrator merge-queue repair poll
 ce event append      # append a shape-only-signed CE-event block to a local chain (G2.003.1)
 ce event verify      # validate an on-disk CE-event chain + head manifest, read-only
 ce event sign        # refresh a draft block's shape-only signature + content hash (no crypto)
@@ -547,11 +548,12 @@ def _build_parser() -> argparse.ArgumentParser:
     fi.add_argument("--packet", required=True, help="path to an existing fan-in packet")
     fi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    # ce queue — Integration Queue dry-run seam (Gate 8, RV1-082). Local
-    # serialized landing preview only; live enqueue/land/merge is refused.
+    # ce queue — Integration Queue preview plus the controller-side Integrator
+    # poll belt. Preview payloads remain authority-free; explicit live flags
+    # route through the merge-gated Integrator belt and fail closed.
     queue = groups.add_parser(
         "queue",
-        help="preview/inspect an Integration Queue dry-run landing order (no authority)",
+        help="preview/inspect Integration Queue state or run the Integrator poll belt",
     )
     queue_sub = queue.add_subparsers(dest="queue_cmd")
 
@@ -567,27 +569,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     qd.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
     qd.add_argument("--preview-id", default=None, help="override the request's preview_id")
-    # Refusal-only authority flags: the dry-run seam never lands/enqueues/merges.
-    qd.add_argument(
-        "--enqueue",
-        action="store_true",
-        help="refuse-only flag: live enqueue is never granted by the dry-run seam (always refused)",
-    )
-    qd.add_argument(
-        "--land",
-        action="store_true",
-        help="refuse-only flag: live landing is never granted by the dry-run seam (always refused)",
-    )
-    qd.add_argument(
-        "--merge",
-        action="store_true",
-        help="refuse-only flag: live merge is never granted by the dry-run seam (always refused)",
-    )
     qd.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     qi = queue_sub.add_parser("inspect", help="verify a preview's content hash + shape (read-only)")
     qi.add_argument("--preview", required=True, help="path to an existing dry-run landing preview")
     qi.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    # ce-ops#218: the belt-driven live merge-queue repair poll lives in the v3 CLI
+    # (`cev3 queue-poll`) — it imports the v3 forge belt, which must not be reached
+    # from this v1 CLI (v1⊥v3 isolation, docs/architecture/VERSION_BOUNDARY.md).
 
     # ce event — G2.003.1 CE-event runtime. Local, daemonless, network-free
     # append-only signed-block chains under the ignored .ce/ce-events/spool/
@@ -1736,16 +1725,14 @@ def _fanin_inspect(args) -> int:
 
 
 def _queue_dry_run(args) -> int:
-    live_action = next(
-        (name for name in ("enqueue", "land", "merge") if getattr(args, name, False)), None
-    )
+    # Preview-only (v1). The live belt-driven actions moved to `cev3 queue-poll`
+    # (v3) to keep this v1 CLI free of any v3 forge import (ce-ops#218).
     try:
         result = integration_queue_dry_run.build(
             request=args.request,
             preview_root=args.preview_root,
             repo_root=args.repo_root,
             preview_id=args.preview_id,
-            live_action=live_action,
         )
     except integration_queue_dry_run.QueueBuildError as exc:
         print(f"ERROR: ce queue dry-run refused [{exc.code}]: {exc}", file=sys.stderr)

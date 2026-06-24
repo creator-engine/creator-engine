@@ -185,11 +185,9 @@ def test_rehearsal_queue_dry_run_inspect(governed_repo: Path, capsys):
     previews = sorted(preview_root.glob("*.json"))
     assert len(previews) == 1
     assert ce_cli.main(["queue", "inspect", "--preview", str(previews[0])]) == 0
-    # Live landing is refused fail-closed (no authority).
-    assert ce_cli.main([
-        "queue", "dry-run", "--request", str(req_path), "--preview-root", str(preview_root),
-        "--repo-root", str(governed_repo), "--land",
-    ]) != 0
+    # `ce queue dry-run` is preview-only (ce-ops#218 v1/v3 boundary refactor): the live
+    # landing path moved to the v3 belt (`cev3 queue-poll`), whose fail-closed/no-authority
+    # refusal is covered by test_integrator_belt. The removed `--land` flag is no longer a v1 surface.
 
 
 def test_rehearsal_launch_dry_run_no_spawn(capsys):
