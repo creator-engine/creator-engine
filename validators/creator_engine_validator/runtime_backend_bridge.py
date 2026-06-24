@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import containment_probe
+
 
 class RuntimeBackendBridgeError(Exception):
     """The requested runtime backend cannot be honored by the visible launcher."""
@@ -32,6 +34,7 @@ class VisibleRunnerExecution:
     started_ref: str
     exit_code: int
     argv: tuple[str, ...]
+    containment_attestation: dict[str, Any]
     surface: Any
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,6 +45,7 @@ class VisibleRunnerExecution:
             "started_ref": self.started_ref,
             "exit_code": self.exit_code,
             "argv": list(self.argv),
+            "containment_attestation": dict(self.containment_attestation),
         }
 
 
@@ -127,6 +131,8 @@ def run_visible_runtime(
     seat_dir: str | None = None,
     container_runner: Any | None = None,
     gvisor_plan_kwargs: Mapping[str, Any] | None = None,
+    containment_proc_root: str | os.PathLike[str] = "/proc",
+    containment_host_pid: int | str = 1,
 ) -> VisibleRunnerExecution:
     """Provision and run ``command`` through a visible runtime backend.
 
@@ -170,6 +176,11 @@ def run_visible_runtime(
         raise RuntimeBackendBridgeError(
             f"runtime backend {resolved_backend!r} returned without a visible surface"
         )
+    containment_attestation = _probe_launched_surface_containment(
+        surface_runner.surface,
+        proc_root=containment_proc_root,
+        host_pid=containment_host_pid,
+    )
     return VisibleRunnerExecution(
         backend_key=handle.backend_key,
         handle_ref=handle.ref,
@@ -177,5 +188,40 @@ def run_visible_runtime(
         started_ref=result.started_ref,
         exit_code=result.exit_code,
         argv=surface_runner.argv,
+        containment_attestation=containment_attestation,
         surface=surface_runner.surface,
     )
+
+
+def _probe_launched_surface_containment(
+    surface: Any,
+    *,
+    proc_root: str | os.PathLike[str],
+    host_pid: int | str,
+) -> dict[str, Any]:
+    terminal = getattr(surface, "terminal", None)
+    if not isinstance(terminal, Mapping):
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch returned no terminal record; refusing "
+            "unproven containment"
+        )
+    pid = terminal.get("pane_pid") or terminal.get("pid")
+    if pid is None:
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch returned no probeable process pid; refusing "
+            "unproven containment"
+        )
+    verdict = containment_probe.probe_containment(
+        pid,
+        reader=containment_probe.ProcReader(root=str(proc_root)),
+        host_pid=host_pid,
+    )
+    payload = verdict.payload
+    payload["pid"] = str(pid)
+    payload["proc_root"] = str(proc_root)
+    if not verdict.contained:
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch failed containment probe for pid "
+            f"{pid}: {verdict.reason}"
+        )
+    return payload

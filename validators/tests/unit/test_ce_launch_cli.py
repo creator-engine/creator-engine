@@ -19,12 +19,23 @@ from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
+_FULL_CAP = "000001ffffffffff"
+_DROPPED_CAP = "00000000a80425fb"
+
+
 class FakeAdapter:
     kind = "tmux"
 
-    def __init__(self, *, available: bool = True, sessions: set[str] | None = None):
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        sessions: set[str] | None = None,
+        pane_pid: int | None = None,
+    ):
         self._available = available
         self._sessions = set(sessions or set())
+        self._pane_pid = pane_pid
         self.spawned: list[tuple[str, str, list[str]]] = []
 
     def is_available(self) -> bool:
@@ -36,7 +47,72 @@ class FakeAdapter:
     def ensure_pane(self, *, session, window, command, cwd=None, env=None):
         self.spawned.append((session, window, list(command)))
         self._sessions.add(session)
-        return TmuxPane(session_id="$1", window_id="@2", pane_id="%3")
+        return TmuxPane(
+            session_id="$1",
+            window_id="@2",
+            pane_id="%3",
+            pane_pid=self._pane_pid,
+        )
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
+    return (
+        "Name:\tproof\n"
+        f"NoNewPrivs:\t{nnp}\n"
+        f"CapEff:\t{cap_eff}\n"
+        f"CapBnd:\t{cap_bnd}\n"
+    )
+
+
+def _make_proc(
+    tmp_path: Path,
+    pid: str,
+    *,
+    ns: dict[str, str],
+    cgroup: str,
+    status: str,
+    root: str,
+) -> None:
+    base = tmp_path / pid
+    for name, ident in ns.items():
+        _write(base / "ns" / name, ident)
+    _write(base / "cgroup", cgroup)
+    _write(base / "status", status)
+    _write(base / "root", root)
+
+
+def _contained_proc(tmp_path: Path, pid: str) -> None:
+    _make_proc(
+        tmp_path,
+        "1",
+        ns={
+            "mnt": "mnt:[4026531840]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026531992]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/init.scope\n",
+        status=_status(_FULL_CAP, _FULL_CAP),
+        root="/",
+    )
+    _make_proc(
+        tmp_path,
+        pid,
+        ns={
+            "mnt": "mnt:[4026532500]",
+            "pid": "pid:[4026532501]",
+            "net": "net:[4026532502]",
+            "user": "user:[4026532503]",
+        },
+        cgroup="0::/system.slice/runsc-sandbox-proof.scope/runsc/container\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/run/runsc/proof/rootfs",
+    )
 
 
 class FakeGhRunner:
@@ -283,7 +359,9 @@ def test_launch_backend_live_refuses_before_raw_tmux(use_fake_tmux, tmp_path, ca
 
 
 def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
-    adapter = FakeAdapter()
+    proc_root = tmp_path / "proc"
+    _contained_proc(proc_root, "4242")
+    adapter = FakeAdapter(pane_pid=4242)
     policy = _write_runtime_policy(tmp_path)
     result = ce_cli.launch_runtime.launch(
         harness="hermes",
@@ -293,11 +371,13 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
         tmux_adapter=adapter,
         container_runner=FakeContainerRunner(),
         gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        containment_proc_root=proc_root,
     )
 
     assert result.spawned is True
     assert result.plan.runtime_policy["resolved_backend"] == "gvisor-proxy"
     assert result.runner_runtime["backend_key"] == "gvisor-proxy"
+    assert result.runner_runtime["containment_attestation"]["contained"] is True
     argv = result.runner_runtime["argv"]
     assert argv[:3] == ["docker", "run", "--rm"]
     assert "--runtime=runsc-gvproxy-ptrace" in argv
