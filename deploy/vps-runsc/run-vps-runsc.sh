@@ -160,6 +160,19 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 model = "gpt-5.5"
 model_reasoning_effort = "high"
+allow_managed_hooks_only = true
+
+[features]
+hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'PYTHONPATH=/workspace/creator-engine/validators python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py'
+timeout = 30
+statusMessage = "Checking CE Ring-1 policy"
 
 [projects."/workspace/creator-engine"]
 trust_level = "trusted"
