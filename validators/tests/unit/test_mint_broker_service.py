@@ -5,15 +5,16 @@ The handler is the standing broker's mint endpoint. For each request it:
 1. validates the request shape (repo, installation_id, permissions, caller token);
 2. REJECTS any out-of-ceiling permission BEFORE any GitHub call (G3 — never even attempt an
    admin mint);
-3. enforces the per-user rate cap;
-4. runs the S2 binding check (the caller's ``ghu_`` must control the claimed installation);
-5. mints via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition with the
+3. REJECTS any permission outside the declared minimum grant BEFORE any GitHub call;
+4. enforces the per-user rate cap;
+5. runs the S2 binding check (the caller's ``ghu_`` must control the claimed installation);
+6. mints via the frozen ``app_jwt_gh_runner`` -> ``mint_scoped_token`` composition with the
    shared-App key behind the openssl signer;
-6. appends a secret-free audit record (reusing ``egress_broker.audit``).
+7. appends a secret-free audit record (reusing ``egress_broker.audit``).
 
 The response carries the minted ``ghs_`` value + expiry; an audit/deny path returns a status
 code and reason. Injectable binding + signer + transport + audit-path seams; ZERO live
-network / crypto. The crux assertions: bound read+PR mints; ``administration:write`` is refused
+network / crypto. The crux assertions: bound read+PR mints; a permission over-ask is refused
 PRE-CALL (no GitHub call made); an unbound caller gets 403 and NOTHING is minted.
 """
 
@@ -44,6 +45,11 @@ def _config(tmp_path, **over):
         "pem_path": str(tmp_path / "shared.pem"),
         "audit_log": str(tmp_path / "audit.jsonl"),
         "permission_ceiling": {
+            "metadata": "read",
+            "contents": "write",
+            "pull_requests": "write",
+        },
+        "declared_minimum_grant": {
             "metadata": "read",
             "contents": "write",
             "pull_requests": "write",
@@ -151,7 +157,7 @@ def test_binding_check_receives_requested_repo_before_minting(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# G3 CRUX: out-of-ceiling permission refused BEFORE any GitHub call
+# G3 defence-in-depth: out-of-ceiling permission refused BEFORE any GitHub call
 # ---------------------------------------------------------------------------
 def test_administration_write_is_refused_before_any_github_call(tmp_path):
     cfg = _config(tmp_path)
@@ -169,12 +175,46 @@ def test_administration_write_is_refused_before_any_github_call(tmp_path):
         transport=_mint_transport(calls=calls),
     )
     assert resp["status"] == 403
+    assert resp["reason"] == "out_of_ceiling"
     assert "token" not in resp
     assert calls == []  # NO GitHub mint call was made
     assert binding_calls == []  # ceiling check fails BEFORE even binding
     rec = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").strip())
     assert rec["decision"] == "deny"
     assert rec["reason"] == "out_of_ceiling"
+
+
+# ---------------------------------------------------------------------------
+# declared-minimum CRUX: over-ask refused BEFORE any rate/binding/GitHub call
+# ---------------------------------------------------------------------------
+def test_permissions_over_declared_minimum_are_refused_before_binding_or_mint(tmp_path):
+    cfg = _config(
+        tmp_path,
+        declared_minimum_grant={
+            "metadata": "read",
+            "contents": "read",
+        },
+    )
+    calls: list = []
+    binding_calls: list = []
+
+    def binding(*a, **k):
+        binding_calls.append(1)
+
+    resp = handle_token_request(
+        _request(permissions={"contents": "write"}),
+        config=cfg,
+        binding_check=binding,
+        signer=_signer,
+        transport=_mint_transport(calls=calls),
+    )
+    assert resp["status"] == 403
+    assert "token" not in resp
+    assert calls == []  # NO GitHub mint call was made
+    assert binding_calls == []  # declared-minimum check fails before binding
+    rec = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").strip())
+    assert rec["decision"] == "deny"
+    assert rec["reason"] == "requested_permissions_exceed_declared_minimum"
 
 
 def test_out_of_ceiling_scope_is_refused(tmp_path):
@@ -188,6 +228,7 @@ def test_out_of_ceiling_scope_is_refused(tmp_path):
         transport=_mint_transport(calls=calls),
     )
     assert resp["status"] == 403
+    assert resp["reason"] == "out_of_ceiling"
     assert calls == []
 
 
