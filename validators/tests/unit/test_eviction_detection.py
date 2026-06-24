@@ -11,6 +11,7 @@ import urllib.parse
 
 import pytest
 
+from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge.eviction_detection import (
     EvictionDetectionError,
     RepairNeededEvent,
@@ -18,6 +19,17 @@ from creator_engine_validator.forge.eviction_detection import (
     detect_repair_needed,
     poll_repair_needed,
 )
+
+
+def _test_limiter(tmp_path, clock=None):
+    return SearchRateLimiter(
+        tmp_path / "search-rate.json",
+        rate_per_minute=6000,
+        burst=1,
+        jitter_seconds=0,
+        clock=clock or (lambda: 0.0),
+        random_float=lambda: 0.0,
+    )
 
 
 def _state(
@@ -195,3 +207,36 @@ def test_poll_repair_needed_uses_search_candidates_then_pr_state():
     assert result.rate_limit == {"remaining": 29}
     assert [event.to_dict()["reason"] for event in result.events] == ["behind"]
     assert result.events[0].head_sha == "d" * 40
+
+
+def test_poll_repair_needed_retries_search_rate_limit(tmp_path):
+    calls = []
+    sleeps: list[float] = []
+    now = {"value": 100.0}
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now["value"] += seconds
+
+    def transport(method, url, headers, body):
+        calls.append({"method": method, "url": url, "headers": dict(headers), "body": body})
+        if len(calls) == 1:
+            return 429, {"Retry-After": "3"}, "{}"
+        return 200, {"X-RateLimit-Remaining": "27"}, _search_body()
+
+    def gh_runner(argv, input_text=None):
+        raise AssertionError("empty search result should not query PR state")
+
+    result = poll_repair_needed(
+        token="ghp_fake",
+        transport=transport,
+        gh_runner=gh_runner,
+        repo="creator-engine/creator-engine",
+        rate_limiter=_test_limiter(tmp_path, clock=lambda: now["value"]),
+        sleep=sleep,
+    )
+
+    assert result.events == ()
+    assert result.rate_limit == {"remaining": 27}
+    assert len(calls) == 2
+    assert sleeps == [5.0]

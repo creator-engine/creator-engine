@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,7 +23,18 @@ from typing import Any
 from .change import ChangeRef
 from .change_status import PullRequestState, pr_state
 from .github_repo_config import GhRunner
-from ..pickup_search import SearchQuery, build_scoped_search_query, declared_search_scope
+from .search_rate_limiter import (
+    SearchRateLimiter,
+    call_with_search_api_headroom,
+    default_search_rate_limiter,
+)
+from ..pickup_search import (
+    PickupRateLimited,
+    SearchQuery,
+    _rate_limited,
+    build_scoped_search_query,
+    declared_search_scope,
+)
 
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
 
@@ -159,11 +171,16 @@ def poll_repair_needed(
     org: str | None = None,
     per_page: int = DEFAULT_SEARCH_PER_PAGE,
     detected_at: str | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> RepairPollResult:
     """Run one read-only Search API poll and emit deterministic repair-needed events."""
     if not token or not token.strip():
         raise EvictionDetectionError("poll_repair_needed requires a non-empty token")
     _transport = transport or _default_transport
+    _rate_limiter = rate_limiter
+    if _rate_limiter is None and (transport is None or transport is _default_transport):
+        _rate_limiter = default_search_rate_limiter()
     _gh_runner = gh_runner or _default_gh_runner
     events: list[RepairNeededEvent] = []
     rate_limit: dict[str, Any] = {}
@@ -174,6 +191,8 @@ def poll_repair_needed(
             transport=_transport,
             query=query,
             per_page=per_page,
+            rate_limiter=_rate_limiter,
+            sleep=sleep,
         )
         for item in _dedupe_candidates(candidates):
             state = pr_state(_change_ref_for_candidate(item), gh_runner=_gh_runner)
@@ -185,6 +204,33 @@ def poll_repair_needed(
 
 
 def _search_once(
+    *,
+    token: str,
+    transport: Transport,
+    query: SearchQuery,
+    per_page: int,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if rate_limiter is not None:
+        return call_with_search_api_headroom(
+            lambda: _search_once_unlimited(
+                token=token,
+                transport=transport,
+                query=query,
+                per_page=per_page,
+            ),
+            limiter=rate_limiter,
+            is_rate_limited=lambda exc: isinstance(exc, PickupRateLimited),
+            retry_after_seconds=lambda exc: (
+                exc.retry_after_seconds if isinstance(exc, PickupRateLimited) else None
+            ),
+            sleep=sleep,
+        )
+    return _search_once_unlimited(token=token, transport=transport, query=query, per_page=per_page)
+
+
+def _search_once_unlimited(
     *,
     token: str,
     transport: Transport,
@@ -203,6 +249,8 @@ def _search_once(
         "order": "desc",
     })
     status, resp_headers, body = transport("GET", f"{_API_ROOT}/search/issues?{params}", headers, None)
+    if status in (403, 429):
+        raise _rate_limited(status, resp_headers)
     if not (200 <= status < 300):
         raise EvictionDetectionError(f"repair-needed candidate search failed (HTTP {status})")
     try:

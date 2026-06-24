@@ -29,6 +29,7 @@ from .integrator_escalation import (
     EscalationContext,
     escalate_unresolved_results,
 )
+from .search_rate_limiter import SearchRateLimiter
 
 
 class IntegratorRunnerError(Exception):
@@ -142,6 +143,7 @@ def run_once(
     execute_repair: ExecuteRepair | None = None,
     plan_factory: PlanFactory | None = None,
     detected_at: str | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
 ) -> IntegratorRunResult:
     """Run one Search-API-backed integrator repair tick.
 
@@ -149,14 +151,18 @@ def run_once(
     3's race-guarded write boundary, loaded lazily unless tests inject it.
     """
 
-    poll = (poller or poll_repair_needed)(
-        token=token,
-        transport=transport,
-        gh_runner=gh_runner,
-        repo=repo,
-        org=org,
-        detected_at=detected_at,
-    )
+    poller_fn = poller or poll_repair_needed
+    poll_kwargs: dict[str, Any] = {
+        "token": token,
+        "transport": transport,
+        "gh_runner": gh_runner,
+        "repo": repo,
+        "org": org,
+        "detected_at": detected_at,
+    }
+    if poller is None:
+        poll_kwargs["rate_limiter"] = rate_limiter
+    poll = poller_fn(**poll_kwargs)
     outcomes = tuple(
         _handle_event(
             event,

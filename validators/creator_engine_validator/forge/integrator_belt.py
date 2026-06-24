@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -38,6 +39,11 @@ from .integrator_runner import (
     run_once,
 )
 from .merge import merge
+from .search_rate_limiter import (
+    SearchRateLimiter,
+    call_with_search_api_headroom,
+    default_search_rate_limiter,
+)
 
 GitSpawn = Callable[[Sequence[str], str | None, Mapping[str, str] | None], subprocess.CompletedProcess]
 LogSink = Callable[[Mapping[str, Any]], None]
@@ -52,6 +58,14 @@ DEFAULT_TEST_CHECK_KEYWORDS = ("test", "pytest", "unit")
 
 class IntegratorBeltError(Exception):
     """Bad input or refused live belt action."""
+
+
+class SearchApiRateLimited(ForgeConfigError):
+    """GitHub GraphQL search exhausted rate-limit retries."""
+
+    def __init__(self, message: str, *, retry_after_seconds: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True)
@@ -373,6 +387,7 @@ def run_poll_loop(
     sleep: Callable[[float], None] = time.sleep,
     detected_at: str | None = None,
     log_sink: LogSink | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
 ) -> BeltPollLoopResult:
     """Run a bounded, witnessable integrator poll loop."""
 
@@ -392,6 +407,9 @@ def run_poll_loop(
         )
 
     ticks: list[BeltPollTick] = []
+    _rate_limiter = rate_limiter
+    if _rate_limiter is None and poller is None and transport is None:
+        _rate_limiter = default_search_rate_limiter()
     for index in range(1, iterations + 1):
         _log(log_sink, "poll_start", index=index, repo=repo, org=org)
         result = run_once(
@@ -403,6 +421,7 @@ def run_poll_loop(
             gh_runner=gh_runner,
             poller=poller,
             detected_at=detected_at,
+            rate_limiter=_rate_limiter,
         )
         tick = BeltPollTick(index=index, result=result)
         ticks.append(tick)
@@ -442,6 +461,7 @@ def run_daemon_loop(
     gh_runner: GhRunner | None = None,
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
 ) -> DaemonLoopResult:
     """Run the supervised autonomous merge daemon.
 
@@ -452,18 +472,33 @@ def run_daemon_loop(
     if interval_seconds < 0:
         raise IntegratorBeltError("interval_seconds must be >= 0")
     runner = gh_runner_with_token(token, gh_runner)
+    _rate_limiter = rate_limiter
+    if _rate_limiter is None and gh_runner is None:
+        _rate_limiter = default_search_rate_limiter()
     ticks: list[DaemonLoopTick] = []
     index = 1
     while True:
         _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
-        result = run_daemon_pass(
-            token=token,
-            repo=repo,
-            org=org,
-            dry_run=dry_run,
-            gh_runner=runner,
-            log_sink=log_sink,
-        )
+        try:
+            result = run_daemon_pass(
+                token=token,
+                repo=repo,
+                org=org,
+                dry_run=dry_run,
+                gh_runner=runner,
+                log_sink=log_sink,
+                rate_limiter=_rate_limiter,
+                sleep=sleep,
+            )
+        except SearchApiRateLimited as exc:
+            _log(
+                log_sink,
+                "daemon_rate_limited",
+                index=index,
+                retry_after_seconds=exc.retry_after_seconds,
+                dry_run=dry_run,
+            )
+            result = DaemonPassResult(decisions=(), dry_run=dry_run)
         tick = DaemonLoopTick(index=index, result=result)
         ticks = [tick] if not once else [*ticks, tick]
         _log(
@@ -492,6 +527,8 @@ def run_daemon_pass(
     gh_runner: GhRunner | None = None,
     log_sink: LogSink | None = None,
     candidates: Sequence[DaemonPullRequest] | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> DaemonPassResult:
     """Discover, evaluate, sequence, and enqueue eligible PRs for merge queue."""
 
@@ -505,6 +542,8 @@ def run_daemon_pass(
         repo=repo,
         org=org,
         gh_runner=runner,
+        rate_limiter=rate_limiter,
+        sleep=sleep,
     )
     decisions: list[DaemonDecision] = []
     selected_paths: dict[str, set[str]] = {}
@@ -578,6 +617,8 @@ def discover_daemon_candidates(
     org: str | None = None,
     gh_runner: GhRunner | None = None,
     first: int = DEFAULT_DAEMON_SEARCH_LIMIT,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[DaemonPullRequest, ...]:
     """Read open PR candidates in a repo or org scope."""
 
@@ -596,12 +637,24 @@ def discover_daemon_candidates(
         raise IntegratorBeltError("first must be between 1 and 100")
 
     runner = gh_runner or _default_gh_runner
-    parsed = _gh_graphql(
+    operation = lambda: _gh_graphql(
         runner,
         _DAEMON_SEARCH_QUERY,
         {"searchQuery": search, "first": first},
         purpose="discover daemon PR candidates",
     )
+    if rate_limiter is not None:
+        parsed = call_with_search_api_headroom(
+            operation,
+            limiter=rate_limiter,
+            is_rate_limited=lambda exc: isinstance(exc, SearchApiRateLimited),
+            retry_after_seconds=lambda exc: (
+                exc.retry_after_seconds if isinstance(exc, SearchApiRateLimited) else None
+            ),
+            sleep=sleep,
+        )
+    else:
+        parsed = operation()
     search_node = ((parsed.get("data") or {}).get("search") or {})
     nodes = search_node.get("nodes")
     if not isinstance(nodes, list):
@@ -1160,8 +1213,14 @@ def _gh_graphql(runner: GhRunner, query: str, variables: dict[str, object], *, p
         argv += [flag, f"{key}={value}"]
     proc = runner(argv, None)
     if proc.returncode != 0:
+        stderr = redact_gh_stderr(proc.stderr or "")
+        if _is_search_rate_limit_error(stderr):
+            raise SearchApiRateLimited(
+                f"could not {purpose}: GitHub Search API rate-limited; retry later",
+                retry_after_seconds=_retry_after_from_text(stderr),
+            )
         raise ForgeConfigError(
-            f"could not {purpose}: {redact_gh_stderr(proc.stderr or '') or 'unknown error'}"
+            f"could not {purpose}: {stderr or 'unknown error'}"
         )
     try:
         parsed = json.loads((proc.stdout or "").strip() or "{}")
@@ -1170,6 +1229,28 @@ def _gh_graphql(runner: GhRunner, query: str, variables: dict[str, object], *, p
     if not isinstance(parsed, dict):
         raise ForgeConfigError(f"could not {purpose}: unexpected JSON response")
     return parsed
+
+
+def _is_search_rate_limit_error(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "http 429" in lowered
+        or "status code 429" in lowered
+        or "rate limit" in lowered
+        or "secondary rate limit" in lowered
+        or "api rate limit exceeded" in lowered
+    )
+
+
+def _retry_after_from_text(text: str) -> int | None:
+    match = re.search(r"(?i)retry-after\s*[:=]\s*(\d+)", text)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _split_repo(repo: str) -> tuple[str, str]:

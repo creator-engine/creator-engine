@@ -184,6 +184,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
+        # Search API headroom for v3 forge pollers. The core limiter is shared
+        # at ``search_rate_limiter`` so v1 pickup never imports ``forge``.
+        "forge.search_rate_limiter",
         # ce-ops#228 PR-1: offline credential-injection transport-deputy policy
         # seam. Pure fail-closed request verdicts before any OneCLI credential
         # injection; no token minting, network, or process execution.

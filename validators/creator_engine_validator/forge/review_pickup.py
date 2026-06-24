@@ -21,10 +21,12 @@ from typing import Any
 
 from . import re_review
 from .github_repo_config import ForgeConfigError
+from .search_rate_limiter import SearchRateLimiter, default_search_rate_limiter
 from ..pickup_search import (
     DEFAULT_SEARCH_PER_PAGE,
     GhRunner,
     PickupError,
+    PickupRateLimited,
     SearchQuery,
     Transport,
     build_scoped_search_query,
@@ -117,6 +119,8 @@ def poll_review_pickup(
     apply_stale: bool = True,
     dry_run: bool = False,
     log_sink: LogSink | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> ReviewPickupResult:
     """Route awaiting-review PRs to distinct non-author reviewer seats.
 
@@ -135,12 +139,17 @@ def poll_review_pickup(
         raise PickupError("review pickup requires at least one --seat reviewer")
 
     _transport = transport or _default_transport
+    _rate_limiter = rate_limiter
+    if _rate_limiter is None and (transport is None or transport is _default_transport):
+        _rate_limiter = default_search_rate_limiter()
     query = review_pickup_query(repo=repo, org=org)
     page_items, rate_limit = _search_once(
         token=token.strip(),
         transport=_transport,
         query=query,
         per_page=per_page,
+        rate_limiter=_rate_limiter,
+        sleep=sleep,
     )
 
     effective_apply = bool(apply and not dry_run)
@@ -214,6 +223,7 @@ def run_review_pickup_loop(
     interval: float = DEFAULT_REVIEW_PICKUP_INTERVAL_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
+    rate_limiter: SearchRateLimiter | None = None,
 ) -> ReviewPickupLoopResult:
     """Run one or more bounded review-pickup passes.
 
@@ -229,19 +239,31 @@ def run_review_pickup_loop(
     while iterations is None or index < iterations:
         index += 1
         _log_event(log_sink, "review_pickup_pass_start", index=index, dry_run=dry_run)
-        result = poll_review_pickup(
-            token=token,
-            reviewer_seats=reviewer_seats,
-            gh_runner=gh_runner,
-            transport=transport,
-            repo=repo,
-            org=org,
-            per_page=per_page,
-            apply=apply,
-            apply_stale=apply_stale,
-            dry_run=dry_run,
-            log_sink=log_sink,
-        )
+        try:
+            result = poll_review_pickup(
+                token=token,
+                reviewer_seats=reviewer_seats,
+                gh_runner=gh_runner,
+                transport=transport,
+                repo=repo,
+                org=org,
+                per_page=per_page,
+                apply=apply,
+                apply_stale=apply_stale,
+                dry_run=dry_run,
+                log_sink=log_sink,
+                rate_limiter=rate_limiter,
+                sleep=sleep,
+            )
+        except PickupRateLimited as exc:
+            _log_event(
+                log_sink,
+                "review_pickup_rate_limited",
+                index=index,
+                dry_run=dry_run,
+                **exc.to_payload(),
+            )
+            result = ReviewPickupResult(rate_limit=exc.to_payload())
         passes.append(result)
         _log_event(
             log_sink,
