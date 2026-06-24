@@ -113,7 +113,42 @@ need_cmd() {
   fi
 }
 
-for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln; do
+append_word() {
+  if [ -n "$1" ]; then
+    printf '%s %s\n' "$1" "$2"
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
+preflight_bootstrap_commands() {
+  missing_cmds=""
+  for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing_cmds="$(append_word "$missing_cmds" "$cmd")"
+    fi
+  done
+  if [ -n "$missing_cmds" ]; then
+    fail missing_bootstrap_dependency "required command(s) missing: $missing_cmds
+
+Install the OS bootstrap package set, then re-run this installer after reviewing the package action.
+
+Debian/Ubuntu:
+  sudo apt-get update && sudo apt-get install -y ca-certificates curl openssh-client tar coreutils sed gawk grep
+
+Fedora/RHEL/CentOS:
+  sudo dnf install -y ca-certificates curl openssh-clients tar coreutils sed gawk grep
+
+Alpine:
+  sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep
+
+Python 3.14 and uv are not host prerequisites: after stock ssh-keygen verifies the signed spec, CE fetches the manifest-pinned uv tarball, verifies its hash, and installs CPython 3.14 in user space if no compatible Python is already present. E1 will not auto-sudo before trust verification."
+  fi
+}
+
+preflight_bootstrap_commands
+
+for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar; do
   need_cmd "$cmd"
 done
 

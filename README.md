@@ -117,6 +117,19 @@ and the `version_boundary` validator check.
 CE currently has two supported install paths, both documented by
 [`docs/contracts/installer.md`](./docs/contracts/installer.md).
 
+For an end-to-end first host path, use the
+[`zero to governed seat quickstart`](./docs/guide/zero-to-governed-seat-quickstart.md).
+
+Bootstrap prerequisites: the host must already have stock OpenSSH `ssh-keygen`
+and the basic shell tools named by the installer. If any are missing, the
+installer refuses before fetching artifacts and prints one remediation block
+with exact Debian/Ubuntu, Fedora/RHEL/CentOS, and Alpine package commands.
+Install them only after reviewing the package action; the E1 installer will not
+run `sudo` before it has verified the signed spec. Python 3.14 and `uv` are not
+host prerequisites for the one-liner: after verification, E1 fetches the
+manifest-pinned `uv` tarball, verifies it, and installs CPython 3.14 in user
+space if needed.
+
 1. **Public one-liner.**
 
    ```bash
@@ -129,7 +142,9 @@ CE currently has two supported install paths, both documented by
    needed, installs `creator-engine-validator==0.2.0` offline, proves `cev3`,
    and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
    automate the GitHub App click, mutate branch protection, or create/adopt a
-   project.
+   project. A successful E1 run is inventory-only; a full governed seat still
+   needs host and GitHub answers, an explicit `ce onboard --plan`, and a later
+   governed `ce onboard --apply`.
 
 2. **Clone plus offline dependency wheelhouse.**
 

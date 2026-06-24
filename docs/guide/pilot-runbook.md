@@ -4,7 +4,8 @@
 App, file work as a Scope, and get governed, cost-safe PRs + merges — all under
 the branded `ce session` frame, on your own agent. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
-contracts/designs.*
+contracts/designs. For the shortest command sequence, see
+[`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md).*
 
 > **Pilot scope.** The E1 one-liner now performs a real authenticated inventory
 > bootstrap: it verifies the signed spec, installs CE into a user-local venv from

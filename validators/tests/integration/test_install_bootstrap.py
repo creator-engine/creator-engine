@@ -16,7 +16,7 @@ import pytest
 from creator_engine_validator import v3_installer
 
 
-pytestmark = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="stock ssh-keygen not available")
+requires_ssh_keygen = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="stock ssh-keygen not available")
 
 
 def _signature_key_id(spec_text: str) -> str:
@@ -167,6 +167,7 @@ def _curl_urls(log_path: Path) -> list[str]:
     return urls
 
 
+@requires_ssh_keygen
 def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root, tamper=True)
     install_root = tmp_path / "install-root"
@@ -180,6 +181,7 @@ def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_p
     assert not (install_root / "venv").exists()
 
 
+@requires_ssh_keygen
 def test_install_sh_refuses_equivalent_same_origin_anchor_before_artifacts(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -200,6 +202,7 @@ def test_install_sh_refuses_equivalent_same_origin_anchor_before_artifacts(tmp_p
     assert not (install_root / "venv").exists()
 
 
+@requires_ssh_keygen
 def test_install_sh_wheelhouse_hash_gate_leaves_venv_untouched(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -215,6 +218,7 @@ def test_install_sh_wheelhouse_hash_gate_leaves_venv_untouched(tmp_path: Path, r
     assert not (install_root / "venv").exists()
 
 
+@requires_ssh_keygen
 def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -258,6 +262,7 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
         assert shim.resolve() == target.resolve()
 
 
+@requires_ssh_keygen
 def test_install_sh_no_fix_path_skips_profile_mutation(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -278,6 +283,7 @@ def test_install_sh_no_fix_path_skips_profile_mutation(tmp_path: Path, repo_root
     assert "skipped shell profile PATH update (--no-fix-path)" in proc.stderr
 
 
+@requires_ssh_keygen
 def test_install_sh_repairs_partial_or_corrupt_verified_venv_state(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     answers = tmp_path / "answers.yaml"
@@ -334,9 +340,19 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     )
     assert proc.returncode != 0
     assert "missing_bootstrap_dependency" in proc.stderr
+    assert "required command(s) missing:" in proc.stderr
     assert "ssh-keygen" in proc.stderr
+    assert "tar" in proc.stderr
+    assert "sudo apt-get update && sudo apt-get install -y ca-certificates curl openssh-client tar coreutils sed gawk grep" in proc.stderr
+    assert "sudo dnf install -y ca-certificates curl openssh-clients tar coreutils sed gawk grep" in proc.stderr
+    assert "sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep" in proc.stderr
+    assert "openssh-client" in proc.stderr
+    assert "openssh-clients" in proc.stderr
+    assert "Python 3.14 and uv are not host prerequisites" in proc.stderr
+    assert "E1 will not auto-sudo before trust verification" in proc.stderr
 
 
+@requires_ssh_keygen
 @pytest.mark.parametrize("extra_env", [{"CE_TEST_UNAME_S": "Darwin"}, {"CE_TEST_UNAME_M": "sparc64"}])
 def test_install_sh_refuses_uname_test_overrides_without_test_mode(
     tmp_path: Path, repo_root: Path, extra_env: dict[str, str]
@@ -349,6 +365,7 @@ def test_install_sh_refuses_uname_test_overrides_without_test_mode(
     assert _curl_urls(tmp_path / "curl.log") == []
 
 
+@requires_ssh_keygen
 def test_install_sh_unsupported_platform_and_pages_window_are_loud(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     unsupported = _run_install(
@@ -389,6 +406,7 @@ def test_unsigned_install_docs_defer_native_windows_one_liner_until_signed_relea
     assert "native PowerShell, Git Bash, MSYS, or Cygwin" in llms
 
 
+@requires_ssh_keygen
 def test_install_sh_accepts_linux_aarch64_and_selects_arm_wheelhouse(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     arm_pyyaml = (
