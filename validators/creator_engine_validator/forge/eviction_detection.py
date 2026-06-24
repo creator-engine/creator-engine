@@ -11,7 +11,6 @@ receive deterministic ``repair-needed`` events, and decide separately what to do
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -23,14 +22,13 @@ from typing import Any
 from .change import ChangeRef
 from .change_status import PullRequestState, pr_state
 from .github_repo_config import GhRunner
+from ..pickup_search import SearchQuery, build_scoped_search_query, declared_search_scope
 
 Transport = Callable[[str, str, "dict[str, str]", "str | None"], "tuple[int, dict[str, str], str]"]
 
 _API_ROOT = "https://api.github.com"
 _API_VERSION = "2022-11-28"
 _ACCEPT = "application/vnd.github+json"
-_REPO_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_ORG_SCOPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 REPAIR_NEEDED_EVENT_TYPE = "repair-needed"
 REPAIRABLE_MERGE_STATE_STATUSES = frozenset({"BEHIND", "DIRTY"})
@@ -40,14 +38,6 @@ DEFAULT_SEARCH_PER_PAGE = 100
 
 class EvictionDetectionError(Exception):
     """Bad input or failed read while detecting repair-needed events."""
-
-
-@dataclass(frozen=True)
-class SearchQuery:
-    """One GitHub Search API query used to discover PR candidates."""
-
-    reason: str
-    query: str
 
 
 @dataclass(frozen=True)
@@ -116,21 +106,12 @@ def _default_gh_runner(
 
 def build_candidate_queries(*, repo: str | None = None, org: str | None = None) -> tuple[SearchQuery, ...]:
     """Build deterministic Search API queries for approved + green PR candidates."""
-    if repo and org:
-        raise EvictionDetectionError("repo and org are mutually exclusive search scopes")
-    scope_terms: list[str] = []
-    if repo:
-        if not _REPO_SCOPE_RE.match(repo):
-            raise EvictionDetectionError(f"repo must be owner/name, got {repo!r}")
-        scope_terms.append(f"repo:{repo}")
-    if org:
-        if not _ORG_SCOPE_RE.match(org):
-            raise EvictionDetectionError(f"org must be a GitHub organization/user slug, got {org!r}")
-        scope_terms.append(f"org:{org}")
+    scope = declared_search_scope(repo=repo, org=org, error_factory=EvictionDetectionError)
     return (
-        SearchQuery(
+        build_scoped_search_query(
             "approved_green_pr",
-            " ".join(["is:open", "is:pull-request", "review:approved", "status:success", *scope_terms]),
+            ["is:open", "is:pull-request", "review:approved", "status:success"],
+            scope=scope,
         ),
     )
 

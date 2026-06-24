@@ -9,8 +9,12 @@ import json
 import subprocess
 import urllib.parse
 
+import pytest
+
 from creator_engine_validator.forge.eviction_detection import (
+    EvictionDetectionError,
     RepairNeededEvent,
+    build_candidate_queries,
     detect_repair_needed,
     poll_repair_needed,
 )
@@ -122,6 +126,28 @@ def _search_hit(repo="creator-engine/creator-engine", number=17):
         "updated_at": "2026-06-23T00:00:00Z",
         "pull_request": {"url": f"https://api.github.com/repos/{repo}/pulls/{number}"},
     }
+
+
+def test_build_candidate_queries_refuses_unscoped_search_fail_closed():
+    with pytest.raises(EvictionDetectionError, match="explicit repo or org scope"):
+        build_candidate_queries()
+
+
+def test_build_candidate_queries_declares_repo_scope():
+    specs = build_candidate_queries(repo="creator-engine/creator-engine")
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.reason == "approved_green_pr"
+    assert spec.query == "is:open is:pull-request review:approved status:success repo:creator-engine/creator-engine"
+    assert spec.scope.kind == "repo"
+    assert spec.scope.value == "creator-engine/creator-engine"
+
+
+def test_build_candidate_queries_declares_org_scope():
+    specs = build_candidate_queries(org="creator-engine")
+    assert specs[0].query == "is:open is:pull-request review:approved status:success org:creator-engine"
+    assert specs[0].scope.kind == "org"
+    assert specs[0].scope.value == "creator-engine"
 
 
 def test_poll_repair_needed_uses_search_candidates_then_pr_state():

@@ -98,11 +98,127 @@ class PickupRateLimited(PickupError):
 
 
 @dataclass(frozen=True)
+class SearchScope:
+    """Explicit Search API blast-radius declaration for a query builder."""
+
+    kind: str
+    value: str | None = None
+    query_terms: tuple[str, ...] = ()
+
+    @classmethod
+    def repo(cls, repo: str) -> "SearchScope":
+        if not _REPO_SCOPE_RE.match(repo):
+            raise PickupError(f"--repo must be owner/name, got {repo!r}")
+        return cls("repo", repo, (f"repo:{repo}",))
+
+    @classmethod
+    def org(cls, org: str) -> "SearchScope":
+        if not _ORG_SCOPE_RE.match(org):
+            raise PickupError(f"--org must be a GitHub organization/user slug, got {org!r}")
+        return cls("org", org, (f"org:{org}",))
+
+    @classmethod
+    def viewer(cls) -> "SearchScope":
+        """Declare a query bounded by GitHub's authenticated-user ``@me`` selector."""
+        return cls("viewer", "@me", ())
+
+    def validate_query(self, query: str) -> None:
+        if self.kind == "repo":
+            if not self.value or not _REPO_SCOPE_RE.match(self.value):
+                raise PickupError("repo search scope requires a valid owner/name value")
+            expected = f"repo:{self.value}"
+            if expected not in self.query_terms:
+                raise PickupError(f"repo search scope requires matching query term {expected!r}")
+            terms = set(query.split())
+            if expected not in terms:
+                raise PickupError(
+                    "search query declared a scope but did not include its scope term(s): "
+                    + expected
+                )
+            return
+        if self.kind == "org":
+            if not self.value or not _ORG_SCOPE_RE.match(self.value):
+                raise PickupError("org search scope requires a valid organization/user slug value")
+            expected = f"org:{self.value}"
+            if expected not in self.query_terms:
+                raise PickupError(f"org search scope requires matching query term {expected!r}")
+            terms = set(query.split())
+            if expected not in terms:
+                raise PickupError(
+                    "search query declared a scope but did not include its scope term(s): "
+                    + expected
+                )
+            return
+        if self.kind == "viewer":
+            if self.value != "@me" or self.query_terms:
+                raise PickupError("viewer search scope must use value '@me' and no query terms")
+            if "@me" not in query:
+                raise PickupError("viewer-scoped search query must include an @me qualifier")
+            return
+        raise PickupError(f"unknown search scope kind {self.kind!r}")
+
+
+def declared_search_scope(
+    *,
+    repo: str | None = None,
+    org: str | None = None,
+    default: SearchScope | None = None,
+    error_factory: Callable[[str], Exception] = PickupError,
+) -> SearchScope:
+    """Resolve an explicit Search API scope or fail closed.
+
+    ``default`` is intentionally an explicit :class:`SearchScope`, not a string
+    fallback. Callers that permit current-user ``@me`` queries must say so with
+    ``SearchScope.viewer()``; callers that need repo/org blast-radius bounds
+    leave it unset and receive a fail-closed error when no scope is supplied.
+    """
+    if repo and org:
+        raise error_factory("repo and org are mutually exclusive search scopes")
+    if repo:
+        try:
+            return SearchScope.repo(repo)
+        except PickupError as exc:
+            raise error_factory(str(exc)) from exc
+    if org:
+        try:
+            return SearchScope.org(org)
+        except PickupError as exc:
+            raise error_factory(str(exc)) from exc
+    if default is not None:
+        if not isinstance(default, SearchScope):
+            raise error_factory("default search scope must be a SearchScope declaration")
+        return default
+    raise error_factory("search query requires an explicit repo or org scope declaration")
+
+
+def build_scoped_search_query(
+    reason: str,
+    terms: Sequence[str],
+    *,
+    scope: SearchScope,
+) -> "SearchQuery":
+    """Build a Search API query through the scope-declaration chokepoint."""
+    if not isinstance(scope, SearchScope):
+        raise PickupError("search query requires an explicit SearchScope declaration")
+    return SearchQuery(reason, " ".join([*terms, *scope.query_terms]), scope=scope)
+
+
+@dataclass(frozen=True)
 class SearchQuery:
     """One GitHub Search query and the pickup reason assigned to its hits."""
 
     reason: str
     query: str
+    scope: SearchScope
+
+    def __post_init__(self) -> None:
+        if not self.reason or not self.reason.strip():
+            raise PickupError("search query requires a non-empty reason")
+        if not self.query or not self.query.strip():
+            raise PickupError("search query requires a non-empty query")
+        if not isinstance(self.scope, SearchScope):
+            raise PickupError("search query requires an explicit SearchScope declaration")
+        self.scope.validate_query(self.query)
 
 
 def _default_transport(  # pragma: no cover - the lone live HTTPS shell; tests inject a fake

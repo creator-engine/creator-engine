@@ -147,6 +147,66 @@ def test_build_queries_maps_reasons_scopes_and_labels():
     assert specs[10].query == 'is:open is:issue label:"triage" repo:o/r'
     for spec in specs:
         _assert_explicit_search_type(spec.query)
+        assert spec.scope == pickup.SearchScope.repo("o/r")
+
+
+def test_search_query_without_declared_scope_fails_closed():
+    with pytest.raises(TypeError):
+        pickup.SearchQuery("unsafe", "is:open is:pull-request")
+    with pytest.raises(pickup.PickupError, match="SearchScope"):
+        pickup.SearchQuery("unsafe", "is:open is:pull-request", scope=None)
+
+
+def test_scoped_search_query_declared_scope_succeeds():
+    spec = pickup.build_scoped_search_query(
+        "review_requested",
+        ["is:open", "is:pull-request", "review-requested:@me"],
+        scope=pickup.SearchScope.viewer(),
+    )
+    assert spec.query == "is:open is:pull-request review-requested:@me"
+    assert spec.scope == pickup.SearchScope.viewer()
+
+
+def test_scoped_search_query_declared_scope_must_match_query_terms():
+    with pytest.raises(pickup.PickupError, match="scope term"):
+        pickup.SearchQuery(
+            "unsafe",
+            "is:open is:pull-request",
+            scope=pickup.SearchScope.repo("o/r"),
+        )
+
+
+def test_manual_repo_scope_without_value_fails_closed():
+    with pytest.raises(pickup.PickupError, match="valid owner/name"):
+        pickup.SearchQuery(
+            "unsafe",
+            "is:open is:pull-request",
+            scope=pickup.SearchScope("repo"),
+        )
+
+
+def test_manual_repo_scope_with_mismatched_term_fails_closed():
+    with pytest.raises(pickup.PickupError, match="matching query term"):
+        pickup.SearchQuery(
+            "unsafe",
+            "is:open is:pull-request repo:o/r",
+            scope=pickup.SearchScope("repo", "o/r", ("repo:other/repo",)),
+        )
+
+
+def test_manual_viewer_scope_shape_fails_closed():
+    with pytest.raises(pickup.PickupError, match="viewer search scope"):
+        pickup.SearchQuery(
+            "unsafe",
+            "is:open is:pull-request review-requested:@me",
+            scope=pickup.SearchScope("viewer", "someone", ()),
+        )
+
+
+def test_build_queries_declares_viewer_scope_when_repo_org_absent():
+    specs = pickup.build_queries()
+    assert specs
+    assert {spec.scope for spec in specs} == {pickup.SearchScope.viewer()}
 
 
 def test_build_queries_refuses_unscoped_label():
