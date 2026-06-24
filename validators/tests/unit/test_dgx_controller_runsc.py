@@ -140,7 +140,9 @@ def test_controller_wrapper_refuses_docker_network_by_default():
 
 
 def test_controller_detach_flag_uses_named_persistent_container():
-    result = run_wrapper("--detach", "tui")
+    result = run_wrapper(
+        "--detach", "tui", CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1"
+    )
 
     argv = dry_run_argv(result)
 
@@ -154,7 +156,10 @@ def test_controller_detach_flag_uses_named_persistent_container():
 
 def test_controller_detach_custom_container_name_propagates():
     result = run_wrapper(
-        "--detach", "tui", CE_DGX_CONTROLLER_CONTAINER_NAME="ce-controller-canary"
+        "--detach",
+        "tui",
+        CE_DGX_CONTROLLER_CONTAINER_NAME="ce-controller-canary",
+        CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1",
     )
 
     argv = dry_run_argv(result)
@@ -177,7 +182,11 @@ def test_controller_foreground_default_keeps_rm_not_detached():
 
 
 def test_controller_detach_env_triggers_detached_argv():
-    result = run_wrapper("tui", CE_DGX_CONTROLLER_DETACH="1")
+    result = run_wrapper(
+        "tui",
+        CE_DGX_CONTROLLER_DETACH="1",
+        CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1",
+    )
 
     argv = dry_run_argv(result)
 
@@ -188,10 +197,35 @@ def test_controller_detach_env_triggers_detached_argv():
 
 
 def test_controller_detach_keeps_oauth_token_passthrough_valueless():
-    result = run_wrapper("--detach", "tui")
+    result = run_wrapper(
+        "--detach", "tui", CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1"
+    )
 
     argv = dry_run_argv(result)
 
     assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
     assert not any(arg.startswith("CLAUDE_CODE_OAUTH_TOKEN=") for arg in argv)
     assert "synthetic-secret-token-value" not in result.stdout
+
+
+def test_controller_detach_refuses_token_env_without_optin():
+    # ce-ops#408 review: detached/named-persistent mode would leave CLAUDE_CODE_OAUTH_TOKEN
+    # in the container's inspectable metadata until `docker rm`; fail closed by default.
+    result = run_wrapper("--detach", "tui")
+
+    assert result.returncode == 78, result.stderr
+    assert "REFUSED" in result.stderr
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in result.stderr
+    assert "CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1" in result.stderr
+    # The token value never reaches stdout/stderr on the refusal path.
+    assert "synthetic-secret-token-value" not in result.stdout
+    assert "synthetic-secret-token-value" not in result.stderr
+
+
+def test_controller_foreground_passes_token_without_optin_and_no_retention_warning():
+    # Foreground uses --rm (scrubs metadata on exit), so no guard and no opt-in needed.
+    result = run_wrapper("tui")
+    argv = dry_run_argv(result)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
+    assert "--rm" in argv
+    assert "REFUSED" not in result.stderr

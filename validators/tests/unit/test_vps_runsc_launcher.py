@@ -189,12 +189,40 @@ def test_detach_dry_run_uses_named_persistent_run_without_rm() -> None:
 
 
 def test_detach_after_harness_uses_harness_aware_container_name() -> None:
-    argv = dry_run_argv(run_wrapper("--harness", "controller", "--detach", "tui"))
+    argv = dry_run_argv(
+        run_wrapper(
+            "--harness",
+            "controller",
+            "--detach",
+            "tui",
+            CE_VPS_ALLOW_DETACHED_TOKEN_ENV="1",
+        )
+    )
 
     assert "-d" in argv
     assert "--name" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-controller"
     assert "--rm" not in argv
+
+
+def test_detach_claude_harness_refuses_token_env_without_optin() -> None:
+    # ce-ops#408 review: a token-bearing harness in detached/named-persistent mode would
+    # leave CLAUDE_CODE_OAUTH_TOKEN in inspectable container metadata until `docker rm`.
+    # Codex detached stays tokenless (unaffected); claude/controller fails closed by default.
+    result = run_wrapper("--harness", "controller", "--detach", "tui")
+
+    assert result.returncode == 78, result.stderr
+    assert "REFUSED" in result.stderr
+    assert "CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1" in result.stderr
+    assert "synthetic-secret-token-value" not in result.stdout
+    assert "synthetic-secret-token-value" not in result.stderr
+
+
+def test_detach_codex_harness_needs_no_optin_tokenless() -> None:
+    # Codex detached carries no OAUTH token, so the guard does not apply.
+    argv = dry_run_argv(run_wrapper("--detach", "tui"))
+    assert "-d" in argv
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in argv
 
 
 def test_custom_container_name_propagates_to_name_flag() -> None:

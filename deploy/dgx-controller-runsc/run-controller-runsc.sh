@@ -190,6 +190,18 @@ if [ "${detach}" = "1" ]; then
   run_flags=(-d --name "${CE_DGX_CONTROLLER_CONTAINER_NAME}")
 fi
 
+# Secret-retention guard (ce-ops#408 review): the controller harness is always Claude, so
+# its --env CLAUDE_CODE_OAUTH_TOKEN lands in the container's inspectable metadata (docker
+# inspect Config.Env). In detached/named-persistent mode that survives until an explicit
+# `docker rm` — foreground --rm scrubbed it on container exit. Fail closed unless opted in.
+if [ "${detach}" = "1" ]; then
+  if [ "${CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV:-0}" != "1" ]; then
+    printf 'REFUSED: detached launch would persist CLAUDE_CODE_OAUTH_TOKEN in the named-persistent container inspectable metadata (docker inspect Config.Env) until "docker rm". Run foreground (omit --detach; --rm scrubs it on exit), or set CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1 to accept this secret-retention tradeoff.\n' >&2
+    exit 78
+  fi
+  printf 'WARNING: CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1 set — CLAUDE_CODE_OAUTH_TOKEN will persist in container metadata until docker rm.\n' >&2
+fi
+
 docker_cmd=(
   docker run "${run_flags[@]}"
   "--runtime=${CE_DGX_RUNTIME}"

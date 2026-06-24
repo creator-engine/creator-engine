@@ -244,6 +244,17 @@ docker_cmd=(
 )
 
 if [ "${image_harness}" = "claude" ]; then
+  # Secret-retention guard (ce-ops#408 review): a token-bearing --env lands in the
+  # container's inspectable metadata (docker inspect Config.Env). In detached/named-
+  # persistent mode that survives until an explicit `docker rm` — foreground --rm scrubbed
+  # it on container exit. Fail closed in detached mode unless the operator opts in.
+  if [ "${detach}" = "1" ] && [ "${CE_VPS_ALLOW_DETACHED_TOKEN_ENV:-0}" != "1" ]; then
+    printf 'REFUSED: detached launch would persist CLAUDE_CODE_OAUTH_TOKEN in the named-persistent container inspectable metadata (docker inspect Config.Env) until "docker rm". Run foreground (omit --detach; --rm scrubs it on exit), or set CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1 to accept this secret-retention tradeoff.\n' >&2
+    exit 78
+  fi
+  if [ "${detach}" = "1" ]; then
+    printf 'WARNING: CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1 set — CLAUDE_CODE_OAUTH_TOKEN will persist in container metadata until docker rm.\n' >&2
+  fi
   docker_cmd+=(--env "CLAUDE_CODE_OAUTH_TOKEN")
   if [ -n "${CE_VPS_CLAUDE_BIN}" ]; then
     docker_cmd+=(
