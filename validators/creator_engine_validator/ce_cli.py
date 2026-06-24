@@ -375,13 +375,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-tmux",
         action="store_true",
         help=(
-            "retired ce-ops#207 headless PTY request; fails closed. Use "
-            "--terminal-kind herdr for the live non-tmux inspectable backend."
+            "request the logged headless operator-inspectable visibility backend "
+            "instead of tmux"
         ),
     )
     launch.add_argument(
         "--terminal-kind",
-        choices=["tmux", "herdr"],
+        choices=["tmux", "headless", "herdr"],
         default=None,
         help="visibility backend terminal kind for the lane (default: tmux)",
     )

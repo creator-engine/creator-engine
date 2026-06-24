@@ -18,8 +18,9 @@ Design invariants (deliberate, load-bearing):
   deliberately copies the proven ``RunnerBackend`` ergonomics (string key,
   factory, fail-closed ``get_*``).
 * **Substrate-specific implementations.** ``TmuxVisibilityBackend`` remains a
-  THIN wrapper over ``tmux_adapter.TmuxAdapter``. ``HerdrVisibilityBackend`` is
-  the live non-tmux ``operator_inspectable`` implementation and drives herdr as a
+  THIN wrapper over ``tmux_adapter.TmuxAdapter``. ``HeadlessVisibilityBackend``
+  is a logged/streamed ``operator_inspectable`` implementation for autonomous
+  seats with no watched pane. ``HerdrVisibilityBackend`` drives herdr as a
   separate process over the substrate-owned control socket.
 * **No validator check.** Nothing here is ``@register``-ed; importing this
   module registers no validator check and runs no I/O on import.
@@ -27,9 +28,14 @@ Design invariants (deliberate, load-bearing):
 from __future__ import annotations
 
 import abc
+import json
+import os
 import shutil
+import subprocess
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +56,8 @@ from .tmux_adapter import TmuxAdapter, TmuxUnavailable
 
 # The terminal kind / visibility class vocabulary. ``operator_visible`` is the
 # tmux class (a human can attach a live pane); ``operator_inspectable`` is the
-# headless class (a recorded surface, no live pane) reserved for W2. Both satisfy
-# the visibility *contract* — see the C1 gate (W2).
+# non-tmux class (a recorded surface, no live pane). Both satisfy the visibility
+# *contract*.
 TMUX_TERMINAL_KIND = "tmux"
 HEADLESS_TERMINAL_KIND = "headless"
 OPERATOR_VISIBLE = "operator_visible"
@@ -60,8 +66,8 @@ OPERATOR_INSPECTABLE = "operator_inspectable"
 # The visibility classes that SATISFY the visibility contract (the C1 gate).
 # A visibility-required role may launch onto any backend whose class is here;
 # an unknown / non-satisfying surface is still refused (the load-bearing
-# refusal). ``operator_inspectable`` = the headless attachable-and-emitting
-# class CE owns via a PTY + recorded evidence spine (W2′).
+# refusal). ``operator_inspectable`` = a non-tmux surface with an inspectable
+# evidence spine.
 SATISFYING_VISIBILITY_CLASSES = frozenset({OPERATOR_VISIBLE, OPERATOR_INSPECTABLE})
 
 
@@ -328,19 +334,27 @@ class HerdrVisibilityBackend(VisibilityBackend):
         return self._last_session.wait_agent_status(pane, status=status)
 
 
-class HeadlessVisibilityBackend(VisibilityBackend):
-    """Retired ``headless`` backend placeholder.
+def _headless_surface_slug(value: str) -> str:
+    slug = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in value)
+    return slug.strip(".-") or "surface"
 
-    The #368 ``pty.fork`` byte tap has been retired by ce-ops#217 U3. The
-    historical ``headless`` terminal kind remains schema-valid for old records,
-    but no live backend is registered for it and no production path forks a PTY.
+
+class HeadlessVisibilityBackend(VisibilityBackend):
+    """Logged/streamed ``operator_inspectable`` backend with no tmux pane.
+
+    The surface contract is a seat-owned evidence directory under ``seat_dir``:
+    ``stream.log`` receives combined stdout/stderr from the launched command and
+    ``surface.json`` records the surface ref, child pid, and log path. Operators
+    can inspect the manifest/log through normal filesystem access without a live
+    tmux pane. This intentionally uses ``subprocess.Popen`` with file-backed
+    streams rather than the retired hand-rolled PTY byte tap.
     """
 
     terminal_kind = HEADLESS_TERMINAL_KIND
     visibility_class = OPERATOR_INSPECTABLE
 
     def is_available(self) -> bool:
-        return False
+        return True
 
     def ensure_surface(
         self,
@@ -352,9 +366,65 @@ class HeadlessVisibilityBackend(VisibilityBackend):
         env: Mapping[str, str] | None = None,
         seat_dir: str | None = None,
     ) -> SurfaceHandle:
-        raise VisibilityBackendError(
-            "terminal_kind='headless' is retired; use terminal_kind='herdr' for "
-            "the live operator_inspectable socket-backed surface"
+        if not seat_dir:
+            raise VisibilityBackendError(
+                "the headless visibility backend requires a seat_dir for its "
+                "operator-inspectable log surface"
+            )
+        root = (
+            Path(seat_dir)
+            / "headless"
+            / (
+                f"{_headless_surface_slug(session)}-"
+                f"{_headless_surface_slug(window)}-{uuid.uuid4().hex[:8]}"
+            )
+        )
+        root.mkdir(parents=True, exist_ok=True)
+        log_path = root / "stream.log"
+        manifest_path = root / "surface.json"
+        surface_ref = str(manifest_path)
+        merged_env = os.environ.copy()
+        if env:
+            merged_env.update(dict(env))
+        try:
+            stream = log_path.open("ab")
+            try:
+                process = subprocess.Popen(
+                    list(command),
+                    cwd=cwd,
+                    env=merged_env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                    close_fds=True,
+                )
+            finally:
+                stream.close()
+        except OSError as exc:
+            raise VisibilityBackendError(
+                f"headless visibility launch failed: {exc}"
+            ) from exc
+        manifest = {
+            "kind": HEADLESS_TERMINAL_KIND,
+            "visibility": self.visibility_class,
+            "surface_ref": surface_ref,
+            "pid": process.pid,
+            "stream_ref": str(log_path),
+            "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        terminal: dict[str, Any] = {
+            "kind": HEADLESS_TERMINAL_KIND,
+            "surface_ref": surface_ref,
+            "pid": process.pid,
+        }
+        return SurfaceHandle(
+            visibility_class=self.visibility_class,
+            terminal=terminal,
+            native=process,
         )
 
 
@@ -402,8 +472,9 @@ def available_visibility_kinds() -> tuple[str, ...]:
 # fresh adapter-backed instance; when the caller injects a tmux adapter (the
 # existing test seam), the launcher constructs the backend directly instead.
 register_visibility_backend(TMUX_TERMINAL_KIND, TmuxVisibilityBackend)
+# The headless backend is the logged/streamed operator_inspectable surface for
+# autonomous contained seats with no tmux pane.
+register_visibility_backend(HEADLESS_TERMINAL_KIND, HeadlessVisibilityBackend)
 # The herdr backend (ce-ops#217 U3): the live operator_inspectable surface over
-# a controller-owned herdr control socket. The retired #368 headless PTY backend
-# is intentionally NOT registered, so ``terminal_kind=headless`` fails closed
-# before any live ``pty.fork`` path can be reached.
+# a controller-owned herdr control socket.
 register_visibility_backend(HERDR_TERMINAL_KIND, HerdrVisibilityBackend)
