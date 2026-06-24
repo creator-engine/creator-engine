@@ -210,6 +210,14 @@ def run_poll_loop(
         raise IntegratorBeltError("interval_seconds must be >= 0")
     if repo and org:
         raise IntegratorBeltError("repo and org are mutually exclusive")
+    if not repo and not org:
+        # Fail closed: an unscoped poll would build a GitHub search across every
+        # approved+green PR the token can see and then publish/requeue/merge them.
+        # The belt must act only within an explicit repo or org scope (ce-ops#218 review).
+        raise IntegratorBeltError(
+            "run_poll_loop refuses an unscoped poll; supply repo or org "
+            "(the belt must not act across every PR a token can see)"
+        )
 
     ticks: list[BeltPollTick] = []
     for index in range(1, iterations + 1):

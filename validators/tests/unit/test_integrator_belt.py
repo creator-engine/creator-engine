@@ -117,6 +117,24 @@ def test_poll_loop_detects_resolves_executes_and_logs():
     assert [entry["action"] for entry in logs] == ["poll_start", "poll_complete", "event_outcome"]
 
 
+def test_poll_loop_refuses_unscoped_fail_closed():
+    # ce-ops#218 review: a live merge-queue belt must NOT poll/act across every PR a
+    # token can see. run_poll_loop fails closed when neither repo nor org is scoped.
+    adapter = FakeBeltAdapter(())
+    raised = None
+    try:
+        belt.run_poll_loop(
+            token="ghp_fake",
+            repair_adapter=adapter,
+            iterations=1,
+            interval_seconds=0,
+            poller=_poller,
+        )
+    except belt.IntegratorBeltError as exc:
+        raised = exc
+    assert raised is not None and "unscoped" in str(raised)
+    assert adapter.published == 0
+
 def test_live_action_runner_refuses_semantic_conflict_without_execute(tmp_path: Path):
     adapter = FakeBeltAdapter(
         (

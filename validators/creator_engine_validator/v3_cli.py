@@ -4059,7 +4059,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "queue-poll",
         help="run a bounded, witnessable Integrator merge-queue repair poll (ce-ops#218)",
     )
-    qp_scope = p_queue_poll.add_mutually_exclusive_group()
+    # Scope is REQUIRED: a live merge-queue belt must never poll/act across every
+    # approved+green PR a token can see (ce-ops#218 review). Fail closed if unscoped.
+    qp_scope = p_queue_poll.add_mutually_exclusive_group(required=True)
     qp_scope.add_argument("--repo", default=None, help="owner/name repository scope")
     qp_scope.add_argument("--org", default=None, help="org/user search scope")
     p_queue_poll.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
