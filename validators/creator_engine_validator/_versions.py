@@ -157,6 +157,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # family; shares the boundary-neutral Search core (pickup_search) with
         # the v1 poller, so no v1<->v3 import edge is created.
         "forge.review_pickup",
+        # ce-ops#95: pure fleet-liveness read-model for `ce seats ls`, reading
+        # lifecycle/sentinel state files only. v3 forge surface; imports no v1.
+        "forge.seats_status",
         # ce-ops#216 Unit 2: deterministic, read-only integrator conflict resolvers
         # for known mechanical families. Pure data transforms; no executor/push/
         # credential authority. v3 forge adapter family, imports no v1 module.

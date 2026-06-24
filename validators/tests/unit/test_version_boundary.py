@@ -150,9 +150,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#188 decoupled review-pickup to v3 (``forge.review_pickup``) — routes
     # awaiting-review PRs to non-author seats; shares the boundary-neutral Search
     # core (``pickup_search``, classified ``shared``): 55 -> 56.
-    # ce-ops#228 PR-1 added the offline transport-deputy policy seam
-    # (``forge.transport_deputy_policy``): 56 -> 57.
-    assert len(ver.V3_RUNTIME) == 57
+    # ce-ops#228 PR-1 added ``forge.transport_deputy_policy`` (56 -> 57);
+    # ce-ops#95 added ``forge.seats_status`` for fleet-liveness listing (57 -> 58).
+    assert len(ver.V3_RUNTIME) == 58
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -202,6 +202,7 @@ def test_classify_lines():
     assert ver.classify("forge.integrator_executor") == ver.V3
     assert ver.classify("forge.integrator_runner") == ver.V3
     assert ver.classify("forge.transport_deputy_policy") == ver.V3
+    assert ver.classify("forge.seats_status") == ver.V3
     assert ver.classify("loader") == ver.SHARED
     assert ver.classify("runtime_evidence_spine") == ver.SHARED  # deliberate call
     assert ver.classify("evidence_sink") == ver.V3              # deliberate call
