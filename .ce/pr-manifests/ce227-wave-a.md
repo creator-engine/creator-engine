@@ -4,11 +4,12 @@ Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention). 
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=736e318865be6ce9dce6f66f5c7eac5cab01e9db19f6dd38da529748a1f4cdc3
+AUTHORIZED_PATHS_SHA256=739b16c0000d5f7c77a2ad1d7e873ede34f4ba2a4b4ce9e49ceb1c0b02859480
 
 ```text
+.ce/changelog/ce227-wave-a.md
 .ce/pr-manifests/ce227-wave-a.md
 deploy/dgx-runsc/run-codex-runsc.sh
 deploy/vps-runsc/run-vps-runsc.sh
