@@ -26,9 +26,9 @@ from ..pickup_search import (
     PickupError,
     SearchQuery,
     Transport,
+    build_scoped_search_query,
+    declared_search_scope,
     _PR_SEARCH_TYPE,
-    _ORG_SCOPE_RE,
-    _REPO_SCOPE_RE,
     _default_transport,
     _issue_number,
     _search_once,
@@ -53,8 +53,6 @@ class ReviewPickupResult:
 
 def review_pickup_query(*, repo: str | None = None, org: str | None = None) -> SearchQuery:
     """Build the controller feed query for open PRs that may need review routing."""
-    if repo and org:
-        raise PickupError("--repo and --org are mutually exclusive search scopes")
     if not repo and not org:
         # Fail closed: an unscoped query builds `is:open is:pull-request` across every
         # open PR the token can see; with --apply that would request reviewers and
@@ -64,16 +62,8 @@ def review_pickup_query(*, repo: str | None = None, org: str | None = None) -> S
             "review pickup refuses an unscoped query; supply repo or org "
             "(must not act across every PR a token can see)"
         )
-    scope_terms: list[str] = []
-    if repo:
-        if not _REPO_SCOPE_RE.match(repo):
-            raise PickupError(f"--repo must be owner/name, got {repo!r}")
-        scope_terms.append(f"repo:{repo}")
-    if org:
-        if not _ORG_SCOPE_RE.match(org):
-            raise PickupError(f"--org must be a GitHub organization/user slug, got {org!r}")
-        scope_terms.append(f"org:{org}")
-    return SearchQuery("awaiting_review", " ".join(["is:open", _PR_SEARCH_TYPE, *scope_terms]))
+    scope = declared_search_scope(repo=repo, org=org)
+    return build_scoped_search_query("awaiting_review", ["is:open", _PR_SEARCH_TYPE], scope=scope)
 
 
 def poll_review_pickup(

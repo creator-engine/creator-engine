@@ -124,6 +124,8 @@ def test_review_pickup_query_is_typed_and_scoped():
     spec = review_pickup.review_pickup_query(repo="o/r")
     assert spec.reason == "awaiting_review"
     assert spec.query == "is:open is:pull-request repo:o/r"
+    assert spec.scope.kind == "repo"
+    assert spec.scope.value == "o/r"
     _assert_explicit_search_type(spec.query)
 
 

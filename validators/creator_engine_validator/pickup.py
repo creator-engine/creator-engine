@@ -65,8 +65,11 @@ from .pickup_search import (  # noqa: F401  (re-exported for the v1 CLI + caller
     PickupError,
     PickupRateLimited,
     SearchQuery,
+    SearchScope,
     TOKEN_ENV,
     Transport,
+    build_scoped_search_query,
+    declared_search_scope,
     _ISSUE_SEARCH_TYPE,
     _ORG_SCOPE_RE,
     _PR_SEARCH_TYPE,
@@ -108,20 +111,13 @@ def build_queries(
     normalized_labels = _normalize_labels(labels)
     if normalized_labels and not (repo or org):
         raise PickupError("--label requires an explicit Search scope: supply --repo owner/name or --org slug")
-    scope_terms: list[str] = []
-    if repo:
-        if not _REPO_SCOPE_RE.match(repo):
-            raise PickupError(f"--repo must be owner/name, got {repo!r}")
-        scope_terms.append(f"repo:{repo}")
-    if org:
-        if not _ORG_SCOPE_RE.match(org):
-            raise PickupError(f"--org must be a GitHub organization/user slug, got {org!r}")
-        scope_terms.append(f"org:{org}")
+    scope = declared_search_scope(repo=repo, org=org, default=SearchScope.viewer())
 
     specs = [
-        SearchQuery(
+        build_scoped_search_query(
             "review_requested",
-            " ".join(["is:open", _PR_SEARCH_TYPE, "review-requested:@me", *scope_terms]),
+            ["is:open", _PR_SEARCH_TYPE, "review-requested:@me"],
+            scope=scope,
         ),
     ]
     for reason, selector in (
@@ -129,12 +125,16 @@ def build_queries(
         ("mention", "mentions:@me"),
     ):
         specs.extend(
-            SearchQuery(reason, " ".join(["is:open", search_type, selector, *scope_terms]))
+            build_scoped_search_query(reason, ["is:open", search_type, selector], scope=scope)
             for search_type in (_PR_SEARCH_TYPE, _ISSUE_SEARCH_TYPE)
         )
     for label in normalized_labels:
         specs.extend(
-            SearchQuery("labeled", " ".join(["is:open", search_type, _label_term(label), *scope_terms]))
+            build_scoped_search_query(
+                "labeled",
+                ["is:open", search_type, _label_term(label)],
+                scope=scope,
+            )
             for search_type in (_PR_SEARCH_TYPE, _ISSUE_SEARCH_TYPE)
         )
     return tuple(specs)
