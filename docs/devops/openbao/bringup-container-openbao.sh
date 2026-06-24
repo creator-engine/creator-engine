@@ -202,6 +202,14 @@ export CE_OPENBAO_CONTAINER_WORKDIR=$WORKDIR_REAL
 EOF
 }
 
+prepare_container_mount_permissions() {
+  # Only expose value-free files the container must read/write. Init output and
+  # live-test env remain private below.
+  chmod o+rx "$WORKDIR_REAL" "$POLICY_DIR"
+  chmod o+r "$CONFIG_PATH" "$POLICY_DIR"/*.hcl
+  chmod o+rwx "$WORKDIR_REAL/raft" "$WORKDIR_REAL/logs"
+}
+
 plan() {
   cat <<EOF
 OpenBao container go-live dry-run plan
@@ -244,6 +252,7 @@ apply() {
   while IFS= read -r dev_id; do
     render_dev_policy "$dev_id" > "$POLICY_DIR/ce-${dev_id}-runtime.hcl"
   done < <(split_dev_ids)
+  prepare_container_mount_permissions
 
   run_container rm -f "$OPENBAO_CONTAINER_NAME" >/dev/null 2>&1 || true
   run_container run -d \
