@@ -82,6 +82,11 @@ CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
 CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
 CE_DGX_CONTAINER_NAME="${CE_DGX_CONTAINER_NAME:-ce-dgx-codex}"
 
+container_term="${TERM:-}"
+if [ -z "${container_term}" ] || [ "${container_term}" = "dumb" ]; then
+  container_term="xterm-256color"
+fi
+
 if [ "${CE_DGX_CODEX_HOME_MODE}" != "rw" ] && [ "${CE_DGX_CODEX_HOME_MODE}" != "ro" ]; then
   printf 'CE_DGX_CODEX_HOME_MODE must be rw or ro, got %s\n' "${CE_DGX_CODEX_HOME_MODE}" >&2
   exit 2
@@ -174,7 +179,7 @@ docker_cmd=(
   --env "XDG_CONFIG_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/config"
   --env "XDG_STATE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/state"
   --env "XDG_CACHE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/cache"
-  --env "TERM=${TERM:-xterm-256color}"
+  --env "TERM=${container_term}"
   --env "CE_DGX_HARNESS=codex"
   --env "CE_DGX_HARNESS_BIN=/usr/local/bin/codex"
   --env "CE_DGX_HARNESS_HOME=${CE_DGX_CONTAINER_HOME}"
@@ -214,9 +219,43 @@ cid="$("${docker_cmd[@]}")" || {
 }
 printf 'started detached container %s (%s)\n' "${CE_DGX_CONTAINER_NAME}" "${cid:0:12}"
 
+herdr_pane_list_has_entries() {
+  python3 -c '
+import json
+import sys
+
+text = sys.stdin.read().strip()
+if not text:
+    raise SystemExit(1)
+try:
+    data = json.loads(text)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+
+def has_pane(value):
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        for key in ("result", "panes", "pane", "items"):
+            if key in value and has_pane(value[key]):
+                return True
+        return False
+    return bool(value)
+
+raise SystemExit(0 if has_pane(data) else 1)
+'
+}
+
+herdr_ready() {
+  local pane_list
+  docker exec "${CE_DGX_CONTAINER_NAME}" test -S "${CE_DGX_HERDR_SOCKET_PATH}" >/dev/null 2>&1 || return 1
+  pane_list="$(docker exec --env "HERDR_SOCKET_PATH=${CE_DGX_HERDR_SOCKET_PATH}" "${CE_DGX_CONTAINER_NAME}" herdr pane list 2>/dev/null)" || return 1
+  herdr_pane_list_has_entries <<<"${pane_list}"
+}
+
 ready=0
 for _ in $(seq 1 60); do
-  if docker exec "${CE_DGX_CONTAINER_NAME}" herdr pane read w1:p1 >/dev/null 2>&1; then
+  if herdr_ready; then
     ready=1
     break
   fi
