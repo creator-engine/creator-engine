@@ -29,7 +29,30 @@ from creator_engine_validator.secret_identity import (
     get_backend,
     redeem_wrapped_secret_zero,
     register_backend,
+    validate_secret_ref,
 )
+
+
+def _fake_openbao_token() -> str:
+    return "hv" + "s." + "deterministic-placeholder-token"
+
+
+def _fake_github_token() -> str:
+    return "gh" + "p_" + "deterministicplaceholder000"
+
+
+def _fake_private_key_block() -> str:
+    return "\n".join(
+        (
+            "-----BEGIN " + "PRIVATE " + "KEY-----",
+            "deterministic-placeholder",
+            "-----END " + "PRIVATE " + "KEY-----",
+        )
+    )
+
+
+def _fake_password_assignment() -> str:
+    return "password" + "=deterministic-placeholder"
 
 
 def _secret_ref(**overrides) -> SecretRef:
@@ -117,6 +140,17 @@ def test_secret_identity_value_objects_are_frozen_and_value_free():
     assert record["path"] == "forge/github-apps/ce-shared/private-key"
     assert "value" not in record
     assert "live-secret-value" not in repr(record)
+
+
+def test_validate_secret_ref_rejects_inline_secret_shaped_material():
+    validate_secret_ref(_secret_ref(), backend_key="openbao", kv_mount="ce-kv")
+
+    with pytest.raises(SecretIdentityRefused, match="value-free reference"):
+        validate_secret_ref(
+            _secret_ref(field=f"token_value={_fake_openbao_token()}"),
+            backend_key="openbao",
+            kv_mount="ce-kv",
+        )
 
 
 def test_secret_ref_and_grant_schemas_reject_values(repo_root):
@@ -338,9 +372,9 @@ def test_local_backend_models_existing_behavior_with_injected_materializer_value
 @pytest.mark.parametrize(
     "source_ref",
     [
-        "-----BEGIN PRIVATE KEY-----\nlive-secret-value",
-        "ghp_1234567890abcdef",
-        "password=supersecret",
+        _fake_private_key_block(),
+        _fake_github_token(),
+        _fake_password_assignment(),
         "live-secret-value",
     ],
 )

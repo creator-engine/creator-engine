@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator.openbao_golive import openbao_live_env_expectations
+
 
 @pytest.mark.skipif(
     os.environ.get("CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE") != "1",
-    reason="set CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE=1 to download and verify OpenBao 2.5.5",
+    reason=openbao_live_env_expectations("production-config"),
 )
 def test_openbao_255_accepts_rendered_production_config(
     repo_root: Path,

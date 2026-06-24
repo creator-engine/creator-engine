@@ -10,13 +10,38 @@ from creator_engine_validator.openbao_golive import (
     GO_LIVE_ARTIFACTS,
     read_go_live_artifact,
     validate_emergency_revoke_script,
+    validate_migration_gate_evidence,
+    openbao_live_env_expectations,
+    resolve_live_openbao_binary,
     validate_per_dev_policy_template,
     validate_policy_renderer,
+    validate_live_openbao_binary,
     validate_provision_script,
+    validate_restore_drill_proof,
+    validate_secret_migration_inventory_tsv,
+    validate_secret_placeholders_in_runbook,
     validate_snapshot_restore_scripts,
     validate_systemd_unit,
     validate_tailnet_tls_hcl,
 )
+
+
+def _fake_openbao_token(prefix: str = "hvs", suffix: str = "deterministic-placeholder-token") -> str:
+    return prefix + "." + suffix
+
+
+def _fake_private_key_block() -> str:
+    return "\n".join(
+        (
+            "-----BEGIN " + "PRIVATE " + "KEY-----",
+            "deterministic-placeholder",
+            "-----END " + "PRIVATE " + "KEY-----",
+        )
+    )
+
+
+def _fake_password_assignment() -> str:
+    return "password" + "=deterministic-placeholder"
 
 
 def _write_executable(path: Path, text: str) -> Path:
@@ -28,6 +53,34 @@ def _write_executable(path: Path, text: str) -> Path:
 def test_openbao_golive_artifacts_exist(repo_root: Path):
     missing = [path for path in GO_LIVE_ARTIFACTS if not (repo_root / path).is_file()]
     assert missing == []
+
+
+def test_openbao_live_env_expectations_are_operator_facing():
+    production = openbao_live_env_expectations("production-config")
+    restore = openbao_live_env_expectations("restore-drill")
+
+    assert "CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE=1" in production
+    assert "curl, openssl, sha256sum, tar" in production
+    assert "CE_OPENBAO_BIN" in restore
+    assert "no production BAO_ADDR, BAO_TOKEN, unseal key, or secret value" in restore
+
+
+def test_openbao_live_binary_prerequisite_validation(tmp_path: Path):
+    assert "CE_OPENBAO_BIN" in validate_live_openbao_binary({})[0]
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(tmp_path / "missing-bao")}) == [
+        f"CE_OPENBAO_BIN must point to a file, got {str(tmp_path / 'missing-bao')!r}"
+    ]
+
+    not_executable = tmp_path / "not-executable-bao"
+    not_executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(not_executable)}) == [
+        f"CE_OPENBAO_BIN must point to an executable bao binary, got {str(not_executable)!r}"
+    ]
+
+    bao_bin = _write_executable(tmp_path / "bao", "#!/usr/bin/env bash\nexit 0\n")
+
+    assert validate_live_openbao_binary({"CE_OPENBAO_BIN": str(bao_bin)}) == []
+    assert resolve_live_openbao_binary({"CE_OPENBAO_BIN": str(bao_bin)}) == bao_bin
 
 
 def test_openbao_hcl_is_raft_tailnet_tls_and_audit_fail_closed(repo_root: Path):
@@ -136,6 +189,154 @@ def test_operator_bringup_requires_post_unseal_audit_reload(repo_root: Path):
     assert "sudo systemctl reload openbao.service" in runbook
     assert "bao audit list" in runbook
     assert "before continuing" in runbook
+
+
+def test_operator_runbooks_keep_secret_exports_as_placeholders(repo_root: Path):
+    runbooks = "\n".join(
+        read_go_live_artifact(repo_root, path)
+        for path in (
+            "docs/devops/openbao-production-golive.md",
+            "docs/devops/openbao-operator-bringup.md",
+        )
+    )
+
+    assert validate_secret_placeholders_in_runbook(runbooks) == []
+    assert validate_secret_placeholders_in_runbook(f'export BAO_TOKEN="{_fake_openbao_token("ba" + "o")}"') == [
+        "BAO_TOKEN must be documented as a placeholder or SecretRef, not an inline value"
+    ]
+
+
+def test_restore_drill_proof_is_value_free_and_rejects_secret_shaped_material():
+    proof = {
+        "ok": True,
+        "checked_at": "2026-06-24T00:00:00Z",
+        "canary_field": "ok",
+        "snapshot_ref": "snapshot-ref:openbao/post-import-001",
+    }
+
+    assert validate_restore_drill_proof(proof) == []
+    violations = validate_restore_drill_proof(
+        proof
+        | {
+            "token": _fake_openbao_token(),
+            "canary_value": _fake_private_key_block(),
+        }
+    )
+    assert "restore proof must not include secret-bearing field token" in violations
+    assert "restore proof field canary_value contains inline secret-shaped material" in violations
+
+
+def test_migration_gate_requires_inventory_restore_rollback_and_ratification_evidence():
+    record = {
+        "source_inventory_ref": "inventory-ref:openbao/migration-window-001",
+        "path_mapping_ref": "mapping-ref:openbao/migration-window-001",
+        "restore_drill_proof_ref": "restore-proof:openbao/restore-drill-001",
+        "encrypted_snapshot_ref": "snapshot-ref:openbao/pre-migration-001",
+        "audit_fail_closed_evidence_ref": "audit-ref:openbao/fail-closed-001",
+        "rollback_plan_ref": "rollback-ref:openbao/migration-window-001",
+        "operator_ratification_ref": "operator-attestation:ce-ops-113/openbao-window-001",
+        "operator_ratified": True,
+        "live_secret_migration_enabled": False,
+        "secret_refs": ["secret-ref:ce-kv/devs/dev-1/runtime/example"],
+    }
+
+    assert validate_migration_gate_evidence(record) == []
+    missing = validate_migration_gate_evidence(record | {"source_inventory_ref": "", "operator_ratified": False})
+    assert "source inventory evidence is required before migration" in missing
+    assert "operator ratification evidence is required before migration" in missing
+    leaked = validate_migration_gate_evidence(
+        record
+        | {
+            "live_secret_migration_enabled": True,
+            "restore_drill_proof_ref": _fake_openbao_token(),
+            "secret_refs": [f"secret-ref:{_fake_openbao_token()}"],
+        }
+    )
+    assert "restore proof evidence is required before migration" in leaked
+    assert "readiness evidence must not enable live secret migration" in leaked
+    assert "migration gate secret_refs must be SecretRef placeholders only" in leaked
+
+
+def test_secret_migration_inventory_template_is_value_free(repo_root: Path):
+    inventory = read_go_live_artifact(repo_root, "docs/devops/openbao/secret-migration-inventory.tsv")
+
+    assert validate_secret_migration_inventory_tsv(inventory) == []
+
+
+def test_secret_migration_inventory_validator_rejects_values_and_bad_refs():
+    inventory = "\n".join(
+        (
+            "record_id\tsecret_class\tsource_ref\ttarget_ref\towner_ref\trotation_ref\trollback_ref\tevidence_ref\tstatus\tnotes",
+            "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1\topenbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\trotation-ref:dev-1\trollback-ref:legacy/dev-1\tevidence-ref:issue-113\tplanned\tvalue-free",
+        )
+    )
+    assert validate_secret_migration_inventory_tsv(inventory) == []
+
+    violations = validate_secret_migration_inventory_tsv(
+        inventory.replace("source-ref:legacy/dev-1", _fake_openbao_token()).replace(
+            "value-free", _fake_password_assignment()
+        )
+    )
+    assert "line 2: invalid source_ref" in violations
+    assert "line 2: source_ref contains inline secret-shaped material" in violations
+    assert "line 2: notes contains inline secret-shaped material" in violations
+
+
+def test_secret_migration_inventory_validator_rejects_shell_parity_secret_markers():
+    header = (
+        "record_id\tsecret_class\tsource_ref\ttarget_ref\towner_ref\trotation_ref\t"
+        "rollback_ref\tevidence_ref\tstatus\tnotes"
+    )
+    base_row = (
+        "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1\t"
+        "openbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\t"
+        "rotation-ref:dev-1\trollback-ref:legacy/dev-1\tevidence-ref:issue-113\t"
+        "planned\t{notes}"
+    )
+
+    for marker in (
+        _fake_openbao_token(suffix="x"),
+        _fake_openbao_token(prefix="hv" + "b", suffix="x"),
+        _fake_openbao_token(prefix="ba" + "o", suffix="x"),
+        "client" + "_secret=placeholder",
+        "credential" + "=placeholder",
+        "-----BEGIN " + "CERTIFICATE-----",
+    ):
+        violations = validate_secret_migration_inventory_tsv(
+            "\n".join((header, base_row.format(notes=marker)))
+        )
+
+        assert "line 2: notes contains inline secret-shaped material" in violations
+
+
+def test_secret_migration_inventory_validator_rejects_duplicate_ids_and_targets():
+    inventory = "\n".join(
+        (
+            "record_id\tsecret_class\tsource_ref\ttarget_ref\towner_ref\trotation_ref\trollback_ref\tevidence_ref\tstatus\tnotes",
+            "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1\topenbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\trotation-ref:dev-1\trollback-ref:legacy/dev-1\tevidence-ref:issue-113\tplanned\tvalue-free",
+            "dev-1-runtime-token\truntime_secret\tsource-ref:legacy/dev-1-next\topenbao-ref:ce-kv/devs/dev-1/runtime/example\towner-ref:dev-1\trotation-ref:dev-1\trollback-ref:legacy/dev-1-next\tevidence-ref:issue-113\tplanned\tvalue-free",
+        )
+    )
+
+    violations = validate_secret_migration_inventory_tsv(inventory)
+
+    assert "line 3: duplicate record_id" in violations
+    assert "line 3: duplicate target_ref" in violations
+
+
+def test_secret_migration_inventory_shell_verifier_accepts_template(repo_root: Path):
+    completed = subprocess.run(
+        [
+            str(repo_root / "docs/devops/openbao/verify-secret-migration-inventory.sh"),
+            str(repo_root / "docs/devops/openbao/secret-migration-inventory.tsv"),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    assert "PASS value-free OpenBao migration inventory" in completed.stdout
 
 
 def test_provision_plan_refuses_public_listener(repo_root: Path):

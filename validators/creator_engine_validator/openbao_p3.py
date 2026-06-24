@@ -11,6 +11,7 @@ No function in this module imports validator checks or performs I/O on import.
 from __future__ import annotations
 
 import json
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -27,6 +28,7 @@ from .secret_identity import (
     SecretIdentityError,
     SecretIdentityRefused,
     SecretRef,
+    validate_secret_ref,
 )
 
 
@@ -43,6 +45,11 @@ _FORBIDDEN_GOVERNANCE_MARKERS = (
     "ratification",
     "controller-key",
     "private-key-root",
+)
+_VALUE_FREE_REF_RE = re.compile(
+    r"^(?:secret-ref|evidence-ref|inventory-ref|mapping-ref|restore-proof|"
+    r"snapshot-ref|rollback-ref|operator-attestation):"
+    r"[A-Za-z0-9][A-Za-z0-9._:/@#-]{0,191}$"
 )
 
 
@@ -119,6 +126,27 @@ class OpenBaoDeploymentPlan:
     __str__ = __repr__
 
 
+@dataclass(frozen=True)
+class OpenBaoMigrationReadiness:
+    """Value-free evidence required before live secret migration."""
+
+    source_inventory_ref: str
+    path_mapping_ref: str
+    restore_drill_proof_ref: str
+    audit_fail_closed_evidence_ref: str
+    encrypted_snapshot_ref: str
+    rollback_plan_ref: str
+    operator_ratification_ref: str
+    per_dev_secret_refs: tuple[SecretRef, ...]
+    dry_run_completed: bool = True
+    production_writes_enabled: bool = False
+
+
+def _validate_value_free_ref(value: str, label: str) -> None:
+    if not isinstance(value, str) or not _VALUE_FREE_REF_RE.fullmatch(value):
+        raise SecretIdentityRefused(f"{label} must be a value-free evidence/reference pointer")
+
+
 def _ref_violates_p3_cotenancy(ref: SecretRef) -> bool:
     haystack = " ".join((ref.path, ref.field, ref.purpose, ref.owner_ref)).lower()
     return any(marker in haystack for marker in _FORBIDDEN_GOVERNANCE_MARKERS)
@@ -136,11 +164,16 @@ def _validate_deployment_config(config: OpenBaoDeploymentConfig) -> None:
     if not config.audit_fail_closed_probe:
         raise SecretIdentityRefused("OpenBao P3 requires audit-fail-closed verification")
     for ref in config.allowed_secret_refs:
+        validate_secret_ref(ref, backend_key="openbao")
         if _ref_violates_p3_cotenancy(ref):
             raise SecretIdentityRefused(
                 f"SecretRef {ref.mount}/{ref.path} is forbidden in the P3 runtime-token instance"
             )
     if config.profile == "local-ephemeral":
+        if not config.allowed_secret_refs:
+            raise SecretIdentityRefused(
+                "OpenBao P3 local execution requires explicit allowed SecretRefs"
+            )
         if config.network_exposure != "local-loopback-only":
             raise SecretIdentityRefused("local OpenBao P3 tests must be loopback-only")
         if not config.address.startswith(_LOCAL_LOOPBACK_PREFIXES):
@@ -153,8 +186,39 @@ def _validate_deployment_config(config: OpenBaoDeploymentConfig) -> None:
             raise SecretIdentityRefused("controller OpenBao P3 must be TLS-only")
         if not config.ca_bundle_ref:
             raise SecretIdentityRefused("controller OpenBao P3 requires an explicit CA bundle ref")
+        if not config.ca_bundle_ref.startswith("secret-ref:"):
+            raise SecretIdentityRefused("controller OpenBao P3 ca_bundle_ref must be a secret-ref placeholder")
+        _validate_value_free_ref(config.ca_bundle_ref, "ca_bundle_ref")
         return
     raise SecretIdentityRefused(f"unsupported OpenBao P3 profile {config.profile!r}")
+
+
+def validate_openbao_migration_readiness(plan: OpenBaoMigrationReadiness) -> None:
+    """Refuse migration readiness plans that lack value-free restore evidence."""
+
+    refs = {
+        "source_inventory_ref": plan.source_inventory_ref,
+        "path_mapping_ref": plan.path_mapping_ref,
+        "restore_drill_proof_ref": plan.restore_drill_proof_ref,
+        "audit_fail_closed_evidence_ref": plan.audit_fail_closed_evidence_ref,
+        "encrypted_snapshot_ref": plan.encrypted_snapshot_ref,
+        "rollback_plan_ref": plan.rollback_plan_ref,
+        "operator_ratification_ref": plan.operator_ratification_ref,
+    }
+    for label, value in refs.items():
+        _validate_value_free_ref(value, label)
+    if not plan.dry_run_completed:
+        raise SecretIdentityRefused("OpenBao migration readiness requires a completed dry run")
+    if plan.production_writes_enabled:
+        raise SecretIdentityRefused("migration readiness must not enable production writes")
+    if not plan.per_dev_secret_refs:
+        raise SecretIdentityRefused("OpenBao migration readiness requires per-dev SecretRefs")
+    for ref in plan.per_dev_secret_refs:
+        validate_secret_ref(ref, backend_key="openbao")
+        if _ref_violates_p3_cotenancy(ref):
+            raise SecretIdentityRefused(
+                f"SecretRef {ref.mount}/{ref.path} is forbidden in OpenBao migration readiness"
+            )
 
 
 def build_p3_deployment_plan(config: OpenBaoDeploymentConfig) -> OpenBaoDeploymentPlan:
@@ -185,6 +249,15 @@ def build_p3_deployment_plan(config: OpenBaoDeploymentConfig) -> OpenBaoDeployme
             "mode": config.backup_mode,
             "encrypted_snapshot_required": True,
             "restore_test_required": True,
+        },
+        "migration_gate": {
+            "live_secret_migration": "operator-ratified-after-readiness",
+            "source_inventory_required": True,
+            "path_mapping_required": True,
+            "restore_drill_proof_required": True,
+            "rollback_plan_required": True,
+            "secret_refs_only": True,
+            "inline_secret_values_allowed": False,
         },
         "emergency_revocation": {
             "operator_only": True,

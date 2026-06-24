@@ -4,6 +4,11 @@ This runbook is for ce-ops#113 items 2 and 3. These are Operator-performed
 trust-root acts. Agents must not execute them against production and must not
 inject real secret-zero material.
 
+For a value-free single-node container pilot, use
+`docs/devops/openbao/bringup-container-openbao.sh --plan`. That path is
+dry-run-first and keeps live production init, unseal, and secret-zero custody as
+Operator-controlled acts.
+
 Prerequisites:
 
 - Hetzner VPS is provisioned and reachable only on the tailnet.
@@ -12,6 +17,9 @@ Prerequisites:
 - Internal TLS cert/key and client CA are staged at the paths configured in
   `/etc/openbao/openbao.hcl`.
 - The `openbao` service is running and sealed.
+- `docs/devops/openbao/bringup-container-openbao.sh --plan` has been reviewed,
+  and any optional local `--apply` dogfood used only synthetic values in an
+  external workdir.
 
 ## 1. Initialize With 3-of-5 Shamir
 
@@ -67,6 +75,10 @@ export BAO_TOKEN='<initial-root-token>'
 bao secrets enable -path=ce-kv kv-v2
 bao auth enable approle
 
+# Optional only when the Operator opens a ratified import window. Do not bind
+# this policy to dev seats, CI, or agent containers.
+bao policy write ce-operator-import docs/devops/openbao/ce-operator-import-policy.hcl.tmpl
+
 export CE_DEV_ID='dev-1'
 export CE_APPROLE_NAME="ce-${CE_DEV_ID}"
 export CE_POLICY_NAME="ce-${CE_DEV_ID}-runtime"
@@ -82,9 +94,27 @@ bao write "auth/approle/role/${CE_APPROLE_NAME}" \
   secret_id_num_uses=1
 ```
 
+Keep the broker policy artifact (`docs/devops/openbao/ce-broker-policy.hcl.tmpl`)
+for the secret-zero broker bringup lane. Do not bind per-dev roles to the broker
+policy.
+
 Repeat policy rendering and role creation per approved dev identity (`dev-1`,
 `dev-2`, and so on). Each AppRole gets exactly one per-dev runtime policy. Do
 not bind multiple dev roles to one shared wildcard policy.
+
+The initial runtime target paths are documented in
+`docs/devops/openbao/openbao-secret-path-map.tsv`:
+
+- Per-dev GitHub PATs:
+  `ce-kv/data/devs/<dev>/runtime/github-pat`, field `token`.
+- `CLAUDE_CODE_OAUTH_TOKEN`:
+  `ce-kv/data/devs/<dev>/runtime/claude-code-oauth-token`, field `token`.
+- Creator Engine shared GitHub App PEM:
+  `ce-kv/data/forge/github-apps/creator-engine-shared/private-key`, field `pem`,
+  broker/Operator-only.
+- `ce-root-v1`:
+  deferred `ce-transit/governance/signing/ce-root-v1` signing path, not a dev
+  runtime KV import and not available to dev AppRoles.
 
 ## 4. Broker-Minted Short-TTL Secret-Zero
 
@@ -107,6 +137,16 @@ SecretIDs, wrapping tokens, PEMs, or resulting OpenBao tokens on disk. The seat
 unwraps once, logs in through AppRole, and uses the resulting short-lived token
 through `SecretIdentityBackend` for its own
 `ce-kv/data/devs/<dev>/runtime/*` paths.
+
+For `CLAUDE_CODE_OAUTH_TOKEN`, the cutover target is broker-mediated
+just-in-time delivery from
+`secret-ref:ce-kv/devs/<dev>/runtime/claude-code-oauth-token`. The launcher
+cutover removes direct `CLAUDE_CODE_OAUTH_TOKEN` env forwarding from
+`deploy/dgx-controller-runsc/run-controller-runsc.sh` and
+`deploy/vps-runsc/run-vps-runsc.sh`; the governed run receives only a SecretRef
+and value-free grant metadata until the broker injects the value into the
+approved in-memory/tmpfs delivery target. This is the Transport-deputy precursor
+for `ce-ops/designs/DESIGN_THREE_DEPUTY_GOVERNANCE_20260624.md`.
 
 ## 5. Revoke Initial Root Token
 
@@ -132,6 +172,29 @@ Operator records value-free evidence for:
 - Restore drill into a throwaway instance passes and writes proof JSON.
 - Emergency revocation plan has been rehearsed by lease, AppRole accessor, and
   emergency seal.
+- The migration inventory validates with
+  `docs/devops/openbao/verify-secret-migration-inventory.sh`; duplicate
+  `record_id` and `target_ref` rows are rejected, and the repository copy
+  remains a template only.
+- `docs/devops/openbao/openbao-secret-path-map.tsv` has been copied to
+  Operator custody for the live window and expanded by name only; no values are
+  copied back into this repository.
+- The inventory contains only source refs, target refs, owner refs, rotation
+  refs, rollback refs, evidence refs, statuses, and notes. It contains no
+  OpenBao token-shaped values (`hvs.`, `hvb.`, `bao.`), PEM blocks, passwords,
+  API keys, or other secret values.
+- The migration importer policy/token for the first window is time-limited,
+  scoped only to listed target refs, denies broad list/readback outside those
+  refs, and has a recorded revocation step.
+- Initial root-token revocation is complete or the remaining root-token custody
+  exception has explicit Operator quorum approval; migration approval does not
+  grant agents or CI access to root/admin credentials.
 
 Only after those checks pass may the Operator separately ratify live secret
-migration.
+migration. Migration is performed by the Operator from controlled custody only,
+outside this repository and outside agent/container lanes: do not place secret
+values in this repository, shell history, issue comments, PRs, chat transcripts,
+persistent temp files, container layers, or CI logs. Rollback or production
+restore remains an Operator break-glass act that requires value-free evidence
+for the active audit sink, encrypted snapshot id, restore-drill proof, revoked
+accessors/leases, and quorum ratification.

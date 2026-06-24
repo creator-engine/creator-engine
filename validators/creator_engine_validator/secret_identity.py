@@ -363,6 +363,16 @@ _SECRET_ZERO_DELIVERY_MODES = frozenset({"broker-channel", "unix-socket", "stdin
 _SEAT_ID_RE = re.compile(r"^dev-[1-9][0-9]*$")
 _APPROLE_MOUNT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _LOCAL_SOURCE_REF_RE = re.compile(r"^host-local-ref:[A-Za-z0-9][A-Za-z0-9./:@-]{0,127}$")
+_INLINE_SECRET_VALUE_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
+    re.compile(r"\b(?:hvs|hvb|bao)\.[A-Za-z0-9_-]{16,}\b"),
+    re.compile(
+        r"\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)\s*=\s*\S{4,}",
+        re.IGNORECASE,
+    ),
+)
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
 _CapabilityPolicy = Mapping[SecretRef, _CapabilitySet]
 
@@ -372,12 +382,32 @@ def _ref_names_controller_key(ref: SecretRef) -> bool:
     return any(_CONTROLLER_KEY_RE.search(value) for value in fields)
 
 
+def _looks_like_inline_secret_value(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _INLINE_SECRET_VALUE_PATTERNS)
+
+
 def _validate_ref_shape(
     ref: SecretRef,
     *,
     backend_key: str | None = None,
     kv_mount: str | None = None,
 ) -> None:
+    text_fields = {
+        "backend": ref.backend,
+        "mount": ref.mount,
+        "path": ref.path,
+        "field": ref.field,
+        "purpose": ref.purpose,
+        "owner_ref": ref.owner_ref,
+        "policy_sha": ref.policy_sha,
+    }
+    for field_name, value in text_fields.items():
+        if not isinstance(value, str) or not value.strip():
+            raise SecretIdentityRefused(f"secret_ref.{field_name} must be a non-empty reference string")
+        if _looks_like_inline_secret_value(value):
+            raise SecretIdentityRefused(
+                f"secret_ref.{field_name} must be a value-free reference, not inline secret material"
+            )
     if not _POLICY_SHA_RE.fullmatch(ref.policy_sha):
         raise SecretIdentityRefused("secret_ref.policy_sha must be a lowercase 64-hex digest")
     if ref.version is not None and ref.version <= 0:
@@ -392,6 +422,17 @@ def _validate_ref_shape(
         )
     if _ref_names_controller_key(ref):
         raise SecretIdentityRefused("controller-key secret classes are forbidden")
+
+
+def validate_secret_ref(
+    ref: SecretRef,
+    *,
+    backend_key: str | None = None,
+    kv_mount: str | None = None,
+) -> None:
+    """Validate that a SecretRef is shaped as a value-free reference."""
+
+    _validate_ref_shape(ref, backend_key=backend_key, kv_mount=kv_mount)
 
 
 def _normalize_allowed_capabilities(

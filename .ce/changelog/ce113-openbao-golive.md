@@ -25,3 +25,25 @@ Follow-on fix: changed the audit stanza to OpenBao 2.5.x's required
 `options = { ... }` map syntax, made provision/apply and Operator bringup
 reload the service so declarative audit devices activate, and extended the
 2.5.5 smoke to prove `bao audit list` shows the file audit device after reload.
+
+Track B update: added the no-real-secrets migration gate, value-free migration
+inventory template, inventory verifier, rollback/restore workflow, and Operator
+bringup checklist additions. The workflow documents secret refs and governance
+evidence only; live secret value import remains an Operator-ratified action
+outside the repo and outside agent/container custody.
+
+Track B hardening: the migration inventory verifier now rejects duplicate
+`record_id` and `target_ref` rows plus OpenBao token-shaped values, PEM
+armoring, password assignments, and common API key patterns. The go-live and
+Operator bringup docs now state that the repository inventory is a template
+only, live import remains Operator-only outside repo/container custody, and
+rollback/restore requires audit, encrypted snapshot, restore-drill, and
+value-free revocation evidence.
+
+Track B completion: added the canonical dry-run-first single-node container
+bring-up script, broker/import policy templates, a name-only OpenBao path map
+for per-dev PATs, Claude OAuth, GitHub App config/key families, reviewer app
+names, and deferred `ce-root-v1`, plus unit and live-test prerequisite coverage.
+The runbooks now name `docs/devops/openbao/bringup-container-openbao.sh` as the
+container dogfood path and document opt-in live validator prerequisites through
+`CE_OPENBAO_BIN` and `CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE`.

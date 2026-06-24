@@ -1,0 +1,27 @@
+# Operator-only migration/import policy template.
+# Use only with a short-lived Operator token during a ratified import window.
+# Do not bind this policy to dev seats, CI, or agent containers.
+
+path "ce-kv/data/devs/+/runtime/*" {
+  capabilities = ["create", "update", "read"]
+}
+
+path "ce-kv/metadata/devs/+/runtime/*" {
+  capabilities = ["create", "update", "read", "list"]
+}
+
+path "ce-kv/data/forge/github-apps/creator-engine-shared/private-key" {
+  capabilities = ["create", "update", "read"]
+}
+
+path "ce-kv/metadata/forge/github-apps/creator-engine-shared/private-key" {
+  capabilities = ["create", "update", "read"]
+}
+
+path "ce-transit/keys/governance/signing/ce-root-v1" {
+  capabilities = ["create", "update", "read"]
+}
+
+path "ce-transit/sign/governance/signing/ce-root-v1" {
+  capabilities = ["update"]
+}

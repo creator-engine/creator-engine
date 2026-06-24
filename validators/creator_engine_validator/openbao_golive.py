@@ -7,18 +7,26 @@ templates/scripts for the hardening properties required before Operator bringup.
 
 from __future__ import annotations
 
+import os
+import re
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 
 GO_LIVE_ARTIFACTS = (
     "docs/devops/openbao/openbao.hcl.tmpl",
     "docs/devops/openbao/openbao.service",
     "docs/devops/openbao/provision-openbao.sh",
+    "docs/devops/openbao/bringup-container-openbao.sh",
     "docs/devops/openbao/snapshot-openbao.sh",
     "docs/devops/openbao/restore-drill-openbao.sh",
     "docs/devops/openbao/emergency-revoke-openbao.sh",
     "docs/devops/openbao/ce-dev-policy.hcl.tmpl",
+    "docs/devops/openbao/ce-broker-policy.hcl.tmpl",
+    "docs/devops/openbao/ce-operator-import-policy.hcl.tmpl",
     "docs/devops/openbao/render-dev-policy.sh",
+    "docs/devops/openbao/openbao-secret-path-map.tsv",
     "docs/devops/openbao/verify-production-config-openbao-2.5.5.sh",
     "docs/devops/openbao-production-golive.md",
     "docs/devops/openbao-operator-bringup.md",
@@ -30,12 +38,282 @@ PUBLIC_BIND_MARKERS = (
     'address = ":::',
     'OPENBAO_TAILNET_BIND_ADDR:-0.0.0.0',
 )
+SECRET_EXPORT_NAMES = frozenset(
+    {
+        "BAO_TOKEN",
+        "OPENBAO_RESTORE_TOKEN",
+        "OPENBAO_VERIFY_TOKEN",
+        "OPENBAO_SECRET_ID_ACCESSOR",
+        "OPENBAO_TOKEN_ACCESSOR",
+        "OPENBAO_ROLE_ID",
+        "OPENBAO_WRAPPING_TOKEN",
+    }
+)
+_EXPORT_RE = re.compile(r"^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(.+?)\s*$", re.MULTILINE)
+_INLINE_SECRET_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    re.compile(r"-----BEGIN CERTIFICATE-----", re.IGNORECASE),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]+\b", re.IGNORECASE),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{2,}\b", re.IGNORECASE),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]+\b", re.IGNORECASE),
+    re.compile(r"(?<![A-Za-z0-9_])(?:hvs|hvb|bao)\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])", re.IGNORECASE),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]+\b", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]+\b", re.IGNORECASE),
+    re.compile(r"\bAKIA[0-9A-Z]{4,}\b", re.IGNORECASE),
+    re.compile(r"\bage-secret-key-[A-Za-z0-9_-]{12,}\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:password|passwd|passphrase|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)"
+        r"\s*[=:]\s*\S{4,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:value|credential)\s*[=:]\s*\S{4,}",
+        re.IGNORECASE,
+    ),
+)
+_VALUE_FREE_EVIDENCE_REF_RE = re.compile(
+    r"^(?:restore-proof|snapshot-ref|evidence-ref|audit-ref|rollback-ref|runbook-ref|"
+    r"inventory-ref|mapping-ref|operator-attestation):"
+    r"[A-Za-z0-9][A-Za-z0-9._:/@#-]{0,191}$"
+)
+_MIGRATION_INVENTORY_HEADER = (
+    "record_id",
+    "secret_class",
+    "source_ref",
+    "target_ref",
+    "owner_ref",
+    "rotation_ref",
+    "rollback_ref",
+    "evidence_ref",
+    "status",
+    "notes",
+)
+_MIGRATION_INVENTORY_SECRET_CLASSES = frozenset(
+    {
+        "github_app_pem",
+        "model_provider_key",
+        "bootstrap_token",
+        "reviewer_token",
+        "signing_key",
+        "runtime_secret",
+        "other",
+    }
+)
+_MIGRATION_INVENTORY_STATUSES = frozenset(
+    {
+        "planned",
+        "imported",
+        "verified",
+        "cutover",
+        "rolled-back",
+        "decommissioned",
+    }
+)
+_MIGRATION_INVENTORY_REF_PATTERNS = {
+    "record_id": re.compile(r"^[a-z0-9][a-z0-9._-]*$"),
+    "source_ref": re.compile(r"^source-ref:[A-Za-z0-9._/:-]+$"),
+    "target_ref": re.compile(r"^openbao-ref:ce-(?:kv|transit)/[A-Za-z0-9._/:-]+$"),
+    "owner_ref": re.compile(r"^owner-ref:[A-Za-z0-9._/:-]+$"),
+    "rotation_ref": re.compile(r"^rotation-ref:[A-Za-z0-9._/:-]+$"),
+    "rollback_ref": re.compile(r"^rollback-ref:[A-Za-z0-9._/:-]+$"),
+    "evidence_ref": re.compile(r"^evidence-ref:[A-Za-z0-9._/:-]+$"),
+}
+_LIVE_ENV_EXPECTATIONS = {
+    "production-config": (
+        "CE_OPENBAO_GOLIVE_DOWNLOAD_SMOKE=1 opts into the networked OpenBao 2.5.5 download smoke",
+        "curl, openssl, sha256sum, tar, and PYTHON_BIN/python3 must be available",
+        "optional OPENBAO_RELEASE_BASE_URL may point at a trusted OpenBao release mirror",
+        "optional OPENBAO_VERIFY_WORKDIR keeps the downloaded binary and logs for inspection",
+    ),
+    "restore-drill": (
+        "CE_OPENBAO_BIN must point to an executable bao binary for OpenBao 2.5.x",
+        "the test starts disposable loopback raft servers and initializes synthetic local-only tokens",
+        "no production BAO_ADDR, BAO_TOKEN, unseal key, or secret value should be supplied",
+    ),
+}
 
 
 def read_go_live_artifact(repo_root: Path, relative_path: str) -> str:
     """Read a go-live artifact by repo-relative path."""
 
     return (repo_root / relative_path).read_text(encoding="utf-8")
+
+
+def openbao_live_env_expectations(kind: str) -> str:
+    """Return an operator-facing prerequisite message for opt-in live tests."""
+
+    try:
+        expectations = _LIVE_ENV_EXPECTATIONS[kind]
+    except KeyError:
+        supported = ", ".join(sorted(_LIVE_ENV_EXPECTATIONS))
+        raise ValueError(f"unknown OpenBao live test kind {kind!r}; expected one of: {supported}") from None
+    return f"OpenBao go-live {kind} live test requires: " + "; ".join(expectations)
+
+
+def validate_live_openbao_binary(env: Mapping[str, str] | None = None) -> list[str]:
+    """Return prerequisite violations for tests that need a local ``bao`` binary."""
+
+    source = os.environ if env is None else env
+    raw_path = source.get("CE_OPENBAO_BIN")
+    if not raw_path:
+        return [openbao_live_env_expectations("restore-drill")]
+    bao_bin = Path(raw_path)
+    violations: list[str] = []
+    if not bao_bin.is_file():
+        violations.append(f"CE_OPENBAO_BIN must point to a file, got {raw_path!r}")
+    elif not os.access(bao_bin, os.X_OK):
+        violations.append(f"CE_OPENBAO_BIN must point to an executable bao binary, got {raw_path!r}")
+    return violations
+
+
+def resolve_live_openbao_binary(env: Mapping[str, str] | None = None) -> Path:
+    """Resolve ``CE_OPENBAO_BIN`` or raise a value-free prerequisite error."""
+
+    source = os.environ if env is None else env
+    violations = validate_live_openbao_binary(source)
+    if violations:
+        raise ValueError("; ".join(violations))
+    return Path(source["CE_OPENBAO_BIN"])
+
+
+def _strip_shell_value(raw: str) -> str:
+    value = raw.strip()
+    if value and value[-1] == ";":
+        value = value[:-1].rstrip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value
+
+
+def _is_placeholder_or_ref(value: str) -> bool:
+    return (
+        (value.startswith("<") and value.endswith(">"))
+        or value.startswith("${")
+        or value.startswith("$")
+        or value.startswith("secret-ref:")
+        or value.endswith("...")
+        or "..." in value
+    )
+
+
+def _contains_inline_secret_value(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _INLINE_SECRET_PATTERNS)
+
+
+def validate_secret_placeholders_in_runbook(runbook: str) -> list[str]:
+    """Return violations when runbook secret exports use concrete values."""
+
+    violations: list[str] = []
+    for name, raw_value in _EXPORT_RE.findall(runbook):
+        if name not in SECRET_EXPORT_NAMES:
+            continue
+        value = _strip_shell_value(raw_value)
+        if _contains_inline_secret_value(value) or not _is_placeholder_or_ref(value):
+            violations.append(f"{name} must be documented as a placeholder or SecretRef, not an inline value")
+    return violations
+
+
+def validate_restore_drill_proof(proof: Mapping[str, Any]) -> list[str]:
+    """Return violations for value-free restore proof evidence."""
+
+    violations: list[str] = []
+    if proof.get("ok") is not True:
+        violations.append("restore proof must record ok=true")
+    for key in ("checked_at", "canary_field"):
+        value = proof.get(key)
+        if not isinstance(value, str) or not value.strip():
+            violations.append(f"restore proof must include non-empty {key}")
+    for key in ("token", "root_token", "secret", "secret_value", "unseal_key", "wrapping_token"):
+        if key in proof:
+            violations.append(f"restore proof must not include secret-bearing field {key}")
+    for key, value in proof.items():
+        if isinstance(value, str) and _contains_inline_secret_value(value):
+            violations.append(f"restore proof field {key} contains inline secret-shaped material")
+    return violations
+
+
+def validate_migration_gate_evidence(record: Mapping[str, Any]) -> list[str]:
+    """Return violations for the value-free live secret migration gate."""
+
+    violations: list[str] = []
+    required_refs = {
+        "source_inventory_ref": "source inventory evidence is required before migration",
+        "path_mapping_ref": "path mapping evidence is required before migration",
+        "restore_drill_proof_ref": "restore proof evidence is required before migration",
+        "encrypted_snapshot_ref": "encrypted snapshot evidence is required before migration",
+        "audit_fail_closed_evidence_ref": "audit fail-closed evidence is required before migration",
+        "rollback_plan_ref": "rollback plan evidence is required before migration",
+        "operator_ratification_ref": "operator ratification evidence ref is required before migration",
+    }
+    for key, message in required_refs.items():
+        value = record.get(key)
+        if not isinstance(value, str) or not _VALUE_FREE_EVIDENCE_REF_RE.fullmatch(value):
+            violations.append(message)
+    for key, value in record.items():
+        if isinstance(value, str) and _contains_inline_secret_value(value):
+            violations.append(f"migration gate field {key} contains inline secret-shaped material")
+    if record.get("live_secret_migration_enabled") is True:
+        violations.append("readiness evidence must not enable live secret migration")
+    if record.get("operator_ratified") is not True:
+        violations.append("operator ratification evidence is required before migration")
+    secret_refs = record.get("secret_refs")
+    if not isinstance(secret_refs, list) or not secret_refs:
+        violations.append("migration gate must enumerate destination secret refs")
+    else:
+        for item in secret_refs:
+            if (
+                not isinstance(item, str)
+                or not item.startswith("secret-ref:")
+                or _contains_inline_secret_value(item)
+            ):
+                violations.append("migration gate secret_refs must be SecretRef placeholders only")
+                break
+    return violations
+
+
+def validate_secret_migration_inventory_tsv(inventory: str) -> list[str]:
+    """Return violations for the value-free OpenBao migration inventory TSV."""
+
+    violations: list[str] = []
+    lines = inventory.splitlines()
+    if not lines:
+        return ["migration inventory must include the expected header"]
+    header = tuple(lines[0].split("\t"))
+    if header != _MIGRATION_INVENTORY_HEADER:
+        violations.append("migration inventory header does not match the expected value-free template")
+    data_rows = 0
+    seen_record_ids: set[str] = set()
+    seen_target_refs: set[str] = set()
+    for line_number, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
+        data_rows += 1
+        fields = line.split("\t")
+        if len(fields) != len(_MIGRATION_INVENTORY_HEADER):
+            violations.append(f"line {line_number}: expected 10 tab-separated fields")
+            continue
+        row = dict(zip(_MIGRATION_INVENTORY_HEADER, fields, strict=True))
+        for field_name, pattern in _MIGRATION_INVENTORY_REF_PATTERNS.items():
+            if not pattern.fullmatch(row[field_name]):
+                violations.append(f"line {line_number}: invalid {field_name}")
+        if row["record_id"] in seen_record_ids:
+            violations.append(f"line {line_number}: duplicate record_id")
+        seen_record_ids.add(row["record_id"])
+        if row["target_ref"] in seen_target_refs:
+            violations.append(f"line {line_number}: duplicate target_ref")
+        seen_target_refs.add(row["target_ref"])
+        if row["secret_class"] not in _MIGRATION_INVENTORY_SECRET_CLASSES:
+            violations.append(f"line {line_number}: invalid secret_class")
+        if row["status"] not in _MIGRATION_INVENTORY_STATUSES:
+            violations.append(f"line {line_number}: invalid status")
+        for field_name, value in row.items():
+            if _contains_inline_secret_value(value):
+                violations.append(
+                    f"line {line_number}: {field_name} contains inline secret-shaped material"
+                )
+    if data_rows == 0:
+        violations.append("migration inventory must include at least one value-free data row")
+    return violations
 
 
 def validate_tailnet_tls_hcl(hcl: str) -> list[str]:
