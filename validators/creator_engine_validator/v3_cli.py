@@ -50,11 +50,13 @@ work intake; never an offensive capability.
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict, is_dataclass
 import hashlib
 import inspect
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -280,6 +282,30 @@ def _emit(args: argparse.Namespace, code: int, lines: list[str], payload: dict[s
         for ln in lines:
             print(ln)
     return code
+
+
+def _jsonable(value: Any) -> Any:
+    """Convert common CLI result objects into JSON-serializable values."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, set):
+        return sorted(_jsonable(v) for v in value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return _jsonable(to_dict())
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(value))
+    if hasattr(value, "__dict__"):
+        return {
+            str(k): _jsonable(v)
+            for k, v in vars(value).items()
+            if not str(k).startswith("_")
+        }
+    return value
 
 
 def _git_read(root: Path, *args: str) -> str | None:
@@ -589,9 +615,125 @@ def _release_dispatch_claim(ctx, reason: str) -> None:
     )
 
 
+def _dispatch_worktree_runtime() -> Any:
+    """Lazy import seam for the dispatch-worktree runtime.
+
+    The runtime is owned outside this CLI wiring slice, so keep the dependency
+    command-local: the rest of ``ce`` remains importable if that module is absent
+    in a partial worktree.
+    """
+    from . import dispatch_worktree
+
+    return dispatch_worktree
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+def _emit_dispatch_worktree_json(code: int, payload: Mapping[str, Any]) -> int:
+    print(json.dumps(_jsonable(payload), indent=2, sort_keys=True))
+    return code
+
+
+def _dispatch_brief_path(raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"--brief must be an existing file path, got {raw!r}")
+    return path
+
+
+def _dispatch_harness_cmd(raw: str | None, brief_path: Path) -> list[str]:
+    if raw is None:
+        return ["codex", "exec", str(brief_path)]
+    argv = shlex.split(raw)
+    if not argv:
+        raise ValueError("--harness-cmd must contain at least one argv token")
+    return argv
+
+
+def _dispatch_outcome_payload(outcome: Any) -> dict[str, Any]:
+    return {
+        "dispatched": bool(outcome.dispatched),
+        "stage": outcome.stage,
+        "reason": outcome.reason,
+        "branch": outcome.branch,
+        "worktree_path": outcome.worktree_path,
+        "pushed": bool(outcome.pushed),
+        "exec_returncode": outcome.exec_returncode,
+        "lane_id": outcome.lane_id,
+        "claim_id": outcome.claim_id,
+    }
+
+
+def _cmd_dispatch_worktree(args: argparse.Namespace) -> int:
+    try:
+        work_key = work_claims.parse_ticket(args.work_key)
+    except work_claims.WorkClaimError as exc:
+        return _emit_dispatch_worktree_json(
+            2,
+            {"ok": False, "error": "work_key_input", "detail": str(exc)},
+        )
+
+    try:
+        dispatch_worktree = _dispatch_worktree_runtime()
+    except ImportError as exc:
+        return _emit_dispatch_worktree_json(
+            1,
+            {
+                "ok": False,
+                "error": "dispatch_worktree_unavailable",
+                "detail": str(exc),
+            },
+        )
+
+    try:
+        brief_path = _dispatch_brief_path(args.brief)
+        harness_cmd = _dispatch_harness_cmd(args.harness_cmd, brief_path)
+    except (OSError, ValueError) as exc:
+        return _emit_dispatch_worktree_json(
+            1,
+            {
+                "ok": False,
+                "error": "dispatch_input_failed",
+                "detail": str(exc),
+                "work_key": work_key.work_key,
+            },
+        )
+    spec = dispatch_worktree.DispatchSpec(
+        repo_root=Path(args.repo_root),
+        ledger_root=Path(args.ledger_root),
+        worktree_root=Path(args.worktree_root),
+        work_key=work_key,
+        branch=args.branch,
+        brief_path=brief_path,
+        harness_cmd=harness_cmd,
+        controller_id=args.controller_id,
+    )
+    try:
+        outcome = dispatch_worktree.dispatch(spec)
+    except Exception as exc:  # pragma: no cover - runtime owns exact failures
+        return _emit_dispatch_worktree_json(
+            1,
+            {
+                "ok": False,
+                "error": "dispatch_worktree_failed",
+                "detail": str(exc),
+                "work_key": work_key.work_key,
+            },
+        )
+    payload = _dispatch_outcome_payload(outcome)
+    return _emit_dispatch_worktree_json(0 if payload["dispatched"] else 1, payload)
+
+
+def _cmd_dispatch(args: argparse.Namespace) -> int:
+    if args.dispatch_command == "worktree":
+        return _cmd_dispatch_worktree(args)
+    return _emit_dispatch_worktree_json(
+        2,
+        {"ok": False, "error": "unknown_dispatch_command", "command": args.dispatch_command},
+    )
+
+
 def _cmd_scope(args: argparse.Namespace) -> int:
     """File (draft) a Scope from the Scope-card flags. The Frame→Shape output."""
     if not _SCOPE_ID_RE.match(args.scope_id or ""):
@@ -3636,6 +3778,30 @@ def _build_parser() -> argparse.ArgumentParser:
                               "side effect (a foreign active claim refuses the spawn)")
     _add_root(p_drive)
 
+    p_dispatch = sub.add_parser("dispatch", help="dispatch governed work to an execution venue")
+    dispatch_sub = p_dispatch.add_subparsers(dest="dispatch_command", required=True)
+    p_dispatch_worktree = dispatch_sub.add_parser(
+        "worktree",
+        help="create a governed dispatch worktree for a claimed work item",
+    )
+    p_dispatch_worktree.add_argument("--repo-root", required=True, dest="repo_root",
+                                     help="source repository root")
+    p_dispatch_worktree.add_argument("--ledger-root", required=True, dest="ledger_root",
+                                     help="Active-Work ledger root")
+    p_dispatch_worktree.add_argument("--worktree-root", required=True, dest="worktree_root",
+                                     help="root directory where dispatch worktrees are created")
+    p_dispatch_worktree.add_argument("--work-key", required=True, dest="work_key",
+                                     help="work item key, e.g. owner/repo#N")
+    p_dispatch_worktree.add_argument("--branch", required=True,
+                                     help="branch name for the dispatched worktree")
+    p_dispatch_worktree.add_argument("--brief", required=True,
+                                     help="path to an existing worker brief file")
+    p_dispatch_worktree.add_argument("--controller-id", required=True, dest="controller_id",
+                                     help="controller id recorded on the dispatch")
+    p_dispatch_worktree.add_argument("--harness-cmd", default=None, dest="harness_cmd",
+                                     help="shell-style worker harness argv "
+                                          "(default: codex exec <brief-path>)")
+
     p_collect = sub.add_parser("collect", help="fold a finished seat run's transcript + outcome into evidence")
     p_collect.add_argument("scope_id", metavar="ID", help="the Scope the run delivered")
     p_collect.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID", help="the dispatched run id")
@@ -4306,6 +4472,7 @@ _DISPATCH = {
     "shape": _cmd_shape,
     "ratify": _cmd_ratify,
     "drive": _cmd_drive,
+    "dispatch": _cmd_dispatch,
     "collect": _cmd_collect,
     "pr": _cmd_pr,
     "configure-repo": _cmd_configure_repo,
