@@ -4099,6 +4099,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_poll.add_argument("--action", choices=("enqueue", "land", "merge"), default="enqueue", help="publish action after a deterministic repair")
     _add_root(p_queue_poll)  # adds --root + --json
 
+    p_queue_daemon = sub.add_parser(
+        "queue-daemon",
+        help="run the autonomous Integrator merge-queue daemon",
+    )
+    qd_scope = p_queue_daemon.add_mutually_exclusive_group(required=True)
+    qd_scope.add_argument("--repo", default=None, help="owner/name repository scope")
+    qd_scope.add_argument("--org", default=None, help="org/user search scope")
+    qd_mode = p_queue_daemon.add_mutually_exclusive_group(required=True)
+    qd_mode.add_argument("--once", action="store_true", help="run one daemon pass and exit")
+    qd_mode.add_argument("--loop", action="store_true", help="run continuously under a supervisor")
+    p_queue_daemon.add_argument("--interval", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between loop passes")
+    p_queue_daemon.add_argument("--dry-run", action="store_true", help="log enqueue decisions without running gh pr merge")
+    p_queue_daemon.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
+    _add_root(p_queue_daemon)  # adds --root + --json
+
     return parser
 
 
@@ -4142,6 +4157,40 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
             f"escalated={result.escalated_count} refused={result.refused_count}"
         )
     return 0 if result.escalated_count == 0 and result.refused_count == 0 else 1
+
+
+def _cmd_queue_daemon(args: argparse.Namespace) -> int:
+    """Autonomous Integrator merge-queue daemon."""
+    try:
+        token = integrator_belt.token_from_env(args.token_env)
+        logger = integrator_belt.JsonLineLogger(sys.stderr)
+        result = integrator_belt.run_daemon_loop(
+            token=token,
+            repo=args.repo,
+            org=args.org,
+            once=bool(args.once),
+            interval_seconds=args.interval,
+            dry_run=bool(args.dry_run),
+            log_sink=logger,
+        )
+    except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
+        print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
+        return 130
+    except integrator_belt.IntegratorBeltError as exc:
+        print(f"ERROR: {CE_CMD} queue-daemon refused: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive fail-closed
+        print(f"ERROR: {CE_CMD} queue-daemon failed closed: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            f"{CE_CMD} queue-daemon: "
+            f"enqueue={result.enqueue_count} skip={result.skip_count} "
+            f"defer={result.defer_count} failed={result.failed_count}"
+        )
+    return 0 if result.failed_count == 0 else 1
 
 
 def _review_pickup_transport():
@@ -4242,6 +4291,7 @@ _DISPATCH = {
     "session": _cmd_session,
     "cockpit": _cmd_cockpit,
     "queue-poll": _cmd_queue_poll,
+    "queue-daemon": _cmd_queue_daemon,
 }
 
 

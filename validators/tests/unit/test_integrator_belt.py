@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+import subprocess
 
 from creator_engine_validator import v3_cli
 from creator_engine_validator.forge import integrator_belt as belt
@@ -15,6 +17,9 @@ REPO = "creator-engine/creator-engine"
 PR = 218
 HEAD = "a" * 40
 BASE = "b" * 40
+BRANCH = "feature-integrator"
+CARRIER = ".ce/pr-manifests/feature-integrator.md"
+CARRIER_2 = ".ce/pr-manifests/feature-integrator-2.md"
 _OURS = "<" * 7 + " ours"
 _SEP = "=" * 7
 _THEIRS = ">" * 7 + " theirs"
@@ -214,3 +219,231 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
     assert captured["repo"] == REPO
     assert captured["iterations"] == 1
     assert '"event_count": 0' in capsys.readouterr().out
+
+
+def _check(name: str, state: str = "SUCCESS") -> belt.DaemonStatusCheck:
+    return belt.DaemonStatusCheck(name=name, state=state, kind="CheckRun")
+
+
+def _daemon_pr(**overrides) -> belt.DaemonPullRequest:
+    data = {
+        "repo": REPO,
+        "pr_number": PR,
+        "title": "ready",
+        "url": f"https://github.com/{REPO}/pull/{PR}",
+        "head_ref": BRANCH,
+        "head_sha": HEAD,
+        "base_ref": "main",
+        "review_decision": "APPROVED",
+        "approving_review_commits": (HEAD,),
+        "mergeable": "MERGEABLE",
+        "merge_state_status": "CLEAN",
+        "rollup_state": "SUCCESS",
+        "checks": (
+            _check("Validate governance artifacts"),
+            _check("unit tests"),
+        ),
+        "changed_paths": ("docs/a.md",),
+        "files_complete": True,
+        "checks_complete": True,
+        "is_draft": False,
+    }
+    data.update(overrides)
+    return belt.DaemonPullRequest(**data)
+
+
+class FakeDaemonGh:
+    def __init__(self, raw_contents: tuple[str | None, ...] = ()) -> None:
+        self.calls: list[list[str]] = []
+        self.raw_contents = list(raw_contents)
+
+    def __call__(self, argv, input_text=None):
+        self.calls.append(list(argv))
+        if len(argv) >= 3 and argv[:2] == ["gh", "api"] and "/contents/" in str(argv[2]):
+            stdout = self.raw_contents.pop(0) if self.raw_contents else ""
+            if stdout is None:
+                return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="not found")
+            return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    @property
+    def merge_calls(self) -> list[list[str]]:
+        return [call for call in self.calls if call[:3] == ["gh", "pr", "merge"]]
+
+
+def _carrier_text(paths: tuple[str, ...]) -> str:
+    normalized = "\n".join(sorted(set(paths))) + "\n"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return (
+        f"PR_PATHS_COUNT={len(set(paths))}\n"
+        f"PR_PATHS_SHA256={digest}\n"
+        "```text\n"
+        f"{normalized}"
+        "```\n"
+    )
+
+
+def test_daemon_selects_approved_green_current_head_and_enqueues():
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    logs: list[dict] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+        log_sink=lambda payload: logs.append(dict(payload)),
+    )
+
+    assert result.enqueue_count == 1
+    assert result.skip_count == 0
+    assert gh.merge_calls == [[
+        "gh",
+        "pr",
+        "merge",
+        str(PR),
+        "--repo",
+        REPO,
+        "--auto",
+        "--match-head-commit",
+        HEAD,
+    ]]
+    assert result.decisions[0].reason == "eligible_enqueued"
+    assert result.decisions[0].path_set_source == "carrier"
+    assert logs[-1]["status"] == "enqueue"
+
+
+def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
+    gh = FakeDaemonGh()
+    stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
+    red = _daemon_pr(pr_number=2, rollup_state="FAILURE")
+    missing_governance = _daemon_pr(pr_number=3, checks=(_check("unit tests"),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(stale, red, missing_governance),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 3
+    assert [decision.reason for decision in result.decisions] == [
+        "approval_not_current_head",
+        "rollup_not_success",
+        "governance_check_missing",
+    ]
+    assert gh.merge_calls == []
+
+
+def test_daemon_skips_missing_carrier_fail_closed():
+    gh = FakeDaemonGh()
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(_daemon_pr(changed_paths=("docs/a.md",)),),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "carrier_missing"
+    assert result.decisions[0].path_set_source == CARRIER
+    assert gh.merge_calls == []
+
+
+def test_daemon_skips_unreadable_or_invalid_carrier_fail_closed():
+    unreadable = _daemon_pr(pr_number=20, changed_paths=(CARRIER, "docs/a.md"))
+    invalid = _daemon_pr(pr_number=21, changed_paths=(CARRIER, "docs/b.md"))
+    gh = FakeDaemonGh(raw_contents=(None, "not a carrier"))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(unreadable, invalid),
+    )
+
+    assert result.enqueue_count == 0
+    assert [decision.reason for decision in result.decisions] == [
+        "carrier_unreadable",
+        "carrier_invalid",
+    ]
+    assert gh.merge_calls == []
+
+
+def test_daemon_dry_run_merges_nothing():
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        dry_run=True,
+        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+    )
+
+    assert result.enqueue_count == 1
+    assert result.decisions[0].reason == "eligible_dry_run"
+    assert gh.merge_calls == []
+
+
+def test_daemon_manifest_overlap_defers_second_pr():
+    gh = FakeDaemonGh(raw_contents=(
+        _carrier_text((CARRIER, "docs/a.md", "validators/a.py")),
+        _carrier_text((CARRIER_2, "docs/a.md", "docs/b.md")),
+    ))
+    first = _daemon_pr(pr_number=10, changed_paths=(CARRIER, "docs/a.md", "validators/a.py"))
+    second = _daemon_pr(
+        pr_number=11,
+        head_ref="feature-integrator-2",
+        changed_paths=(CARRIER_2, "docs/a.md", "docs/b.md"),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        dry_run=True,
+        candidates=(first, second),
+    )
+
+    assert [decision.status for decision in result.decisions] == ["enqueue", "defer"]
+    assert result.decisions[1].reason == "path_overlap"
+    assert result.decisions[1].overlap_with == f"{REPO}#10"
+    assert "overlap_paths=docs/a.md" in result.decisions[1].evidence
+
+
+def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
+    captured = {}
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+
+    def fake_loop(**kwargs):
+        captured.update(kwargs)
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert captured["token"] == "ghp_fake"
+    assert captured["repo"] == REPO
+    assert captured["once"] is True
+    assert captured["dry_run"] is True
+    assert '"enqueue_count": 0' in capsys.readouterr().out

@@ -17,10 +17,12 @@ import os
 import shutil
 import subprocess
 import time
+from base64 import b64decode
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import quote
 
 from ._redact import redact_gh_stderr
 from .auto_merge import enable_auto_merge
@@ -43,6 +45,9 @@ LogSink = Callable[[Mapping[str, Any]], None]
 DEFAULT_TOKEN_ENV = "GH_TOKEN"
 DEFAULT_WORK_ROOT = ".ce/integrator-belt"
 DEFAULT_INTERVAL_SECONDS = 60.0
+DEFAULT_DAEMON_SEARCH_LIMIT = 50
+DEFAULT_GOVERNANCE_CHECK = "Validate governance artifacts"
+DEFAULT_TEST_CHECK_KEYWORDS = ("test", "pytest", "unit")
 
 
 class IntegratorBeltError(Exception):
@@ -89,6 +94,173 @@ class BeltPollLoopResult:
             "executed_count": self.executed_count,
             "escalated_count": self.escalated_count,
             "refused_count": self.refused_count,
+        }
+
+
+@dataclass(frozen=True)
+class DaemonStatusCheck:
+    """One status-check context observed on a PR head."""
+
+    name: str
+    state: str
+    kind: str
+
+    @property
+    def success(self) -> bool:
+        return self.state == "SUCCESS"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "state": self.state, "kind": self.kind}
+
+
+@dataclass(frozen=True)
+class DaemonPullRequest:
+    """Secret-free daemon candidate read from GitHub."""
+
+    repo: str
+    pr_number: int
+    title: str
+    url: str
+    head_ref: str
+    head_sha: str
+    base_ref: str
+    review_decision: str | None
+    approving_review_commits: tuple[str, ...]
+    mergeable: str | None
+    merge_state_status: str | None
+    rollup_state: str | None
+    checks: tuple[DaemonStatusCheck, ...]
+    changed_paths: tuple[str, ...]
+    files_complete: bool
+    checks_complete: bool
+    is_draft: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "title": self.title,
+            "url": self.url,
+            "head_ref": self.head_ref,
+            "head_sha": self.head_sha,
+            "base_ref": self.base_ref,
+            "review_decision": self.review_decision,
+            "approving_review_commits": list(self.approving_review_commits),
+            "mergeable": self.mergeable,
+            "merge_state_status": self.merge_state_status,
+            "rollup_state": self.rollup_state,
+            "checks": [check.to_dict() for check in self.checks],
+            "changed_paths": list(self.changed_paths),
+            "files_complete": self.files_complete,
+            "checks_complete": self.checks_complete,
+            "is_draft": self.is_draft,
+        }
+
+
+@dataclass(frozen=True)
+class DaemonDecision:
+    """One daemon enqueue/skip/defer decision."""
+
+    status: str
+    reason: str
+    repo: str
+    pr_number: int
+    head_sha: str
+    path_set: tuple[str, ...] = ()
+    path_set_source: str = ""
+    overlap_with: str | None = None
+    evidence: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "reason": self.reason,
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "head_sha": self.head_sha,
+            "path_set": list(self.path_set),
+            "path_set_source": self.path_set_source,
+            "evidence": list(self.evidence),
+        }
+        if self.overlap_with:
+            payload["overlap_with"] = self.overlap_with
+        return payload
+
+
+@dataclass(frozen=True)
+class DaemonPassResult:
+    """Result of one autonomous merge-daemon pass."""
+
+    decisions: tuple[DaemonDecision, ...]
+    dry_run: bool
+
+    @property
+    def enqueue_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.status == "enqueue")
+
+    @property
+    def skip_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.status == "skip")
+
+    @property
+    def defer_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.status == "defer")
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.reason == "enqueue_failed")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dry_run": self.dry_run,
+            "enqueue_count": self.enqueue_count,
+            "skip_count": self.skip_count,
+            "defer_count": self.defer_count,
+            "failed_count": self.failed_count,
+            "decisions": [decision.to_dict() for decision in self.decisions],
+        }
+
+
+@dataclass(frozen=True)
+class DaemonLoopTick:
+    """One supervised daemon loop tick."""
+
+    index: int
+    result: DaemonPassResult
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"index": self.index, "result": self.result.to_dict()}
+
+
+@dataclass(frozen=True)
+class DaemonLoopResult:
+    """Aggregate result for supervised daemon modes."""
+
+    ticks: tuple[DaemonLoopTick, ...]
+
+    @property
+    def enqueue_count(self) -> int:
+        return sum(tick.result.enqueue_count for tick in self.ticks)
+
+    @property
+    def skip_count(self) -> int:
+        return sum(tick.result.skip_count for tick in self.ticks)
+
+    @property
+    def defer_count(self) -> int:
+        return sum(tick.result.defer_count for tick in self.ticks)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(tick.result.failed_count for tick in self.ticks)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ticks": [tick.to_dict() for tick in self.ticks],
+            "enqueue_count": self.enqueue_count,
+            "skip_count": self.skip_count,
+            "defer_count": self.defer_count,
+            "failed_count": self.failed_count,
         }
 
 
@@ -257,6 +429,432 @@ def run_poll_loop(
         if index != iterations and interval_seconds:
             sleep(interval_seconds)
     return BeltPollLoopResult(ticks=tuple(ticks))
+
+
+def run_daemon_loop(
+    *,
+    token: str,
+    repo: str | None = None,
+    org: str | None = None,
+    once: bool = True,
+    interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+    dry_run: bool = False,
+    gh_runner: GhRunner | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    log_sink: LogSink | None = None,
+) -> DaemonLoopResult:
+    """Run the supervised autonomous merge daemon.
+
+    ``once=True`` performs a single pass. ``once=False`` loops until interrupted
+    by the caller/process supervisor.
+    """
+
+    if interval_seconds < 0:
+        raise IntegratorBeltError("interval_seconds must be >= 0")
+    runner = gh_runner_with_token(token, gh_runner)
+    ticks: list[DaemonLoopTick] = []
+    index = 1
+    while True:
+        _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
+        result = run_daemon_pass(
+            token=token,
+            repo=repo,
+            org=org,
+            dry_run=dry_run,
+            gh_runner=runner,
+            log_sink=log_sink,
+        )
+        tick = DaemonLoopTick(index=index, result=result)
+        ticks = [tick] if not once else [*ticks, tick]
+        _log(
+            log_sink,
+            "daemon_pass_complete",
+            index=index,
+            enqueue_count=result.enqueue_count,
+            skip_count=result.skip_count,
+            defer_count=result.defer_count,
+            failed_count=result.failed_count,
+        )
+        if once:
+            break
+        if interval_seconds:
+            sleep(interval_seconds)
+        index += 1
+    return DaemonLoopResult(ticks=tuple(ticks))
+
+
+def run_daemon_pass(
+    *,
+    token: str,
+    repo: str | None = None,
+    org: str | None = None,
+    dry_run: bool = False,
+    gh_runner: GhRunner | None = None,
+    log_sink: LogSink | None = None,
+    candidates: Sequence[DaemonPullRequest] | None = None,
+) -> DaemonPassResult:
+    """Discover, evaluate, sequence, and enqueue eligible PRs for merge queue."""
+
+    del token  # auth is carried only by the injected runner environment
+    if repo and org:
+        raise IntegratorBeltError("repo and org are mutually exclusive")
+    if not repo and not org:
+        raise IntegratorBeltError("run_daemon_pass refuses an unscoped daemon; supply repo or org")
+    runner = gh_runner or _default_gh_runner
+    prs = tuple(candidates) if candidates is not None else discover_daemon_candidates(
+        repo=repo,
+        org=org,
+        gh_runner=runner,
+    )
+    decisions: list[DaemonDecision] = []
+    selected_paths: dict[str, set[str]] = {}
+    for pr in sorted(prs, key=lambda item: (item.repo, item.pr_number)):
+        gate_reason = _daemon_gate_refusal(pr)
+        if gate_reason is not None:
+            decision = _decision(pr, "skip", gate_reason)
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        path_set, path_source, path_refusal = _daemon_path_set(pr, runner)
+        if not path_set:
+            decision = _decision(
+                pr,
+                "skip",
+                path_refusal or "carrier_invalid",
+                path_set_source=path_source,
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        overlap = _first_overlap(path_set, selected_paths)
+        if overlap is not None:
+            owner, paths = overlap
+            decision = _decision(
+                pr,
+                "defer",
+                "path_overlap",
+                path_set=path_set,
+                path_set_source=path_source,
+                overlap_with=owner,
+                evidence=(f"overlap_paths={','.join(sorted(paths))}",),
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        selected_paths[f"{pr.repo}#{pr.pr_number}"] = set(path_set)
+        if dry_run:
+            decision = _decision(
+                pr,
+                "enqueue",
+                "eligible_dry_run",
+                path_set=path_set,
+                path_set_source=path_source,
+                evidence=("dry_run=true",),
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        enqueue = _enqueue_merge_queue(pr, runner)
+        decision = _decision(
+            pr,
+            "enqueue" if enqueue.returncode == 0 else "skip",
+            "eligible_enqueued" if enqueue.returncode == 0 else "enqueue_failed",
+            path_set=path_set,
+            path_set_source=path_source,
+            evidence=(
+                "gh_pr_merge_auto=true",
+                f"returncode={enqueue.returncode}",
+                f"stderr={redact_gh_stderr(enqueue.stderr or '')}",
+            ),
+        )
+        decisions.append(decision)
+        _log_daemon_decision(log_sink, decision)
+    return DaemonPassResult(decisions=tuple(decisions), dry_run=dry_run)
+
+
+def discover_daemon_candidates(
+    *,
+    repo: str | None = None,
+    org: str | None = None,
+    gh_runner: GhRunner | None = None,
+    first: int = DEFAULT_DAEMON_SEARCH_LIMIT,
+) -> tuple[DaemonPullRequest, ...]:
+    """Read open PR candidates in a repo or org scope."""
+
+    if repo and org:
+        raise IntegratorBeltError("repo and org are mutually exclusive")
+    if repo:
+        _split_repo(repo)
+        search = f"repo:{repo} is:pr is:open"
+    elif org:
+        if not org.strip() or any(ch.isspace() for ch in org):
+            raise IntegratorBeltError(f"org scope is malformed: {org!r}")
+        search = f"org:{org} is:pr is:open"
+    else:
+        raise IntegratorBeltError("discover_daemon_candidates refuses an unscoped search")
+    if first < 1 or first > 100:
+        raise IntegratorBeltError("first must be between 1 and 100")
+
+    runner = gh_runner or _default_gh_runner
+    parsed = _gh_graphql(
+        runner,
+        _DAEMON_SEARCH_QUERY,
+        {"query": search, "first": first},
+        purpose="discover daemon PR candidates",
+    )
+    search_node = ((parsed.get("data") or {}).get("search") or {})
+    nodes = search_node.get("nodes")
+    if not isinstance(nodes, list):
+        raise ForgeConfigError("unexpected daemon candidate response")
+    if ((search_node.get("pageInfo") or {}).get("hasNextPage")) is True:
+        raise ForgeConfigError(
+            "daemon candidate search returned more than one page; narrow --repo/--org scope"
+        )
+    out: list[DaemonPullRequest] = []
+    for node in nodes:
+        if isinstance(node, dict):
+            out.append(_parse_daemon_pr(node))
+    return tuple(out)
+
+
+_DAEMON_SEARCH_QUERY = (
+    "query($query:String!,$first:Int!){"
+    "search(type:ISSUE,query:$query,first:$first){pageInfo{hasNextPage endCursor}nodes{"
+    "... on PullRequest{"
+    "number title url isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
+    "repository{nameWithOwner} "
+    "latestReviews(first:20){nodes{state commit{oid}}} "
+    "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
+    "pageInfo{hasNextPage} nodes{__typename "
+    "... on CheckRun{name conclusion status} "
+    "... on StatusContext{context state}"
+    "}}}}}} "
+    "files(first:100){pageInfo{hasNextPage}nodes{path}}"
+    "}}}}}"
+)
+
+
+def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
+    repo = str((node.get("repository") or {}).get("nameWithOwner") or "")
+    number = node.get("number")
+    if not repo or not isinstance(number, int):
+        raise ForgeConfigError("daemon candidate missing repo or number")
+    head_sha = _required_str(node, "headRefOid")
+    commit = _latest_commit_node(node)
+    rollup = (commit.get("statusCheckRollup") or {}) if isinstance(commit, dict) else {}
+    contexts = ((rollup.get("contexts") or {}) if isinstance(rollup, dict) else {})
+    checks = tuple(_parse_status_check(raw) for raw in contexts.get("nodes") or ())
+    files = (node.get("files") or {}) if isinstance(node.get("files"), dict) else {}
+    reviews = (node.get("latestReviews") or {}) if isinstance(node.get("latestReviews"), dict) else {}
+    approving = tuple(
+        str(((review.get("commit") or {}).get("oid") or "")).lower()
+        for review in reviews.get("nodes") or ()
+        if isinstance(review, dict)
+        and review.get("state") == "APPROVED"
+        and ((review.get("commit") or {}).get("oid"))
+    )
+    return DaemonPullRequest(
+        repo=repo,
+        pr_number=number,
+        title=str(node.get("title") or ""),
+        url=str(node.get("url") or ""),
+        head_ref=_required_str(node, "headRefName"),
+        head_sha=head_sha,
+        base_ref=_required_str(node, "baseRefName"),
+        review_decision=node.get("reviewDecision") if isinstance(node.get("reviewDecision"), str) else None,
+        approving_review_commits=approving,
+        mergeable=node.get("mergeable") if isinstance(node.get("mergeable"), str) else None,
+        merge_state_status=(
+            node.get("mergeStateStatus") if isinstance(node.get("mergeStateStatus"), str) else None
+        ),
+        rollup_state=rollup.get("state") if isinstance(rollup.get("state"), str) else None,
+        checks=checks,
+        changed_paths=tuple(
+            sorted(
+                str(item.get("path"))
+                for item in files.get("nodes") or ()
+                if isinstance(item, dict) and isinstance(item.get("path"), str)
+            )
+        ),
+        files_complete=((files.get("pageInfo") or {}).get("hasNextPage") is not True),
+        checks_complete=((contexts.get("pageInfo") or {}).get("hasNextPage") is not True),
+        is_draft=bool(node.get("isDraft")),
+    )
+
+
+def _latest_commit_node(node: Mapping[str, Any]) -> Mapping[str, Any]:
+    commits = node.get("commits") if isinstance(node.get("commits"), dict) else {}
+    nodes = commits.get("nodes") if isinstance(commits, dict) else []
+    if not nodes or not isinstance(nodes[0], dict):
+        return {}
+    commit = nodes[0].get("commit")
+    return commit if isinstance(commit, dict) else {}
+
+
+def _parse_status_check(raw: Any) -> DaemonStatusCheck:
+    if not isinstance(raw, dict):
+        return DaemonStatusCheck(name="", state="UNKNOWN", kind="unknown")
+    kind = str(raw.get("__typename") or "unknown")
+    if kind == "CheckRun":
+        return DaemonStatusCheck(
+            name=str(raw.get("name") or ""),
+            state=str(raw.get("conclusion") or raw.get("status") or "UNKNOWN"),
+            kind=kind,
+        )
+    if kind == "StatusContext":
+        return DaemonStatusCheck(
+            name=str(raw.get("context") or ""),
+            state=str(raw.get("state") or "UNKNOWN"),
+            kind=kind,
+        )
+    return DaemonStatusCheck(name=str(raw.get("name") or raw.get("context") or ""), state="UNKNOWN", kind=kind)
+
+
+def _daemon_gate_refusal(pr: DaemonPullRequest) -> str | None:
+    if pr.is_draft:
+        return "draft_pr"
+    if pr.review_decision != "APPROVED":
+        return "review_not_approved"
+    if pr.head_sha.lower() not in pr.approving_review_commits:
+        return "approval_not_current_head"
+    if pr.mergeable != "MERGEABLE":
+        return "not_mergeable"
+    if not pr.files_complete:
+        return "changed_files_incomplete"
+    if not pr.checks_complete:
+        return "status_checks_incomplete"
+    if pr.rollup_state != "SUCCESS":
+        return "rollup_not_success"
+    governance = _find_check(pr.checks, DEFAULT_GOVERNANCE_CHECK)
+    if governance is None:
+        return "governance_check_missing"
+    if not governance.success:
+        return "governance_check_not_success"
+    tests = tuple(check for check in pr.checks if _is_test_check(check.name))
+    if any(not check.success for check in tests):
+        return "test_check_not_success"
+    return None
+
+
+def _find_check(checks: Sequence[DaemonStatusCheck], name: str) -> DaemonStatusCheck | None:
+    for check in checks:
+        if check.name == name:
+            return check
+    return None
+
+
+def _is_test_check(name: str) -> bool:
+    lower = name.lower()
+    return any(keyword in lower for keyword in DEFAULT_TEST_CHECK_KEYWORDS)
+
+
+def _daemon_path_set(
+    pr: DaemonPullRequest, runner: GhRunner
+) -> tuple[tuple[str, ...], str, str | None]:
+    from ..checks import path_manifest_fidelity
+
+    expected = (
+        f"{path_manifest_fidelity.MANIFEST_DIR}/"
+        f"{path_manifest_fidelity.branch_slug(pr.head_ref)}.md"
+    )
+    if expected not in pr.changed_paths:
+        return (), expected, "carrier_missing"
+    text = _read_file_at_ref(runner, pr.repo, expected, pr.head_sha)
+    if text is None:
+        return (), expected, "carrier_unreadable"
+    identity = path_manifest_fidelity.parse_carrier(text)
+    if identity is None or not identity.consistent or not identity.paths:
+        return (), expected, "carrier_invalid"
+    return identity.paths, "carrier", None
+
+
+def _is_carrier_manifest_path(path: str) -> bool:
+    return path.startswith(".ce/pr-manifests/") and path.endswith(".md")
+
+
+def _read_file_at_ref(runner: GhRunner, repo: str, path: str, ref: str) -> str | None:
+    quoted_path = quote(path, safe="/")
+    proc = runner(
+        [
+            "gh",
+            "api",
+            f"/repos/{repo}/contents/{quoted_path}?ref={quote(ref, safe='')}",
+            "-H",
+            "Accept: application/vnd.github.raw",
+        ],
+        None,
+    )
+    if proc.returncode == 0:
+        return proc.stdout or ""
+    proc = runner(["gh", "api", f"/repos/{repo}/contents/{quoted_path}", "-f", f"ref={ref}"], None)
+    if proc.returncode != 0:
+        return None
+    try:
+        parsed = json.loads((proc.stdout or "").strip() or "{}")
+    except (TypeError, ValueError):
+        return None
+    content = parsed.get("content") if isinstance(parsed, dict) else None
+    if not isinstance(content, str):
+        return None
+    try:
+        return b64decode(content.encode("ascii"), validate=False).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def _first_overlap(
+    path_set: Sequence[str], selected_paths: Mapping[str, set[str]]
+) -> tuple[str, set[str]] | None:
+    current = set(path_set)
+    for owner, paths in selected_paths.items():
+        overlap = current & paths
+        if overlap:
+            return owner, overlap
+    return None
+
+
+def _enqueue_merge_queue(pr: DaemonPullRequest, runner: GhRunner) -> subprocess.CompletedProcess:
+    return runner(
+        [
+            "gh",
+            "pr",
+            "merge",
+            str(pr.pr_number),
+            "--repo",
+            pr.repo,
+            "--auto",
+            "--match-head-commit",
+            pr.head_sha,
+        ],
+        None,
+    )
+
+
+def _decision(
+    pr: DaemonPullRequest,
+    status: str,
+    reason: str,
+    *,
+    path_set: Sequence[str] = (),
+    path_set_source: str = "",
+    overlap_with: str | None = None,
+    evidence: Sequence[str] = (),
+) -> DaemonDecision:
+    return DaemonDecision(
+        status=status,
+        reason=reason,
+        repo=pr.repo,
+        pr_number=pr.pr_number,
+        head_sha=pr.head_sha,
+        path_set=tuple(sorted(set(path_set))),
+        path_set_source=path_set_source,
+        overlap_with=overlap_with,
+        evidence=tuple(evidence),
+    )
+
+
+def _log_daemon_decision(log_sink: LogSink | None, decision: DaemonDecision) -> None:
+    _log(log_sink, "daemon_decision", **decision.to_dict())
 
 
 class LiveGitHubRepairAdapter:
