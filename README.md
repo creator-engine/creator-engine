@@ -117,12 +117,18 @@ and the `version_boundary` validator check.
 CE currently has two supported install paths, both documented by
 [`docs/contracts/installer.md`](./docs/contracts/installer.md).
 
-Bootstrap prerequisite: the host must already have the OpenSSH client
-`ssh-keygen` available before running either verified install path. On fresh
-Linux images this is usually the `openssh-client` package on Debian/Ubuntu/Alpine
-or `openssh-clients` on Fedora/RHEL/CentOS. Install it only after reviewing the
-package action; the E1 installer will not run `sudo` before it has verified the
-signed spec.
+For an end-to-end first host path, use the
+[`zero to governed seat quickstart`](./docs/guide/zero-to-governed-seat-quickstart.md).
+
+Bootstrap prerequisites: the host must already have stock OpenSSH `ssh-keygen`
+and the basic shell tools named by the installer. If any are missing, the
+installer refuses before fetching artifacts and prints one remediation block
+with exact Debian/Ubuntu, Fedora/RHEL/CentOS, and Alpine package commands.
+Install them only after reviewing the package action; the E1 installer will not
+run `sudo` before it has verified the signed spec. Python 3.14 and `uv` are not
+host prerequisites for the one-liner: after verification, E1 fetches the
+manifest-pinned `uv` tarball, verifies it, and installs CPython 3.14 in user
+space if needed.
 
 1. **Public one-liner.**
 

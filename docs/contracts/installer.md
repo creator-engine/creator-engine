@@ -31,11 +31,19 @@ or reuse the venv and proves the `cev3` entry point before inventory.
 where the human approves sudo-scoped host changes and the GitHub-App
 authorization click.
 
-**Bootstrap prerequisite:** E1 requires stock OpenSSH `ssh-keygen` before it can
-verify the spec. Fresh Linux hosts should install the OpenSSH client package
-first (`openssh-client` on Debian/Ubuntu/Alpine; `openssh-clients` on
-Fedora/RHEL/CentOS). The installer must only report this missing dependency; it
-must not auto-sudo before trust verification.
+**Bootstrap prerequisites:** E1 requires stock OpenSSH `ssh-keygen` before it can
+verify the spec, plus basic POSIX tools used by the shell bootstrap (`curl`,
+`sed`, `awk`, `grep`, `base64`, `mktemp`, `chmod`, `uname`, `date`, `mkdir`,
+`rm`, `cp`, `mv`, `ln`, and `tar`). If any are absent, the installer MUST refuse
+before fetching artifacts and emit one actionable remediation block with exact
+package-manager commands for Debian/Ubuntu, Fedora/RHEL/CentOS, and Alpine.
+The installer must not auto-sudo before trust verification.
+
+CPython 3.14 and `uv` are not host prerequisites for E1. After the signed spec
+and trust anchor are verified, the installer uses the signature-covered
+`python_acquisition` manifest to fetch a pinned `uv` tarball, verify its hash,
+and install CPython 3.14 in user space when no compatible interpreter is already
+present.
 
 ## E1 real bootstrap
 
