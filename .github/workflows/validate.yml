@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   validate:
@@ -28,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          # PR diff gates validate the live PR head, not GitHub's synthetic merge ref.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
@@ -118,10 +122,95 @@ jobs:
       - name: Resolve live comparison base
         id: live-base
         if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          base_ref="$(
-            python - <<'PYEOF'
+          base_ref=""
+          base_rev=""
+          live_base_sha=""
+          live_head_ref=""
+          live_head_sha=""
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            pr_number="$(
+              python - <<'PYEOF'
+          import json
+          import os
+          import sys
+
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          try:
+              with open(event_path, encoding="utf-8") as handle:
+                  event = json.load(handle)
+          except (OSError, TypeError, ValueError):
+              event = {}
+          number = ((event.get("pull_request") or {}).get("number") or "")
+          if not number:
+              print("FAIL: could not resolve pull_request.number from GITHUB_EVENT_PATH", file=sys.stderr)
+              sys.exit(1)
+          print(number)
+          PYEOF
+            )"
+
+            pr_json="$(mktemp)"
+            pr_values="$(mktemp)"
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" > "${pr_json}"
+            python - "${pr_json}" > "${pr_values}" <<'PYEOF'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              pr = json.load(handle)
+
+          values = {
+              "base_ref": ((pr.get("base") or {}).get("ref") or ""),
+              "base_sha": ((pr.get("base") or {}).get("sha") or ""),
+              "head_ref": ((pr.get("head") or {}).get("ref") or ""),
+              "head_sha": ((pr.get("head") or {}).get("sha") or ""),
+          }
+          sha_re = re.compile(r"^[0-9a-f]{40}$")
+          for key, value in values.items():
+              if not isinstance(value, str) or not value:
+                  print(f"FAIL: live PR payload missing {key}", file=sys.stderr)
+                  sys.exit(1)
+              if "\n" in value or "\r" in value:
+                  print(f"FAIL: live PR payload {key} contains a newline", file=sys.stderr)
+                  sys.exit(1)
+          for key in ("base_sha", "head_sha"):
+              if not sha_re.fullmatch(values[key]):
+                  print(f"FAIL: live PR payload {key} is not a full SHA", file=sys.stderr)
+                  sys.exit(1)
+
+          print(values["base_ref"])
+          print(values["base_sha"])
+          print(values["head_ref"])
+          print(values["head_sha"])
+          PYEOF
+            mapfile -t live_pr < "${pr_values}"
+            rm -f "${pr_json}" "${pr_values}"
+            if [[ "${#live_pr[@]}" -ne 4 ]]; then
+              echo "FAIL: live PR payload did not resolve exactly four base/head fields" >&2
+              exit 1
+            fi
+
+            base_ref="${live_pr[0]}"
+            live_base_sha="${live_pr[1]}"
+            live_head_ref="${live_pr[2]}"
+            live_head_sha="${live_pr[3]}"
+
+            checkout_head="$(git rev-parse HEAD)"
+            if [[ "${checkout_head}" != "${live_head_sha}" ]]; then
+              echo "FAIL: refusing stale re-run: checkout HEAD ${checkout_head} != live PR head ${live_head_sha}; push or re-run on the current head" >&2
+              exit 1
+            fi
+
+            echo "Live PR base: ${base_ref} ${live_base_sha}"
+            echo "Live PR head: ${live_head_ref} ${live_head_sha}"
+          else
+            base_ref="$(
+              python - <<'PYEOF'
           import json
           import os
           import sys
@@ -137,9 +226,7 @@ jobs:
               except (OSError, ValueError):
                   event = {}
 
-              if event_name == "pull_request":
-                  base_ref = (((event.get("pull_request") or {}).get("base") or {}).get("ref") or "")
-              elif event_name == "merge_group":
+              if event_name == "merge_group":
                   base_ref = ((event.get("merge_group") or {}).get("base_ref") or "")
                   prefix = "refs/heads/"
                   if base_ref.startswith(prefix):
@@ -153,9 +240,13 @@ jobs:
               sys.exit(1)
           print(base_ref)
           PYEOF
-          )"
+            )"
+          fi
 
           git check-ref-format --branch "${base_ref}" >/dev/null
+          if [[ -n "${live_head_ref}" ]]; then
+            git check-ref-format --branch "${live_head_ref}" >/dev/null
+          fi
 
           fetch_with_shallow_retry() {
             local attempt arg max_attempts delay output status unshallow_fetch
@@ -203,23 +294,43 @@ jobs:
           fetch_with_shallow_retry --no-tags --prune --depth=100 origin \
             "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
 
-          comparison_base="$(git merge-base "origin/${base_ref}" HEAD 2>/dev/null || true)"
+          base_rev="origin/${base_ref}"
+          if [[ -n "${live_base_sha}" ]]; then
+            fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
+            if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
+              echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
+              exit 1
+            fi
+            base_rev="${live_base_sha}"
+          fi
+
+          comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
           if [[ -z "${comparison_base}" && "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
             fetch_with_shallow_retry --no-tags --prune --unshallow origin
             fetch_with_shallow_retry --no-tags --prune origin \
               "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
-            comparison_base="$(git merge-base "origin/${base_ref}" HEAD 2>/dev/null || true)"
+            if [[ -n "${live_base_sha}" ]]; then
+              fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
+              if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
+                echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
+                exit 1
+              fi
+            fi
+            comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
           fi
 
           if [[ -z "${comparison_base}" ]]; then
-            echo "FAIL: could not derive merge-base for origin/${base_ref} and HEAD" >&2
+            echo "FAIL: could not derive merge-base for ${base_rev} and HEAD" >&2
             exit 1
           fi
 
-          echo "Live comparison base: ${comparison_base} (origin/${base_ref})"
+          echo "Live comparison base: ${comparison_base} (${base_rev})"
           {
             echo "comparison_base=${comparison_base}"
             echo "base_ref=${base_ref}"
+            echo "base_sha=${live_base_sha}"
+            echo "head_ref=${live_head_ref}"
+            echo "head_sha=${live_head_sha}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Creator Engine validator — work-sizing floor PR-diff gate (G5)
@@ -280,14 +391,19 @@ jobs:
         run: |
           set -euo pipefail
           comparison_base="${{ steps.live-base.outputs.comparison_base }}"
+          head_ref="${{ steps.live-base.outputs.head_ref }}"
           if [[ -z "${comparison_base}" ]]; then
             echo "FAIL: live comparison base was not resolved" >&2
             exit 1
           fi
-          if [[ -z "${GITHUB_HEAD_REF:-}" ]]; then
-            echo "FAIL: GITHUB_HEAD_REF is required for per-PR carrier resolution" >&2
+          if [[ -z "${head_ref}" ]]; then
+            echo "FAIL: live PR head ref was not resolved" >&2
             exit 1
           fi
+          # Invariant: the upstream live-base step must resolve the current PR via
+          # gh api, prove checkout HEAD equals the live PR head SHA, and compute
+          # this comparison base from the live PR base SHA. This gate must not use
+          # event-cached refs such as GITHUB_BASE_REF/GITHUB_HEAD_REF directly.
           # Per-PR carrier convention (ce-ops#21): each gate PR carries its ratified
           # closed manifest as its OWN file `.ce/pr-manifests/<branch-slug>.md`. The
           # validator discovers this PR's carrier from the diff (exactly one, ADDED,
@@ -296,7 +412,7 @@ jobs:
           # `.ce/changelog/<branch-slug>.md` fragment, fails closed.
           PYTHONPATH=validators python -m creator_engine_validator \
             verify-path-manifest --base "${comparison_base}" \
-            --manifest-dir .ce/pr-manifests --head-ref "${GITHUB_HEAD_REF}" \
+            --manifest-dir .ce/pr-manifests --head-ref "${head_ref}" \
             --require-carrier
 
       - name: Workflow permissions audit (no write permissions present)

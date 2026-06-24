@@ -37,27 +37,65 @@ def _fetch_with_shallow_retry_source() -> str:
     return match.group(0)
 
 
-def test_validate_workflow_resolves_live_comparison_base_from_git():
+def _run_without_comment_lines(run: str) -> str:
+    return "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
+
+
+def test_validate_workflow_resolves_live_pr_base_and_head_for_pull_requests():
     step = _validate_step("Resolve live comparison base")
 
     assert step.get("id") == "live-base"
     assert step.get("if") == "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}"
+    assert step.get("env", {}).get("GH_TOKEN") == "${{ github.token }}"
 
     run = step["run"]
-    assert "GITHUB_BASE_REF" in run
+    assert 'if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then' in run
     assert "GITHUB_EVENT_PATH" in run
-    assert "pull_request" in run
+    assert '((event.get("pull_request") or {}).get("number") or "")' in run
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}"' in run
+    assert '"base_ref": ((pr.get("base") or {}).get("ref") or "")' in run
+    assert '"base_sha": ((pr.get("base") or {}).get("sha") or "")' in run
+    assert '"head_ref": ((pr.get("head") or {}).get("ref") or "")' in run
+    assert '"head_sha": ((pr.get("head") or {}).get("sha") or "")' in run
+    assert 'base_ref="${live_pr[0]}"' in run
+    assert 'live_base_sha="${live_pr[1]}"' in run
+    assert 'live_head_ref="${live_pr[2]}"' in run
+    assert 'live_head_sha="${live_pr[3]}"' in run
+
+    assert "checkout_head=\"$(git rev-parse HEAD)\"" in run
+    assert '[[ "${checkout_head}" != "${live_head_sha}" ]]' in run
+    assert (
+        "refusing stale re-run: checkout HEAD ${checkout_head} != live PR head "
+        "${live_head_sha}; push or re-run on the current head"
+    ) in run
+
+    assert 'base_rev="${live_base_sha}"' in run
+    assert 'git merge-base "${base_rev}" HEAD' in run
+    assert 'fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}"' in run
+    assert '[[ "${fetched_base_sha}" != "${live_base_sha}" ]]' in run
+    assert "live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}" in run
+    assert "comparison_base=${comparison_base}" in run
+    assert "base_sha=${live_base_sha}" in run
+    assert "head_ref=${live_head_ref}" in run
+    assert "head_sha=${live_head_sha}" in run
+
+    workflow_text = _VALIDATE_WORKFLOW.read_text()
+    assert "github.event.pull_request.base.sha" not in workflow_text
+    assert "PR_BASE_SHA" not in workflow_text
+
+
+def test_validate_workflow_preserves_merge_group_base_resolution():
+    step = _validate_step("Resolve live comparison base")
+    run = step["run"]
+
     assert "merge_group" in run
+    assert "GITHUB_BASE_REF" in run
     assert "base_ref" in run
     assert "git fetch" in run
     assert "refs/remotes/origin/${base_ref}" in run
     assert "git merge-base" in run
     assert "origin/${base_ref}" in run
     assert "comparison_base=${comparison_base}" in run
-
-    workflow_text = _VALIDATE_WORKFLOW.read_text()
-    assert "github.event.pull_request.base.sha" not in workflow_text
-    assert "PR_BASE_SHA" not in workflow_text
 
 
 def test_fetch_with_shallow_retry_preserves_non_race_fetch_failure_status(tmp_path):
@@ -120,13 +158,16 @@ def test_validate_workflow_runs_path_manifest_gate_from_live_base_and_head_ref()
     assert step.get("if") == "${{ github.event_name == 'pull_request' }}"
 
     run = step["run"]
+    run_without_comments = _run_without_comment_lines(run)
     assert 'comparison_base="${{ steps.live-base.outputs.comparison_base }}"' in run
-    assert "GITHUB_HEAD_REF" in run
+    assert 'head_ref="${{ steps.live-base.outputs.head_ref }}"' in run
+    assert "live PR head ref was not resolved" in run
     assert "verify-path-manifest" in run
     assert '--base "${comparison_base}"' in run
     assert "--manifest-dir .ce/pr-manifests" in run
-    assert '--head-ref "${GITHUB_HEAD_REF}"' in run
+    assert '--head-ref "${head_ref}"' in run
     assert "--require-carrier" in run
+    assert "GITHUB_HEAD_REF" not in run_without_comments
     assert "github.event.pull_request.base.sha" not in run
     assert "PR_BASE_SHA" not in run
 
