@@ -181,6 +181,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.review_submit",
         "forge.ruleset",
         "forge.scoped_token",
+        # ce-ops#228 PR-1: offline credential-injection transport-deputy policy
+        # seam. Pure fail-closed request verdicts before any OneCLI credential
+        # injection; no token minting, network, or process execution.
+        "forge.transport_deputy_policy",
         # ce-ops#157 shared-App self-serve: user-side OAuth device-flow install
         # discovery (POST /login/device/code → poll → GET /user/installations).
         # Part of the v3 forge adapter family; injectable transport, no v1 import.

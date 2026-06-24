@@ -103,6 +103,13 @@ from .auto_merge import AutoMergeRefused, AutoMergeResult, enable_auto_merge
 from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
 from .review_submit import ReviewResult, ReviewSubmitRefused, submit_review
+from .transport_deputy_policy import (
+    PolicyProfile,
+    PolicyRule,
+    Decision as TransportDecision,
+    TransportRequest,
+    evaluate as evaluate_transport_deputy_policy,
+)
 from .ruleset import (
     CE_PROTECTION_RULESET_NAME,
     RulesetBypassActor,
@@ -159,6 +166,8 @@ __all__ = [
     "ResolverResult",
     "ReviewState",
     "ResolutionPlan",
+    "PolicyProfile",
+    "PolicyRule",
     "RulesetBypassActor",
     "RulesetPolicy",
     "RulesetRefused",
@@ -167,6 +176,8 @@ __all__ = [
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
+    "TransportDecision",
+    "TransportRequest",
     "app_jwt_gh_runner",
     "authenticated_gh_runner",
     "allow_auto_merge",
@@ -179,6 +190,7 @@ __all__ = [
     "enable_auto_merge",
     "escalate_unresolved_results",
     "escalation_for_result",
+    "evaluate_transport_deputy_policy",
     "execute_integrator_repair",
     "install_required_checks",
     "merge",
