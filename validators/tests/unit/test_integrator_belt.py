@@ -313,6 +313,31 @@ def test_daemon_selects_approved_green_current_head_and_enqueues():
     assert logs[-1]["status"] == "enqueue"
 
 
+def test_discover_daemon_candidates_uses_non_query_search_variable():
+    calls: list[list[str]] = []
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout='{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}',
+            stderr="",
+        )
+
+    assert belt.discover_daemon_candidates(repo=REPO, gh_runner=gh) == ()
+
+    argv = calls[0]
+    query_fields = [
+        value
+        for flag, value in zip(argv, argv[1:])
+        if flag == "-f" and value.startswith("query=")
+    ]
+    assert len(query_fields) == 1
+    assert f"searchQuery=repo:{REPO} is:pr is:open" in argv
+    assert f"query=repo:{REPO} is:pr is:open" not in argv
+
+
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     gh = FakeDaemonGh()
     stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
