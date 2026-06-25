@@ -76,6 +76,7 @@ from . import (
     onboard_apply_live,
     runtime_evidence_spine,
     seat_reaper,
+    secret_identity,
     v3_forge_join,
     v3_installer,
     v3_report,
@@ -4293,7 +4294,74 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_daemon.add_argument(
         "--approval-wall-secret-env",
         default=approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
-        help="bootstrap env var containing the approval capability wall secret; production may wrap the SecretIdentityBackend supplier",
+        help="bootstrap fallback env var containing the approval capability wall secret",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-backend",
+        default=None,
+        help="SecretIdentityBackend registry key for the primary approval wall secret supplier (for example: openbao)",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-mount",
+        default=None,
+        help="SecretRef mount for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-path",
+        default=None,
+        help="SecretRef path for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-field",
+        default=None,
+        help="SecretRef field for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-version",
+        type=int,
+        default=None,
+        help="optional SecretRef version for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-purpose",
+        default="approval-capability-wall",
+        help="SecretRef purpose for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-owner-ref",
+        default="controller:integrator",
+        help="SecretRef owner reference for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-ref-policy-sha",
+        default=None,
+        help="64-hex SecretRef policy sha for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-target-ref",
+        default=None,
+        help="materialization target ref read after SecretIdentityBackend delivery (supports env:NAME and file:PATH)",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-repo",
+        default=None,
+        help="owner/name repo binding for the SecretRequest (defaults to --repo when scoped to one repo)",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-run-id",
+        default="approval-wall-daemon",
+        help="run id for the SecretRequest used to materialize the approval wall secret",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-seat-id",
+        default="dev-1",
+        help="seat id for the SecretRequest used to materialize the approval wall secret",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-ttl-seconds",
+        type=int,
+        default=600,
+        help="SecretRequest TTL in seconds for the primary approval wall secret supplier",
     )
     p_queue_daemon.add_argument(
         "--approval-wall-state",
@@ -4475,15 +4543,104 @@ def _approval_wall_state_path_from_args(args: argparse.Namespace) -> Path:
     return approval_capability.approval_wall_state_path(getattr(args, "root", V3_LOCAL_STATE_ROOT))
 
 
+def _approval_wall_secret_identity_supplier_from_args(
+    args: argparse.Namespace,
+) -> approval_capability.SecretSupplier | None:
+    backend_key = getattr(args, "approval_wall_secret_backend", None)
+    if not backend_key:
+        return None
+    required = (
+        "approval_wall_secret_mount",
+        "approval_wall_secret_path",
+        "approval_wall_secret_field",
+        "approval_wall_secret_ref_policy_sha",
+        "approval_wall_secret_target_ref",
+    )
+    if any(not getattr(args, name, None) for name in required):
+        return None
+    repo = getattr(args, "approval_wall_secret_repo", None) or getattr(args, "repo", None)
+    if not repo:
+        return None
+    secret_ref = secret_identity.SecretRef(
+        backend=backend_key,
+        mount=getattr(args, "approval_wall_secret_mount"),
+        path=getattr(args, "approval_wall_secret_path"),
+        field=getattr(args, "approval_wall_secret_field"),
+        version=getattr(args, "approval_wall_secret_version", None),
+        purpose=getattr(args, "approval_wall_secret_purpose", "approval-capability-wall"),
+        owner_ref=getattr(args, "approval_wall_secret_owner_ref", "controller:integrator"),
+        policy_sha=getattr(args, "approval_wall_secret_ref_policy_sha"),
+    )
+    target_ref = getattr(args, "approval_wall_secret_target_ref")
+    delivery = "env" if target_ref.startswith("env:") else "file"
+    request = secret_identity.SecretRequest(
+        run_id=getattr(args, "approval_wall_secret_run_id", "approval-wall-daemon"),
+        seat_id=getattr(args, "approval_wall_secret_seat_id", "dev-1"),
+        repo=repo,
+        secret_ref=secret_ref,
+        ttl_seconds=getattr(args, "approval_wall_secret_ttl_seconds", 600),
+        delivery=delivery,
+        requested_capabilities=("read",),
+        audit_context={
+            "purpose": "approval-capability-wall",
+            "source": "ce queue-daemon",
+        },
+    )
+
+    def supply() -> bytes | str | None:
+        backend_supplier = approval_capability.approval_wall_secret_supplier_from_secret_identity_backend(
+            backend=secret_identity.get_backend(backend_key),
+            request=request,
+            target_ref=target_ref,
+            value_reader=_approval_wall_materialized_value_reader,
+        )
+        return backend_supplier()
+
+    return supply
+
+
+def _approval_wall_materialized_value_reader(target_ref: str) -> bytes | str | None:
+    if target_ref.startswith("env:"):
+        name = target_ref.removeprefix("env:")
+        return os.environ.get(name) if name else None
+    if target_ref.startswith("file://"):
+        path = target_ref.removeprefix("file://")
+        return Path(path).read_text(encoding="utf-8")
+    if target_ref.startswith("file:"):
+        path = target_ref.removeprefix("file:")
+        return Path(path).read_text(encoding="utf-8")
+    return Path(target_ref).read_text(encoding="utf-8")
+
+
+def _approval_wall_primary_then_env_supplier(
+    *,
+    primary: approval_capability.SecretSupplier | None,
+    fallback_env: approval_capability.SecretSupplier,
+) -> approval_capability.SecretSupplier:
+    def supply() -> bytes | str | None:
+        if primary is not None:
+            value = primary()
+            if value:
+                return value
+        return fallback_env()
+
+    return supply
+
+
 def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capability.ApprovalWallRuntime:
+    backend_supplier = _approval_wall_secret_identity_supplier_from_args(args)
+    fallback_env_supplier = approval_capability.approval_wall_secret_supplier_from_env(
+        env_name=getattr(
+            args,
+            "approval_wall_secret_env",
+            approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+        )
+    )
     return approval_capability.resolve_approval_wall(
         approval_capability.ApprovalWallConfig(
-            secret_supplier=approval_capability.approval_wall_secret_supplier_from_env(
-                env_name=getattr(
-                    args,
-                    "approval_wall_secret_env",
-                    approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
-                )
+            secret_supplier=_approval_wall_primary_then_env_supplier(
+                primary=backend_supplier,
+                fallback_env=fallback_env_supplier,
             ),
             state_path=_approval_wall_state_path_from_args(args),
             policy_sha=getattr(args, "approval_wall_policy_sha", None),

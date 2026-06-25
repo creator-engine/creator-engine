@@ -1217,6 +1217,168 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     assert '"enqueue_count": 0' in capsys.readouterr().out
 
 
+def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    captured = {}
+    backend_secret = "backend-secret"
+    env_fallback_secret = "env-fallback-secret"
+    materialized_env = "CE_TEST_APPROVAL_WALL_BACKEND_SECRET"
+    ref = _approval_secret_ref()
+    backend_calls: list[str] = []
+
+    class EnvMaterializingBackend(FakeSecretIdentityBackend):
+        def validate_config(self) -> None:
+            backend_calls.append("validate_config")
+            return super().validate_config()
+
+        def issue(self, request):
+            backend_calls.append("issue")
+            return super().issue(request)
+
+        def materialize(self, grant, target_ref: str):
+            backend_calls.append("materialize")
+            if target_ref.startswith("env:"):
+                monkeypatch.setenv(target_ref.removeprefix("env:"), backend_secret)
+            return super().materialize(grant, target_ref)
+
+        def revoke(self, grant):
+            backend_calls.append("revoke")
+            return super().revoke(grant)
+
+    backend = EnvMaterializingBackend(allowed_refs={ref})
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", env_fallback_secret)
+
+    def fake_loop(**kwargs):
+        captured.update(kwargs)
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-policy-sha", POLICY_SHA,
+        "--approval-wall-secret-backend", ref.backend,
+        "--approval-wall-secret-mount", ref.mount,
+        "--approval-wall-secret-path", ref.path,
+        "--approval-wall-secret-field", ref.field,
+        "--approval-wall-secret-version", str(ref.version),
+        "--approval-wall-secret-purpose", ref.purpose,
+        "--approval-wall-secret-owner-ref", ref.owner_ref,
+        "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
+        "--approval-wall-secret-target-ref", f"env:{materialized_env}",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert backend_calls[:3] == ["validate_config", "issue", "materialize"]
+    assert captured["approval_wall"].armed is True
+    issued_at = 1_700_000_000
+    expires_at = 1_900_000_000
+    marker_from_backend_secret = issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD,
+            approved_by=APPROVER,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            policy_sha=POLICY_SHA,
+        ),
+        backend_secret,
+    )
+    assert captured["approval_wall"].verifier.verify(
+        marker_from_backend_secret,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(APPROVER,),
+    ).valid is True
+    marker_from_env_fallback = issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD,
+            approved_by=APPROVER,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            policy_sha=POLICY_SHA,
+        ),
+        env_fallback_secret,
+    )
+    assert captured["approval_wall"].verifier.verify(
+        marker_from_env_fallback,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(APPROVER,),
+    ).reason == "signature_mismatch"
+    assert env_fallback_secret not in capsys.readouterr().out
+
+
+def test_ce_queue_daemon_configured_backend_error_does_not_fall_back_to_env(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    ref = _approval_secret_ref()
+    state_path = tmp_path / "approval-capability-wall" / "state.json"
+
+    class RefusingBackend(FakeSecretIdentityBackend):
+        def validate_config(self) -> None:
+            raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: RefusingBackend(allowed_refs={ref}))
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+    save_approval_wall_state(state_path, ApprovalWallState(armed=True))
+
+    def fake_loop(**_kwargs):
+        raise AssertionError("daemon loop must not run when configured backend fails closed")
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-policy-sha", POLICY_SHA,
+        "--approval-wall-secret-backend", ref.backend,
+        "--approval-wall-secret-mount", ref.mount,
+        "--approval-wall-secret-path", ref.path,
+        "--approval-wall-secret-field", ref.field,
+        "--approval-wall-secret-version", str(ref.version),
+        "--approval-wall-secret-purpose", ref.purpose,
+        "--approval-wall-secret-owner-ref", ref.owner_ref,
+        "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
+        "--approval-wall-secret-target-ref", "env:CE_TEST_APPROVAL_WALL_BACKEND_SECRET",
+        "--json",
+    ])
+
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "approval wall misconfigured" in err
+    assert "armed_state_without_secret" in err
+
+
 def test_dequeue_merge_queue_disables_auto_and_optionally_drafts():
     calls: list[list[str]] = []
 
