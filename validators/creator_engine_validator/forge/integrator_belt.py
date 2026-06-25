@@ -128,6 +128,28 @@ class DaemonStatusCheck:
 
 
 @dataclass(frozen=True)
+class DaemonApprovalWitness:
+    """One current approval signal observed for a PR head."""
+
+    reviewer_login: str
+    commit_oid: str
+    state: str = "APPROVED"
+    review_id: str = ""
+
+    @property
+    def approved(self) -> bool:
+        return self.state == "APPROVED"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reviewer_login": self.reviewer_login,
+            "commit_oid": self.commit_oid,
+            "state": self.state,
+            "review_id": self.review_id,
+        }
+
+
+@dataclass(frozen=True)
 class DaemonPullRequest:
     """Secret-free daemon candidate read from GitHub."""
 
@@ -148,6 +170,7 @@ class DaemonPullRequest:
     files_complete: bool
     checks_complete: bool
     is_draft: bool
+    approval_witnesses: tuple[DaemonApprovalWitness, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -168,6 +191,7 @@ class DaemonPullRequest:
             "files_complete": self.files_complete,
             "checks_complete": self.checks_complete,
             "is_draft": self.is_draft,
+            "approval_witnesses": [witness.to_dict() for witness in self.approval_witnesses],
         }
 
 
@@ -312,6 +336,33 @@ class LiveActionResult:
     action: str
     refusal_reason: str | None = None
     evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MergeQueueDequeueResult:
+    """Secret-free result for the emergency merge-queue dequeue primitive."""
+
+    repo: str
+    pr_number: int
+    disabled_auto_merge: bool
+    converted_to_draft: bool
+    evidence: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.disabled_auto_merge and all(
+            not item.startswith("draft_returncode=") or item == "draft_returncode=0"
+            for item in self.evidence
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "disabled_auto_merge": self.disabled_auto_merge,
+            "converted_to_draft": self.converted_to_draft,
+            "evidence": list(self.evidence),
+        }
 
 
 def token_from_env(name: str = DEFAULT_TOKEN_ENV) -> str:
@@ -462,6 +513,7 @@ def run_daemon_loop(
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
+    authorized_reviewers: Sequence[str] | None = None,
 ) -> DaemonLoopResult:
     """Run the supervised autonomous merge daemon.
 
@@ -476,6 +528,7 @@ def run_daemon_loop(
     if _rate_limiter is None and gh_runner is None:
         _rate_limiter = default_search_rate_limiter()
     ticks: list[DaemonLoopTick] = []
+    approval_settle_seen: set[str] = set()
     index = 1
     while True:
         _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
@@ -489,6 +542,8 @@ def run_daemon_loop(
                 log_sink=log_sink,
                 rate_limiter=_rate_limiter,
                 sleep=sleep,
+                approval_settle_seen=approval_settle_seen,
+                authorized_reviewers=authorized_reviewers,
             )
         except SearchApiRateLimited as exc:
             _log(
@@ -529,6 +584,8 @@ def run_daemon_pass(
     candidates: Sequence[DaemonPullRequest] | None = None,
     rate_limiter: SearchRateLimiter | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    approval_settle_seen: set[str] | None = None,
+    authorized_reviewers: Sequence[str] | None = None,
 ) -> DaemonPassResult:
     """Discover, evaluate, sequence, and enqueue eligible PRs for merge queue."""
 
@@ -538,6 +595,8 @@ def run_daemon_pass(
     if not repo and not org:
         raise IntegratorBeltError("run_daemon_pass refuses an unscoped daemon; supply repo or org")
     runner = gh_runner or _default_gh_runner
+    settle_seen = approval_settle_seen if approval_settle_seen is not None else set()
+    authorized = _normalize_authorized_reviewers(authorized_reviewers)
     prs = tuple(candidates) if candidates is not None else discover_daemon_candidates(
         repo=repo,
         org=org,
@@ -550,10 +609,44 @@ def run_daemon_pass(
     for pr in sorted(prs, key=lambda item: (item.repo, item.pr_number)):
         gate_reason = _daemon_gate_refusal(pr)
         if gate_reason is not None:
+            _clear_approval_settle_for_pr(settle_seen, pr)
             decision = _decision(pr, "skip", gate_reason)
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
             continue
+        approval_witness = _current_approval_witness(pr)
+        if approval_witness is None:
+            decision = _decision(pr, "skip", "approval_reviewer_unconfirmed")
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        approval_key = _approval_settle_key(pr, approval_witness)
+        if approval_key not in settle_seen:
+            settle_seen.add(approval_key)
+            decision = _decision(
+                pr,
+                "defer",
+                "approval_settle_pending",
+                evidence=(
+                    f"reviewer={approval_witness.reviewer_login}",
+                    f"head_sha={pr.head_sha}",
+                ),
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        authorized_witness, authorization_refusal = _authorized_approval_witness(pr, authorized)
+        if authorized_witness is None:
+            decision = _decision(
+                pr,
+                "skip",
+                authorization_refusal,
+                evidence=(f"reviewer={approval_witness.reviewer_login}",),
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        approval_witness = authorized_witness
         path_set, path_source, path_refusal = _daemon_path_set(pr, runner)
         if not path_set:
             decision = _decision(
@@ -589,6 +682,21 @@ def run_daemon_pass(
                 path_set=path_set,
                 path_set_source=path_source,
                 evidence=("dry_run=true",),
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        reverified, reverify_reason, reverify_evidence = _reverify_approval_before_enqueue(
+            pr, runner, approval_witness
+        )
+        if not reverified:
+            decision = _decision(
+                pr,
+                "skip",
+                reverify_reason,
+                path_set=path_set,
+                path_set_source=path_source,
+                evidence=reverify_evidence,
             )
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
@@ -676,7 +784,7 @@ _DAEMON_SEARCH_QUERY = (
     "... on PullRequest{"
     "number title url isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
     "repository{nameWithOwner} "
-    "latestOpinionatedReviews(first:20){nodes{state commit{oid}}} "
+    "latestOpinionatedReviews(first:20){nodes{id state author{login} commit{oid}}} "
     "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
     "pageInfo{hasNextPage} nodes{__typename "
     "... on CheckRun{name conclusion status} "
@@ -706,12 +814,11 @@ def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
         if isinstance(node.get("latestOpinionatedReviews"), dict)
         else {}
     )
+    approval_witnesses = _parse_approval_witnesses(reviews)
     approving = tuple(
-        str(((review.get("commit") or {}).get("oid") or "")).lower()
-        for review in reviews.get("nodes") or ()
-        if isinstance(review, dict)
-        and review.get("state") == "APPROVED"
-        and ((review.get("commit") or {}).get("oid"))
+        witness.commit_oid.lower()
+        for witness in approval_witnesses
+        if witness.approved and witness.commit_oid
     )
     return DaemonPullRequest(
         repo=repo,
@@ -739,7 +846,29 @@ def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
         files_complete=((files.get("pageInfo") or {}).get("hasNextPage") is not True),
         checks_complete=((contexts.get("pageInfo") or {}).get("hasNextPage") is not True),
         is_draft=bool(node.get("isDraft")),
+        approval_witnesses=approval_witnesses,
     )
+
+
+def _parse_approval_witnesses(reviews: Mapping[str, Any]) -> tuple[DaemonApprovalWitness, ...]:
+    witnesses: list[DaemonApprovalWitness] = []
+    for review in reviews.get("nodes") or ():
+        if not isinstance(review, dict):
+            continue
+        reviewer = str(((review.get("author") or {}).get("login") or "")).strip()
+        commit_oid = str(((review.get("commit") or {}).get("oid") or "")).lower()
+        state = str(review.get("state") or "")
+        if not reviewer or not commit_oid:
+            continue
+        witnesses.append(
+            DaemonApprovalWitness(
+                reviewer_login=reviewer,
+                commit_oid=commit_oid,
+                state=state,
+                review_id=str(review.get("id") or ""),
+            )
+        )
+    return tuple(witnesses)
 
 
 def _latest_commit_node(node: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -777,6 +906,8 @@ def _daemon_gate_refusal(pr: DaemonPullRequest) -> str | None:
         return "review_not_approved"
     if pr.head_sha.lower() not in pr.approving_review_commits:
         return "approval_not_current_head"
+    if _current_approval_witness(pr) is None:
+        return "approval_reviewer_unconfirmed"
     if pr.mergeable != "MERGEABLE":
         return "not_mergeable"
     if not pr.files_complete:
@@ -794,6 +925,57 @@ def _daemon_gate_refusal(pr: DaemonPullRequest) -> str | None:
     if any(not check.success for check in tests):
         return "test_check_not_success"
     return None
+
+
+def _current_approval_witnesses(pr: DaemonPullRequest) -> tuple[DaemonApprovalWitness, ...]:
+    head_sha = pr.head_sha.lower()
+    current = (
+        witness
+        for witness in pr.approval_witnesses
+        if witness.approved
+        and witness.commit_oid.lower() == head_sha
+        and witness.reviewer_login.strip()
+    )
+    return tuple(sorted(current, key=lambda witness: (witness.reviewer_login.lower(), witness.review_id)))
+
+
+def _current_approval_witness(pr: DaemonPullRequest) -> DaemonApprovalWitness | None:
+    current = _current_approval_witnesses(pr)
+    return current[0] if current else None
+
+
+def _normalize_authorized_reviewers(reviewers: Sequence[str] | None) -> frozenset[str] | None:
+    if reviewers is None:
+        return None
+    normalized = frozenset(
+        reviewer.strip().lower()
+        for reviewer in reviewers
+        if isinstance(reviewer, str) and reviewer.strip()
+    )
+    return normalized
+
+
+def _authorized_approval_witness(
+    pr: DaemonPullRequest, authorized_reviewers: frozenset[str] | None
+) -> tuple[DaemonApprovalWitness | None, str]:
+    if not authorized_reviewers:
+        return None, "authorized_reviewers_missing"
+    for witness in _current_approval_witnesses(pr):
+        if witness.reviewer_login.lower() in authorized_reviewers:
+            return witness, ""
+    return None, "approval_reviewer_unauthorized"
+
+
+def _approval_settle_key(pr: DaemonPullRequest, witness: DaemonApprovalWitness) -> str:
+    review_part = witness.review_id or witness.reviewer_login.lower()
+    return f"{pr.repo}#{pr.pr_number}:{pr.head_sha.lower()}:{review_part}"
+
+
+def _clear_approval_settle_for_pr(keys: set[str], pr: DaemonPullRequest) -> None:
+    prefix = f"{pr.repo}#{pr.pr_number}:"
+    for key in tuple(keys):
+        if key.startswith(prefix):
+            keys.discard(key)
 
 
 def _find_check(checks: Sequence[DaemonStatusCheck], name: str) -> DaemonStatusCheck | None:
@@ -887,6 +1069,127 @@ def _enqueue_merge_queue(pr: DaemonPullRequest, runner: GhRunner) -> subprocess.
             pr.head_sha,
         ],
         None,
+    )
+
+
+_DAEMON_APPROVAL_REVERIFY_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){"
+    "repository(owner:$owner,name:$name){pullRequest(number:$number){"
+    "reviewDecision headRefOid "
+    "latestOpinionatedReviews(first:20){nodes{id state author{login} commit{oid}}}"
+    "}}}"
+)
+
+
+def _reverify_approval_before_enqueue(
+    pr: DaemonPullRequest,
+    runner: GhRunner,
+    expected: DaemonApprovalWitness,
+) -> tuple[bool, str, tuple[str, ...]]:
+    try:
+        owner, name = _split_repo(pr.repo)
+        parsed = _gh_graphql(
+            runner,
+            _DAEMON_APPROVAL_REVERIFY_QUERY,
+            {"owner": owner, "name": name, "number": pr.pr_number},
+            purpose=f"reverify approval for {pr.repo}#{pr.pr_number}",
+        )
+    except (ForgeConfigError, IntegratorBeltError) as exc:
+        return (
+            False,
+            "approval_reverify_failed",
+            (f"error={redact_gh_stderr(str(exc))}",),
+        )
+    live_pr = ((parsed.get("data") or {}).get("repository") or {}).get("pullRequest")
+    if not isinstance(live_pr, dict):
+        return False, "approval_reverify_failed", ("error=unexpected_response",)
+    if str(live_pr.get("headRefOid") or "").lower() != pr.head_sha.lower():
+        return (
+            False,
+            "approval_reverify_failed",
+            (
+                "head_moved=true",
+                f"expected_head={pr.head_sha}",
+                f"live_head={str(live_pr.get('headRefOid') or '')}",
+            ),
+        )
+    if live_pr.get("reviewDecision") != "APPROVED":
+        return (
+            False,
+            "approval_not_reconfirmed",
+            (f"review_decision={live_pr.get('reviewDecision') or ''}",),
+        )
+    witnesses = _parse_approval_witnesses(
+        live_pr.get("latestOpinionatedReviews")
+        if isinstance(live_pr.get("latestOpinionatedReviews"), dict)
+        else {}
+    )
+    for witness in witnesses:
+        if (
+            witness.approved
+            and witness.reviewer_login == expected.reviewer_login
+            and witness.commit_oid.lower() == pr.head_sha.lower()
+            and (not expected.review_id or witness.review_id == expected.review_id)
+        ):
+            return (
+                True,
+                "approval_reverified",
+                (
+                    "approval_reverified=true",
+                    f"reviewer={expected.reviewer_login}",
+                    f"review_id={expected.review_id}",
+                ),
+            )
+    return (
+        False,
+        "approval_not_reconfirmed",
+        (
+            f"reviewer={expected.reviewer_login}",
+            f"review_id={expected.review_id}",
+            "approval_reverified=false",
+        ),
+    )
+
+
+def dequeue_merge_queue(
+    *,
+    repo: str,
+    pr_number: int,
+    gh_runner: GhRunner | None = None,
+    convert_to_draft: bool = False,
+) -> MergeQueueDequeueResult:
+    """Emergency primitive for evicting a PR from GitHub's merge queue."""
+
+    _split_repo(repo)
+    if pr_number < 1:
+        raise IntegratorBeltError("pr_number must be >= 1")
+    runner = gh_runner or _default_gh_runner
+    disable = runner(
+        ["gh", "pr", "merge", str(pr_number), "--repo", repo, "--disable-auto"],
+        None,
+    )
+    evidence = [
+        "gh_pr_merge_disable_auto=true",
+        f"disable_returncode={disable.returncode}",
+        f"disable_stderr={redact_gh_stderr(disable.stderr or '')}",
+    ]
+    converted = False
+    if disable.returncode == 0 and convert_to_draft:
+        draft = runner(["gh", "pr", "ready", str(pr_number), "--repo", repo, "--undo"], None)
+        converted = draft.returncode == 0
+        evidence.extend(
+            [
+                "gh_pr_ready_undo=true",
+                f"draft_returncode={draft.returncode}",
+                f"draft_stderr={redact_gh_stderr(draft.stderr or '')}",
+            ]
+        )
+    return MergeQueueDequeueResult(
+        repo=repo,
+        pr_number=pr_number,
+        disabled_auto_merge=disable.returncode == 0,
+        converted_to_draft=converted,
+        evidence=tuple(evidence),
     )
 
 

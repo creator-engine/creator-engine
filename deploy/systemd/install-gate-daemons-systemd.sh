@@ -15,8 +15,8 @@ Defaults:
 
 The script copies rendered units, runs daemon-reload, enables the services, and
 starts them unless --no-start is supplied. It does not create or overwrite the
-secret env file; create it first with CE_GATE_REPO plus GH_TOKEN and/or
-CE_PICKUP_TOKEN as needed.
+secret env file; create it first with CE_GATE_REPO, CE_GATE_AUTHORIZED_REVIEWERS,
+plus GH_TOKEN and/or CE_PICKUP_TOKEN as needed.
 USAGE
 }
 
@@ -102,6 +102,7 @@ if [[ ! -f "$env_file" ]]; then
 ERROR: env file is missing: $env_file
 Create it before starting the services. Required:
   CE_GATE_REPO=owner/name
+  CE_GATE_AUTHORIZED_REVIEWERS=reviewer-login[,reviewer-login...]
   GH_TOKEN=...
 Optional for review pickup:
   CE_PICKUP_TOKEN=...
