@@ -4,13 +4,15 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=1d04531fc13e051774726985953beb55a564cc8f30db0f86d6badd396ada8303
+AUTHORIZED_PATHS_SHA256=fe270bafe96e9194c8180767b1ecb00a6b9c24bf731261ecd441c6f0bbca2a47
 
 ```text
 .ce/changelog/ce-codex-statusline-default.md
 .ce/pr-manifests/ce-codex-statusline-default.md
 deploy/dgx-runsc/run-codex-runsc.sh
 deploy/vps-runsc/run-vps-runsc.sh
+validators/tests/unit/test_dgx_runsc.py
+validators/tests/unit/test_vps_runsc_launcher.py
 ```

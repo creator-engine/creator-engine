@@ -8,4 +8,4 @@ issue: ce-ops#244
 
 **default codex TUI statusline for contained CE seats.**
 
-- Add a [tui] status_line block to the generated codex config in both runsc launchers so contained codex CE seats boot with the statusline by default (picked up on next canonical relaunch).
+- Default [tui] statusline in the runsc launchers; update launcher config snapshot tests.

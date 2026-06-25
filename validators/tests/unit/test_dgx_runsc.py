@@ -31,6 +31,10 @@ def expected_contained_codex_config() -> str:
         'model_reasoning_effort = "high"\n'
         "allow_managed_hooks_only = true\n"
         "\n"
+        "[tui]\n"
+        'status_line = ["model-with-reasoning", "current-dir", "git-branch", "pull-request-number", "context-remaining", "context-used", "five-hour-limit", "weekly-limit"]\n'
+        "status_line_use_colors = true\n"
+        "\n"
         "[features]\n"
         "hooks = true\n"
         "\n"
