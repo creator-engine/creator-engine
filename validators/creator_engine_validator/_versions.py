@@ -160,6 +160,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # ce-ops#95: pure fleet-liveness read-model for `ce seats ls`, reading
         # lifecycle/sentinel state files only. v3 forge surface; imports no v1.
         "forge.seats_status",
+        # ce-fleet-status: aggregate fleet read-model for `ce fleet status`,
+        # reusing seats_status plus daemon JSONL logs/process probes and the
+        # integrator PR board adapter. v3 forge surface; imports no v1.
+        "forge.fleet_status",
         # ce-ops#216 Unit 2: deterministic, read-only integrator conflict resolvers
         # for known mechanical families. Pure data transforms; no executor/push/
         # credential authority. v3 forge adapter family, imports no v1 module.

@@ -153,7 +153,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#228 PR-1 added ``forge.transport_deputy_policy`` (56 -> 57);
     # ce-ops#95 added ``forge.seats_status`` for fleet-liveness listing (57 -> 58).
     # Search API headroom adds the v3 forge limiter wrapper (58 -> 59).
-    assert len(ver.V3_RUNTIME) == 59
+    # ce-fleet-status adds ``forge.fleet_status`` for the aggregate fleet view
+    # over seats, daemon health, and the open PR board (59 -> 60).
+    assert len(ver.V3_RUNTIME) == 60
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 
@@ -204,6 +206,7 @@ def test_classify_lines():
     assert ver.classify("forge.integrator_runner") == ver.V3
     assert ver.classify("forge.transport_deputy_policy") == ver.V3
     assert ver.classify("forge.seats_status") == ver.V3
+    assert ver.classify("forge.fleet_status") == ver.V3
     assert ver.classify("forge.search_rate_limiter") == ver.V3
     assert ver.classify("search_rate_limiter") == ver.SHARED
     assert ver.classify("loader") == ver.SHARED
