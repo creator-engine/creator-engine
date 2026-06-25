@@ -14,9 +14,9 @@ docker run --runtime=runsc --network=none ...
 Both forms can hand `runsc` the DGX root network namespace and fail with
 `cannot run with network enabled in root network namespace`. CE's own runner
 does not rely on Docker bridge networking for this posture. It translates the
-runtime policy to a gVisor Systrap plan with mediated egress, and the DGX
-Stage-1 deployment provides that mediation through the existing
-`gvproxy`/`gvisor-tap-vsock` network path.
+runtime policy to a gVisor plan whose Docker argv omits Docker networking flags.
+The DGX Stage-1 `gvproxy`/`gvisor-tap-vsock` path provides routing/transport
+only; it is not proof of per-policy allowlist egress confinement.
 
 The first DGX pass confirmed that `runsc --platform=systrap --network=host`
 fixes networking for a basic container, but Codex itself panics at startup in
@@ -40,22 +40,24 @@ The local runner evidence is in
 - `translate_to_runsc_plan()` renders the same Docker shape used by
   `run-codex-runsc.sh`: `docker run --runtime=runsc-gvproxy-ptrace`.
 - A policy with egress is still recorded as `network="proxy"` in the CE plan,
-  but that is the mediated-egress policy label; the rendered Docker argv omits
+  but that is only the policy label; the rendered Docker argv omits
   `--network` by default.
 - The plan renders `--security-opt=no-new-privileges`, `--cap-drop=ALL`, the
   seat `--user uid:gid`, the policy bind mounts, the host `CODEX_HOME` bind
   mount, the Codex binary bind mount, and the digest-pinned image reference.
-- `SubprocessContainerRunner.egress_enforceable()` treats the concrete proxy as
-  the registered Docker runtime route. There is no in-repo `gvproxy` process
-  launch.
+- `SubprocessContainerRunner.egress_enforceable()` does not treat the DGX
+  `gvproxy`/`runsc` route as allowlist enforcement. That route proves
+  containment/routing only; a non-empty `egress_allowlist` must refuse unless a
+  real allowlist enforcement primitive is proven.
 
 On the DGX, mirror that deployment shape by registering a dedicated Docker
 runtime named `runsc-gvproxy-ptrace`. That runtime keeps the process under
 `runsc`, uses `ptrace` for Codex compatibility, and tells `runsc` to use the DGX
 host network stack. On this host, that stack is already the Stage-1
-`gvproxy`/`gvisor-tap-vsock` egress path. The wrapper does not pass Docker
-`--network` by default and refuses the old plain `runsc` runtime unless the
-operator explicitly overrides it for diagnostics.
+`gvproxy`/`gvisor-tap-vsock` egress route, not proof of per-policy allowlist
+confinement. The wrapper does not pass Docker `--network` by default and refuses
+the old plain `runsc` runtime unless the operator explicitly overrides it for
+diagnostics.
 
 ## Apply Steps On The DGX
 

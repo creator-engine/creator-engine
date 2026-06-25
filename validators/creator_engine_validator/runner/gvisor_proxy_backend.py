@@ -1,15 +1,14 @@
-"""CE v3 plane-C backend: hardened gVisor + capability-separation egress proxy (G-1.2).
+"""CE v3 plane-C backend: hardened gVisor runner with honest egress gating (G-1.2).
 
 The first runner backend that translates a runtime-policy record (the G-1.0
-contract) into the hardened DGX Docker ``runsc`` shape plus a
-**capability-separation egress-proxy** deny-by-default config, registered under
-the ``gvisor-proxy`` key behind the G-1.1 ``RunnerBackend`` adapter.
+contract) into the hardened DGX Docker ``runsc`` shape plus a deny-by-default
+egress allowlist config object, registered under the ``gvisor-proxy`` key behind
+the G-1.1 ``RunnerBackend`` adapter.
 
-This FIXES the in-repo egress STUB: the v2 ``worker_runtime`` path returns no
-egress-enforcement primitive (``egress_primitive() -> None``) and therefore
-*refuses* a non-empty egress allowlist rather than enforcing it. The v3 backend
-translates the allowlist into an enforceable deny-by-default proxy config — the
-agent holds no network/secrets; the proxy holds both.
+This keeps the in-repo egress posture honest: like the v2 ``worker_runtime``
+path, a non-empty egress allowlist is *refused* unless a real allowlist
+enforcement primitive is proven present. DGX ``runsc``/``gvproxy`` metadata
+proves containment/routing only; it is not by itself allowlist enforcement.
 
 LOAD-BEARING translate-vs-execute split (CI has no Docker/runsc runtime):
 
@@ -20,8 +19,8 @@ LOAD-BEARING translate-vs-execute split (CI has no Docker/runsc runtime):
   and importing this module performs no I/O.
 * Live provisioning is **gated behind an availability probe**
   (``ContainerRunner.available``) and refuses before any side effect when the
-  Docker/runsc runtime or the egress-proxy primitive is absent — broad egress is
-  never silently run.
+  Docker/runsc runtime or an allowlist enforcement primitive is absent — broad
+  egress is never silently run.
 
 Defensive only — hardens our own agent runtime; never an offensive capability.
 """
@@ -60,8 +59,6 @@ DEFAULT_CODEX_BIN_TARGET = "/usr/local/bin/codex"
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RUNTIME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _HOST_NETWORK_ARG_RE = re.compile(r"^--?(?:network|net)=host$")
-_ISOLATED_NETWORK_ARG_RE = re.compile(r"^--?(?:network|net)=(?:none|isolated|private|netns)$")
-_EGRESS_POLICY_ARG_RE = re.compile(r"^--?egress[-_]?policy(?:=.+)?$")
 
 _NETWORK_KEYS = {
     "network",
@@ -73,14 +70,10 @@ _NETWORK_KEYS = {
     "net_mode",
     "netmode",
 }
-_ISOLATED_NETWORK_VALUES = {"none", "isolated", "private", "netns"}
-_PROXY_MARKERS = ("gvproxy", "egress-proxy", "egress_proxy")
-_PROXY_KEYS = {"proxy", "egress_proxy", "egressproxy", "egress_proxy_config", "egressproxyconfig"}
-_EGRESS_POLICY_KEYS = {"egress_policy", "egresspolicy", "egress_allowlist", "egressallowlist"}
 
 
 class EgressNotEnforceable(BackendUnavailable):
-    """A non-empty egress allowlist cannot be enforced (no proxy primitive).
+    """A non-empty egress allowlist cannot be enforced (no proven primitive).
 
     Defined locally (subclassing the G-1.1 ``BackendUnavailable``) so the stable
     ``runner/backend.py`` ABC stays untouched. Raised *before* any side effect,
@@ -106,7 +99,11 @@ class EgressRule:
 
 @dataclass(frozen=True)
 class EgressProxyConfig:
-    """A deny-by-default egress-proxy config translated from a runtime policy."""
+    """A deny-by-default egress config translated from a runtime policy.
+
+    This is a pure policy object. It is not proof that a live runner can enforce
+    the allowlist.
+    """
 
     deny_by_default: bool
     rules: tuple[EgressRule, ...]
@@ -351,11 +348,12 @@ def _require_runtime_name(value: Any) -> str:
 
 
 def translate_to_egress_proxy_config(runtime_policy: dict[str, Any]) -> EgressProxyConfig:
-    """Translate ``egress_allowlist`` into a deny-by-default egress-proxy config (pure).
+    """Translate ``egress_allowlist`` into a deny-by-default egress config (pure).
 
     Deny-by-default is ALWAYS the floor. An empty allowlist yields ``no_egress``;
-    a non-empty allowlist yields explicit allow rules (the egress-stub FIX — an
-    enforceable config, not a refusal). Everything not listed is denied.
+    a non-empty allowlist yields explicit allow rules. Live provisioning still
+    refuses the non-empty case unless the runner proves a real allowlist
+    enforcement primitive.
     """
     rules: list[EgressRule] = []
     for entry in runtime_policy.get("egress_allowlist") or []:
@@ -385,7 +383,7 @@ class ContainerRunner(Protocol):
         ...
 
     def egress_enforceable(self) -> bool:
-        """True when the capability-separation egress proxy can enforce a config."""
+        """True only when a concrete allowlist enforcement primitive is proven."""
         ...
 
     def run(self, argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -436,11 +434,9 @@ class SubprocessContainerRunner:
 
     def egress_enforceable(self) -> bool:
         config = self._registered_runtime_config()
-        if config is None or _runtime_declares_host_network(config):
+        if config is None:
             return False
-        if _runtime_declares_proxy(config):
-            return True
-        return _runtime_declares_isolated_network(config) and _runtime_declares_egress_policy(config)
+        return _runtime_declares_allowlist_enforcement_primitive(config)
 
     def run(self, argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:  # pragma: no cover - requires live Docker
         return subprocess.run(
@@ -460,41 +456,17 @@ def _runtime_declares_host_network(config: dict[str, Any]) -> bool:
     return False
 
 
-def _runtime_declares_proxy(config: dict[str, Any]) -> bool:
-    for key, value in _walk_runtime_metadata(config):
-        normalized_key = _normalize_metadata_key(key)
-        if "no_proxy" in normalized_key:
-            continue
-        if normalized_key in _PROXY_KEYS and _truthy_metadata(value):
-            return True
-        if any(marker in normalized_key for marker in _PROXY_MARKERS) and _truthy_metadata(value):
-            return True
-        if isinstance(value, str) and any(marker in value.lower() for marker in _PROXY_MARKERS):
-            return True
-    return False
+def _runtime_declares_allowlist_enforcement_primitive(config: dict[str, Any]) -> bool:
+    """Return True only for known allowlist enforcement primitives.
 
-
-def _runtime_declares_isolated_network(config: dict[str, Any]) -> bool:
-    for key, value in _walk_runtime_metadata(config):
-        normalized = _normalize_metadata_key(key)
-        if normalized in _NETWORK_KEYS and _metadata_value(value) in _ISOLATED_NETWORK_VALUES:
-            return True
-        if normalized == "netns" and _truthy_metadata(value):
-            return True
-        if _sequence_declares_isolated_network(value):
-            return True
-        if isinstance(value, str) and _ISOLATED_NETWORK_ARG_RE.match(value.strip().lower()):
-            return True
-    return False
-
-
-def _runtime_declares_egress_policy(config: dict[str, Any]) -> bool:
-    for key, value in _walk_runtime_metadata(config):
-        normalized = _normalize_metadata_key(key)
-        if normalized in _EGRESS_POLICY_KEYS and _truthy_metadata(value):
-            return True
-        if isinstance(value, str) and _EGRESS_POLICY_ARG_RE.match(value.strip().lower()):
-            return True
+    The DGX Docker runtime metadata can prove that Docker will invoke runsc and
+    may route traffic through gvproxy, but this module does not currently wire a
+    live allowlist-enforcing proxy/config handoff. Treating generic
+    ``gvproxy``/``proxy``/``egressPolicy`` strings as enforcement would be a
+    false attestation, so the current known-primitive set is intentionally empty.
+    """
+    if _runtime_declares_host_network(config):
+        return False
     return False
 
 
@@ -519,15 +491,6 @@ def _sequence_declares_host_network(value: Any) -> bool:
     )
 
 
-def _sequence_declares_isolated_network(value: Any) -> bool:
-    if not isinstance(value, (list, tuple)):
-        return False
-    parts = [_metadata_value(part) for part in value]
-    return any(_sequence_has_network_value(parts, network) for network in _ISOLATED_NETWORK_VALUES) or any(
-        _ISOLATED_NETWORK_ARG_RE.match(part) for part in parts
-    )
-
-
 def _sequence_has_network_value(parts: list[str], expected: str) -> bool:
     for index, part in enumerate(parts[:-1]):
         if part in {"--network", "network", "--net", "net"} and parts[index + 1] == expected:
@@ -543,17 +506,11 @@ def _metadata_value(value: Any) -> str:
     return value.strip().lower() if isinstance(value, str) else ""
 
 
-def _truthy_metadata(value: Any) -> bool:
-    if isinstance(value, str):
-        return bool(value.strip()) and value.strip().lower() not in {"0", "false", "no", "off", "none"}
-    return bool(value)
-
-
 # ---------------------------------------------------------------------------
 # The backend
 # ---------------------------------------------------------------------------
 class GvisorProxyBackend(RunnerBackend):
-    """gVisor + capability-separation egress-proxy backend (translation + injected runner)."""
+    """gVisor runner backend with deny-by-default egress gating."""
 
     backend_key = BACKEND_KEY
 
@@ -599,17 +556,18 @@ class GvisorProxyBackend(RunnerBackend):
         except RunscPlanRejected as exc:
             raise BackendUnavailable(f"invalid Docker/runsc plan: {exc}") from exc
         egress = translate_to_egress_proxy_config(record)
+        # Safety floor: a non-empty allowlist MUST have proven enforcement;
+        # mirror worker_runtime and refuse before Docker/runsc availability probing.
+        if not egress.no_egress and not self._runner.egress_enforceable():
+            raise EgressNotEnforceable(
+                "policy declares a non-empty egress allowlist but no allowlist enforcement "
+                "primitive is proven; refusing before container start (broad egress is never "
+                "silently labelled governed)"
+            )
         # Availability gate — refuse before any side effect.
         if not self._runner.available():
             raise BackendUnavailable(
                 f"the {DOCKER_BINARY!r} client is not available; refusing to provision"
-            )
-        # Egress-stub fix + safety floor: a non-empty allowlist MUST be enforceable;
-        # never run broad egress.
-        if not egress.no_egress and not self._runner.egress_enforceable():
-            raise EgressNotEnforceable(
-                "policy declares a non-empty egress allowlist but no proxy primitive is "
-                "enforceable; refusing before container start (broad egress is never silent)"
             )
         policy_sha = record.get("policy_sha", "")
         handle = ProvisionedHandle(
