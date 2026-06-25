@@ -124,6 +124,7 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert "CE_DGX_HARNESS_BIN=/usr/local/bin/codex" in argv
     assert "CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in argv
     assert "CE_SEAT_LOG_DIR=/var/log/ce-seat" in argv
+    assert "CE_HERDR_SERVER_LOG=/var/log/ce-seat/herdr-server.log" in argv
     assert "CE_CODEX_STDERR_LOG=/var/log/ce-seat/codex-stderr.log" in argv
     assert "XDG_CONFIG_HOME=/var/log/ce-seat/xdg/config" in argv
     assert "XDG_STATE_HOME=/var/log/ce-seat/xdg/state" in argv
@@ -263,11 +264,13 @@ def test_entrypoint_fail_closed_and_uses_herdr_control_path_only_for_cli() -> No
     assert 'DEFAULT_SOCKET="/run/creator-engine/herdr/herdr.sock"' in text
     assert 'install -d -m 0700 "${SOCKET_DIR}"' in text
     assert 'CE_SEAT_LOG_DIR="${CE_SEAT_LOG_DIR:-/var/log/ce-seat}"' in text
+    assert 'CE_HERDR_SERVER_LOG="${CE_HERDR_SERVER_LOG:-${CE_SEAT_LOG_DIR}/herdr-server.log}"' in text
     assert 'CE_CODEX_STDERR_LOG="${CE_CODEX_STDERR_LOG:-${CE_SEAT_LOG_DIR}/codex-stderr.log}"' in text
+    assert ': >>"${CE_HERDR_SERVER_LOG}"' in text
     assert ': >>"${CE_CODEX_STDERR_LOG}"' in text
     assert 'XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}' in text
     assert 'HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-${DEFAULT_SOCKET}}" "${HERDR_BIN}" "$@"' in text
-    assert "herdr_cli server &" in text
+    assert 'HERDR_SOCKET_PATH="${SOCKET_PATH}" "${HERDR_BIN}" server >>"${CE_HERDR_SERVER_LOG}" 2>&1 &' in text
     assert 'herdr_cli workspace create --cwd "${WORKSPACE_CWD}" --label "${WORKSPACE_LABEL}"' in text
     assert "json_get_root_pane_id" in text
     assert '/bin/sh -c \'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"\'' in text

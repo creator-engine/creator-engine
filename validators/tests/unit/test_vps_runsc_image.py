@@ -88,10 +88,12 @@ def test_entrypoint_is_fail_closed_and_routes_harness_through_herdr() -> None:
     assert '[ -x "${harness_bin}" ] || fail' in text
     assert '[ -d "${HERDR_SOCKET_DIR}" ] || fail' in text
     assert '[ -d "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is missing: ${CE_SEAT_LOG_DIR}"' in text
+    assert 'CE_HERDR_SERVER_LOG="${CE_HERDR_SERVER_LOG:-${CE_SEAT_LOG_DIR}/herdr-server.log}"' in text
+    assert ': >>"${CE_HERDR_SERVER_LOG}"' in text
     assert ': >>"${CE_CODEX_STDERR_LOG}"' in text
     assert 'XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}' in text
     assert "stat -c '%a'" in text
-    assert 'HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" server &' in text
+    assert 'HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" server >>"${CE_HERDR_SERVER_LOG}" 2>&1 &' in text
     assert "server --socket" not in text
     assert '[ -S "${HERDR_SOCKET_PATH}" ] || fail "herdr server did not create socket"' in text
     assert 'herdr_cli()' in text
@@ -108,8 +110,8 @@ def test_entrypoint_selects_harness_from_ce_dgx_harness() -> None:
     text = _entrypoint()
 
     assert 'CE_DGX_HARNESS="${CE_DGX_HARNESS:-codex}"' in text
-    assert 'harness_bin="/usr/local/bin/codex"' in text
-    assert 'harness_bin="/usr/local/bin/claude"' in text
+    assert 'harness_bin="${CE_DGX_HARNESS_BIN:-/usr/local/bin/codex}"' in text
+    assert 'harness_bin="${CE_DGX_HARNESS_BIN:-/usr/local/bin/claude}"' in text
     assert 'fail "CE_DGX_HARNESS must be codex or claude' in text
     assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")' in text
 
