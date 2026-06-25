@@ -45,6 +45,10 @@ ratification:
   ratified_by: chmod735
   ratified_at: "2026-06-19"
   ratification_prompt_sha: bb69016797062f5b53f3f5a79164f495b59c885d19172828b87a1407904d9366
+  # N=1 native mode: ratified by the sole resolved human (chmod735 -> peer-operator
+  # in .ce/coordination.yml's identity_map). Honest solo quorum, NOT two-account
+  # laundering. Auto-expires the instant the identity map resolves a second human.
+  quorum: n1_solo
 ---
 
 # Derived Artifacts Out Of The Trust Path
