@@ -262,8 +262,13 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
     assert '"event_count": 0' in capsys.readouterr().out
 
 
-def _check(name: str, state: str = "SUCCESS") -> belt.DaemonStatusCheck:
-    return belt.DaemonStatusCheck(name=name, state=state, kind="CheckRun")
+def _check(
+    name: str,
+    state: str = "SUCCESS",
+    *,
+    latest_at: str | None = None,
+) -> belt.DaemonStatusCheck:
+    return belt.DaemonStatusCheck(name=name, state=state, kind="CheckRun", latest_at=latest_at)
 
 
 def _daemon_pr(**overrides) -> belt.DaemonPullRequest:
@@ -598,6 +603,95 @@ def test_daemon_settle_window_defers_first_approval_cycle_then_enqueues():
         "--match-head-commit",
         HEAD,
     ]]
+
+
+def test_daemon_enqueues_when_required_rollup_has_stale_failure_then_latest_success():
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    pr = _daemon_pr(
+        changed_paths=(CARRIER, "docs/a.md"),
+        rollup_state="FAILURE",
+        checks=(
+            _check("Validate governance artifacts"),
+            _check("unit tests", "SUCCESS", latest_at="2026-06-25T12:10:00Z"),
+            _check("unit tests", "FAILURE", latest_at="2026-06-25T12:00:00Z"),
+        ),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_verifier=_approval_verifier(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 1
+    assert result.decisions[0].reason == "eligible_enqueued"
+    assert gh.merge_calls == [[
+        "gh",
+        "pr",
+        "merge",
+        str(PR),
+        "--repo",
+        REPO,
+        "--auto",
+        "--match-head-commit",
+        HEAD,
+    ]]
+
+
+def test_daemon_latest_required_check_failure_still_fails_closed():
+    gh = FakeDaemonGh()
+    pr = _daemon_pr(
+        changed_paths=(CARRIER, "docs/a.md"),
+        checks=(
+            _check("Validate governance artifacts"),
+            _check("unit tests", "FAILURE", latest_at="2026-06-25T12:10:00Z"),
+            _check("unit tests", "SUCCESS", latest_at="2026-06-25T12:00:00Z"),
+        ),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_verifier=_approval_verifier(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "test_check_not_success"
+    assert gh.merge_calls == []
+
+
+def test_daemon_rollup_not_success_without_clean_merge_state_fails_closed():
+    gh = FakeDaemonGh()
+    pr = _daemon_pr(
+        rollup_state="FAILURE",
+        merge_state_status="BLOCKED",
+        checks=(
+            _check("Validate governance artifacts"),
+            _check("unit tests"),
+        ),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_verifier=_approval_verifier(),
+        candidates=(pr,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "rollup_not_success"
+    assert gh.merge_calls == []
 
 
 def test_daemon_settled_without_authorized_reviewers_fails_closed():
@@ -1252,6 +1346,34 @@ def test_daemon_search_query_uses_latest_opinionated_reviews():
     assert "latestReviews(" not in query
     assert "body isDraft reviewDecision" in query
     assert "author{login}" in query
+    assert "... on CheckRun{name conclusion status completedAt startedAt}" in query
+    assert "... on StatusContext{context state updatedAt createdAt}" in query
+
+
+def test_parse_status_check_records_latest_timestamp_signal():
+    check_run = belt._parse_status_check(
+        {
+            "__typename": "CheckRun",
+            "name": "unit tests",
+            "conclusion": "SUCCESS",
+            "status": "COMPLETED",
+            "completedAt": "2026-06-25T12:10:00Z",
+            "startedAt": "2026-06-25T12:00:00Z",
+        }
+    )
+    status_context = belt._parse_status_check(
+        {
+            "__typename": "StatusContext",
+            "context": "legacy status",
+            "state": "SUCCESS",
+            "updatedAt": "2026-06-25T12:20:00Z",
+            "createdAt": "2026-06-25T12:05:00Z",
+        }
+    )
+
+    assert check_run.latest_at == "2026-06-25T12:10:00Z"
+    assert status_context.latest_at == "2026-06-25T12:20:00Z"
+    assert check_run.to_dict()["latest_at"] == "2026-06-25T12:10:00Z"
 
 
 def test_parse_daemon_pr_reads_approval_and_capability_from_latest_opinionated_reviews():
@@ -1298,7 +1420,15 @@ def test_parse_daemon_pr_reads_approval_and_capability_from_latest_opinionated_r
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     gh = FakeDaemonGh()
     stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
-    red = _daemon_pr(pr_number=2, body=_body_with_approval(pr_number=2), rollup_state="FAILURE")
+    red = _daemon_pr(
+        pr_number=2,
+        body=_body_with_approval(pr_number=2),
+        rollup_state="FAILURE",
+        checks=(
+            _check("Validate governance artifacts"),
+            _check("unit tests", "FAILURE"),
+        ),
+    )
     missing_governance = _daemon_pr(
         pr_number=3,
         body=_body_with_approval(pr_number=3),
@@ -1317,7 +1447,7 @@ def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     assert result.skip_count == 3
     assert [decision.reason for decision in result.decisions] == [
         "approval_not_current_head",
-        "rollup_not_success",
+        "test_check_not_success",
         "governance_check_missing",
     ]
     assert gh.merge_calls == []
