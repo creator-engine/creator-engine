@@ -42,7 +42,7 @@ crosswalk:
     - ce-ops#91
     - ce-ops#65
 ratification:
-  ratified_by: operator
+  ratified_by: chmod735
   ratified_at: "2026-06-19"
   ratification_prompt_sha: bb69016797062f5b53f3f5a79164f495b59c885d19172828b87a1407904d9366
 ---
