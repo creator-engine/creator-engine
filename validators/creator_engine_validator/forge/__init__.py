@@ -55,6 +55,14 @@ from .eviction_detection import (
     poll_repair_needed,
 )
 from .credential_runner import authenticated_gh_runner
+from .cred_injection_proxy import (
+    ContainedDispatch,
+    CredentialBinding,
+    CredentialProxyRefused,
+    OutboundTransportRequest,
+    ProxyDispatchResult,
+    dispatch_with_credential_injection,
+)
 from .deterministic_resolvers import (
     ResolverResult,
     resolve_conflict,
@@ -137,7 +145,10 @@ __all__ = [
     "ChecksState",
     "ConfigResult",
     "ConflictState",
+    "ContainedDispatch",
     "ControllerEscalationEvent",
+    "CredentialBinding",
+    "CredentialProxyRefused",
     "EscalationContext",
     "ForgeConfigError",
     "ForgeConfigRefused",
@@ -151,6 +162,7 @@ __all__ = [
     "MergeRefused",
     "MergeResult",
     "OpenChangeRefused",
+    "OutboundTransportRequest",
     "EvictionDetectionError",
     "ExecutorAdapter",
     "ExecutorPublishResult",
@@ -168,6 +180,7 @@ __all__ = [
     "ResolutionPlan",
     "PolicyProfile",
     "PolicyRule",
+    "ProxyDispatchResult",
     "RulesetBypassActor",
     "RulesetPolicy",
     "RulesetRefused",
@@ -187,6 +200,7 @@ __all__ = [
     "configure_repo",
     "delete_ruleset",
     "detect_repair_needed",
+    "dispatch_with_credential_injection",
     "enable_auto_merge",
     "escalate_unresolved_results",
     "escalation_for_result",
