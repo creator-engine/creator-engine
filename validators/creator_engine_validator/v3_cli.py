@@ -93,7 +93,7 @@ from .forge import (
     delete_ruleset,
     upsert_ruleset,
 )
-from .forge import integrator_belt, seats_status
+from .forge import fleet_status, integrator_belt, seats_status
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
@@ -3606,6 +3606,7 @@ def _build_parser() -> argparse.ArgumentParser:
     version.add_version_flag(parser)
     sub = parser.add_subparsers(dest="command")
     seats_status.add_parser(sub, default_root=V3_LOCAL_STATE_ROOT)
+    fleet_status.add_parser(sub, default_root=V3_LOCAL_STATE_ROOT)
 
     p_scope = sub.add_parser("scope", help="file a Scope (Goal/Done-when/Budget/Change-type)")
     p_scope.add_argument("scope_id", metavar="ID", help="stable Scope slug")
@@ -4642,6 +4643,7 @@ _DISPATCH = {
     "carrier": _cmd_carrier,
     "queue-poll": _cmd_queue_poll,
     "queue-daemon": _cmd_queue_daemon,
+    "fleet": fleet_status.run_cli,
     "seats": seats_status.run_cli,
 }
 
