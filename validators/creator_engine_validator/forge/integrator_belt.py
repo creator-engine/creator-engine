@@ -26,6 +26,10 @@ from typing import Any
 from urllib.parse import quote
 
 from ._redact import redact_gh_stderr
+from .approval_capability import (
+    ApprovalCapabilityVerifier,
+    extract_approval_capability_marker,
+)
 from .auto_merge import enable_auto_merge
 from .change import ChangeRef
 from .eviction_detection import RepairNeededEvent, RepairPollResult, Transport
@@ -157,11 +161,15 @@ class DaemonPullRequest:
     pr_number: int
     title: str
     url: str
+    body: str
     head_ref: str
     head_sha: str
     base_ref: str
     review_decision: str | None
     approving_review_commits: tuple[str, ...]
+    approving_reviewers: tuple[str, ...]
+    approval_capability_present: bool
+    approval_capability_marker: str | None
     mergeable: str | None
     merge_state_status: str | None
     rollup_state: str | None
@@ -183,6 +191,8 @@ class DaemonPullRequest:
             "base_ref": self.base_ref,
             "review_decision": self.review_decision,
             "approving_review_commits": list(self.approving_review_commits),
+            "approving_reviewers": list(self.approving_reviewers),
+            "approval_capability_present": self.approval_capability_present,
             "mergeable": self.mergeable,
             "merge_state_status": self.merge_state_status,
             "rollup_state": self.rollup_state,
@@ -510,6 +520,7 @@ def run_daemon_loop(
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
     dry_run: bool = False,
     gh_runner: GhRunner | None = None,
+    approval_verifier: ApprovalCapabilityVerifier | None = None,
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
@@ -539,6 +550,7 @@ def run_daemon_loop(
                 org=org,
                 dry_run=dry_run,
                 gh_runner=runner,
+                approval_verifier=approval_verifier,
                 log_sink=log_sink,
                 rate_limiter=_rate_limiter,
                 sleep=sleep,
@@ -580,6 +592,7 @@ def run_daemon_pass(
     org: str | None = None,
     dry_run: bool = False,
     gh_runner: GhRunner | None = None,
+    approval_verifier: ApprovalCapabilityVerifier | None = None,
     log_sink: LogSink | None = None,
     candidates: Sequence[DaemonPullRequest] | None = None,
     rate_limiter: SearchRateLimiter | None = None,
@@ -607,7 +620,7 @@ def run_daemon_pass(
     decisions: list[DaemonDecision] = []
     selected_paths: dict[str, set[str]] = {}
     for pr in sorted(prs, key=lambda item: (item.repo, item.pr_number)):
-        gate_reason = _daemon_gate_refusal(pr)
+        gate_reason = _daemon_gate_refusal(pr, approval_verifier=approval_verifier)
         if gate_reason is not None:
             _clear_approval_settle_for_pr(settle_seen, pr)
             decision = _decision(pr, "skip", gate_reason)
@@ -782,7 +795,7 @@ _DAEMON_SEARCH_QUERY = (
     "query($searchQuery:String!,$first:Int!){"
     "search(type:ISSUE,query:$searchQuery,first:$first){pageInfo{hasNextPage endCursor}nodes{"
     "... on PullRequest{"
-    "number title url isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
+    "number title url body isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
     "repository{nameWithOwner} "
     "latestOpinionatedReviews(first:20){nodes{id state author{login} commit{oid}}} "
     "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
@@ -820,16 +833,33 @@ def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
         for witness in approval_witnesses
         if witness.approved and witness.commit_oid
     )
+    approving_reviewers = tuple(
+        sorted(
+            {
+                str((review.get("author") or {}).get("login") or "")
+                for review in reviews.get("nodes") or ()
+                if isinstance(review, dict)
+                and review.get("state") == "APPROVED"
+                and ((review.get("author") or {}).get("login"))
+            }
+        )
+    )
+    body = str(node.get("body") or "")
+    approval_marker = extract_approval_capability_marker(body)
     return DaemonPullRequest(
         repo=repo,
         pr_number=number,
         title=str(node.get("title") or ""),
         url=str(node.get("url") or ""),
+        body=body,
         head_ref=_required_str(node, "headRefName"),
         head_sha=head_sha,
         base_ref=_required_str(node, "baseRefName"),
         review_decision=node.get("reviewDecision") if isinstance(node.get("reviewDecision"), str) else None,
         approving_review_commits=approving,
+        approving_reviewers=approving_reviewers,
+        approval_capability_present=approval_marker is not None,
+        approval_capability_marker=approval_marker,
         mergeable=node.get("mergeable") if isinstance(node.get("mergeable"), str) else None,
         merge_state_status=(
             node.get("mergeStateStatus") if isinstance(node.get("mergeStateStatus"), str) else None
@@ -899,7 +929,11 @@ def _parse_status_check(raw: Any) -> DaemonStatusCheck:
     return DaemonStatusCheck(name=str(raw.get("name") or raw.get("context") or ""), state="UNKNOWN", kind=kind)
 
 
-def _daemon_gate_refusal(pr: DaemonPullRequest) -> str | None:
+def _daemon_gate_refusal(
+    pr: DaemonPullRequest,
+    *,
+    approval_verifier: ApprovalCapabilityVerifier | None = None,
+) -> str | None:
     if pr.is_draft:
         return "draft_pr"
     if pr.review_decision != "APPROVED":
@@ -908,6 +942,19 @@ def _daemon_gate_refusal(pr: DaemonPullRequest) -> str | None:
         return "approval_not_current_head"
     if _current_approval_witness(pr) is None:
         return "approval_reviewer_unconfirmed"
+    if not pr.approval_capability_marker:
+        return "approval_capability_missing"
+    if approval_verifier is None:
+        return "approval_capability_invalid"
+    capability = approval_verifier.verify(
+        pr.approval_capability_marker,
+        repo=pr.repo,
+        pr_number=pr.pr_number,
+        head_sha=pr.head_sha,
+        approved_by_candidates=pr.approving_reviewers,
+    )
+    if not capability.valid:
+        return "approval_capability_invalid"
     if pr.mergeable != "MERGEABLE":
         return "not_mergeable"
     if not pr.files_complete:

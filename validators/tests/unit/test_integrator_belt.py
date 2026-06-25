@@ -10,6 +10,12 @@ import subprocess
 
 from creator_engine_validator import v3_cli
 from creator_engine_validator.search_rate_limiter import SearchRateLimiter
+from creator_engine_validator.forge.approval_capability import (
+    ApprovalCapabilityClaims,
+    ApprovalCapabilityVerifier,
+    extract_approval_capability_marker,
+    issue_approval_capability,
+)
 from creator_engine_validator.forge import integrator_belt as belt
 from creator_engine_validator.forge.eviction_detection import RepairNeededEvent, RepairPollResult
 from creator_engine_validator.forge.integrator_executor import ExecutorPublishResult, ExecutorRefs
@@ -23,6 +29,11 @@ BRANCH = "feature-integrator"
 CARRIER = ".ce/pr-manifests/feature-integrator.md"
 CARRIER_2 = ".ce/pr-manifests/feature-integrator-2.md"
 AUTHORIZED_REVIEWER = "ce-reviewer"
+APPROVER = AUTHORIZED_REVIEWER
+POLICY_SHA = "approval-wall-policy-v1"
+ISSUED_AT = 1_800_000_000
+EXPIRES_AT = ISSUED_AT + 600
+APPROVAL_SECRET = b"approval-wall-test-secret"
 _OURS = "<" * 7 + " ours"
 _SEP = "=" * 7
 _THEIRS = ">" * 7 + " theirs"
@@ -240,16 +251,24 @@ def _check(name: str, state: str = "SUCCESS") -> belt.DaemonStatusCheck:
 
 
 def _daemon_pr(**overrides) -> belt.DaemonPullRequest:
+    pr_number = overrides.get("pr_number", PR)
+    head_sha = overrides.get("head_sha", HEAD)
+    body = overrides.pop("body", _body_with_approval(pr_number=pr_number, head_sha=head_sha))
+    approval_marker = extract_approval_capability_marker(body)
     data = {
         "repo": REPO,
         "pr_number": PR,
         "title": "ready",
         "url": f"https://github.com/{REPO}/pull/{PR}",
+        "body": body,
         "head_ref": BRANCH,
         "head_sha": HEAD,
         "base_ref": "main",
         "review_decision": "APPROVED",
         "approving_review_commits": (HEAD,),
+        "approving_reviewers": (APPROVER,),
+        "approval_capability_present": approval_marker is not None,
+        "approval_capability_marker": approval_marker,
         "mergeable": "MERGEABLE",
         "merge_state_status": "CLEAN",
         "rollup_state": "SUCCESS",
@@ -272,6 +291,42 @@ def _daemon_pr(**overrides) -> belt.DaemonPullRequest:
     }
     data.update(overrides)
     return belt.DaemonPullRequest(**data)
+
+
+def _approval_marker(
+    *,
+    repo: str = REPO,
+    pr_number: int = PR,
+    head_sha: str = HEAD,
+    approved_by: str = APPROVER,
+    issued_at: int = ISSUED_AT,
+    expires_at: int = EXPIRES_AT,
+    policy_sha: str = POLICY_SHA,
+) -> str:
+    return issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            approved_by=approved_by,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            policy_sha=policy_sha,
+        ),
+        APPROVAL_SECRET,
+    )
+
+
+def _body_with_approval(marker: str | None = None, **claim_overrides) -> str:
+    return f"Controller approval wall\n\n{marker or _approval_marker(**claim_overrides)}\n"
+
+
+def _approval_verifier(*, now: int = ISSUED_AT + 1) -> ApprovalCapabilityVerifier:
+    return ApprovalCapabilityVerifier(
+        lambda: APPROVAL_SECRET,
+        now=lambda: now,
+        policy_sha=POLICY_SHA,
+    )
 
 
 class FakeDaemonGh:
@@ -367,6 +422,7 @@ def test_daemon_default_direct_pass_defers_first_cycle_and_does_not_merge():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         log_sink=lambda payload: logs.append(dict(payload)),
     )
@@ -387,6 +443,7 @@ def test_daemon_settle_window_defers_first_approval_cycle_then_enqueues():
         token="ghp_fake",
         repo=REPO,
         gh_runner=first_gh,
+        approval_verifier=_approval_verifier(),
         candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
         approval_settle_seen=settle_seen,
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -402,6 +459,7 @@ def test_daemon_settle_window_defers_first_approval_cycle_then_enqueues():
         token="ghp_fake",
         repo=REPO,
         gh_runner=second_gh,
+        approval_verifier=_approval_verifier(),
         candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
         approval_settle_seen=settle_seen,
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -430,6 +488,7 @@ def test_daemon_settled_without_authorized_reviewers_fails_closed():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
     )
@@ -442,6 +501,8 @@ def test_daemon_settled_without_authorized_reviewers_fails_closed():
 def test_daemon_skips_unvetted_reviewer_excluded_by_authorized_set():
     pr = _daemon_pr(
         changed_paths=(CARRIER, "docs/a.md"),
+        body=_body_with_approval(_approval_marker(approved_by="unvetted-reviewer")),
+        approving_reviewers=("unvetted-reviewer",),
         approval_witnesses=(
             belt.DaemonApprovalWitness(
                 reviewer_login="unvetted-reviewer",
@@ -457,6 +518,7 @@ def test_daemon_skips_unvetted_reviewer_excluded_by_authorized_set():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -485,6 +547,7 @@ def test_daemon_reverifies_approval_immediately_before_enqueue():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -514,6 +577,7 @@ def test_daemon_reverify_requires_same_authorized_reviewer():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -535,6 +599,7 @@ def test_daemon_reverify_head_moved_fails_closed():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -557,6 +622,7 @@ def test_daemon_reverify_review_decision_downgrade_fails_closed():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -566,6 +632,73 @@ def test_daemon_reverify_review_decision_downgrade_fails_closed():
     assert result.decisions[0].reason == "approval_not_reconfirmed"
     assert "review_decision=CHANGES_REQUESTED" in result.decisions[0].evidence
     assert gh.merge_calls == []
+
+
+def test_daemon_skips_raw_approval_without_capability_fail_closed():
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_verifier=_approval_verifier(),
+        candidates=(_daemon_pr(body="", changed_paths=(CARRIER, "docs/a.md")),),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_missing"
+    assert gh.merge_calls == []
+
+
+def test_daemon_skips_invalid_signature_head_mismatch_and_expired_capability_before_merge():
+    valid = _approval_marker(pr_number=1)
+    invalid_signature = valid[:-1] + ("A" if valid[-1] != "A" else "B")
+    head_mismatch = _approval_marker(pr_number=2, head_sha="c" * 40)
+    expired = _approval_marker(pr_number=3, expires_at=EXPIRES_AT)
+    gh = FakeDaemonGh(raw_contents=(
+        _carrier_text((CARRIER, "docs/a.md")),
+        _carrier_text((CARRIER, "docs/b.md")),
+        _carrier_text((CARRIER, "docs/c.md")),
+    ))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_verifier=_approval_verifier(now=EXPIRES_AT),
+        candidates=(
+            _daemon_pr(pr_number=1, body=_body_with_approval(invalid_signature), changed_paths=(CARRIER, "docs/a.md")),
+            _daemon_pr(pr_number=2, body=_body_with_approval(head_mismatch), changed_paths=(CARRIER, "docs/b.md")),
+            _daemon_pr(pr_number=3, body=_body_with_approval(expired), changed_paths=(CARRIER, "docs/c.md")),
+        ),
+    )
+
+    assert result.enqueue_count == 0
+    assert [decision.reason for decision in result.decisions] == [
+        "approval_capability_invalid",
+        "approval_capability_invalid",
+        "approval_capability_invalid",
+    ]
+    assert gh.merge_calls == []
+    assert gh.calls == []
+
+
+def test_approval_capability_audit_record_contains_no_secret():
+    verifier = _approval_verifier()
+    result = verifier.verify(
+        _approval_marker(),
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(APPROVER,),
+    )
+
+    assert result.valid is True
+    audit = result.to_audit_record()
+    assert audit["reason"] == "valid"
+    assert audit["repo"] == REPO
+    assert APPROVAL_SECRET.decode("utf-8") not in str(audit)
 
 
 def test_discover_daemon_candidates_uses_non_query_search_variable():
@@ -680,13 +813,17 @@ def test_daemon_search_query_uses_latest_opinionated_reviews():
     query = belt._DAEMON_SEARCH_QUERY
     assert "latestOpinionatedReviews(" in query
     assert "latestReviews(" not in query
+    assert "body isDraft reviewDecision" in query
+    assert "author{login}" in query
 
 
-def test_parse_daemon_pr_reads_approval_from_latest_opinionated_reviews():
+def test_parse_daemon_pr_reads_approval_and_capability_from_latest_opinionated_reviews():
     head = "a" * 40
+    marker = _approval_marker(pr_number=7, head_sha=head)
     node = {
         "repository": {"nameWithOwner": REPO},
         "number": 7,
+        "body": f"ready\n{marker}\n",
         "headRefOid": head,
         "headRefName": "feature",
         "baseRefName": "main",
@@ -699,7 +836,7 @@ def test_parse_daemon_pr_reads_approval_from_latest_opinionated_reviews():
                 {
                     "id": "review-7",
                     "state": "APPROVED",
-                    "author": {"login": "ce-reviewer"},
+                    "author": {"login": APPROVER},
                     "commit": {"oid": head},
                 }
             ]
@@ -709,24 +846,33 @@ def test_parse_daemon_pr_reads_approval_from_latest_opinionated_reviews():
     assert pr.approving_review_commits == (head.lower(),)
     assert pr.approval_witnesses == (
         belt.DaemonApprovalWitness(
-            reviewer_login="ce-reviewer",
+            reviewer_login=APPROVER,
             commit_oid=head.lower(),
             state="APPROVED",
             review_id="review-7",
         ),
     )
+    assert pr.approving_reviewers == (APPROVER,)
+    assert pr.approval_capability_present is True
+    assert pr.approval_capability_marker == marker
+    assert "approval_capability_marker" not in pr.to_dict()
 
 
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     gh = FakeDaemonGh()
     stale = _daemon_pr(pr_number=1, approving_review_commits=("c" * 40,))
-    red = _daemon_pr(pr_number=2, rollup_state="FAILURE")
-    missing_governance = _daemon_pr(pr_number=3, checks=(_check("unit tests"),))
+    red = _daemon_pr(pr_number=2, body=_body_with_approval(pr_number=2), rollup_state="FAILURE")
+    missing_governance = _daemon_pr(
+        pr_number=3,
+        body=_body_with_approval(pr_number=3),
+        checks=(_check("unit tests"),),
+    )
 
     result = belt.run_daemon_pass(
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(stale, red, missing_governance),
     )
 
@@ -758,6 +904,7 @@ def test_daemon_skips_unconfirmed_reviewer_identity_fail_closed():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
     )
 
@@ -775,6 +922,7 @@ def test_daemon_skips_missing_carrier_fail_closed():
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -788,14 +936,15 @@ def test_daemon_skips_missing_carrier_fail_closed():
 
 
 def test_daemon_skips_unreadable_or_invalid_carrier_fail_closed():
-    unreadable = _daemon_pr(pr_number=20, changed_paths=(CARRIER, "docs/a.md"))
-    invalid = _daemon_pr(pr_number=21, changed_paths=(CARRIER, "docs/b.md"))
+    unreadable = _daemon_pr(pr_number=20, body=_body_with_approval(pr_number=20), changed_paths=(CARRIER, "docs/a.md"))
+    invalid = _daemon_pr(pr_number=21, body=_body_with_approval(pr_number=21), changed_paths=(CARRIER, "docs/b.md"))
     gh = FakeDaemonGh(raw_contents=(None, "not a carrier"))
 
     result = belt.run_daemon_pass(
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
+        approval_verifier=_approval_verifier(),
         candidates=(unreadable, invalid),
         approval_settle_seen={*_settled(unreadable), *_settled(invalid)},
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -818,6 +967,7 @@ def test_daemon_dry_run_merges_nothing():
         repo=REPO,
         gh_runner=gh,
         dry_run=True,
+        approval_verifier=_approval_verifier(),
         candidates=(pr,),
         approval_settle_seen=_settled(pr),
         authorized_reviewers=(AUTHORIZED_REVIEWER,),
@@ -833,10 +983,17 @@ def test_daemon_manifest_overlap_defers_second_pr():
         _carrier_text((CARRIER, "docs/a.md", "validators/a.py")),
         _carrier_text((CARRIER_2, "docs/a.md", "docs/b.md")),
     ))
-    first = _daemon_pr(pr_number=10, changed_paths=(CARRIER, "docs/a.md", "validators/a.py"))
+    first = _daemon_pr(
+        pr_number=10,
+        body=_body_with_approval(pr_number=10),
+        changed_paths=(CARRIER, "docs/a.md", "validators/a.py"),
+    )
     second = _daemon_pr(
         pr_number=11,
         head_ref="feature-integrator-2",
+        body=_body_with_approval(
+            _approval_marker(pr_number=11, head_sha=HEAD)
+        ),
         changed_paths=(CARRIER_2, "docs/a.md", "docs/b.md"),
     )
 
@@ -845,6 +1002,7 @@ def test_daemon_manifest_overlap_defers_second_pr():
         repo=REPO,
         gh_runner=gh,
         dry_run=True,
+        approval_verifier=_approval_verifier(),
         candidates=(first, second),
         approval_settle_seen={*_settled(first), *_settled(second)},
         authorized_reviewers=(AUTHORIZED_REVIEWER,),

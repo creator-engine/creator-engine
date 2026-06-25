@@ -37,6 +37,13 @@ installable validator package so the existing CI pytest job covers it.
 from __future__ import annotations
 
 from .app_jwt_runner import app_jwt_gh_runner
+from .approval_capability import (
+    ApprovalCapabilityClaims,
+    ApprovalCapabilityVerification,
+    ApprovalCapabilityVerifier,
+    extract_approval_capability_marker,
+    issue_approval_capability,
+)
 from .change import ChangeRef, OpenChangeRefused, open_change
 from .change_status import (
     ChangeStatusRefused,
@@ -138,6 +145,9 @@ from .scoped_token import (
 __all__ = [
     "DEFAULT_MAIN_PROTECTION",
     "ApprovalQuery",
+    "ApprovalCapabilityClaims",
+    "ApprovalCapabilityVerification",
+    "ApprovalCapabilityVerifier",
     "BranchProtectionPolicy",
     "CE_PROTECTION_RULESET_NAME",
     "ChangeRef",
@@ -206,7 +216,9 @@ __all__ = [
     "escalation_for_result",
     "evaluate_transport_deputy_policy",
     "execute_integrator_repair",
+    "extract_approval_capability_marker",
     "install_required_checks",
+    "issue_approval_capability",
     "merge",
     "mint_scoped_token",
     "open_change",
