@@ -10,9 +10,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "run-controller-runsc.sh"
+DOCKERFILE = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "Dockerfile"
+TOKEN_ENV_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
+SYNTHETIC_TOKEN = "synthetic-secret-token-value"
 
 
-def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
+def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
         {
@@ -24,10 +27,16 @@ def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess
             "CE_DGX_UID": "1000",
             "CE_DGX_GID": "1000",
             "CE_DGX_TTY_FLAGS": "-i",
-            "CLAUDE_CODE_OAUTH_TOKEN": "synthetic-secret-token-value",
+            # C1 credential injection is SEAM-STUB only. Keep a host token present
+            # so dry-run tests prove the wrapper does not pass it through.
+            TOKEN_ENV_NAME: SYNTHETIC_TOKEN,
         }
     )
-    env.update(env_overrides)
+    for key, value in env_overrides.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     return subprocess.run(
         ["bash", str(SCRIPT), "--dry-run", *args],
         cwd=REPO_ROOT,
@@ -43,7 +52,20 @@ def dry_run_argv(result: subprocess.CompletedProcess[str]) -> list[str]:
     return shlex.split(result.stdout)
 
 
-def test_controller_wrapper_shell_syntax_is_valid():
+def assert_no_claude_token_leaked(
+    result: subprocess.CompletedProcess[str], argv: list[str] | None = None
+) -> None:
+    haystacks = [result.stdout, result.stderr]
+    if argv is not None:
+        haystacks.extend(argv)
+
+    for haystack in haystacks:
+        assert TOKEN_ENV_NAME not in haystack
+        assert SYNTHETIC_TOKEN not in haystack
+        assert "CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV" not in haystack
+
+
+def test_controller_wrapper_shell_syntax_is_valid() -> None:
     result = subprocess.run(
         ["bash", "-n", str(SCRIPT)],
         cwd=REPO_ROOT,
@@ -55,7 +77,7 @@ def test_controller_wrapper_shell_syntax_is_valid():
     assert result.returncode == 0, result.stderr
 
 
-def test_controller_tui_dry_run_uses_contained_defaults():
+def test_controller_tui_dry_run_uses_contained_defaults() -> None:
     result = run_wrapper("tui")
 
     argv = dry_run_argv(result)
@@ -66,14 +88,17 @@ def test_controller_tui_dry_run_uses_contained_defaults():
     assert "--cap-drop=ALL" in argv
     assert "--tmpfs" in argv
     assert "/run/creator-engine:uid=1000,gid=1000,mode=0700" in argv
-    assert "--network=bridge" not in argv
+    assert "/run/creator-engine/controller-log:uid=1000,gid=1000,mode=0700" in argv
+    assert not any(arg.startswith("--network=") for arg in argv)
     assert "--env" in argv
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
-    assert "synthetic-secret-token-value" not in result.stdout
+    assert "CE_SEAT_LOG_DIR=/run/creator-engine/controller-log" in argv
+    assert "CE_CODEX_STDERR_LOG=/run/creator-engine/controller-log/controller-stderr.log" in argv
+    assert "CE_DGX_CREDENTIAL_INJECTION=SEAM-STUB" in argv
+    assert_no_claude_token_leaked(result, argv)
     assert "creator-engine/claude-controller-runsc:test" in argv
     assert argv[-1] == "creator-engine/claude-controller-runsc:test"
     assert "CE_DGX_HARNESS=claude" in argv
-    assert "CE_DGX_HARNESS_BIN=/usr/local/bin/claude" in argv
+    assert "CE_DGX_HARNESS_BIN=/usr/local/bin/ce-controller-harness" in argv
     assert "CE_DGX_HARNESS_HOME=/home/cedev4" in argv
     assert "CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in argv
     assert "XDG_CONFIG_HOME=/run/creator-engine/xdg/config" in argv
@@ -97,7 +122,7 @@ def test_controller_tui_dry_run_uses_contained_defaults():
     assert not any("/run/creator-engine/herdr" in arg and arg.startswith("type=bind,") for arg in argv)
 
 
-def test_controller_exec_dry_run_maps_to_claude_print_mode():
+def test_controller_exec_dry_run_maps_to_claude_print_mode() -> None:
     result = run_wrapper("exec", "summarize status")
 
     argv = dry_run_argv(result)
@@ -107,9 +132,10 @@ def test_controller_exec_dry_run_maps_to_claude_print_mode():
         "-p",
         "summarize status",
     ]
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_wrapper_mounts_optional_supervisor_socket():
+def test_controller_wrapper_mounts_optional_supervisor_socket() -> None:
     result = run_wrapper("tui", CE_DGX_SUPERVISOR_SOCKET="/run/user/1000/ce-supervisor.sock")
 
     argv = dry_run_argv(result)
@@ -123,26 +149,47 @@ def test_controller_wrapper_mounts_optional_supervisor_socket():
         )
         for arg in argv
     )
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_wrapper_refuses_plain_runsc_by_default():
+def test_controller_dry_run_does_not_mount_host_control_sockets() -> None:
+    result = run_wrapper("tui")
+
+    argv = dry_run_argv(result)
+    mounts = [argv[index + 1] for index, arg in enumerate(argv[:-1]) if arg == "--mount"]
+    forbidden_fragments = (
+        "/run/creator-engine/herdr",
+        "/tmp/tmux-",
+        "/run/tmux",
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/run/podman/podman.sock",
+        "/run/containerd/containerd.sock",
+    )
+
+    assert mounts
+    for mount in mounts:
+        assert not any(fragment in mount for fragment in forbidden_fragments)
+
+
+def test_controller_wrapper_refuses_plain_runsc_by_default() -> None:
     result = run_wrapper("tui", CE_DGX_RUNTIME="runsc")
 
     assert result.returncode == 2
     assert "Refusing CE_DGX_RUNTIME=runsc" in result.stderr
+    assert_no_claude_token_leaked(result)
 
 
-def test_controller_wrapper_refuses_docker_network_by_default():
+def test_controller_wrapper_refuses_docker_network_by_default() -> None:
     result = run_wrapper("tui", CE_DGX_DOCKER_NETWORK="bridge")
 
     assert result.returncode == 2
     assert "Refusing Docker --network=bridge" in result.stderr
+    assert_no_claude_token_leaked(result)
 
 
-def test_controller_detach_flag_uses_named_persistent_container():
-    result = run_wrapper(
-        "--detach", "tui", CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1"
-    )
+def test_controller_detach_flag_uses_named_persistent_container_without_token_optin() -> None:
+    result = run_wrapper("--detach", "tui")
 
     argv = dry_run_argv(result)
 
@@ -152,14 +199,14 @@ def test_controller_detach_flag_uses_named_persistent_container():
     name_idx = argv.index("--name")
     assert argv[name_idx + 1] == "ce-dgx-controller"
     assert "--rm" not in argv
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_detach_custom_container_name_propagates():
+def test_controller_detach_custom_container_name_propagates() -> None:
     result = run_wrapper(
         "--detach",
         "tui",
         CE_DGX_CONTROLLER_CONTAINER_NAME="ce-controller-canary",
-        CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1",
     )
 
     argv = dry_run_argv(result)
@@ -169,9 +216,10 @@ def test_controller_detach_custom_container_name_propagates():
     assert argv[name_idx + 1] == "ce-controller-canary"
     assert "ce-dgx-controller" not in argv
     assert "--rm" not in argv
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_foreground_default_keeps_rm_not_detached():
+def test_controller_foreground_default_keeps_rm_not_detached() -> None:
     result = run_wrapper("tui")
 
     argv = dry_run_argv(result)
@@ -179,14 +227,11 @@ def test_controller_foreground_default_keeps_rm_not_detached():
     assert "--rm" in argv
     assert "-d" not in argv
     assert "--name" not in argv
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_detach_env_triggers_detached_argv():
-    result = run_wrapper(
-        "tui",
-        CE_DGX_CONTROLLER_DETACH="1",
-        CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1",
-    )
+def test_controller_detach_env_triggers_detached_argv_without_token_optin() -> None:
+    result = run_wrapper("tui", CE_DGX_CONTROLLER_DETACH="1")
 
     argv = dry_run_argv(result)
 
@@ -194,38 +239,52 @@ def test_controller_detach_env_triggers_detached_argv():
     assert "--name" in argv
     assert "ce-dgx-controller" in argv
     assert "--rm" not in argv
+    assert_no_claude_token_leaked(result, argv)
 
 
-def test_controller_detach_keeps_oauth_token_passthrough_valueless():
+def test_controller_detach_ignores_legacy_token_retention_optin() -> None:
     result = run_wrapper(
         "--detach", "tui", CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV="1"
     )
 
     argv = dry_run_argv(result)
 
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
-    assert not any(arg.startswith("CLAUDE_CODE_OAUTH_TOKEN=") for arg in argv)
-    assert "synthetic-secret-token-value" not in result.stdout
-
-
-def test_controller_detach_refuses_token_env_without_optin():
-    # ce-ops#408 review: detached/named-persistent mode would leave CLAUDE_CODE_OAUTH_TOKEN
-    # in the container's inspectable metadata until `docker rm`; fail closed by default.
-    result = run_wrapper("--detach", "tui")
-
-    assert result.returncode == 78, result.stderr
-    assert "REFUSED" in result.stderr
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in result.stderr
-    assert "CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1" in result.stderr
-    # The token value never reaches stdout/stderr on the refusal path.
-    assert "synthetic-secret-token-value" not in result.stdout
-    assert "synthetic-secret-token-value" not in result.stderr
-
-
-def test_controller_foreground_passes_token_without_optin_and_no_retention_warning():
-    # Foreground uses --rm (scrubs metadata on exit), so no guard and no opt-in needed.
-    result = run_wrapper("tui")
-    argv = dry_run_argv(result)
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
-    assert "--rm" in argv
+    assert "-d" in argv
+    assert "--rm" not in argv
     assert "REFUSED" not in result.stderr
+    assert "WARNING" not in result.stderr
+    assert_no_claude_token_leaked(result, argv)
+
+
+def test_herdr_pane_list_parser_fails_closed_on_invalid_json() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "def has_pane(value):" in text
+    assert "except json.JSONDecodeError:\n    raise SystemExit(1)" in text
+    assert "except json.JSONDecodeError:\n    raise SystemExit(0)" not in text
+
+
+def test_controller_image_scaffolding_has_pinned_herdr_builder_and_tools() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "FROM rust:1-bookworm AS herdr-builder" in text
+    assert "HERDR_CE_REF=" in text
+    assert "cargo build" in text
+    assert "--release" in text
+    assert "--locked" in text
+    assert "COPY --from=herdr-builder" in text
+    assert "/usr/local/bin/herdr" in text
+    assert "gh" in text
+    assert "git" in text
+    assert "PYTHONPATH=/workspace/creator-engine/validators" in text
+    assert "creator_engine_validator" in text
+    assert "} >/usr/local/bin/ce-controller-harness" in text
+    assert 'export PYTHONPATH="${validator_path}${PYTHONPATH:+:${PYTHONPATH}}"' in text
+    assert 'export CE_DGX_CREDENTIAL_INJECTION="${CE_DGX_CREDENTIAL_INJECTION:-SEAM-STUB}"' in text
+    assert (
+        'export CE_TRANSPORT_DEPUTY_SEAM_STATUS="${CE_TRANSPORT_DEPUTY_SEAM_STATUS:-stub-ce-ops-239-no-secret-injection}"'
+        in text
+    )
+    assert 'exec /usr/local/bin/claude "$@"' in text
+    assert TOKEN_ENV_NAME not in text
+    assert SYNTHETIC_TOKEN not in text

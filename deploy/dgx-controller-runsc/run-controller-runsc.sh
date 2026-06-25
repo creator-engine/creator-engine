@@ -16,21 +16,23 @@ Detached mode:
                                 returns 0 without blocking. A crashed controller
                                 is left inspectable (`docker logs`, exit code)
                                 because the detached container is NOT removed
-                                with --rm. Detached mode removes the tmux crutch
-                                for keeping the controller alive.
+                                with --rm.
 
 Environment:
-  CE_DGX_CONTROLLER_IMAGE       Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
+  CE_DGX_CONTROLLER_IMAGE       Docker image tag (default: creator-engine/claude-controller-runsc:c1)
   CE_DGX_IMAGE                  Deprecated alias for CE_DGX_CONTROLLER_IMAGE
   CE_DGX_RUNTIME                Docker runtime (default: runsc-gvproxy-ptrace)
   CE_DGX_DOCKER_NETWORK         Optional Docker --network value (default: unset)
   CE_DGX_NETWORK                Deprecated alias for CE_DGX_DOCKER_NETWORK
   CE_DGX_REPO                   Host repo path (default: current directory)
-  CE_DGX_CONTROLLER_HOME        Host-contained controller home, not the host home
+  CE_DGX_CONTROLLER_HOME        Dedicated host-contained controller home
+                                (default: ~/.ce/controller-home)
   CE_DGX_CONTROLLER_HOME_MODE   Mount mode for controller home: rw or ro (default: rw)
   CE_DGX_CLAUDE_BIN             Optional host Claude binary mounted at /usr/local/bin/claude
   CE_DGX_HERDR_SOCKET_PATH      Container-only herdr socket path (default: /run/creator-engine/herdr/herdr.sock)
   CE_DGX_SUBSTRATE_RUN_DIR      Container tmpfs root for herdr substrate state (default: /run/creator-engine)
+  CE_DGX_CONTROLLER_LOG_DIR     Container tmpfs log/state dir for the shared herdr harness
+                                (default: ${CE_DGX_SUBSTRATE_RUN_DIR}/controller-log)
   CE_DGX_SUPERVISOR_SOCKET      Optional future supervisor socket source path
   CE_DGX_CONTAINER_REPO         Container repo path (default: /workspace/creator-engine)
   CE_DGX_CONTAINER_USER         Container seat user name (default: cedev4)
@@ -45,8 +47,36 @@ Environment:
   CE_DGX_ALLOW_SYSTRAP_CONTROLLER
                                  Allow CE_DGX_RUNTIME=runsc-gvproxy despite DGX systrap caveats (default: 0)
   CE_DGX_ALLOW_DOCKER_NETWORK   Allow Docker --network despite DGX root-netns failure (default: 0)
-  CE_DGX_ALLOW_HOST_HOME        Allow mounting HOME as controller home for diagnostics (default: 0)
 EOF
+}
+
+fail_usage() {
+  printf '%s\n' "$*" >&2
+  exit 2
+}
+
+require_absolute_path() {
+  local name="$1" value="$2"
+  case "${value}" in
+    /*) ;;
+    *) fail_usage "${name} must be an absolute path, got ${value}" ;;
+  esac
+}
+
+refuse_disallowed_supervisor_socket() {
+  local path="$1"
+  case "${path}" in
+    */docker.sock|*/podman.sock|*/containerd.sock|*/herdr.sock|*/herdr/*|*/tmux|*/tmux/*|*/tmux-*|*/tmux-*/*)
+      cat >&2 <<EOF
+Refusing CE_DGX_SUPERVISOR_SOCKET=${path}.
+
+C1 preserves only a non-secret future supervisor seam. It must not bind-mount
+Docker, Podman, containerd, host herdr, or host tmux sockets into the contained
+controller.
+EOF
+      exit 2
+      ;;
+  esac
 }
 
 dry_run="${CE_DGX_DRY_RUN:-0}"
@@ -70,7 +100,7 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
   shift
 fi
 
-CE_DGX_CONTROLLER_IMAGE="${CE_DGX_CONTROLLER_IMAGE:-${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}}"
+CE_DGX_CONTROLLER_IMAGE="${CE_DGX_CONTROLLER_IMAGE:-${CE_DGX_IMAGE:-creator-engine/claude-controller-runsc:c1}}"
 CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
@@ -79,6 +109,7 @@ CE_DGX_CONTROLLER_HOME_MODE="${CE_DGX_CONTROLLER_HOME_MODE:-rw}"
 CE_DGX_CLAUDE_BIN="${CE_DGX_CLAUDE_BIN:-}"
 CE_DGX_HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 CE_DGX_SUBSTRATE_RUN_DIR="${CE_DGX_SUBSTRATE_RUN_DIR:-/run/creator-engine}"
+CE_DGX_CONTROLLER_LOG_DIR="${CE_DGX_CONTROLLER_LOG_DIR:-${CE_DGX_SUBSTRATE_RUN_DIR}/controller-log}"
 CE_DGX_SUPERVISOR_SOCKET="${CE_DGX_SUPERVISOR_SOCKET:-}"
 CE_DGX_CONTAINER_REPO="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
 CE_DGX_CONTAINER_USER="${CE_DGX_CONTAINER_USER:-cedev4}"
@@ -88,19 +119,37 @@ CE_DGX_UID="${CE_DGX_UID:-$(id -u)}"
 CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
 CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
 CE_DGX_CONTROLLER_CONTAINER_NAME="${CE_DGX_CONTROLLER_CONTAINER_NAME:-ce-dgx-controller}"
+CE_DGX_CREDENTIAL_INJECTION="SEAM-STUB"
+CE_DGX_TRANSPORT_DEPUTY_SEAM_STATUS="stub-ce-ops-239-no-secret-injection"
 
-if [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "rw" ] && [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "ro" ]; then
-  printf 'CE_DGX_CONTROLLER_HOME_MODE must be rw or ro, got %s\n' "${CE_DGX_CONTROLLER_HOME_MODE}" >&2
-  exit 2
+container_term="${TERM:-}"
+if [ -z "${container_term}" ] || [ "${container_term}" = "dumb" ]; then
+  container_term="xterm-256color"
 fi
 
-if [ -n "${HOME:-}" ] && [ "${CE_DGX_CONTROLLER_HOME}" = "${HOME}" ] && [ "${CE_DGX_ALLOW_HOST_HOME:-0}" != "1" ]; then
+if [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "rw" ] && [ "${CE_DGX_CONTROLLER_HOME_MODE}" != "ro" ]; then
+  fail_usage "CE_DGX_CONTROLLER_HOME_MODE must be rw or ro, got ${CE_DGX_CONTROLLER_HOME_MODE}"
+fi
+
+require_absolute_path "CE_DGX_REPO" "${CE_DGX_REPO}"
+require_absolute_path "CE_DGX_CONTROLLER_HOME" "${CE_DGX_CONTROLLER_HOME}"
+require_absolute_path "CE_DGX_HERDR_SOCKET_PATH" "${CE_DGX_HERDR_SOCKET_PATH}"
+require_absolute_path "CE_DGX_SUBSTRATE_RUN_DIR" "${CE_DGX_SUBSTRATE_RUN_DIR}"
+require_absolute_path "CE_DGX_CONTROLLER_LOG_DIR" "${CE_DGX_CONTROLLER_LOG_DIR}"
+if [ -n "${CE_DGX_CLAUDE_BIN}" ]; then
+  require_absolute_path "CE_DGX_CLAUDE_BIN" "${CE_DGX_CLAUDE_BIN}"
+fi
+if [ -n "${CE_DGX_SUPERVISOR_SOCKET}" ]; then
+  require_absolute_path "CE_DGX_SUPERVISOR_SOCKET" "${CE_DGX_SUPERVISOR_SOCKET}"
+  refuse_disallowed_supervisor_socket "${CE_DGX_SUPERVISOR_SOCKET}"
+fi
+
+if [ -n "${HOME:-}" ] && [ "${CE_DGX_CONTROLLER_HOME}" = "${HOME}" ]; then
   cat >&2 <<'EOF'
 Refusing to mount the host HOME as CE_DGX_CONTROLLER_HOME.
 
 The contained Controller must use a dedicated controller home so host browser,
 SSH, tmux, and general home-directory state are not exposed to the runtime.
-Set CE_DGX_ALLOW_HOST_HOME=1 only for an operator-directed diagnostic.
 EOF
   exit 2
 fi
@@ -150,6 +199,9 @@ if [ "${dry_run}" != "1" ]; then
     exit 66
   }
   [ -d "${CE_DGX_REPO}" ] || { printf 'repo path not found: %s\n' "${CE_DGX_REPO}" >&2; exit 66; }
+  mkdir -p "${CE_DGX_CONTROLLER_HOME}"
+  chown "${CE_DGX_UID}:${CE_DGX_GID}" "${CE_DGX_CONTROLLER_HOME}" 2>/dev/null || true
+  chmod 0700 "${CE_DGX_CONTROLLER_HOME}" 2>/dev/null || true
   [ -d "${CE_DGX_CONTROLLER_HOME}" ] || {
     printf 'controller home not found: %s\n' "${CE_DGX_CONTROLLER_HOME}" >&2
     exit 66
@@ -185,43 +237,36 @@ if [ "${CE_DGX_CONTROLLER_HOME_MODE}" = "ro" ]; then
   controller_home_mount="${controller_home_mount},readonly"
 fi
 
-run_flags=(--rm)
+lifecycle_flags=(--rm)
 if [ "${detach}" = "1" ]; then
-  run_flags=(-d --name "${CE_DGX_CONTROLLER_CONTAINER_NAME}")
-fi
-
-# Secret-retention guard (ce-ops#408 review): the controller harness is always Claude, so
-# its --env CLAUDE_CODE_OAUTH_TOKEN lands in the container's inspectable metadata (docker
-# inspect Config.Env). In detached/named-persistent mode that survives until an explicit
-# `docker rm` — foreground --rm scrubbed it on container exit. Fail closed unless opted in.
-if [ "${detach}" = "1" ]; then
-  if [ "${CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV:-0}" != "1" ]; then
-    printf 'REFUSED: detached launch would persist CLAUDE_CODE_OAUTH_TOKEN in the named-persistent container inspectable metadata (docker inspect Config.Env) until "docker rm". Run foreground (omit --detach; --rm scrubs it on exit), or set CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1 to accept this secret-retention tradeoff.\n' >&2
-    exit 78
-  fi
-  printf 'WARNING: CE_DGX_CONTROLLER_ALLOW_DETACHED_TOKEN_ENV=1 set — CLAUDE_CODE_OAUTH_TOKEN will persist in container metadata until docker rm.\n' >&2
+  lifecycle_flags=(-d --name "${CE_DGX_CONTROLLER_CONTAINER_NAME}")
 fi
 
 docker_cmd=(
-  docker run "${run_flags[@]}"
+  docker run "${lifecycle_flags[@]}"
   "--runtime=${CE_DGX_RUNTIME}"
   --security-opt=no-new-privileges
   --cap-drop=ALL
   --user "${CE_DGX_UID}:${CE_DGX_GID}"
   --workdir "${CE_DGX_CONTAINER_REPO}"
   --tmpfs "${CE_DGX_SUBSTRATE_RUN_DIR}:uid=${CE_DGX_UID},gid=${CE_DGX_GID},mode=0700"
+  --tmpfs "${CE_DGX_CONTROLLER_LOG_DIR}:uid=${CE_DGX_UID},gid=${CE_DGX_GID},mode=0700"
   --env "HOME=${CE_DGX_CONTAINER_HOME}"
+  --env "PYTHONPATH=${CE_DGX_CONTAINER_REPO}/validators"
   --env "XDG_CONFIG_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/config"
   --env "XDG_STATE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/state"
   --env "XDG_CACHE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/cache"
-  --env "TERM=${TERM:-xterm-256color}"
-  --env "CLAUDE_CODE_OAUTH_TOKEN"
+  --env "CE_SEAT_LOG_DIR=${CE_DGX_CONTROLLER_LOG_DIR}"
+  --env "CE_CODEX_STDERR_LOG=${CE_DGX_CONTROLLER_LOG_DIR}/controller-stderr.log"
+  --env "TERM=${container_term}"
   --env "CE_DGX_HARNESS=claude"
-  --env "CE_DGX_HARNESS_BIN=/usr/local/bin/claude"
+  --env "CE_DGX_HARNESS_BIN=/usr/local/bin/ce-controller-harness"
   --env "CE_DGX_HARNESS_HOME=${CE_DGX_CONTAINER_HOME}"
   --env "CE_DGX_HERDR_SOCKET_PATH=${CE_DGX_HERDR_SOCKET_PATH}"
   --env "CE_DGX_TERMINAL_KIND=herdr"
   --env "CE_TERMINAL_KIND=herdr"
+  --env "CE_DGX_CREDENTIAL_INJECTION=${CE_DGX_CREDENTIAL_INJECTION}"
+  --env "CE_TRANSPORT_DEPUTY_SEAM_STATUS=${CE_DGX_TRANSPORT_DEPUTY_SEAM_STATUS}"
   --mount "${repo_mount}"
   --mount "${controller_home_mount}"
 )
@@ -255,41 +300,84 @@ if [ "${dry_run}" = "1" ]; then
   exit 0
 fi
 
-if [ "${detach}" = "1" ]; then
-  "${docker_cmd[@]}"
-
-  ready=0
-  for _ in $(seq 1 60); do
-    if docker exec "${CE_DGX_CONTROLLER_CONTAINER_NAME}" herdr pane read w1:p1 >/dev/null 2>&1; then
-      ready=1
-      break
-    fi
-    sleep 0.5
-  done
-
-  if [ "${ready}" != "1" ]; then
-    cat >&2 <<EOF
-Detached controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME} did not become herdr-ready.
-
-The container was started but herdr never responded on w1:p1 within the
-readiness window. Inspect forensic state and tear it down:
-
-  docker logs ${CE_DGX_CONTROLLER_CONTAINER_NAME}
-  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
-EOF
-    exit 69
-  fi
-
-  cat <<EOF
-Detached controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME} is herdr-ready.
-
-Attach to drive the controller:
-  docker exec -it ${CE_DGX_CONTROLLER_CONTAINER_NAME} herdr
-
-Retire the controller:
-  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
-EOF
-  exit 0
+if [ "${detach}" != "1" ]; then
+  exec "${docker_cmd[@]}"
 fi
 
-exec "${docker_cmd[@]}"
+cid="$("${docker_cmd[@]}")" || {
+  printf 'detached docker run failed for container %s\n' "${CE_DGX_CONTROLLER_CONTAINER_NAME}" >&2
+  exit 1
+}
+printf 'started detached controller %s (%s)\n' "${CE_DGX_CONTROLLER_CONTAINER_NAME}" "${cid:0:12}"
+
+herdr_pane_list_has_entries() {
+  python3 -c '
+import json
+import sys
+
+text = sys.stdin.read().strip()
+if not text:
+    raise SystemExit(1)
+try:
+    data = json.loads(text)
+except json.JSONDecodeError:
+    raise SystemExit(1)
+
+def has_pane(value):
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        for key in ("result", "panes", "pane", "items"):
+            if key in value and has_pane(value[key]):
+                return True
+        return False
+    return bool(value)
+
+raise SystemExit(0 if has_pane(data) else 1)
+'
+}
+
+herdr_ready() {
+  local pane_list
+  docker exec "${CE_DGX_CONTROLLER_CONTAINER_NAME}" test -S "${CE_DGX_HERDR_SOCKET_PATH}" >/dev/null 2>&1 || return 1
+  pane_list="$(docker exec --env "HERDR_SOCKET_PATH=${CE_DGX_HERDR_SOCKET_PATH}" "${CE_DGX_CONTROLLER_CONTAINER_NAME}" herdr pane list 2>/dev/null)" || return 1
+  herdr_pane_list_has_entries <<<"${pane_list}"
+}
+
+ready=0
+for _ in $(seq 1 60); do
+  if herdr_ready; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+
+if [ "${ready}" != "1" ]; then
+  cat >&2 <<EOF
+herdr never became ready in controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME}.
+
+Inspect forensic state (the container is NOT auto-removed in detached mode):
+
+  docker logs ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+  docker inspect ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+
+Then tear it down:
+
+  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+EOF
+  exit 1
+fi
+
+cat <<EOF
+herdr is ready in detached controller container ${CE_DGX_CONTROLLER_CONTAINER_NAME}.
+
+Attach (canonical operator path):
+
+  docker exec -it ${CE_DGX_CONTROLLER_CONTAINER_NAME} herdr
+
+Retire the controller when done:
+
+  docker stop ${CE_DGX_CONTROLLER_CONTAINER_NAME} && docker rm ${CE_DGX_CONTROLLER_CONTAINER_NAME}
+EOF
+exit 0
