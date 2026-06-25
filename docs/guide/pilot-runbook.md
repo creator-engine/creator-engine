@@ -2,7 +2,7 @@
 
 *The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub
 App, file work as a Scope, and get governed, cost-safe PRs + merges — all under
-the branded `ce session` frame, on your own agent. Plain-language intro:
+the branded `cev3 session` frame, on your own agent. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
 contracts/designs. For the shortest command sequence, see
 [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md).*
@@ -46,8 +46,8 @@ or answer interactively as each journey step batches its asks. The agent loop:
 <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
 # sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
-ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --plan
-ce onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --apply --non-interactive
+cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --plan
+cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --apply --non-interactive
 ```
 
 `--plan` shows the full plan plus the *exact remaining asks*;
@@ -99,13 +99,13 @@ The GitHub leg is fully decomposed and **re-run convergent**:
 
 For a brand-new project, set `github.mode: new`, `github.repo`,
 `project.name` (optional; defaults to the repo basename), and
-`project.scaffold.kind: minimal` in the answers file. `ce onboard --plan` then
+`project.scaffold.kind: minimal` in the answers file. `cev3 onboard --plan` then
 shows `first_project`: the project root under `host.workspace_root`, the minimal
 scaffold input supplied to E2's `workspace_checkout` leg, and the Frame→Ship
 flags that remain false until your first real Scope ships. The bootstrap README
 and initial branch are onboarding evidence only; they do not count as first ship.
 
-For an existing repo, `ce onboard --inventory` and `--plan` also report
+For an existing repo, `cev3 onboard --inventory` and `--plan` also report
 `brownfield` / `brownfield_adoption`: workflows and checks to preserve, detected
 test commands, Git history posture, branch/commit conventions, scrub preflight,
 project skill artifacts, and a first Scope seed. These paths are read-only until
@@ -117,7 +117,7 @@ without those legs refuses apply with `e2_brownfield_seam_unavailable`.
 Launch the session frame:
 
 ```
-ce session
+cev3 session
 ◆ Creator Engine · governed session · repo <owner/repo> · transport cc-hooks · backend gvisor · state .ce/state
 ◆ CE · Frame 0 · Shape 0 · Build 0 · Review 0 · Ship 0  │  ctx 8%  │  spend —
 ```
@@ -134,17 +134,17 @@ boundary-aware checkpoint/`/clear` nudge. Vocabulary canon:
    Change-type · Ready**. You set the **Budget** (your call); the agent drafts the
    rest and may make a change *safer* on its own but only *you* can make it
    riskier. Shaping design: [`../architecture/shaping-ux.md`](../architecture/shaping-ux.md).
-   When the card reads **Ready ✓**, place the bet: `ce ratify <scope>`.
-3. **Build** — `ce drive <scope>` dispatches one governed, boxed run (the front
+   When the card reads **Ready ✓**, place the bet: `cev3 ratify <scope>`.
+3. **Build** — `cev3 drive <scope>` dispatches one governed, boxed run (the front
    gate refuses unless Ready + ratified; the appetite becomes the run's spend cap).
-4. **Review** — read the **◆ CE Completion Report**: `ce report <scope>`:
+4. **Review** — read the **◆ CE Completion Report**: `cev3 report <scope>`:
 
 ```
 ┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ──────────────────
 │ Outcome   PR opened → #7
 │ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
 │ Next      → Review PR #7  (Change-type code → your approval)
-│ Inspect   gh pr view 7   |   ce show cs-4f2   |   ce artifacts r-91a
+│ Inspect   gh pr view 7   |   cev3 show cs-4f2   |   cev3 artifacts r-91a
 └──────────────────────────────────────────────────────────
 ```
 
@@ -156,23 +156,23 @@ boundary-aware checkpoint/`/clear` nudge. Vocabulary canon:
 
 ## 4. Inspect anything
 
-`ce artifacts <run>` and `ce show <scope>` enumerate every artifact (PR · Scope ·
+`cev3 artifacts <run>` and `cev3 show <scope>` enumerate every artifact (PR · Scope ·
 ratification · closed manifest · evidence-chain · spend) with its inspect command.
-For the plain-language tour, run `ce guide`.
+For the plain-language tour, run `cev3 guide`.
 
 ## 5. Greenfield-OSS quickstart
 
 For a fresh open-source repo: prepare answers with `github.mode: new`, run
-`ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan`,
+`cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --plan`,
 then apply after the plan is clean:
 
 ```
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
+cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
 ```
 
-Authorize the App when prompted, then open `ce session`. Chat in Frame, confirm a
+Authorize the App when prompted, then open `cev3 session`. Chat in Frame, confirm a
 real first Scope, set the Budget, ratify it, drive the Build, review the PR in a
-distinct venue, and merge through `ce merge --apply`. From there, every change is
+distinct venue, and merge through `cev3 merge --apply`. From there, every change is
 a governed, cost-safe, evidence-backed Scope.
 
 ## Deferred (after E1)

@@ -14,6 +14,10 @@ Review that package action, run the matching command, then re-run the installer.
 curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
 ```
 
+**Prereqs:** the host needs `curl` and `git` available. `curl` fetches the
+installer; `git` is required for the first-value author→commit→push→PR→merge
+flow once you reach a governed seat.
+
 Python 3.14 and `uv` do not need to be installed ahead of time. After the signed
 spec is verified with `ssh-keygen`, E1 downloads the manifest-pinned `uv`
 tarball, verifies its hash, and installs CPython 3.14 in user space if needed.
@@ -41,7 +45,7 @@ Run the plan first. It shows the exact remaining asks and the privileged changes
 that still need human approval.
 
 ```bash
-ce onboard \
+cev3 onboard \
   --spec <verified-spec> \
   --trust-root <verified-trust-root> \
   --trust-anchor <source>=<verified-trust-anchor> \
@@ -53,7 +57,7 @@ ce onboard \
 When the plan is acceptable, apply it explicitly:
 
 ```bash
-ce onboard \
+cev3 onboard \
   --spec <verified-spec> \
   --trust-root <verified-trust-root> \
   --trust-anchor <source>=<verified-trust-anchor> \
@@ -71,17 +75,17 @@ host changes remain human-approved apply seams.
 After apply converges, open the governed session in the target repo:
 
 ```bash
-ce session
+cev3 session
 ```
 
 Frame a concrete change, confirm the Scope, ratify it, drive the Build, review
 the PR in a distinct venue, and merge through the governed merge path:
 
 ```bash
-ce ratify <scope>
-ce drive <scope>
-ce report <scope>
-ce merge --apply
+cev3 ratify <scope>
+cev3 drive <scope>
+cev3 report <scope>
+cev3 merge --apply
 ```
 
 The first bootstrap commit or scaffold is onboarding evidence only. The first
