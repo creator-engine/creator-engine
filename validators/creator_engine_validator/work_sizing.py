@@ -24,6 +24,7 @@ MUTATION_CLASSES: Final[tuple[str, ...]] = (
     "redaction",
 )
 
+# CE ceremony tiers (depth/floor), not Agile work-item types.
 _SIZE_TABLE: Final[dict[str, dict[str, Any]]] = {
     "tiny": {
         "artifact_set": ("scope_card",),
@@ -108,4 +109,3 @@ def size_ceremony(work_class: str, mutation_class: str) -> dict[str, Any]:
         "ratification_gates": list(risk["ratification_gates"]),
         "adr_required": bool(risk["adr_required"]),
     }
-
