@@ -26,6 +26,7 @@ class FakeRunner:
     ) -> None:
         self.calls: list[tuple[list[str], dict[str, str]]] = []
         self.foreground_calls: list[tuple[list[str], dict[str, str]]] = []
+        self.timeouts: list[float | None] = []
         self.read_outputs = list(read_outputs or [])
         self.foreground_returncode = foreground_returncode
         self.foreground_stderr = foreground_stderr
@@ -36,9 +37,11 @@ class FakeRunner:
         argv: Sequence[str],
         *,
         env: Mapping[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         args = list(argv)
         self.calls.append((args, dict(env or {})))
+        self.timeouts.append(timeout_s)
         if args[1:3] == ["workspace", "create"]:
             payload = {
                 "result": {
@@ -93,6 +96,21 @@ def isolate_default_steer_lock_dir(
         "_default_steer_lock_dir",
         lambda: tmp_path / "herdr-steer-locks",
     )
+
+
+class MutableClock:
+    def __init__(self, current: float = 0.0) -> None:
+        self.current = current
+
+    def __call__(self) -> float:
+        return self.current
+
+
+def advance_clock(clock: MutableClock) -> Callable[[float], None]:
+    def sleep(seconds: float) -> None:
+        clock.current += seconds
+
+    return sleep
 
 
 def test_terminal_kind_constant() -> None:
@@ -256,6 +274,52 @@ def test_observe_uses_pane_read_recent_text_stdout_and_wait_uses_controller_sock
     )
 
 
+def test_unbounded_run_omits_timeout_kwarg_for_legacy_injected_runner() -> None:
+    class LegacyRunner:
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            env: Mapping[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            args = list(argv)
+            self.calls.append((args, dict(env or {})))
+            return subprocess.CompletedProcess(args, 0, "legacy output", "")
+
+    runner = LegacyRunner()
+    session = hs.HerdrSession(
+        socket_path="/run/ce/herdr/control.sock",
+        herdr_binary="herdr",
+        runner=runner,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.observe(pane, lines=5) == b"legacy output"
+    assert runner.calls == [
+        (
+            [
+                "herdr",
+                "pane",
+                "read",
+                "pane-1",
+                "--source",
+                "recent",
+                "--lines",
+                "5",
+                "--format",
+                "text",
+            ],
+            {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
+        )
+    ]
+
+
 def test_send_text_uses_controller_socket_and_does_not_expose_socket_to_seat_env_or_terminal() -> None:
     runner = FakeRunner()
     session = hs.HerdrSession(
@@ -367,7 +431,7 @@ def test_deliver_brief_verifies_agent_reaction_after_commit() -> None:
     assert session.deliver_brief(
         pane,
         body,
-        reaction_timeout_s=0,
+        reaction_timeout_s=1,
         reaction_poll_interval_s=0,
         sleep=lambda _seconds: None,
     ) == marker
@@ -379,7 +443,74 @@ def test_deliver_brief_verifies_agent_reaction_after_commit() -> None:
     assert send_text_call[4].endswith(f"\n{marker}")
 
 
+def test_deliver_brief_baseline_read_is_bounded_by_reaction_timeout() -> None:
+    clock = MutableClock()
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Working"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    session.deliver_brief(
+        pane,
+        "brief body",
+        reaction_timeout_s=2.5,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+        clock=clock,
+    )
+
+    read_timeouts = [
+        timeout
+        for (call, _env), timeout in zip(runner.calls, runner.timeouts, strict=True)
+        if call[1:3] == ["pane", "read"]
+    ]
+    assert read_timeouts[0] == 2.5
+
+
+def test_deliver_brief_reaction_deadline_starts_before_baseline_read() -> None:
+    clock = MutableClock(current=100.0)
+
+    class BaselineConsumesTime(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__(read_outputs=["Ready", "prompt cleared", "Working"])
+            self._read_count = 0
+
+        def run(self, argv, *, env=None, timeout_s=None):
+            completed = super().run(argv, env=env, timeout_s=timeout_s)
+            if list(argv)[1:3] == ["pane", "read"]:
+                self._read_count += 1
+                if self._read_count == 1:
+                    clock.current += 2.0
+            return completed
+
+    runner = BaselineConsumesTime()
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    session.deliver_brief(
+        pane,
+        "brief body",
+        reaction_timeout_s=5.0,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+        clock=clock,
+    )
+
+    read_timeouts = [
+        timeout
+        for (call, _env), timeout in zip(runner.calls, runner.timeouts, strict=True)
+        if call[1:3] == ["pane", "read"]
+    ]
+    assert read_timeouts == [5.0, 3.0, 3.0]
+
+
 def test_deliver_brief_fails_closed_when_agent_does_not_react() -> None:
+    clock = MutableClock()
     runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Ready"])
     session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
     pane = hs.HerdrPane(
@@ -391,13 +522,41 @@ def test_deliver_brief_fails_closed_when_agent_does_not_react() -> None:
         session.deliver_brief(
             pane,
             "brief body",
-            reaction_timeout_s=0,
+            reaction_timeout_s=3,
+            reaction_poll_interval_s=1,
+            sleep=advance_clock(clock),
+            clock=clock,
+        )
+    read_timeouts = [
+        timeout
+        for (call, _env), timeout in zip(runner.calls, runner.timeouts, strict=True)
+        if call[1:3] == ["pane", "read"]
+    ]
+    assert read_timeouts == [3, 1, 1]
+
+
+@pytest.mark.parametrize("reaction_timeout_s", [0, -0.1])
+def test_deliver_brief_rejects_non_positive_reaction_timeout(
+    reaction_timeout_s: float,
+) -> None:
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=FakeRunner())
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="reaction timeout must be positive"):
+        session.deliver_brief(
+            pane,
+            "brief body",
+            reaction_timeout_s=reaction_timeout_s,
             reaction_poll_interval_s=0,
             sleep=lambda _seconds: None,
         )
 
 
 def test_deliver_brief_does_not_accept_marker_echo_without_agent_reaction() -> None:
+    clock = MutableClock()
     body = "brief body"
     marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
     runner = FakeRunner(read_outputs=["Ready", "prompt cleared", f"rendered\n{marker}"])
@@ -411,13 +570,15 @@ def test_deliver_brief_does_not_accept_marker_echo_without_agent_reaction() -> N
         session.deliver_brief(
             pane,
             body,
-            reaction_timeout_s=0,
-            reaction_poll_interval_s=0,
-            sleep=lambda _seconds: None,
+            reaction_timeout_s=3,
+            reaction_poll_interval_s=1,
+            sleep=advance_clock(clock),
+            clock=clock,
         )
 
 
 def test_deliver_brief_does_not_accept_echoed_brief_reaction_words() -> None:
+    clock = MutableClock()
     body = "Please start working and processing this brief."
     marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
     runner = FakeRunner(read_outputs=["Ready", "prompt cleared", f"{body}\n{marker}"])
@@ -431,9 +592,10 @@ def test_deliver_brief_does_not_accept_echoed_brief_reaction_words() -> None:
         session.deliver_brief(
             pane,
             body,
-            reaction_timeout_s=0,
-            reaction_poll_interval_s=0,
-            sleep=lambda _seconds: None,
+            reaction_timeout_s=3,
+            reaction_poll_interval_s=1,
+            sleep=advance_clock(clock),
+            clock=clock,
         )
 
 
@@ -505,7 +667,7 @@ def test_deliver_brief_marker_hash_matches_brief_body_before_marker() -> None:
     session.deliver_brief(
         pane,
         body,
-        reaction_timeout_s=0,
+        reaction_timeout_s=1,
         reaction_poll_interval_s=0,
         sleep=lambda _seconds: None,
     )
@@ -515,6 +677,92 @@ def test_deliver_brief_marker_hash_matches_brief_body_before_marker() -> None:
     )
     payload = send_text_call[4]
     assert payload == f"{body}{marker}"
+
+
+@pytest.mark.parametrize(
+    ("pane_text", "payload", "expected"),
+    [
+        ("", "", ""),
+        ("before\npayload\npayload-tail\nafter", "", "before\npayload\npayload-tail\nafter"),
+        ("before\npayload\nafter", "payload", "before\n\nafter"),
+        ("before\r\nline one\r\nline two\r\nafter", "line one\nline two", "before\n\nafter"),
+        ("brief: working\nagent: Working on it", "working", "brief: \nagent: Working on it"),
+    ],
+)
+def test_without_dispatched_payload_handles_empty_multiline_and_partial_lines(
+    pane_text: str,
+    payload: str,
+    expected: str,
+) -> None:
+    assert hs.HerdrSession._without_dispatched_payload(pane_text, payload) == expected
+
+
+@pytest.mark.parametrize(
+    ("pane_text", "expected"),
+    [
+        ("", 0),
+        ("Working\nPROCESSING\nthinking", 3),
+        ("preworking processingness thinking", 1),
+        ("Codex    session rollout\nsession rollout", 2),
+    ],
+)
+def test_agent_reaction_score_handles_empty_multiline_partial_words_and_case(
+    pane_text: str,
+    expected: int,
+) -> None:
+    assert hs.HerdrSession._agent_reaction_score(pane_text) == expected
+
+
+def test_deliver_brief_accepts_injected_reaction_signal_set() -> None:
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Acknowledged"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        agent_reaction_signals=("acknowledged",),
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        "brief body",
+        reaction_timeout_s=1,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == hs.HerdrSession._brief_marker("brief body")
+
+
+def test_agent_reaction_signals_replace_defaults_and_reject_empty_sequence() -> None:
+    with pytest.raises(hs.HerdrCommandError, match="non-empty sequence"):
+        hs.HerdrSession(
+            herdr_binary="/opt/herdr",
+            runner=FakeRunner(),
+            agent_reaction_signals=(),
+        )
+
+    clock = MutableClock()
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Working"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        agent_reaction_signals=("acknowledged",),
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="did not produce an agent reaction"):
+        session.deliver_brief(
+            pane,
+            "brief body",
+            reaction_timeout_s=3,
+            reaction_poll_interval_s=1,
+            sleep=advance_clock(clock),
+            clock=clock,
+        )
 
 
 def test_send_non_utf8_bytes_remain_fail_closed() -> None:
@@ -911,7 +1159,7 @@ def test_run_pane_shell_quotes_command_sequence_as_one_command_string() -> None:
 
 def test_malformed_json_raises_command_error_not_name_error() -> None:
     class BadJson(FakeRunner):
-        def run(self, argv, *, env=None):
+        def run(self, argv, *, env=None, timeout_s=None):
             return subprocess.CompletedProcess(list(argv), 0, "not-json", "")
 
     session = hs.HerdrSession(runner=BadJson())
@@ -921,7 +1169,7 @@ def test_malformed_json_raises_command_error_not_name_error() -> None:
 
 def test_command_failure_is_reported() -> None:
     class Boom(FakeRunner):
-        def run(self, argv, *, env=None):
+        def run(self, argv, *, env=None, timeout_s=None):
             return subprocess.CompletedProcess(list(argv), 7, "", "boom")
 
     session = hs.HerdrSession(runner=Boom())

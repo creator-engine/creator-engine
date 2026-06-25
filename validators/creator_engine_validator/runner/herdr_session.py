@@ -89,9 +89,13 @@ HERDR_BRIEF_RENDER_POLL_INTERVAL_S = HERDR_BRIEF_REACTION_POLL_INTERVAL_S
 HERDR_STEER_LOCK_TTL_S = 300.0
 BRIEF_MARKER_PREFIX = "==CE-BRIEF-SHA256:"
 BRIEF_MARKER_SUFFIX = "=="
-AGENT_REACTION_RE = re.compile(
-    r"\b(?:working|processing|thinking)\b|codex\s+(?:session|rollout)|session\s+rollout",
-    re.IGNORECASE,
+DEFAULT_AGENT_REACTION_SIGNALS = (
+    "working",
+    "processing",
+    "thinking",
+    "codex session",
+    "codex rollout",
+    "session rollout",
 )
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +118,37 @@ class HerdrNotWired(HerdrSessionError, NotImplementedError):
 
 class HerdrSteeringDeferred(HerdrCommandError):
     """Raised when autonomous dispatch is deferred behind operator steering."""
+
+
+def _reaction_signal_pattern(signal: str) -> str:
+    """Compile one literal reaction signal into a bounded, case-insensitive regex.
+
+    Signal strings are literal words or phrases, not regex fragments. Matching is
+    case-insensitive, requires non-word boundaries at both ends so partial words
+    do not count, and treats whitespace inside phrases flexibly. This keeps the
+    default heuristic extensible while avoiding an unreviewed regex injection
+    surface in validator config.
+    """
+    if not isinstance(signal, str):
+        raise HerdrCommandError("agent reaction signals must be strings")
+    stripped = signal.strip()
+    if not stripped:
+        raise HerdrCommandError("agent reaction signals must not be empty")
+    phrase = r"\s+".join(re.escape(part) for part in stripped.split())
+    return rf"(?<![A-Za-z0-9_]){phrase}(?![A-Za-z0-9_])"
+
+
+def _compile_agent_reaction_re(signals: Sequence[str]) -> re.Pattern[str]:
+    """Return the reaction matcher for the configured literal signal set."""
+    if not signals:
+        raise HerdrCommandError(
+            "agent reaction signals must be a non-empty sequence of literal strings"
+        )
+    patterns = [_reaction_signal_pattern(signal) for signal in signals]
+    return re.compile("|".join(patterns), re.IGNORECASE)
+
+
+AGENT_REACTION_RE = _compile_agent_reaction_re(DEFAULT_AGENT_REACTION_SIGNALS)
 
 
 @dataclass(frozen=True)
@@ -149,6 +184,7 @@ class HerdrCommandRunner(Protocol):
         argv: Sequence[str],
         *,
         env: Mapping[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run ``argv`` and return a completed process."""
 
@@ -179,13 +215,14 @@ class SubprocessHerdrCommandRunner:
         argv: Sequence[str],
         *,
         env: Mapping[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             list(argv),
             check=False,
             capture_output=True,
             text=True,
-            timeout=self._timeout_seconds,
+            timeout=self._timeout_seconds if timeout_s is None else timeout_s,
             env=self._merged_env(env),
         )
 
@@ -220,12 +257,28 @@ class HerdrSession:
         steer_lock_ttl_s: float = HERDR_STEER_LOCK_TTL_S,
         steer_lock_heartbeat_interval_s: float | None = None,
         clock: Callable[[], float] = time.time,
+        agent_reaction_signals: Sequence[str] | None = None,
     ) -> None:
+        """Create a controller-side herdr session.
+
+        ``agent_reaction_signals`` is a non-empty sequence of literal signal
+        strings used by :meth:`deliver_brief` to detect post-dispatch agent
+        activity. The configured sequence replaces the default set entirely;
+        pass ``None`` to use :data:`DEFAULT_AGENT_REACTION_SIGNALS`.
+        """
         #: The substrate-owned herdr control socket. Held by the CE
         #: substrate/controller, never handed to a governed seat (§2/§7).
         self._socket_path = Path(socket_path)
         self._herdr_binary = str(herdr_binary)
         self._runner = runner if runner is not None else SubprocessHerdrCommandRunner()
+        reaction_signals = (
+            DEFAULT_AGENT_REACTION_SIGNALS
+            if agent_reaction_signals is None
+            else agent_reaction_signals
+        )
+        self._agent_reaction_re = _compile_agent_reaction_re(
+            reaction_signals
+        )
         self._connected = False
         self._steer_lock_dir = (
             Path(steer_lock_dir)
@@ -444,10 +497,20 @@ class HerdrSession:
     def _dispatch_steer_lease(self, pane: HerdrPane) -> ContextManager[None]:
         return self._pane_steer_lease(pane, owner="dispatch")
 
-    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        args: Sequence[str],
+        *,
+        timeout_s: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         argv = [self._herdr_binary, *args]
         try:
-            completed = self._runner.run(argv, env=self._socket_env())
+            kwargs: dict[str, Any] = {"env": self._socket_env()}
+            if timeout_s is not None:
+                kwargs["timeout_s"] = timeout_s
+            completed = self._runner.run(argv, **kwargs)
+        except subprocess.TimeoutExpired as exc:
+            raise HerdrCommandError(f"herdr command timed out: {argv!r}") from exc
         except (OSError, subprocess.SubprocessError) as exc:
             raise HerdrCommandError(f"herdr command failed to start: {argv!r}: {exc}") from exc
         if completed.returncode != 0:
@@ -474,11 +537,21 @@ class HerdrSession:
                 + (f": {stderr}" if stderr else "")
             )
 
-    def _run_text(self, args: Sequence[str]) -> str:
-        completed = self._run(args)
+    def _run_text(
+        self,
+        args: Sequence[str],
+        *,
+        timeout_s: float | None = None,
+    ) -> str:
+        completed = self._run(args, timeout_s=timeout_s)
         return completed.stdout or ""
 
-    def _read_recent_unwrapped_text(self, pane: HerdrPane) -> str:
+    def _read_recent_unwrapped_text(
+        self,
+        pane: HerdrPane,
+        *,
+        timeout_s: float | None = None,
+    ) -> str:
         return self._run_text(
             [
                 "pane",
@@ -488,7 +561,8 @@ class HerdrSession:
                 "recent-unwrapped",
                 "--format",
                 "text",
-            ]
+            ],
+            timeout_s=timeout_s,
         )
 
     def _run_json(self, args: Sequence[str]) -> dict[str, Any]:
@@ -587,8 +661,12 @@ class HerdrSession:
         return f"{brief_body}{separator}{marker}", marker
 
     @staticmethod
-    def _agent_reaction_score(pane_text: str) -> int:
-        return len(AGENT_REACTION_RE.findall(pane_text))
+    def _agent_reaction_score(
+        pane_text: str,
+        *,
+        reaction_re: re.Pattern[str] = AGENT_REACTION_RE,
+    ) -> int:
+        return len(reaction_re.findall(pane_text))
 
     @staticmethod
     def _without_dispatched_payload(pane_text: str, dispatched_payload: str) -> str:
@@ -609,15 +687,17 @@ class HerdrSession:
         *,
         baseline_text: str,
         dispatched_payload: str,
+        reaction_re: re.Pattern[str] = AGENT_REACTION_RE,
     ) -> bool:
         redacted_pane_text = cls._without_dispatched_payload(pane_text, dispatched_payload)
         redacted_baseline_text = cls._without_dispatched_payload(
             baseline_text,
             dispatched_payload,
         )
-        return cls._agent_reaction_score(redacted_pane_text) > cls._agent_reaction_score(
-            redacted_baseline_text
-        )
+        return cls._agent_reaction_score(
+            redacted_pane_text,
+            reaction_re=reaction_re,
+        ) > cls._agent_reaction_score(redacted_baseline_text, reaction_re=reaction_re)
 
     # -- connect ----------------------------------------------------------
     def connect(self) -> None:
@@ -761,6 +841,7 @@ class HerdrSession:
         submit_settle_s: float = HERDR_SEND_SUBMIT_SETTLE_S,
         submit_poll_interval_s: float = HERDR_SEND_POLL_INTERVAL_S,
         submit_max_attempts: int = HERDR_SEND_SUBMIT_MAX_ATTEMPTS,
+        commit_read_timeout_s: Callable[[], float] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Inject input/keystrokes into ``pane`` — the governed control path.
@@ -792,7 +873,12 @@ class HerdrSession:
             for _attempt in range(submit_max_attempts):
                 self._run_ok(["pane", "send-keys", pane.pane_id, "Enter"])
                 sleep(submit_poll_interval_s)
-                pane_text = self._read_recent_unwrapped_text(pane)
+                pane_text = self._read_recent_unwrapped_text(
+                    pane,
+                    timeout_s=(
+                        commit_read_timeout_s() if commit_read_timeout_s is not None else None
+                    ),
+                )
                 if not self._input_line_pending(pane_text, text):
                     submitted = True
                     break
@@ -814,28 +900,71 @@ class HerdrSession:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> str:
-        """Deliver a marked brief and fail closed unless the agent reacts."""
+        """Deliver a marked brief and fail closed unless the agent reacts.
+
+        Reaction detection is a bounded pane-read delta heuristic over
+        configurable literal signals. ``herdr wait agent-status`` is still
+        lifecycle-oriented ("ready", etc.) rather than a structured
+        per-dispatch acknowledgement, so it cannot yet prove that this exact
+        brief was received and acted on. Until herdr exposes that primitive,
+        brief delivery uses the keyword delta and fails closed on timeout.
+        """
         if render_timeout_s is not None:
             reaction_timeout_s = render_timeout_s
         if render_poll_interval_s is not None:
             reaction_poll_interval_s = render_poll_interval_s
+        if reaction_timeout_s <= 0:
+            raise HerdrCommandError("herdr brief reaction timeout must be positive")
+        if reaction_poll_interval_s < 0:
+            raise HerdrCommandError(
+                "herdr brief reaction poll interval must be non-negative"
+            )
         payload, marker = self._brief_payload(brief_body)
-        baseline_text = self._read_recent_unwrapped_text(pane)
+        deadline = clock() + reaction_timeout_s
+
+        def remaining_budget_s() -> float:
+            return deadline - clock()
+
+        def bounded_remaining_budget_s(*, context: str) -> float:
+            remaining = remaining_budget_s()
+            if remaining <= 0:
+                raise HerdrCommandError(
+                    "herdr brief reaction timeout expired before "
+                    f"{context} on pane {pane.pane_id}: {marker}"
+                )
+            return remaining
+
+        baseline_text = self._read_recent_unwrapped_text(
+            pane,
+            timeout_s=bounded_remaining_budget_s(context="baseline read"),
+        )
         self.send(
             pane,
             payload,
             submit_settle_s=HERDR_SEND_SUBMIT_SETTLE_S,
             submit_poll_interval_s=reaction_poll_interval_s,
             submit_max_attempts=HERDR_SEND_SUBMIT_MAX_ATTEMPTS,
+            commit_read_timeout_s=lambda: bounded_remaining_budget_s(
+                context="dispatch commit verification"
+            ),
             sleep=sleep,
         )
-        deadline = clock() + reaction_timeout_s
         while True:
-            pane_text = self._read_recent_unwrapped_text(pane)
+            remaining = remaining_budget_s()
+            if remaining <= 0:
+                raise HerdrCommandError(
+                    "herdr brief dispatch did not produce an agent reaction "
+                    f"on pane {pane.pane_id}: {marker}"
+                )
+            pane_text = self._read_recent_unwrapped_text(
+                pane,
+                timeout_s=remaining,
+            )
             if self._agent_reaction_observed(
                 pane_text,
                 baseline_text=baseline_text,
                 dispatched_payload=payload,
+                reaction_re=self._agent_reaction_re,
             ):
                 return marker
             if clock() >= deadline:
@@ -843,7 +972,7 @@ class HerdrSession:
                     "herdr brief dispatch did not produce an agent reaction "
                     f"on pane {pane.pane_id}: {marker}"
                 )
-            sleep(reaction_poll_interval_s)
+            sleep(min(reaction_poll_interval_s, max(0.0, remaining_budget_s())))
 
     # -- attach -----------------------------------------------------------
     def attach(self, pane: HerdrPane) -> None:
