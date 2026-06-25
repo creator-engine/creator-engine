@@ -1711,3 +1711,36 @@ def test_ce_queue_dequeue_cli_json(monkeypatch, capsys):
     assert captured["pr_number"] == PR
     assert captured["convert_to_draft"] is True
     assert '"disabled_auto_merge": true' in capsys.readouterr().out
+
+
+def test_ce_emergency_stop_cli_json_dequeues_and_drafts(monkeypatch, capsys):
+    captured = {}
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
+
+    def fake_dequeue(**kwargs):
+        captured.update(kwargs)
+        return belt.MergeQueueDequeueResult(
+            repo=kwargs["repo"],
+            pr_number=kwargs["pr_number"],
+            disabled_auto_merge=True,
+            converted_to_draft=True,
+            evidence=("gh_pr_merge_disable_auto=true", "draft_returncode=0"),
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "dequeue_merge_queue", fake_dequeue)
+
+    ret = v3_cli.main([
+        "emergency-stop",
+        str(PR),
+        "--repo", REPO,
+        "--convert-to-draft",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert captured["repo"] == REPO
+    assert captured["pr_number"] == PR
+    assert captured["convert_to_draft"] is True
+    assert '"disabled_auto_merge": true' in capsys.readouterr().out

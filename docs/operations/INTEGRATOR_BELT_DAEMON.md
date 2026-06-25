@@ -18,6 +18,31 @@ python -m creator_engine_validator.v3_cli queue-daemon \
 Use `--org ORG` instead of `--repo OWNER/REPO` only when the token is intended to operate
 across that org scope. The daemon refuses an unscoped run.
 
+## Emergency Stop
+
+To evict a PR from GitHub's merge queue, disable auto-merge through the
+first-class emergency stop command:
+
+```bash
+python -m creator_engine_validator.v3_cli emergency-stop PR_NUMBER \
+  --repo OWNER/REPO
+```
+
+Use `--convert-to-draft` only when the PR should also return to draft after the
+queue stop:
+
+```bash
+python -m creator_engine_validator.v3_cli emergency-stop PR_NUMBER \
+  --repo OWNER/REPO \
+  --convert-to-draft
+```
+
+The backcompat `queue-dequeue` command is an alias for the same primitive. Both
+commands execute `gh pr merge PR_NUMBER --repo OWNER/REPO --disable-auto`; the
+draft conversion runs only after that dequeue succeeds. Converting a PR to draft
+or dismissing an approval by itself does not evict an already in-flight merge
+queue entry.
+
 `--authorized-reviewer` is required fail-closed config. Pass one or more GitHub
 reviewer logins whose approvals may authorize merge-queue enqueue. Repeat the
 flag or provide a comma-separated value, for example
