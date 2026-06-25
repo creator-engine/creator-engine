@@ -55,9 +55,16 @@ class FakeAdapter:
 
 
 class FakeContainerRunner:
-    def __init__(self, *, available: bool = True, egress_enforceable: bool = True):
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        egress_enforceable: bool = True,
+        runtime_probe_pid: int | None = None,
+    ):
         self._available = available
         self._egress = egress_enforceable
+        self._runtime_probe_pid = runtime_probe_pid
 
     def available(self) -> bool:
         return self._available
@@ -67,6 +74,15 @@ class FakeContainerRunner:
 
     def run(self, argv, input_text=None):  # pragma: no cover - bridge must not call it
         raise AssertionError("visible bridge should route runsc argv through tmux")
+
+    def runtime_probe(self, *, run_id, argv, surface):
+        if self._runtime_probe_pid is None:
+            return None
+        return {
+            "pid": self._runtime_probe_pid,
+            "run_id": run_id,
+            "source": "fake-container-runner",
+        }
 
 
 def _write_prompt(tmp_path: Path, text: str = "governed gate prompt body\n") -> tuple[Path, str]:
@@ -314,7 +330,7 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
         tmux_adapter=adapter,
         runtime_policy=policy,
         backend="gvisor",
-        container_runner=FakeContainerRunner(),
+        container_runner=FakeContainerRunner(runtime_probe_pid=4242),
         gvisor_plan_kwargs=_gvisor_plan_kwargs(),
         containment_proc_root=proc_root,
     )

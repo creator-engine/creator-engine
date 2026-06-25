@@ -4,9 +4,9 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=11
+AUTHORIZED_PATHS_COUNT=12
 
-AUTHORIZED_PATHS_SHA256=b9f35e94c2e61c0b032c57223e4d9eb321f9618b741e8633ca08922c694d2ac5
+AUTHORIZED_PATHS_SHA256=4485874b1f0a5eea66f5a6cc8e6480940454c1cfe9579dd7dd15aa885e8adcd7
 
 ```text
 .ce/changelog/ce221-probed-containment.md
@@ -20,4 +20,5 @@ validators/tests/unit/test_ce_launch_cli.py
 validators/tests/unit/test_contained_launch_proof.py
 validators/tests/unit/test_containment_probe.py
 validators/tests/unit/test_containment_status.py
+validators/tests/unit/test_lane_runtime.py
 ```
