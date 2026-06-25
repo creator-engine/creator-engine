@@ -5343,8 +5343,11 @@ _DISPATCH = {
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
-    command = args.command or "session"
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if not raw_argv:
+        raw_argv = ["session"]
+    args = parser.parse_args(raw_argv)
+    command = args.command
     handler = _DISPATCH.get(command)
     if handler is None:  # pragma: no cover - argparse guards the choices
         parser.print_help()

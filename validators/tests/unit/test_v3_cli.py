@@ -896,6 +896,27 @@ def test_session_frame_shows_stage_counts(tmp_path, capsys):
     assert "Creator Engine" in out and "Frame" in out and "ctx" in out and "spend" in out
 
 
+def test_no_arg_default_session_uses_session_defaults_and_version(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "V3_LOCAL_STATE_ROOT", str(tmp_path))
+    token = v3_cli.version.ce_version()
+
+    code = v3_cli.main([])
+    assert code == 0
+    default_out = capsys.readouterr().out
+
+    code = v3_cli.main(["session", "--root", str(tmp_path)])
+    assert code == 0
+    explicit_out = capsys.readouterr().out
+
+    assert default_out == explicit_out
+    assert token in default_out
+
+    code = v3_cli.main(["session", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ce_version"] == token
+
+
 def test_session_unified_meters_from_inputs(tmp_path, capsys):
     _file_ready(tmp_path)
     spine = tmp_path / "spine.yaml"
