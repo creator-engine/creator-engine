@@ -160,6 +160,58 @@ if [ -n "${CE_VPS_CODEX_PACKAGE_ROOT}" ]; then
   esac
 fi
 
+backup_stale_herdr_session() {
+  local seat_log_dir="$1"
+  local session_dir="${seat_log_dir}/xdg/config/herdr"
+  local session_file="${session_dir}/session.json"
+  local seat_real session_dir_real digest backup_file
+
+  if [ ! -e "${session_file}" ] && [ ! -L "${session_file}" ]; then
+    return 0
+  fi
+  if [ -L "${session_file}" ]; then
+    printf 'refusing to clear symlinked herdr session file: %s\n' "${session_file}" >&2
+    exit 66
+  fi
+  if [ ! -f "${session_file}" ]; then
+    printf 'refusing to clear non-regular herdr session file: %s\n' "${session_file}" >&2
+    exit 66
+  fi
+
+  seat_real="$(realpath -e "${seat_log_dir}")" || {
+    printf 'could not resolve seat log dir: %s\n' "${seat_log_dir}" >&2
+    exit 66
+  }
+  session_dir_real="$(realpath -e "${session_dir}")" || {
+    printf 'could not resolve herdr session dir: %s\n' "${session_dir}" >&2
+    exit 66
+  }
+  case "${session_dir_real}/" in
+    "${seat_real}/"*)
+      ;;
+    *)
+      printf 'refusing to clear herdr session outside seat log dir: %s resolves to %s (seat log dir %s)\n' "${session_dir}" "${session_dir_real}" "${seat_real}" >&2
+      exit 66
+      ;;
+  esac
+
+  digest="$(sha256sum "${session_file}" | awk '{print $1}')" || {
+    printf 'could not hash stale herdr session: %s\n' "${session_file}" >&2
+    exit 66
+  }
+  backup_file="${session_dir}/session.json.prelaunch-backup.${digest}"
+  if [ -e "${backup_file}" ] || [ -L "${backup_file}" ]; then
+    if [ -f "${backup_file}" ] && [ ! -L "${backup_file}" ]; then
+      rm -f -- "${backup_file}"
+    else
+      printf 'refusing to overwrite unsafe herdr session backup path: %s\n' "${backup_file}" >&2
+      exit 66
+    fi
+  fi
+  mv -- "${session_file}" "${backup_file}"
+  printf 'backed up stale herdr session: %s -> %s\n' "${session_file}" "${backup_file}" >&2
+}
+
 prepare_contained_codex_config() {
   local config_dir
   config_dir="$(dirname "${CE_VPS_CONTAINED_CODEX_CONFIG}")"
@@ -224,6 +276,7 @@ if [ "${dry_run}" != "1" ]; then
   if [ -n "${CE_VPS_CLAUDE_BIN}" ]; then
     [ -x "${CE_VPS_CLAUDE_BIN}" ] || { printf 'Claude binary not executable: %s\n' "${CE_VPS_CLAUDE_BIN}" >&2; exit 66; }
   fi
+  backup_stale_herdr_session "${CE_VPS_SEAT_LOG_DIR}"
 fi
 
 tty_flags=()
