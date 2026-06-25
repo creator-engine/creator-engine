@@ -1,16 +1,24 @@
 # DGX Controller Under runsc/gVisor
 
-This directory is the Gate 2 DGX Controller sibling of the merged
-`deploy/dgx-runsc/` Codex artifact from ce-ops#128 / `3d9e86a`. It provides an
-dry-runable Docker argv wrapper and image notes for running the Claude Code
-Controller under the same `runsc-gvproxy-ptrace` containment shape. By default
-the wrapper reuses the `deploy/dgx-runsc/` image because that image bakes the
-shared herdr harness entrypoint; mount the Claude binary at
-`/usr/local/bin/claude`.
+This directory is the C1 contained-controller deployment scaffold for running a
+Controller harness under Docker with the DGX `runsc-gvproxy-ptrace` runtime.
+It mirrors the `deploy/dgx-runsc/` seat posture: gVisor containment, herdr
+operator attach, tmpfs substrate state, no Docker network by default, dropped
+capabilities, `no-new-privileges`, and a dedicated controller home.
 
-This cut does not implement the Gate 3 Controller Supervisor. If
-`CE_DGX_SUPERVISOR_SOCKET` is supplied, the wrapper only mounts that existing
-socket into the container at `/run/ce-supervisor.sock`.
+The detailed architecture, credential-injection seam, C3 parity plan, and C4
+cutover plan live in `deploy/dgx-controller-runsc/DESIGN.md`.
+
+C1 is intentionally a credential seam stub. The launcher does not pass
+`CLAUDE_CODE_OAUTH_TOKEN`, token values, token env names, secret refs, host auth
+files, or private-key material through Docker env, argv, or mounts. It only
+sets the non-secret marker
+`CE_DGX_CREDENTIAL_INJECTION=SEAM-STUB` and
+`CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection`.
+
+C2 is blocked on ce-ops#239 / the transport-deputy path. Until that lands, this
+scaffold validates containment and operator flow but does not provide durable
+Claude auth.
 
 ## Containment Posture
 
@@ -19,44 +27,81 @@ The wrapper defaults to:
 - Docker runtime `runsc-gvproxy-ptrace`.
 - No Docker `--network` flag unless explicitly allowed for diagnostics.
 - `--security-opt=no-new-privileges` and `--cap-drop=ALL`.
-- A dedicated controller home mounted at container `HOME`, not the host home.
-- No host tmux socket, SSH agent, Docker socket, Podman socket, containerd
-  socket, browser profile, OpenBao root token, GitHub App private key, or
-  `ce-root-v1` private key mount.
-- Claude Code auth passed only as the environment name
-  `CLAUDE_CODE_OAUTH_TOKEN`, so dry-runs never print the token value.
+- A runtime-owned tmpfs at `/run/creator-engine` for herdr and XDG state.
+- A writable controller harness log tmpfs at
+  `/run/creator-engine/controller-log`, passed through `CE_SEAT_LOG_DIR` and
+  `CE_CODEX_STDERR_LOG` so the shared herdr entrypoint never falls back to
+  `/var/log/ce-seat`.
+- A dedicated controller home mounted at container `HOME`, never the host
+  `HOME`.
+- Operator attach through the in-container herdr server:
+  `docker exec -it ce-dgx-controller herdr`.
+- `PYTHONPATH=/workspace/creator-engine/validators`, so the mounted repo exposes
+  `creator_engine_validator` to controller subprocesses.
 
-The corresponding declarative contract is
-`examples/well-formed/controller-runtime-contract/contained.yaml`.
+The wrapper does not mount host tmux sockets, host herdr sockets, SSH agent
+sockets, Docker sockets, Podman sockets, containerd sockets, browser profiles,
+OpenBao root tokens, GitHub App private keys, or `ce-root-v1` private keys.
+
+An optional `CE_DGX_SUPERVISOR_SOCKET` remains as non-secret future plumbing and
+is mounted at `/run/ce-supervisor.sock` when supplied. The launcher refuses
+Docker, Podman, containerd, herdr, and tmux socket paths for that seam.
 
 ## Build Image
 
-Build the shared herdr entrypoint image from the repo root on the DGX:
+Build from the repository root. The Dockerfile intentionally uses root build
+context so it can copy the shared herdr harness entrypoint from
+`deploy/dgx-runsc/`.
 
 ```bash
+cd /path/to/creator-engine
 docker build \
-  -f deploy/dgx-runsc/Dockerfile \
-  -t creator-engine/codex-runsc:0.141.0-aarch64 \
+  -f deploy/dgx-controller-runsc/Dockerfile \
+  -t creator-engine/claude-controller-runsc:c1 \
   --build-arg CE_DGX_USER="$(id -un)" \
   --build-arg CE_DGX_UID="$(id -u)" \
   --build-arg CE_DGX_GID="$(id -g)" \
-  deploy/dgx-runsc
+  .
 ```
 
-The shared image builds herdr-ce from the pinned source revision inside a
-Debian bookworm builder stage. Do not copy a host-built `herdr` binary into the
-image; the runtime binary must match the image libc.
+The image builds `herdr` from the same pinned herdr-ce source revision as the
+DGX Codex seat image, installs `git`, `gh`, `python3`, and `tini`, sets
+`PYTHONPATH=/workspace/creator-engine/validators`, and exposes the shared herdr
+harness entrypoint. Herdr is configured to execute
+`/usr/local/bin/ce-controller-harness`; that wrapper restores `PYTHONPATH`,
+exports the non-secret C1 seam markers, and then execs the mounted Claude binary
+at `/usr/local/bin/claude`.
 
-The wrapper mounts a runtime-owned tmpfs at `/run/creator-engine` for herdr
-socket and XDG state. The substrate entrypoint uses that path to own the herdr
-server, while the governed Claude harness starts with a clean environment that
-does not inherit socket carriers.
+Provide a Claude binary with `CE_DGX_CLAUDE_BIN=/path/to/claude`; it is mounted
+read-only at `/usr/local/bin/claude`. Do not bake auth into the image.
 
-The image intentionally does not bake Claude auth, GitHub auth, OpenBao tokens,
-or a private key. Provide a Claude binary through
-`CE_DGX_CLAUDE_BIN=/path/to/claude`; the wrapper mounts it at
-`/usr/local/bin/claude` and sets `CE_DGX_HARNESS=claude` for the shared
-entrypoint.
+## Runtime Registration
+
+Use the same Docker runtime family as `deploy/dgx-runsc/`:
+
+```json
+{
+  "runtimes": {
+    "runsc-gvproxy-ptrace": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": [
+        "--platform=ptrace",
+        "--network=host"
+      ]
+    }
+  }
+}
+```
+
+After Docker reload/restart:
+
+```bash
+docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy-ptrace"'
+```
+
+Do not pass Docker `--network=bridge`, `--network=none`, or `--network=host` to
+the launcher for normal operation. The registered runtime owns the DGX gvproxy /
+gvisor-tap-vsock egress route.
 
 ## Dry-Run Validation
 
@@ -80,14 +125,24 @@ CE_DGX_CLAUDE_BIN=/home/cedev4/.local/bin/claude \
 deploy/dgx-controller-runsc/run-controller-runsc.sh exec "summarize status"
 ```
 
-The wrapper refuses `CE_DGX_RUNTIME=runsc`, `CE_DGX_RUNTIME=runsc-gvproxy`, and
-Docker `--network` by default. Those overrides exist only for
-operator-directed diagnostics and mirror the `deploy/dgx-runsc/` DGX evidence.
+The printed argv should include `docker run`, `--runtime=runsc-gvproxy-ptrace`,
+`--security-opt=no-new-privileges`, `--cap-drop=ALL`, `--tmpfs
+/run/creator-engine:...`, `--tmpfs
+/run/creator-engine/controller-log:...`, the repo mount, the dedicated
+controller-home mount, the optional Claude binary mount,
+`CE_DGX_HARNESS_BIN=/usr/local/bin/ce-controller-harness`,
+`CE_SEAT_LOG_DIR=/run/creator-engine/controller-log`,
+`CE_CODEX_STDERR_LOG=/run/creator-engine/controller-log/controller-stderr.log`,
+`CE_DGX_TERMINAL_KIND=herdr`, and `CE_DGX_CREDENTIAL_INJECTION=SEAM-STUB` /
+`CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection`.
 
-## Detached Launch (canonical)
+The printed argv must not include a Docker `--network=` flag, `HERDR_SOCKET_PATH`,
+`CLAUDE_CODE_OAUTH_TOKEN`, token-looking values, Docker/Podman/containerd socket
+mounts, host herdr socket mounts, or host tmux socket mounts.
 
-The canonical way to keep the contained Controller alive is detached mode, via
-either the `--detach` flag or `CE_DGX_CONTROLLER_DETACH=1`:
+## Detached Launch
+
+Detached mode is the canonical operator path:
 
 ```bash
 CE_DGX_REPO=/path/to/creator-engine \
@@ -96,65 +151,38 @@ CE_DGX_CLAUDE_BIN=/home/cedev4/.local/bin/claude \
 deploy/dgx-controller-runsc/run-controller-runsc.sh --detach tui
 ```
 
-Detached mode runs `docker run -d` under a deterministic, named, persistent
-container (`--name`, default `ce-dgx-controller`, overridable via
-`CE_DGX_CONTROLLER_CONTAINER_NAME`). It deliberately drops `--rm`: a crashed or
-stopped controller stays inspectable for forensics. A prior live outage was
-worsened because `--rm` deleted the container before its logs and exit code
-could be read.
-
-After the container starts, the wrapper polls
-`docker exec <name> herdr pane read w1:p1` in a bounded loop (up to ~60 tries,
-0.5s apart). If herdr never responds, the wrapper fails loudly with a non-zero
-exit, naming the container and the teardown command. On success it prints the
-canonical drive path and the retire command, then returns 0 without blocking:
+Detached mode runs `docker run -d --name ce-dgx-controller` and deliberately
+drops `--rm`, leaving a crashed or stopped controller inspectable through
+`docker logs`, `docker inspect`, and the recorded exit code. After start, the
+wrapper polls the in-container herdr socket and pane list. On success it prints
+the attach and retire commands:
 
 ```bash
-# Attach to drive the controller (canonical):
 docker exec -it ce-dgx-controller herdr
-
-# Retire the controller:
 docker stop ce-dgx-controller && docker rm ce-dgx-controller
 ```
 
-The Claude controller TUI still renders into the herdr pane (the `-it` TTY
-flags are kept in detached mode), so attaching with `herdr` gives the live
-interactive controller.
+Foreground mode keeps `docker run --rm` and `exec`s Docker in the calling
+terminal.
 
-> **tmux is DEPRECATED / legacy** for keeping the Controller alive. The old
-> pattern of wrapping the controller in a host tmux session is superseded by
-> detached mode: the named persistent container plus the herdr attach path
-> removes the tmux crutch entirely. Use `--detach` and
-> `docker exec -it ce-dgx-controller herdr`, not tmux.
+## Forward Pointers
 
-The foreground (non-`--detach`) path is unchanged: it keeps `docker run --rm`
-and `exec`s Docker so the controller runs in the calling terminal.
+- C2: transport-deputy credential delivery from ce-ops#239. This is where
+  Claude auth becomes available without env/argv/mount secret exposure.
+- C3: parity validation against the existing DGX Codex runsc seat posture.
+- C4: cutover from scaffolded controller launch to the governed controller
+  deployment path once C2/C3 evidence is ratified.
 
-## Runtime Registration
+## Tests
 
-Use the same Docker runtime family as the merged Codex DGX artifact:
-
-```json
-{
-  "runtimes": {
-    "runsc-gvproxy-ptrace": {
-      "path": "/usr/bin/runsc",
-      "runtimeArgs": [
-        "--platform=ptrace",
-        "--network=host"
-      ]
-    }
-  }
-}
-```
-
-After Docker reload/restart:
+Run the controller shell dry-run checks from the repository root:
 
 ```bash
-docker info --format '{{json .Runtimes}}' | grep -q '"runsc-gvproxy-ptrace"'
+deploy/dgx-controller-runsc/test-controller-dry-run.sh
 ```
 
-This Gate 2 wrapper does not grant git push authority. Future push/signing
-authority must be mediated by the Gate 3+ supervisor path, with Max auth via the
-`max-auth-via-setup-token` handle and `ce-root-v1` signing via OpenBao request
-handles rather than private-key mounts.
+Run the validator unit coverage from the repository root:
+
+```bash
+python -m pytest validators/tests/unit
+```
