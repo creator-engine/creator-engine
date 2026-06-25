@@ -29,6 +29,9 @@ Environment:
   CE_VPS_CONTAINER_USER        Container seat user name (default: current user)
   CE_VPS_UID                   Container uid (default: id -u)
   CE_VPS_GID                   Container gid (default: id -g)
+  CE_VPS_SEAT_ID               Host log seat id (default: CE_VPS_CONTAINER_NAME)
+  CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
+                                (default: ~/.ce/logs/seats/<seat-id>)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
   CE_VPS_DRY_RUN               Print docker argv instead of executing when set to 1
 EOF
@@ -104,8 +107,11 @@ CE_VPS_UID="${CE_VPS_UID:-$(id -u)}"
 CE_VPS_GID="${CE_VPS_GID:-$(id -g)}"
 CE_VPS_TTY_FLAGS="${CE_VPS_TTY_FLAGS:--it}"
 CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-ce-vps-${harness}}"
+CE_VPS_SEAT_ID="${CE_VPS_SEAT_ID:-${CE_VPS_CONTAINER_NAME}}"
+CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
+CE_VPS_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
 herdr_socket_path="/run/creator-engine/herdr/herdr.sock"
 
 container_term="${TERM:-}"
@@ -131,6 +137,14 @@ case "${CE_VPS_CONTAINED_CODEX_CONFIG}" in
     ;;
   *)
     printf 'CE_VPS_CONTAINED_CODEX_CONFIG must be an absolute path, got %s\n' "${CE_VPS_CONTAINED_CODEX_CONFIG}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_VPS_SEAT_LOG_DIR}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_VPS_SEAT_LOG_DIR must be an absolute path, got %s\n' "${CE_VPS_SEAT_LOG_DIR}" >&2
     exit 2
     ;;
 esac
@@ -185,6 +199,9 @@ EOF
 prepare_contained_codex_config
 
 if [ "${dry_run}" != "1" ]; then
+  mkdir -p "${CE_VPS_SEAT_LOG_DIR}"
+  chown "${CE_VPS_UID}:${CE_VPS_GID}" "${CE_VPS_SEAT_LOG_DIR}" 2>/dev/null || true
+  chmod 0700 "${CE_VPS_SEAT_LOG_DIR}" 2>/dev/null || true
   command -v docker >/dev/null 2>&1 || { printf 'docker not found\n' >&2; exit 127; }
   docker info --format '{{json .Runtimes}}' | grep -q "\"${CE_VPS_RUNTIME}\"" || {
     printf 'docker runtime not registered: %s\n' "${CE_VPS_RUNTIME}" >&2
@@ -223,6 +240,7 @@ codex_home_mount="type=bind,source=${CE_VPS_CODEX_HOME},target=${CE_VPS_CONTAINE
 if [ "${CE_VPS_CODEX_HOME_MODE}" = "ro" ]; then
   codex_home_mount="${codex_home_mount},readonly"
 fi
+seat_log_mount="type=bind,source=${CE_VPS_SEAT_LOG_DIR},target=${CE_VPS_CONTAINER_SEAT_LOG_DIR}"
 contained_codex_config_mount="type=bind,source=${CE_VPS_CONTAINED_CODEX_CONFIG},target=${CE_VPS_CONTAINER_CODEX_HOME}/config.toml,readonly"
 codex_mount_args=()
 if [ -n "${CE_VPS_CODEX_PACKAGE_ROOT}" ]; then
@@ -243,6 +261,9 @@ if [ "${detach}" = "1" ]; then
   docker_run_flags+=(-d --name "${CE_VPS_CONTAINER_NAME}")
 else
   docker_run_flags+=(--rm)
+  if [ "${mode}" = "tui" ]; then
+    docker_run_flags+=(--name "${CE_VPS_CONTAINER_NAME}")
+  fi
 fi
 
 docker_cmd=(
@@ -256,11 +277,17 @@ docker_cmd=(
   --workdir "${CE_VPS_CONTAINER_REPO}"
   --env "HOME=${CE_VPS_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_VPS_CONTAINER_CODEX_HOME}"
+  --env "CE_SEAT_LOG_DIR=${CE_VPS_CONTAINER_SEAT_LOG_DIR}"
+  --env "CE_CODEX_STDERR_LOG=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/codex-stderr.log"
+  --env "XDG_CONFIG_HOME=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/xdg/config"
+  --env "XDG_STATE_HOME=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/xdg/state"
+  --env "XDG_CACHE_HOME=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/xdg/cache"
   --env "TERM=${container_term}"
   --env "CE_DGX_HARNESS=${image_harness}"
   --env "CE_DGX_HARNESS_MODE=${mode}"
   --mount "${repo_mount}"
   --mount "${codex_home_mount}"
+  --mount "${seat_log_mount}"
   --mount "${contained_codex_config_mount}"
   "${codex_mount_args[@]}"
 )

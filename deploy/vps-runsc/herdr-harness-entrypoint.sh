@@ -11,6 +11,8 @@ HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 HERDR_SOCKET_DIR="$(dirname "${HERDR_SOCKET_PATH}")"
 HERDR_WORKSPACE_NAME="${HERDR_WORKSPACE_NAME:-creator-engine}"
 CE_DGX_HARNESS="${CE_DGX_HARNESS:-codex}"
+CE_SEAT_LOG_DIR="${CE_SEAT_LOG_DIR:-/var/log/ce-seat}"
+CE_CODEX_STDERR_LOG="${CE_CODEX_STDERR_LOG:-${CE_SEAT_LOG_DIR}/codex-stderr.log}"
 
 case "${CE_DGX_HARNESS}" in
   codex)
@@ -31,6 +33,15 @@ esac
 [ "$(stat -c '%a' "${HERDR_SOCKET_DIR}")" = "700" ] || {
   fail "herdr socket directory must be mode 0700: ${HERDR_SOCKET_DIR}"
 }
+[ -d "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is missing: ${CE_SEAT_LOG_DIR}"
+[ -w "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is not writable: ${CE_SEAT_LOG_DIR}"
+install -d -m 0700 \
+  "${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}" \
+  "${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}" \
+  "${XDG_CACHE_HOME:-${CE_SEAT_LOG_DIR}/xdg/cache}"
+if [ "${CE_DGX_HARNESS}" = "codex" ]; then
+  : >>"${CE_CODEX_STDERR_LOG}" || fail "codex stderr log is not writable: ${CE_CODEX_STDERR_LOG}"
+fi
 
 cleanup() {
   if [ -n "${herdr_pid:-}" ] && kill -0 "${herdr_pid}" 2>/dev/null; then
@@ -66,9 +77,15 @@ harness_env=(
   "PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
   "TERM=${TERM:-xterm-256color}"
   "CE_DGX_HARNESS=${CE_DGX_HARNESS}"
+  "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}"
+  "XDG_STATE_HOME=${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}"
+  "XDG_CACHE_HOME=${XDG_CACHE_HOME:-${CE_SEAT_LOG_DIR}/xdg/cache}"
 )
 if [ -n "${CODEX_HOME:-}" ]; then
   harness_env+=("CODEX_HOME=${CODEX_HOME}")
+fi
+if [ "${CE_DGX_HARNESS}" = "codex" ]; then
+  harness_env+=("CE_CODEX_STDERR_LOG=${CE_CODEX_STDERR_LOG}")
 fi
 
 workspace_json="$(herdr_cli workspace create --cwd "${PWD}" --label "${HERDR_WORKSPACE_NAME}")" || {
@@ -91,7 +108,11 @@ print(workspace.get("workspace_id", ""), root_pane.get("pane_id", ""))
 [ -n "${workspace_id}" ] || fail "herdr workspace response did not include workspace id"
 [ -n "${root_pane_id}" ] || fail "herdr workspace response did not include root pane id"
 
-governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")
+if [ "${CE_DGX_HARNESS}" = "codex" ]; then
+  governed_harness=(/usr/bin/env -i "${harness_env[@]}" /bin/sh -c 'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"' sh "${harness_bin}" "$@")
+else
+  governed_harness=(/usr/bin/env -i "${harness_env[@]}" "${harness_bin}" "$@")
+fi
 quoted_harness="$(printf '%q ' "${governed_harness[@]}")"
 herdr_cli pane run "${root_pane_id}" "${quoted_harness}" || {
   fail "could not start governed harness through herdr"

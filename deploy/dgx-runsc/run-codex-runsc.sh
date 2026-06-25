@@ -33,6 +33,9 @@ Environment:
   CE_DGX_CONTAINER_USER     Container seat user name (default: cedev4)
   CE_DGX_UID                Container uid (default: id -u)
   CE_DGX_GID                Container gid (default: id -g)
+  CE_DGX_SEAT_ID            Host log seat id (default: CE_DGX_CONTAINER_NAME)
+  CE_DGX_SEAT_LOG_DIR       Host log dir mounted at /var/log/ce-seat
+                            (default: ~/.ce/logs/seats/<seat-id>)
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
   CE_DGX_DETACH             Launch detached (docker run -d, named container) when set to 1
   CE_DGX_CONTAINER_NAME     Detached container name (default: ce-dgx-codex)
@@ -72,7 +75,7 @@ CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
 CE_DGX_CODEX_HOME_MODE="${CE_DGX_CODEX_HOME_MODE:-rw}"
-CE_DGX_CODEX_BIN="${CE_DGX_CODEX_BIN:-/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex}"
+CE_DGX_CODEX_BIN="${CE_DGX_CODEX_BIN:-/home/cedev4/.codex/packages/standalone/current/bin/codex}"
 CE_DGX_HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 CE_DGX_SUBSTRATE_RUN_DIR="${CE_DGX_SUBSTRATE_RUN_DIR:-/run/creator-engine}"
 CE_DGX_CONTAINER_REPO="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
@@ -83,7 +86,10 @@ CE_DGX_UID="${CE_DGX_UID:-$(id -u)}"
 CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
 CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
 CE_DGX_CONTAINER_NAME="${CE_DGX_CONTAINER_NAME:-ce-dgx-codex}"
+CE_DGX_SEAT_ID="${CE_DGX_SEAT_ID:-${CE_DGX_CONTAINER_NAME}}"
+CE_DGX_SEAT_LOG_DIR="${CE_DGX_SEAT_LOG_DIR:-${HOME:-/home/cedev4}/.ce/logs/seats/${CE_DGX_SEAT_ID}}"
 CE_DGX_CONTAINED_CODEX_CONFIG="${CE_DGX_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-dgx-runsc-codex-config-${CE_DGX_UID}-${CE_DGX_CONTAINER_USER}.toml}"
+CE_DGX_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
 
 container_term="${TERM:-}"
 if [ -z "${container_term}" ] || [ "${container_term}" = "dumb" ]; then
@@ -99,6 +105,14 @@ case "${CE_DGX_CONTAINED_CODEX_CONFIG}" in
     ;;
   *)
     printf 'CE_DGX_CONTAINED_CODEX_CONFIG must be an absolute path, got %s\n' "${CE_DGX_CONTAINED_CODEX_CONFIG}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_DGX_SEAT_LOG_DIR}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_DGX_SEAT_LOG_DIR must be an absolute path, got %s\n' "${CE_DGX_SEAT_LOG_DIR}" >&2
     exit 2
     ;;
 esac
@@ -181,6 +195,9 @@ EOF
 fi
 
 if [ "${dry_run}" != "1" ]; then
+  mkdir -p "${CE_DGX_SEAT_LOG_DIR}"
+  chown "${CE_DGX_UID}:${CE_DGX_GID}" "${CE_DGX_SEAT_LOG_DIR}" 2>/dev/null || true
+  chmod 0700 "${CE_DGX_SEAT_LOG_DIR}" 2>/dev/null || true
   command -v docker >/dev/null 2>&1 || { printf 'docker not found\n' >&2; exit 127; }
   docker info --format '{{json .Runtimes}}' | grep -q "\"${CE_DGX_RUNTIME}\"" || {
     printf 'docker runtime not registered: %s\n' "${CE_DGX_RUNTIME}" >&2
@@ -208,6 +225,7 @@ codex_home_mount="type=bind,source=${CE_DGX_CODEX_HOME},target=${CE_DGX_CONTAINE
 if [ "${CE_DGX_CODEX_HOME_MODE}" = "ro" ]; then
   codex_home_mount="${codex_home_mount},readonly"
 fi
+seat_log_mount="type=bind,source=${CE_DGX_SEAT_LOG_DIR},target=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
 codex_bin_mount="type=bind,source=${CE_DGX_CODEX_BIN},target=/usr/local/bin/codex,readonly"
 contained_codex_config_mount="type=bind,source=${CE_DGX_CONTAINED_CODEX_CONFIG},target=${CE_DGX_CONTAINER_CODEX_HOME}/config.toml,readonly"
 
@@ -216,6 +234,8 @@ contained_codex_config_mount="type=bind,source=${CE_DGX_CONTAINED_CODEX_CONFIG},
 lifecycle_flags=(--rm)
 if [ "${detach}" = "1" ]; then
   lifecycle_flags=(-d --name "${CE_DGX_CONTAINER_NAME}")
+elif [ "${mode}" = "tui" ]; then
+  lifecycle_flags=(--rm --name "${CE_DGX_CONTAINER_NAME}")
 fi
 
 docker_cmd=(
@@ -228,9 +248,11 @@ docker_cmd=(
   --tmpfs "${CE_DGX_SUBSTRATE_RUN_DIR}:uid=${CE_DGX_UID},gid=${CE_DGX_GID},mode=0700"
   --env "HOME=${CE_DGX_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_DGX_CONTAINER_CODEX_HOME}"
-  --env "XDG_CONFIG_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/config"
-  --env "XDG_STATE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/state"
-  --env "XDG_CACHE_HOME=${CE_DGX_SUBSTRATE_RUN_DIR}/xdg/cache"
+  --env "CE_SEAT_LOG_DIR=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
+  --env "CE_CODEX_STDERR_LOG=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/codex-stderr.log"
+  --env "XDG_CONFIG_HOME=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/xdg/config"
+  --env "XDG_STATE_HOME=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/xdg/state"
+  --env "XDG_CACHE_HOME=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/xdg/cache"
   --env "TERM=${container_term}"
   --env "CE_DGX_HARNESS=codex"
   --env "CE_DGX_HARNESS_BIN=/usr/local/bin/codex"
@@ -240,6 +262,7 @@ docker_cmd=(
   --env "CE_TERMINAL_KIND=herdr"
   --mount "${repo_mount}"
   --mount "${codex_home_mount}"
+  --mount "${seat_log_mount}"
   --mount "${contained_codex_config_mount}"
   --mount "${codex_bin_mount}"
 )
