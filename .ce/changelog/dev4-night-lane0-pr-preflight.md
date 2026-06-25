@@ -3,7 +3,7 @@ slug: dev4-night-lane0-pr-preflight
 date: 2026-06-25
 kind: added
 scope: validator tooling
-issue: lane-0-preflight
+issue: ce-ops#252
 ---
 
 **Lane 0 PR preflight.**
