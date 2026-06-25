@@ -378,10 +378,16 @@ _INLINE_SECRET_VALUE_PATTERNS = (
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
 _CapabilityPolicy = Mapping[SecretRef, _CapabilitySet]
 _RefPredicate = Callable[[SecretRef], bool]
-_OPENBAO_APPROVAL_WALL_PATH = "forge/approval-capability/wall"
-_OPENBAO_APPROVAL_WALL_FIELD = "secret"
-_OPENBAO_APPROVAL_WALL_PURPOSE = "approval-capability-wall"
-_OPENBAO_APPROVAL_WALL_OWNER_REF = "controller:integrator"
+DEFAULT_APPROVAL_WALL_SECRET_BACKEND = "openbao"
+DEFAULT_APPROVAL_WALL_SECRET_MOUNT = "ce-kv"
+DEFAULT_APPROVAL_WALL_SECRET_PATH = "forge/approval-capability/wall"
+DEFAULT_APPROVAL_WALL_SECRET_FIELD = "signing_secret"
+DEFAULT_APPROVAL_WALL_SECRET_PURPOSE = "approval-capability-wall"
+DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF = "controller:integrator"
+_OPENBAO_APPROVAL_WALL_PATH = DEFAULT_APPROVAL_WALL_SECRET_PATH
+_OPENBAO_APPROVAL_WALL_FIELD = DEFAULT_APPROVAL_WALL_SECRET_FIELD
+_OPENBAO_APPROVAL_WALL_PURPOSE = DEFAULT_APPROVAL_WALL_SECRET_PURPOSE
+_OPENBAO_APPROVAL_WALL_OWNER_REF = DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF
 
 
 def _ref_names_controller_key(ref: SecretRef) -> bool:

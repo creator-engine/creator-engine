@@ -42,22 +42,26 @@ Live drift note: the VPS unit has stale `CAP_IPC_LOCK`/memlock drift from the
 repository unit. Repair is recommended in a follow-up; this runbook lane does
 not change the unit.
 
-## SecretRefs
+## SecretRef SSOT
 
-Chosen TEST SecretRef for the controller/operator proof:
+The approval-capability wall has one canonical OpenBao SecretRef. Operators
+must use this SecretRef for both verifier reads and controller/integrator
+mint-on-approval issuance:
 
+- Backend: `openbao`
 - Mount: `ce-kv`
-- Path: `forge/approval-wall/test`
+- Path: `forge/approval-capability/wall`
 - Field: `signing_secret`
+- Purpose: `approval-capability-wall`
+- Owner-ref: `controller:integrator`
 
-Suggested production placeholders only:
+Earlier `forge/approval-wall/test` and `forge/approval-wall/prod` examples are
+not the SecretRef for ce-ops#247. Do not use them for mint-on-approval or live
+approval-wall arming.
 
-- Mount: `ce-kv`
-- Path: `forge/approval-wall/prod`
-- Field: `signing_secret`
-
-The production secret must not be minted by this lane. The production path and
-field remain controller/operator binding choices until the live arming window.
+The production signing secret must be created only by an authorized
+controller/operator through the approved secret channel. This documentation lane
+records the binding; it must not mint, reveal, or commit the live secret.
 
 ## Secure Token Retrieval
 
@@ -101,51 +105,52 @@ bao secrets list -format=json | jq -e \
   || bao secrets enable -path="$CE_OPENBAO_KV_MOUNT" kv-v2
 ```
 
-3. Write the TEST secret to `ce-kv/forge/approval-wall/test`, field
-   `signing_secret`. Use a tmpfs file or another approved in-memory handoff.
+3. Verify or write the canonical approval-wall signing secret at
+   `ce-kv/forge/approval-capability/wall`, field `signing_secret`. Use a tmpfs
+   file or another approved in-memory handoff for the source value.
 
 ```bash
-export CE_APPROVAL_WALL_TEST_SECRET_FILE="/run/user/$(id -u)/ce-approval-wall-test-signing-secret"
-install -m 700 -d "$(dirname "$CE_APPROVAL_WALL_TEST_SECRET_FILE")"
-# Operator writes the synthetic TEST secret to the file with mode 0600.
-jq -Rs '{data: {signing_secret: .}}' < "$CE_APPROVAL_WALL_TEST_SECRET_FILE" \
+export CE_APPROVAL_WALL_SIGNING_SECRET_FILE="/run/user/$(id -u)/ce-approval-wall-signing-secret"
+install -m 700 -d "$(dirname "$CE_APPROVAL_WALL_SIGNING_SECRET_FILE")"
+# Operator writes the approved signing secret to the file with mode 0600.
+jq -Rs '{data: {signing_secret: .}}' < "$CE_APPROVAL_WALL_SIGNING_SECRET_FILE" \
   | curl --silent --show-error --fail \
       --cacert "$BAO_CACERT" \
       --header "X-Vault-Token: $BAO_TOKEN" \
       --request POST \
       --data-binary @- \
-      "$BAO_ADDR/v1/$CE_OPENBAO_KV_MOUNT/data/forge/approval-wall/test"
+      "$BAO_ADDR/v1/$CE_OPENBAO_KV_MOUNT/data/forge/approval-capability/wall"
 ```
 
 4. Create a least-privilege read policy and short-lived daemon token for the
-   TEST SecretRef only.
+   canonical SecretRef only.
 
 ```bash
-cat > /run/user/$(id -u)/ce-approval-wall-test-read.hcl <<'POLICY'
-path "ce-kv/data/forge/approval-wall/test" {
+cat > /run/user/$(id -u)/ce-approval-wall-read.hcl <<'POLICY'
+path "ce-kv/data/forge/approval-capability/wall" {
   capabilities = ["read"]
 }
 POLICY
 
-bao policy write ce-approval-wall-test-read \
-  /run/user/$(id -u)/ce-approval-wall-test-read.hcl
+bao policy write ce-approval-wall-read \
+  /run/user/$(id -u)/ce-approval-wall-read.hcl
 
 bao token create \
-  -policy=ce-approval-wall-test-read \
+  -policy=ce-approval-wall-read \
   -ttl=1h \
   -renewable=false \
   -format=json
 ```
 
-Export only the returned TEST token through the approved secret channel:
+Export only the returned token through the approved secret channel:
 
 ```bash
-export BAO_TOKEN='<least-privilege-test-token-from-approved-channel>'
+export BAO_TOKEN='<least-privilege-daemon-token-from-approved-channel>'
 ```
 
 5. Run the queue-daemon proof with file target in tmpfs. Use `--once`,
-   `--dry-run`, and a tmpfs wall state path so this test does not arm the live
-   production daemon or production state.
+   `--dry-run`, and a tmpfs wall state path so this proof does not arm the live
+   daemon state.
 
 ```bash
 export CE_APPROVAL_WALL_TMPFS="/run/user/$(id -u)/ce-approval-wall-test"
@@ -164,7 +169,7 @@ PYTHONPATH=validators \
   --authorized-reviewer '<APPROVING_LOGIN>' \
   --approval-wall-secret-backend openbao \
   --approval-wall-secret-mount ce-kv \
-  --approval-wall-secret-path forge/approval-wall/test \
+  --approval-wall-secret-path forge/approval-capability/wall \
   --approval-wall-secret-field signing_secret \
   --approval-wall-secret-purpose approval-capability-wall \
   --approval-wall-secret-owner-ref controller:integrator \
@@ -179,52 +184,49 @@ PYTHONPATH=validators \
   --json
 ```
 
-6. Mint a marker with the same TEST secret via env only in a controlled shell.
-   This is for TEST marker proof only; do not use this to mint production wall
-   markers.
+6. Exercise mint-on-approval only through the trusted controller/integrator
+   queue daemon. Do not set `CE_APPROVAL_CAPABILITY_SECRET` for automatic
+   minting. On a controlled PR with a current-head approval from an authorized
+   reviewer and no existing marker, run the queue daemon with the same OpenBao
+   SecretRef, `--authorized-reviewer`, path manifest gate, settle state, and
+   live reverify enabled. The first pass may defer as `approval_settle_pending`;
+   the settled pass must mint only after current-head approval, reviewer
+   authorization, path gate, and live reverify all succeed.
 
-```bash
-export CE_APPROVAL_CAPABILITY_SECRET="$(cat "$CE_APPROVAL_WALL_TEST_SECRET_FILE")"
-PYTHONPATH=validators \
-"$CE_VALIDATOR_PYTHON" -m creator_engine_validator.v3_cli approval-capability mint \
-  --repo '<OWNER/REPO>' \
-  --pr '<PR_NUMBER>' \
-  --head-sha '<APPROVED_HEAD_SHA>' \
-  --approved-by '<APPROVING_LOGIN>' \
-  --policy-sha '<APPROVAL_POLICY_SHA>' \
-  --ttl-seconds 600 \
-  --approval-wall-state "$CE_APPROVAL_WALL_TMPFS/state.json"
-unset CE_APPROVAL_CAPABILITY_SECRET
-```
+   A successful automatic mint writes the public
+   `ce-approval-capability: v1.<payload-b64>.<signature>` marker into the PR
+   body and returns `approval_capability_minted`. The daemon defers after
+   minting; the armed verifier then verifies the marker from PR body metadata on
+   the next pass before enqueue is eligible.
 
-7. Verify a valid marker. Place the TEST marker on the test PR body, rerun the
-   queue-daemon proof above, and confirm the marker verifies with the OpenBao
-   TEST SecretRef.
+7. Verify a valid marker. Rerun the queue-daemon proof above against the PR body
+   carrying the marker and confirm the marker verifies with the canonical
+   OpenBao SecretRef.
 
 8. Verify wrong-secret failure. Mint a marker with a different synthetic secret
-   in the same controlled env-only manner, place it on the test PR body, rerun
-   the queue-daemon proof, and confirm the failure reason is
-   `signature_mismatch`.
+   outside the daemon path, place it on the controlled PR body, rerun the
+   queue-daemon proof, and confirm the failure reason is `signature_mismatch`.
 
 9. Verify missing or unreachable secret failure. Run the queue-daemon proof with
    backend flags still configured but with no usable `BAO_TOKEN` or with an
-   unreachable TEST path. Confirm exit `1`, no env fallback, and no target file
-   creation.
+   unreachable canonical path. Confirm exit `1`, no env fallback, and no target
+   file creation.
 
-10. Destroy and revoke test material.
+10. Revoke proof tokens and remove only temporary local material. Do not delete
+    the canonical OpenBao signing secret unless this is an explicitly authorized
+    decommissioning action.
 
 ```bash
 export BAO_TOKEN='<authorized-operator-token-from-approved-channel>'
-bao token revoke '<test-daemon-token-or-accessor>'
-bao kv metadata delete -mount="$CE_OPENBAO_KV_MOUNT" forge/approval-wall/test
-bao policy delete ce-approval-wall-test-read
-rm -f "$CE_APPROVAL_WALL_TEST_SECRET_FILE"
+bao token revoke '<daemon-token-or-accessor>'
+bao policy delete ce-approval-wall-read
+rm -f "$CE_APPROVAL_WALL_SIGNING_SECRET_FILE"
 rm -rf "$CE_APPROVAL_WALL_TMPFS"
-unset BAO_TOKEN BAO_ADDR BAO_CACERT CE_OPENBAO_KV_MOUNT CE_APPROVAL_WALL_TEST_SECRET_FILE
+unset BAO_TOKEN BAO_ADDR BAO_CACERT CE_OPENBAO_KV_MOUNT CE_APPROVAL_WALL_SIGNING_SECRET_FILE
 ```
 
 Do not flip the armed flag, update production daemon configuration, mint a
-production wall secret, or leave test tokens/secrets alive in this lane.
+production wall secret, or leave proof tokens/secrets alive in this lane.
 
 ## Repo Validations
 

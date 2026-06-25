@@ -28,6 +28,12 @@ from creator_engine_validator.secret_identity import (
     UnknownBackend,
     WrappedSecretZeroRetrieval,
     available_backends,
+    DEFAULT_APPROVAL_WALL_SECRET_BACKEND,
+    DEFAULT_APPROVAL_WALL_SECRET_FIELD,
+    DEFAULT_APPROVAL_WALL_SECRET_MOUNT,
+    DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF,
+    DEFAULT_APPROVAL_WALL_SECRET_PATH,
+    DEFAULT_APPROVAL_WALL_SECRET_PURPOSE,
     get_backend,
     redeem_wrapped_secret_zero,
     register_backend,
@@ -92,7 +98,7 @@ def _approval_wall_ref(**overrides) -> SecretRef:
         "backend": "openbao",
         "mount": "ce-kv",
         "path": "forge/approval-capability/wall",
-        "field": "secret",
+        "field": "signing_secret",
         "version": 1,
         "purpose": "approval-capability-wall",
         "owner_ref": "controller:integrator",
@@ -328,6 +334,17 @@ def test_openbao_registered_backend_allows_default_approval_wall_ref(monkeypatch
 
     assert grant.secret_ref == _approval_wall_ref()
     assert [call.path for call in calls] == ["/v1/sys/health", "/v1/sys/audit"]
+
+
+def test_openbao_approval_wall_secret_ref_defaults_match_ce_ops_247():
+    ref = _approval_wall_ref()
+
+    assert DEFAULT_APPROVAL_WALL_SECRET_BACKEND == ref.backend == "openbao"
+    assert DEFAULT_APPROVAL_WALL_SECRET_MOUNT == ref.mount == "ce-kv"
+    assert DEFAULT_APPROVAL_WALL_SECRET_PATH == ref.path == "forge/approval-capability/wall"
+    assert DEFAULT_APPROVAL_WALL_SECRET_FIELD == ref.field == "signing_secret"
+    assert DEFAULT_APPROVAL_WALL_SECRET_PURPOSE == ref.purpose == "approval-capability-wall"
+    assert DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF == ref.owner_ref == "controller:integrator"
 
 
 def test_openbao_registered_backend_allows_realistic_default_approval_wall_ref(monkeypatch):

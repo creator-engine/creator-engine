@@ -4391,12 +4391,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_queue_daemon.add_argument(
         "--approval-wall-secret-purpose",
-        default="approval-capability-wall",
+        default=None,
         help="SecretRef purpose for the primary approval wall secret supplier",
     )
     p_queue_daemon.add_argument(
         "--approval-wall-secret-owner-ref",
-        default="controller:integrator",
+        default=None,
         help="SecretRef owner reference for the primary approval wall secret supplier",
     )
     p_queue_daemon.add_argument(
@@ -4429,6 +4429,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=600,
         help="SecretRequest TTL in seconds for the primary approval wall secret supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-marker-ttl-seconds",
+        type=int,
+        default=3600,
+        help="daemon-minted approval marker lifetime in seconds",
     )
     p_queue_daemon.add_argument(
         "--approval-wall-state",
@@ -4553,6 +4559,11 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
         wall = _approval_wall_runtime_from_args(args)
         if wall.misconfigured:
             raise integrator_belt.IntegratorBeltError(f"approval wall misconfigured: {wall.reason}")
+        approval_marker_issuer = (
+            _approval_capability_marker_issuer_from_args(args)
+            if wall.armed and _approval_wall_backend_configured_from_args(args)
+            else None
+        )
         result = integrator_belt.run_daemon_loop(
             token=token,
             repo=args.repo,
@@ -4563,6 +4574,7 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             approval_wall=wall,
             log_sink=logger,
             authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
+            approval_marker_issuer=approval_marker_issuer,
         )
     except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
         print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
@@ -4634,49 +4646,52 @@ def _approval_wall_state_path_from_args(args: argparse.Namespace) -> Path:
 def _approval_wall_secret_identity_supplier_from_args(
     args: argparse.Namespace,
 ) -> approval_capability.SecretSupplier | None:
-    backend_key = getattr(args, "approval_wall_secret_backend", None)
-    configured_fields = (
-        "approval_wall_secret_backend",
-        "approval_wall_secret_mount",
-        "approval_wall_secret_path",
-        "approval_wall_secret_field",
-        "approval_wall_secret_ref_policy_sha",
-        "approval_wall_secret_target_ref",
-        "approval_wall_secret_repo",
+    raw_backend_key = getattr(args, "approval_wall_secret_backend", None)
+    raw_mount = getattr(args, "approval_wall_secret_mount", None)
+    raw_path = getattr(args, "approval_wall_secret_path", None)
+    raw_field = getattr(args, "approval_wall_secret_field", None)
+    raw_purpose = getattr(args, "approval_wall_secret_purpose", None)
+    raw_owner_ref = getattr(args, "approval_wall_secret_owner_ref", None)
+    policy_sha = getattr(args, "approval_wall_secret_ref_policy_sha", None)
+    target_ref = getattr(args, "approval_wall_secret_target_ref", None)
+    ref_fields = (
+        raw_backend_key,
+        raw_mount,
+        raw_path,
+        raw_field,
+        raw_purpose,
+        raw_owner_ref,
     )
-    if not any(getattr(args, name, None) for name in configured_fields):
+    if not any((*ref_fields, policy_sha, target_ref)):
         return None
-    required = (
-        "approval_wall_secret_backend",
-        "approval_wall_secret_mount",
-        "approval_wall_secret_path",
-        "approval_wall_secret_field",
-        "approval_wall_secret_ref_policy_sha",
-        "approval_wall_secret_target_ref",
-    )
-    if any(not getattr(args, name, None) for name in required):
+    if not policy_sha or not target_ref:
         raise integrator_belt.IntegratorBeltError(
             "approval wall SecretIdentityBackend configuration is partial"
         )
+    backend_key = raw_backend_key or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_BACKEND
+    mount = raw_mount or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_MOUNT
+    path = raw_path or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_PATH
+    field = raw_field or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_FIELD
+    purpose = raw_purpose or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_PURPOSE
+    owner_ref = raw_owner_ref or secret_identity.DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF
     repo = getattr(args, "approval_wall_secret_repo", None) or getattr(args, "repo", None)
     if not repo:
         raise integrator_belt.IntegratorBeltError(
             "approval wall SecretIdentityBackend configuration requires --repo or --approval-wall-secret-repo"
         )
-    target_ref = getattr(args, "approval_wall_secret_target_ref")
     if target_ref.startswith("env:"):
         raise integrator_belt.IntegratorBeltError(
             "approval wall SecretIdentityBackend target must be file-backed; env: targets are fork-unsafe"
         )
     secret_ref = secret_identity.SecretRef(
         backend=backend_key,
-        mount=getattr(args, "approval_wall_secret_mount"),
-        path=getattr(args, "approval_wall_secret_path"),
-        field=getattr(args, "approval_wall_secret_field"),
+        mount=mount,
+        path=path,
+        field=field,
         version=getattr(args, "approval_wall_secret_version", None),
-        purpose=getattr(args, "approval_wall_secret_purpose", "approval-capability-wall"),
-        owner_ref=getattr(args, "approval_wall_secret_owner_ref", "controller:integrator"),
-        policy_sha=getattr(args, "approval_wall_secret_ref_policy_sha"),
+        purpose=purpose,
+        owner_ref=owner_ref,
+        policy_sha=policy_sha,
     )
     request = secret_identity.SecretRequest(
         run_id=getattr(args, "approval_wall_secret_run_id", "approval-wall-daemon"),
@@ -4702,6 +4717,10 @@ def _approval_wall_secret_identity_supplier_from_args(
         return backend_supplier()
 
     return supply
+
+
+def _approval_wall_backend_configured_from_args(args: argparse.Namespace) -> bool:
+    return _approval_wall_secret_identity_supplier_from_args(args) is not None
 
 
 def _approval_wall_materialized_value_reader(target_ref: str) -> bytes | str | None:
@@ -4730,7 +4749,9 @@ def _approval_wall_primary_then_env_supplier(
     return supply
 
 
-def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capability.ApprovalWallRuntime:
+def _approval_wall_secret_supplier_from_args(
+    args: argparse.Namespace,
+) -> approval_capability.SecretSupplier:
     backend_supplier = _approval_wall_secret_identity_supplier_from_args(args)
     fallback_env_supplier = approval_capability.approval_wall_secret_supplier_from_env(
         env_name=getattr(
@@ -4739,12 +4760,17 @@ def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capab
             approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
         )
     )
+    return _approval_wall_primary_then_env_supplier(
+        primary=backend_supplier,
+        fallback_env=fallback_env_supplier,
+    )
+
+
+def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capability.ApprovalWallRuntime:
+    backend_supplier = _approval_wall_secret_identity_supplier_from_args(args)
     wall = approval_capability.resolve_approval_wall(
         approval_capability.ApprovalWallConfig(
-            secret_supplier=_approval_wall_primary_then_env_supplier(
-                primary=backend_supplier,
-                fallback_env=fallback_env_supplier,
-            ),
+            secret_supplier=_approval_wall_secret_supplier_from_args(args),
             state_path=_approval_wall_state_path_from_args(args),
             policy_sha=getattr(args, "approval_wall_policy_sha", None),
         )
@@ -4756,6 +4782,44 @@ def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capab
             state_path=_approval_wall_state_path_from_args(args),
         )
     return wall
+
+
+def _approval_capability_marker_issuer_from_args(
+    args: argparse.Namespace,
+) -> integrator_belt.ApprovalMarkerIssuer:
+    supplier = _approval_wall_secret_identity_supplier_from_args(args)
+    if supplier is None:
+        raise integrator_belt.IntegratorBeltError(
+            "approval wall SecretIdentityBackend supplier is not configured for minting"
+        )
+    policy_sha = getattr(args, "approval_wall_policy_sha", None)
+    ttl_seconds = getattr(args, "approval_wall_marker_ttl_seconds", 3600)
+    if ttl_seconds <= 0:
+        raise integrator_belt.IntegratorBeltError("approval wall marker ttl must be positive")
+    issuer = approval_capability.ApprovalCapabilityIssuer(
+        secret_supplier=supplier,
+        now=time.time,
+        policy_sha=policy_sha or "",
+        ttl_seconds=ttl_seconds,
+    )
+
+    def issue(
+        pr: integrator_belt.DaemonPullRequest,
+        witness: integrator_belt.DaemonApprovalWitness,
+    ) -> str:
+        if not policy_sha:
+            raise integrator_belt.IntegratorBeltError("approval wall policy sha is required to mint")
+        try:
+            return issuer.mint(
+                repo=pr.repo,
+                pr_number=pr.pr_number,
+                head_sha=pr.head_sha,
+                approved_by=witness.reviewer_login,
+            )
+        except approval_capability.ApprovalCapabilityIssuerError as exc:
+            raise integrator_belt.IntegratorBeltError(str(exc)) from exc
+
+    return issue
 
 
 def _cmd_approval_capability(args: argparse.Namespace) -> int:

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1080,6 +1082,188 @@ def test_approval_capability_mint_outputs_valid_marker_without_secret(monkeypatc
         approved_by_candidates=("ce-dev-2",),
     )
     assert result.valid is True
+
+
+def _approval_wall_daemon_args(**overrides) -> Namespace:
+    values = {
+        "repo": "owner/repo",
+        "approval_wall_policy_sha": "policy-v1",
+        "approval_wall_marker_ttl_seconds": 77,
+        "approval_wall_secret_backend": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_BACKEND,
+        "approval_wall_secret_mount": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_MOUNT,
+        "approval_wall_secret_path": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_PATH,
+        "approval_wall_secret_field": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_FIELD,
+        "approval_wall_secret_version": None,
+        "approval_wall_secret_purpose": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_PURPOSE,
+        "approval_wall_secret_owner_ref": v3_cli.secret_identity.DEFAULT_APPROVAL_WALL_SECRET_OWNER_REF,
+        "approval_wall_secret_ref_policy_sha": "a" * 64,
+        "approval_wall_secret_target_ref": "file:/tmp/ce-approval-wall-secret",
+        "approval_wall_secret_repo": None,
+        "approval_wall_secret_run_id": "approval-wall-daemon",
+        "approval_wall_secret_seat_id": "dev-1",
+        "approval_wall_secret_ttl_seconds": 600,
+        "approval_wall_secret_env": "CE_APPROVAL_CAPABILITY_SECRET",
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def _daemon_pr() -> v3_cli.integrator_belt.DaemonPullRequest:
+    return v3_cli.integrator_belt.DaemonPullRequest(
+        repo="owner/repo",
+        pr_number=440,
+        title="approval wall",
+        url="https://github.example/owner/repo/pull/440",
+        body="",
+        head_ref="feature",
+        head_sha="a" * 40,
+        base_ref="main",
+        review_decision="APPROVED",
+        approving_review_commits=("a" * 40,),
+        approving_reviewers=("ce-dev-2",),
+        approval_capability_present=False,
+        approval_capability_marker=None,
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+        rollup_state="SUCCESS",
+        checks=(),
+        changed_paths=("validators/creator_engine_validator/v3_cli.py",),
+        files_complete=True,
+        checks_complete=True,
+        is_draft=False,
+    )
+
+
+class _RecordingApprovalWallBackend:
+    backend_key = "openbao"
+
+    def __init__(self) -> None:
+        self.requests = []
+        self.materialized_targets = []
+        self.revoked = []
+
+    def validate_config(self) -> None:
+        return None
+
+    def resolve_identity(self, seat_id):
+        raise AssertionError("resolve_identity is not used by approval wall minting")
+
+    def issue(self, request):
+        self.requests.append(request)
+        return v3_cli.secret_identity.SecretGrant(
+            grant_id="grant-approval-wall-001",
+            run_id=request.run_id,
+            seat_id=request.seat_id,
+            secret_ref=request.secret_ref,
+            lease_id=None,
+            token_accessor_ref="accessor:approval-wall",
+            issued_at="2026-06-25T00:00:00Z",
+            expires_at="2026-06-25T00:10:00Z",
+            delivery_ref=None,
+            audit_ref="audit:approval-wall",
+        )
+
+    def issue_secret_zero(self, request):
+        raise AssertionError("issue_secret_zero is not used by approval wall minting")
+
+    def materialize(self, grant, target_ref):
+        self.materialized_targets.append(target_ref)
+        return replace(grant, delivery_ref=target_ref)
+
+    def revoke(self, grant):
+        self.revoked.append(grant.grant_id)
+        return replace(grant, revoked_at="2026-06-25T00:01:00Z")
+
+    def collect_audit(self, grant):
+        return {"grant_id": grant.grant_id, "audit_ref": grant.audit_ref}
+
+
+def test_approval_capability_marker_issuer_uses_backend_supplier(monkeypatch):
+    backend = _RecordingApprovalWallBackend()
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setattr(
+        v3_cli,
+        "_approval_wall_materialized_value_reader",
+        lambda target_ref: "backend-approval-wall-secret",
+    )
+    monkeypatch.setattr(v3_cli.time, "time", lambda: 1_800_000_000)
+
+    issuer = v3_cli._approval_capability_marker_issuer_from_args(_approval_wall_daemon_args())
+    marker = issuer(
+        _daemon_pr(),
+        v3_cli.integrator_belt.DaemonApprovalWitness(
+            reviewer_login="ce-dev-2",
+            commit_oid="a" * 40,
+        ),
+    )
+
+    assert backend.materialized_targets == ["file:/tmp/ce-approval-wall-secret"]
+    assert backend.revoked == ["grant-approval-wall-001"]
+    request = backend.requests[0]
+    assert request.secret_ref.backend == "openbao"
+    assert request.secret_ref.mount == "ce-kv"
+    assert request.secret_ref.path == "forge/approval-capability/wall"
+    assert request.secret_ref.field == "signing_secret"
+    assert request.secret_ref.purpose == "approval-capability-wall"
+    assert request.secret_ref.owner_ref == "controller:integrator"
+
+    verifier = ApprovalCapabilityVerifier(
+        lambda: "backend-approval-wall-secret",
+        now=lambda: 1_800_000_001,
+        policy_sha="policy-v1",
+    )
+    result = verifier.verify(
+        marker,
+        repo="owner/repo",
+        pr_number=440,
+        head_sha="a" * 40,
+        approved_by_candidates=("ce-dev-2",),
+    )
+    assert result.valid is True
+    assert result.claims is not None
+    assert result.claims.expires_at - result.claims.issued_at == 77
+    assert ApprovalCapabilityVerifier(
+        lambda: "env-fallback-secret",
+        now=lambda: 1_800_000_001,
+        policy_sha="policy-v1",
+    ).verify(marker, repo="owner/repo", pr_number=440, head_sha="a" * 40).valid is False
+
+
+def test_approval_capability_marker_issuer_refuses_without_backend_supplier(monkeypatch):
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+    args = _approval_wall_daemon_args(
+        approval_wall_secret_backend=None,
+        approval_wall_secret_mount=None,
+        approval_wall_secret_path=None,
+        approval_wall_secret_field=None,
+        approval_wall_secret_purpose=None,
+        approval_wall_secret_owner_ref=None,
+        approval_wall_secret_ref_policy_sha=None,
+        approval_wall_secret_target_ref=None,
+    )
+
+    with pytest.raises(v3_cli.integrator_belt.IntegratorBeltError, match="not configured"):
+        v3_cli._approval_capability_marker_issuer_from_args(args)
+
+
+def test_approval_capability_marker_issuer_refuses_backend_without_secret_and_ignores_env(monkeypatch):
+    backend = _RecordingApprovalWallBackend()
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setattr(v3_cli, "_approval_wall_materialized_value_reader", lambda target_ref: None)
+    monkeypatch.setattr(v3_cli.time, "time", lambda: 1_800_000_000)
+
+    issuer = v3_cli._approval_capability_marker_issuer_from_args(_approval_wall_daemon_args())
+
+    with pytest.raises(v3_cli.integrator_belt.IntegratorBeltError, match="secret unavailable"):
+        issuer(
+            _daemon_pr(),
+            v3_cli.integrator_belt.DaemonApprovalWitness(
+                reviewer_login="ce-dev-2",
+                commit_oid="a" * 40,
+            ),
+        )
 
 
 def test_guide_prints_in_product_help(capsys):

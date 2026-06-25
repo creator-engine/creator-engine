@@ -13,7 +13,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -111,6 +111,50 @@ class ApprovalCapabilityVerification:
         if self.claims is not None:
             record.update(self.claims.to_payload())
         return record
+
+
+class ApprovalCapabilityIssuerError(Exception):
+    """Approval capability issuance failed before signing."""
+
+
+@dataclass(frozen=True)
+class ApprovalCapabilityIssuer:
+    """Pure/offline controller-side approval capability issuer.
+
+    The issuer never discovers secrets itself. Callers must inject a supplier;
+    unavailable, empty, or failing suppliers refuse issuance before marker
+    creation.
+    """
+
+    secret_supplier: SecretSupplier = field(repr=False)
+    now: Clock
+    policy_sha: str
+    ttl_seconds: int
+
+    def mint(
+        self,
+        *,
+        repo: str,
+        pr_number: int,
+        head_sha: str,
+        approved_by: str,
+    ) -> str:
+        if self.ttl_seconds <= 0:
+            raise ApprovalCapabilityIssuerError("ttl_seconds must be positive")
+        secret = _issuer_secret_bytes(self.secret_supplier)
+        issued_at = int(self.now())
+        claims = ApprovalCapabilityClaims(
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            approved_by=approved_by,
+            issued_at=issued_at,
+            expires_at=issued_at + self.ttl_seconds,
+            policy_sha=self.policy_sha,
+        )
+        if ApprovalCapabilityClaims.from_payload(claims.to_payload()) is None:
+            raise ApprovalCapabilityIssuerError("invalid approval capability claims")
+        return issue_approval_capability(claims, secret)
 
 
 class ApprovalWallStateError(Exception):
@@ -443,6 +487,19 @@ def _secret_bytes(supplier: SecretSupplier) -> bytes | None:
     if value is None:
         return None
     return _coerce_secret(value)
+
+
+def _issuer_secret_bytes(supplier: SecretSupplier) -> bytes:
+    try:
+        value = supplier()
+    except Exception as exc:
+        raise ApprovalCapabilityIssuerError("approval capability secret unavailable") from exc
+    if value is None:
+        raise ApprovalCapabilityIssuerError("approval capability secret unavailable")
+    secret = _coerce_secret(value)
+    if not secret:
+        raise ApprovalCapabilityIssuerError("approval capability secret unavailable")
+    return secret
 
 
 def _coerce_secret(value: bytes | str) -> bytes:
