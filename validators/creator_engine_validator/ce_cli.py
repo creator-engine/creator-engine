@@ -16,6 +16,7 @@ ce worker status     # read a local container-instance record
 ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed environment
 ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
+ce update            # signed in-place CE update; --check is read-only
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce publish-branch   # host-side publish gate for contained seats' committed branches
 ce herdr remote-attach # attach through authenticated herdr remote reach, not docker exec
@@ -107,6 +108,7 @@ from . import (
     seat_lifecycle,
     side_effect_ledger_runtime,
     transcript_archive,
+    update as update_runtime,
     version,
     work_claims,
     worker_spawn,
@@ -186,6 +188,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="local-only verification; skip live SHA256SUMS comparison",
     )
     verify_install.add_argument("--json", action="store_true", dest="json_output")
+
+    update = groups.add_parser(
+        "update",
+        help="signed in-place CE update; --check is read-only",
+    )
+    update.add_argument(
+        "--check",
+        action="store_true",
+        help="resolve the latest signed release and compare without mutating",
+    )
+    update.add_argument(
+        "--install-root",
+        default=None,
+        help="CE bootstrap install root (default: CE_INSTALL_ROOT or installer default)",
+    )
+    update.add_argument(
+        "--site",
+        default=update_runtime.DEFAULT_SITE,
+        help="CE mirror site (default: https://creator-engine.dev)",
+    )
+    update.add_argument(
+        "--trust-anchor-url",
+        default=update_runtime.DEFAULT_TRUST_ANCHOR_URL,
+        help="out-of-band ce-root-v1 DNS TXT resolver URL",
+    )
+    update.add_argument("--json", action="store_true", dest="json_output")
 
     # ce onboard — the ce-ops#197 first-run one-shot orchestrator. Sequences the
     # six phases (doctor → install → verify-install → fix-path → bootstrap →
@@ -3784,6 +3812,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return handler(args)
     if args.group == "verify-install":
         return _verify_install(args)
+    if args.group == "update":
+        return update_runtime.run_cli(args)
     if args.group == "onboard":
         return ce_onboard.run_cli(args)
     if args.group == "bootstrap":

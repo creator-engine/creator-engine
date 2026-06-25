@@ -101,6 +101,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "integration_queue_dry_run",
         "packaging_runtime",
         "ce_provenance",
+        # ce-ops#190: signed in-place `ce update` runtime. Driven by the v1
+        # `ce` kernel; mirrors the installer trust path locally and imports no
+        # v3 runtime module.
+        "update",
         # ce-ops#222: fleet-wide containment attestation command. A v1 kernel
         # CLI runtime over shared probe helpers; imports no v3 module.
         "containment_status",
