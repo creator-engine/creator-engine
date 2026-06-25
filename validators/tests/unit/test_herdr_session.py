@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -14,9 +14,20 @@ from creator_engine_validator.runner import herdr_session as hs
 
 
 class FakeRunner:
-    def __init__(self, *, read_outputs: Sequence[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        read_outputs: Sequence[str] | None = None,
+        foreground_returncode: int = 0,
+        foreground_stderr: str = "",
+        on_foreground: Callable[[list[str], dict[str, str]], None] | None = None,
+    ) -> None:
         self.calls: list[tuple[list[str], dict[str, str]]] = []
+        self.foreground_calls: list[tuple[list[str], dict[str, str]]] = []
         self.read_outputs = list(read_outputs or [])
+        self.foreground_returncode = foreground_returncode
+        self.foreground_stderr = foreground_stderr
+        self.on_foreground = on_foreground
 
     def run(
         self,
@@ -50,6 +61,24 @@ class FakeRunner:
         else:  # pragma: no cover - protects test fixtures if the command map drifts
             return subprocess.CompletedProcess(args, 2, "", "unexpected command")
         return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    def run_foreground(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        args = list(argv)
+        env_dict = dict(env or {})
+        self.foreground_calls.append((args, env_dict))
+        if self.on_foreground is not None:
+            self.on_foreground(args, env_dict)
+        return subprocess.CompletedProcess(
+            args,
+            self.foreground_returncode,
+            "",
+            self.foreground_stderr,
+        )
 
 
 def test_terminal_kind_constant() -> None:
@@ -623,17 +652,63 @@ def test_expired_operator_steer_lock_self_releases_for_dispatch(tmp_path: Path) 
     assert not lease_path.exists()
 
 
-def test_attach_operator_lease_releases_on_not_wired_detach_path(tmp_path: Path) -> None:
-    session = hs.HerdrSession(runner=FakeRunner(), steer_lock_dir=tmp_path)
+def test_attach_runs_foreground_pane_attach_with_operator_lease(tmp_path: Path) -> None:
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    lease_seen_during_attach: list[dict[str, object]] = []
+
+    def inspect_lease(_args: list[str], _env: dict[str, str]) -> None:
+        _lock_path, lease_path = session._steer_lock_paths(pane)
+        lease_seen_during_attach.append(json.loads(lease_path.read_text(encoding="utf-8")))
+
+    runner = FakeRunner(on_foreground=inspect_lease)
+    session = hs.HerdrSession(
+        socket_path="/run/ce/herdr/control.sock",
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+    )
+    _lock_path, lease_path = session._steer_lock_paths(pane)
+
+    session.attach(pane)
+
+    assert runner.calls == []
+    assert runner.foreground_calls == [
+        (
+            ["/opt/herdr", "pane", "attach", "pane-1"],
+            {hs.HERDR_SOCKET_ENV: "/run/ce/herdr/control.sock"},
+        )
+    ]
+    assert lease_seen_during_attach[0]["owner"] == "operator"
+    assert lease_seen_during_attach[0]["pane_id"] == "pane-1"
+    assert lease_seen_during_attach[0]["reason"] == "operator steering"
+    assert not lease_path.exists()
+
+
+def test_attach_operator_lease_releases_on_foreground_failure(tmp_path: Path) -> None:
+    runner = FakeRunner(foreground_returncode=7, foreground_stderr="attach failed")
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+    )
     pane = hs.HerdrPane(
         pane_id="pane-1",
         surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
     )
     _lock_path, lease_path = session._steer_lock_paths(pane)
 
-    with pytest.raises(hs.HerdrNotWired):
+    with pytest.raises(hs.HerdrCommandError, match="attach failed"):
         session.attach(pane)
 
+    assert runner.foreground_calls == [
+        (
+            ["/opt/herdr", "pane", "attach", "pane-1"],
+            {hs.HERDR_SOCKET_ENV: "herdr.sock"},
+        )
+    ]
     assert not lease_path.exists()
 
 

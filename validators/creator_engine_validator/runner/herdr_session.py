@@ -147,6 +147,14 @@ class HerdrCommandRunner(Protocol):
     ) -> subprocess.CompletedProcess[str]:
         """Run ``argv`` and return a completed process."""
 
+    def run_foreground(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``argv`` attached to the controller terminal until it exits."""
+
 
 class SubprocessHerdrCommandRunner:
     """Run herdr CLI commands as subprocesses; no Python/Rust linking occurs."""
@@ -154,22 +162,38 @@ class SubprocessHerdrCommandRunner:
     def __init__(self, *, timeout_seconds: float = 30.0) -> None:
         self._timeout_seconds = timeout_seconds
 
+    @staticmethod
+    def _merged_env(env: Mapping[str, str] | None) -> dict[str, str]:
+        merged_env = dict(os.environ)
+        if env:
+            merged_env.update({str(k): str(v) for k, v in env.items()})
+        return merged_env
+
     def run(
         self,
         argv: Sequence[str],
         *,
         env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        merged_env = dict(os.environ)
-        if env:
-            merged_env.update({str(k): str(v) for k, v in env.items()})
         return subprocess.run(
             list(argv),
             check=False,
             capture_output=True,
             text=True,
             timeout=self._timeout_seconds,
-            env=merged_env,
+            env=self._merged_env(env),
+        )
+
+    def run_foreground(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(argv),
+            check=False,
+            env=self._merged_env(env),
         )
 
 
@@ -361,6 +385,19 @@ class HerdrSession:
 
     def _run_ok(self, args: Sequence[str]) -> None:
         self._run(args)
+
+    def _run_foreground_ok(self, args: Sequence[str]) -> None:
+        argv = [self._herdr_binary, *args]
+        try:
+            completed = self._runner.run_foreground(argv, env=self._socket_env())
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HerdrCommandError(f"herdr command failed to start: {argv!r}: {exc}") from exc
+        if completed.returncode != 0:
+            stderr = (completed.stderr or "").strip()
+            raise HerdrCommandError(
+                f"herdr command exited {completed.returncode}: {argv!r}"
+                + (f": {stderr}" if stderr else "")
+            )
 
     def _run_text(self, args: Sequence[str]) -> str:
         completed = self._run(args)
@@ -743,7 +780,7 @@ class HerdrSession:
         through an attached view holds the same per-pane lease as :meth:`send`.
         """
         with self._operator_steer_lease(pane):
-            raise HerdrNotWired("HerdrSession.attach is a U1 scaffold; wired in U3/U8")
+            self._run_foreground_ok(["pane", "attach", pane.pane_id])
 
     # -- observe ----------------------------------------------------------
     def observe(
