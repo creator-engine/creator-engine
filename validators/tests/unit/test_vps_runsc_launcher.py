@@ -86,6 +86,82 @@ def dry_run_argv(result: subprocess.CompletedProcess[str]) -> list[str]:
     return shlex.split(result.stdout)
 
 
+def make_live_fake_docker(root: Path) -> Path:
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"info\" ]; then\n"
+        "  printf '{\"runsc-gvproxy-ptrace\":{}}\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"run\" ]; then\n"
+        "  if [ -e \"${CE_TEST_HERDR_SESSION_FILE}\" ]; then\n"
+        "    printf 'stale herdr session was still present before docker run\\n' >&2\n"
+        "    exit 97\n"
+        "  fi\n"
+        "  printf 'fake-container-id\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"exec\" ]; then\n"
+        "  case \" $* \" in\n"
+        "    *' pane list'*) printf '{\"panes\":[{\"id\":\"w1:p1\"}]}\\n' ;;\n"
+        "  esac\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'unexpected docker invocation: %s\\n' \"$*\" >&2\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    return fake_bin
+
+
+def run_live_wrapper_with_fake_docker(
+    root: Path, *args: str, **env_overrides: str
+) -> subprocess.CompletedProcess[str]:
+    fake_bin = make_live_fake_docker(root)
+    repo = root / "repo"
+    codex_home = root / "codex-home"
+    codex_bin = root / "codex"
+    seat_logs = root / "seat-logs"
+    repo.mkdir(exist_ok=True)
+    codex_home.mkdir(exist_ok=True)
+    codex_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    codex_bin.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "CE_VPS_DRY_RUN": "0",
+            "CE_VPS_REPO": str(repo),
+            "CE_VPS_CODEX_HOME": str(codex_home),
+            "CE_VPS_CODEX_BIN": str(codex_bin),
+            "CE_VPS_CONTAINED_CODEX_CONFIG": str(root / "contained-codex.toml"),
+            "CE_VPS_CONTAINER_USER": "seat",
+            "CE_VPS_SEAT_LOG_DIR": str(seat_logs),
+            "CE_VPS_UID": "1234",
+            "CE_VPS_GID": "5678",
+            "CE_VPS_TTY_FLAGS": "-i",
+            "CE_TEST_HERDR_SESSION_FILE": str(
+                seat_logs / "xdg" / "config" / "herdr" / "session.json"
+            ),
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "TERM": "xterm-256color",
+        }
+    )
+    env.update(env_overrides)
+    return subprocess.run(
+        ["bash", str(SCRIPT), *args],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def test_vps_launcher_shell_syntax_is_valid() -> None:
     result = subprocess.run(
         ["bash", "-n", str(SCRIPT)],
@@ -243,6 +319,67 @@ def test_detach_dry_run_uses_named_persistent_run_without_rm() -> None:
     assert "ce-vps-codex" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-codex"
     assert "--rm" not in argv
+
+
+def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
+    tmp_path: Path,
+) -> None:
+    session_file = tmp_path / "seat-logs" / "xdg" / "config" / "herdr" / "session.json"
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text('{"windows":[{"id":"w1","stale":true}]}\n', encoding="utf-8")
+
+    result = run_live_wrapper_with_fake_docker(tmp_path, "--detach", "tui")
+
+    assert result.returncode == 0, result.stderr
+    assert not session_file.exists()
+    backups = list(session_file.parent.glob("session.json.prelaunch-backup.*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == '{"windows":[{"id":"w1","stale":true}]}\n'
+    assert (tmp_path / "contained-codex.toml").read_text(
+        encoding="utf-8"
+    ) == expected_contained_codex_config()
+    assert "backed up stale herdr session" in result.stderr
+    assert "container ce-vps-codex is ready" in result.stdout
+
+
+def test_detach_relaunch_dry_run_does_not_mutate_stale_herdr_session(
+    tmp_path: Path,
+) -> None:
+    seat_logs = tmp_path / "seat-logs"
+    session_file = seat_logs / "xdg" / "config" / "herdr" / "session.json"
+    session_file.parent.mkdir(parents=True)
+    stale_text = '{"windows":[{"id":"w1","stale":true}]}\n'
+    session_file.write_text(stale_text, encoding="utf-8")
+
+    result = run_wrapper(
+        "--detach",
+        "tui",
+        CE_VPS_SEAT_LOG_DIR=str(seat_logs),
+        CE_VPS_CONTAINED_CODEX_CONFIG=str(tmp_path / "contained-codex.toml"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert session_file.read_text(encoding="utf-8") == stale_text
+    assert not list(session_file.parent.glob("session.json.prelaunch-backup.*"))
+
+
+def test_relaunch_refuses_herdr_session_directory_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    seat_logs = tmp_path / "seat-logs"
+    escaped = tmp_path / "escaped-herdr"
+    (seat_logs / "xdg" / "config").mkdir(parents=True)
+    escaped.mkdir()
+    (seat_logs / "xdg" / "config" / "herdr").symlink_to(escaped)
+    escaped_session = escaped / "session.json"
+    escaped_session.write_text('{"windows":[{"id":"w1"}]}\n', encoding="utf-8")
+
+    result = run_live_wrapper_with_fake_docker(tmp_path, "--detach", "tui")
+
+    assert result.returncode == 66
+    assert "outside seat log dir" in result.stderr
+    assert escaped_session.exists()
+    assert "stale herdr session was still present before docker run" not in result.stderr
 
 
 def test_detach_after_harness_uses_harness_aware_container_name() -> None:
