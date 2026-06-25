@@ -83,6 +83,18 @@ class FakeRunner:
         )
 
 
+@pytest.fixture(autouse=True)
+def isolate_default_steer_lock_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hs,
+        "_default_steer_lock_dir",
+        lambda: tmp_path / "herdr-steer-locks",
+    )
+
+
 def test_terminal_kind_constant() -> None:
     assert hs.HERDR_TERMINAL_KIND == "herdr"
 
