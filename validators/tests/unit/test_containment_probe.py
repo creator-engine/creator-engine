@@ -10,8 +10,8 @@ The three load-bearing cases (ce-ops#221):
 
 * a raw host process (namespaces == host, host user-slice cgroup, full caps)
   -> ``contained: false``;
-* a gVisor-isolated process (distinct namespaces, runsc cgroup, dropped caps)
-  -> ``contained: true, backend: gvisor``;
+* a gVisor-isolated process (target argv/comm is runsc, dropped caps, non-host
+  cgroup) -> ``contained: true, backend: gvisor``;
 * an undeterminable process (unreadable /proc) -> fail-closed
   ``contained: false``.
 """
@@ -133,8 +133,50 @@ def test_raw_host_process_is_not_contained(tmp_path):
     assert "host cgroup scope" in verdict.reason or "shared with host" in verdict.reason
 
 
+def test_raw_host_pid_is_not_contained_when_other_proc_entries_are_runsc(tmp_path):
+    """Incident guard: detached runsc PIDs elsewhere cannot prove this PID."""
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "4242",
+        ns={
+            "mnt": "mnt:[4026531840]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026531992]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/user.slice/user-1000.slice/session-3.scope\n",
+        status=_status(_FULL_CAP, _FULL_CAP),
+        root="/",
+        cmdline="/usr/bin/bash",
+        comm="bash",
+    )
+    _make_proc(
+        tmp_path,
+        "5151",
+        ns={
+            "mnt": "mnt:[4026532700]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026532702]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("4242", reader=reader, host_pid="1")
+
+    assert verdict.contained is False
+    assert verdict.backend == "none"
+    assert verdict.isolation["mnt"] is False
+    assert verdict.isolation["caps"] is False
+
+
 def test_gvisor_process_is_contained(tmp_path):
-    """Distinct namespaces + runsc cgroup + dropped caps -> contained gvisor."""
+    """Target runsc argv + dropped caps + non-host cgroup -> contained gvisor."""
     _host_proc(tmp_path)
     _make_proc(
         tmp_path,
@@ -151,6 +193,8 @@ def test_gvisor_process_is_contained(tmp_path):
         ),
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/bundles/9f2c1a/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
     reader = containment_probe.ProcReader(root=str(tmp_path))
     verdict = containment_probe.probe_containment("5151", reader=reader, host_pid="1")
@@ -163,6 +207,32 @@ def test_gvisor_process_is_contained(tmp_path):
     assert verdict.isolation["nnp"] is True
     assert verdict.isolation["root"] is True
     assert verdict.gaps == []
+
+
+def test_runsc_cgroup_and_root_without_target_runsc_argv_do_not_classify_gvisor(tmp_path):
+    """Runsc-looking metadata is not gVisor proof without target PID argv/comm."""
+    _host_proc(tmp_path)
+    _make_proc(
+        tmp_path,
+        "5252",
+        ns={
+            "mnt": "mnt:[4026532500]",
+            "pid": "pid:[4026532501]",
+            "net": "net:[4026532502]",
+            "user": "user:[4026532503]",
+        },
+        cgroup="0::/system.slice/runsc-sandbox-9f2c1a.scope/runsc/cap-container\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/run/runsc/bundles/9f2c1a/rootfs",
+        cmdline="/usr/bin/python worker.py",
+        comm="python",
+    )
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("5252", reader=reader, host_pid="1")
+
+    assert verdict.contained is True
+    assert verdict.backend == "none"
+    assert "backend:unclassified" in verdict.gaps
 
 
 def test_bwrap_container_is_contained(tmp_path):
@@ -278,6 +348,30 @@ def test_gvisor_systrap_platform_argv_classifies_gvisor(tmp_path):
 
     assert verdict.backend == "gvisor"
     assert verdict.contained is True
+
+
+def test_gvisor_target_with_unreadable_cgroup_fails_closed(tmp_path):
+    """A runsc argv alone is not enough when target proc data is unprobeable."""
+    _host_proc(tmp_path)
+    base = tmp_path / "3333"
+    for name, ident in {
+        "mnt": "mnt:[4026532720]",
+        "pid": "pid:[4026531836]",
+        "net": "net:[4026532722]",
+        "user": "user:[4026531837]",
+    }.items():
+        _write(base / "ns" / name, ident)
+    _write(base / "status", _status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"))
+    _write(base / "root", "/")
+    _write(base / "cmdline", "runsc-sandbox\0--platform=ptrace\0boot\0")
+    _write(base / "comm", "runsc-sandbox\n")
+
+    reader = containment_probe.ProcReader(root=str(tmp_path))
+    verdict = containment_probe.probe_containment("3333", reader=reader, host_pid="1")
+
+    assert verdict.backend == "gvisor"
+    assert verdict.contained is False
+    assert "cgroup undeterminable" in verdict.reason
 
 
 def test_runsc_prefixed_imposter_does_not_classify_gvisor(tmp_path):
@@ -510,6 +604,8 @@ def test_cli_gvisor_process_exits_zero(tmp_path, capsys):
         cgroup="0::/system.slice/runsc-sandbox.scope\n",
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
     rc = ce_cli.main(
         [
@@ -543,6 +639,8 @@ def test_cli_full_attestation_reports_herdr_and_ring1_probe_evidence(tmp_path, c
         cgroup="0::/system.slice/runsc-sandbox.scope\n",
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
     _use_target_root(tmp_path, "5151", target_root)
     shim_dir = target_root / "ring1-shim"
