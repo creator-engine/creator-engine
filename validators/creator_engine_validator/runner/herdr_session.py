@@ -45,17 +45,23 @@ Design invariants this seam will enforce (load-bearing, implemented in U3/U4):
 
 from __future__ import annotations
 
-import json
+import fcntl
 import hashlib
+import json
+import logging
 import os
 import re
 import shlex
 import subprocess
+import tempfile
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, ContextManager, Iterator, Protocol
 
 #: The ``terminal.kind`` key the herdr visibility backend will service (U3).
 #: Parallels ``visibility_backend.TMUX_TERMINAL_KIND`` / ``HEADLESS_TERMINAL_KIND``.
@@ -79,12 +85,14 @@ HERDR_BRIEF_REACTION_TIMEOUT_S = 5.0
 HERDR_BRIEF_REACTION_POLL_INTERVAL_S = 0.5
 HERDR_BRIEF_RENDER_TIMEOUT_S = HERDR_BRIEF_REACTION_TIMEOUT_S
 HERDR_BRIEF_RENDER_POLL_INTERVAL_S = HERDR_BRIEF_REACTION_POLL_INTERVAL_S
+HERDR_STEER_LOCK_TTL_S = 300.0
 BRIEF_MARKER_PREFIX = "==CE-BRIEF-SHA256:"
 BRIEF_MARKER_SUFFIX = "=="
 AGENT_REACTION_RE = re.compile(
     r"\b(?:working|processing|thinking)\b|codex\s+(?:session|rollout)|session\s+rollout",
     re.IGNORECASE,
 )
+_LOGGER = logging.getLogger(__name__)
 
 
 class HerdrSessionError(Exception):
@@ -97,6 +105,10 @@ class HerdrCommandError(HerdrSessionError):
 
 class HerdrNotWired(HerdrSessionError, NotImplementedError):
     """Raised by surfaces intentionally deferred past U3 (notably U4 steer)."""
+
+
+class HerdrSteeringDeferred(HerdrCommandError):
+    """Raised when autonomous dispatch is deferred behind operator steering."""
 
 
 @dataclass(frozen=True)
@@ -175,6 +187,9 @@ class HerdrSession:
         socket_path: str | Path = DEFAULT_HERDR_SOCKET,
         herdr_binary: str | Path = "herdr",
         runner: HerdrCommandRunner | None = None,
+        steer_lock_dir: str | Path | None = None,
+        steer_lock_ttl_s: float = HERDR_STEER_LOCK_TTL_S,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         #: The substrate-owned herdr control socket. Held by the CE
         #: substrate/controller, never handed to a governed seat (§2/§7).
@@ -182,6 +197,13 @@ class HerdrSession:
         self._herdr_binary = str(herdr_binary)
         self._runner = runner if runner is not None else SubprocessHerdrCommandRunner()
         self._connected = False
+        self._steer_lock_dir = (
+            Path(steer_lock_dir)
+            if steer_lock_dir is not None
+            else Path(tempfile.gettempdir()) / "creator-engine" / "herdr-steer-locks"
+        )
+        self._steer_lock_ttl_s = steer_lock_ttl_s
+        self._clock = clock
 
     @property
     def socket_path(self) -> Path:
@@ -190,6 +212,138 @@ class HerdrSession:
 
     def _socket_env(self) -> dict[str, str]:
         return {HERDR_SOCKET_ENV: str(self._socket_path)}
+
+    @staticmethod
+    def _atomic_write_text(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.parent / f"{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+        tmp.write_text(content, encoding="utf-8")
+        tmp.rename(path)
+
+    @staticmethod
+    def _iso_utc(epoch_seconds: float) -> str:
+        return datetime.fromtimestamp(epoch_seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def _parse_iso_utc(value: Any) -> float | None:
+        if not isinstance(value, str) or not value:
+            return None
+        text = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).timestamp()
+
+    def _steer_lock_key(self, pane: HerdrPane) -> str:
+        socket_identity = os.path.realpath(str(self._socket_path))
+        digest = hashlib.sha256(
+            f"{socket_identity}\0{pane.surface_ref}\0{pane.pane_id}".encode("utf-8")
+        ).hexdigest()
+        return f"herdr-pane-{digest[:32]}"
+
+    def _steer_lock_paths(self, pane: HerdrPane) -> tuple[Path, Path]:
+        key = self._steer_lock_key(pane)
+        return self._steer_lock_dir / f"{key}.lock", self._steer_lock_dir / f"{key}.json"
+
+    @contextmanager
+    def _steer_lock_file(self, pane: HerdrPane) -> Iterator[Path]:
+        lock_path, lease_path = self._steer_lock_paths(pane)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                yield lease_path
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+    def _read_steer_lease(self, lease_path: Path) -> dict[str, Any] | None:
+        if not lease_path.is_file():
+            return None
+        try:
+            data = json.loads(lease_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _lease_is_live(self, lease: Mapping[str, Any], *, now: float) -> bool:
+        expires_at = self._parse_iso_utc(lease.get("expires_at"))
+        return expires_at is None or now < expires_at
+
+    @contextmanager
+    def _pane_steer_lease(self, pane: HerdrPane, *, owner: str) -> Iterator[None]:
+        if owner not in {"dispatch", "operator"}:
+            raise HerdrCommandError(f"invalid herdr steer lock owner: {owner!r}")
+        lease_id = f"{owner}-{uuid.uuid4().hex}"
+        with self._steer_lock_file(pane) as lease_path:
+            now = self._clock()
+            existing = self._read_steer_lease(lease_path)
+            if existing and not self._lease_is_live(existing, now=now):
+                try:
+                    lease_path.unlink()
+                except FileNotFoundError:
+                    pass
+                existing = None
+            if existing:
+                existing_owner = str(existing.get("owner") or "unknown")
+                if owner == "dispatch" and existing_owner == "operator":
+                    reason = "operator steering"
+                    message = f"deferred: operator steering pane {pane.pane_id}"
+                    _LOGGER.warning(
+                        message,
+                        extra={
+                            "action": "herdr_dispatch",
+                            "status": "deferred",
+                            "reason": reason,
+                            "pane_id": pane.pane_id,
+                            "surface_ref": pane.surface_ref,
+                        },
+                    )
+                    raise HerdrSteeringDeferred(
+                        f"{message}: surface_ref={pane.surface_ref}"
+                    )
+                raise HerdrCommandError(
+                    f"herdr pane {pane.pane_id} is already held by {existing_owner} "
+                    f"steering lease"
+                )
+            expires_at = now + max(self._steer_lock_ttl_s, 0.0)
+            record = {
+                "kind": "herdr-steer-lock",
+                "version": 1,
+                "lease_id": lease_id,
+                "owner": owner,
+                "pane_id": pane.pane_id,
+                "surface_ref": pane.surface_ref,
+                "socket_key": self._steer_lock_key(pane),
+                "status": "active",
+                "reason": (
+                    "operator steering" if owner == "operator" else "autonomous dispatch"
+                ),
+                "acquired_at": self._iso_utc(now),
+                "expires_at": self._iso_utc(expires_at),
+            }
+            self._atomic_write_text(
+                lease_path,
+                json.dumps(record, sort_keys=True, indent=2),
+            )
+        try:
+            yield
+        finally:
+            with self._steer_lock_file(pane) as lease_path:
+                current = self._read_steer_lease(lease_path)
+                if current and current.get("lease_id") == lease_id:
+                    try:
+                        lease_path.unlink()
+                    except FileNotFoundError:
+                        pass
+
+    def _operator_steer_lease(self, pane: HerdrPane) -> ContextManager[None]:
+        return self._pane_steer_lease(pane, owner="operator")
+
+    def _dispatch_steer_lease(self, pane: HerdrPane) -> ContextManager[None]:
+        return self._pane_steer_lease(pane, owner="dispatch")
 
     def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         argv = [self._herdr_binary, *args]
@@ -519,21 +673,22 @@ class HerdrSession:
                     "herdr pane send-text only accepts UTF-8 text; "
                     "non-text/control input remains fail-closed"
                 ) from exc
-        self._run_ok(["pane", "send-text", pane.pane_id, text])
-        sleep(submit_settle_s)
-        submitted = False
-        for _attempt in range(submit_max_attempts):
-            self._run_ok(["pane", "send-keys", pane.pane_id, "Enter"])
-            sleep(submit_poll_interval_s)
-            pane_text = self._read_recent_unwrapped_text(pane)
-            if not self._input_line_pending(pane_text, text):
-                submitted = True
-                break
-        if not submitted:
-            raise HerdrCommandError(
-                f"herdr pane send did not commit after {submit_max_attempts} "
-                f"Enter attempt(s): pane {pane.pane_id} still shows pending input"
-            )
+        with self._dispatch_steer_lease(pane):
+            self._run_ok(["pane", "send-text", pane.pane_id, text])
+            sleep(submit_settle_s)
+            submitted = False
+            for _attempt in range(submit_max_attempts):
+                self._run_ok(["pane", "send-keys", pane.pane_id, "Enter"])
+                sleep(submit_poll_interval_s)
+                pane_text = self._read_recent_unwrapped_text(pane)
+                if not self._input_line_pending(pane_text, text):
+                    submitted = True
+                    break
+            if not submitted:
+                raise HerdrCommandError(
+                    f"herdr pane send did not commit after {submit_max_attempts} "
+                    f"Enter attempt(s): pane {pane.pane_id} still shows pending input"
+                )
 
     def deliver_brief(
         self,
@@ -585,9 +740,10 @@ class HerdrSession:
         U3/U8: herdr is daemon-by-shape — panes survive the terminal closing and
         support detach/reattach. Attach is the live interactive surface (U8's
         A/B/C: multi-session, resizable stream, interactive steer). Steering
-        through an attached view still funnels writes through :meth:`send`.
+        through an attached view holds the same per-pane lease as :meth:`send`.
         """
-        raise HerdrNotWired("HerdrSession.attach is a U1 scaffold; wired in U3/U8")
+        with self._operator_steer_lease(pane):
+            raise HerdrNotWired("HerdrSession.attach is a U1 scaffold; wired in U3/U8")
 
     # -- observe ----------------------------------------------------------
     def observe(

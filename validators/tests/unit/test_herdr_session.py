@@ -6,6 +6,7 @@ import json
 import hashlib
 import subprocess
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import pytest
 
@@ -481,6 +482,196 @@ def test_send_non_utf8_bytes_remain_fail_closed() -> None:
     )
     with pytest.raises(hs.HerdrCommandError, match="only accepts UTF-8 text"):
         session.send(pane, b"\xff")
+
+
+def test_send_defers_before_write_when_operator_is_steering(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    runner = FakeRunner()
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with session._operator_steer_lease(pane):
+        with caplog.at_level("WARNING", logger=hs.__name__):
+            with pytest.raises(
+                hs.HerdrSteeringDeferred,
+                match="deferred: operator steering pane pane-1",
+            ):
+                session.send(pane, "printf ready", submit_settle_s=0)
+
+    assert runner.calls == []
+    assert "deferred: operator steering pane pane-1" in caplog.text
+    assert caplog.records[-1].action == "herdr_dispatch"
+    assert caplog.records[-1].status == "deferred"
+    assert caplog.records[-1].reason == "operator steering"
+    assert caplog.records[-1].pane_id == "pane-1"
+    assert caplog.records[-1].surface_ref == pane.surface_ref
+
+
+def test_steer_lock_is_per_pane_not_global(tmp_path: Path) -> None:
+    runner = FakeRunner(read_outputs=["committed"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+    )
+    pane_1 = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    pane_2 = hs.HerdrPane(
+        pane_id="pane-2",
+        surface_ref="herdr-surface-3d1a629a76f24962a4df6437bd6ab140",
+    )
+
+    with session._operator_steer_lease(pane_1):
+        session.send(pane_2, "printf ready", submit_settle_s=0, submit_poll_interval_s=0)
+
+    assert runner.calls[0][0] == [
+        "/opt/herdr",
+        "pane",
+        "send-text",
+        "pane-2",
+        "printf ready",
+    ]
+
+
+def test_observe_is_not_blocked_by_operator_steering(tmp_path: Path) -> None:
+    runner = FakeRunner(read_outputs=["read-only output"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with session._operator_steer_lease(pane):
+        assert session.observe(pane, lines=5) == b"read-only output"
+
+    assert runner.calls == [
+        (
+            [
+                "/opt/herdr",
+                "pane",
+                "read",
+                "pane-1",
+                "--source",
+                "recent",
+                "--lines",
+                "5",
+                "--format",
+                "text",
+            ],
+            {hs.HERDR_SOCKET_ENV: "herdr.sock"},
+        )
+    ]
+
+
+def test_expired_operator_steer_lock_self_releases_for_dispatch(tmp_path: Path) -> None:
+    now = 1_800_000_000.0
+    runner = FakeRunner(read_outputs=["committed"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+        clock=lambda: now,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    _lock_path, lease_path = session._steer_lock_paths(pane)
+    session._atomic_write_text(
+        lease_path,
+        json.dumps(
+            {
+                "kind": "herdr-steer-lock",
+                "version": 1,
+                "lease_id": "operator-expired",
+                "owner": "operator",
+                "pane_id": pane.pane_id,
+                "surface_ref": pane.surface_ref,
+                "status": "active",
+                "reason": "operator steering",
+                "acquired_at": session._iso_utc(now - 20),
+                "expires_at": session._iso_utc(now - 10),
+            },
+            sort_keys=True,
+        ),
+    )
+
+    session.send(pane, "printf ready", submit_settle_s=0, submit_poll_interval_s=0)
+
+    assert runner.calls[0][0] == [
+        "/opt/herdr",
+        "pane",
+        "send-text",
+        "pane-1",
+        "printf ready",
+    ]
+    assert not lease_path.exists()
+
+
+def test_attach_operator_lease_releases_on_not_wired_detach_path(tmp_path: Path) -> None:
+    session = hs.HerdrSession(runner=FakeRunner(), steer_lock_dir=tmp_path)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    _lock_path, lease_path = session._steer_lock_paths(pane)
+
+    with pytest.raises(hs.HerdrNotWired):
+        session.attach(pane)
+
+    assert not lease_path.exists()
+
+
+def test_attach_is_deferred_while_dispatch_lease_is_live(tmp_path: Path) -> None:
+    now = 1_800_000_000.0
+    session = hs.HerdrSession(
+        runner=FakeRunner(),
+        steer_lock_dir=tmp_path,
+        clock=lambda: now,
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    _lock_path, lease_path = session._steer_lock_paths(pane)
+    session._atomic_write_text(
+        lease_path,
+        json.dumps(
+            {
+                "kind": "herdr-steer-lock",
+                "version": 1,
+                "lease_id": "dispatch-live",
+                "owner": "dispatch",
+                "pane_id": pane.pane_id,
+                "surface_ref": pane.surface_ref,
+                "status": "active",
+                "reason": "autonomous dispatch",
+                "acquired_at": session._iso_utc(now),
+                "expires_at": session._iso_utc(now + 10),
+            },
+            sort_keys=True,
+        ),
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="held by dispatch steering lease"):
+        session.attach(pane)
+
+    assert lease_path.exists()
 
 
 def test_socket_env_names_are_never_passed_into_governed_workspace() -> None:
