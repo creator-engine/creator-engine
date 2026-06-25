@@ -74,6 +74,7 @@ from . import (
     evidence_sink,
     onboard_apply,
     onboard_apply_live,
+    playbook_runtime,
     runtime_evidence_spine,
     seat_reaper,
     secret_identity,
@@ -3941,6 +3942,42 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="perform the gated squash-merge (default: plan-only — read the gate)")
     _add_root(p_merge)
 
+    p_playbook = sub.add_parser(
+        "playbook",
+        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+    )
+    playbook_sub = p_playbook.add_subparsers(dest="playbook_cmd")
+    p_playbook_list = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    p_playbook_list.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root to search for PLAYBOOK.md files (default: cwd)",
+    )
+    p_playbook_list.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    p_playbook_show = playbook_sub.add_parser("show", help="show a public playbook and projected descriptor")
+    p_playbook_show.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
+    p_playbook_show.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root used to resolve playbook ids (default: cwd)",
+    )
+    p_playbook_show.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    p_playbook_run = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    p_playbook_run.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
+    p_playbook_run.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root used to resolve playbook ids (default: cwd)",
+    )
+    p_playbook_run.add_argument("--dry-run", action="store_true", help="print the governed run plan without side effects")
+    p_playbook_run.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     p_configure_repo = sub.add_parser(
         "configure-repo",
         help="plan/apply GitHub repo branch-protection or repo auto-merge setting "
@@ -5281,6 +5318,7 @@ _DISPATCH = {
     "review-pickup": _cmd_review_pickup,
     "review": _cmd_review,
     "merge": _cmd_merge,
+    "playbook": playbook_runtime.run_cli,
     "escalation": _cmd_escalation,
     "notify": _cmd_notify,
     "reap": _cmd_reap,

@@ -96,6 +96,7 @@ from . import (
     lane_runtime,
     launch_runtime,
     pcl_runtime,
+    playbook_runtime,
     publish_gate,
     reviewer_triage,
     seat_lifecycle,
@@ -875,6 +876,44 @@ def _build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--payload", default=None, help="path to a JSON request-body file (optional)")
     cs.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="write API base URL")
     cs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    playbook = groups.add_parser(
+        "playbook",
+        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+    )
+    playbook_sub = playbook.add_subparsers(dest="playbook_cmd")
+    pl = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    pl.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root to search for PLAYBOOK.md files (default: cwd)",
+    )
+    pl.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    ps = playbook_sub.add_parser("show", help="show a public playbook and projected descriptor")
+    ps.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
+    ps.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root used to resolve playbook ids (default: cwd)",
+    )
+    ps.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    prun = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    prun.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
+    prun.add_argument(
+        "--playbooks-root",
+        "--root",
+        dest="playbooks_root",
+        default=".",
+        help="root used to resolve playbook ids (default: cwd)",
+    )
+    prun.add_argument("--dry-run", action="store_true", help="print the governed run plan without side effects")
+    prun.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce reviewer-triage — ce-ops#120 Phase 1-2 plan-only reviewer assignment.
     # This surface consumes explicit PR facts + tracked local policy and emits a
@@ -3570,6 +3609,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.parse_args(["connector", "--help"])  # prints connector help, exits
             return 2
         return handler(args)
+    if args.group == "playbook":
+        if getattr(args, "playbook_cmd", None) is None:
+            parser.parse_args(["playbook", "--help"])  # prints playbook help, exits
+            return 2
+        return playbook_runtime.run_cli(args)
     if args.group == "reviewer-triage":
         reviewer_triage_cmd = getattr(args, "reviewer_triage_cmd", None)
         handler = _REVIEWER_TRIAGE_DISPATCH.get(reviewer_triage_cmd)
