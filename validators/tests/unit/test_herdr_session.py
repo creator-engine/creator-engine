@@ -1157,6 +1157,102 @@ def test_run_pane_shell_quotes_command_sequence_as_one_command_string() -> None:
     ]
 
 
+def test_remote_attach_command_uses_herdr_remote_session_shape() -> None:
+    argv = hs.build_remote_attach_command(
+        "ce-vps-1",
+        session="ce-vps-codex",
+        herdr_binary="/usr/local/bin/herdr",
+    )
+
+    assert argv == (
+        "/usr/local/bin/herdr",
+        "--remote",
+        "ce-vps-1",
+        "--session",
+        "ce-vps-codex",
+    )
+    rendered = " ".join(argv)
+    assert "docker exec" not in rendered
+    assert "sudo" not in rendered
+
+
+def test_remote_attach_plan_carries_contained_pane_metadata_without_runtime_attach() -> None:
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    plan = hs.plan_remote_attach(
+        remote_target="operator@ce-vps-1",
+        session="ce-vps-codex",
+        pane=pane,
+    )
+
+    assert plan.argv == ("herdr", "--remote", "operator@ce-vps-1", "--session", "ce-vps-codex")
+    assert plan.pane_id == "pane-1"
+    assert plan.reach_plane == "herdr-remote"
+    assert "docker exec" in plan.avoids_runtime_attach
+    assert "host-root container runtime attach" in plan.avoids_runtime_attach
+
+
+def test_remote_attach_executes_through_injectable_runner_without_socket_env() -> None:
+    class RemoteRunner:
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def run(self, argv, *, env=None):
+            self.calls.append((list(argv), dict(env or {})))
+            return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    runner = RemoteRunner()
+
+    hs.remote_attach(
+        remote_target="ce-vps-1",
+        session="ce-vps-codex",
+        pane_id="pane-1",
+        runner=runner,
+    )
+
+    assert runner.calls == [
+        (
+            ["herdr", "--remote", "ce-vps-1", "--session", "ce-vps-codex"],
+            {},
+        )
+    ]
+    assert hs.HERDR_SOCKET_ENV not in runner.calls[0][1]
+    assert hs.LEGACY_HERDR_SOCKET_ENV not in runner.calls[0][1]
+
+
+def test_remote_attach_refuses_privileged_or_container_runtime_programs() -> None:
+    with pytest.raises(hs.HerdrCommandError, match="sudo"):
+        hs.build_remote_attach_command("ce-vps-1", herdr_binary="sudo")
+    with pytest.raises(hs.HerdrCommandError, match="docker"):
+        hs.build_remote_attach_command("ce-vps-1", herdr_binary="/usr/bin/docker")
+
+
+def test_subprocess_remote_attach_runner_scrubs_local_socket_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, *, check, text, env):
+        captured["argv"] = list(argv)
+        captured["check"] = check
+        captured["text"] = text
+        captured["env"] = dict(env)
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setenv(hs.HERDR_SOCKET_ENV, "/run/ce/herdr/control.sock")
+    monkeypatch.setenv(hs.LEGACY_HERDR_SOCKET_ENV, "/run/ce/herdr/legacy.sock")
+    monkeypatch.setattr(hs.subprocess, "run", fake_run)
+
+    runner = hs.SubprocessHerdrAttachRunner()
+    runner.run(["herdr", "--remote", "ce-vps-1"], env={})
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert hs.HERDR_SOCKET_ENV not in env
+    assert hs.LEGACY_HERDR_SOCKET_ENV not in env
+
+
 def test_malformed_json_raises_command_error_not_name_error() -> None:
     class BadJson(FakeRunner):
         def run(self, argv, *, env=None, timeout_s=None):

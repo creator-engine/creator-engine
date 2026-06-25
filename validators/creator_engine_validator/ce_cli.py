@@ -18,6 +18,7 @@ ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce publish-branch   # host-side publish gate for contained seats' committed branches
+ce herdr remote-attach # attach through authenticated herdr remote reach, not docker exec
 ce fanin build       # aggregate local evidence into a deterministic fan-in packet (RV1-070/071)
 ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
@@ -68,8 +69,10 @@ Prose contracts: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``,
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -133,6 +136,27 @@ def _make_worker_broker():
 def _make_worker_spawn_launcher():
     """Factory for the worker-spawn launcher seam (monkeypatchable in tests)."""
     return worker_spawn.LaunchRuntimeWorkerLauncher()
+
+
+def _make_herdr_attach_runner():
+    """Factory for interactive herdr remote attach (monkeypatchable in tests)."""
+    herdr_session = _herdr_session_module()
+    return herdr_session.SubprocessHerdrAttachRunner()
+
+
+def _herdr_session_module():
+    """Load the v3 herdr runner only inside the explicit herdr command seam."""
+    return importlib.import_module("creator_engine_validator.runner.herdr_session")
+
+
+# Command groups shipped INTERNAL-only for now: present in the `ce` CLI (for
+# fleet/dev use) but intentionally kept OFF the public product surface. They are
+# hidden from `ce --help` and are EXEMPT from the public-README "documents every
+# command group" requirement (the inventory guard still tracks them so additions
+# are never silent). `herdr` (authenticated remote reach-plane) is internal pending
+# internal testing and GRADUATES to a public product command in a later release
+# (ce-ops#237).
+INTERNAL_COMMAND_GROUPS = frozenset({"herdr"})
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1092,6 +1116,52 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="json_output",
         help="emit the machine-readable JSON fleet status",
+    )
+
+    # INTERNAL command (see INTERNAL_COMMAND_GROUPS): hidden from `ce --help` and
+    # not on the public product surface yet. Graduates to a public product command
+    # in a later release after internal testing (ce-ops#237).
+    herdr = groups.add_parser(
+        "herdr",
+        help=argparse.SUPPRESS,
+    )
+    herdr_sub = herdr.add_subparsers(dest="herdr_cmd")
+
+    herdr_remote_attach = herdr_sub.add_parser(
+        "remote-attach",
+        help="attach to a contained herdr seat through authenticated herdr remote reach",
+    )
+    herdr_remote_attach.add_argument(
+        "--remote",
+        dest="remote_target",
+        required=True,
+        help="SSH target understood by herdr --remote",
+    )
+    herdr_remote_attach.add_argument(
+        "--session",
+        default=None,
+        help="optional named herdr server/session on the remote target",
+    )
+    herdr_remote_attach.add_argument(
+        "--pane-id",
+        default=None,
+        help="optional contained seat pane id to carry in the plan metadata",
+    )
+    herdr_remote_attach.add_argument(
+        "--herdr-binary",
+        default="herdr",
+        help="herdr CLI binary (default: herdr)",
+    )
+    herdr_remote_attach.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the herdr remote command without attaching",
+    )
+    herdr_remote_attach.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit the machine-readable remote attach plan",
     )
 
     publish_branch_cmd = groups.add_parser(
@@ -3043,6 +3113,43 @@ def _containment_status(args) -> int:
     return 0 if status.ok else 1
 
 
+def _herdr_remote_attach(args) -> int:
+    herdr_session = _herdr_session_module()
+    try:
+        plan = herdr_session.plan_remote_attach(
+            remote_target=args.remote_target,
+            session=args.session,
+            pane_id=args.pane_id,
+            herdr_binary=args.herdr_binary,
+        )
+    except herdr_session.HerdrCommandError as exc:
+        print(f"ERROR: ce herdr remote-attach refused: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
+    elif getattr(args, "dry_run", False):
+        print("ce herdr remote-attach: " + shlex.join(plan.argv))
+        print("reach_plane: herdr-remote")
+        print("runtime_attach: disabled (no docker exec, sudo, or host-root attach)")
+
+    if getattr(args, "json_output", False) or getattr(args, "dry_run", False):
+        return 0
+
+    try:
+        herdr_session.remote_attach(
+            remote_target=args.remote_target,
+            session=args.session,
+            pane_id=args.pane_id,
+            herdr_binary=args.herdr_binary,
+            runner=_make_herdr_attach_runner(),
+        )
+    except herdr_session.HerdrCommandError as exc:
+        print(f"ERROR: ce herdr remote-attach failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _make_gh_runner():
     """Factory for the work-claim gh runner (monkeypatchable in tests)."""
     return work_claims.default_gh_runner
@@ -3541,6 +3648,10 @@ _PICKUP_DISPATCH = {
     "triage": _pickup_triage,
 }
 
+_HERDR_DISPATCH = {
+    "remote-attach": _herdr_remote_attach,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -3633,6 +3744,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _CLAIM_DISPATCH.get(claim_cmd)
         if handler is None:
             parser.parse_args(["claim", "--help"])  # prints claim help, exits
+            return 2
+        return handler(args)
+    if args.group == "herdr":
+        herdr_cmd = getattr(args, "herdr_cmd", None)
+        handler = _HERDR_DISPATCH.get(herdr_cmd)
+        if handler is None:
+            parser.parse_args(["herdr", "--help"])  # prints herdr help, exits
             return 2
         return handler(args)
     if args.group == "verify-install":

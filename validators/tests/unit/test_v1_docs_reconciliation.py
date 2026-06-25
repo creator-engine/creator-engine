@@ -51,18 +51,29 @@ def _readme_text() -> str:
 
 def test_as_built_ce_inventory_matches_expected():
     # Guard the inventory itself so a new/removed command forces a docs update.
+    # Internal-only command groups (e.g. `herdr`, ce-ops#237) are tracked here so
+    # additions are never silent, but are exempt from the public-README docs
+    # requirement below — see ce_cli.INTERNAL_COMMAND_GROUPS.
     assert _ce_command_groups() == {
         "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
         "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",
-        "containment-status",
+        "containment-status", "herdr",
     }
+
+
+def test_internal_command_groups_are_a_subset_of_the_inventory():
+    # Internal groups must be real, shipped commands (no stale exemptions).
+    assert ce_cli.INTERNAL_COMMAND_GROUPS <= _ce_command_groups()
 
 
 def test_readme_documents_every_ce_command_group():
     text = _readme_text()
-    missing = [g for g in _ce_command_groups() if not re.search(rf"\bce {re.escape(g)}\b", text)]
+    # Internal-only groups (ce_cli.INTERNAL_COMMAND_GROUPS) are intentionally off
+    # the public product surface and exempt from README documentation.
+    public_groups = _ce_command_groups() - ce_cli.INTERNAL_COMMAND_GROUPS
+    missing = [g for g in public_groups if not re.search(rf"\bce {re.escape(g)}\b", text)]
     assert not missing, f"README.md does not document ce command group(s): {missing}"
 
 
