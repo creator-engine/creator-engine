@@ -27,6 +27,7 @@ evasion, no credential exfiltration).
 """
 from __future__ import annotations
 
+from .orchestrator import ContainedSeatSelfPushRequest, contained_seat_self_push
 from .policy import (
     BrokerPolicy,
     CheckResult,
@@ -41,8 +42,10 @@ __all__ = [
     "BrokerPolicy",
     "CheckResult",
     "CommitFacts",
+    "ContainedSeatSelfPushRequest",
     "Decision",
     "Precondition",
     "RateState",
+    "contained_seat_self_push",
     "evaluate",
 ]

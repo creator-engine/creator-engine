@@ -6,12 +6,16 @@
 
 ## Why this exists
 
-A contained agent (e.g. dev-4 in gVisor) authors + **signs** a commit on a local branch but
-**cannot push** — it holds no forge egress, by design (`ce-mandatory-containment-decision`,
-`ce-governed-seat-cannot-push`). Today an **uncontained controller** (dev-2) couriers that
-signed commit by hand. ADR-0007 chose, as the endgame, a **non-agent deterministic gateway**
-as the sole holder of forge egress — trustable with the push credential precisely *because it
-cannot be talked into misusing it*, where an LLM agent cannot.
+A contained seat authors + **signs** a commit on a local branch but **cannot raw-push** — it
+holds no forge egress, by design (`ce-mandatory-containment-decision`,
+`ce-governed-seat-cannot-push`). ce-ops#242 calls this **SELF-PUSH**: the seat requests
+publication of its own branch by sending only value-free request facts
+(`seat_id`, `repo_path`, `branch`) through `ContainedSeatSelfPushRequest`. Direct `git push`
+from the sandbox remains denied, and the contained seat does not need `gh`.
+
+ADR-0007 chose, as the endgame, a **non-agent deterministic gateway** as the sole holder of
+forge egress — trustable with the push credential precisely *because it cannot be talked into
+misusing it*, where an LLM agent cannot.
 
 This v0 is the **incremental, build-now path** to that gateway: a deterministic host-side
 broker that couriers a contained seat's signed commit to the forge under fail-closed policy,
@@ -42,19 +46,20 @@ Given `{seat_id, repo_path, branch}` and a host-local config, the broker
    - **allowed namespace** — the well-formed branch matches an allowed namespace prefix.
    - **rate/scope** — recent pushes for the seat are under the per-window cap.
    - **pluggable ratification/CI precondition** — each supplied precondition must be satisfied.
-3. **Mint** the seat's App installation token — the generalized minter
-   ([`minter`](../../tools/egress-broker/egress_broker/minter.py)) builds an RS256 App JWT
-   (`{iat:now-60, exp:now+540, iss:app_id}`) behind an `openssl` signer (the **PEM never enters
-   the broker process**), discovering the `installation_id` via `GET /app/installations`
-   ([`installation`](../../tools/egress-broker/egress_broker/installation.py)) filtered to the
-   org when the config doesn't record one (dev-4's case; dev-2's is recorded). The token is a
-   JIT, least-privilege (`contents:write` + `pull_requests:write`), ≤1 h credential minted
-   through the **frozen** `forge.scoped_token` / `forge.app_jwt_runner` seams.
-4. **Push + open/update the PR** as the seat's App — the branch is pushed via the frozen
-   `forge.change_push` (constructed HTTPS remote, **never force**, fast-forward only); the PR is
-   opened/refreshed with a body noting *"Authored by `<seat>`, gateway-pushed"*. Authorship
-   travels with the **signed commit**; the broker is the transport, not the author. The token is
-   **revoked in a `finally`** (defense-in-depth beyond its ≤1 h ceiling).
+3. **Mint a repo-scoped push/PR credential host-side.** The live SELF-PUSH seam requires
+   OpenBao or the scoped-token mint authority outside the sandbox. The generalized minter
+   ([`minter`](../../tools/egress-broker/egress_broker/minter.py)) preserves the App-JWT seam
+   and discovers the `installation_id` via `GET /app/installations`
+   ([`installation`](../../tools/egress-broker/egress_broker/installation.py)) when config does
+   not record one. The resulting capability is least-privilege (`contents:write` +
+   `pull_requests:write`), repo-scoped, short-lived, and revocable.
+4. **Inject only into trusted host child transports.** The credential is not handed to the
+   contained seat and is not available to raw sandbox `git push`. It is injected only into
+   host-side trusted push and PR child environments: the frozen `forge.change_push` push leg
+   (constructed HTTPS remote, **never force**, fast-forward only) and the PR open/update leg.
+   The PR body notes *"Authored by `<seat>`, gateway-pushed"*. Authorship travels with the
+   **signed commit**; the broker is the transport, not the author. The credential is **revoked
+   in a `finally`**.
 5. **Audit (append-only).** Every path — allow OR deny — appends one immutable JSONL record
    ([`audit`](../../tools/egress-broker/egress_broker/audit.py)): seat, commit sha, author +
    signer, the verified checks + failing reasons, which App owner/installation couriered it, the
@@ -72,13 +77,27 @@ The broker's trusted computing base is small and **wholly deterministic** — no
   the host's own trust store (gpg keyring / ssh `allowed_signers`). The broker passes that
   verdict through; the host trust config is the root of trust the controller must provision.
 - **Policy → `egress_broker.policy`.** A pure, exhaustively-tested function. Deny on any doubt.
-- **Secret custody → the frozen forge seams + `openssl`.** The App PEM stays behind
-  `openssl dgst -sha256 -sign`; the JWT is header-only; the installation token lives only in the
-  child push/PR env and the in-memory `ScopedToken` (redacted repr) — never the argv, a log, the
-  audit, or disk.
+- **Secret custody → OpenBao + frozen forge seams.** The host seam holds the trust store and
+  mint authority. The raw token lives only in trusted host child push/PR env injection and the
+  in-memory `ScopedToken` (redacted repr) — never the contained seat env, argv, filesystem,
+  logs, audit, returned result, or other durable record.
 
 This is the **network-egress twin** of the OpenBao secret broker (ce-ops#135): the secret broker
 stops agents *holding* secrets; this gateway stops agents *reaching* the forge.
+
+## Smoke path and live boundary
+
+Expected smoke coverage for ce-ops#242 is offline and fake-backed:
+
+- deny paths never mint, push, or open a PR;
+- dry-run verifies and audits but mints/pushes nothing;
+- apply-path fakes run `verify → mint → push → open/update PR → revoke` in order;
+- the trusted child transport receives the credential only through env injection;
+- audit records stay value-free and reject token/secret/PEM-shaped material.
+
+This branch does **not** claim a live push was performed. A live `--apply` remains a host-side
+operator boundary requiring the real trust store, OpenBao/scoped-token wiring, forge App grant,
+network egress, and a ratified invocation outside the contained sandbox.
 
 ## What the controller must wire to run it live
 
@@ -87,21 +106,24 @@ This v0 is code-complete and locally green, but **not yet wired**. To run a live
 1. **Host trust store** — the CE dev signing public keys must be in the broker host's gpg
    keyring / ssh `allowed_signers`, or every commit verifies as `E`/`U` and is (correctly)
    denied. *This is the root of trust; nothing else matters until it is set.*
-2. **PEM custody** — each seat's App PEM on RAM-only host storage (`/dev/shm/ce-devN/…`),
-   readable by the broker host user, invisible to the agent container.
-3. **Installation ids** — fill `installation_id` for seats whose env records one (dev-2); leave
+2. **OpenBao / scoped-token mint authority** — the App or token mint authority must be held
+   outside the sandbox and issue only repo-scoped, short-lived push/PR credentials.
+3. **Host git/PR child env injection** — the raw token must be injected only into trusted
+   host-side git/PR children. It must not be present in the contained seat env, argv,
+   filesystem, logs, audit, returned result, or durable record.
+4. **Installation ids** — fill `installation_id` for seats whose env records one (dev-2); leave
    `null` for discovery (dev-4).
-4. **Config** — copy [`apps.example.json`](../../tools/egress-broker/apps.example.json) to a
+5. **Config** — copy [`apps.example.json`](../../tools/egress-broker/apps.example.json) to a
    host-local path, set the real App ids and the `authorized_logins` allow-list, and confirm the
    `allowed_branch_namespaces` / `forbidden_branches` for your repo.
-5. **(Optional) precondition hook** — wire a real ratification/CI precondition (e.g. CI-green +
+6. **(Optional) precondition hook** — wire a real ratification/CI precondition (e.g. CI-green +
    a ratification record) into the pluggable hook as the gateway matures.
 
 ## Deferred to the full ADR-0007 gateway (NOT in v0)
 
 | Concern | v0 (this) | Full gateway (deferred) |
 | --- | --- | --- |
-| PEM custody | host RAM-only file (`/dev/shm`), read by `openssl` | **OpenBao JIT** delivery (ADR-0005 `SecretIdentityBackend`, ce-ops#135) — nothing standing on disk |
+| Credential custody | OpenBao/scoped-token injection for trusted host push/PR children | richer OpenBao lease metadata and gateway-local revocation evidence |
 | Signed-artifact handoff | host reads the seat's bind-mounted branch directly | a **controlled handoff channel** (branch + SHA / commit object signalled to the gateway) |
 | Runtime placement | a host-side CLI run by the (still-uncontained) controller | the **OpenShell supervisor/gateway** layer; the controller itself contained (ce-ops#128) |
 | Merge | out of scope (push + PR only) | the **same shape**, actuated only on ratification + peer review + green CI |
