@@ -34,6 +34,9 @@ Environment:
   CE_DGX_UID                Container uid (default: id -u)
   CE_DGX_GID                Container gid (default: id -g)
   CE_DGX_SEAT_ID            Host log seat id (default: CE_DGX_CONTAINER_NAME)
+  CE_DGX_EGRESS_BROKER_SOCKET Host self-push broker Unix socket to bind-mount (default: unset)
+  CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path
+                            (default: /run/ce-egress-broker.sock)
   CE_DGX_SEAT_LOG_DIR       Host log dir mounted at /var/log/ce-seat
                             (default: ~/.ce/logs/seats/<seat-id>)
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
@@ -86,7 +89,13 @@ CE_DGX_UID="${CE_DGX_UID:-$(id -u)}"
 CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
 CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
 CE_DGX_CONTAINER_NAME="${CE_DGX_CONTAINER_NAME:-ce-dgx-codex}"
+CE_DGX_SEAT_ID_EXPLICIT=0
+if [ "${CE_DGX_SEAT_ID+x}" = "x" ]; then
+  CE_DGX_SEAT_ID_EXPLICIT=1
+fi
 CE_DGX_SEAT_ID="${CE_DGX_SEAT_ID:-${CE_DGX_CONTAINER_NAME}}"
+CE_DGX_EGRESS_BROKER_SOCKET="${CE_DGX_EGRESS_BROKER_SOCKET:-}"
+CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET="${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET:-/run/ce-egress-broker.sock}"
 CE_DGX_SEAT_LOG_DIR="${CE_DGX_SEAT_LOG_DIR:-${HOME:-/home/cedev4}/.ce/logs/seats/${CE_DGX_SEAT_ID}}"
 CE_DGX_CONTAINED_CODEX_CONFIG="${CE_DGX_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-dgx-runsc-codex-config-${CE_DGX_UID}-${CE_DGX_CONTAINER_USER}.toml}"
 CE_DGX_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
@@ -117,7 +126,32 @@ case "${CE_DGX_SEAT_LOG_DIR}" in
     exit 2
     ;;
 esac
-
+if [ -n "${CE_DGX_EGRESS_BROKER_SOCKET}" ]; then
+  if [ "${CE_DGX_SEAT_ID_EXPLICIT}" != "1" ]; then
+    printf 'CE_DGX_SEAT_ID must be set explicitly when CE_DGX_EGRESS_BROKER_SOCKET is set\n' >&2
+    exit 2
+  fi
+  if [[ ! "${CE_DGX_SEAT_ID}" =~ ^dev-[0-9]+$ ]]; then
+    printf 'CE_DGX_SEAT_ID must be a broker seat id like dev-4 when CE_DGX_EGRESS_BROKER_SOCKET is set, got %s\n' "${CE_DGX_SEAT_ID}" >&2
+    exit 2
+  fi
+  case "${CE_DGX_EGRESS_BROKER_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_DGX_EGRESS_BROKER_SOCKET must be an absolute path, got %s\n' "${CE_DGX_EGRESS_BROKER_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
+  case "${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET must be an absolute path, got %s\n' "${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
+fi
 prepare_contained_codex_config() {
   local config_dir
   config_dir="$(dirname "${CE_DGX_CONTAINED_CODEX_CONFIG}")"
@@ -211,6 +245,12 @@ if [ "${dry_run}" != "1" ]; then
   [ -d "${CE_DGX_REPO}" ] || { printf 'repo path not found: %s\n' "${CE_DGX_REPO}" >&2; exit 66; }
   [ -d "${CE_DGX_CODEX_HOME}" ] || { printf 'codex home not found: %s\n' "${CE_DGX_CODEX_HOME}" >&2; exit 66; }
   [ -x "${CE_DGX_CODEX_BIN}" ] || { printf 'codex binary not executable: %s\n' "${CE_DGX_CODEX_BIN}" >&2; exit 66; }
+  if [ -n "${CE_DGX_EGRESS_BROKER_SOCKET}" ]; then
+    [ -S "${CE_DGX_EGRESS_BROKER_SOCKET}" ] || {
+      printf 'egress broker socket not found: %s\n' "${CE_DGX_EGRESS_BROKER_SOCKET}" >&2
+      exit 66
+    }
+  fi
 fi
 
 tty_flags=()
@@ -233,7 +273,10 @@ fi
 seat_log_mount="type=bind,source=${CE_DGX_SEAT_LOG_DIR},target=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
 codex_bin_mount="type=bind,source=${CE_DGX_CODEX_BIN},target=/usr/local/bin/codex,readonly"
 contained_codex_config_mount="type=bind,source=${CE_DGX_CONTAINED_CODEX_CONFIG},target=${CE_DGX_CONTAINER_CODEX_HOME}/config.toml,readonly"
-
+egress_broker_mount=""
+if [ -n "${CE_DGX_EGRESS_BROKER_SOCKET}" ]; then
+  egress_broker_mount="type=bind,source=${CE_DGX_EGRESS_BROKER_SOCKET},target=${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET}"
+fi
 # Foreground keeps --rm (ephemeral). Detached drops --rm and adds -d --name so a
 # crashed/stopped seat stays inspectable (docker logs, exit code) for forensics.
 lifecycle_flags=(--rm)
@@ -272,6 +315,14 @@ docker_cmd=(
   --mount "${contained_codex_config_mount}"
   --mount "${codex_bin_mount}"
 )
+
+if [ -n "${egress_broker_mount}" ]; then
+  docker_cmd+=(
+    --env "CE_EGRESS_BROKER_SOCKET=${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET}"
+    --env "CE_SEAT_ID=${CE_DGX_SEAT_ID}"
+    --mount "${egress_broker_mount}"
+  )
+fi
 
 if [ -n "${CE_DGX_DOCKER_NETWORK}" ]; then
   docker_cmd+=("--network=${CE_DGX_DOCKER_NETWORK}")

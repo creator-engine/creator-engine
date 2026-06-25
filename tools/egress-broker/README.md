@@ -9,9 +9,11 @@ the architecture map: [`docs/architecture/egress-broker.md`](../../docs/architec
 > **Forge-egress TCB. Fail-closed: deny on any verification doubt.**
 
 ce-ops#242 **SELF-PUSH** means the contained seat authors and signs locally, then asks the
-host-side broker to publish its own branch. The seat-side request is value-free:
-`ContainedSeatSelfPushRequest(seat_id, repo_path, branch)`. Raw sandbox `git push` remains
-denied, and `gh` is not required or used inside the contained seat.
+host-side broker to publish its own branch. The live seat-side protocol is value-free:
+`{"seat_id":"dev-4","branch":"ce242-..."}` over a per-seat Unix socket. A legacy
+`repo_path` field may be present for compatibility, but the daemon ignores it and uses the
+trusted host repo path supplied to the daemon. Raw sandbox `git push` remains denied, and
+`gh` is not required or used inside the contained seat.
 
 The host-side courier remains the transport deputy. It verifies the commit facts, obtains a
 repo-scoped short-lived push/PR credential through the OpenBao / `forge.scoped_token` mint
@@ -32,6 +34,7 @@ tools/egress-broker/
     config.py                # per-App + policy config schema + fail-closed loader
     audit.py                 # append-only, secret-free JSONL audit + rate counter
     orchestrator.py          # verify → mint → push → open/update PR → revoke → audit
+    host_broker.py           # contained SELF-PUSH request handler + Unix-socket daemon seam
 ```
 
 The policy/verify core is unit-tested under `validators/tests/unit/test_egress_*.py` (CI-collected).
@@ -60,6 +63,72 @@ fakeable: tests can inject git/gh/openssl/HTTPS seams and run with no network or
 
 Exit codes: `0` allow, `2` fail-closed refusal, `3` config error. Add `--json` for machine output.
 
+Run the contained SELF-PUSH host daemon for one seat:
+
+```bash
+install -d -m 0700 /run/user/$UID/creator-engine/egress-broker
+python tools/egress-broker/ce_egress_self_push_broker.py \
+  --seat dev-4 \
+  --socket /run/user/$UID/creator-engine/egress-broker/dev-4.sock \
+  --host-repo-path /home/cedev4/ce-workspaces/creator-engine \
+  --config ~/.ce-egress/broker.json
+```
+
+The socket should be owned by the seat UID/GID and mode `0600` or `0660`
+(depending on whether a seat group is used). The daemon binds one broker seat id to one socket
+and always calls `contained_seat_self_push(..., apply=True)` with the configured host repo path.
+It rejects request fields such as `command`, `remote`, `refspec`, `token`, `pem_path`,
+and `config_path`; a request `apply` field is ignored. The seat cannot select a command,
+target remote, credential, host config, or dry-run/apply mode.
+
+Host seam spec:
+
+- Transport: host-owned AF_UNIX stream socket, one JSON line per connection.
+- Request: `{"seat_id":"dev-4","branch":"ce-ops-242-smoke"}`. Compatibility
+  `repo_path` may be present but is ignored in favor of `--host-repo-path`.
+- Response: one secret-free JSON line with status and value facts only.
+- Live behavior: the daemon calls `contained_seat_self_push(..., apply=True)`;
+  there is no seat-controlled apply flag.
+- Ownership boundary: one daemon process binds one broker seat id to one socket.
+
+Live apply smoke template from a contained seat:
+
+```bash
+# Host: start the daemon with the real host trust/config/mint seams.
+python tools/egress-broker/ce_egress_self_push_broker.py \
+  --seat dev-4 \
+  --socket /run/user/$UID/creator-engine/egress-broker/dev-4.sock \
+  --host-repo-path /home/cedev4/ce-workspaces/creator-engine \
+  --config ~/.ce-egress/broker.json
+
+# Contained seat: send only values over CE_EGRESS_BROKER_SOCKET.
+python3 - <<'PY'
+import json
+import os
+import socket
+
+req = {"seat_id": os.environ["CE_SEAT_ID"], "branch": "ce-ops-242-smoke"}
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+    sock.connect(os.environ["CE_EGRESS_BROKER_SOCKET"])
+    sock.sendall((json.dumps(req, separators=(",", ":")) + "\n").encode())
+    print(sock.recv(65536).decode(), end="")
+PY
+```
+
+The zero-credential contained environment cannot run
+`tools/egress-broker/ce_egress_broker.py --apply` directly. A direct `--apply`
+smoke is host-only and requires the host config, trust store, App PEM, mint
+authority, and trusted child transports:
+
+```bash
+python tools/egress-broker/ce_egress_broker.py \
+  --seat dev-4 \
+  --repo-path /home/cedev4/ce-workspaces/creator-engine \
+  --branch ce-ops-242-smoke \
+  --config ~/.ce-egress/broker.json \
+  --apply
+```
+
 ## Before a live `--apply`
 
 1. **Host trust store** — the CE dev signing public keys must be in the broker host's gpg
@@ -77,6 +146,9 @@ Exit codes: `0` allow, `2` fail-closed refusal, `3` config error. Add `--json` f
 5. **Config** — copy `apps.example.json` to a host-local path; set the real App ids, the
    `authorized_logins` allow-list, and confirm `installation_id` (recorded for dev-2; `null` →
    discovered for dev-4) and the branch namespaces.
+6. **Host path binding** — start the self-push daemon with the trusted host repo path. Do not
+   trust a repo path supplied by the contained seat; compatibility `repo_path` requests are
+   translated to the daemon's host path.
 
 ## Smoke expectations
 
@@ -90,9 +162,12 @@ The expected ce-ops#242 path is offline and fake-backed:
 
 ## Safety invariants
 
-- The contained seat supplies only `seat_id`, `repo_path`, and `branch`; it receives no forge
-  credential and does not need `gh`.
+- The contained seat supplies only `seat_id` and `branch`; it receives no forge credential and
+  does not need `gh`. A compatibility `repo_path` field is ignored by the host daemon.
 - The App or scoped-token mint authority never enters the contained seat.
+- The host broker config (`~/.ce-egress/broker.json`), App PEMs under `/dev/shm/ce-devN`, host
+  trust store, OpenBao/mint authority, SSH agent, Docker socket, and any GitHub/OpenBao tokens
+  stay host-side and are not bind-mounted or passed as container environment.
 - The installation token lives only in trusted host child push/PR env + the in-memory
   `ScopedToken` (redacted repr) — never the argv, a log, the audit, disk, durable records, or
   sandbox; it is revoked in a `finally`.
