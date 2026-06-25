@@ -49,6 +49,7 @@ ce connector fetch      # execute one read-only GET via an injectable client; --
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
+ce validate-pr          # run local PR preflight against committed base..HEAD state
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -101,6 +102,7 @@ from . import (
     pcl_runtime,
     playbook_runtime,
     publish_gate,
+    pr_preflight,
     reviewer_triage,
     seat_lifecycle,
     side_effect_ledger_runtime,
@@ -1184,6 +1186,33 @@ def _build_parser() -> argparse.ArgumentParser:
     publish_branch_cmd.add_argument("--active-work-ledger-root", default=None)
     publish_branch_cmd.add_argument("--dry-run", action="store_true", help="verify publishability without pushing")
     publish_branch_cmd.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    validate_pr = groups.add_parser(
+        "validate-pr",
+        help="run the local PR preflight gate set against committed base..HEAD state",
+    )
+    validate_pr.add_argument("--repo-root", default=".", help="PR worktree root (default: current directory)")
+    validate_pr.add_argument(
+        "--base",
+        default="origin/main",
+        help="base branch/ref to fetch and merge-base against (default: origin/main)",
+    )
+    validate_pr.add_argument(
+        "--declared-work-class",
+        required=True,
+        choices=pr_preflight.WORK_CLASSES,
+        help="declared PR work class from the PR body",
+    )
+    validate_pr.add_argument(
+        "--head-ref",
+        default=None,
+        help="PR head branch name for carrier slug (default: current branch)",
+    )
+    validate_pr.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
+    )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
     init = groups.add_parser(
@@ -3767,6 +3796,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _containment_probe(args)
     if args.group == "publish-branch":
         return _publish_branch(args)
+    if args.group == "validate-pr":
+        return pr_preflight.run_cli(args)
     if args.group == "containment-status":
         return _containment_status(args)
     if args.group == "init":

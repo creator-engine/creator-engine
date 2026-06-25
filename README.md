@@ -107,7 +107,7 @@ platform evolves:
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
   `pickup`, `playbook`, `bootstrap`, `verify-install`, `onboard`, `publish-branch`,
-  `harness-matrix`, and `containment-status`.
+  `harness-matrix`, `containment-status`, and `validate-pr`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
@@ -140,7 +140,12 @@ platform evolves:
   seat's live PID with `ce containment-probe` semantics and reports
   `{seat, contained, backend, herdr_session, ring1}` as JSON or a table, failing
   closed for unprobeable seats and never deriving containment from config or
-  prose. `ce hud` is an alias for the visible `ce launch` Controller-seat
+  prose. `ce validate-pr` runs the governed PR preflight locally against the
+  committed `base..HEAD` state — the same gates CI enforces (check-examples,
+  work-sizing, path-manifest, changelog, and the offline test suite) with a
+  clean, scrubbed environment — so an author can confirm a PR is governance-valid
+  before pushing instead of discovering it in CI. `ce hud` is an alias for the
+  visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
 - **`cev3`** is the v3 work-driving entry point in this repository. It covers the
