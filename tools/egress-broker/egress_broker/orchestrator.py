@@ -373,6 +373,25 @@ def courier(
 
     installation_id = _resolve(seat)
     token = _mint(seat, installation_id)
+    if not getattr(token, "value", ""):
+        rec = append_audit(
+            audit_log,
+            {
+                **base,
+                "decision": "deny",
+                "applied": False,
+                "pushed": False,
+                "transport_refusal": "mint returned no usable credential; refusing ambient-auth fallback",
+                "installation_id": installation_id,
+            },
+            now=audit_now,
+        )
+        raise EgressRefused(
+            "egress mint returned no usable credential; refusing to invoke push/PR transports "
+            "(a credential-less child could fall back to ambient auth)",
+            decision=decision,
+            audit_record=rec,
+        )
     pushed = False
     pr_number: int | None = None
     try:

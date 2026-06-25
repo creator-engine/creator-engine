@@ -481,6 +481,43 @@ def test_apply_without_injected_mint_uses_default_minter(tmp_path):
     ]
 
 
+def test_empty_minted_token_refuses_before_push_or_pr_and_ignores_ambient_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "ghs_AMBIENT_SHOULD_NOT_BE_USED")
+    calls = []
+    empty = ScopedToken(
+        run_id="r", repo="creator-engine/creator-engine", policy_sha="a" * 64,
+        secret_name="forge_egress_push_pr", permissions=(), expires_at="2026-06-20T13:00:00Z",
+        token_ref="ref", value="",
+    )
+
+    def resolve_id(seat):
+        calls.append(("resolve_id", seat.seat_id))
+        return 555
+
+    def mint(seat, installation_id):
+        calls.append(("mint", seat.seat_id, installation_id))
+        return empty
+
+    def forbidden_transport(token):  # pragma: no cover - must never be called
+        raise AssertionError("credential-less courier must not invoke push/PR/revoke transports")
+
+    with pytest.raises(EgressRefused) as ei:
+        courier(
+            "dev-4", "/seat/workspace/creator-engine", "ce-egress-broker",
+            config=_config(tmp_path), apply=True, read_facts_fn=lambda: _GOOD_FACTS,
+            resolve_id_fn=resolve_id, mint_fn=mint,
+            push_fn=forbidden_transport, open_pr_fn=forbidden_transport,
+            revoke_fn=forbidden_transport,
+        )
+
+    assert calls == [("resolve_id", "dev-4"), ("mint", "dev-4", 555)]
+    assert "ambient" in str(ei.value).lower()
+    rec = _audit_lines(tmp_path)[-1]
+    assert rec["decision"] == "deny"
+    assert rec["pushed"] is False
+    assert "ghs_AMBIENT_SHOULD_NOT_BE_USED" not in (tmp_path / "audit.jsonl").read_text()
+
+
 def test_token_is_revoked_even_if_pr_step_raises(tmp_path):
     spy = _Spy(push_raises=True)
     with pytest.raises(RuntimeError):
