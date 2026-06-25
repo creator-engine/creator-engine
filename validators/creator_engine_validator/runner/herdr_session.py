@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -74,10 +75,16 @@ FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV}
 HERDR_SEND_SUBMIT_SETTLE_S = 1.0
 HERDR_SEND_POLL_INTERVAL_S = 0.5
 HERDR_SEND_SUBMIT_MAX_ATTEMPTS = 3
-HERDR_BRIEF_RENDER_TIMEOUT_S = 5.0
-HERDR_BRIEF_RENDER_POLL_INTERVAL_S = 0.5
+HERDR_BRIEF_REACTION_TIMEOUT_S = 5.0
+HERDR_BRIEF_REACTION_POLL_INTERVAL_S = 0.5
+HERDR_BRIEF_RENDER_TIMEOUT_S = HERDR_BRIEF_REACTION_TIMEOUT_S
+HERDR_BRIEF_RENDER_POLL_INTERVAL_S = HERDR_BRIEF_REACTION_POLL_INTERVAL_S
 BRIEF_MARKER_PREFIX = "==CE-BRIEF-SHA256:"
 BRIEF_MARKER_SUFFIX = "=="
+AGENT_REACTION_RE = re.compile(
+    r"\b(?:working|processing|thinking)\b|codex\s+(?:session|rollout)|session\s+rollout",
+    re.IGNORECASE,
+)
 
 
 class HerdrSessionError(Exception):
@@ -313,6 +320,39 @@ class HerdrSession:
         separator = "" if brief_body.endswith("\n") else "\n"
         return f"{brief_body}{separator}{marker}", marker
 
+    @staticmethod
+    def _agent_reaction_score(pane_text: str) -> int:
+        return len(AGENT_REACTION_RE.findall(pane_text))
+
+    @staticmethod
+    def _without_dispatched_payload(pane_text: str, dispatched_payload: str) -> str:
+        normalized = pane_text.replace("\r\n", "\n").replace("\r", "\n")
+        payload = dispatched_payload.replace("\r\n", "\n").replace("\r", "\n")
+        if not payload:
+            return normalized
+        redacted = normalized.replace(payload, "")
+        payload_lines = {line.strip() for line in payload.splitlines() if line.strip()}
+        return "\n".join(
+            line for line in redacted.splitlines() if line.strip() not in payload_lines
+        )
+
+    @classmethod
+    def _agent_reaction_observed(
+        cls,
+        pane_text: str,
+        *,
+        baseline_text: str,
+        dispatched_payload: str,
+    ) -> bool:
+        redacted_pane_text = cls._without_dispatched_payload(pane_text, dispatched_payload)
+        redacted_baseline_text = cls._without_dispatched_payload(
+            baseline_text,
+            dispatched_payload,
+        )
+        return cls._agent_reaction_score(redacted_pane_text) > cls._agent_reaction_score(
+            redacted_baseline_text
+        )
+
     # -- connect ----------------------------------------------------------
     def connect(self) -> None:
         """Open the client connection to the substrate-owned herdr socket.
@@ -500,30 +540,43 @@ class HerdrSession:
         pane: HerdrPane,
         brief_body: str,
         *,
-        render_timeout_s: float = HERDR_BRIEF_RENDER_TIMEOUT_S,
-        render_poll_interval_s: float = HERDR_BRIEF_RENDER_POLL_INTERVAL_S,
+        reaction_timeout_s: float = HERDR_BRIEF_REACTION_TIMEOUT_S,
+        reaction_poll_interval_s: float = HERDR_BRIEF_REACTION_POLL_INTERVAL_S,
+        render_timeout_s: float | None = None,
+        render_poll_interval_s: float | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> str:
-        """Deliver a brief with a SHA-256 render marker and fail closed if absent."""
+        """Deliver a marked brief and fail closed unless the agent reacts."""
+        if render_timeout_s is not None:
+            reaction_timeout_s = render_timeout_s
+        if render_poll_interval_s is not None:
+            reaction_poll_interval_s = render_poll_interval_s
         payload, marker = self._brief_payload(brief_body)
+        baseline_text = self._read_recent_unwrapped_text(pane)
         self.send(
             pane,
             payload,
             submit_settle_s=HERDR_SEND_SUBMIT_SETTLE_S,
-            submit_poll_interval_s=render_poll_interval_s,
+            submit_poll_interval_s=reaction_poll_interval_s,
             submit_max_attempts=HERDR_SEND_SUBMIT_MAX_ATTEMPTS,
             sleep=sleep,
         )
-        deadline = clock() + render_timeout_s
+        deadline = clock() + reaction_timeout_s
         while True:
-            if marker in self._read_recent_unwrapped_text(pane):
+            pane_text = self._read_recent_unwrapped_text(pane)
+            if self._agent_reaction_observed(
+                pane_text,
+                baseline_text=baseline_text,
+                dispatched_payload=payload,
+            ):
                 return marker
             if clock() >= deadline:
                 raise HerdrCommandError(
-                    f"herdr brief marker did not render on pane {pane.pane_id}: {marker}"
+                    "herdr brief dispatch did not produce an agent reaction "
+                    f"on pane {pane.pane_id}: {marker}"
                 )
-            sleep(render_poll_interval_s)
+            sleep(reaction_poll_interval_s)
 
     # -- attach -----------------------------------------------------------
     def attach(self, pane: HerdrPane) -> None:

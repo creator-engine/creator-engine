@@ -310,10 +310,10 @@ def test_send_fails_closed_when_submitted_text_remains_on_active_input_line() ->
     ) == hs.HERDR_SEND_SUBMIT_MAX_ATTEMPTS
 
 
-def test_deliver_brief_verifies_marker_rendered_after_commit() -> None:
+def test_deliver_brief_verifies_agent_reaction_after_commit() -> None:
     body = "Wave-B brief\nDo the focused work."
     marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
-    runner = FakeRunner(read_outputs=["prompt cleared", f"rendered\n{marker}"])
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Working on it"])
     session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
     pane = hs.HerdrPane(
         pane_id="pane-1",
@@ -323,54 +323,153 @@ def test_deliver_brief_verifies_marker_rendered_after_commit() -> None:
     assert session.deliver_brief(
         pane,
         body,
-        render_timeout_s=0,
-        render_poll_interval_s=0,
+        reaction_timeout_s=0,
+        reaction_poll_interval_s=0,
         sleep=lambda _seconds: None,
     ) == marker
 
-    send_text_call = runner.calls[0][0]
+    send_text_call = next(
+        call[0] for call in runner.calls if call[0][1:3] == ["pane", "send-text"]
+    )
     assert send_text_call[:4] == ["/opt/herdr", "pane", "send-text", "pane-1"]
     assert send_text_call[4].endswith(f"\n{marker}")
 
 
-def test_deliver_brief_fails_closed_when_marker_does_not_render() -> None:
-    runner = FakeRunner(read_outputs=["prompt cleared", "rendered without marker"])
+def test_deliver_brief_fails_closed_when_agent_does_not_react() -> None:
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Ready"])
     session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
     pane = hs.HerdrPane(
         pane_id="pane-1",
         surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
     )
 
-    with pytest.raises(hs.HerdrCommandError, match="brief marker did not render"):
+    with pytest.raises(hs.HerdrCommandError, match="did not produce an agent reaction"):
         session.deliver_brief(
             pane,
             "brief body",
-            render_timeout_s=0,
-            render_poll_interval_s=0,
+            reaction_timeout_s=0,
+            reaction_poll_interval_s=0,
             sleep=lambda _seconds: None,
         )
 
 
+def test_deliver_brief_does_not_accept_marker_echo_without_agent_reaction() -> None:
+    body = "brief body"
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", f"rendered\n{marker}"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="did not produce an agent reaction"):
+        session.deliver_brief(
+            pane,
+            body,
+            reaction_timeout_s=0,
+            reaction_poll_interval_s=0,
+            sleep=lambda _seconds: None,
+        )
+
+
+def test_deliver_brief_does_not_accept_echoed_brief_reaction_words() -> None:
+    body = "Please start working and processing this brief."
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", f"{body}\n{marker}"])
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="did not produce an agent reaction"):
+        session.deliver_brief(
+            pane,
+            body,
+            reaction_timeout_s=0,
+            reaction_poll_interval_s=0,
+            sleep=lambda _seconds: None,
+        )
+
+
+def test_deliver_brief_multi_poll_ignores_echo_then_accepts_agent_reaction() -> None:
+    body = "Please start working and processing this brief."
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner = FakeRunner(
+        read_outputs=[
+            "Ready",
+            "prompt cleared",
+            f"{body}\n{marker}",
+            "Codex session rollout started",
+        ]
+    )
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        body,
+        reaction_timeout_s=1,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == marker
+
+    read_calls = [call[0] for call in runner.calls if call[0][1:3] == ["pane", "read"]]
+    assert len(read_calls) == 4
+
+
+def test_deliver_brief_preserves_genuine_reaction_with_brief_line_prefix() -> None:
+    body = "Working"
+    marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
+    runner = FakeRunner(
+        read_outputs=[
+            "Ready",
+            "prompt cleared",
+            f"{body}\n{marker}",
+            "Working on it",
+        ]
+    )
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        body,
+        reaction_timeout_s=1,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == marker
+
+
 def test_deliver_brief_marker_hash_matches_brief_body_before_marker() -> None:
     body = "line one\nline two\n"
-    runner = FakeRunner(read_outputs=["prompt cleared", "rendered"])
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Working"])
     session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
     pane = hs.HerdrPane(
         pane_id="pane-1",
         surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
     )
     marker = f"==CE-BRIEF-SHA256:{hashlib.sha256(body.encode('utf-8')).hexdigest()}=="
-    runner.read_outputs[1] = f"rendered\n{marker}"
 
     session.deliver_brief(
         pane,
         body,
-        render_timeout_s=0,
-        render_poll_interval_s=0,
+        reaction_timeout_s=0,
+        reaction_poll_interval_s=0,
         sleep=lambda _seconds: None,
     )
 
-    payload = runner.calls[0][0][4]
+    send_text_call = next(
+        call[0] for call in runner.calls if call[0][1:3] == ["pane", "send-text"]
+    )
+    payload = send_text_call[4]
     assert payload == f"{body}{marker}"
 
 
