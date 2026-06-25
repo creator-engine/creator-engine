@@ -95,13 +95,13 @@ platform evolves:
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
-  `pickup`, `bootstrap`, `verify-install`, `onboard`, `publish-branch`,
+  `pickup`, `playbook`, `bootstrap`, `verify-install`, `onboard`, `publish-branch`,
   `harness-matrix`, and `containment-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
-  `ce bootstrap`
+  `ce playbook`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
   `ce verify-install` (post-install provenance verification for a pinned CE
   release venv), `ce publish-branch` (host-side publish gate for contained
@@ -114,7 +114,10 @@ platform evolves:
   each phase's blast-radius and consequence-class so a user's own agent can plan
   and gate the install under the governed-install rail). `ce pickup`
   is the ce-ops#55/#182 read-only, Search-API-backed autonomous forge
-  work-pickup poller for fine-grained PAT compatibility. `ce publish-branch`
+  work-pickup poller for fine-grained PAT compatibility. `ce playbook`
+  lists, shows, and plans `run --dry-run` for public dual-use `PLAYBOOK.md`
+  files by projecting them into the internal playbook descriptor without
+  executing side effects. `ce publish-branch`
   verifies attribution and fast-forward/no-force policy, pushes through
   host-side git credentials, and records the publish to the Side-Effect Ledger.
   `ce harness-matrix`
