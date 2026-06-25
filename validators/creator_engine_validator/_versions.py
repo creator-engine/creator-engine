@@ -144,6 +144,10 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge.change_push",
         "forge.change_status",
         "forge.credential_runner",
+        # ce-ops#228 PR-2: contained-agent credential-injection proxy. Evaluates
+        # transport policy first, mints only on allow, and injects the live bearer
+        # into the trusted outbound transport request rather than worker env/argv.
+        "forge.cred_injection_proxy",
         "forge.eviction_detection",
         "forge.github_repo_config",
         "forge.merge",
