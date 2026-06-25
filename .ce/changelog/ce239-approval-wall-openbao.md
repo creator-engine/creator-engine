@@ -11,10 +11,15 @@ Wire `ce queue-daemon` approval-wall runtime to prefer a configured
 secret.
 
 - Added daemon SecretRef/SecretRequest flags for the approval-wall secret.
-- Kept `CE_APPROVAL_CAPABILITY_SECRET` as the documented bootstrap fallback.
+- Registered the production `openbao` secret-identity backend and replaced the
+  no-op OpenBao materializer with file-backed 0600 delivery.
+- Kept `CE_APPROVAL_CAPABILITY_SECRET` as the documented bootstrap fallback only
+  when no backend is configured.
+- Refuse partial backend configuration, empty backend materialization, backend
+  transport failure, and fork-unsafe `env:` target refs without consulting env.
 - Preserved dormant-by-default behavior when no backend or fallback secret is
   configured.
 - Added daemon-path unit coverage proving backend materialization wins over the
-  env fallback when both are present.
+  env fallback when both are present and uses file delivery.
 - Isolated herdr steering lease unit tests from shared tempdir state under
   xdist.

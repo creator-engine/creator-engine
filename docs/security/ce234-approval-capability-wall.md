@@ -60,9 +60,13 @@ The daemon's primary production secret source is a configured
 injected reader used by
 `approval_wall_secret_supplier_from_secret_identity_backend`. The bootstrap
 secret source, `CE_APPROVAL_CAPABILITY_SECRET`, remains available only as a
-fallback when the SecretIdentityBackend supplier is not configured or does not
-yield a value. With neither source configured and no durable armed state, the
-wall remains dormant.
+fallback when no SecretIdentityBackend supplier is configured. If backend flags
+are present, partial configuration, `env:` target refs, backend refusal, or an
+empty/falsy materialized value are treated as misconfiguration and the daemon
+fails closed instead of consulting the env fallback. Backend delivery must be
+file-backed so controller-minted verifier material is not placed in
+`os.environ`. With neither source configured and no durable armed state, the wall
+remains dormant.
 
 Controllers mint markers with:
 

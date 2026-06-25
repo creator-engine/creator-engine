@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -24,6 +25,10 @@ from creator_engine_validator.forge.approval_capability import (
 )
 from creator_engine_validator.secret_identity import (
     FakeSecretIdentityBackend,
+    OpenBaoConfig,
+    OpenBaoRequest,
+    OpenBaoResponse,
+    OpenBaoSecretIdentityBackend,
     SecretRef,
     SecretRequest,
 )
@@ -363,6 +368,44 @@ def _approval_secret_request(ref: SecretRef) -> SecretRequest:
         delivery="file",
         requested_capabilities=("read",),
         audit_context={"purpose": "approval-capability-wall"},
+    )
+
+
+def _openbao_approval_wall_backend(
+    *,
+    ref: SecretRef,
+    secret: str,
+    calls: list[OpenBaoRequest],
+) -> OpenBaoSecretIdentityBackend:
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        secret_path = f"/v1/{ref.mount}/data/{ref.path}"
+        if ref.version is not None:
+            secret_path = f"{secret_path}?version={ref.version}"
+        if request.path == secret_path:
+            return OpenBaoResponse(
+                status=200,
+                json={
+                    "data": {
+                        "data": {ref.field: secret},
+                        "metadata": {"version": ref.version or 1},
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected OpenBao request: {request}")
+
+    return OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+            kv_mount=ref.mount,
+        ),
+        runner=runner,
+        allowed_refs={ref},
     )
 
 
@@ -1225,7 +1268,7 @@ def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
     captured = {}
     backend_secret = "backend-secret"
     env_fallback_secret = "env-fallback-secret"
-    materialized_env = "CE_TEST_APPROVAL_WALL_BACKEND_SECRET"
+    materialized_path = tmp_path / "approval-wall-secret"
     ref = _approval_secret_ref()
     backend_calls: list[str] = []
 
@@ -1240,8 +1283,8 @@ def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
 
         def materialize(self, grant, target_ref: str):
             backend_calls.append("materialize")
-            if target_ref.startswith("env:"):
-                monkeypatch.setenv(target_ref.removeprefix("env:"), backend_secret)
+            path = Path(target_ref.removeprefix("file:"))
+            path.write_text(backend_secret, encoding="utf-8")
             return super().materialize(grant, target_ref)
 
         def revoke(self, grant):
@@ -1282,7 +1325,7 @@ def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
         "--approval-wall-secret-purpose", ref.purpose,
         "--approval-wall-secret-owner-ref", ref.owner_ref,
         "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
-        "--approval-wall-secret-target-ref", f"env:{materialized_env}",
+        "--approval-wall-secret-target-ref", f"file:{materialized_path}",
         "--json",
     ])
 
@@ -1329,25 +1372,194 @@ def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
         head_sha=HEAD,
         approved_by_candidates=(APPROVER,),
     ).reason == "signature_mismatch"
+    assert backend_secret not in os.environ.values()
     assert env_fallback_secret not in capsys.readouterr().out
 
 
-def test_ce_queue_daemon_configured_backend_error_does_not_fall_back_to_env(
+def test_ce_queue_daemon_openbao_configured_verifies_controller_minted_marker(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    captured = {}
+    openbao_secret = "openbao-approval-wall-secret"
+    env_fallback_secret = "env-fallback-secret"
+    materialized_path = tmp_path / "openbao-approval-wall-secret"
+    ref = _approval_secret_ref()
+    openbao_calls: list[OpenBaoRequest] = []
+    backend = _openbao_approval_wall_backend(
+        ref=ref,
+        secret=openbao_secret,
+        calls=openbao_calls,
+    )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", env_fallback_secret)
+
+    def fake_loop(**kwargs):
+        captured.update(kwargs)
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-policy-sha", POLICY_SHA,
+        "--approval-wall-secret-backend", ref.backend,
+        "--approval-wall-secret-mount", ref.mount,
+        "--approval-wall-secret-path", ref.path,
+        "--approval-wall-secret-field", ref.field,
+        "--approval-wall-secret-version", str(ref.version),
+        "--approval-wall-secret-purpose", ref.purpose,
+        "--approval-wall-secret-owner-ref", ref.owner_ref,
+        "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
+        "--approval-wall-secret-target-ref", f"file:{materialized_path}",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert captured["approval_wall"].armed is True
+    assert [call.path for call in openbao_calls] == [
+        "/v1/sys/health",
+        "/v1/sys/audit",
+        f"/v1/{ref.mount}/data/{ref.path}?version={ref.version}",
+    ]
+    assert materialized_path.read_text(encoding="utf-8") == openbao_secret
+
+    marker = issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD,
+            approved_by=APPROVER,
+            issued_at=1_700_000_000,
+            expires_at=1_900_000_000,
+            policy_sha=POLICY_SHA,
+        ),
+        openbao_secret,
+    )
+    assert captured["approval_wall"].verifier.verify(
+        marker,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(APPROVER,),
+    ).valid is True
+
+    env_marker = issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD,
+            approved_by=APPROVER,
+            issued_at=1_700_000_000,
+            expires_at=1_900_000_000,
+            policy_sha=POLICY_SHA,
+        ),
+        env_fallback_secret,
+    )
+    assert captured["approval_wall"].verifier.verify(
+        env_marker,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(APPROVER,),
+    ).reason == "signature_mismatch"
+    assert openbao_secret not in os.environ.values()
+    assert openbao_secret not in capsys.readouterr().out
+
+
+def test_ce_queue_daemon_configured_backend_empty_refuses_without_env_fallback(
     monkeypatch,
     capsys,
     tmp_path: Path,
 ):
     ref = _approval_secret_ref()
-    state_path = tmp_path / "approval-capability-wall" / "state.json"
+    materialized_path = tmp_path / "empty-approval-wall-secret"
 
-    class RefusingBackend(FakeSecretIdentityBackend):
-        def validate_config(self) -> None:
-            raise RuntimeError("backend unavailable")
+    class EmptyMaterializingBackend(FakeSecretIdentityBackend):
+        def materialize(self, grant, target_ref: str):
+            Path(target_ref.removeprefix("file:")).write_text("", encoding="utf-8")
+            return super().materialize(grant, target_ref)
 
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
-    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: RefusingBackend(allowed_refs={ref}))
+    monkeypatch.setattr(
+        v3_cli.secret_identity,
+        "get_backend",
+        lambda key: EmptyMaterializingBackend(allowed_refs={ref}),
+    )
     monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
-    save_approval_wall_state(state_path, ApprovalWallState(armed=True))
+
+    def fake_loop(**_kwargs):
+        raise AssertionError("daemon loop must not run when configured backend returns empty")
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-policy-sha", POLICY_SHA,
+        "--approval-wall-secret-backend", ref.backend,
+        "--approval-wall-secret-mount", ref.mount,
+        "--approval-wall-secret-path", ref.path,
+        "--approval-wall-secret-field", ref.field,
+        "--approval-wall-secret-version", str(ref.version),
+        "--approval-wall-secret-purpose", ref.purpose,
+        "--approval-wall-secret-owner-ref", ref.owner_ref,
+        "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
+        "--approval-wall-secret-target-ref", f"file:{materialized_path}",
+        "--json",
+    ])
+
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "approval wall misconfigured" in err
+    assert "configured_backend_without_secret" in err
+
+
+def test_ce_queue_daemon_configured_backend_unreachable_does_not_fall_back_to_env(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    ref = _approval_secret_ref()
+    materialized_path = tmp_path / "unreachable-approval-wall-secret"
+    openbao_calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        openbao_calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=503, json={"sealed": True})
+        raise AssertionError(f"unexpected OpenBao request after failed health: {request}")
+
+    backend = OpenBaoSecretIdentityBackend(
+        OpenBaoConfig(
+            address="https://bao.example",
+            token_supplier=lambda: "broker-token",
+            kv_mount=ref.mount,
+        ),
+        runner=runner,
+        allowed_refs={ref},
+    )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
 
     def fake_loop(**_kwargs):
         raise AssertionError("daemon loop must not run when configured backend fails closed")
@@ -1369,14 +1581,80 @@ def test_ce_queue_daemon_configured_backend_error_does_not_fall_back_to_env(
         "--approval-wall-secret-purpose", ref.purpose,
         "--approval-wall-secret-owner-ref", ref.owner_ref,
         "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
-        "--approval-wall-secret-target-ref", "env:CE_TEST_APPROVAL_WALL_BACKEND_SECRET",
+        "--approval-wall-secret-target-ref", f"file:{materialized_path}",
         "--json",
     ])
 
     assert ret == 1
     err = capsys.readouterr().err
     assert "approval wall misconfigured" in err
-    assert "armed_state_without_secret" in err
+    assert "configured_backend_without_secret" in err
+    assert [call.path for call in openbao_calls] == ["/v1/sys/health"]
+
+
+def test_ce_queue_daemon_partial_backend_config_refuses_env_fallback(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+
+    def fake_loop(**_kwargs):
+        raise AssertionError("daemon loop must not run with partial backend config")
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-secret-backend", "openbao",
+        "--approval-wall-secret-mount", "ce-kv",
+        "--json",
+    ])
+
+    assert ret == 1
+    assert "configuration is partial" in capsys.readouterr().err
+
+
+def test_ce_queue_daemon_env_target_ref_rejected_as_fork_unsafe(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    ref = _approval_secret_ref()
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
+
+    def fake_loop(**_kwargs):
+        raise AssertionError("daemon loop must not run with env target ref")
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--root", str(tmp_path),
+        "--approval-wall-secret-backend", ref.backend,
+        "--approval-wall-secret-mount", ref.mount,
+        "--approval-wall-secret-path", ref.path,
+        "--approval-wall-secret-field", ref.field,
+        "--approval-wall-secret-version", str(ref.version),
+        "--approval-wall-secret-purpose", ref.purpose,
+        "--approval-wall-secret-owner-ref", ref.owner_ref,
+        "--approval-wall-secret-ref-policy-sha", ref.policy_sha,
+        "--approval-wall-secret-target-ref", "env:CE_TEST_APPROVAL_WALL_BACKEND_SECRET",
+        "--json",
+    ])
+
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "env: targets are fork-unsafe" in err
 
 
 def test_dequeue_merge_queue_disables_auto_and_optionally_drafts():

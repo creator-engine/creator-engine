@@ -1,4 +1,6 @@
 from dataclasses import FrozenInstanceError
+import os
+import stat
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError as JsonSchemaError
@@ -250,6 +252,11 @@ def test_registry_returns_fresh_backend_and_refuses_duplicates():
         get_backend("missing-secret-identity")
 
 
+def test_openbao_backend_registered_in_prod():
+    assert "openbao" in available_backends()
+    assert isinstance(get_backend("openbao"), OpenBaoSecretIdentityBackend)
+
+
 def test_fake_backend_issues_materializes_and_revokes_value_free_grants():
     backend = FakeSecretIdentityBackend(
         identities={
@@ -496,6 +503,69 @@ def test_openbao_adapter_uses_injected_io_and_never_returns_secret_value():
         "/v1/ce-kv/data/forge/github-apps/ce-shared/private-key?version=1",
     ]
     assert all("live-secret-value" not in repr(call) for call in calls)
+
+
+def test_openbao_default_materializer_writes_file_0600_without_env(tmp_path):
+    secret = "live-secret-value"
+    target = tmp_path / "secret.txt"
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if (
+            request.path
+            == "/v1/ce-kv/data/forge/github-apps/ce-shared/private-key?version=1"
+        ):
+            return OpenBaoResponse(
+                status=200,
+                json={
+                    "data": {
+                        "data": {"pem": secret},
+                        "metadata": {"version": 1},
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = _openbao_backend(runner)
+    grant = backend.issue(_secret_request())
+    materialized = backend.materialize(grant, f"file:{target}")
+
+    assert materialized.delivery_ref == f"file:{target}"
+    assert target.read_text(encoding="utf-8") == secret
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert secret not in os.environ.values()
+
+
+def test_openbao_default_materializer_rejects_env_target_before_env_write(tmp_path):
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        if (
+            request.path
+            == "/v1/ce-kv/data/forge/github-apps/ce-shared/private-key?version=1"
+        ):
+            return OpenBaoResponse(
+                status=200,
+                json={
+                    "data": {
+                        "data": {"pem": "live-secret-value"},
+                        "metadata": {"version": 1},
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected request: {request}")
+
+    backend = _openbao_backend(runner)
+    grant = backend.issue(_secret_request())
+
+    with pytest.raises(SecretIdentityRefused, match="file-backed"):
+        backend.materialize(grant, "env:CE_TEST_SECRET")
+    assert os.environ.get("CE_TEST_SECRET") is None
 
 
 @pytest.mark.parametrize(

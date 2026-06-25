@@ -4340,7 +4340,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_daemon.add_argument(
         "--approval-wall-secret-target-ref",
         default=None,
-        help="materialization target ref read after SecretIdentityBackend delivery (supports env:NAME and file:PATH)",
+        help="file materialization target ref read after SecretIdentityBackend delivery (file:PATH or absolute path)",
     )
     p_queue_daemon.add_argument(
         "--approval-wall-secret-repo",
@@ -4547,9 +4547,19 @@ def _approval_wall_secret_identity_supplier_from_args(
     args: argparse.Namespace,
 ) -> approval_capability.SecretSupplier | None:
     backend_key = getattr(args, "approval_wall_secret_backend", None)
-    if not backend_key:
+    configured_fields = (
+        "approval_wall_secret_backend",
+        "approval_wall_secret_mount",
+        "approval_wall_secret_path",
+        "approval_wall_secret_field",
+        "approval_wall_secret_ref_policy_sha",
+        "approval_wall_secret_target_ref",
+        "approval_wall_secret_repo",
+    )
+    if not any(getattr(args, name, None) for name in configured_fields):
         return None
     required = (
+        "approval_wall_secret_backend",
         "approval_wall_secret_mount",
         "approval_wall_secret_path",
         "approval_wall_secret_field",
@@ -4557,10 +4567,19 @@ def _approval_wall_secret_identity_supplier_from_args(
         "approval_wall_secret_target_ref",
     )
     if any(not getattr(args, name, None) for name in required):
-        return None
+        raise integrator_belt.IntegratorBeltError(
+            "approval wall SecretIdentityBackend configuration is partial"
+        )
     repo = getattr(args, "approval_wall_secret_repo", None) or getattr(args, "repo", None)
     if not repo:
-        return None
+        raise integrator_belt.IntegratorBeltError(
+            "approval wall SecretIdentityBackend configuration requires --repo or --approval-wall-secret-repo"
+        )
+    target_ref = getattr(args, "approval_wall_secret_target_ref")
+    if target_ref.startswith("env:"):
+        raise integrator_belt.IntegratorBeltError(
+            "approval wall SecretIdentityBackend target must be file-backed; env: targets are fork-unsafe"
+        )
     secret_ref = secret_identity.SecretRef(
         backend=backend_key,
         mount=getattr(args, "approval_wall_secret_mount"),
@@ -4571,15 +4590,13 @@ def _approval_wall_secret_identity_supplier_from_args(
         owner_ref=getattr(args, "approval_wall_secret_owner_ref", "controller:integrator"),
         policy_sha=getattr(args, "approval_wall_secret_ref_policy_sha"),
     )
-    target_ref = getattr(args, "approval_wall_secret_target_ref")
-    delivery = "env" if target_ref.startswith("env:") else "file"
     request = secret_identity.SecretRequest(
         run_id=getattr(args, "approval_wall_secret_run_id", "approval-wall-daemon"),
         seat_id=getattr(args, "approval_wall_secret_seat_id", "dev-1"),
         repo=repo,
         secret_ref=secret_ref,
         ttl_seconds=getattr(args, "approval_wall_secret_ttl_seconds", 600),
-        delivery=delivery,
+        delivery="file",
         requested_capabilities=("read",),
         audit_context={
             "purpose": "approval-capability-wall",
@@ -4619,9 +4636,7 @@ def _approval_wall_primary_then_env_supplier(
 ) -> approval_capability.SecretSupplier:
     def supply() -> bytes | str | None:
         if primary is not None:
-            value = primary()
-            if value:
-                return value
+            return primary()
         return fallback_env()
 
     return supply
@@ -4636,7 +4651,7 @@ def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capab
             approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
         )
     )
-    return approval_capability.resolve_approval_wall(
+    wall = approval_capability.resolve_approval_wall(
         approval_capability.ApprovalWallConfig(
             secret_supplier=_approval_wall_primary_then_env_supplier(
                 primary=backend_supplier,
@@ -4646,6 +4661,13 @@ def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capab
             policy_sha=getattr(args, "approval_wall_policy_sha", None),
         )
     )
+    if backend_supplier is not None and wall.dormant:
+        return approval_capability.ApprovalWallRuntime(
+            approval_capability.APPROVAL_WALL_MISCONFIGURED,
+            reason="configured_backend_without_secret",
+            state_path=_approval_wall_state_path_from_args(args),
+        )
+    return wall
 
 
 def _cmd_approval_capability(args: argparse.Namespace) -> int:
