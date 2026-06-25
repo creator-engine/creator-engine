@@ -465,6 +465,18 @@ def _build_parser() -> argparse.ArgumentParser:
     wsp.add_argument("--worker-id", default=None, help="optional stable worker id; otherwise derived from value-free inputs")
     wsp.add_argument("--json", action="store_true", dest="json_output")
 
+    wse = worker_sub.add_parser(
+        "scrub-env",
+        help="emit a scrubbed worker environment for a bridge-launched worker",
+    )
+    wse.add_argument("--worker-id", required=True)
+    wse.add_argument("--role", required=True, choices=sorted(worker_spawn.WORKER_ROLES))
+    wse.add_argument("--scope-id", required=True)
+    wse.add_argument("--depth", type=int, required=True)
+    wse.add_argument("--parent-id", default=None)
+    wse.add_argument("--home-path", required=True)
+    wse.add_argument("--json", action="store_true", dest="json_output")
+
     wa = worker_sub.add_parser("allocate", help="start a worker container bound to a live claim under a ratified policy")
     wa.add_argument("--policy", required=True, help="path to the ratified worker-container policy record")
     wa.add_argument("--controller-id", required=True)
@@ -1580,6 +1592,30 @@ def _worker_spawn(args) -> int:
         verb = "planned" if result.plan.dry_run else "spawned"
         print(f"ce worker spawn: {verb} {result.plan.worker_id} ({result.plan.role}/{result.plan.harness})")
         print(f"record: {result.record_path}")
+    return 0
+
+
+def _worker_scrub_env(args) -> int:
+    try:
+        child_env, scrubbed = worker_spawn.scrub_worker_environment(
+            worker_id=args.worker_id,
+            role=args.role,
+            scope_id=args.scope_id,
+            depth=args.depth,
+            parent_id=args.parent_id,
+            home_path=args.home_path,
+        )
+    except worker_spawn.WorkerSpawnError as exc:
+        print(f"ERROR: ce worker scrub-env refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "child_env": child_env,
+        "scrubbed_env_names": list(scrubbed),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"ce worker scrub-env: {len(child_env)} env vars emitted")
     return 0
 
 
@@ -3398,6 +3434,7 @@ _LEDGER_DISPATCH = {
 
 _WORKER_DISPATCH = {
     "spawn": _worker_spawn,
+    "scrub-env": _worker_scrub_env,
     "allocate": _worker_allocate,
     "terminate": _worker_terminate,
     "gc": _worker_gc,
