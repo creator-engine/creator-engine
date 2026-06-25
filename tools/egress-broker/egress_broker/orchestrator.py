@@ -82,6 +82,43 @@ class BrokerResult:
     audit_record: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ContainedSeatSelfPushRequest:
+    """Value-free facts a contained seat may submit for host-side SELF-PUSH.
+
+    The request carries only identity and branch facts. The contained seat does not provide,
+    receive, or influence the push credential; all verification, mint, push, PR, revoke, and
+    audit work remains in the host-side courier path.
+    """
+
+    seat_id: str
+    repo_path: str
+    branch: str
+
+
+def contained_seat_self_push(
+    request: ContainedSeatSelfPushRequest,
+    *,
+    config: BrokerConfig,
+    apply: bool = False,
+    **courier_options,
+) -> BrokerResult:
+    """Facade for ce-ops#242 contained-seat SELF-PUSH over :func:`courier`.
+
+    ``apply=False`` preserves courier's safe default: verify and audit only, with no mint,
+    push, PR, or revocation path. Any extra options are host-owned injected seams used by
+    operators or tests; they are not data supplied by the contained seat.
+    """
+    return courier(
+        request.seat_id,
+        request.repo_path,
+        request.branch,
+        config=config,
+        apply=apply,
+        **courier_options,
+    )
+
+
 # ---------------------------------------------------------------------------
 # The PR step — idempotent open-or-update carrying the gateway attribution
 # ---------------------------------------------------------------------------

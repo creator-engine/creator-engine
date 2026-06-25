@@ -8,6 +8,16 @@ the architecture map: [`docs/architecture/egress-broker.md`](../../docs/architec
 
 > **Forge-egress TCB. Fail-closed: deny on any verification doubt.**
 
+ce-ops#242 **SELF-PUSH** means the contained seat authors and signs locally, then asks the
+host-side broker to publish its own branch. The seat-side request is value-free:
+`ContainedSeatSelfPushRequest(seat_id, repo_path, branch)`. Raw sandbox `git push` remains
+denied, and `gh` is not required or used inside the contained seat.
+
+The host-side courier remains the transport deputy. It verifies the commit facts, obtains a
+repo-scoped short-lived push/PR credential through the OpenBao / `forge.scoped_token` mint
+authority, injects that credential only into trusted host child transports for git/PR work,
+opens or updates the PR, revokes the credential, and writes a value-free audit record.
+
 ## Layout
 
 ```
@@ -44,6 +54,10 @@ Apply (mint → push → open/update the attributed PR → revoke):
 python tools/egress-broker/ce_egress_broker.py ... --apply
 ```
 
+`--apply` is a live host boundary. This branch adds the contained-seat SELF-PUSH facade and
+documentation, but does not perform a live push. The covered path remains deterministic and
+fakeable: tests can inject git/gh/openssl/HTTPS seams and run with no network or real `gh`.
+
 Exit codes: `0` allow, `2` fail-closed refusal, `3` config error. Add `--json` for machine output.
 
 ## Before a live `--apply`
@@ -51,18 +65,37 @@ Exit codes: `0` allow, `2` fail-closed refusal, `3` config error. Add `--json` f
 1. **Host trust store** — the CE dev signing public keys must be in the broker host's gpg
    keyring / ssh `allowed_signers`. Without it every commit verifies `E`/`U` → denied (correctly).
    *This is the root of trust.*
-2. **PEM custody** — each seat's App PEM RAM-only (`/dev/shm/ce-devN/…`), readable by the broker
-   host user, invisible to the agent container. The broker process never reads the PEM — only
-   `openssl` does, at sign time.
-3. **Config** — copy `apps.example.json` to a host-local path; set the real App ids, the
+2. **OpenBao / mint authority** — the App or scoped-token mint authority must live outside the
+   sandbox. The contained seat never holds it.
+3. **Repo-scoped short-lived token** — the live mint must produce only the least-privilege
+   repo credential needed for push + PR (`contents:write` + `pull_requests:write`) with a short
+   TTL and revocation after use.
+4. **Trusted host child transports** — git and PR operations run outside the sandbox with
+   credential env injection into those child processes only. The raw token must never appear in
+   the contained seat env, argv, filesystem, logs, audit, returned result, or other durable
+   record.
+5. **Config** — copy `apps.example.json` to a host-local path; set the real App ids, the
    `authorized_logins` allow-list, and confirm `installation_id` (recorded for dev-2; `null` →
    discovered for dev-4) and the branch namespaces.
 
+## Smoke expectations
+
+The expected ce-ops#242 path is offline and fake-backed:
+
+- deny paths never mint, push, or open a PR;
+- dry-run verifies and audits but mints/pushes nothing;
+- apply-path fakes run `verify → mint → push → open/update PR → revoke` in order;
+- the credential is injected only into trusted host child transports, not the contained seat;
+- audits are append-only and reject token/secret/PEM-shaped material.
+
 ## Safety invariants
 
-- The App **PEM never enters the broker process** (only `openssl dgst -sha256 -sign` reads it).
-- The installation token lives only in the child push/PR env + the in-memory `ScopedToken`
-  (redacted repr) — never the argv, a log, the audit, or disk; it is revoked in a `finally`.
+- The contained seat supplies only `seat_id`, `repo_path`, and `branch`; it receives no forge
+  credential and does not need `gh`.
+- The App or scoped-token mint authority never enters the contained seat.
+- The installation token lives only in trusted host child push/PR env + the in-memory
+  `ScopedToken` (redacted repr) — never the argv, a log, the audit, disk, durable records, or
+  sandbox; it is revoked in a `finally`.
 - The push is **never** a force-push (fast-forward only; the frozen `forge.change_push`).
 - The audit is structurally secret-free and append-only.
 - Defensive only — never offensive (no history rewrite, no detection evasion, no exfiltration).
