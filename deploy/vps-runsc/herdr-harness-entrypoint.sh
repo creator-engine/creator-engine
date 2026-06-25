@@ -1,25 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-fail() {
-  printf 'herdr harness entrypoint refused: %s\n' "$*" >&2
-  exit 66
-}
-
 HERDR_BIN="${HERDR_BIN:-/usr/local/bin/herdr}"
 HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 HERDR_SOCKET_DIR="$(dirname "${HERDR_SOCKET_PATH}")"
 HERDR_WORKSPACE_NAME="${HERDR_WORKSPACE_NAME:-creator-engine}"
 CE_DGX_HARNESS="${CE_DGX_HARNESS:-codex}"
 CE_SEAT_LOG_DIR="${CE_SEAT_LOG_DIR:-/var/log/ce-seat}"
+CE_HERDR_SERVER_LOG="${CE_HERDR_SERVER_LOG:-${CE_SEAT_LOG_DIR}/herdr-server.log}"
 CE_CODEX_STDERR_LOG="${CE_CODEX_STDERR_LOG:-${CE_SEAT_LOG_DIR}/codex-stderr.log}"
+
+log_diagnostic() {
+  local message="$1" log_dir
+
+  printf '%s\n' "${message}" >&2
+  if [ -n "${CE_HERDR_SERVER_LOG:-}" ]; then
+    log_dir="$(dirname "${CE_HERDR_SERVER_LOG}")"
+    if [ -d "${log_dir}" ] && [ -w "${log_dir}" ]; then
+      printf '%s\n' "${message}" >>"${CE_HERDR_SERVER_LOG}" 2>/dev/null || true
+    fi
+  fi
+}
+
+fail() {
+  log_diagnostic "herdr harness entrypoint refused: $*"
+  exit 66
+}
 
 case "${CE_DGX_HARNESS}" in
   codex)
-    harness_bin="/usr/local/bin/codex"
+    harness_bin="${CE_DGX_HARNESS_BIN:-/usr/local/bin/codex}"
     ;;
   claude)
-    harness_bin="/usr/local/bin/claude"
+    harness_bin="${CE_DGX_HARNESS_BIN:-/usr/local/bin/claude}"
     ;;
   *)
     fail "CE_DGX_HARNESS must be codex or claude, got ${CE_DGX_HARNESS}"
@@ -35,6 +48,21 @@ esac
 }
 [ -d "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is missing: ${CE_SEAT_LOG_DIR}"
 [ -w "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is not writable: ${CE_SEAT_LOG_DIR}"
+case "${CE_HERDR_SERVER_LOG}" in
+  /*)
+    ;;
+  *)
+    fail "CE_HERDR_SERVER_LOG must be an absolute path: ${CE_HERDR_SERVER_LOG}"
+    ;;
+esac
+case "${CE_CODEX_STDERR_LOG}" in
+  /*)
+    ;;
+  *)
+    fail "CE_CODEX_STDERR_LOG must be an absolute path: ${CE_CODEX_STDERR_LOG}"
+    ;;
+esac
+: >>"${CE_HERDR_SERVER_LOG}" || fail "herdr server log is not writable: ${CE_HERDR_SERVER_LOG}"
 install -d -m 0700 \
   "${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}" \
   "${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}" \
@@ -49,10 +77,21 @@ cleanup() {
     wait "${herdr_pid}" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT INT TERM
+handle_term() {
+  cleanup
+  exit 143
+}
+handle_int() {
+  cleanup
+  exit 130
+}
+trap cleanup EXIT
+trap handle_int INT
+trap handle_term TERM
 
 rm -f "${HERDR_SOCKET_PATH}"
-HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" server &
+printf 'starting herdr server: socket=%s\n' "${HERDR_SOCKET_PATH}" >>"${CE_HERDR_SERVER_LOG}"
+HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" server >>"${CE_HERDR_SERVER_LOG}" 2>&1 &
 herdr_pid="$!"
 
 for _ in $(seq 1 100); do
@@ -60,7 +99,8 @@ for _ in $(seq 1 100); do
     break
   fi
   if ! kill -0 "${herdr_pid}" 2>/dev/null; then
-    wait "${herdr_pid}" || true
+    server_status=0
+    wait "${herdr_pid}" || server_status="$?"
     fail "herdr server exited before creating socket"
   fi
   sleep 0.05
@@ -118,4 +158,14 @@ herdr_cli pane run "${root_pane_id}" "${quoted_harness}" || {
   fail "could not start governed harness through herdr"
 }
 
-wait "${herdr_pid}"
+server_status=0
+wait "${herdr_pid}" || server_status="$?"
+if [ "${server_status}" -eq 130 ] || [ "${server_status}" -eq 143 ]; then
+  cleanup
+  trap - EXIT INT TERM
+  exit "${server_status}"
+fi
+trap - EXIT INT TERM
+if [ "${server_status}" -ne 0 ]; then
+  fail "herdr server exited with status ${server_status}"
+fi

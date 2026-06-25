@@ -90,6 +90,7 @@ CE_DGX_SEAT_ID="${CE_DGX_SEAT_ID:-${CE_DGX_CONTAINER_NAME}}"
 CE_DGX_SEAT_LOG_DIR="${CE_DGX_SEAT_LOG_DIR:-${HOME:-/home/cedev4}/.ce/logs/seats/${CE_DGX_SEAT_ID}}"
 CE_DGX_CONTAINED_CODEX_CONFIG="${CE_DGX_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-dgx-runsc-codex-config-${CE_DGX_UID}-${CE_DGX_CONTAINER_USER}.toml}"
 CE_DGX_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
+CE_DGX_CONTAINER_HERDR_SERVER_LOG="${CE_DGX_CONTAINER_SEAT_LOG_DIR}/herdr-server.log"
 
 container_term="${TERM:-}"
 if [ -z "${container_term}" ] || [ "${container_term}" = "dumb" ]; then
@@ -253,6 +254,7 @@ docker_cmd=(
   --env "HOME=${CE_DGX_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_DGX_CONTAINER_CODEX_HOME}"
   --env "CE_SEAT_LOG_DIR=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
+  --env "CE_HERDR_SERVER_LOG=${CE_DGX_CONTAINER_HERDR_SERVER_LOG}"
   --env "CE_CODEX_STDERR_LOG=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/codex-stderr.log"
   --env "XDG_CONFIG_HOME=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/xdg/config"
   --env "XDG_STATE_HOME=${CE_DGX_CONTAINER_SEAT_LOG_DIR}/xdg/state"

@@ -120,6 +120,7 @@ def test_codex_dry_run_uses_vps_containment_defaults() -> None:
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=exec" in argv
     assert "CE_SEAT_LOG_DIR=/var/log/ce-seat" in argv
+    assert "CE_HERDR_SERVER_LOG=/var/log/ce-seat/herdr-server.log" in argv
     assert "CE_CODEX_STDERR_LOG=/var/log/ce-seat/codex-stderr.log" in argv
     assert "XDG_CONFIG_HOME=/var/log/ce-seat/xdg/config" in argv
     assert "XDG_STATE_HOME=/var/log/ce-seat/xdg/state" in argv

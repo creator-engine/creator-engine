@@ -112,6 +112,7 @@ CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${C
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
 CE_VPS_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
+CE_VPS_CONTAINER_HERDR_SERVER_LOG="${CE_VPS_CONTAINER_SEAT_LOG_DIR}/herdr-server.log"
 herdr_socket_path="/run/creator-engine/herdr/herdr.sock"
 
 container_term="${TERM:-}"
@@ -282,6 +283,7 @@ docker_cmd=(
   --env "HOME=${CE_VPS_CONTAINER_HOME}"
   --env "CODEX_HOME=${CE_VPS_CONTAINER_CODEX_HOME}"
   --env "CE_SEAT_LOG_DIR=${CE_VPS_CONTAINER_SEAT_LOG_DIR}"
+  --env "CE_HERDR_SERVER_LOG=${CE_VPS_CONTAINER_HERDR_SERVER_LOG}"
   --env "CE_CODEX_STDERR_LOG=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/codex-stderr.log"
   --env "XDG_CONFIG_HOME=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/xdg/config"
   --env "XDG_STATE_HOME=${CE_VPS_CONTAINER_SEAT_LOG_DIR}/xdg/state"
