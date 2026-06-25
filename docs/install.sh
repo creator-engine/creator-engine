@@ -1058,4 +1058,6 @@ fi
 
 say "state file: ${STATE_FILE}"
 say "summary: downloaded=${downloaded} reused=${reused} verified=${verified} installed=${installed} skipped_already_current=${skipped_already_current} failed=${failed}"
+say "next: reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell, so ce/cev3 are available"
+say "note: git is required for first-value and is checked in inventory"
 say "next: prepare ce-install.answers.yaml, then run ${VENV_DIR}/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --answers <file> --plan"

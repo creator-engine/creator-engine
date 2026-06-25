@@ -248,6 +248,8 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
     assert not (install_root / "install.lock").exists()
     assert "installed=1" in first.stderr
     assert f"updated shell profile PATH block: {profile}" in first.stderr
+    assert "reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell" in first.stderr
+    assert "git is required for first-value and is checked in inventory" in first.stderr
 
     second = _run_install(tmp_path, repo_root, site=site, install_root=install_root, answers=answers)
     assert second.returncode == 0, second.stderr

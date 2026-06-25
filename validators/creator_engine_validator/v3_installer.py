@@ -2006,6 +2006,43 @@ def inventory_emission(
     return tuple(rows)
 
 
+def inventory_dependency_rows(
+    backend: str,
+    probe: Mapping[str, bool] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Inventory-only dependency awareness rows for the selected backend.
+
+    This is intentionally softer than :func:`plan_dependencies`: it emits only
+    missing dependency rows, never install/refusal steps. ``--plan`` and
+    ``--apply`` keep using the fail-closed dependency planner.
+    """
+    if backend not in BACKEND_DEPS:
+        raise InstallRefused(
+            f"unknown isolation backend {backend!r}: expected one of "
+            f"{sorted(BACKEND_DEPS)}"
+        )
+    probe = probe or {}
+    rows: list[dict[str, Any]] = []
+    for tool in BACKEND_DEPS[backend]:
+        if bool(probe.get(tool, False)):
+            continue
+        reason = "first-value" if tool == "git" else backend
+        rows.append(
+            {
+                "key": f"dependencies.{tool}",
+                "step": 1,
+                "sensitivity": "plain",
+                "modes": ["D"],
+                "optional": True,
+                "status": f"WARN MISSING (needed for {reason})",
+                "dependency": True,
+                "backend": backend,
+                "tool": tool,
+            }
+        )
+    return tuple(rows)
+
+
 # ---------------------------------------------------------------------------
 # v3.5-E.3 E3-G2 — the GitHub leg, decomposed (PURE planners, injected probes)
 #

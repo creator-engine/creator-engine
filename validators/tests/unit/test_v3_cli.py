@@ -1288,6 +1288,58 @@ def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
     assert rows["cost.profile"]["status"] == "default:default"
 
 
+def test_onboard_inventory_warns_for_missing_selected_backend_dependency(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in ("python", "uv", "claude"),
+    )
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(_answers_file(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    rows = {row["key"]: row for row in payload["inventory"]}
+    assert rows["dependencies.git"]["status"] == "WARN MISSING (needed for first-value)"
+    assert rows["dependencies.git"]["dependency"] is True
+    assert rows["dependencies.git"]["tool"] == "git"
+    assert "dependencies.runsc" not in rows
+    assert "dependencies.proxy" not in rows
+
+
+def test_onboard_inventory_human_output_shows_missing_git_warn(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in ("python", "uv", "claude"),
+    )
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(_answers_file(tmp_path)),
+        "--inventory",
+    ])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "dependencies.git" in out
+    assert "WARN MISSING (needed for first-value)" in out
+    assert "REFUSED" not in out
+
+
 def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, monkeypatch):
     calls = []
 
