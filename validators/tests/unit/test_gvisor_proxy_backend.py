@@ -1,9 +1,9 @@
-"""Unit tests for the v3 G-1.2 gVisor + capability-separation egress-proxy backend.
+"""Unit tests for the v3 G-1.2 gVisor runner backend.
 
 Translate-vs-execute split: the translation is pure and fully tested here; the
 backend's live work goes through an injected fake ``ContainerRunner`` so these
-tests perform ZERO live subprocess. Fixes the in-repo egress stub: a non-empty
-allowlist yields an enforceable deny-by-default proxy config, not a refusal.
+tests perform ZERO live subprocess. Non-empty egress allowlists fail closed
+unless the runner proves a real allowlist enforcement primitive.
 """
 
 import subprocess
@@ -94,17 +94,23 @@ class FakeRunner:
         self._rc = returncode
         self._out = stdout
         self._err = stderr
-        self.calls: list[list[str]] = []
+        self.calls: list[tuple[str, list[str] | None]] = []
 
     def available(self) -> bool:
+        self.calls.append(("available", None))
         return self._available
 
     def egress_enforceable(self) -> bool:
+        self.calls.append(("egress_enforceable", None))
         return self._egress
 
     def run(self, argv, input_text=None) -> subprocess.CompletedProcess:
-        self.calls.append(list(argv))
+        self.calls.append(("run", list(argv)))
         return subprocess.CompletedProcess(list(argv), self._rc, stdout=self._out, stderr=self._err)
+
+    @property
+    def run_calls(self) -> list[list[str]]:
+        return [argv for name, argv in self.calls if name == "run" and argv is not None]
 
 
 def subprocess_runner_with_docker_info(monkeypatch, stdout: str, returncode: int = 0) -> SubprocessContainerRunner:
@@ -228,9 +234,7 @@ def test_translate_empty_allowlist_is_no_egress():
     assert cfg.rules == ()
 
 
-def test_egress_stub_fixed_non_empty_allowlist_is_enforceable_not_refused():
-    # The v2 worker_runtime path REFUSES a non-empty allowlist (no primitive).
-    # The v3 translation yields an enforceable deny-by-default config instead.
+def test_translate_non_empty_allowlist_is_config_not_enforcement_proof():
     cfg = translate_to_egress_proxy_config(valid_policy())
     assert cfg.rules and cfg.deny_by_default is True
 
@@ -277,9 +281,11 @@ def test_provision_rejects_unpinned_image():
 
 
 def test_provision_unavailable_runtime_refuses():
-    backend = backend_with_inputs(FakeRunner(available=False))
+    fake = FakeRunner(available=False)
+    backend = backend_with_inputs(fake)
     with pytest.raises(BackendUnavailable):
         backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-4"))
+    assert fake.calls == [("egress_enforceable", None), ("available", None)]
 
 
 def test_subprocess_runner_unavailable_when_docker_lacks_required_runsc_runtime(monkeypatch):
@@ -335,7 +341,7 @@ def test_subprocess_runner_egress_not_enforceable_without_proxy(monkeypatch):
     assert runner.egress_enforceable() is False
 
 
-def test_subprocess_runner_egress_enforceable_with_proxy_runtime(monkeypatch):
+def test_subprocess_runner_egress_not_enforceable_with_gvproxy_runtime_metadata(monkeypatch):
     runner = subprocess_runner_with_docker_info(
         monkeypatch,
         (
@@ -344,10 +350,10 @@ def test_subprocess_runner_egress_enforceable_with_proxy_runtime(monkeypatch):
         ),
     )
 
-    assert runner.egress_enforceable() is True
+    assert runner.egress_enforceable() is False
 
 
-def test_subprocess_runner_egress_enforceable_with_isolated_policy(monkeypatch):
+def test_subprocess_runner_egress_not_enforceable_with_policy_metadata_only(monkeypatch):
     runner = subprocess_runner_with_docker_info(
         monkeypatch,
         (
@@ -356,7 +362,7 @@ def test_subprocess_runner_egress_enforceable_with_isolated_policy(monkeypatch):
         ),
     )
 
-    assert runner.egress_enforceable() is True
+    assert runner.egress_enforceable() is False
 
 
 @pytest.mark.parametrize(
@@ -382,18 +388,32 @@ def test_provision_missing_docker_runsc_inputs_refuses_before_availability_probe
 
 
 def test_provision_non_empty_egress_without_proxy_refuses():
-    backend = backend_with_inputs(FakeRunner(available=True, egress_enforceable=False))
-    with pytest.raises(EgressNotEnforceable):
+    fake = FakeRunner(available=True, egress_enforceable=False)
+    backend = backend_with_inputs(fake)
+    with pytest.raises(EgressNotEnforceable, match="no allowlist enforcement primitive is proven"):
         backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-5"))
     assert issubclass(EgressNotEnforceable, BackendUnavailable)
+    assert fake.calls == [("egress_enforceable", None)]
+
+
+def test_provision_non_empty_egress_without_primitive_runs_no_command():
+    fake = FakeRunner(available=True, egress_enforceable=False)
+    backend = backend_with_inputs(fake)
+
+    with pytest.raises(EgressNotEnforceable, match="refusing before container start"):
+        backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-no-primitive"))
+
+    assert fake.calls == [("egress_enforceable", None)]
 
 
 def test_provision_empty_egress_without_proxy_is_allowed():
     policy = valid_policy()
     policy["egress_allowlist"] = []
-    backend = backend_with_inputs(FakeRunner(available=True, egress_enforceable=False))
+    fake = FakeRunner(available=True, egress_enforceable=False)
+    backend = backend_with_inputs(fake)
     handle = backend.provision(ProvisionRequest(runtime_policy=policy, run_id="run-6"))
     assert handle.ref.startswith("gvisor:")  # no egress to enforce → provisions fine
+    assert fake.calls == [("available", None)]
 
 
 # ---------------------------------------------------------------------------
@@ -406,9 +426,10 @@ def test_full_lifecycle_through_injected_runner():
     result = backend.run(handle, RunRequest(command=("echo", "hi")))
     assert isinstance(result, RunResult)
     assert result.exit_code == 0 and result.stdout == "hello"
-    assert fake.calls and fake.calls[0][0] == "docker"  # the injected runner saw a Docker argv
-    assert "--runtime=runsc-gvproxy-ptrace" in fake.calls[0]
-    assert fake.calls[0][-2:] == ["echo", "hi"]
+    run_argv = fake.run_calls[0]
+    assert run_argv[0] == "docker"  # the injected runner saw a Docker argv
+    assert "--runtime=runsc-gvproxy-ptrace" in run_argv
+    assert run_argv[-2:] == ["echo", "hi"]
     evidence = backend.collect(handle)
     assert evidence.handle_ref == handle.ref
     teardown = backend.teardown(handle)
