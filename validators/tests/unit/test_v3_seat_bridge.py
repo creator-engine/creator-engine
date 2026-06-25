@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -155,6 +157,62 @@ def test_bridge_module_imports_no_v1_module():
 def test_bridge_is_classified_v3():
     assert ver.classify("v3_seat_bridge") == ver.V3
     assert "v3_seat_bridge" in ver.V3_RUNTIME
+
+
+def test_dispatch_worktree_bridge_reaches_v1_primitives_as_subprocess_data():
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def runner(argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        if list(argv)[1:3] == ["worker", "scrub-env"]:
+            return subprocess.CompletedProcess(
+                list(argv),
+                0,
+                json.dumps({"child_env": {"CE_WORKER_ID": "lane-1"}, "scrubbed_env_names": ["TOKEN"]}),
+                "",
+            )
+        return subprocess.CompletedProcess(list(argv), 0, "ok", "")
+
+    bridge = v3_seat_bridge.SubprocessDispatchWorktreeBridge(
+        runner=runner,
+        validator_exe="/bin/validator",
+        ce_exe="/bin/ce",
+    )
+
+    bridge.allocate_worktree(
+        repo_root=Path("/repo/worktree"),
+        ledger_root=Path("/repo/.hermes/active-work-ledger"),
+        lane_id="lane-1",
+        worktree_path=Path("/tmp/worktrees/lane-1"),
+        envelope_ref="/tmp/brief.md",
+        branch="dispatch/lane-1",
+        controller_id="controller-1",
+        lease_seconds=3600,
+    )
+    env, scrubbed = bridge.scrub_worker_environment(
+        worker_id="lane-1",
+        role="implementer",
+        scope_id="creator-engine/ce-ops:issue:501",
+        depth=1,
+        parent_id="controller-1",
+        home_path=Path("/tmp/worktrees/lane-1/.ce/state/workers/lane-1/home"),
+    )
+    bridge.release_worktree(
+        repo_root=Path("/repo/worktree"),
+        ledger_root=Path("/repo/.hermes/active-work-ledger"),
+        lane_id="lane-1",
+        controller_id="controller-1",
+        release_reason="completed",
+    )
+
+    assert env == {"CE_WORKER_ID": "lane-1"}
+    assert scrubbed == ("TOKEN",)
+    argv = [call[0] for call in calls]
+    assert argv[0][:2] == ["/bin/validator", "pco-allocate"]
+    assert "--repo-root" in argv[0]
+    assert argv[1][:3] == ["/bin/ce", "worker", "scrub-env"]
+    assert "--json" in argv[1]
+    assert argv[2][:2] == ["/bin/validator", "pco-release"]
 
 
 # ---------------------------------------------------------------------------

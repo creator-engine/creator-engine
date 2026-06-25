@@ -43,7 +43,7 @@ from typing import Any, Callable
 
 import yaml
 
-from . import coordination
+from . import coordination, work_claims
 
 DEFAULT_BRIDGE_HARNESS = "claude"
 CODEX_BRIDGE_HARNESS = "codex"
@@ -154,6 +154,182 @@ class SpawnRefused(SeatBridgeError):
 
 class HarnessNotSupported(SeatBridgeError):
     """An unknown bridge harness was requested."""
+
+
+class DispatchWorktreeBridgeError(SeatBridgeError):
+    """The dispatch-worktree bridge refused a v1 subprocess/data leg."""
+
+
+class SubprocessDispatchWorktreeBridge:
+    """Runtime provider for ``dispatch_worktree`` using bridge-safe v1 seams.
+
+    The shared dispatch core injects this provider. PCO and worker environment
+    operations cross to the v1 runtime as subprocess + JSON/stdout data; this
+    class imports no v1 modules.
+    """
+
+    def __init__(
+        self,
+        *,
+        runner: Callable[..., Any] = subprocess.run,
+        gh_runner: work_claims.GhRunner | None = None,
+        validator_exe: str | None = None,
+        ce_exe: str | None = None,
+    ) -> None:
+        self._runner = runner
+        self._gh_runner = gh_runner or work_claims.default_gh_runner
+        self._validator_exe = validator_exe
+        self._ce_exe = ce_exe
+
+    def acquire_work_claim(
+        self,
+        work_key: work_claims.WorkKey,
+        *,
+        holder: str,
+        host: str,
+        reason: str,
+        now: datetime,
+    ) -> work_claims.ClaimResult:
+        return work_claims.acquire(
+            work_key,
+            self._gh_runner,
+            holder=holder,
+            host=host,
+            reason=reason,
+            now=now,
+        )
+
+    def release_work_claim(
+        self,
+        work_key: work_claims.WorkKey,
+        *,
+        holder: str,
+        host: str,
+        claim_id: str,
+        reason: str,
+        now: datetime,
+    ) -> work_claims.ClaimResult:
+        return work_claims.release(
+            work_key,
+            self._gh_runner,
+            holder=holder,
+            host=host,
+            claim_id=claim_id,
+            reason=reason,
+            now=now,
+        )
+
+    def best_effort_release_work_claim(
+        self,
+        work_key: work_claims.WorkKey,
+        claim_id: str | None,
+        *,
+        holder: str,
+        host: str,
+        reason: str,
+        now: datetime,
+    ) -> bool:
+        return work_claims.best_effort_release(
+            work_key,
+            self._gh_runner,
+            claim_id,
+            holder=holder,
+            host=host,
+            reason=reason,
+            now=now,
+        )
+
+    def allocate_worktree(
+        self,
+        *,
+        repo_root: Path,
+        ledger_root: Path,
+        lane_id: str,
+        worktree_path: Path,
+        envelope_ref: str,
+        branch: str,
+        controller_id: str,
+        lease_seconds: int,
+    ) -> None:
+        argv = [
+            _resolve_validator_exe(self._validator_exe),
+            "pco-allocate",
+            "--lane-id", lane_id,
+            "--worktree-path", str(worktree_path),
+            "--branch", branch,
+            "--envelope-ref", envelope_ref,
+            "--controller-id", controller_id,
+            "--ledger-root", str(ledger_root),
+            "--repo-root", str(repo_root),
+            "--lease-seconds", str(lease_seconds),
+            "--pane-label", "implementer",
+        ]
+        completed = self._runner(argv, capture_output=True, text=True)
+        if getattr(completed, "returncode", 1) != 0:
+            reason = (getattr(completed, "stderr", "") or "").strip() or "(no stderr)"
+            raise DispatchWorktreeBridgeError(f"pco-allocate refused: {reason}")
+
+    def release_worktree(
+        self,
+        *,
+        repo_root: Path,
+        ledger_root: Path,
+        lane_id: str,
+        controller_id: str,
+        release_reason: str,
+    ) -> None:
+        argv = [
+            _resolve_validator_exe(self._validator_exe),
+            "pco-release",
+            "--lane-id", lane_id,
+            "--controller-id", controller_id,
+            "--ledger-root", str(ledger_root),
+            "--repo-root", str(repo_root),
+            "--release-reason", release_reason,
+        ]
+        completed = self._runner(argv, capture_output=True, text=True)
+        if getattr(completed, "returncode", 1) != 0:
+            reason = (getattr(completed, "stderr", "") or "").strip() or "(no stderr)"
+            raise DispatchWorktreeBridgeError(f"pco-release refused: {reason}")
+
+    def scrub_worker_environment(
+        self,
+        *,
+        worker_id: str,
+        role: str,
+        scope_id: str,
+        depth: int,
+        parent_id: str | None,
+        home_path: Path,
+    ) -> tuple[dict[str, str], tuple[str, ...]]:
+        argv = [
+            _resolve_ce_exe(self._ce_exe),
+            "worker",
+            "scrub-env",
+            "--worker-id", worker_id,
+            "--role", role,
+            "--scope-id", scope_id,
+            "--depth", str(depth),
+            "--home-path", str(home_path),
+            "--json",
+        ]
+        if parent_id:
+            argv.extend(["--parent-id", parent_id])
+        completed = self._runner(argv, capture_output=True, text=True)
+        if getattr(completed, "returncode", 1) != 0:
+            reason = (getattr(completed, "stderr", "") or "").strip() or "(no stderr)"
+            raise DispatchWorktreeBridgeError(f"ce worker scrub-env refused: {reason}")
+        try:
+            payload = json.loads(getattr(completed, "stdout", "") or "")
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise DispatchWorktreeBridgeError(
+                f"ce worker scrub-env produced unparsable JSON: {exc}"
+            ) from exc
+        child_env = payload.get("child_env")
+        scrubbed = payload.get("scrubbed_env_names", ())
+        if not isinstance(child_env, dict):
+            raise DispatchWorktreeBridgeError("ce worker scrub-env returned no child_env object")
+        return {str(k): str(v) for k, v in child_env.items()}, tuple(str(v) for v in scrubbed)
 
 
 def get_harness_bridge(harness: str) -> HarnessBridge:
