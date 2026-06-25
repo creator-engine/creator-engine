@@ -1,0 +1,229 @@
+{
+  "metadata": {
+    "schema_version": "1.0",
+    "source": "ce-ops#244 follow-up grounded in ce-ops#163 and Spec 005 sections d.2/f",
+    "status": "draft-preview-only",
+    "ratification_status": "not ratified for live bootstrap injection",
+    "preview_warning": "Preview-only output from scripts/gen-controller-bootstrap.py. Do not install into live CLAUDE.md, AGENTS.md, or .claude/agents without a separate ratified injection step."
+  },
+  "canonical_roles": {
+    "architect_research": {
+      "aliases": [
+        "explorer",
+        "architect",
+        "research"
+      ],
+      "purpose": [
+        "Research, repository orientation, option analysis, reproduction planning, and plan drafting."
+      ],
+      "allowed_work": [
+        "Read specs, plans, source, logs, and issue context.",
+        "Map dependencies, risks, options, and implementation boundaries.",
+        "Recommend work decomposition and evidence plans."
+      ],
+      "disallowed_work": [
+        "Do not write tracked source.",
+        "Do not receive source-host write credentials.",
+        "Do not silently escalate into implementation."
+      ],
+      "claude_tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "mount_default": [
+        "Read-only allocated worktree, tmpfs scratch, and read-only governance tree."
+      ],
+      "egress_default": [
+        "Model-provider hosts, ratified documentation or web allowlist, and source-host read API."
+      ],
+      "credential_default": [
+        "Model-provider key by name only; no write tokens, no SSH key, and no controller-key."
+      ],
+      "boundaries": [
+        "May inspect attacker-controlled inputs only from a read-only lane.",
+        "May recommend implementation tasks but must not perform them.",
+        "Must not receive source-host write credentials."
+      ],
+      "evidence": [
+        "Summarize context read, risks found, and recommended implementation or verification handoff."
+      ],
+      "spec005_grounding": "Spec 005 section d.2 canonical role with section f default-deny safety floor."
+    },
+    "implementer": {
+      "aliases": [
+        "builder",
+        "code_writer"
+      ],
+      "purpose": [
+        "Make scoped source changes in exactly one allocated worktree and produce local evidence for review."
+      ],
+      "allowed_work": [
+        "Edit only delegated files and paths.",
+        "Run focused tests and formatters needed for authored changes.",
+        "Prepare implementation notes and evidence for a non-author review."
+      ],
+      "disallowed_work": [
+        "Do not edit outside the delegated envelope.",
+        "Do not touch governance, schemas, validators, or role files unless explicitly assigned.",
+        "Do not self-review, self-merge, or broaden credentials."
+      ],
+      "claude_tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash",
+        "Edit",
+        "Write"
+      ],
+      "mount_default": [
+        "Read-write on exactly one allocated worktree, tmpfs scratch, and read-only governance tree."
+      ],
+      "egress_default": [
+        "Model-provider hosts, ratified dependency-registry allowlist, and source-host write API for the one branch granted by a per-task token."
+      ],
+      "credential_default": [
+        "Model-provider key by name and per-task scoped PAT or GitHub App token with claim-lifetime TTL; no SSH key and no controller-key."
+      ],
+      "boundaries": [
+        "May edit only paths granted by the task and worktree lease.",
+        "Must not touch governance, schemas, validators, or role files unless explicitly assigned.",
+        "Must not self-review, self-merge, or broaden credentials."
+      ],
+      "evidence": [
+        "List files changed, commands run, and any residual risks or skipped checks."
+      ],
+      "spec005_grounding": "Spec 005 section d.2 canonical role with section f default-deny safety floor."
+    },
+    "verification": {
+      "aliases": [
+        "verifier",
+        "tester",
+        "reviewer",
+        "code_review"
+      ],
+      "purpose": [
+        "Run checks, reproduce failures, review evidence, and collect acceptance or rejection findings from a read-only source mount plus writable build-output scratch."
+      ],
+      "allowed_work": [
+        "Perform non-author review and acceptance grading.",
+        "Run validation, replay checks, inspect CI logs, and collect artifacts.",
+        "Request changes with file and evidence references."
+      ],
+      "disallowed_work": [
+        "Do not edit tracked source.",
+        "Do not receive model-provider, SSH, source-host write, or controller-key credentials by default.",
+        "Do not merge work that the same worker reviewed."
+      ],
+      "claude_tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash"
+      ],
+      "mount_default": [
+        "Read-only allocated worktree, tmpfs scratch, read-only governance tree, and writable build-output tmpfs."
+      ],
+      "egress_default": [
+        "None by default; dependency-registry-only allowlist only when ratified because offline-cached dependencies are not viable."
+      ],
+      "credential_default": [
+        "None by default. Tests should not require internet or model-provider credentials."
+      ],
+      "boundaries": [
+        "May run validation and collect artifacts but must not edit tracked source.",
+        "Must prefer offline-cached dependencies and fail closed on missing network grants.",
+        "Must not receive model-provider, SSH, source-host write, or controller-key credentials."
+      ],
+      "evidence": [
+        "Report findings first when reviewing, then commands run, artifacts inspected, and any test gaps."
+      ],
+      "spec005_grounding": "Spec 005 section d.2 canonical role with section f default-deny safety floor."
+    }
+  },
+  "schema_roles": {
+    "reviewer": {
+      "frontmatter_name": "reviewer",
+      "aliases": [
+        "review",
+        "code_review",
+        "acceptance_review"
+      ],
+      "maps_to": "verification",
+      "description": "Harness-facing non-author review specialization. It may be named reviewer in generated files, but its canonical Spec 005 role is verification.",
+      "canonical_role_statement": "Reviewer is not a fourth canonical Spec 005 role; it is a schema and harness review role mapped to canonical `verification`."
+    }
+  },
+  "foreman_directive": [
+    "Controllers operate as foremen: plan, dispatch, monitor, triage, and route work.",
+    "Substantive code-writing, tracked source mutation, feature construction, full PR review, reproduction, and verification are delegated to governed workers.",
+    "Author and reviewer separation is mandatory; the worker that authored a change must not supply the non-author review verdict for that same change.",
+    "Generated bootstrap artifacts remain preview-only until a separate ratified step installs them.",
+    "Controllers respect worktree ownership, do not revert other workers' edits, and do not touch files outside the delegated scope."
+  ],
+  "safety_floor": [
+    "Mounts default to read-only; any read-write mount requires explicit per-path declaration and justification.",
+    "Host home directories are never mounted, including SSH, GPG, cloud, GitHub CLI, Claude, Codex, browser, shell rc, and shell history material.",
+    "Credentials are withheld by default; only named, scoped, time-bounded credentials may be injected by the host-side broker.",
+    "The Slice 2.5 controller-key private key is never injected into a worker, and workers do not sign leases.",
+    "Docker, Podman, and equivalent container-engine sockets are never mounted into worker containers.",
+    "Network egress is role-specific and enforced before model or tool network I/O.",
+    "Secret values never appear in generated records, logs, manifests, bootstrap text, or preview output."
+  ],
+  "vocabulary_mapping": {
+    "codex explorer": "canonical architect_research",
+    "codex implementer": "canonical implementer",
+    "codex reviewer": "schema role reviewer mapped to canonical verification",
+    "claude architect_research": "canonical architect_research",
+    "claude implementer": "canonical implementer",
+    "claude verification": "canonical verification",
+    "claude reviewer": "schema role reviewer mapped to canonical verification",
+    "spec005 architect/research": "canonical architect_research",
+    "spec005 verifier": "canonical verification"
+  },
+  "worker_selection_policy": [
+    "Problem framing, spec reading, dependency research, reproduction planning, and branch reconnaissance default to architect_research.",
+    "Scoped implementation, tracked source edits, fixture updates, docs edits under ownership, and focused tests for authored changes default to implementer.",
+    "Read-only PR review, acceptance grading, test replay, CI log review, and evidence validation default to verification; harnesses may call the review specialization reviewer.",
+    "Mixed build plus review work is split between implementer and verification so author and reviewer remain distinct.",
+    "High-risk unclear work starts with architect_research and escalates only after scope and acceptance criteria are concrete.",
+    "Choose the least-authority role that can complete the task and require explicit controller dispatch for any role escalation."
+  ],
+  "harness_outputs": {
+    "codex": {
+      "metadata": {
+        "description": "Codex controller preview output with AGENTS.md foreman doctrine and vocabulary mapping."
+      },
+      "files": [
+        "codex/AGENTS.md"
+      ]
+    },
+    "claude": {
+      "metadata": {
+        "description": "Claude-Code controller preview outputs with CLAUDE.md, launcher charter, and generated agent role definitions."
+      },
+      "files": [
+        "claude/CLAUDE.md",
+        "claude/LAUNCHER_CHARTER.md",
+        "claude/.claude/agents/architect_research.md",
+        "claude/.claude/agents/implementer.md",
+        "claude/.claude/agents/verification.md",
+        "claude/.claude/agents/reviewer.md"
+      ],
+      "reviewer_output_metadata": {
+        "path": "claude/.claude/agents/reviewer.md",
+        "frontmatter_name": "reviewer",
+        "canonical_role": "verification",
+        "mapping": "reviewer is a schema/harness review specialization mapped to canonical verification"
+      }
+    }
+  },
+  "acceptance_safety_notes": [
+    "Preview generation must not touch live CLAUDE.md, AGENTS.md, or .claude/agents.",
+    "Generated artifacts must contain visible preview-only warnings.",
+    "Generated artifacts must preserve architect_research, implementer, and verification as the only canonical Spec 005 roles.",
+    "Generated reviewer files may use reviewer as a harness-facing name only while stating canonical verification."
+  ]
+}
