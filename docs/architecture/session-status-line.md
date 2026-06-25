@@ -6,7 +6,7 @@ Companions: [`pilot-uiux-model.md`](./pilot-uiux-model.md) (the surface),
 [`stage-vocabulary.md`](./stage-vocabulary.md) (the stage skin),
 [`../contracts/spend-envelope.md`](../contracts/spend-envelope.md) (the G-5 spend
 projection), and GH #157 (the context meter). Execution status:
-[`../v3-roadmap.md`](../v3-roadmap.md).*
+the project README's **Current Status** section.*
 
 ## What this is
 

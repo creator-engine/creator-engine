@@ -1,6 +1,6 @@
 # CE v3 — Pilot Deployment & Transport Selection
 
-*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate. Execution status lives in the project README's **Current Status** section.*
 
 ## Transport-selection matrix (the drive/observe channel, per scenario)
 The decisive axis is **auth/billing × ToS, NOT vendor.** Authority is ALWAYS CE's external gate regardless of transport.

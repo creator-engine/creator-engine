@@ -7,9 +7,8 @@ evidence capture, independent review, and human-ratified privileged gates.
 
 The current direction is v3.5: make CE usable by solo and small teams while
 moving toward the "every agent contained" security posture for the NVIDIA pitch
-arc. The forward plan lives in
-[`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md). The historical v3 gate map is
-kept in [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
+arc. Public, user-facing status lives in the **Current Status** section below
+and on the docs site.
 
 ## Current Status
 
@@ -285,12 +284,10 @@ CI also enforces per-PR path-manifest fidelity. New PRs should include a carrier
 under `.ce/pr-manifests/<branch-slug>.md` whose path list exactly matches
 `base..HEAD`.
 
-## Roadmaps and Canonical Docs
+## Canonical Docs
 
-- Forward v3.5 program plan:
-  [`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md).
-- Historical v3 gate map:
-  [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
+- Current execution status: the **Current Status** section above and the docs
+  site. (Internal program roadmaps are tracked privately.)
 - Architecture index:
   [`docs/architecture/README.md`](./docs/architecture/README.md).
 - Approval-capability wall:
