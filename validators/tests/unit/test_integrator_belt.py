@@ -345,6 +345,17 @@ def _approval_verifier(*, now: int = ISSUED_AT + 1) -> ApprovalCapabilityVerifie
     )
 
 
+def _approval_wall(*, now: int = ISSUED_AT + 1):
+    return resolve_approval_wall(
+        ApprovalWallConfig(
+            secret_supplier=lambda: APPROVAL_SECRET,
+            state_path=None,
+            now=lambda: now,
+            policy_sha=POLICY_SHA,
+        )
+    )
+
+
 def _approval_secret_ref() -> SecretRef:
     return SecretRef(
         backend="openbao",
@@ -779,6 +790,226 @@ def test_daemon_skips_raw_approval_without_capability_fail_closed():
     assert result.enqueue_count == 0
     assert result.skip_count == 1
     assert result.decisions[0].reason == "approval_capability_missing"
+    assert gh.merge_calls == []
+
+
+def test_daemon_mints_missing_approval_capability_for_trusted_authorized_reviewer():
+    pr = _daemon_pr(body="Controller approval wall\n", changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issued: list[tuple[belt.DaemonPullRequest, belt.DaemonApprovalWitness]] = []
+    updates: list[str] = []
+
+    def issuer(candidate, witness):
+        issued.append((candidate, witness))
+        return _approval_marker(
+            repo=candidate.repo,
+            pr_number=candidate.pr_number,
+            head_sha=candidate.head_sha,
+            approved_by=witness.reviewer_login,
+        )
+
+    def updater(candidate, body):
+        assert candidate is pr
+        updates.append(body)
+        return subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr="")
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=issuer,
+        pr_body_updater=updater,
+    )
+
+    assert result.enqueue_count == 0
+    assert result.defer_count == 1
+    assert result.decisions[0].reason == "approval_capability_minted"
+    assert len(issued) == 1
+    assert issued[0][1].reviewer_login == AUTHORIZED_REVIEWER
+    assert len(updates) == 1
+    marker = extract_approval_capability_marker(updates[0])
+    assert marker is not None
+    verification = _approval_verifier().verify(
+        marker,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(AUTHORIZED_REVIEWER,),
+    )
+    assert verification.valid is True
+    assert gh.merge_calls == []
+
+
+def test_daemon_following_pass_with_minted_marker_enqueues_normally():
+    marker = _approval_marker(approved_by=AUTHORIZED_REVIEWER)
+    pr = _daemon_pr(body=f"Controller approval wall\n\n{marker}\n", changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or marker,
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 1
+    assert result.decisions[0].reason == "eligible_enqueued"
+    assert issuer_calls == []
+    assert updates == []
+    assert gh.merge_calls == [[
+        "gh",
+        "pr",
+        "merge",
+        str(PR),
+        "--repo",
+        REPO,
+        "--auto",
+        "--match-head-commit",
+        HEAD,
+    ]]
+
+
+def test_daemon_missing_capability_without_issuer_remains_fail_closed_before_settle():
+    pr = _daemon_pr(body="Controller approval wall\n", changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_missing"
+    assert updates == []
+    assert gh.calls == []
+
+
+def test_daemon_mint_issuer_backend_unavailable_leaves_body_unchanged():
+    pr = _daemon_pr(body="Controller approval wall\n", changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    updates: list[str] = []
+
+    def issuer(_candidate, _witness):
+        raise belt.IntegratorBeltError("approval wall secret is unavailable")
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=issuer,
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_mint_failed"
+    assert "error=approval wall secret is unavailable" in result.decisions[0].evidence
+    assert updates == []
+    assert gh.merge_calls == []
+
+
+def test_daemon_invalid_existing_capability_does_not_mint_or_update():
+    wrong_secret_marker = issue_approval_capability(
+        ApprovalCapabilityClaims(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD,
+            approved_by=AUTHORIZED_REVIEWER,
+            issued_at=ISSUED_AT,
+            expires_at=EXPIRES_AT,
+            policy_sha=POLICY_SHA,
+        ),
+        b"wrong-secret",
+    )
+    pr = _daemon_pr(body=_body_with_approval(wrong_secret_marker), changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or _approval_marker(),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_invalid"
+    assert "approval_capability_reason=signature_mismatch" in result.decisions[0].evidence
+    assert issuer_calls == []
+    assert updates == []
+    assert gh.calls == []
+
+
+def test_daemon_unauthorized_reviewer_does_not_mint_missing_capability():
+    pr = _daemon_pr(
+        body="Controller approval wall\n",
+        changed_paths=(CARRIER, "docs/a.md"),
+        approving_reviewers=("unvetted-reviewer",),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="unvetted-reviewer",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-unvetted",
+            ),
+        ),
+    )
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or _approval_marker(),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_reviewer_unauthorized"
+    assert issuer_calls == []
+    assert updates == []
     assert gh.merge_calls == []
 
 

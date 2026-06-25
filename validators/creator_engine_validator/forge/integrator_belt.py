@@ -32,6 +32,7 @@ from .approval_capability import (
     APPROVAL_WALL_MISCONFIGURED,
     ApprovalCapabilityVerifier,
     ApprovalWallRuntime,
+    MARKER_PREFIX,
     extract_approval_capability_marker,
 )
 from .auto_merge import enable_auto_merge
@@ -207,6 +208,10 @@ class DaemonPullRequest:
             "is_draft": self.is_draft,
             "approval_witnesses": [witness.to_dict() for witness in self.approval_witnesses],
         }
+
+
+ApprovalMarkerIssuer = Callable[[DaemonPullRequest, DaemonApprovalWitness], str]
+PrBodyUpdater = Callable[[DaemonPullRequest, str], subprocess.CompletedProcess]
 
 
 @dataclass(frozen=True)
@@ -538,6 +543,8 @@ def run_daemon_loop(
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
     authorized_reviewers: Sequence[str] | None = None,
+    approval_marker_issuer: ApprovalMarkerIssuer | None = None,
+    pr_body_updater: PrBodyUpdater | None = None,
 ) -> DaemonLoopResult:
     """Run the supervised autonomous merge daemon.
 
@@ -570,6 +577,8 @@ def run_daemon_loop(
                 sleep=sleep,
                 approval_settle_seen=approval_settle_seen,
                 authorized_reviewers=authorized_reviewers,
+                approval_marker_issuer=approval_marker_issuer,
+                pr_body_updater=pr_body_updater,
             )
         except SearchApiRateLimited as exc:
             _log(
@@ -614,6 +623,8 @@ def run_daemon_pass(
     sleep: Callable[[float], None] = time.sleep,
     approval_settle_seen: set[str] | None = None,
     authorized_reviewers: Sequence[str] | None = None,
+    approval_marker_issuer: ApprovalMarkerIssuer | None = None,
+    pr_body_updater: PrBodyUpdater | None = None,
 ) -> DaemonPassResult:
     """Discover, evaluate, sequence, and enqueue eligible PRs for merge queue."""
 
@@ -640,6 +651,19 @@ def run_daemon_pass(
             approval_verifier=approval_verifier,
             approval_wall=approval_wall,
         )
+        mint_needed = _approval_marker_mint_needed(
+            gate,
+            approval_verifier,
+            approval_wall,
+            approval_marker_issuer,
+        )
+        if mint_needed:
+            non_wall_gate = _daemon_non_wall_gate(pr)
+            if non_wall_gate.refusal_reason is not None:
+                gate = non_wall_gate
+                mint_needed = False
+            else:
+                gate = DaemonGateEvaluation(None, non_wall_gate.evidence)
         if gate.refusal_reason is not None:
             _clear_approval_settle_for_pr(settle_seen, pr)
             decision = _decision(pr, "skip", gate.refusal_reason, evidence=gate.evidence)
@@ -707,6 +731,22 @@ def run_daemon_pass(
             continue
         selected_paths[f"{pr.repo}#{pr.pr_number}"] = set(path_set)
         if dry_run:
+            if mint_needed:
+                decision = _decision(
+                    pr,
+                    "defer",
+                    "approval_capability_mint_dry_run",
+                    path_set=path_set,
+                    path_set_source=path_source,
+                    evidence=(
+                        *gate.evidence,
+                        "dry_run=true",
+                        f"reviewer={approval_witness.reviewer_login}",
+                    ),
+                )
+                decisions.append(decision)
+                _log_daemon_decision(log_sink, decision)
+                continue
             decision = _decision(
                 pr,
                 "enqueue",
@@ -729,6 +769,25 @@ def run_daemon_pass(
                 path_set=path_set,
                 path_set_source=path_source,
                 evidence=reverify_evidence,
+            )
+            decisions.append(decision)
+            _log_daemon_decision(log_sink, decision)
+            continue
+        if mint_needed:
+            minted, mint_reason, mint_evidence = _mint_approval_marker_before_enqueue(
+                pr,
+                runner,
+                approval_witness,
+                issuer=approval_marker_issuer,
+                body_updater=pr_body_updater,
+            )
+            decision = _decision(
+                pr,
+                "defer" if minted else "skip",
+                mint_reason,
+                path_set=path_set,
+                path_set_source=path_source,
+                evidence=(*gate.evidence, *reverify_evidence, *mint_evidence),
             )
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
@@ -994,7 +1053,10 @@ def _daemon_gate_evaluation(
     if not pr.approval_capability_marker:
         return DaemonGateEvaluation("approval_capability_missing")
     if verifier is None:
-        return DaemonGateEvaluation("approval_capability_invalid")
+        return DaemonGateEvaluation(
+            "approval_capability_invalid",
+            ("approval_capability_reason=verifier_unavailable",),
+        )
     capability = verifier.verify(
         pr.approval_capability_marker,
         repo=pr.repo,
@@ -1003,7 +1065,10 @@ def _daemon_gate_evaluation(
         approved_by_candidates=pr.approving_reviewers,
     )
     if not capability.valid:
-        return DaemonGateEvaluation("approval_capability_invalid")
+        return DaemonGateEvaluation(
+            "approval_capability_invalid",
+            (f"approval_capability_reason={capability.reason}",),
+        )
     return _daemon_non_wall_gate(pr)
 
 
@@ -1173,6 +1238,120 @@ def _enqueue_merge_queue(pr: DaemonPullRequest, runner: GhRunner) -> subprocess.
             pr.head_sha,
         ],
         None,
+    )
+
+
+def _approval_marker_mint_needed(
+    gate: DaemonGateEvaluation,
+    approval_verifier: ApprovalCapabilityVerifier | None,
+    approval_wall: ApprovalWallRuntime | None,
+    approval_marker_issuer: ApprovalMarkerIssuer | None,
+) -> bool:
+    if gate.refusal_reason != "approval_capability_missing":
+        return False
+    if approval_marker_issuer is None:
+        return False
+    if approval_wall is not None:
+        return approval_wall.status == APPROVAL_WALL_ARMED
+    return approval_verifier is not None
+
+
+def _mint_approval_marker_before_enqueue(
+    pr: DaemonPullRequest,
+    runner: GhRunner,
+    witness: DaemonApprovalWitness,
+    *,
+    issuer: ApprovalMarkerIssuer | None,
+    body_updater: PrBodyUpdater | None = None,
+) -> tuple[bool, str, tuple[str, ...]]:
+    if issuer is None:
+        return (
+            False,
+            "approval_capability_issuer_unavailable",
+            (f"reviewer={witness.reviewer_login}",),
+        )
+    try:
+        marker = issuer(pr, witness)
+    except Exception as exc:
+        return (
+            False,
+            "approval_capability_mint_failed",
+            (
+                f"reviewer={witness.reviewer_login}",
+                f"error={redact_gh_stderr(str(exc))}",
+            ),
+        )
+    normalized = extract_approval_capability_marker(marker)
+    if normalized is None:
+        return (
+            False,
+            "approval_capability_mint_failed",
+            (f"reviewer={witness.reviewer_login}", "error=issuer_returned_invalid_marker"),
+        )
+    updated_body = _upsert_approval_capability_marker(pr.body, normalized)
+    updater = body_updater or (lambda candidate, body: _update_pr_body(candidate, body, runner))
+    try:
+        update = updater(pr, updated_body)
+    except Exception as exc:
+        return (
+            False,
+            "approval_capability_body_update_failed",
+            (
+                f"reviewer={witness.reviewer_login}",
+                f"error={redact_gh_stderr(str(exc))}",
+            ),
+        )
+    if update.returncode != 0:
+        return (
+            False,
+            "approval_capability_body_update_failed",
+            (
+                f"reviewer={witness.reviewer_login}",
+                f"returncode={update.returncode}",
+                f"stderr={redact_gh_stderr(update.stderr or '')}",
+            ),
+        )
+    return (
+        True,
+        "approval_capability_minted",
+        (
+            f"reviewer={witness.reviewer_login}",
+            "approval_capability_marker_upserted=true",
+            f"returncode={update.returncode}",
+        ),
+    )
+
+
+def _upsert_approval_capability_marker(body: str | None, marker: str) -> str:
+    normalized = extract_approval_capability_marker(marker)
+    if normalized is None:
+        raise IntegratorBeltError("approval capability marker is malformed")
+    kept = [
+        line
+        for line in (body or "").splitlines()
+        if not line.strip().startswith(MARKER_PREFIX)
+    ]
+    while kept and kept[-1] == "":
+        kept.pop()
+    if kept:
+        return "\n".join((*kept, "", normalized)) + "\n"
+    return f"{normalized}\n"
+
+
+def _update_pr_body(
+    pr: DaemonPullRequest, body: str, runner: GhRunner
+) -> subprocess.CompletedProcess:
+    return runner(
+        [
+            "gh",
+            "api",
+            "-X",
+            "PATCH",
+            f"/repos/{pr.repo}/pulls/{pr.pr_number}",
+            "--input",
+            "-",
+        ],
+        json.dumps({"body": body}, sort_keys=True),
     )
 
 

@@ -16,11 +16,14 @@ ce-approval-capability: v1.<payload-b64>.<signature>
 The signed payload is value-only and binds the authorization to one exact merge
 candidate: `repo`, `pr_number`, `head_sha`, `approved_by`, `issued_at`,
 `expires_at`, and `policy_sha`. The signature is produced with a controller-only
-capability secret. Production minting should use the existing credential spine:
+capability secret. Production minting uses the existing credential spine:
 `SecretIdentityBackend` backed by OpenBao, with the live secret exposed only to a
-trusted controller/integrator mint or verify process. Forks and contained seats
-may still submit GitHub reviews, but they cannot mint a valid marker because they
-do not receive that controller-only capability.
+trusted controller/integrator mint or verify process. The canonical SecretRef is
+backend `openbao`, mount `ce-kv`, path `forge/approval-capability/wall`, field
+`signing_secret`, purpose `approval-capability-wall`, and owner-ref
+`controller:integrator`. Forks and contained seats may still submit GitHub
+reviews, but they cannot mint a valid wall-capable marker because they do not
+receive that controller-only capability.
 
 The wall is enforce-when-armed:
 
@@ -47,6 +50,16 @@ When armed, the integrator verifies in this order:
 6. Only then do mergeability, changed-file completeness, governance checks,
    test checks, carrier validity, path overlap, and merge-queue enqueue run.
 
+ce-ops#247 adds controller/integrator-only mint-on-approval on the same path.
+If the armed wall refuses only because the marker is missing, and a trusted
+controller/integrator issuer is available, the daemon may mint a marker before
+enqueue. That mint is permitted only after current-head approval, approval
+settle, authorized-reviewer matching, path manifest gating, and live approval
+reverify all pass. The marker is written into the PR body as public metadata and
+the daemon defers; the armed verifier must verify that PR-body marker on a later
+pass before enqueue is eligible. Contained seats never receive the OpenBao wall
+secret and do not mint wall-capable approvals.
+
 Durable records and logs must remain value-free. They may record that a marker
 was present and may record public claims or failure reasons, but they must never
 persist the verifier secret or any live credential. The capability text itself is
@@ -55,24 +68,36 @@ controller-side signature key.
 
 The daemon's primary production secret source is a configured
 `SecretIdentityBackend`/OpenBao supplier. `ce queue-daemon` builds a regular
-`SecretRequest` from the approval-wall SecretRef flags, materializes it to
-`--approval-wall-secret-target-ref`, and reads the materialized value through the
-injected reader used by
-`approval_wall_secret_supplier_from_secret_identity_backend`. The bootstrap
-secret source, `CE_APPROVAL_CAPABILITY_SECRET`, remains available only as a
-fallback when no SecretIdentityBackend supplier is configured. If backend flags
-are present, partial configuration, `env:` target refs, backend refusal, or an
-empty/falsy materialized value are treated as misconfiguration and the daemon
-fails closed instead of consulting the env fallback. Backend delivery must be
-file-backed so controller-minted verifier material is not placed in
-`os.environ`. With neither source configured and no durable armed state, the wall
-remains dormant.
+`SecretRequest` from the approval-wall SecretRef flags, materializes it to a
+file-backed target, and reads the materialized value through the injected reader
+used by `approval_wall_secret_supplier_from_secret_identity_backend`. The
+OpenBao request must use backend `openbao`, mount `ce-kv`, path
+`forge/approval-capability/wall`, field `signing_secret`, purpose
+`approval-capability-wall`, and owner-ref `controller:integrator`.
 
-Controllers mint markers with:
+When the wall is armed, the daemon fails closed on missing backend
+configuration, unavailable or empty secret material, and invalid existing
+markers. If a SecretIdentityBackend is configured, backend refusal or empty
+materialization is not allowed to fall back to environment variables. Automatic
+mint-on-approval uses the configured controller/integrator backend supplier; it
+has no env fallback. The standalone `ce approval-capability mint` command is a
+manual bootstrap/controller utility and is not the automatic mint path.
+
+The daemon's bootstrap secret source, `CE_APPROVAL_CAPABILITY_SECRET`, remains
+available only when no SecretIdentityBackend supplier is configured. If backend
+flags are present, partial configuration, `env:` target refs, backend refusal,
+or an empty/falsy materialized value are treated as misconfiguration and the
+daemon fails closed instead of consulting the env fallback. Backend delivery must
+be file-backed so controller-minted verifier material is not placed in
+`os.environ`. With neither source configured and no durable armed state, the
+wall remains dormant.
+
+For manual controller/bootstrap operations, controllers can mint markers with:
 
 ```text
 ce approval-capability mint --repo OWNER/REPO --pr NUMBER --head-sha SHA --approved-by LOGIN --policy-sha SHA_OR_ID
 ```
 
 The command prints only the public marker. It refuses if the wall secret is not
-configured.
+configured. This command is not the queue-daemon automatic mint-on-approval
+path.
