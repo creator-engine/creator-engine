@@ -81,6 +81,7 @@ export BAO_ADDR='https://ce-dev-1.tailf3cfef.ts.net:8200'
 export BAO_CACERT='/usr/local/share/ca-certificates/ce-openbao-ca.crt'
 export CE_OPENBAO_KV_MOUNT='ce-kv'
 export BAO_TOKEN='<authorized-operator-token-from-approved-channel>'
+export CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-python}"
 ```
 
 1. Verify the authenticated audit endpoint.
@@ -156,7 +157,7 @@ BAO_CACERT="$BAO_CACERT" \
 CE_OPENBAO_KV_MOUNT="$CE_OPENBAO_KV_MOUNT" \
 BAO_TOKEN="$BAO_TOKEN" \
 PYTHONPATH=validators \
-.venv/bin/python -m creator_engine_validator.v3_cli queue-daemon \
+"$CE_VALIDATOR_PYTHON" -m creator_engine_validator.v3_cli queue-daemon \
   --repo '<OWNER/REPO>' \
   --once \
   --dry-run \
@@ -185,7 +186,7 @@ PYTHONPATH=validators \
 ```bash
 export CE_APPROVAL_CAPABILITY_SECRET="$(cat "$CE_APPROVAL_WALL_TEST_SECRET_FILE")"
 PYTHONPATH=validators \
-.venv/bin/python -m creator_engine_validator.v3_cli approval-capability mint \
+"$CE_VALIDATOR_PYTHON" -m creator_engine_validator.v3_cli approval-capability mint \
   --repo '<OWNER/REPO>' \
   --pr '<PR_NUMBER>' \
   --head-sha '<APPROVED_HEAD_SHA>' \
@@ -230,11 +231,13 @@ production wall secret, or leave test tokens/secrets alive in this lane.
 Run the docs and carrier checks for this change set:
 
 ```bash
-PYTHONPATH=validators .venv/bin/python -m creator_engine_validator.ce_cli check \
+export CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-python}"
+
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.ce_cli check \
   docs/devops/openbao-approval-wall-arming.md \
   .ce/changelog/ce-openbao-vps-standup.md \
   .ce/pr-manifests/ce-openbao-vps-standup.md
 
-PYTHONPATH=validators .venv/bin/python -m creator_engine_validator.cli scan-path-manifest \
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator.cli scan-path-manifest \
   .ce/pr-manifests/ce-openbao-vps-standup.md
 ```
