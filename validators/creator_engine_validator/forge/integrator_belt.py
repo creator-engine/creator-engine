@@ -21,6 +21,7 @@ import time
 from base64 import b64decode
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
@@ -126,13 +127,17 @@ class DaemonStatusCheck:
     name: str
     state: str
     kind: str
+    latest_at: str | None = None
 
     @property
     def success(self) -> bool:
         return self.state == "SUCCESS"
 
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "state": self.state, "kind": self.kind}
+        payload: dict[str, Any] = {"name": self.name, "state": self.state, "kind": self.kind}
+        if self.latest_at:
+            payload["latest_at"] = self.latest_at
+        return payload
 
 
 @dataclass(frozen=True)
@@ -820,8 +825,8 @@ _DAEMON_SEARCH_QUERY = (
     "latestOpinionatedReviews(first:20){nodes{id state author{login} commit{oid}}} "
     "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
     "pageInfo{hasNextPage} nodes{__typename "
-    "... on CheckRun{name conclusion status} "
-    "... on StatusContext{context state}"
+    "... on CheckRun{name conclusion status completedAt startedAt} "
+    "... on StatusContext{context state updatedAt createdAt}"
     "}}}}}} "
     "files(first:100){pageInfo{hasNextPage}nodes{path}}"
     "}}}}"
@@ -939,14 +944,29 @@ def _parse_status_check(raw: Any) -> DaemonStatusCheck:
             name=str(raw.get("name") or ""),
             state=str(raw.get("conclusion") or raw.get("status") or "UNKNOWN"),
             kind=kind,
+            latest_at=_first_timestamp(raw, "completedAt", "startedAt", "updatedAt"),
         )
     if kind == "StatusContext":
         return DaemonStatusCheck(
             name=str(raw.get("context") or ""),
             state=str(raw.get("state") or "UNKNOWN"),
             kind=kind,
+            latest_at=_first_timestamp(raw, "updatedAt", "createdAt"),
         )
-    return DaemonStatusCheck(name=str(raw.get("name") or raw.get("context") or ""), state="UNKNOWN", kind=kind)
+    return DaemonStatusCheck(
+        name=str(raw.get("name") or raw.get("context") or ""),
+        state="UNKNOWN",
+        kind=kind,
+        latest_at=_first_timestamp(raw, "updatedAt", "createdAt", "completedAt", "startedAt"),
+    )
+
+
+def _first_timestamp(raw: Mapping[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _daemon_gate_refusal(
@@ -1018,16 +1038,17 @@ def _daemon_non_wall_gate(
         return DaemonGateEvaluation("changed_files_incomplete", evidence)
     if not pr.checks_complete:
         return DaemonGateEvaluation("status_checks_incomplete", evidence)
-    if pr.rollup_state != "SUCCESS":
-        return DaemonGateEvaluation("rollup_not_success", evidence)
-    governance = _find_check(pr.checks, DEFAULT_GOVERNANCE_CHECK)
+    latest_required_checks = _latest_required_checks(pr.checks)
+    governance = latest_required_checks.get(DEFAULT_GOVERNANCE_CHECK)
     if governance is None:
         return DaemonGateEvaluation("governance_check_missing", evidence)
     if not governance.success:
         return DaemonGateEvaluation("governance_check_not_success", evidence)
-    tests = tuple(check for check in pr.checks if _is_test_check(check.name))
+    tests = tuple(check for check in latest_required_checks.values() if _is_test_check(check.name))
     if any(not check.success for check in tests):
         return DaemonGateEvaluation("test_check_not_success", evidence)
+    if pr.rollup_state != "SUCCESS" and pr.merge_state_status != "CLEAN":
+        return DaemonGateEvaluation("rollup_not_success", evidence)
     return DaemonGateEvaluation(None, evidence)
 
 
@@ -1082,11 +1103,45 @@ def _clear_approval_settle_for_pr(keys: set[str], pr: DaemonPullRequest) -> None
             keys.discard(key)
 
 
-def _find_check(checks: Sequence[DaemonStatusCheck], name: str) -> DaemonStatusCheck | None:
-    for check in checks:
-        if check.name == name:
-            return check
-    return None
+def _latest_required_checks(checks: Sequence[DaemonStatusCheck]) -> dict[str, DaemonStatusCheck]:
+    latest: dict[str, tuple[DaemonStatusCheck, datetime | None, int]] = {}
+    for observed_order, check in enumerate(checks):
+        if check.name == DEFAULT_GOVERNANCE_CHECK or _is_test_check(check.name):
+            timestamp = _parse_check_timestamp(check.latest_at)
+            current = latest.get(check.name)
+            if current is None or _check_is_later(timestamp, observed_order, current):
+                latest[check.name] = (check, timestamp, observed_order)
+    return {name: check for name, (check, _timestamp, _order) in latest.items()}
+
+
+def _check_is_later(
+    candidate_timestamp: datetime | None,
+    candidate_order: int,
+    current: tuple[DaemonStatusCheck, datetime | None, int],
+) -> bool:
+    _current_check, current_timestamp, current_order = current
+    if (
+        candidate_timestamp is not None
+        and current_timestamp is not None
+        and candidate_timestamp != current_timestamp
+    ):
+        return candidate_timestamp > current_timestamp
+    return candidate_order > current_order
+
+
+def _parse_check_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _is_test_check(name: str) -> bool:
