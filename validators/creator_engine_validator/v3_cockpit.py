@@ -114,6 +114,7 @@ _FILTER_KEYS = ("all", "mine", "live")
 _COST_TOP_N = 6
 
 SnapshotLoader = Callable[[], dict[str, Any]]
+PeekHandler = Callable[[dict[str, Any]], None]
 
 
 def _mark(flag: Any) -> str:
@@ -290,6 +291,81 @@ def _outcome_text(detail: dict[str, Any]) -> str:
     else:
         lines.append("ratification: —")
     return "\n".join(lines)
+
+
+def _peek_target(snapshot: dict[str, Any], lane_id: str | None) -> dict[str, Any]:
+    """Return the precomputed peek target for ``lane_id`` (snapshot lookup only)."""
+    if lane_id is None:
+        return {}
+    for target in (snapshot.get("peek") or {}).get("seats", []):
+        if target.get("lane_id") == lane_id:
+            return target
+    return {}
+
+
+def _peek_capability_line(target: dict[str, Any], key: str, label: str) -> str:
+    capability = (target.get("capabilities") or {}).get(key) or {}
+    state = capability.get("state", "—")
+    mark = "✓" if capability.get("available") else "—"
+    trigger = capability.get("trigger") or {}
+    trigger_text = (
+        f"{trigger.get('kind', '—')} pane {trigger.get('pane_id', '—')}"
+        if trigger
+        else capability.get("blocked_reason") or "—"
+    )
+    return f"{mark} {label}: {state} · {trigger_text}"
+
+
+def _peek_text(snapshot: dict[str, Any], lane_id: str | None) -> str:
+    """Render the precomputed peek gate + target capabilities (render-only)."""
+    peek = snapshot.get("peek") or {}
+    target = _peek_target(snapshot, lane_id)
+    lines = [
+        f"mode: {peek.get('mode', '—')} · peek {peek.get('state', '—')}",
+        f"default: {'on' if peek.get('default_enabled') else 'off'} · "
+        f"override: {peek.get('override')}",
+    ]
+    if peek.get("disabled_reason"):
+        lines.append(str(peek.get("disabled_reason")))
+    if not target:
+        lines.append("target: —")
+        return "\n".join(lines)
+    lines.append(
+        f"target: {target.get('controller_id', '—')} / {target.get('lane_id', '—')} "
+        f"({target.get('terminal_kind', '—')})"
+    )
+    blocked = target.get("blocked_reason")
+    if blocked:
+        lines.append(f"blocked: {blocked}")
+    lines.append(_peek_capability_line(target, "visual_inspect", "visual inspect"))
+    lines.append(_peek_capability_line(target, "send_input", "send input"))
+    return "\n".join(lines)
+
+
+def build_peek_request(
+    snapshot: dict[str, Any],
+    lane_id: str | None,
+    *,
+    action: str = "visual_inspect",
+    data: str | None = None,
+) -> dict[str, Any]:
+    """Build one peek handler request from the snapshot only."""
+    target = _peek_target(snapshot, lane_id)
+    capability = (target.get("capabilities") or {}).get(action) or {}
+    trigger = capability.get("trigger") or {}
+    routed = bool(capability.get("available") and trigger.get("driver") == "HerdrSession")
+    reason = None
+    if not routed:
+        reason = capability.get("blocked_reason") or capability.get("state") or "unavailable"
+    return {
+        "action": action,
+        "lane_id": lane_id,
+        "controller_id": target.get("controller_id"),
+        "routed": routed,
+        "reason": reason,
+        "trigger": trigger if routed else None,
+        "data": data if action == "send_input" else None,
+    }
 
 
 def _cost_scope_line(row: dict[str, Any]) -> str:
@@ -755,6 +831,7 @@ class CockpitApp(App[None]):
         Binding("a", "filter('all')", "All"),
         Binding("m", "filter('mine')", "Mine"),
         Binding("l", "filter('live')", "Live"),
+        Binding("p", "peek", "Peek"),
         # ce-ops#45: open the CEO-mode journey screen ON TOP of the board (the
         # board stays the DEFAULT screen — no product mode switcher, no default
         # change, no persisted preference).
@@ -821,6 +898,7 @@ class CockpitApp(App[None]):
         snapshot: dict[str, Any],
         *,
         reload: SnapshotLoader | None = None,
+        peek_handler: PeekHandler | None = None,
         watch_paths: Sequence[str] = (),
     ) -> None:
         super().__init__()
@@ -832,6 +910,8 @@ class CockpitApp(App[None]):
             self.title = f"{APP_TITLE} · {ce_ver}"
         self._snapshot = snapshot
         self._reload = reload
+        self._peek_handler = peek_handler
+        self._last_peek_request: dict[str, Any] | None = None
         self._watch_paths = list(watch_paths)
         self._watch_task: asyncio.Task[None] | None = None
         self._active_filter = "all"
@@ -858,6 +938,8 @@ class CockpitApp(App[None]):
                         yield Static("", id="detail-waterfall")
                     with TabPane("Outcome", id="tab-outcome"):
                         yield Static("", id="detail-outcome")
+                    with TabPane("Peek", id="tab-peek"):
+                        yield Static("", id="detail-peek")
             yield VerticalScroll(Static("", id="right-rail-text"), id="right-rail")
         yield Static("", id="meters")
         yield Footer()
@@ -903,6 +985,7 @@ class CockpitApp(App[None]):
         self.query_one("#detail-evidence", Static).update(_evidence_text(detail))
         self.query_one("#detail-waterfall", Static).update(_waterfall_text(detail))
         self.query_one("#detail-outcome", Static).update(_outcome_text(detail))
+        self.query_one("#detail-peek", Static).update(_peek_text(self._snapshot, lane_id))
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         index = event.cursor_row
@@ -924,6 +1007,16 @@ class CockpitApp(App[None]):
         """Open the CEO-mode journey screen over the board (the board stays default)."""
         self.push_screen(JourneyScreen(self._snapshot))
 
+    def action_peek(self) -> None:
+        """Build a visual-inspect peek request for the selected row."""
+        table = self.query_one("#board", DataTable)
+        index = table.cursor_row
+        lane_id = self._row_lanes[index] if 0 <= index < len(self._row_lanes) else None
+        request = build_peek_request(self._snapshot, lane_id, action="visual_inspect")
+        self._last_peek_request = request
+        if self._peek_handler is not None:
+            self._peek_handler(request)
+
     async def _watch_loop(self) -> None:
         """Tail the L1 roots and re-bind on change (the fold runs in L2 via reload)."""
         from watchfiles import awatch  # lazy: only the live-tail path needs it
@@ -938,10 +1031,16 @@ def run_app(
     snapshot: dict[str, Any],
     *,
     reload: SnapshotLoader | None = None,
+    peek_handler: PeekHandler | None = None,
     watch_paths: Sequence[str] = (),
 ) -> int:
     """Run the Cockpit TUI over a prepared L2 snapshot; return a CLI exit code."""
-    CockpitApp(snapshot, reload=reload, watch_paths=watch_paths).run()
+    CockpitApp(
+        snapshot,
+        reload=reload,
+        peek_handler=peek_handler,
+        watch_paths=watch_paths,
+    ).run()
     return 0
 
 

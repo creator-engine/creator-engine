@@ -73,6 +73,15 @@ LEDGER_ROOT_ENV = "CE_LEDGER_ROOT"
 #: ``docs/architecture/cockpit.md``.
 OBSERVATIONS_DIR_ENV = "CE_HOOK_OBSERVATIONS_DIR"
 
+#: Cockpit operating mode. Dev is hands-on; CEO/strangeLoop default to
+#: autonomous-by-default but keep the peek capability available for explicit
+#: opt-in.
+COCKPIT_MODE_ENV = "CE_COCKPIT_MODE"
+COCKPIT_PEEK_ENV = "CE_COCKPIT_PEEK"
+MODE_DEV = "dev"
+MODE_CEO = "ceo"
+MODE_STRANGE_LOOP = "strangeLoop"
+
 #: The persistent demo watermark (Fork 4 — a pitch demo is never mistaken for
 #: live governance).
 DEMO_WATERMARK = "DEMO — seeded data, not a live fleet"
@@ -177,6 +186,9 @@ _CLASS_COLORS = {"allowed": "spark", "denied": "gate", "escalate": "amber"}
 
 #: Seat statuses that count as LIVE for the crabfleet all/mine/live filters.
 _LIVE_STATUSES = frozenset({"starting", "active", "blocked", "closing"})
+
+_PEEK_TRUE = frozenset({"1", "true", "yes", "on", "enable", "enabled", "opt-in"})
+_PEEK_FALSE = frozenset({"0", "false", "no", "off", "disable", "disabled", "opt-out"})
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +654,190 @@ def _seat_card(
         "run_id": lane_id if lane_id in chains else None,
         "model": models.get(lane_key),
         "harness": harnesses.get(lane_key),
+    }
+
+
+def _normalise_cockpit_mode(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return MODE_DEV
+    key = text.replace("-", "").replace("_", "").lower()
+    if key == "dev":
+        return MODE_DEV
+    if key == "ceo":
+        return MODE_CEO
+    if key in {"strangeloop", "strangemode"}:
+        return MODE_STRANGE_LOOP
+    return text
+
+
+def _peek_override(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _PEEK_TRUE:
+        return True
+    if text in _PEEK_FALSE:
+        return False
+    return None
+
+
+def _peek_default_enabled(mode: str) -> bool:
+    return mode == MODE_DEV
+
+
+def _peek_trigger(kind: str, terminal: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "driver": "HerdrSession",
+        "surface_ref": terminal.get("surface_ref"),
+        "pane_id": terminal.get("pane_id"),
+        "pid": terminal.get("pid"),
+        "requires": ["controller_herdr_session", "herdr_control_endpoint"],
+    }
+
+
+def _peek_capability(
+    *,
+    enabled: bool,
+    substrate_ready: bool,
+    trigger: dict[str, Any] | None,
+    blocked_reason: str | None,
+) -> dict[str, Any]:
+    available = bool(enabled and substrate_ready)
+    if available:
+        state = AVAILABLE
+        reason = None
+    elif not enabled:
+        state = "mode_disabled"
+        reason = "peek is off for this cockpit mode until the operator opts in"
+    else:
+        state = UNAVAILABLE
+        reason = blocked_reason
+    return {
+        "available": available,
+        "state": state,
+        "trigger": trigger,
+        "blocked_reason": reason,
+    }
+
+
+def _peek_surface_for_pane(pane: Mapping[str, Any], *, enabled: bool) -> dict[str, Any]:
+    terminal = pane.get("terminal") if isinstance(pane.get("terminal"), Mapping) else {}
+    terminal_kind = terminal.get("kind")
+    status = pane.get("status")
+    live = status in _LIVE_STATUSES
+    herdr_ready = bool(
+        live
+        and terminal_kind == "herdr"
+        and terminal.get("surface_ref")
+        and terminal.get("pane_id")
+    )
+
+    blocked_reason = None
+    if not live:
+        blocked_reason = "seat is not in a live cockpit status"
+    elif terminal_kind == "headless":
+        blocked_reason = (
+            "headless log surface has no interactive attach/send-input seam; "
+            "herdr surface metadata is required"
+        )
+    elif terminal_kind == "herdr":
+        blocked_reason = "herdr surface metadata is incomplete"
+    else:
+        blocked_reason = (
+            f"terminal kind {terminal_kind or 'unknown'} is not exposed through "
+            "the cockpit herdr peek seam"
+        )
+
+    inspect_trigger = _peek_trigger("herdr_attach", terminal) if herdr_ready else None
+    send_trigger = _peek_trigger("herdr_send_input", terminal) if herdr_ready else None
+    visual_inspect = _peek_capability(
+        enabled=enabled,
+        substrate_ready=herdr_ready,
+        trigger=inspect_trigger,
+        blocked_reason=blocked_reason,
+    )
+    send_input = _peek_capability(
+        enabled=enabled,
+        substrate_ready=herdr_ready,
+        trigger=send_trigger,
+        blocked_reason=blocked_reason,
+    )
+    if visual_inspect["available"] and send_input["available"]:
+        state = AVAILABLE
+        surface_blocker = None
+    elif not enabled:
+        state = "mode_disabled"
+        surface_blocker = None
+    else:
+        state = UNAVAILABLE
+        surface_blocker = blocked_reason
+    return {
+        "controller_id": pane.get("controller_id"),
+        "lane_id": pane.get("lane_id"),
+        "role": pane.get("role"),
+        "status": status,
+        "terminal_kind": terminal_kind,
+        "surface_ref": terminal.get("surface_ref"),
+        "pane_id": terminal.get("pane_id"),
+        "pid": terminal.get("pid"),
+        "can_attach": bool(visual_inspect["available"]),
+        "can_send": bool(send_input["available"]),
+        "state": state,
+        "blocked_reason": surface_blocker,
+        "capabilities": {
+            "visual_inspect": visual_inspect,
+            "send_input": send_input,
+        },
+    }
+
+
+def _fold_peek(
+    panes: list[dict[str, Any]] | None,
+    *,
+    operating_mode: Any,
+    peek_opt_in: bool | None,
+) -> dict[str, Any]:
+    """Fold the cockpit peek surface: mode gate + inspect/send triggers (PURE)."""
+    mode = _normalise_cockpit_mode(operating_mode)
+    default_enabled = _peek_default_enabled(mode)
+    enabled = default_enabled if peek_opt_in is None else bool(peek_opt_in)
+    seats = [
+        _peek_surface_for_pane(p, enabled=enabled)
+        for p in (panes or [])
+        if isinstance(p, Mapping)
+    ]
+    seats.sort(key=lambda s: (str(s.get("controller_id")), str(s.get("lane_id"))))
+    available_count = len([s for s in seats if s.get("state") == AVAILABLE])
+    unavailable_count = len([s for s in seats if s.get("state") == UNAVAILABLE])
+    return {
+        "mode": mode,
+        "enabled": enabled,
+        "default_enabled": default_enabled,
+        "override": peek_opt_in,
+        "policy": {
+            "dev": "enabled_by_default_opt_out",
+            "ceo": "disabled_by_default_opt_in",
+            "strangeLoop": "disabled_by_default_opt_in",
+            "never_locked_out": True,
+            "can_enable": True,
+        },
+        "state": "enabled" if enabled else "disabled",
+        "disabled_reason": (
+            None if enabled else "peek is off until the operator opts in"
+        ),
+        "capability_model": {
+            "visual_inspect": True,
+            "send_input": True,
+            "read_only_tail_is_not_peek": True,
+        },
+        "availability": AVAILABLE if panes is not None else UNAVAILABLE,
+        "available_count": available_count,
+        "unavailable_count": unavailable_count,
+        "seats": seats,
     }
 
 
@@ -1505,6 +1701,8 @@ def fold_snapshot(
     context_pct: Any = None,
     harnesses: Mapping[str, str] | None = None,
     controller_id: str | None = None,
+    operating_mode: str | None = None,
+    peek_opt_in: bool | None = None,
     demo: bool = False,
     roots: Mapping[str, str | None] | None = None,
     ce_version: str | None = None,
@@ -1543,6 +1741,11 @@ def fold_snapshot(
     meters = _fold_meters(chains, usage_turns, context_pct)
     escalation_section = _fold_escalations(escalations)
     claims_section = _fold_claims(claims, controller_id)
+    peek = _fold_peek(
+        panes,
+        operating_mode=operating_mode,
+        peek_opt_in=peek_opt_in,
+    )
 
     seats = [
         _seat_card(p, chain_map, models, harness_map)
@@ -1703,6 +1906,7 @@ def fold_snapshot(
         },
         "escalations": escalation_section,
         "journey": journey,
+        "peek": peek,
         "dispatches": dispatch_section,
         "seat_events": seat_events_section,
         "claims": claims_section,
@@ -1988,6 +2192,8 @@ def snapshot_from_roots(
     state = Path(state_root)
     ledger = _resolve(ledger_root, env, LEDGER_ROOT_ENV)
     observations = _resolve(observations_dir, env, OBSERVATIONS_DIR_ENV)
+    operating_mode = _normalise_cockpit_mode(env.get(COCKPIT_MODE_ENV))
+    peek_opt_in = _peek_override(env.get(COCKPIT_PEEK_ENV))
 
     chains = load_chains(state / RUNS_SUBDIR) if state.is_dir() else None
     panes = load_panes(ledger) if ledger else None
@@ -2003,6 +2209,8 @@ def snapshot_from_roots(
         claims=load_claims(state) if state.is_dir() else None,
         envelopes=load_envelopes(panes),
         harnesses=load_harnesses(ledger) if ledger else None,
+        operating_mode=operating_mode,
+        peek_opt_in=peek_opt_in,
         demo=demo,
         ce_version=ce_version,
         roots={
