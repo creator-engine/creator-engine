@@ -14,12 +14,22 @@ import re
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..secret_identity import SecretIdentityBackend, SecretRequest
 
 MARKER_PREFIX = "ce-approval-capability:"
 CAPABILITY_VERSION = "v1"
+DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV = "CE_APPROVAL_CAPABILITY_SECRET"
+DEFAULT_APPROVAL_WALL_STATE_RELATIVE = Path("approval-capability-wall") / "state.json"
+APPROVAL_WALL_ARMED = "armed"
+APPROVAL_WALL_DORMANT = "dormant"
+APPROVAL_WALL_MISCONFIGURED = "misconfigured"
 
 SecretSupplier = Callable[[], bytes | str | None]
+MaterializedSecretReader = Callable[[str], bytes | str | None]
 Clock = Callable[[], float]
 
 _MARKER_RE = re.compile(
@@ -101,6 +111,222 @@ class ApprovalCapabilityVerification:
         if self.claims is not None:
             record.update(self.claims.to_payload())
         return record
+
+
+class ApprovalWallStateError(Exception):
+    """Durable approval-wall state could not be loaded or written safely."""
+
+
+@dataclass(frozen=True)
+class ApprovalWallState:
+    """Value-free durable state for enforce-when-armed wall posture."""
+
+    armed: bool = False
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "ApprovalWallState":
+        armed = payload.get("armed", False)
+        if not isinstance(armed, bool):
+            raise ApprovalWallStateError("approval wall state field 'armed' must be boolean")
+        return cls(armed=armed)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"armed": self.armed}
+
+
+@dataclass(frozen=True)
+class ApprovalWallConfig:
+    """Secret-free approval wall runtime configuration."""
+
+    secret_supplier: SecretSupplier | None = None
+    state_path: Path | None = None
+    now: Clock | None = None
+    policy_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalWallRuntime:
+    """Resolved approval wall posture plus verifier when enforcement is armed."""
+
+    status: str
+    verifier: "ApprovalCapabilityVerifier | None" = None
+    reason: str = ""
+    state_path: Path | None = None
+
+    @property
+    def armed(self) -> bool:
+        return self.status == APPROVAL_WALL_ARMED
+
+    @property
+    def dormant(self) -> bool:
+        return self.status == APPROVAL_WALL_DORMANT
+
+    @property
+    def misconfigured(self) -> bool:
+        return self.status == APPROVAL_WALL_MISCONFIGURED
+
+
+def approval_wall_state_path(root: str | Path = ".ce/state") -> Path:
+    """Return the default durable wall-state path below a v3 local-state root."""
+
+    return Path(root) / DEFAULT_APPROVAL_WALL_STATE_RELATIVE
+
+
+def approval_wall_secret_supplier_from_env(
+    *,
+    env_name: str = DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+    environ: Mapping[str, str] | None = None,
+    backend_supplier: SecretSupplier | None = None,
+) -> SecretSupplier:
+    """Build the wall secret supplier.
+
+    The env var is an offline bootstrap fallback. ``backend_supplier`` is the
+    injectable SecretIdentityBackend/OpenBao bridge point: production may pass a
+    materializer-backed callable, while tests keep it local and network-free.
+    """
+
+    env = environ
+
+    def supply() -> bytes | str | None:
+        source = env if env is not None else {}
+        value = source.get(env_name) if env is not None else None
+        if env is None:
+            import os
+
+            value = os.environ.get(env_name)
+        if value:
+            return value
+        if backend_supplier is not None:
+            return backend_supplier()
+        return None
+
+    return supply
+
+
+def approval_wall_secret_supplier_from_secret_identity_backend(
+    *,
+    backend: "SecretIdentityBackend",
+    request: "SecretRequest",
+    target_ref: str,
+    value_reader: MaterializedSecretReader,
+    collect_audit: bool = True,
+    revoke_after_read: bool = True,
+) -> SecretSupplier:
+    """Build a supplier from the SecretIdentityBackend/OpenBao seam.
+
+    ``backend`` is expected to satisfy ``SecretIdentityBackend`` and ``request``
+    to be a ``SecretRequest``. The backend only returns value-free grants; the
+    injected ``value_reader`` is the sole path that reads the materialized value
+    from ``target_ref``. This keeps OpenBao/live I/O outside this module and
+    keeps durable grant/audit/state records secret-free.
+    """
+
+    def supply() -> bytes | str | None:
+        grant = None
+        materialized = None
+        try:
+            backend.validate_config()
+            grant = backend.issue(request)
+            materialized = backend.materialize(grant, target_ref)
+            if collect_audit:
+                backend.collect_audit(materialized)
+            return value_reader(target_ref)
+        finally:
+            if revoke_after_read and (materialized is not None or grant is not None):
+                revoked = backend.revoke(materialized or grant)
+                if collect_audit:
+                    backend.collect_audit(revoked)
+
+    return supply
+
+
+def resolve_approval_wall(config: ApprovalWallConfig) -> ApprovalWallRuntime:
+    """Resolve dormant/armed/misconfigured posture without exposing secrets."""
+
+    state = ApprovalWallState()
+    if config.state_path is not None:
+        try:
+            state = load_approval_wall_state(config.state_path)
+        except ApprovalWallStateError as exc:
+            return ApprovalWallRuntime(
+                APPROVAL_WALL_MISCONFIGURED,
+                reason=f"state_unreadable: {exc}",
+                state_path=config.state_path,
+            )
+
+    secret = _secret_bytes(config.secret_supplier) if config.secret_supplier is not None else None
+    if state.armed and not secret:
+        return ApprovalWallRuntime(
+            APPROVAL_WALL_MISCONFIGURED,
+            reason="armed_state_without_secret",
+            state_path=config.state_path,
+        )
+    if secret:
+        if config.state_path is not None and not state.armed:
+            try:
+                save_approval_wall_state(config.state_path, ApprovalWallState(armed=True))
+            except ApprovalWallStateError as exc:
+                return ApprovalWallRuntime(
+                    APPROVAL_WALL_MISCONFIGURED,
+                    reason=f"state_unwritable: {exc}",
+                    state_path=config.state_path,
+                )
+        return ApprovalWallRuntime(
+            APPROVAL_WALL_ARMED,
+            verifier=ApprovalCapabilityVerifier(lambda: secret, now=config.now, policy_sha=config.policy_sha),
+            reason="secret_configured",
+            state_path=config.state_path,
+        )
+    return ApprovalWallRuntime(APPROVAL_WALL_DORMANT, reason="secret_not_configured", state_path=config.state_path)
+
+
+def approval_wall_verifier_from_env(
+    *,
+    state_root: str | Path = ".ce/state",
+    secret_env: str = DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+    environ: Mapping[str, str] | None = None,
+    backend_supplier: SecretSupplier | None = None,
+    now: Clock | None = None,
+    policy_sha: str | None = None,
+) -> ApprovalWallRuntime:
+    """Resolve the daemon wall using env bootstrap plus an injectable backend hook."""
+
+    return resolve_approval_wall(
+        ApprovalWallConfig(
+            secret_supplier=approval_wall_secret_supplier_from_env(
+                env_name=secret_env,
+                environ=environ,
+                backend_supplier=backend_supplier,
+            ),
+            state_path=approval_wall_state_path(state_root),
+            now=now,
+            policy_sha=policy_sha,
+        )
+    )
+
+
+def load_approval_wall_state(path: str | Path) -> ApprovalWallState:
+    state_path = Path(path)
+    if not state_path.exists():
+        return ApprovalWallState()
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApprovalWallStateError(str(exc)) from exc
+    if not isinstance(payload, dict):
+        raise ApprovalWallStateError("approval wall state must be a JSON object")
+    return ApprovalWallState.from_payload(payload)
+
+
+def save_approval_wall_state(path: str | Path, state: ApprovalWallState) -> None:
+    state_path = Path(path)
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_name(f".{state_path.name}.tmp")
+        tmp.write_text(json.dumps(state.to_payload(), sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(state_path)
+    except OSError as exc:
+        raise ApprovalWallStateError(str(exc)) from exc
 
 
 class ApprovalCapabilityVerifier:

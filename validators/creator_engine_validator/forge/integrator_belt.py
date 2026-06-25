@@ -27,7 +27,11 @@ from urllib.parse import quote
 
 from ._redact import redact_gh_stderr
 from .approval_capability import (
+    APPROVAL_WALL_ARMED,
+    APPROVAL_WALL_DORMANT,
+    APPROVAL_WALL_MISCONFIGURED,
     ApprovalCapabilityVerifier,
+    ApprovalWallRuntime,
     extract_approval_capability_marker,
 )
 from .auto_merge import enable_auto_merge
@@ -233,6 +237,14 @@ class DaemonDecision:
         if self.overlap_with:
             payload["overlap_with"] = self.overlap_with
         return payload
+
+
+@dataclass(frozen=True)
+class DaemonGateEvaluation:
+    """Gate outcome before path-set sequencing."""
+
+    refusal_reason: str | None = None
+    evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -521,6 +533,7 @@ def run_daemon_loop(
     dry_run: bool = False,
     gh_runner: GhRunner | None = None,
     approval_verifier: ApprovalCapabilityVerifier | None = None,
+    approval_wall: ApprovalWallRuntime | None = None,
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
@@ -551,6 +564,7 @@ def run_daemon_loop(
                 dry_run=dry_run,
                 gh_runner=runner,
                 approval_verifier=approval_verifier,
+                approval_wall=approval_wall,
                 log_sink=log_sink,
                 rate_limiter=_rate_limiter,
                 sleep=sleep,
@@ -593,6 +607,7 @@ def run_daemon_pass(
     dry_run: bool = False,
     gh_runner: GhRunner | None = None,
     approval_verifier: ApprovalCapabilityVerifier | None = None,
+    approval_wall: ApprovalWallRuntime | None = None,
     log_sink: LogSink | None = None,
     candidates: Sequence[DaemonPullRequest] | None = None,
     rate_limiter: SearchRateLimiter | None = None,
@@ -620,10 +635,14 @@ def run_daemon_pass(
     decisions: list[DaemonDecision] = []
     selected_paths: dict[str, set[str]] = {}
     for pr in sorted(prs, key=lambda item: (item.repo, item.pr_number)):
-        gate_reason = _daemon_gate_refusal(pr, approval_verifier=approval_verifier)
-        if gate_reason is not None:
+        gate = _daemon_gate_evaluation(
+            pr,
+            approval_verifier=approval_verifier,
+            approval_wall=approval_wall,
+        )
+        if gate.refusal_reason is not None:
             _clear_approval_settle_for_pr(settle_seen, pr)
-            decision = _decision(pr, "skip", gate_reason)
+            decision = _decision(pr, "skip", gate.refusal_reason, evidence=gate.evidence)
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
             continue
@@ -694,7 +713,7 @@ def run_daemon_pass(
                 "eligible_dry_run",
                 path_set=path_set,
                 path_set_source=path_source,
-                evidence=("dry_run=true",),
+                evidence=(*gate.evidence, "dry_run=true"),
             )
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
@@ -722,6 +741,7 @@ def run_daemon_pass(
             path_set=path_set,
             path_set_source=path_source,
             evidence=(
+                *gate.evidence,
                 "gh_pr_merge_auto=true",
                 f"returncode={enqueue.returncode}",
                 f"stderr={redact_gh_stderr(enqueue.stderr or '')}",
@@ -933,20 +953,49 @@ def _daemon_gate_refusal(
     pr: DaemonPullRequest,
     *,
     approval_verifier: ApprovalCapabilityVerifier | None = None,
+    approval_wall: ApprovalWallRuntime | None = None,
 ) -> str | None:
+    return _daemon_gate_evaluation(
+        pr,
+        approval_verifier=approval_verifier,
+        approval_wall=approval_wall,
+    ).refusal_reason
+
+
+def _daemon_gate_evaluation(
+    pr: DaemonPullRequest,
+    *,
+    approval_verifier: ApprovalCapabilityVerifier | None = None,
+    approval_wall: ApprovalWallRuntime | None = None,
+) -> DaemonGateEvaluation:
     if pr.is_draft:
-        return "draft_pr"
+        return DaemonGateEvaluation("draft_pr")
     if pr.review_decision != "APPROVED":
-        return "review_not_approved"
+        return DaemonGateEvaluation("review_not_approved")
     if pr.head_sha.lower() not in pr.approving_review_commits:
-        return "approval_not_current_head"
+        return DaemonGateEvaluation("approval_not_current_head")
     if _current_approval_witness(pr) is None:
-        return "approval_reviewer_unconfirmed"
+        return DaemonGateEvaluation("approval_reviewer_unconfirmed")
+    wall_status = APPROVAL_WALL_ARMED if approval_verifier is not None else APPROVAL_WALL_DORMANT
+    verifier = approval_verifier
+    wall_reason = ""
+    if approval_wall is not None:
+        wall_status = approval_wall.status
+        verifier = approval_wall.verifier
+        wall_reason = approval_wall.reason
+    if wall_status == APPROVAL_WALL_DORMANT:
+        evidence = ("approval_wall: not armed",)
+        return _daemon_non_wall_gate(pr, evidence=evidence)
+    if wall_status == APPROVAL_WALL_MISCONFIGURED:
+        evidence = ("approval_wall: misconfigured",)
+        if wall_reason:
+            evidence = (*evidence, f"approval_wall_reason={wall_reason}")
+        return DaemonGateEvaluation("approval_wall_misconfigured", evidence)
     if not pr.approval_capability_marker:
-        return "approval_capability_missing"
-    if approval_verifier is None:
-        return "approval_capability_invalid"
-    capability = approval_verifier.verify(
+        return DaemonGateEvaluation("approval_capability_missing")
+    if verifier is None:
+        return DaemonGateEvaluation("approval_capability_invalid")
+    capability = verifier.verify(
         pr.approval_capability_marker,
         repo=pr.repo,
         pr_number=pr.pr_number,
@@ -954,24 +1003,32 @@ def _daemon_gate_refusal(
         approved_by_candidates=pr.approving_reviewers,
     )
     if not capability.valid:
-        return "approval_capability_invalid"
+        return DaemonGateEvaluation("approval_capability_invalid")
+    return _daemon_non_wall_gate(pr)
+
+
+def _daemon_non_wall_gate(
+    pr: DaemonPullRequest,
+    *,
+    evidence: tuple[str, ...] = (),
+) -> DaemonGateEvaluation:
     if pr.mergeable != "MERGEABLE":
-        return "not_mergeable"
+        return DaemonGateEvaluation("not_mergeable", evidence)
     if not pr.files_complete:
-        return "changed_files_incomplete"
+        return DaemonGateEvaluation("changed_files_incomplete", evidence)
     if not pr.checks_complete:
-        return "status_checks_incomplete"
+        return DaemonGateEvaluation("status_checks_incomplete", evidence)
     if pr.rollup_state != "SUCCESS":
-        return "rollup_not_success"
+        return DaemonGateEvaluation("rollup_not_success", evidence)
     governance = _find_check(pr.checks, DEFAULT_GOVERNANCE_CHECK)
     if governance is None:
-        return "governance_check_missing"
+        return DaemonGateEvaluation("governance_check_missing", evidence)
     if not governance.success:
-        return "governance_check_not_success"
+        return DaemonGateEvaluation("governance_check_not_success", evidence)
     tests = tuple(check for check in pr.checks if _is_test_check(check.name))
     if any(not check.success for check in tests):
-        return "test_check_not_success"
-    return None
+        return DaemonGateEvaluation("test_check_not_success", evidence)
+    return DaemonGateEvaluation(None, evidence)
 
 
 def _current_approval_witnesses(pr: DaemonPullRequest) -> tuple[DaemonApprovalWitness, ...]:

@@ -13,8 +13,19 @@ from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge.approval_capability import (
     ApprovalCapabilityClaims,
     ApprovalCapabilityVerifier,
+    ApprovalWallConfig,
+    ApprovalWallState,
+    approval_wall_secret_supplier_from_secret_identity_backend,
     extract_approval_capability_marker,
     issue_approval_capability,
+    load_approval_wall_state,
+    resolve_approval_wall,
+    save_approval_wall_state,
+)
+from creator_engine_validator.secret_identity import (
+    FakeSecretIdentityBackend,
+    SecretRef,
+    SecretRequest,
 )
 from creator_engine_validator.forge import integrator_belt as belt
 from creator_engine_validator.forge.eviction_detection import RepairNeededEvent, RepairPollResult
@@ -329,6 +340,61 @@ def _approval_verifier(*, now: int = ISSUED_AT + 1) -> ApprovalCapabilityVerifie
     )
 
 
+def _approval_secret_ref() -> SecretRef:
+    return SecretRef(
+        backend="openbao",
+        mount="ce-kv",
+        path="forge/approval-capability/wall",
+        field="secret",
+        version=1,
+        purpose="approval-capability-wall",
+        owner_ref="controller:integrator",
+        policy_sha="a" * 64,
+    )
+
+
+def _approval_secret_request(ref: SecretRef) -> SecretRequest:
+    return SecretRequest(
+        run_id="approval-wall-run",
+        seat_id="dev-1",
+        repo=REPO,
+        secret_ref=ref,
+        ttl_seconds=600,
+        delivery="file",
+        requested_capabilities=("read",),
+        audit_context={"purpose": "approval-capability-wall"},
+    )
+
+
+class RecordingSecretIdentityBackend(FakeSecretIdentityBackend):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.calls: list[str] = []
+        self.audit_records: list[dict[str, str]] = []
+
+    def validate_config(self) -> None:
+        self.calls.append("validate_config")
+        return super().validate_config()
+
+    def issue(self, request):
+        self.calls.append("issue")
+        return super().issue(request)
+
+    def materialize(self, grant, target_ref: str):
+        self.calls.append("materialize")
+        return super().materialize(grant, target_ref)
+
+    def revoke(self, grant):
+        self.calls.append("revoke")
+        return super().revoke(grant)
+
+    def collect_audit(self, grant):
+        self.calls.append("collect_audit")
+        record = dict(super().collect_audit(grant))
+        self.audit_records.append(record)
+        return record
+
+
 class FakeDaemonGh:
     def __init__(
         self,
@@ -634,6 +700,28 @@ def test_daemon_reverify_review_decision_downgrade_fails_closed():
     assert gh.merge_calls == []
 
 
+def test_daemon_dormant_wall_keeps_raw_approved_current_head_fallback():
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    logs: list[dict] = []
+    pr = _daemon_pr(body="", changed_paths=(CARRIER, "docs/a.md"))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        log_sink=lambda payload: logs.append(dict(payload)),
+    )
+
+    assert result.enqueue_count == 1
+    assert result.skip_count == 0
+    assert result.decisions[0].reason == "eligible_enqueued"
+    assert "approval_wall: not armed" in result.decisions[0].evidence
+    assert "approval_wall: not armed" in logs[-1]["evidence"]
+
+
 def test_daemon_skips_raw_approval_without_capability_fail_closed():
     gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
 
@@ -648,6 +736,35 @@ def test_daemon_skips_raw_approval_without_capability_fail_closed():
     assert result.enqueue_count == 0
     assert result.skip_count == 1
     assert result.decisions[0].reason == "approval_capability_missing"
+    assert gh.merge_calls == []
+
+
+def test_daemon_persisted_armed_wall_missing_secret_fails_closed(tmp_path: Path):
+    state_path = tmp_path / "approval-wall.json"
+    save_approval_wall_state(state_path, ApprovalWallState(armed=True))
+    wall = resolve_approval_wall(
+        ApprovalWallConfig(
+            secret_supplier=lambda: None,
+            state_path=state_path,
+            policy_sha=POLICY_SHA,
+        )
+    )
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=wall,
+        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+    )
+
+    assert load_approval_wall_state(state_path).armed is True
+    assert wall.misconfigured is True
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_wall_misconfigured"
+    assert "approval_wall: misconfigured" in result.decisions[0].evidence
     assert gh.merge_calls == []
 
 
@@ -699,6 +816,52 @@ def test_approval_capability_audit_record_contains_no_secret():
     assert audit["reason"] == "valid"
     assert audit["repo"] == REPO
     assert APPROVAL_SECRET.decode("utf-8") not in str(audit)
+
+
+def test_approval_wall_secret_identity_backend_supplier_reads_injected_value_without_leak(tmp_path: Path):
+    secret = "backend-wall-secret"
+    target_ref = "tmpfs:/run/ce/approval-wall-secret"
+    ref = _approval_secret_ref()
+    request = _approval_secret_request(ref)
+    backend = RecordingSecretIdentityBackend(allowed_refs={ref})
+    reads: list[str] = []
+
+    def reader(target: str) -> str:
+        reads.append(target)
+        return secret
+
+    supplier = approval_wall_secret_supplier_from_secret_identity_backend(
+        backend=backend,
+        request=request,
+        target_ref=target_ref,
+        value_reader=reader,
+    )
+
+    assert supplier() == secret
+    assert reads == [target_ref]
+    assert backend.calls == [
+        "validate_config",
+        "issue",
+        "materialize",
+        "collect_audit",
+        "revoke",
+        "collect_audit",
+    ]
+    assert all(secret not in str(record) for record in backend.audit_records)
+
+    state_path = tmp_path / "approval-wall-state.json"
+    runtime = resolve_approval_wall(
+        ApprovalWallConfig(
+            secret_supplier=supplier,
+            state_path=state_path,
+            policy_sha=POLICY_SHA,
+        )
+    )
+
+    assert runtime.armed is True
+    assert load_approval_wall_state(state_path).armed is True
+    assert secret not in state_path.read_text(encoding="utf-8")
+    assert all(secret not in str(record) for record in backend.audit_records)
 
 
 def test_discover_daemon_candidates_uses_non_query_search_variable():
@@ -1014,10 +1177,11 @@ def test_daemon_manifest_overlap_defers_second_pr():
     assert "overlap_paths=docs/a.md" in result.decisions[1].evidence
 
 
-def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
+def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     captured = {}
 
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
 
     def fake_loop(**kwargs):
         captured.update(kwargs)
@@ -1038,6 +1202,7 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
         "--once",
         "--dry-run",
         "--authorized-reviewer", "ce-reviewer,ce-reviewer-2",
+        "--root", str(tmp_path),
         "--json",
     ])
 
@@ -1047,6 +1212,8 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
     assert captured["once"] is True
     assert captured["dry_run"] is True
     assert captured["authorized_reviewers"] == ("ce-reviewer", "ce-reviewer-2")
+    assert captured["approval_wall"].armed is True
+    assert load_approval_wall_state(tmp_path / "approval-capability-wall" / "state.json").armed is True
     assert '"enqueue_count": 0' in capsys.readouterr().out
 
 
