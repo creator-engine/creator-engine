@@ -37,7 +37,7 @@ what is committed here, that gitignored tree is the system of record.
 | Document | What it decides |
 | --- | --- |
 | [`v3-spec.md`](./v3-spec.md) | **The spec — read first.** The thin-orchestrator / thick-enforcer architecture, the five-component / three-plane (A/B/C) model, the forge-adapter interface, the container + in-container enforcer design, the D0–D6 deletion plan, the G-i/ii/iii → G-1 → G-2 → G-3 MVP gate map, and the OD-04′ supersession. |
-| [`v3-secure-runtime.md`](./v3-secure-runtime.md) | **Plane C — runtime safety.** The NVIDIA OpenShell adoption evaluation (defensive): deny-by-default per-endpoint L4/L7 egress, the gVisor + capability-separation-proxy ship-now backend, the credential model, the tamper-evident evidence spine, and the "sandbox is necessary, not sufficient" lesson. |
+| [`v3-secure-runtime.md`](./v3-secure-runtime.md) | **Plane C — runtime safety.** A defensive evaluation of the NVIDIA OpenShell runtime: deny-by-default per-endpoint L4/L7 egress, the gVisor + capability-separation-proxy ship-now backend, the credential model, the tamper-evident evidence spine, and the "sandbox is necessary, not sufficient" lesson. |
 | [`v3-product-brief.md`](./v3-product-brief.md) | **The product brief that framed the above.** The consolidated, already-ratified product decisions: product identity, target market, the A/B/C scope model, monorepo-first topology, the two product principles (agent-native install; Dev-mode-only MVP), and what survives vs. what is cut. |
 
 Note: `specs/001-v0-1-governance-substrate/` is the **superseded v2 governance

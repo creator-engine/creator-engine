@@ -4,7 +4,7 @@ This runbook covers the deployable artifacts for ce-ops#113 item 1, item 4,
 item 5, and item 6. Items 2 and 3 are Operator trust-root acts and are covered
 in [openbao-operator-bringup.md](openbao-operator-bringup.md).
 
-Host decision is locked: Hetzner VPS, logically segregated from work seats,
+Host decision is locked: the VPS, logically segregated from work seats,
 reachable only on the tailnet. Do not expose OpenBao on a public listener.
 
 ## Artifacts

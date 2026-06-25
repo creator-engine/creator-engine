@@ -11,7 +11,7 @@ and requires this PR's `base..HEAD` diff to equal exactly the authorized path-se
 SHA256 to match the fenced block.
 
 The change (docs-only): adds `docs/v3.5-roadmap.md` (the forward program plan that clusters
-the open backlog into 7 workstreams → waves → the NVIDIA pitch), and adds a forward-pointer
+the open backlog into 7 workstreams → waves → the roadmap milestone), and adds a forward-pointer
 header to the now-historical `docs/v3-roadmap.md`. No code or behaviour change.
 
 Per-file purpose (closed path-set — 4 paths):

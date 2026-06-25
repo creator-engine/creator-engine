@@ -6,7 +6,7 @@ scope: program planning / roadmap (docs)
 issue: ce-ops#93, ce-ops#91
 ---
 
-**CE v3.5 program plan — turn the flat backlog into one dependency-ordered plan to the NVIDIA pitch.**
+**CE v3.5 program plan — turn the flat backlog into one dependency-ordered plan to the roadmap milestone.**
 
 - **Added `docs/v3.5-roadmap.md`** — the forward program plan: the pitch DoD
   (containerized CE + ~100 live waitlist users + usage data) and the post-pitch

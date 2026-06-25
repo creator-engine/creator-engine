@@ -6,7 +6,7 @@ scope: openbao production go-live
 issue: ce-ops#113
 ---
 
-Added production go-live artifacts for the ratified Hetzner/tailnet OpenBao
+Added production go-live artifacts for the ratified VPS/tailnet OpenBao
 deployment: hardened raft/TLS/audit config, systemd/provisioning scripts,
 encrypted off-host snapshot and restore-drill tooling, emergency revocation
 automation, Operator bringup runbooks, and validator tests including an opt-in

@@ -95,7 +95,6 @@ _KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/devops/openbao-approval-wall-arming.md",
         "docs/devops/openbao-operator-bringup.md",
         "docs/devops/openbao-production-golive.md",
-        "docs/devops/openbao/provision-openbao.sh",
         "docs/downloads/0.2.0/scanners/scanner-mirror.fragment.yaml",
         "docs/guide/contributing-to-ce.md",
         "docs/keys/ce-root-v1",

@@ -36,7 +36,7 @@ credential that uploads) ≠ **merge** (the gated act). Today a contained agent
 (e.g. dev-4) authors + commits + signs locally but cannot push (no credential,
 no egress, governance hook denies it), so an **uncontained controller** (today
 dev-2) acts as courier: it takes the signed commit and pushes/opens the PR
-("commit-and-signal"). The every-agent-contained endgame (#128, a pre-pitch
+("commit-and-signal"). The every-agent-contained endgame (#128, a roadmap milestone
 critical path) contains **every** agent including controllers — which removes
 the last uncontained courier. So: when no agent may push, *what* pushes?
 
