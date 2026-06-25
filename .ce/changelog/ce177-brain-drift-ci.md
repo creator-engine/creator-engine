@@ -1,13 +1,8 @@
----
-slug: ce177-brain-drift-ci
-date: 2026-06-25
-kind: feature
-scope: Complete Knowledge-SSOT drift CI verification
-issue: ce-ops#177
----
+# ce-ops#177 — Brain Drift CI
 
-**CE177 brain drift CI.**
-
-- **Declared work class:** feature
-
-Complete CE177 brain drift CI with structured drift details, fail-closed unknown probes, and stable state-root evidence resolution.
+- Added the `ce_brain_drift` governance check for active Knowledge-SSOT brain assertions.
+- Added `ce brain verify --drift` for on-demand drift verification.
+- Wired CI to run the drift check over `.ce/state` on every validation run.
+- Added offline probe and local-evidence tests for pass, drift, fail-closed, and deterministic output paths.
+- Tightened artifact evidence so active non-probe assertions require an explicit supported hash/value comparison; evidence existence alone fails closed.
+- Defined missing brain ledgers in drift mode as zero active assertions so CLI and CI/check behavior agree.
