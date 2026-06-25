@@ -1,4 +1,4 @@
-# PR path manifest — ce-ops#16 · v3.1-G2f venue/seat spawn hardening (roadmap W2)
+# PR path manifest — ce-ops#16 · v3.1-G2f venue/seat spawn hardening (pitch-arc W2)
 
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention). CI runs:
 

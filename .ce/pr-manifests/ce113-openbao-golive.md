@@ -11,7 +11,7 @@ below. The carrier lists itself.
 
 Scope:
 Build deployable and tested ce-ops#113 production go-live artifacts for the
-Operator-ratified VPS, logically segregated and tailnet-only OpenBao
+Operator-ratified Hetzner VPS, logically segregated and tailnet-only OpenBao
 topology. This PR does not initialize or unseal production, does not inject real
 secret-zero, and does not migrate live secrets.
 

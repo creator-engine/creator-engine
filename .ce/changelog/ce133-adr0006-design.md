@@ -14,6 +14,6 @@ verification, ce-ops#91 doc-currency touchpoints, ce-ops#65 changelog-gate
 touchpoints, and the phased gates needed to end the recurring per-PR app-wheel
 rebuild tax.
 
-The Operator ratified ADR-0006 on 2026-06-19 as Gate-1 design acceptance.
+Operator neckar ratified ADR-0006 on 2026-06-19 as Gate-1 design acceptance.
 Gates 2-3 remain separate future ratified gates; this fragment records no code,
 workflow, trust-root, or release-artifact change.
