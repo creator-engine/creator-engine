@@ -167,6 +167,12 @@ fi
 if [ "${CE_DGX_HARNESS:-codex}" = "codex" ]; then
   harness_cmd+=("CE_CODEX_STDERR_LOG=${CE_CODEX_STDERR_LOG}")
 fi
+if [ -n "${CE_EGRESS_BROKER_SOCKET:-}" ]; then
+  harness_cmd+=("CE_EGRESS_BROKER_SOCKET=${CE_EGRESS_BROKER_SOCKET}")
+fi
+if [ -n "${CE_SEAT_ID:-}" ]; then
+  harness_cmd+=("CE_SEAT_ID=${CE_SEAT_ID}")
+fi
 
 if [ "${CE_DGX_HARNESS:-codex}" = "codex" ]; then
   harness_cmd+=(/bin/sh -c 'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"' sh "${HARNESS_BIN}")

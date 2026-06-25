@@ -27,6 +27,11 @@ evasion, no credential exfiltration).
 """
 from __future__ import annotations
 
+from .host_broker import (
+    handle_self_push_json_line,
+    handle_self_push_request,
+    serve_self_push_unix_socket,
+)
 from .orchestrator import ContainedSeatSelfPushRequest, contained_seat_self_push
 from .policy import (
     BrokerPolicy,
@@ -48,4 +53,7 @@ __all__ = [
     "RateState",
     "contained_seat_self_push",
     "evaluate",
+    "handle_self_push_json_line",
+    "handle_self_push_request",
+    "serve_self_push_unix_socket",
 ]

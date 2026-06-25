@@ -83,6 +83,63 @@ def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.Completed
         )
 
 
+def run_wrapper_nondry_run_with_fake_docker(
+    *args: str, **env_overrides: str | None
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory(prefix="creator-engine-dgx-runsc-test-") as runtime_dir:
+        root = Path(runtime_dir)
+        fake_bin = root / "bin"
+        repo = root / "repo"
+        codex_home = root / "codex-home"
+        codex_bin = root / "codex"
+        fake_bin.mkdir()
+        repo.mkdir()
+        codex_home.mkdir()
+        codex_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        codex_bin.chmod(0o755)
+        docker = fake_bin / "docker"
+        docker.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"info\" ]; then\n"
+            "  printf '{\"runsc-gvproxy-ptrace\":{}}\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'unexpected docker invocation: %s\\n' \"$*\" >&2\n"
+            "exit 99\n",
+            encoding="utf-8",
+        )
+        docker.chmod(0o755)
+        env.update(
+            {
+                "CE_DGX_DRY_RUN": "0",
+                "CE_DGX_IMAGE": "creator-engine/codex-runsc:test",
+                "CE_DGX_REPO": str(repo),
+                "CE_DGX_CODEX_HOME": str(codex_home),
+                "CE_DGX_CODEX_BIN": str(codex_bin),
+                "CE_DGX_CONTAINED_CODEX_CONFIG": str(root / "contained-codex.toml"),
+                "CE_DGX_SEAT_LOG_DIR": str(root / "seat-logs"),
+                "CE_DGX_UID": "1000",
+                "CE_DGX_GID": "1000",
+                "CE_DGX_TTY_FLAGS": "-i",
+                "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            }
+        )
+        for key, value in env_overrides.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+        return subprocess.run(
+            ["bash", str(SCRIPT), *args],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+
 def dry_run_argv(result: subprocess.CompletedProcess[str]) -> list[str]:
     assert result.returncode == 0, result.stderr
     return shlex.split(result.stdout)
@@ -293,6 +350,9 @@ def test_entrypoint_starts_harness_with_clean_env_without_socket_carriers() -> N
     assert not re.search(r"CE_DGX_[A-Z0-9_]*SOCKET[A-Z0-9_]*", harness_block)
     assert "CE_DGX_TERMINAL_KIND=herdr" in harness_block
     assert "CE_TERMINAL_KIND=herdr" in harness_block
+    assert "CE_EGRESS_BROKER_SOCKET=${CE_EGRESS_BROKER_SOCKET}" in text
+    assert "CE_SEAT_ID=${CE_SEAT_ID}" in text
+    assert "CE_DGX_EGRESS_BROKER_SOCKET" not in harness_block
 
 
 def test_dgx_socket_path_reaches_container_env_but_not_seat_env() -> None:
@@ -306,6 +366,97 @@ def test_dgx_socket_path_reaches_container_env_but_not_seat_env() -> None:
     assert "-i" in harness_block
     assert "CE_DGX_HERDR_SOCKET_PATH" not in harness_block
     assert "HERDR_SOCKET_PATH" not in harness_block
+
+
+def test_egress_broker_socket_mount_requires_explicit_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_DGX_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-4.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_DGX_SEAT_ID must be set explicitly" in result.stderr
+
+
+def test_egress_broker_socket_mount_rejects_non_broker_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_DGX_SEAT_ID="ce-dgx-codex",
+        CE_DGX_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-4.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_DGX_SEAT_ID must be a broker seat id like dev-4" in result.stderr
+
+
+def test_egress_broker_socket_mount_rejects_empty_explicit_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_DGX_SEAT_ID="",
+        CE_DGX_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-4.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_DGX_SEAT_ID must be a broker seat id like dev-4" in result.stderr
+
+
+def test_egress_broker_socket_mounts_only_socket_and_value_env() -> None:
+    host_socket = "/run/user/1000/creator-engine/egress-broker/dev-4.sock"
+    container_socket = "/run/ce-egress-broker.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_DGX_SEAT_ID="dev-4",
+            CE_DGX_EGRESS_BROKER_SOCKET=host_socket,
+            CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET=container_socket,
+            GITHUB_TOKEN="ghp_0123456789abcdef0123456789abcdef0123",
+            GH_TOKEN="ghs_0123456789abcdef0123456789abcdef0123",
+            OPENBAO_TOKEN="hvs.0123456789abcdef",
+            CE_APP_KEY="-----BEGIN PRIVATE KEY-----",
+            SSH_AUTH_SOCK="/tmp/ssh-agent.sock",
+            DOCKER_HOST="unix:///var/run/docker.sock",
+            CE_EGRESS_BROKER_CONFIG="/home/cedev4/.ce-egress/broker.json",
+        )
+    )
+
+    assert f"CE_EGRESS_BROKER_SOCKET={container_socket}" in argv
+    assert "CE_SEAT_ID=dev-4" in argv
+    assert f"CE_DGX_EGRESS_BROKER_SOCKET={host_socket}" not in argv
+    assert not any("CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET=" in arg for arg in argv)
+    assert any(
+        arg == f"type=bind,source={host_socket},target={container_socket}"
+        for arg in argv
+    )
+    rendered = "\n".join(argv)
+    assert "ghp_0123456789abcdef0123456789abcdef0123" not in rendered
+    assert "ghs_0123456789abcdef0123456789abcdef0123" not in rendered
+    assert "hvs.0123456789abcdef" not in rendered
+    assert "-----BEGIN PRIVATE KEY-----" not in rendered
+    assert "/tmp/ssh-agent.sock" not in rendered
+    assert "/var/run/docker.sock" not in rendered
+    assert "/home/cedev4/.ce-egress/broker.json" not in rendered
+    assert not any("GITHUB_TOKEN" in arg or "GH_TOKEN" in arg for arg in argv)
+    assert not any(
+        "OPENBAO" in arg
+        or "APP_KEY" in arg
+        or "SSH_AUTH_SOCK" in arg
+        or "DOCKER_HOST" in arg
+        or "CE_EGRESS_BROKER_CONFIG" in arg
+        for arg in argv
+    )
+
+
+def test_egress_broker_socket_absent_fails_closed_before_docker_run_under_nondry_run() -> None:
+    missing_socket = "/run/user/1000/creator-engine/egress-broker/missing.sock"
+    result = run_wrapper_nondry_run_with_fake_docker(
+        "tui",
+        CE_DGX_SEAT_ID="dev-4",
+        CE_DGX_EGRESS_BROKER_SOCKET=missing_socket,
+    )
+
+    assert result.returncode == 66
+    assert f"egress broker socket not found: {missing_socket}" in result.stderr
+    assert "unexpected docker invocation" not in result.stderr
 
 
 def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:

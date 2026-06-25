@@ -12,6 +12,7 @@ import json
 import pytest
 
 import ce_egress_broker as cli
+import ce_egress_self_push_broker as self_push_cli
 from egress_broker.orchestrator import BrokerResult, EgressRefused
 from egress_broker.policy import Decision
 
@@ -135,3 +136,68 @@ def test_unknown_seat_still_runs_courier_for_the_audited_deny(tmp_path):
     rc = cli.main(args, courier_fn=fake_courier)
     assert called["n"] == 1
     assert rc != 0
+
+
+def test_self_push_broker_cli_wires_host_seams(tmp_path):
+    seen = {}
+
+    def fake_signer_factory(pem_path):
+        seen["pem_path"] = pem_path
+        return lambda payload: b"sig"
+
+    def fake_serve(socket_path, **kw):
+        seen.update(socket_path=socket_path, **kw)
+
+    rc = self_push_cli.main(
+        [
+            "--socket", str(tmp_path / "dev-4.sock"),
+            "--seat", "dev-4",
+            "--host-repo-path", "/host/repo",
+            "--config", str(_config_file(tmp_path)),
+            "--once",
+        ],
+        serve_fn=fake_serve,
+        signer_factory=fake_signer_factory,
+    )
+
+    assert rc == 0
+    assert seen["pem_path"] == "/dev/shm/ce-dev4/ce-forge-dev4.pem"
+    assert seen["broker_seat_id"] == "dev-4"
+    assert seen["host_repo_path"] == "/host/repo"
+    assert seen["once"] is True
+    assert callable(seen["signer"])
+
+
+def test_self_push_broker_cli_config_error_and_runtime_error_codes(tmp_path, capsys):
+    rc = self_push_cli.main(
+        [
+            "--socket", str(tmp_path / "dev-4.sock"),
+            "--seat", "dev-4",
+            "--host-repo-path", "/host/repo",
+            "--config", str(tmp_path / "missing.json"),
+        ],
+        serve_fn=lambda *a, **k: None,
+        signer_factory=lambda pem: (lambda payload: b"sig"),
+    )
+    assert rc == self_push_cli.EXIT_CONFIG_ERROR
+
+    secret = "ghs_SHOULD_NOT_LEAK_0123456789"
+
+    def leaking_serve(*args, **kwargs):
+        raise RuntimeError(f"transport failed with {secret}")
+
+    rc = self_push_cli.main(
+        [
+            "--socket", str(tmp_path / "dev-4.sock"),
+            "--seat", "dev-4",
+            "--host-repo-path", "/host/repo",
+            "--config", str(_config_file(tmp_path)),
+        ],
+        serve_fn=leaking_serve,
+        signer_factory=lambda pem: (lambda payload: b"sig"),
+    )
+
+    assert rc == self_push_cli.EXIT_RUNTIME_ERROR
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err
+    assert secret not in err

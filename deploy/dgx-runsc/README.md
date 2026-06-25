@@ -148,6 +148,23 @@ operator explicitly overrides it for diagnostics.
    for `herdr` CLI calls and starts the governed harness with a clean explicit
    environment that excludes raw and CE_DGX-prefixed socket carriers.
 
+   To expose the contained-seat SELF-PUSH broker, set only the per-seat host Unix
+   socket and the explicit broker seat id:
+
+   ```bash
+   CE_DGX_EGRESS_BROKER_SOCKET=/run/user/$UID/creator-engine/egress-broker/dev-4.sock \
+   CE_DGX_SEAT_ID=dev-4 \
+   CE_DGX_DRY_RUN=1 \
+     CE_DGX_REPO="$PWD" \
+     ./deploy/dgx-runsc/run-codex-runsc.sh exec "print broker env"
+   ```
+
+   The dry-run argv must include a bind mount from that host socket to
+   `/run/ce-egress-broker.sock`, plus `CE_EGRESS_BROKER_SOCKET=/run/ce-egress-broker.sock`
+   and `CE_SEAT_ID=dev-4`. It must not include `CE_DGX_EGRESS_BROKER_SOCKET` as a container
+   env, GitHub/OpenBao tokens, App keys, SSH agent sockets, Docker sockets, or the host broker
+   config path.
+
 6. Start the interactive Codex TUI in the repo:
 
    ```bash
@@ -273,6 +290,8 @@ CE_DGX_TERMINAL_KIND=herdr
 CE_DGX_TTY_FLAGS=-it
 CE_DGX_DETACH=0
 CE_DGX_CONTAINER_NAME=ce-dgx-codex
+CE_DGX_EGRESS_BROKER_SOCKET=
+CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET=/run/ce-egress-broker.sock
 ```
 
 `CE_DGX_NETWORK` remains as a deprecated alias for `CE_DGX_DOCKER_NETWORK`.
@@ -294,6 +313,58 @@ would be more likely to reduce available memory than fix the guard-page failure.
 Set `CE_DGX_CODEX_HOME_MODE=ro` only after confirming Codex does not need to
 write session state. The default is `rw` because the TUI commonly records local
 session data under `~/.codex`.
+
+## Contained SELF-PUSH Broker Socket
+
+The wrapper can bind-mount one host-side ce-egress-broker Unix socket into the
+container. This is intentionally narrow:
+
+- `CE_DGX_EGRESS_BROKER_SOCKET` is the host socket source, for example
+  `/run/user/$UID/creator-engine/egress-broker/dev-4.sock`.
+- `CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET` defaults to `/run/ce-egress-broker.sock`.
+- When the broker socket is set, `CE_DGX_SEAT_ID` must be set explicitly to the
+  `dev-N` broker seat id (`dev-4`, not the launcher default `ce-dgx-codex`).
+- Non-dry-run launches preflight `[ -S "$CE_DGX_EGRESS_BROKER_SOCKET" ]` and fail closed if
+  the host daemon socket is absent.
+- The container receives only `CE_EGRESS_BROKER_SOCKET` and `CE_SEAT_ID`. The host socket env
+  name, host broker config, GitHub tokens, App keys, OpenBao tokens, SSH agent, and Docker
+  socket are not passed through.
+
+The clean herdr harness environment propagates only `CE_EGRESS_BROKER_SOCKET` and
+`CE_SEAT_ID` for this path. The host daemon owns `~/.ce-egress/broker.json`, the trusted host
+repo path, the host signature trust store, and `/dev/shm/ce-devN` App PEMs.
+
+Live SELF-PUSH smoke is a host-daemon apply path. Start the broker on the host,
+then let the contained seat send only the value request over the mounted socket:
+
+```bash
+# host terminal
+install -d -m 0700 "/run/user/$UID/creator-engine/egress-broker"
+python tools/egress-broker/ce_egress_self_push_broker.py \
+  --seat dev-4 \
+  --socket "/run/user/$UID/creator-engine/egress-broker/dev-4.sock" \
+  --host-repo-path "$PWD" \
+  --config "$HOME/.ce-egress/broker.json"
+
+# contained seat
+python3 - <<'PY'
+import json
+import os
+import socket
+
+branch = "ce-ops-242-smoke"  # replace with the signed branch to publish
+req = {"seat_id": os.environ["CE_SEAT_ID"], "branch": branch}
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+    sock.connect(os.environ["CE_EGRESS_BROKER_SOCKET"])
+    sock.sendall((json.dumps(req, separators=(",", ":")) + "\n").encode())
+    print(sock.recv(65536).decode(), end="")
+PY
+```
+
+The contained environment is intentionally zero-credential: it cannot run
+`tools/egress-broker/ce_egress_broker.py --apply` itself because it has no
+broker config, App key, mint token, SSH agent, Docker socket, or forge token.
+Only the host daemon can perform the live apply.
 
 ## Validation Notes
 
