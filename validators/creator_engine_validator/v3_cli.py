@@ -3088,6 +3088,18 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             schema, detected=detected, answers=answers or None
         )
         inventory_merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
+        inventory_backend = v3_installer.resolve_isolation_backend(
+            profile=inventory_merged.value("profile"),
+            explicit=inventory_merged.value("isolation_backend"),
+        )
+        dependency_probe = {
+            tool: _which(tool)
+            for tool in v3_installer.BACKEND_DEPS[inventory_backend]
+        }
+        rows = rows + v3_installer.inventory_dependency_rows(
+            inventory_backend,
+            dependency_probe,
+        )
         inventory_missing = v3_installer.missing_answers(schema, inventory_merged)
         first_project = v3_installer.build_greenfield_first_project_plan(
             schema, inventory_merged, inventory_missing

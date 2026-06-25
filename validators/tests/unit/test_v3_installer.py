@@ -1533,6 +1533,32 @@ def test_inventory_emission_statuses():
     assert "D" in rows["github.repo"]["modes"]
 
 
+def test_inventory_dependency_rows_warn_only_for_selected_backend_missing_deps():
+    rows = inst.inventory_dependency_rows(
+        "os-native",
+        {"git": False, "python": True, "uv": True, "runsc": False, "proxy": False},
+    )
+
+    assert [row["key"] for row in rows] == ["dependencies.git"]
+    assert rows[0]["status"] == "WARN MISSING (needed for first-value)"
+    assert rows[0]["dependency"] is True
+
+
+def test_inventory_dependency_rows_scope_gvisor_deps_to_gvisor_backend():
+    os_native = inst.inventory_dependency_rows(
+        "os-native",
+        {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False},
+    )
+    gvisor = inst.inventory_dependency_rows(
+        "gvisor-proxy",
+        {"git": True, "python": True, "uv": True, "runsc": False, "proxy": False},
+    )
+
+    assert os_native == ()
+    assert {row["tool"] for row in gvisor} == {"runsc", "proxy"}
+    assert all(row["status"] == "WARN MISSING (needed for gvisor-proxy)" for row in gvisor)
+
+
 def test_inventory_derives_from_schema_annotations_only():
     keys = {item.key for item in inst.schema_inventory(ANSWERS_SCHEMA)}
     # the meta key carries no x-ce-step → never an operator input
