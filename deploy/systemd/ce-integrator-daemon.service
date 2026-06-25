@@ -9,7 +9,7 @@ Type=simple
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
 Environment=PYTHONPATH=validators
-ExecStart=.venv/bin/python -m creator_engine_validator.v3_cli queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --json
+ExecStart=.venv/bin/python -m creator_engine_validator.v3_cli queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
 Restart=on-failure
 RestartSec=30s
 

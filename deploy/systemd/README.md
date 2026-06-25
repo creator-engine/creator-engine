@@ -26,10 +26,14 @@ Example:
 
 ```sh
 CE_GATE_REPO=creator-engine/creator-engine
+CE_GATE_AUTHORIZED_REVIEWERS=ce-dev-3,ce-dev-4
 GH_TOKEN=ghp_integrator_token
 CE_PICKUP_TOKEN=ghp_review_pickup_token
 ```
 
-`GH_TOKEN` is required by the integrator daemon. Review pickup first uses
-`CE_PICKUP_TOKEN`; if it is absent, the CLI falls back to
-`~/.ce-keys/ce-dev-2.pat` unless ambient `gh` auth is explicitly enabled.
+`GH_TOKEN` and `CE_GATE_AUTHORIZED_REVIEWERS` are required by the integrator
+daemon. `CE_GATE_AUTHORIZED_REVIEWERS` is a comma-separated list of reviewer
+GitHub logins whose approvals may authorize merge-queue enqueue; missing or
+empty config fails closed. Review pickup first uses `CE_PICKUP_TOKEN`; if it is
+absent, the CLI falls back to `~/.ce-keys/ce-dev-2.pat` unless ambient `gh`
+auth is explicitly enabled.

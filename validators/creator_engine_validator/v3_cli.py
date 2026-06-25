@@ -4149,7 +4149,25 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_daemon.add_argument("--interval", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between loop passes")
     p_queue_daemon.add_argument("--dry-run", action="store_true", help="log enqueue decisions without running gh pr merge")
     p_queue_daemon.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
+    p_queue_daemon.add_argument(
+        "--authorized-reviewer",
+        action="append",
+        default=[],
+        dest="authorized_reviewers",
+        metavar="LOGIN",
+        help="authorized approval reviewer login; repeatable, comma-separated allowed",
+    )
     _add_root(p_queue_daemon)  # adds --root + --json
+
+    p_queue_dequeue = sub.add_parser(
+        "queue-dequeue",
+        help="emergency merge-queue dequeue: disable GitHub auto-merge for one PR",
+    )
+    p_queue_dequeue.add_argument("pr_number", type=int, metavar="PR", help="pull request number")
+    p_queue_dequeue.add_argument("--repo", required=True, help="owner/name repository scope")
+    p_queue_dequeue.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
+    p_queue_dequeue.add_argument("--convert-to-draft", action="store_true", help="also convert the PR back to draft after dequeue")
+    _add_root(p_queue_dequeue)  # adds --root + --json
 
     return parser
 
@@ -4209,6 +4227,7 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             interval_seconds=args.interval,
             dry_run=bool(args.dry_run),
             log_sink=logger,
+            authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
         )
     except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
         print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
@@ -4228,6 +4247,42 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             f"defer={result.defer_count} failed={result.failed_count}"
         )
     return 0 if result.failed_count == 0 else 1
+
+
+def _comma_values(values: Sequence[str]) -> tuple[str, ...]:
+    out: list[str] = []
+    for value in values:
+        out.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return tuple(out)
+
+
+def _cmd_queue_dequeue(args: argparse.Namespace) -> int:
+    """Emergency merge-queue dequeue primitive."""
+    try:
+        token = integrator_belt.token_from_env(args.token_env)
+        gh_runner = integrator_belt.gh_runner_with_token(token)
+        result = integrator_belt.dequeue_merge_queue(
+            repo=args.repo,
+            pr_number=args.pr_number,
+            gh_runner=gh_runner,
+            convert_to_draft=bool(args.convert_to_draft),
+        )
+    except integrator_belt.IntegratorBeltError as exc:
+        print(f"ERROR: {CE_CMD} queue-dequeue refused: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive fail-closed
+        print(f"ERROR: {CE_CMD} queue-dequeue failed closed: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        draft = " draft=true" if result.converted_to_draft else ""
+        print(
+            f"{CE_CMD} queue-dequeue: "
+            f"repo={result.repo} pr={result.pr_number} "
+            f"disabled_auto_merge={result.disabled_auto_merge}{draft}"
+        )
+    return 0 if result.ok else 1
 
 
 def _review_pickup_transport():
@@ -4643,6 +4698,7 @@ _DISPATCH = {
     "carrier": _cmd_carrier,
     "queue-poll": _cmd_queue_poll,
     "queue-daemon": _cmd_queue_daemon,
+    "queue-dequeue": _cmd_queue_dequeue,
     "fleet": fleet_status.run_cli,
     "seats": seats_status.run_cli,
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 import subprocess
 
@@ -21,6 +22,7 @@ BASE = "b" * 40
 BRANCH = "feature-integrator"
 CARRIER = ".ce/pr-manifests/feature-integrator.md"
 CARRIER_2 = ".ce/pr-manifests/feature-integrator-2.md"
+AUTHORIZED_REVIEWER = "ce-reviewer"
 _OURS = "<" * 7 + " ours"
 _SEP = "=" * 7
 _THEIRS = ">" * 7 + " theirs"
@@ -259,15 +261,32 @@ def _daemon_pr(**overrides) -> belt.DaemonPullRequest:
         "files_complete": True,
         "checks_complete": True,
         "is_draft": False,
+        "approval_witnesses": (
+            belt.DaemonApprovalWitness(
+                reviewer_login=AUTHORIZED_REVIEWER,
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-1",
+            ),
+        ),
     }
     data.update(overrides)
     return belt.DaemonPullRequest(**data)
 
 
 class FakeDaemonGh:
-    def __init__(self, raw_contents: tuple[str | None, ...] = ()) -> None:
+    def __init__(
+        self,
+        raw_contents: tuple[str | None, ...] = (),
+        approval_witnesses: tuple[belt.DaemonApprovalWitness, ...] | None = None,
+        review_decision: str = "APPROVED",
+        head_sha: str = HEAD,
+    ) -> None:
         self.calls: list[list[str]] = []
         self.raw_contents = list(raw_contents)
+        self.approval_witnesses = approval_witnesses
+        self.review_decision = review_decision
+        self.head_sha = head_sha
 
     def __call__(self, argv, input_text=None):
         self.calls.append(list(argv))
@@ -276,6 +295,44 @@ class FakeDaemonGh:
             if stdout is None:
                 return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="not found")
             return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+        if len(argv) >= 4 and argv[:3] == ["gh", "api", "graphql"]:
+            witnesses = self.approval_witnesses
+            if witnesses is None:
+                witnesses = (
+                    belt.DaemonApprovalWitness(
+                        reviewer_login=AUTHORIZED_REVIEWER,
+                        commit_oid=HEAD,
+                        state="APPROVED",
+                        review_id="review-1",
+                    ),
+                )
+            reviews = [
+                {
+                    "id": witness.review_id,
+                    "state": witness.state,
+                    "author": {"login": witness.reviewer_login},
+                    "commit": {"oid": witness.commit_oid},
+                }
+                for witness in witnesses
+            ]
+            return subprocess.CompletedProcess(
+                list(argv),
+                0,
+                stdout=json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewDecision": self.review_decision,
+                                    "headRefOid": self.head_sha,
+                                    "latestOpinionatedReviews": {"nodes": reviews},
+                                }
+                            }
+                        }
+                    }
+                ),
+                stderr="",
+            )
         return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
 
     @property
@@ -295,21 +352,64 @@ def _carrier_text(paths: tuple[str, ...]) -> str:
     )
 
 
-def test_daemon_selects_approved_green_current_head_and_enqueues():
+def _settled(pr: belt.DaemonPullRequest) -> set[str]:
+    witness = belt._current_approval_witness(pr)
+    assert witness is not None
+    return {belt._approval_settle_key(pr, witness)}
+
+
+def test_daemon_default_direct_pass_defers_first_cycle_and_does_not_merge():
     gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
     logs: list[dict] = []
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
 
     result = belt.run_daemon_pass(
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
-        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+        candidates=(pr,),
         log_sink=lambda payload: logs.append(dict(payload)),
     )
 
-    assert result.enqueue_count == 1
+    assert result.enqueue_count == 0
     assert result.skip_count == 0
-    assert gh.merge_calls == [[
+    assert result.defer_count == 1
+    assert gh.merge_calls == []
+    assert result.decisions[0].reason == "approval_settle_pending"
+    assert logs[-1]["status"] == "defer"
+
+
+def test_daemon_settle_window_defers_first_approval_cycle_then_enqueues():
+    settle_seen: set[str] = set()
+    first_gh = FakeDaemonGh()
+
+    first = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=first_gh,
+        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+        approval_settle_seen=settle_seen,
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert first.enqueue_count == 0
+    assert first.defer_count == 1
+    assert first.decisions[0].reason == "approval_settle_pending"
+    assert first_gh.merge_calls == []
+
+    second_gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    second = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=second_gh,
+        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+        approval_settle_seen=settle_seen,
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert second.enqueue_count == 1
+    assert second.decisions[0].reason == "eligible_enqueued"
+    assert second_gh.merge_calls == [[
         "gh",
         "pr",
         "merge",
@@ -320,9 +420,152 @@ def test_daemon_selects_approved_green_current_head_and_enqueues():
         "--match-head-commit",
         HEAD,
     ]]
-    assert result.decisions[0].reason == "eligible_enqueued"
-    assert result.decisions[0].path_set_source == "carrier"
-    assert logs[-1]["status"] == "enqueue"
+
+
+def test_daemon_settled_without_authorized_reviewers_fails_closed():
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.decisions[0].reason == "authorized_reviewers_missing"
+    assert gh.merge_calls == []
+
+
+def test_daemon_skips_unvetted_reviewer_excluded_by_authorized_set():
+    pr = _daemon_pr(
+        changed_paths=(CARRIER, "docs/a.md"),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="unvetted-reviewer",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-unvetted",
+            ),
+        ),
+    )
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.decisions[0].reason == "approval_reviewer_unauthorized"
+    assert gh.merge_calls == []
+
+
+def test_daemon_reverifies_approval_immediately_before_enqueue():
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(
+        raw_contents=(_carrier_text((CARRIER, "docs/a.md")),),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login=AUTHORIZED_REVIEWER,
+                commit_oid=HEAD,
+                state="DISMISSED",
+                review_id="review-1",
+            ),
+        ),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_not_reconfirmed"
+    assert gh.merge_calls == []
+
+
+def test_daemon_reverify_requires_same_authorized_reviewer():
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(
+        raw_contents=(_carrier_text((CARRIER, "docs/a.md")),),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="other-reviewer",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-2",
+            ),
+        ),
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.decisions[0].reason == "approval_not_reconfirmed"
+    assert gh.merge_calls == []
+
+
+def test_daemon_reverify_head_moved_fails_closed():
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(
+        raw_contents=(_carrier_text((CARRIER, "docs/a.md")),),
+        head_sha="d" * 40,
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.decisions[0].reason == "approval_reverify_failed"
+    assert "head_moved=true" in result.decisions[0].evidence
+    assert gh.merge_calls == []
+
+
+def test_daemon_reverify_review_decision_downgrade_fails_closed():
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(
+        raw_contents=(_carrier_text((CARRIER, "docs/a.md")),),
+        review_decision="CHANGES_REQUESTED",
+    )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.decisions[0].reason == "approval_not_reconfirmed"
+    assert "review_decision=CHANGES_REQUESTED" in result.decisions[0].evidence
+    assert gh.merge_calls == []
 
 
 def test_discover_daemon_candidates_uses_non_query_search_variable():
@@ -452,11 +695,26 @@ def test_parse_daemon_pr_reads_approval_from_latest_opinionated_reviews():
         # the approval (with its head commit oid) only in latestOpinionatedReviews.
         "latestReviews": {"nodes": []},
         "latestOpinionatedReviews": {
-            "nodes": [{"state": "APPROVED", "commit": {"oid": head}}]
+            "nodes": [
+                {
+                    "id": "review-7",
+                    "state": "APPROVED",
+                    "author": {"login": "ce-reviewer"},
+                    "commit": {"oid": head},
+                }
+            ]
         },
     }
     pr = belt._parse_daemon_pr(node)
     assert pr.approving_review_commits == (head.lower(),)
+    assert pr.approval_witnesses == (
+        belt.DaemonApprovalWitness(
+            reviewer_login="ce-reviewer",
+            commit_oid=head.lower(),
+            state="APPROVED",
+            review_id="review-7",
+        ),
+    )
 
 
 def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
@@ -482,14 +740,44 @@ def test_daemon_skips_stale_approval_red_and_missing_governance_fail_closed():
     assert gh.merge_calls == []
 
 
-def test_daemon_skips_missing_carrier_fail_closed():
+def test_daemon_skips_unconfirmed_reviewer_identity_fail_closed():
     gh = FakeDaemonGh()
+    pr = _daemon_pr(
+        approving_review_commits=(HEAD,),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-blank",
+            ),
+        ),
+    )
 
     result = belt.run_daemon_pass(
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
-        candidates=(_daemon_pr(changed_paths=("docs/a.md",)),),
+        candidates=(pr,),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_reviewer_unconfirmed"
+    assert gh.merge_calls == []
+
+
+def test_daemon_skips_missing_carrier_fail_closed():
+    gh = FakeDaemonGh()
+    pr = _daemon_pr(changed_paths=("docs/a.md",))
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
     )
 
     assert result.enqueue_count == 0
@@ -509,6 +797,8 @@ def test_daemon_skips_unreadable_or_invalid_carrier_fail_closed():
         repo=REPO,
         gh_runner=gh,
         candidates=(unreadable, invalid),
+        approval_settle_seen={*_settled(unreadable), *_settled(invalid)},
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
     )
 
     assert result.enqueue_count == 0
@@ -521,13 +811,16 @@ def test_daemon_skips_unreadable_or_invalid_carrier_fail_closed():
 
 def test_daemon_dry_run_merges_nothing():
     gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
 
     result = belt.run_daemon_pass(
         token="ghp_fake",
         repo=REPO,
         gh_runner=gh,
         dry_run=True,
-        candidates=(_daemon_pr(changed_paths=(CARRIER, "docs/a.md")),),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
     )
 
     assert result.enqueue_count == 1
@@ -553,6 +846,8 @@ def test_daemon_manifest_overlap_defers_second_pr():
         gh_runner=gh,
         dry_run=True,
         candidates=(first, second),
+        approval_settle_seen={*_settled(first), *_settled(second)},
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
     )
 
     assert [decision.status for decision in result.decisions] == ["enqueue", "defer"]
@@ -584,6 +879,7 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
         "--repo", REPO,
         "--once",
         "--dry-run",
+        "--authorized-reviewer", "ce-reviewer,ce-reviewer-2",
         "--json",
     ])
 
@@ -592,4 +888,61 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys):
     assert captured["repo"] == REPO
     assert captured["once"] is True
     assert captured["dry_run"] is True
+    assert captured["authorized_reviewers"] == ("ce-reviewer", "ce-reviewer-2")
     assert '"enqueue_count": 0' in capsys.readouterr().out
+
+
+def test_dequeue_merge_queue_disables_auto_and_optionally_drafts():
+    calls: list[list[str]] = []
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    result = belt.dequeue_merge_queue(
+        repo=REPO,
+        pr_number=PR,
+        gh_runner=gh,
+        convert_to_draft=True,
+    )
+
+    assert result.ok is True
+    assert result.disabled_auto_merge is True
+    assert result.converted_to_draft is True
+    assert calls == [
+        ["gh", "pr", "merge", str(PR), "--repo", REPO, "--disable-auto"],
+        ["gh", "pr", "ready", str(PR), "--repo", REPO, "--undo"],
+    ]
+
+
+def test_ce_queue_dequeue_cli_json(monkeypatch, capsys):
+    captured = {}
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setattr(v3_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
+
+    def fake_dequeue(**kwargs):
+        captured.update(kwargs)
+        return belt.MergeQueueDequeueResult(
+            repo=kwargs["repo"],
+            pr_number=kwargs["pr_number"],
+            disabled_auto_merge=True,
+            converted_to_draft=True,
+            evidence=("gh_pr_merge_disable_auto=true", "draft_returncode=0"),
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "dequeue_merge_queue", fake_dequeue)
+
+    ret = v3_cli.main([
+        "queue-dequeue",
+        str(PR),
+        "--repo", REPO,
+        "--convert-to-draft",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert captured["repo"] == REPO
+    assert captured["pr_number"] == PR
+    assert captured["convert_to_draft"] is True
+    assert '"disabled_auto_merge": true' in capsys.readouterr().out
