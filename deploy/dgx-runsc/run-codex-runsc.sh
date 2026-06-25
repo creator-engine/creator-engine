@@ -134,6 +134,10 @@ model = "gpt-5.5"
 model_reasoning_effort = "high"
 allow_managed_hooks_only = true
 
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "pull-request-number", "context-remaining", "context-used", "five-hour-limit", "weekly-limit"]
+status_line_use_colors = true
+
 [features]
 hooks = true
 
