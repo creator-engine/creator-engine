@@ -130,6 +130,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "forge",
         "forge._redact",
         "forge.app_jwt_runner",
+        # ce-ops#234 approval wall: pure HMAC capability markers that make raw
+        # GitHub approval necessary but insufficient for integrator enqueue.
+        "forge.approval_capability",
         # ce-ops#99 P1 repo-scope devops ops: all plan-by-default, injectable-runner
         # forge surfaces, classified with the rest of the v3 forge adapter family.
         "forge.auto_merge",

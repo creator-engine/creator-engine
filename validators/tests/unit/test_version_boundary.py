@@ -156,7 +156,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-fleet-status adds ``forge.fleet_status`` for the aggregate fleet view
     # over seats, daemon health, and the open PR board (59 -> 60).
     # ce-ops#228 PR-2 added ``forge.cred_injection_proxy`` (60 -> 61).
-    assert len(ver.V3_RUNTIME) == 61
+    # ce-ops#234 added ``forge.approval_capability`` for controller-only
+    # approval wall markers required before integrator enqueue (61 -> 62).
+    assert len(ver.V3_RUNTIME) == 62
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

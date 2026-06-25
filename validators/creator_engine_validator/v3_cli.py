@@ -60,6 +60,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -94,7 +95,7 @@ from .forge import (
     delete_ruleset,
     upsert_ruleset,
 )
-from .forge import fleet_status, integrator_belt, seats_status
+from .forge import approval_capability, fleet_status, integrator_belt, seats_status
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
@@ -4289,6 +4290,21 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="LOGIN",
         help="authorized approval reviewer login; repeatable, comma-separated allowed",
     )
+    p_queue_daemon.add_argument(
+        "--approval-wall-secret-env",
+        default=approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+        help="bootstrap env var containing the approval capability wall secret; production may wrap the SecretIdentityBackend supplier",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-state",
+        default=None,
+        help="durable approval wall state file (default: <root>/approval-capability-wall/state.json)",
+    )
+    p_queue_daemon.add_argument(
+        "--approval-wall-policy-sha",
+        default=None,
+        help="optional approval capability policy sha/id required in markers",
+    )
     _add_root(p_queue_daemon)  # adds --root + --json
 
     p_queue_dequeue = sub.add_parser(
@@ -4300,6 +4316,37 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_dequeue.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
     p_queue_dequeue.add_argument("--convert-to-draft", action="store_true", help="also convert the PR back to draft after dequeue")
     _add_root(p_queue_dequeue)  # adds --root + --json
+
+    p_approval_capability = sub.add_parser(
+        "approval-capability",
+        help="controller-only approval capability wall utilities",
+    )
+    approval_sub = p_approval_capability.add_subparsers(dest="approval_capability_command", required=True)
+    p_approval_mint = approval_sub.add_parser(
+        "mint",
+        help="mint a controller approval capability marker",
+    )
+    p_approval_mint.add_argument("--repo", required=True, help="owner/name repository")
+    p_approval_mint.add_argument("--pr", required=True, type=int, dest="pr_number", help="pull request number")
+    p_approval_mint.add_argument("--head-sha", required=True, help="approved head sha")
+    p_approval_mint.add_argument("--approved-by", required=True, help="approving GitHub login")
+    p_approval_mint.add_argument("--policy-sha", required=True, help="approval policy sha or id")
+    p_approval_mint.add_argument("--ttl-seconds", type=int, default=3600, help="marker lifetime in seconds")
+    p_approval_mint.add_argument(
+        "--approval-wall-secret-env",
+        default=approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+        help="bootstrap env var containing the approval capability wall secret; production may wrap the SecretIdentityBackend supplier",
+    )
+    p_approval_mint.add_argument(
+        "--approval-wall-state",
+        default=None,
+        help="durable approval wall state file (default: <root>/approval-capability-wall/state.json)",
+    )
+    p_approval_mint.add_argument(
+        "--root",
+        default=V3_LOCAL_STATE_ROOT,
+        help=f"v3 local-state root for approval wall state (default: {V3_LOCAL_STATE_ROOT})",
+    )
 
     return parser
 
@@ -4351,6 +4398,9 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
     try:
         token = integrator_belt.token_from_env(args.token_env)
         logger = integrator_belt.JsonLineLogger(sys.stderr)
+        wall = _approval_wall_runtime_from_args(args)
+        if wall.misconfigured:
+            raise integrator_belt.IntegratorBeltError(f"approval wall misconfigured: {wall.reason}")
         result = integrator_belt.run_daemon_loop(
             token=token,
             repo=args.repo,
@@ -4358,6 +4408,7 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             once=bool(args.once),
             interval_seconds=args.interval,
             dry_run=bool(args.dry_run),
+            approval_wall=wall,
             log_sink=logger,
             authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
         )
@@ -4415,6 +4466,80 @@ def _cmd_queue_dequeue(args: argparse.Namespace) -> int:
             f"disabled_auto_merge={result.disabled_auto_merge}{draft}"
         )
     return 0 if result.ok else 1
+
+
+def _approval_wall_state_path_from_args(args: argparse.Namespace) -> Path:
+    raw = getattr(args, "approval_wall_state", None)
+    if raw:
+        return Path(raw)
+    return approval_capability.approval_wall_state_path(getattr(args, "root", V3_LOCAL_STATE_ROOT))
+
+
+def _approval_wall_runtime_from_args(args: argparse.Namespace) -> approval_capability.ApprovalWallRuntime:
+    return approval_capability.resolve_approval_wall(
+        approval_capability.ApprovalWallConfig(
+            secret_supplier=approval_capability.approval_wall_secret_supplier_from_env(
+                env_name=getattr(
+                    args,
+                    "approval_wall_secret_env",
+                    approval_capability.DEFAULT_APPROVAL_CAPABILITY_SECRET_ENV,
+                )
+            ),
+            state_path=_approval_wall_state_path_from_args(args),
+            policy_sha=getattr(args, "approval_wall_policy_sha", None),
+        )
+    )
+
+
+def _cmd_approval_capability(args: argparse.Namespace) -> int:
+    if args.approval_capability_command == "mint":
+        return _cmd_approval_capability_mint(args)
+    print(f"ERROR: {CE_CMD} approval-capability refused: missing subcommand", file=sys.stderr)
+    return 2
+
+
+def _cmd_approval_capability_mint(args: argparse.Namespace) -> int:
+    if args.pr_number < 1:
+        print(f"ERROR: {CE_CMD} approval-capability mint refused: --pr must be >= 1", file=sys.stderr)
+        return 2
+    if args.ttl_seconds <= 0:
+        print(f"ERROR: {CE_CMD} approval-capability mint refused: --ttl-seconds must be > 0", file=sys.stderr)
+        return 2
+    supplier = approval_capability.approval_wall_secret_supplier_from_env(
+        env_name=args.approval_wall_secret_env,
+    )
+    secret = supplier()
+    wall = approval_capability.resolve_approval_wall(
+        approval_capability.ApprovalWallConfig(
+            secret_supplier=lambda: secret,
+            state_path=_approval_wall_state_path_from_args(args),
+            policy_sha=args.policy_sha,
+        )
+    )
+    if wall.misconfigured:
+        print(
+            f"ERROR: {CE_CMD} approval-capability mint refused: approval wall misconfigured: {wall.reason}",
+            file=sys.stderr,
+        )
+        return 1
+    if wall.dormant or secret is None:
+        print(
+            f"ERROR: {CE_CMD} approval-capability mint refused: approval wall secret is not configured",
+            file=sys.stderr,
+        )
+        return 1
+    issued_at = int(time.time())
+    claims = approval_capability.ApprovalCapabilityClaims(
+        repo=args.repo,
+        pr_number=args.pr_number,
+        head_sha=args.head_sha,
+        approved_by=args.approved_by,
+        issued_at=issued_at,
+        expires_at=issued_at + args.ttl_seconds,
+        policy_sha=args.policy_sha,
+    )
+    print(approval_capability.issue_approval_capability(claims, secret))
+    return 0
 
 
 def _review_pickup_transport():
@@ -4832,6 +4957,7 @@ _DISPATCH = {
     "queue-poll": _cmd_queue_poll,
     "queue-daemon": _cmd_queue_daemon,
     "queue-dequeue": _cmd_queue_dequeue,
+    "approval-capability": _cmd_approval_capability,
     "fleet": fleet_status.run_cli,
     "seats": seats_status.run_cli,
 }

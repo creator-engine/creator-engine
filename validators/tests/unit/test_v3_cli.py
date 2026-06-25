@@ -19,6 +19,7 @@ import yaml
 
 from creator_engine_validator import _versions as ver
 from creator_engine_validator import onboard_apply, v3_cli, v3_installer, v3_seat_bridge
+from creator_engine_validator.forge.approval_capability import ApprovalCapabilityVerifier
 from creator_engine_validator.schema import validate_with_schema
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1047,6 +1048,38 @@ def test_user_facing_command_is_ce_not_cev3(tmp_path, capsys):
     v3_cli.main(["artifacts", "rate-limit-login", "--root", str(tmp_path)])
     v3_cli.main(["shape", "rate-limit-login", "--goal", "g", "--change-type", "code"])
     assert "cev3" not in capsys.readouterr().out
+
+
+def test_approval_capability_mint_outputs_valid_marker_without_secret(monkeypatch, capsys, tmp_path):
+    secret = "mint-command-secret"
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", secret)
+    monkeypatch.setattr(v3_cli.time, "time", lambda: 1_800_000_000)
+
+    code = v3_cli.main([
+        "approval-capability",
+        "mint",
+        "--repo", "owner/repo",
+        "--pr", "440",
+        "--head-sha", "a" * 40,
+        "--approved-by", "ce-dev-2",
+        "--policy-sha", "policy-v1",
+        "--ttl-seconds", "600",
+        "--root", str(tmp_path),
+    ])
+
+    assert code == 0
+    marker = capsys.readouterr().out.strip()
+    assert marker.startswith("ce-approval-capability: v1.")
+    assert secret not in marker
+    verifier = ApprovalCapabilityVerifier(lambda: secret, now=lambda: 1_800_000_001, policy_sha="policy-v1")
+    result = verifier.verify(
+        marker,
+        repo="owner/repo",
+        pr_number=440,
+        head_sha="a" * 40,
+        approved_by_candidates=("ce-dev-2",),
+    )
+    assert result.valid is True
 
 
 def test_guide_prints_in_product_help(capsys):
