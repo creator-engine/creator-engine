@@ -286,26 +286,45 @@ def _emit(args: argparse.Namespace, code: int, lines: list[str], payload: dict[s
     return code
 
 
+_MISSING_GIT_REFUSAL = (
+    "missing_bootstrap_dependency: required command missing: git. "
+    "Remediation: install Git with your OS package manager, then re-run this installer."
+)
+
+
+def _require_git() -> None:
+    if not _which("git"):
+        raise v3_installer.InstallRefused(_MISSING_GIT_REFUSAL)
+
+
 def _git_read(root: Path, *args: str) -> str | None:
-    proc = subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
+    _require_git()
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError as exc:
+        raise v3_installer.InstallRefused(_MISSING_GIT_REFUSAL) from exc
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
 
 
 def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+    _require_git()
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise v3_installer.InstallRefused(_MISSING_GIT_REFUSAL) from exc
 
 
 def _github_repo_from_remote(remote: str | None) -> str | None:
@@ -3081,73 +3100,81 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             present_harnesses[0] if len(present_harnesses) == 1 else "both"
         )
     project_root = Path.cwd()
-    brownfield_probe = _detect_brownfield_project(project_root)
-    detected.update(v3_installer.brownfield_detected_facts(brownfield_probe))
-    # 4. --inventory: the awareness artifact (schema-derived, never hand-kept).
-    if args.inventory:
-        rows = v3_installer.inventory_emission(
-            schema, detected=detected, answers=answers or None
-        )
-        inventory_merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
-        inventory_backend = v3_installer.resolve_isolation_backend(
-            profile=inventory_merged.value("profile"),
-            explicit=inventory_merged.value("isolation_backend"),
-        )
-        dependency_probe = {
-            tool: _which(tool)
-            for tool in v3_installer.BACKEND_DEPS[inventory_backend]
-        }
-        rows = rows + v3_installer.inventory_dependency_rows(
-            inventory_backend,
-            dependency_probe,
-        )
-        inventory_missing = v3_installer.missing_answers(schema, inventory_merged)
-        first_project = v3_installer.build_greenfield_first_project_plan(
-            schema, inventory_merged, inventory_missing
-        )
-        brownfield = v3_installer.brownfield_inventory_summary(
-            schema, answers=answers or None, probe=brownfield_probe
-        )
-        trust_anchor_note = (
-            f"; trust anchors {', '.join(trust_anchor_evidence.agreed)}"
-            if trust_anchor_evidence is not None
-            else ""
-        )
-        lines = [
-            f"{_BRAND} · onboard inventory — {len(rows)} inputs "
-            f"(spec verified against pinned key {verified.key_id!r}{trust_anchor_note})"
-        ]
-        for row in rows:
-            modes = "/".join(row["modes"]) or "—"
-            optional = " · optional" if row["optional"] else ""
-            lines.append(
-                f"    step {row['step']} · {row['key']} "
-                f"[{row['sensitivity']} · {modes}{optional}] → {row['status']}"
+    try:
+        brownfield_probe = _detect_brownfield_project(project_root)
+        detected.update(v3_installer.brownfield_detected_facts(brownfield_probe))
+        # 4. --inventory: the awareness artifact (schema-derived, never hand-kept).
+        if args.inventory:
+            rows = v3_installer.inventory_emission(
+                schema, detected=detected, answers=answers or None
             )
-        lines.append(
-            f"{_BRAND} · prepare {v3_installer.ANSWERS_BASENAME} from this "
-            "(secrets ONLY as env:// file:// prompt:// keychain:// refs), then: "
-            f"{CE_CMD} onboard --spec <spec> --answers <file> --plan"
-        )
-        lines.append(
-            f"{_BRAND} · brownfield inventory — {len(brownfield['ci'])} workflow(s), "
-            f"{len(brownfield['tests'])} test command(s), history {brownfield['history']['mode']}, "
-            f"scrub {brownfield['secrets_preflight']['status']}"
-        )
-        if first_project is not None:
-            lines.append(
-                f"{_BRAND} · first project — greenfield · scaffold "
-                f"{first_project['scaffold_input']['kind']} · "
-                f"E2 apply required {str(first_project['e2_apply_required']).lower()}"
+            inventory_merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
+            inventory_backend = v3_installer.resolve_isolation_backend(
+                profile=inventory_merged.value("profile"),
+                explicit=inventory_merged.value("isolation_backend"),
             )
-        return _emit(args, 0, lines, {
-            "action": "onboard_inventory",
-            "verified": _verified_payload(verified, trust_anchor_evidence),
-            "self_attested": self_attested,
-            "inventory": [dict(row) for row in rows],
-            "brownfield": brownfield,
-            "first_project": first_project,
-        })
+            dependency_probe = {
+                tool: _which(tool)
+                for tool in v3_installer.BACKEND_DEPS[inventory_backend]
+            }
+            rows = rows + v3_installer.inventory_dependency_rows(
+                inventory_backend,
+                dependency_probe,
+            )
+            inventory_missing = v3_installer.missing_answers(schema, inventory_merged)
+            first_project = v3_installer.build_greenfield_first_project_plan(
+                schema, inventory_merged, inventory_missing
+            )
+            brownfield = v3_installer.brownfield_inventory_summary(
+                schema, answers=answers or None, probe=brownfield_probe
+            )
+            trust_anchor_note = (
+                f"; trust anchors {', '.join(trust_anchor_evidence.agreed)}"
+                if trust_anchor_evidence is not None
+                else ""
+            )
+            lines = [
+                f"{_BRAND} · onboard inventory — {len(rows)} inputs "
+                f"(spec verified against pinned key {verified.key_id!r}{trust_anchor_note})"
+            ]
+            for row in rows:
+                modes = "/".join(row["modes"]) or "—"
+                optional = " · optional" if row["optional"] else ""
+                lines.append(
+                    f"    step {row['step']} · {row['key']} "
+                    f"[{row['sensitivity']} · {modes}{optional}] → {row['status']}"
+                )
+            lines.append(
+                f"{_BRAND} · prepare {v3_installer.ANSWERS_BASENAME} from this "
+                "(secrets ONLY as env:// file:// prompt:// keychain:// refs), then: "
+                f"{CE_CMD} onboard --spec <spec> --answers <file> --plan"
+            )
+            lines.append(
+                f"{_BRAND} · brownfield inventory — {len(brownfield['ci'])} workflow(s), "
+                f"{len(brownfield['tests'])} test command(s), history {brownfield['history']['mode']}, "
+                f"scrub {brownfield['secrets_preflight']['status']}"
+            )
+            if first_project is not None:
+                lines.append(
+                    f"{_BRAND} · first project — greenfield · scaffold "
+                    f"{first_project['scaffold_input']['kind']} · "
+                    f"E2 apply required {str(first_project['e2_apply_required']).lower()}"
+                )
+            return _emit(args, 0, lines, {
+                "action": "onboard_inventory",
+                "verified": _verified_payload(verified, trust_anchor_evidence),
+                "self_attested": self_attested,
+                "inventory": [dict(row) for row in rows],
+                "brownfield": brownfield,
+                "first_project": first_project,
+            })
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · onboard REFUSED: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
     # 5. the precedence merge + the missing list + the scoped sudo-grant diff.
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
     missing = v3_installer.missing_answers(schema, merged)
@@ -4844,24 +4871,16 @@ def _path_manifest_against_index(
 
     def _run_git_from_index(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
         if argv == ["diff", "--name-status", "--no-renames", f"{base}..HEAD"]:
-            proc = subprocess.run(
-                ["git", "diff", "--cached", "--name-status", "--no-renames", base],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            try:
+                proc = _git_run(cwd, "diff", "--cached", "--name-status", "--no-renames", base)
+            except v3_installer.InstallRefused as exc:
+                return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr
         if argv == ["diff", "--name-only", f"{base}..HEAD"]:
-            proc = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", base],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            try:
+                proc = _git_run(cwd, "diff", "--cached", "--name-only", base)
+            except v3_installer.InstallRefused as exc:
+                return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr
         return original_run_git(argv, cwd)
 
@@ -4923,7 +4942,15 @@ def _cmd_carrier(args: argparse.Namespace) -> int:
             {"error": "carrier_input", "detail": "--slug must be canonical", "expected_slug": canonical_slug},
         )
 
-    repo_root_raw = _git_read(Path.cwd(), "rev-parse", "--show-toplevel")
+    try:
+        repo_root_raw = _git_read(Path.cwd(), "rev-parse", "--show-toplevel")
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
     if not repo_root_raw:
         return _emit(
             args,
@@ -4945,7 +4972,15 @@ def _cmd_carrier(args: argparse.Namespace) -> int:
 
     carrier_path, changelog_path = _carrier_output_paths(slug)
     staged_paths = (carrier_path, changelog_path)
-    status_proc = _git_run(repo_root, "status", "--porcelain", "--untracked-files=all")
+    try:
+        status_proc = _git_run(repo_root, "status", "--porcelain", "--untracked-files=all")
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
     if status_proc.returncode != 0:
         detail = (status_proc.stderr or status_proc.stdout or "git status failed").strip()
         return _emit(
@@ -5017,23 +5052,15 @@ def _cmd_carrier(args: argparse.Namespace) -> int:
 
     def _generator_git_runner(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
         if argv == ["diff", "--name-only", f"{args.base}..HEAD"]:
-            proc = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", args.base],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            try:
+                proc = _git_run(cwd, "diff", "--cached", "--name-only", args.base)
+            except v3_installer.InstallRefused as exc:
+                return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr
-        proc = subprocess.run(
-            ["git", *argv],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+        try:
+            proc = _git_run(cwd, *argv)
+        except v3_installer.InstallRefused as exc:
+            return 127, "", str(exc)
         return proc.returncode, proc.stdout, proc.stderr
 
     try:
@@ -5063,7 +5090,15 @@ def _cmd_carrier(args: argparse.Namespace) -> int:
             {"error": "carrier_missing_outputs", "missing": missing},
         )
 
-    add_proc = _git_run(repo_root, "add", "--", *(path.as_posix() for path in staged_paths))
+    try:
+        add_proc = _git_run(repo_root, "add", "--", *(path.as_posix() for path in staged_paths))
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier failed closed: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
     if add_proc.returncode != 0:
         detail = (add_proc.stderr or add_proc.stdout or "git add failed").strip()
         return _emit(

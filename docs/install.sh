@@ -51,6 +51,27 @@ fail() {
   exit 1
 }
 
+single_line() {
+  printf '%s' "$*" | sed -E 's/[[:cntrl:]]+/ /g; s/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+onboard_refusal_detail() {
+  class="$1"
+  combined="$2"
+  code="$3"
+  if [ "$class" = "missing_bootstrap_dependency" ]; then
+    line="$(grep -m1 'missing_bootstrap_dependency' "$combined" 2>/dev/null || true)"
+    line="$(printf '%s' "$line" | sed -E 's/.*missing_bootstrap_dependency[: ]*//; s/[{}"\\]//g; s/^[[:space:]]+//; s/[[:space:]]+/ /g')"
+    if [ -n "$line" ]; then
+      single_line "$line"
+      return
+    fi
+    single_line "required bootstrap dependency missing. Remediation: install the missing command and re-run this installer."
+    return
+  fi
+  single_line "cev3 onboard --inventory exited ${code}. Remediation: fix the onboard inventory refusal and re-run this installer."
+}
+
 usage() {
   cat >&2 <<'EOF'
 Usage: install.sh [--answers PATH] [--inventory-only] [--json] [--install-root PATH] [--site URL] [--no-fix-path]
@@ -1046,15 +1067,26 @@ if [ "$CE_JSON" = "1" ]; then
 fi
 
 say "running authenticated onboard inventory"
+ONBOARD_STDOUT="${TMPDIR_CE}/onboard.stdout"
+ONBOARD_STDERR="${TMPDIR_CE}/onboard.stderr"
+ONBOARD_COMBINED="${TMPDIR_CE}/onboard.combined"
 set +e
-"${ONBOARD_ARGS[@]}"
+"${ONBOARD_ARGS[@]}" >"$ONBOARD_STDOUT" 2>"$ONBOARD_STDERR"
 onboard_code="$?"
 set -e
 if [ "$onboard_code" -ne 0 ]; then
   failed=$((failed + 1))
-  printf '◆ CE · INSTALL_REFUSED onboard_inventory_failed: cev3 onboard --inventory exited %s\n' "$onboard_code" >&2
+  cat "$ONBOARD_STDOUT" "$ONBOARD_STDERR" >"$ONBOARD_COMBINED"
+  onboard_class="onboard_inventory_failed"
+  if grep -q 'missing_bootstrap_dependency' "$ONBOARD_COMBINED" 2>/dev/null; then
+    onboard_class="missing_bootstrap_dependency"
+  fi
+  onboard_detail="$(onboard_refusal_detail "$onboard_class" "$ONBOARD_COMBINED" "$onboard_code")"
+  printf '◆ CE · INSTALL_REFUSED %s: %s\n' "$onboard_class" "$onboard_detail" >&2
   exit "$onboard_code"
 fi
+cat "$ONBOARD_STDOUT"
+cat "$ONBOARD_STDERR" >&2
 
 say "state file: ${STATE_FILE}"
 say "summary: downloaded=${downloaded} reused=${reused} verified=${verified} installed=${installed} skipped_already_current=${skipped_already_current} failed=${failed}"

@@ -1340,6 +1340,32 @@ def test_onboard_inventory_human_output_shows_missing_git_warn(
     assert "REFUSED" not in out
 
 
+def test_git_read_refuses_missing_git(monkeypatch, tmp_path):
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: False if tool == "git" else True)
+    with pytest.raises(v3_installer.InstallRefused) as exc:
+        v3_cli._git_read(tmp_path, "status")
+    detail = str(exc.value)
+    assert "missing_bootstrap_dependency" in detail
+    assert "required command missing: git" in detail
+    assert "Remediation:" in detail
+
+
+def test_onboard_inventory_surfaces_brownfield_install_refusal(tmp_path, capsys, monkeypatch):
+    def refused(_root):
+        raise v3_installer.InstallRefused(
+            "missing_bootstrap_dependency: required command missing: git. "
+            "Remediation: install Git with your OS package manager, then re-run this installer."
+        )
+
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", refused)
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "missing_bootstrap_dependency" in payload["detail"]
+    assert "required command missing: git" in payload["detail"]
+
+
 def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, monkeypatch):
     calls = []
 

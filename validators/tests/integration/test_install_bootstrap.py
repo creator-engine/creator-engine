@@ -117,6 +117,28 @@ cp "$src" "$out"
     return bin_dir
 
 
+def _path_without_commands(tmp_path: Path, missing: set[str], prepend: list[Path] | None = None) -> str:
+    bin_dir = tmp_path / ("path-without-" + "-".join(sorted(missing)))
+    bin_dir.mkdir(exist_ok=True)
+    for raw_dir in os.environ["PATH"].split(os.pathsep):
+        if not raw_dir:
+            continue
+        source_dir = Path(raw_dir)
+        if not source_dir.is_dir():
+            continue
+        for candidate in source_dir.iterdir():
+            name = candidate.name
+            if name in missing or (bin_dir / name).exists() or not os.access(candidate, os.X_OK):
+                continue
+            try:
+                os.symlink(candidate, bin_dir / name)
+            except FileExistsError:
+                pass
+    parts = [str(path) for path in (prepend or [])]
+    parts.append(str(bin_dir))
+    return os.pathsep.join(parts)
+
+
 def _run_install(
     tmp_path: Path,
     repo_root: Path,
@@ -126,13 +148,17 @@ def _run_install(
     extra_env: dict[str, str] | None = None,
     answers: Path | None = None,
     extra_args: list[str] | None = None,
+    missing_commands: set[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = _fake_curl_bin(tmp_path)
     curl_log = tmp_path / "curl.log"
     install_root = install_root or (tmp_path / "install-root")
+    path = f"{fake_bin}:{os.environ['PATH']}"
+    if missing_commands:
+        path = _path_without_commands(tmp_path, missing_commands, prepend=[fake_bin])
     env = {
         **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PATH": path,
         "HOME": str(tmp_path / "home"),
         "FAKE_SITE": str(site),
         "FAKE_CURL_LOG": str(curl_log),
@@ -167,12 +193,32 @@ def _curl_urls(log_path: Path) -> list[str]:
     return urls
 
 
+def _combined_output(proc: subprocess.CompletedProcess[str]) -> str:
+    return proc.stdout + proc.stderr
+
+
+def _assert_clean_install_refusal(proc: subprocess.CompletedProcess[str], failure_class: str) -> str:
+    combined = _combined_output(proc)
+    assert proc.returncode != 0
+    assert combined.count("INSTALL_REFUSED") == 1
+    assert f"INSTALL_REFUSED {failure_class}" in combined
+    assert (
+        "Remediation:" in combined
+        or "remediation:" in combined
+        or re.search(rf"INSTALL_REFUSED {re.escape(failure_class)}: .+", combined)
+    )
+    assert "Traceback" not in combined
+    assert "FileNotFoundError" not in combined
+    return combined
+
+
 @requires_ssh_keygen
 def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root, tamper=True)
     install_root = tmp_path / "install-root"
     proc = _run_install(tmp_path, repo_root, site=site, install_root=install_root)
     assert proc.returncode != 0
+    _assert_clean_install_refusal(proc, "signature_refused")
     assert "signature_refused" in proc.stderr
     assert _curl_urls(tmp_path / "curl.log") == [
         "https://creator-engine.dev/llms-install.md",
@@ -328,11 +374,8 @@ def test_install_sh_repairs_partial_or_corrupt_verified_venv_state(tmp_path: Pat
 
 
 def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path, repo_root: Path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    (fake_bin / "curl").write_text("#!/usr/bin/env sh\nexit 99\n", encoding="utf-8")
-    (fake_bin / "curl").chmod(0o755)
-    env = {**os.environ, "PATH": str(fake_bin), "HOME": str(tmp_path / "home")}
+    path = _path_without_commands(tmp_path, {"ssh-keygen", "apt-get", "dnf", "apk", "pacman", "brew", "sudo"})
+    env = {**os.environ, "PATH": path, "HOME": str(tmp_path / "home")}
     proc = subprocess.run(
         [shutil.which("bash") or "bash", str(repo_root / "docs" / "install.sh"), "--install-root", str(tmp_path / "install")],
         cwd=repo_root,
@@ -351,6 +394,43 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     assert "brew install openssh" in proc.stderr
     assert "openssh-client" in proc.stderr
     assert "openssh-clients" in proc.stderr
+
+
+def test_install_sh_missing_curl_refuses_cleanly_before_fetch(tmp_path: Path, repo_root: Path):
+    fake_stock = tmp_path / "fake-stock"
+    fake_stock.mkdir()
+    (fake_stock / "ssh-keygen").write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    (fake_stock / "ssh-keygen").chmod(0o755)
+    path = _path_without_commands(tmp_path, {"curl"}, prepend=[fake_stock])
+    env = {**os.environ, "PATH": path, "HOME": str(tmp_path / "home")}
+    proc = subprocess.run(
+        [shutil.which("bash") or "bash", str(repo_root / "docs" / "install.sh"), "--install-root", str(tmp_path / "install")],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    combined = _assert_clean_install_refusal(proc, "missing_bootstrap_dependency")
+    assert "curl" in combined
+    assert "Install the OS bootstrap package set" in combined
+
+
+@requires_ssh_keygen
+def test_install_sh_missing_git_refuses_cleanly_from_inventory_child(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    answers = tmp_path / "answers.yaml"
+    answers.write_text("answers_version: 1\nprofile: solo-pilot\n", encoding="utf-8")
+
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        answers=answers,
+        missing_commands={"git"},
+    )
+
+    combined = _assert_clean_install_refusal(proc, "missing_bootstrap_dependency")
+    assert "required command missing: git" in combined
 
 
 @requires_ssh_keygen
