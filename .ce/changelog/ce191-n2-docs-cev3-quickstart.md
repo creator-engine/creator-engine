@@ -1,10 +1,10 @@
 ---
-slug: ce191-n2-docs-cev3
+slug: ce191-n2-docs-cev3-quickstart
 date: 2026-06-25
 kind: documented
 scope: governed-flow guides / quickstart
 issue: ce-ops#191
-base: daf65c25
+base: 574a843d
 ---
 
 Points the user-facing governed-flow docs at the `cev3` command (the v3
