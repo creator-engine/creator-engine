@@ -377,6 +377,11 @@ _INLINE_SECRET_VALUE_PATTERNS = (
 )
 _CapabilitySet = set[str] | frozenset[str] | tuple[str, ...]
 _CapabilityPolicy = Mapping[SecretRef, _CapabilitySet]
+_RefPredicate = Callable[[SecretRef], bool]
+_OPENBAO_APPROVAL_WALL_PATH = "forge/approval-capability/wall"
+_OPENBAO_APPROVAL_WALL_FIELD = "secret"
+_OPENBAO_APPROVAL_WALL_PURPOSE = "approval-capability-wall"
+_OPENBAO_APPROVAL_WALL_OWNER_REF = "controller:integrator"
 
 
 def _ref_names_controller_key(ref: SecretRef) -> bool:
@@ -480,13 +485,20 @@ def _validate_runtime_policy_binding(
     *,
     allowed_refs: set[SecretRef],
     allowed_capabilities: Mapping[SecretRef, frozenset[str]],
+    allowed_ref_predicates: tuple[_RefPredicate, ...] = (),
 ) -> None:
-    if request.secret_ref not in allowed_refs:
+    exact_ref_allowed = request.secret_ref in allowed_refs
+    predicate_ref_allowed = any(
+        predicate(request.secret_ref) for predicate in allowed_ref_predicates
+    )
+    if not exact_ref_allowed and not predicate_ref_allowed:
         raise SecretIdentityRefused(
             f"secret_ref {request.secret_ref.mount}/{request.secret_ref.path} is not allowed"
         )
     requested = frozenset(request.requested_capabilities)
     allowed = allowed_capabilities.get(request.secret_ref, frozenset())
+    if predicate_ref_allowed:
+        allowed = allowed | _DEFAULT_ALLOWED_CAPABILITIES
     if not requested <= allowed:
         denied = ", ".join(sorted(requested - allowed)) or "(none)"
         raise SecretIdentityRefused(
@@ -1000,6 +1012,8 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
         secret_zero_deliverer: SecretZeroDeliverer | None = None,
         allowed_refs: set[SecretRef] | None = None,
         allowed_capabilities: _CapabilityPolicy | None = None,
+        allowed_ref_predicates: tuple[_RefPredicate, ...] = (),
+        allow_unrestricted_refs: bool = False,
         allowed_secret_zero_seats: tuple[str, ...] = ("dev-1", "dev-2", "dev-3", "dev-4"),
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
@@ -1007,10 +1021,14 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
         self._runner = runner
         self._materializer = materializer or _default_file_secret_materializer
         self._secret_zero_deliverer = secret_zero_deliverer
-        self._allowed_refs = None if allowed_refs is None else set(allowed_refs)
+        if allowed_refs is None and allow_unrestricted_refs:
+            self._allowed_refs = None
+        else:
+            self._allowed_refs = set(allowed_refs or set())
         self._allowed_capabilities = _normalize_allowed_capabilities(
             self._allowed_refs or set(), allowed_capabilities
         )
+        self._allowed_ref_predicates = tuple(allowed_ref_predicates)
         self._allowed_secret_zero_seats = set(allowed_secret_zero_seats)
         self._clock = clock
         self._audit_checked = False
@@ -1043,6 +1061,7 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
                 request,
                 allowed_refs=self._allowed_refs,
                 allowed_capabilities=self._allowed_capabilities,
+                allowed_ref_predicates=self._allowed_ref_predicates,
             )
         if not self._audit_checked:
             self.validate_config()
@@ -1316,6 +1335,97 @@ def _env_bool(value: str | None, *, default: bool) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _env_explicit_true(value: str | None, *, name: str) -> bool:
+    if value is None or not value.strip():
+        return False
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise SecretIdentityRefused(
+        f"{name} must be one of: 1, true, yes, on, 0, false, no, off"
+    )
+
+
+def _matches_openbao_approval_wall_ref(ref: SecretRef, *, kv_mount: str) -> bool:
+    return (
+        ref.backend == "openbao"
+        and ref.mount == kv_mount
+        and ref.path == _OPENBAO_APPROVAL_WALL_PATH
+        and ref.field == _OPENBAO_APPROVAL_WALL_FIELD
+        and ref.purpose == _OPENBAO_APPROVAL_WALL_PURPOSE
+        and ref.owner_ref == _OPENBAO_APPROVAL_WALL_OWNER_REF
+    )
+
+
+def _parse_openbao_allowed_ref(raw_ref: str, *, kv_mount: str) -> SecretRef:
+    parts: dict[str, str] = {}
+    for part in raw_ref.split(";"):
+        item = part.strip()
+        if not item:
+            raise SecretIdentityRefused(
+                "CE_OPENBAO_ALLOWED_REFS contains an empty SecretRef field"
+            )
+        key, separator, value = item.partition("=")
+        if not separator or not key.strip() or not value.strip():
+            raise SecretIdentityRefused(
+                "CE_OPENBAO_ALLOWED_REFS entries must use key=value SecretRef fields"
+            )
+        parts[key.strip()] = value.strip()
+
+    required = {"path", "field", "purpose", "owner_ref", "policy_sha"}
+    missing = sorted(required - set(parts))
+    if missing:
+        raise SecretIdentityRefused(
+            "CE_OPENBAO_ALLOWED_REFS SecretRef missing fields: " + ", ".join(missing)
+        )
+    version: int | None
+    raw_version = parts.get("version")
+    if raw_version in (None, ""):
+        version = None
+    else:
+        try:
+            version = int(raw_version)
+        except ValueError:
+            raise SecretIdentityRefused(
+                "CE_OPENBAO_ALLOWED_REFS SecretRef version must be an integer"
+            ) from None
+
+    ref = SecretRef(
+        backend=parts.get("backend", "openbao"),
+        mount=parts.get("mount", kv_mount),
+        path=parts["path"],
+        field=parts["field"],
+        version=version,
+        purpose=parts["purpose"],
+        owner_ref=parts["owner_ref"],
+        policy_sha=parts["policy_sha"],
+    )
+    validate_secret_ref(ref, backend_key="openbao", kv_mount=kv_mount)
+    return ref
+
+
+def _openbao_allowed_refs_from_env(
+    environ: Mapping[str, str],
+    *,
+    kv_mount: str,
+) -> set[SecretRef]:
+    raw_allowed_refs = environ.get("CE_OPENBAO_ALLOWED_REFS")
+    if raw_allowed_refs is None:
+        return set()
+    if not raw_allowed_refs.strip():
+        return set()
+    refs = set()
+    for entry in raw_allowed_refs.split(","):
+        if not entry.strip():
+            raise SecretIdentityRefused(
+                "CE_OPENBAO_ALLOWED_REFS contains an empty SecretRef entry"
+            )
+        refs.add(_parse_openbao_allowed_ref(entry, kv_mount=kv_mount))
+    return refs
+
+
 def _openbao_backend_from_env() -> OpenBaoSecretIdentityBackend:
     environ = os.environ
     address = environ.get("BAO_ADDR") or environ.get("OPENBAO_ADDR") or ""
@@ -1326,6 +1436,25 @@ def _openbao_backend_from_env() -> OpenBaoSecretIdentityBackend:
         default=True,
     )
     ca_bundle = environ.get("BAO_CACERT") or environ.get("OPENBAO_CACERT")
+    allow_unrestricted_refs = _env_explicit_true(
+        environ.get("CE_OPENBAO_ALLOW_UNRESTRICTED_REFS"),
+        name="CE_OPENBAO_ALLOW_UNRESTRICTED_REFS",
+    )
+    raw_allowed_refs = environ.get("CE_OPENBAO_ALLOWED_REFS")
+    allowed_refs = (
+        None
+        if allow_unrestricted_refs
+        else _openbao_allowed_refs_from_env(environ, kv_mount=kv_mount)
+    )
+    allowed_ref_predicates: tuple[_RefPredicate, ...] = ()
+    if not allow_unrestricted_refs and raw_allowed_refs is None:
+        allowed_ref_predicates = (
+            lambda ref: _matches_openbao_approval_wall_ref(ref, kv_mount=kv_mount),
+        )
+    if allow_unrestricted_refs and raw_allowed_refs:
+        raise SecretIdentityRefused(
+            "CE_OPENBAO_ALLOW_UNRESTRICTED_REFS cannot be combined with CE_OPENBAO_ALLOWED_REFS"
+        )
 
     from .openbao_p3 import OpenBaoHttpConfig, make_openbao_http_runner
 
@@ -1342,7 +1471,13 @@ def _openbao_backend_from_env() -> OpenBaoSecretIdentityBackend:
             ca_bundle=ca_bundle,
         )
     )
-    return OpenBaoSecretIdentityBackend(config, runner=runner)
+    return OpenBaoSecretIdentityBackend(
+        config,
+        runner=runner,
+        allowed_refs=allowed_refs,
+        allowed_ref_predicates=allowed_ref_predicates,
+        allow_unrestricted_refs=allow_unrestricted_refs,
+    )
 
 
 register_backend("openbao", _openbao_backend_from_env)

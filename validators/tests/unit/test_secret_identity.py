@@ -87,6 +87,51 @@ def _secret_request(**overrides) -> SecretRequest:
     return SecretRequest(**values)
 
 
+def _approval_wall_ref(**overrides) -> SecretRef:
+    values = {
+        "backend": "openbao",
+        "mount": "ce-kv",
+        "path": "forge/approval-capability/wall",
+        "field": "secret",
+        "version": 1,
+        "purpose": "approval-capability-wall",
+        "owner_ref": "controller:integrator",
+        "policy_sha": "a" * 64,
+    }
+    values.update(overrides)
+    return SecretRef(**values)
+
+
+def _approval_wall_request(**overrides) -> SecretRequest:
+    values = {
+        "run_id": "approval-wall-daemon",
+        "seat_id": "dev-1",
+        "repo": "creator-engine/creator-engine",
+        "secret_ref": _approval_wall_ref(),
+        "ttl_seconds": 600,
+        "delivery": "file",
+        "requested_capabilities": ("read",),
+        "audit_context": {"purpose": "approval-capability-wall"},
+    }
+    values.update(overrides)
+    return SecretRequest(**values)
+
+
+def _allowed_ref_env_value(ref: SecretRef) -> str:
+    fields = {
+        "backend": ref.backend,
+        "mount": ref.mount,
+        "path": ref.path,
+        "field": ref.field,
+        "purpose": ref.purpose,
+        "owner_ref": ref.owner_ref,
+        "policy_sha": ref.policy_sha,
+    }
+    if ref.version is not None:
+        fields["version"] = str(ref.version)
+    return ";".join(f"{key}={value}" for key, value in fields.items())
+
+
 def _local_secret_ref(**overrides) -> SecretRef:
     values = {
         "backend": "local",
@@ -131,6 +176,14 @@ def _openbao_backend(runner, **overrides) -> OpenBaoSecretIdentityBackend:
     }
     values.update(overrides)
     return OpenBaoSecretIdentityBackend(**values)
+
+
+def _install_fake_openbao_env(monkeypatch, runner) -> None:
+    from creator_engine_validator import openbao_p3
+
+    monkeypatch.setenv("BAO_ADDR", "https://bao.example")
+    monkeypatch.setenv("BAO_TOKEN", "broker-token")
+    monkeypatch.setattr(openbao_p3, "make_openbao_http_runner", lambda _config: runner)
 
 
 def test_secret_identity_value_objects_are_frozen_and_value_free():
@@ -255,6 +308,143 @@ def test_registry_returns_fresh_backend_and_refuses_duplicates():
 def test_openbao_backend_registered_in_prod():
     assert "openbao" in available_backends()
     assert isinstance(get_backend("openbao"), OpenBaoSecretIdentityBackend)
+
+
+def test_openbao_registered_backend_allows_default_approval_wall_ref(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        raise AssertionError(f"unexpected request: {request}")
+
+    _install_fake_openbao_env(monkeypatch, runner)
+
+    backend = get_backend("openbao")
+    grant = backend.issue(_approval_wall_request())
+
+    assert grant.secret_ref == _approval_wall_ref()
+    assert [call.path for call in calls] == ["/v1/sys/health", "/v1/sys/audit"]
+
+
+def test_openbao_registered_backend_allows_realistic_default_approval_wall_ref(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        raise AssertionError(f"unexpected request: {request}")
+
+    _install_fake_openbao_env(monkeypatch, runner)
+    wall_ref = _approval_wall_ref(version=None, policy_sha="b" * 64)
+
+    backend = get_backend("openbao")
+    grant = backend.issue(_approval_wall_request(secret_ref=wall_ref))
+
+    assert grant.secret_ref == wall_ref
+    assert [call.path for call in calls] == ["/v1/sys/health", "/v1/sys/audit"]
+
+
+def test_openbao_registered_backend_default_approval_wall_ref_is_read_only(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+    _install_fake_openbao_env(
+        monkeypatch,
+        lambda request: calls.append(request) or OpenBaoResponse(status=200),
+    )
+
+    backend = get_backend("openbao")
+
+    with pytest.raises(SecretIdentityRefused, match="requested capabilities"):
+        backend.issue(_approval_wall_request(requested_capabilities=("mint",)))
+
+    assert calls == []
+
+
+def test_openbao_registered_backend_refuses_ref_outside_env_allow_list(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+    _install_fake_openbao_env(
+        monkeypatch,
+        lambda request: calls.append(request) or OpenBaoResponse(status=200),
+    )
+    monkeypatch.setenv("CE_OPENBAO_ALLOWED_REFS", _allowed_ref_env_value(_approval_wall_ref()))
+
+    backend = get_backend("openbao")
+
+    with pytest.raises(SecretIdentityRefused, match="not allowed"):
+        backend.issue(_secret_request())
+
+    assert calls == []
+
+
+def test_openbao_registered_backend_accepts_env_allowed_ref(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        raise AssertionError(f"unexpected request: {request}")
+
+    _install_fake_openbao_env(monkeypatch, runner)
+    monkeypatch.setenv("CE_OPENBAO_ALLOWED_REFS", _allowed_ref_env_value(_secret_ref()))
+
+    backend = get_backend("openbao")
+    grant = backend.issue(_secret_request())
+
+    assert grant.secret_ref == _secret_ref()
+    assert [call.path for call in calls] == ["/v1/sys/health", "/v1/sys/audit"]
+
+
+def test_openbao_registered_backend_explicit_unrestricted_ref_opt_in(monkeypatch):
+    calls: list[OpenBaoRequest] = []
+
+    def runner(request: OpenBaoRequest) -> OpenBaoResponse:
+        calls.append(request)
+        if request.path == "/v1/sys/health":
+            return OpenBaoResponse(status=200, json={"sealed": False})
+        if request.path == "/v1/sys/audit":
+            return OpenBaoResponse(status=200, json={"file/": {"type": "file"}})
+        raise AssertionError(f"unexpected request: {request}")
+
+    _install_fake_openbao_env(monkeypatch, runner)
+    monkeypatch.setenv("CE_OPENBAO_ALLOW_UNRESTRICTED_REFS", "1")
+
+    backend = get_backend("openbao")
+    grant = backend.issue(_secret_request())
+
+    assert grant.secret_ref == _secret_ref()
+    assert [call.path for call in calls] == ["/v1/sys/health", "/v1/sys/audit"]
+
+
+@pytest.mark.parametrize("value", ["", "definitely"])
+def test_openbao_registered_backend_does_not_enable_unrestricted_refs_by_typo(
+    monkeypatch,
+    value,
+):
+    calls: list[OpenBaoRequest] = []
+    _install_fake_openbao_env(
+        monkeypatch,
+        lambda request: calls.append(request) or OpenBaoResponse(status=200),
+    )
+    monkeypatch.setenv("CE_OPENBAO_ALLOW_UNRESTRICTED_REFS", value)
+
+    if value:
+        with pytest.raises(SecretIdentityRefused, match="CE_OPENBAO_ALLOW_UNRESTRICTED_REFS"):
+            get_backend("openbao")
+    else:
+        backend = get_backend("openbao")
+        with pytest.raises(SecretIdentityRefused, match="not allowed"):
+            backend.issue(_secret_request())
+
+    assert calls == []
 
 
 def test_fake_backend_issues_materializes_and_revokes_value_free_grants():
@@ -596,6 +786,19 @@ def test_openbao_issue_refuses_unlisted_secret_before_any_io():
     backend = _openbao_backend(
         lambda req: calls.append(req) or OpenBaoResponse(status=200),
         allowed_refs=set(),
+    )
+
+    with pytest.raises(SecretIdentityRefused):
+        backend.issue(_secret_request())
+
+    assert calls == []
+
+
+def test_openbao_issue_refuses_secret_when_allowed_refs_omitted_before_any_io():
+    calls: list[OpenBaoRequest] = []
+    backend = _openbao_backend(
+        lambda req: calls.append(req) or OpenBaoResponse(status=200),
+        allowed_refs=None,
     )
 
     with pytest.raises(SecretIdentityRefused):
