@@ -16,3 +16,5 @@ secret.
   configured.
 - Added daemon-path unit coverage proving backend materialization wins over the
   env fallback when both are present.
+- Isolated herdr steering lease unit tests from shared tempdir state under
+  xdist.

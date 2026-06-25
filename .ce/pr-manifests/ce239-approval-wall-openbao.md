@@ -7,14 +7,16 @@ bootstrap fallback.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=03c3567a6591a55bb6c4633e7fcc4fc1210689caf34418ea55fd6d63d5e8ac7d
+AUTHORIZED_PATHS_SHA256=f07137d2e2abf1cb507319e0072cebbaeb20ba6b934835705b6a40b28ae18dd1
 
 ```text
 .ce/changelog/ce239-approval-wall-openbao.md
 .ce/pr-manifests/ce239-approval-wall-openbao.md
 docs/security/ce234-approval-capability-wall.md
+validators/creator_engine_validator/runner/herdr_session.py
 validators/creator_engine_validator/v3_cli.py
+validators/tests/unit/test_herdr_session.py
 validators/tests/unit/test_integrator_belt.py
 ```

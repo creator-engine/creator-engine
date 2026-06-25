@@ -96,6 +96,10 @@ AGENT_REACTION_RE = re.compile(
 _LOGGER = logging.getLogger(__name__)
 
 
+def _default_steer_lock_dir() -> Path:
+    return Path(tempfile.gettempdir()) / "creator-engine" / "herdr-steer-locks"
+
+
 class HerdrSessionError(Exception):
     """A herdr-socket session could not be established or driven."""
 
@@ -226,7 +230,7 @@ class HerdrSession:
         self._steer_lock_dir = (
             Path(steer_lock_dir)
             if steer_lock_dir is not None
-            else Path(tempfile.gettempdir()) / "creator-engine" / "herdr-steer-locks"
+            else _default_steer_lock_dir()
         )
         self._steer_lock_ttl_s = steer_lock_ttl_s
         self._steer_lock_heartbeat_interval_s = steer_lock_heartbeat_interval_s
