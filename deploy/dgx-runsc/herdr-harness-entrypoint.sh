@@ -5,6 +5,8 @@ HERDR_BIN="/usr/local/bin/herdr"
 DEFAULT_SOCKET="/run/creator-engine/herdr/herdr.sock"
 WORKSPACE_CWD="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
 WORKSPACE_LABEL="${CE_DGX_HERDR_LABEL:-creator-engine-dgx-runsc}"
+CE_SEAT_LOG_DIR="${CE_SEAT_LOG_DIR:-/var/log/ce-seat}"
+CE_CODEX_STDERR_LOG="${CE_CODEX_STDERR_LOG:-${CE_SEAT_LOG_DIR}/codex-stderr.log}"
 
 fail() {
   printf 'ce-herdr-harness-entrypoint: %s\n' "$*" >&2
@@ -67,6 +69,15 @@ esac
 SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-${DEFAULT_SOCKET}}"
 SOCKET_DIR="$(dirname "${SOCKET_PATH}")"
 install -d -m 0700 "${SOCKET_DIR}"
+[ -d "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is missing: ${CE_SEAT_LOG_DIR}"
+[ -w "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is not writable: ${CE_SEAT_LOG_DIR}"
+install -d -m 0700 \
+  "${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}" \
+  "${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}" \
+  "${XDG_CACHE_HOME:-${CE_SEAT_LOG_DIR}/xdg/cache}"
+if [ "${CE_DGX_HARNESS:-codex}" = "codex" ]; then
+  : >>"${CE_CODEX_STDERR_LOG}" || fail "codex stderr log is not writable: ${CE_CODEX_STDERR_LOG}"
+fi
 
 herdr_cli server &
 HERDR_SERVER_PID="$!"
@@ -105,13 +116,23 @@ harness_cmd=(
   "CE_DGX_HARNESS=${CE_DGX_HARNESS:-codex}"
   "CE_DGX_TERMINAL_KIND=herdr"
   "CE_TERMINAL_KIND=herdr"
+  "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}"
+  "XDG_STATE_HOME=${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}"
+  "XDG_CACHE_HOME=${XDG_CACHE_HOME:-${CE_SEAT_LOG_DIR}/xdg/cache}"
 )
 
 if [ -n "${CODEX_HOME:-}" ]; then
   harness_cmd+=("CODEX_HOME=${CODEX_HOME}")
 fi
+if [ "${CE_DGX_HARNESS:-codex}" = "codex" ]; then
+  harness_cmd+=("CE_CODEX_STDERR_LOG=${CE_CODEX_STDERR_LOG}")
+fi
 
-harness_cmd+=("${HARNESS_BIN}")
+if [ "${CE_DGX_HARNESS:-codex}" = "codex" ]; then
+  harness_cmd+=(/bin/sh -c 'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"' sh "${HARNESS_BIN}")
+else
+  harness_cmd+=("${HARNESS_BIN}")
+fi
 harness_cmd+=("$@")
 
 herdr_cli pane run "${ROOT_PANE_ID}" "$(quote_cmd "${harness_cmd[@]}")"

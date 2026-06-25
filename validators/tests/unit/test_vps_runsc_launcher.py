@@ -57,6 +57,7 @@ def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess
                 "CE_VPS_CODEX_BIN": "/opt/codex/bin/codex",
                 "CE_VPS_CLAUDE_BIN": "/opt/claude/bin/claude",
                 "CE_VPS_CONTAINER_USER": "seat",
+                "CE_VPS_SEAT_LOG_DIR": f"{runtime_dir}/seat-logs",
                 "CE_VPS_UID": "1234",
                 "CE_VPS_GID": "5678",
                 "CE_VPS_TTY_FLAGS": "-i",
@@ -114,6 +115,11 @@ def test_codex_dry_run_uses_vps_containment_defaults() -> None:
     ]
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=exec" in argv
+    assert "CE_SEAT_LOG_DIR=/var/log/ce-seat" in argv
+    assert "CE_CODEX_STDERR_LOG=/var/log/ce-seat/codex-stderr.log" in argv
+    assert "XDG_CONFIG_HOME=/var/log/ce-seat/xdg/config" in argv
+    assert "XDG_STATE_HOME=/var/log/ce-seat/xdg/state" in argv
+    assert "XDG_CACHE_HOME=/var/log/ce-seat/xdg/cache" in argv
     assert "CODEX_HOME=/home/seat/.codex" in argv
     assert "TERM=xterm-256color" in argv
 
@@ -149,6 +155,8 @@ def test_codex_tui_dry_run_ends_at_image_without_literal_tui_subcommand() -> Non
         "creator-engine/codex-runsc:x86_64",
         "--dangerously-bypass-hook-trust",
     ]
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "ce-vps-codex"
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
     assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
@@ -163,6 +171,10 @@ def test_codex_dry_run_mounts_repo_codex_home_and_codex_binary() -> None:
     )
     assert any(
         arg == "type=bind,source=/home/seat/.codex,target=/home/seat/.codex"
+        for arg in argv
+    )
+    assert any(
+        arg.startswith("type=bind,source=") and arg.endswith(",target=/var/log/ce-seat")
         for arg in argv
     )
     assert any(
@@ -283,12 +295,21 @@ def test_detach_env_triggers_detached_argv() -> None:
     assert "--rm" not in argv
 
 
-def test_default_non_detached_keeps_rm_without_detach_flags() -> None:
-    argv = dry_run_argv(run_wrapper("tui"))
+def test_default_non_detached_exec_keeps_rm_without_detach_or_name_flags() -> None:
+    argv = dry_run_argv(run_wrapper("exec", "hello"))
 
     assert "--rm" in argv
     assert "-d" not in argv
     assert "--name" not in argv
+
+
+def test_default_tui_uses_canonical_container_name_without_detach() -> None:
+    argv = dry_run_argv(run_wrapper("tui"))
+
+    assert "--rm" in argv
+    assert "-d" not in argv
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "ce-vps-codex"
 
 
 def test_detach_dry_run_still_generates_pretrusting_contained_config(

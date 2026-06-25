@@ -87,6 +87,9 @@ def test_entrypoint_is_fail_closed_and_routes_harness_through_herdr() -> None:
     assert '[ -x "${HERDR_BIN}" ] || fail' in text
     assert '[ -x "${harness_bin}" ] || fail' in text
     assert '[ -d "${HERDR_SOCKET_DIR}" ] || fail' in text
+    assert '[ -d "${CE_SEAT_LOG_DIR}" ] || fail "seat log directory is missing: ${CE_SEAT_LOG_DIR}"' in text
+    assert ': >>"${CE_CODEX_STDERR_LOG}"' in text
+    assert 'XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}' in text
     assert "stat -c '%a'" in text
     assert 'HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH}" "${HERDR_BIN}" server &' in text
     assert "server --socket" not in text
@@ -97,7 +100,8 @@ def test_entrypoint_is_fail_closed_and_routes_harness_through_herdr() -> None:
     assert "root_pane_id" in text
     assert "herdr_cli pane run" in text
     assert "fail \"could not start governed harness through herdr\"" in text
-    assert "exec \"$@\"" not in text
+    assert 'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"' in text
+    assert re.search(r"^exec \"\\$@\"$", text, re.M) is None
 
 
 def test_entrypoint_selects_harness_from_ce_dgx_harness() -> None:
@@ -122,8 +126,13 @@ def test_entrypoint_runs_governed_harness_with_explicit_safe_env() -> None:
     )
     assert '"TERM=${TERM:-xterm-256color}"' in block
     assert '"CE_DGX_HARNESS=${CE_DGX_HARNESS}"' in block
+    assert '"XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-${CE_SEAT_LOG_DIR}/xdg/config}"' in block
+    assert '"XDG_STATE_HOME=${XDG_STATE_HOME:-${CE_SEAT_LOG_DIR}/xdg/state}"' in block
+    assert '"XDG_CACHE_HOME=${XDG_CACHE_HOME:-${CE_SEAT_LOG_DIR}/xdg/cache}"' in block
     assert 'if [ -n "${CODEX_HOME:-}" ]; then' in text
     assert 'harness_env+=("CODEX_HOME=${CODEX_HOME}")' in text
+    assert 'harness_env+=("CE_CODEX_STDERR_LOG=${CE_CODEX_STDERR_LOG}")' in text
+    assert '/bin/sh -c \'exec "$@" 2>>"${CE_CODEX_STDERR_LOG}"\'' in text
     assert "env_scrub_args" not in text
     assert " -u " not in text
     assert "CE_DGX_HARNESS_MODE" not in text
