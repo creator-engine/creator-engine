@@ -2,21 +2,20 @@
 
 The `v3-*.md` documents in this directory are the **committed, shareable** design
 source-of-truth for the Creator Engine **v3** evolution. They are the in-repo home
-for the load-bearing v3 architecture decisions so that `docs/v3-roadmap.md`'s
-design pointers resolve in a **fresh clone** (the original architect reports live
-under a gitignored research tree and do not travel with the repo).
+for the load-bearing v3 architecture decisions, so the design pointers resolve in
+a **fresh clone** (the original architect reports live under a gitignored research
+tree and do not travel with the repo).
 
 This directory also retains older, pre-v3 architecture documents (`SAD.md`,
 `agentic-sdlc-operating-model.md`, `parallel-controller-orchestration.md`, and
 companions) authored before the v3 pivot. Those describe the earlier model; the
-`v3-*.md` set and `docs/v3-roadmap.md` are the current design of record.
+`v3-*.md` set is the current design of record.
 
-Read these alongside the roadmap:
+Read these as the *why* behind what is built:
 
-- **`docs/v3-roadmap.md`** — *where we are / what's next* (the gate map + per-gate
-  status). Start there for orientation.
-- **the documents below** — *why it is built this way* (the design decisions the
-  roadmap is executing).
+- **the documents below** — *why it is built this way* (the design decisions being
+  executed). For *where we are / what's next*, see the project README's **Current
+  Status** section and `git log --oneline main`.
 
 ## Provenance (read this first)
 
@@ -49,7 +48,7 @@ substrate** — historical context, not the v3 roadmap.
 The pilot arc — building the full stack (agent-interaction contract · tokenomics
 gate · coordination layer) + the product surface to a **pilot-ready** build. These
 are **DESIGNED / pilot-target** (re-ground at the implementing gate, G-4…G-7);
-execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).
+execution status lives in the project README's **Current Status** section.
 
 | Document | What it decides |
 | --- | --- |
@@ -67,5 +66,5 @@ execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).
 These are point-in-time architecture records, not a living spec. Refresh a curated
 copy only when its source Architect report is materially revised; keep the
 redaction discipline above (design substance + citations in, instance/provenance
-detail out). The authoritative *status* of execution always lives in
-`docs/v3-roadmap.md` and `git log --oneline main`.
+detail out). The authoritative *status* of execution always lives in the project
+README's **Current Status** section and `git log --oneline main`.

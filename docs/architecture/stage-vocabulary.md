@@ -1,6 +1,6 @@
 # CE v3 — Vocabulary (canon)
 
-*Canon decision + dual-mapping reference for CE's user-facing vocabulary (provenance: 2026-06-07/08 design sessions; GH #159). **CANON — terminology-canon-tracked.** CE presents users **clear words** (the skin) over **conserved mechanical names** (the engine); this document is the authority for both and their correspondence. It covers three user-facing surfaces — the **stage phases** (`Frame → Shape → Build → Review → Ship`), the **Scope-card / gate fields**, and the **◆ CE Completion Report**. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Canon decision + dual-mapping reference for CE's user-facing vocabulary (provenance: 2026-06-07/08 design sessions; GH #159). **CANON — terminology-canon-tracked.** CE presents users **clear words** (the skin) over **conserved mechanical names** (the engine); this document is the authority for both and their correspondence. It covers three user-facing surfaces — the **stage phases** (`Frame → Shape → Build → Review → Ship`), the **Scope-card / gate fields**, and the **◆ CE Completion Report**. Execution status lives in the project README's **Current Status** section.*
 
 ## The decision
 

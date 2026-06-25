@@ -1,6 +1,6 @@
 # CE v3 — Pilot UI/UX Model
 
-*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate. Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate. Execution status lives in the project README's **Current Status** section.*
 
 ## Surface decision (pilot)
 The pilot surface = the Operator's **own agent** (Claude Code / Codex) as the conversational co-pilot + the **`ce` CLI** for explicit commands + **GitHub** as the review/merge surface. **No CE-spawned conversational Controller; the full CE Cockpit is deferred post-pilot.** The earlier tmux / visible-Controller / canonical-line model is the **build harness** (the v2 lane/tmux machinery deleted at D2), NOT the product.

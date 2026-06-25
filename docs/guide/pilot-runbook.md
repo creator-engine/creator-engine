@@ -187,4 +187,4 @@ inventory bootstrap prepares but does not claim.
 [`../architecture/pilot-uiux-model.md`](../architecture/pilot-uiux-model.md) ·
 [`../architecture/pilot-deployment-transport.md`](../architecture/pilot-deployment-transport.md) ·
 [`../contracts/installer.md`](../contracts/installer.md) ·
-[`../contracts/scope.md`](../contracts/scope.md) · [`../v3-roadmap.md`](../v3-roadmap.md).
+[`../contracts/scope.md`](../contracts/scope.md) · the project README's **Current Status** section.

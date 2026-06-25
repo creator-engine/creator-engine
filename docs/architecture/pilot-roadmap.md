@@ -1,6 +1,6 @@
 # CE v3 — Roadmap to Pilot (full-stack-first)
 
-*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate (G-4…G-7). Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md).*
+*Curated, redacted design reference (provenance: 2026-06-06 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate (G-4…G-7). Execution status lives in the project README's **Current Status** section.*
 
 ## Decision
 The developer test group will pilot CE on a real greenfield OSS project and will **wait** for a pilot-ready build. So CE is built **full-stack-first**: the designed-but-unbuilt stack (agent-interaction contract · tokenomics gate · coordination layer) + the product surface are built **before** a pilot is exposed (not fastest-usable-pilot-first).
@@ -79,4 +79,4 @@ Cockpit UI · ACP/Tier-A transport · durable Skill axis · MCP-server install t
 The stack design is grounded + captured (the contract, tokenomics, coordination-hierarchy, and substrate decisions). The methodology evidence is thin and treated honestly — the one rigorous RCT (METR, Jul-2025) found experienced devs ~19% **slower** with AI on then-current tooling while believing they were faster; DORA-2025 shows throughput gains conditioned on mature engineering practice plus a persistent stability cost; Martin Fowler (Feb 2026) called it "too early" for a new methodology manifesto. This is **informed design, not a proven methodology**; each gate re-grounds against then-current `main` before composing.
 
 ## Companions
-[`pilot-deployment-transport.md`](./pilot-deployment-transport.md) (transport selection + deployment invariants) · [`pilot-uiux-model.md`](./pilot-uiux-model.md) (the pilot UI/UX) · [`v3-spec.md`](./v3-spec.md), [`v3-secure-runtime.md`](./v3-secure-runtime.md), [`v3-product-brief.md`](./v3-product-brief.md) (the MVP design) · [`docs/v3-roadmap.md`](../v3-roadmap.md) (execution status).
+[`pilot-deployment-transport.md`](./pilot-deployment-transport.md) (transport selection + deployment invariants) · [`pilot-uiux-model.md`](./pilot-uiux-model.md) (the pilot UI/UX) · [`v3-spec.md`](./v3-spec.md), [`v3-secure-runtime.md`](./v3-secure-runtime.md), [`v3-product-brief.md`](./v3-product-brief.md) (the MVP design) · the project README's **Current Status** section (execution status).

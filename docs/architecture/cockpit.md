@@ -6,7 +6,7 @@ design session, landed #165): the Operator ratified the v3.5-B arc on
 2026-06-09, and the Cockpit is now a LIVE build lane. Design-of-record: the
 v3.5-B Cockpit design (CE-Cockpit-B-Architect, 2026-06-09 — an Operator-held
 reference report) plus the ratified B.1–B.7 gate cluster (2026-06-09). Execution
-status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md). Vocabulary canon:
+status lives in the project README's **Current Status** section. Vocabulary canon:
 [`stage-vocabulary.md`](./stage-vocabulary.md).*
 
 ## What the cockpit is

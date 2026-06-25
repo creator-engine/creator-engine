@@ -1,6 +1,6 @@
 # CE v3 — Shaping UX (the Frame→Shape dialogue + the chat→Scope trigger)
 
-*Curated design reference (provenance: 2026-06-08 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate (G-7). Execution status lives in [`docs/v3-roadmap.md`](../v3-roadmap.md). Vocabulary canon: [`stage-vocabulary.md`](./stage-vocabulary.md). User-facing walk-through: [`../guide/understanding-ce.md`](../guide/understanding-ce.md).*
+*Curated design reference (provenance: 2026-06-08 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate (G-7). Execution status lives in the project README's **Current Status** section. Vocabulary canon: [`stage-vocabulary.md`](./stage-vocabulary.md). User-facing walk-through: [`../guide/understanding-ce.md`](../guide/understanding-ce.md).*
 
 This is how a developer's free-form chat becomes a **Scope** — a tracked, ratifiable, ticket-sized bet — and how CE shapes it. It is the UX of the **Frame** and **Shape** stages.
 

@@ -32,7 +32,6 @@ _EXPECTED_DOC_LINKS = {
     "guide/pilot-runbook.md",
     "guide/contributing-to-ce.md",
     "security/SECURITY_MODEL.md",
-    "v3.5-roadmap.md",
 }
 
 
