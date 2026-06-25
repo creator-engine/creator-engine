@@ -7,6 +7,7 @@ that can be audited before any credential material is decrypted or attached.
 """
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ _TOKEN_VALUE_RE = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"Bearer\s+[A-Za-z0-9._~+/=-]{20,}|[A-Za-z0-9_-]{40,})"
 )
+_CONTAINED_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,9 @@ def evaluate(
                 else "unmatched write path denied before credential injection",
             )
         )
+        review_event_check = _contained_review_event_allowed(method, path, request.body)
+        if review_event_check is not None:
+            checks.append(review_event_check)
     else:
         checks.append(
             CheckResult(
@@ -359,3 +364,37 @@ def _matching_rule(
                 continue
         return rule.name
     return None
+
+
+def _contained_review_event_allowed(method: str, path: str, body: str | None) -> CheckResult | None:
+    if method != "POST" or not _REVIEW_POST_RE.match(path):
+        return None
+    if body is None:
+        return CheckResult(
+            "contained_review_event_allowed",
+            False,
+            "contained review POST is missing an explicit review event",
+        )
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return CheckResult(
+            "contained_review_event_allowed",
+            False,
+            "contained review POST body is not a JSON object",
+        )
+    if not isinstance(payload, Mapping):
+        return CheckResult(
+            "contained_review_event_allowed",
+            False,
+            "contained review POST body is not a JSON object",
+        )
+    event = str(payload.get("event") or "").strip().upper().replace("-", "_")
+    allowed = event in _CONTAINED_REVIEW_EVENTS
+    return CheckResult(
+        "contained_review_event_allowed",
+        allowed,
+        "contained review event is COMMENT or REQUEST_CHANGES"
+        if allowed
+        else "contained review event is outside COMMENT/REQUEST_CHANGES",
+    )

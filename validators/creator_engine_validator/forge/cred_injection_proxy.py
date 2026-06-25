@@ -11,11 +11,14 @@ not perform network I/O, spawn subprocesses, or read ambient credentials.
 """
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._redact import redact_gh_stderr
+from .credential_runner import authenticated_gh_runner
 from .github_repo_config import ForgeConfigRefused
 from .scoped_token import ScopedToken, TokenRequest
 from .transport_deputy_policy import Decision, TransportRequest, evaluate
@@ -36,6 +39,9 @@ _AUDIT_TOKEN_VALUE_RE = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"Bearer\s+[A-Za-z0-9._~+/=-]{20,})"
 )
+_REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
+_HEAD_SHA_RE = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_CONTAINED_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
 
 
 class CredentialProxyRefused(ForgeConfigRefused):
@@ -80,11 +86,12 @@ class OutboundTransportRequest:
     host: str
     method: str
     path: str
-    headers: Mapping[str, str]
+    headers: Mapping[str, str] = field(repr=False)
     body: str | None = None
     repo: str | None = None
     pr: int | None = None
     head_sha: str | None = None
+    credential: ScopedToken | None = field(default=None, repr=False, compare=False)
 
     def as_record(self) -> dict[str, object]:
         """Return a value-free projection; never include header values or body."""
@@ -109,6 +116,51 @@ class ProxyDispatchResult:
     decision: Decision
     audit_record: Mapping[str, object]
     response: Any = None
+
+
+@dataclass(frozen=True)
+class ContainedSeatReview:
+    """A contained seat's value-only PR review intent.
+
+    This is intentionally narrower than GitHub's review API. Contained seats may
+    submit only opinionated non-approval reviews through this seam; gate-valid
+    approvals remain controller-only approval-wall work.
+    """
+
+    seat_id: str
+    repo: str
+    pr_number: int
+    head_sha: str
+    event: str
+    body: str = ""
+    role_profile: str = "reviewer"
+    host: str = "api.github.com"
+
+
+@dataclass(frozen=True)
+class ContainedSeatReviewResult:
+    """Submitted contained-seat review result plus secret-free proxy audit."""
+
+    repo: str
+    pr_number: int
+    head_sha: str
+    event: str
+    changed: bool
+    applied: bool
+    review_id: int | None
+    audit_record: Mapping[str, object]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "head_sha": self.head_sha,
+            "event": self.event,
+            "changed": self.changed,
+            "applied": self.applied,
+            "review_id": self.review_id,
+            "audit_record": dict(self.audit_record),
+        }
 
 
 def dispatch_with_credential_injection(
@@ -182,6 +234,112 @@ def dispatch_with_credential_injection(
     )
 
 
+def submit_contained_seat_pr_review(
+    review: ContainedSeatReview,
+    *,
+    binding: CredentialBinding,
+    minter: CredentialMinter,
+    worker_env: Mapping[str, str] | None = None,
+    worker_argv: Sequence[str] = (),
+    durable_metadata: Mapping[str, object] | None = None,
+    transport: TransportAdapter | None = None,
+    token_spawn: Any = None,
+    evaluator: PolicyEvaluator = evaluate,
+) -> ContainedSeatReviewResult:
+    """Submit a contained seat COMMENT/REQUEST_CHANGES review through the proxy.
+
+    The contained seat supplies only value facts. The trusted caller owns
+    ``minter`` and either supplies ``transport`` or lets this function build the
+    default trusted ``gh api`` transport outside the sandbox. ``APPROVE`` is
+    deliberately refused before policy evaluation or token minting.
+    """
+
+    event = _validate_contained_review(review)
+    payload: dict[str, object] = {"event": event, "commit_id": review.head_sha}
+    if review.body:
+        payload["body"] = review.body
+
+    request = TransportRequest(
+        seat_id=review.seat_id,
+        role_profile=review.role_profile,
+        host=review.host,
+        method="POST",
+        path=f"/repos/{review.repo}/pulls/{review.pr_number}/reviews",
+        repo=review.repo,
+        pr=review.pr_number,
+        head_sha=review.head_sha,
+        headers={"Accept": "application/vnd.github+json"},
+        body=json.dumps(payload, sort_keys=True),
+    )
+    metadata = dict(durable_metadata or {})
+    metadata.setdefault("contained_review_event", event)
+    result = dispatch_with_credential_injection(
+        ContainedDispatch(
+            request=request,
+            binding=binding,
+            worker_env=dict(worker_env or {}),
+            worker_argv=tuple(worker_argv),
+            durable_metadata=metadata,
+        ),
+        minter=minter,
+        transport=transport or gh_api_transport_adapter(spawn=token_spawn),
+        evaluator=evaluator,
+    )
+    if not result.allowed:
+        raise CredentialProxyRefused(
+            f"contained seat review refused before forge side effect: {result.audit_record.get('outcome')}"
+        )
+    response = result.response if isinstance(result.response, Mapping) else {}
+    review_id = response.get("id")
+    return ContainedSeatReviewResult(
+        repo=review.repo,
+        pr_number=review.pr_number,
+        head_sha=review.head_sha,
+        event=event,
+        changed=True,
+        applied=True,
+        review_id=(int(review_id) if review_id is not None else None),
+        audit_record=result.audit_record,
+    )
+
+
+def gh_api_transport_adapter(*, spawn: Any = None) -> TransportAdapter:
+    """Return the trusted outside-sandbox ``gh api`` transport adapter.
+
+    The adapter requires the proxy-injected :class:`ScopedToken` object and
+    turns it into an authenticated ``GhRunner`` via ``authenticated_gh_runner``.
+    The token goes only into the child ``gh`` env outside the seat sandbox; it is
+    never copied into argv, stdin, worker env, worker argv, or durable audit.
+    """
+
+    def transport(request: OutboundTransportRequest) -> object:
+        token = request.credential
+        if token is None or not token.value:
+            raise CredentialProxyRefused("trusted gh transport missing injected credential")
+        runner = authenticated_gh_runner(token, spawn=spawn)
+        path = request.path.lstrip("/")
+        argv = ["gh", "api", "-X", request.method.upper(), path]
+        input_text = request.body
+        if input_text is not None:
+            argv += ["--input", "-"]
+        proc = runner(argv, input_text)
+        parsed: object = None
+        out = (proc.stdout or "").strip()
+        if out:
+            try:
+                parsed = json.loads(out)
+            except (json.JSONDecodeError, ValueError):
+                parsed = None
+        if proc.returncode != 0 or not isinstance(parsed, Mapping):
+            raise CredentialProxyRefused(
+                "trusted gh transport failed for contained review: "
+                f"{redact_gh_stderr(proc.stderr or '') or 'unknown error'}"
+            )
+        return parsed
+
+    return transport
+
+
 def _token_request(dispatch: ContainedDispatch) -> TokenRequest:
     request = dispatch.request
     binding = dispatch.binding
@@ -209,7 +367,30 @@ def _outbound_request(request: TransportRequest, token: ScopedToken) -> Outbound
         repo=request.repo,
         pr=request.pr,
         head_sha=request.head_sha,
+        credential=token,
     )
+
+
+def _validate_contained_review(review: ContainedSeatReview) -> str:
+    event = (review.event or "").strip().upper().replace("-", "_")
+    if event not in _CONTAINED_REVIEW_EVENTS:
+        raise CredentialProxyRefused(
+            "contained seat review event must be COMMENT or REQUEST_CHANGES; "
+            "APPROVE is controller approval-wall only"
+        )
+    if not review.seat_id.strip():
+        raise CredentialProxyRefused("contained seat review requires a seat_id")
+    if not _REPO_RE.match(review.repo or ""):
+        raise CredentialProxyRefused(f"repo {review.repo!r} is not in owner/name form")
+    if (
+        not isinstance(review.pr_number, int)
+        or isinstance(review.pr_number, bool)
+        or review.pr_number <= 0
+    ):
+        raise CredentialProxyRefused(f"pr_number {review.pr_number!r} must be a positive integer")
+    if not _HEAD_SHA_RE.match(review.head_sha or ""):
+        raise CredentialProxyRefused("contained seat review requires a 40-64 hex head_sha")
+    return event
 
 
 def _base_audit(dispatch: ContainedDispatch, decision: Decision) -> dict[str, object]:
@@ -265,6 +446,8 @@ def _value_free(value: str) -> str:
 
 __all__ = [
     "ContainedDispatch",
+    "ContainedSeatReview",
+    "ContainedSeatReviewResult",
     "CredentialBinding",
     "CredentialMinter",
     "CredentialProxyRefused",
@@ -273,4 +456,6 @@ __all__ = [
     "ProxyDispatchResult",
     "TransportAdapter",
     "dispatch_with_credential_injection",
+    "gh_api_transport_adapter",
+    "submit_contained_seat_pr_review",
 ]
