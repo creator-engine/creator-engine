@@ -101,8 +101,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#128 SUB-C adds ``runtime_backend_bridge`` as the visible runner
     # composition bridge under launch_runtime/lane_runtime: 31 -> 32.
     # ce-ops#222 adds ``containment_status`` as the v1 fleet containment
-    # attestation CLI runtime over shared probe helpers: 33 -> 34.
-    assert len(ver.V1_RUNTIME) == 34
+    # attestation CLI runtime over shared probe helpers: 33 -> 34. ce-ops#190
+    # adds signed in-place ``ce update`` as a v1 kernel runtime: 34 -> 35.
+    assert len(ver.V1_RUNTIME) == 35
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
