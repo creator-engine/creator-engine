@@ -5,60 +5,74 @@ software work. It turns coding agents into auditable participants in a software
 delivery loop: scoped work, explicit identity, contained runtime execution,
 evidence capture, independent review, and human-ratified privileged gates.
 
-The current direction is v3.5: make CE usable by solo and small teams while
-moving toward the "every agent contained" security posture for the NVIDIA pitch
-arc. Public, user-facing status lives in the **Current Status** section below
-and on the docs site.
+CE is **terminal-first**. You run `ce launch` and your own coding agent
+(Claude Code or Codex) opens in its native terminal UI — CE is the invisible
+governance wrapper around it, not a replacement editor or chat window. The
+forward plan lives in [`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md); the
+historical gate map is kept in [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
+
+## What You Install
+
+CE ships in three tiers. Most users only need the first.
+
+**The Engine — the whole product for one user.** The public installer gives a
+single developer a governed CLI that wraps their own coding agent. It runs
+uncontained, as a single controller, under the user's own credentials, and adds:
+
+- **Governance hooks** — a per-tool deny gate that classifies each action the
+  agent attempts (deploy, governance, identity, security, release, trust-root)
+  and refuses privileged classes until a human ratifies them.
+- **The external grader** — the offline `creator-engine-validator` enforces
+  schema, protocol, packaging, terminology, version-boundary, path-manifest, and
+  runtime-policy conformance from *outside* the agent, so correctness does not
+  depend on the agent grading itself.
+- **Envelope, spine, and ledger** — every run frames an explicit Scope, captures
+  structured evidence (runtime policy, spend, action decisions, change refs,
+  review/merge state), and records side effects to an auditable ledger.
+
+Together these wire your own agent through a **Frame → Shape → Build → Review →
+Ship** loop on your repository, with the privileged gates held for a human.
+
+**Ecosystem add-ons — optional.** These are clearly-labeled, opt-in capabilities
+layered on top of the Engine; none are required to use CE:
+
+- **forge-automation (the belt)** — an optional, one-command add-on that watches
+  for approved-and-green PRs and merges them on your behalf under a human merge
+  gate. It is the first add-on, not core CLI behavior.
+- **cockpit** — an optional, read-only terminal dashboard, available behind the
+  `textual` extra. No desktop or web app ships; the journey cockpit and web
+  control UI are designed ([`ADR-0008`](./docs/decisions/ADR-0008-web-control-ui.md))
+  but are not the shipped surface.
+- **containment** — optional gVisor/runsc and PTY isolation for teams that want
+  to run agents (including the controller) in a sandbox.
+- **secret-identity / transport-deputy** — an optional governed secret plane
+  (OpenBao behind `SecretIdentityBackend`, with a `LocalSecretIdentityBackend`
+  for offline development) and a credential-injection seam, for teams that want
+  per-identity custody and zero-credential contained workers.
+
+**Internal-only.** Fleet operations and deployment machinery used to develop CE
+itself are not part of the product and are not documented here.
 
 ## Current Status
 
 As of June 25, 2026:
 
-- v3.1 is pilot-ready: the repo contains the v3 Scope-to-PR-to-review-to-merge
-  substrate, the product CLI surface, cockpit/read-model work, and the two-mode
-  installer substrate.
-- v3.5 is the active program plan. Its critical workstreams are containment,
-  team-mode throughput, install/pilot readiness, secret and identity custody,
-  release integrity, and documentation/product surface currency.
-- The governed secret plane has landed in code: OpenBao is stood up behind the
-  `SecretIdentityBackend` (ce-ops#113/#135, ADR-0012), with a
-  `LocalSecretIdentityBackend` for offline development. The OpenBao VPS instance
-  is stood up, initialized, and unsealed under systemd; authenticated day-2
-  operations (audit verification, secret writes, least-privilege token mint)
-  proceed through the operator arming runbook
-  ([`docs/devops/openbao-approval-wall-arming.md`](./docs/devops/openbao-approval-wall-arming.md)).
-- The merge gate now runs an autonomous, fail-closed Integrator belt daemon
-  (ce-ops#216/#218): it discovers approved+green PRs, re-verifies the
-  current-head approval, validates the carrier and path manifest, and enqueues to
-  the GitHub merge queue under the human merge gate. An emergency-stop / dequeue
-  primitive (ce-ops#235) can pull a PR back out.
-- The approval-capability wall (ce-ops#234/#239) is wired to OpenBao: when armed,
-  a raw GitHub approval is no longer sufficient — the Integrator also requires a
-  controller-minted, value-only capability marker bound to the exact merge
-  candidate. Controller/integrator-only mint-on-approval (ce-ops#247) can auto-
-  mint that marker on a trusted, fully-gated approval. Arming the live DGX daemon
-  is the in-flight step; see
-  [`docs/devops/openbao-approval-wall-arming.md`](./docs/devops/openbao-approval-wall-arming.md).
-- Transport-deputy plumbing has landed (ce-ops#228/#242/#243): a credential-
-  injection proxy and policy seam let a zero-credential contained seat self-push
-  and self-submit a PR review through injected, scoped credentials.
-- Governed worker-role definitions for Claude-Code controllers/foremen are in
-  [`.claude/agents/`](./.claude/agents/README.md) (ce-ops#244): `architect_research`,
-  `implementer`, `verification`, and `reviewer`, each with a distinct mount,
-  egress, and credential boundary. They are additive role defs; runtime injection
-  remains a separate ratified step.
-- The N6 clean-room ship/slip rehearsal harness (ce-ops#191) and its
-  [`scripts/first-value.sh`](./scripts/first-value.sh) first-value path are in
-  tree for dogfooding a clean install.
-- The package artifacts are at `creator-engine-validator` version `0.2.0`.
-  There is no public product tag or GitHub release yet; release publication is
-  still a separate governed workstream. See
+- The Engine is pilot-ready: the Scope-to-PR-to-review-to-merge loop, the product
+  CLI surface, the read-model/cockpit surface, and the two install paths are in
+  tree and dogfooded.
+- The optional add-ons above (forge-automation, cockpit, containment,
+  secret-identity) are in active development at varying maturity. The
+  `LocalSecretIdentityBackend` covers offline development without any external
+  secret store.
+- The package artifacts are at `creator-engine-validator` version `0.2.0`. There
+  is no public product tag or GitHub release yet; release publication is a
+  separate governed workstream. See
   [`docs/delivery/VERSIONING_AND_RELEASE_POLICY.md`](./docs/delivery/VERSIONING_AND_RELEASE_POLICY.md).
 - Linux x86_64 and aarch64 cp314 wheelhouses are in-tree for the runtime and
-  developer/test dependency sets. This unblocks DGX/Grace class hosts for the
-  offline validator/test path.
-- The v8 "Factory Floor" website is live at `creator-engine.dev`; this README is
-  the repo orientation, not the website source.
+  developer/test dependency sets, enabling the offline validator/test path on
+  both architectures.
+- The website is live at `creator-engine.dev`; this README is the repo
+  orientation, not the website source.
 
 ## What CE Does
 
@@ -104,7 +118,7 @@ platform evolves:
   (offline provisioning for a source-clone controller/seat venv),
   `ce verify-install` (post-install provenance verification for a pinned CE
   release venv), `ce publish-branch` (host-side publish gate for contained
-  seats' commit-only branches), and `ce onboard` (the ce-ops#197 first-run one-shot
+  seats' commit-only branches), and `ce onboard` (the first-run one-shot
   orchestrator: it sequences the
   preflight doctor, install detection/acquisition, the `ce verify-install`
   provenance gate, the managed profile PATH block, `ce init` + `ce brain init`,
@@ -112,7 +126,7 @@ platform evolves:
   degrading; `ce onboard --emit-manifest` emits a machine-readable description of
   each phase's blast-radius and consequence-class so a user's own agent can plan
   and gate the install under the governed-install rail). `ce pickup`
-  is the ce-ops#55/#182 read-only, Search-API-backed autonomous forge
+  is a read-only, Search-API-backed autonomous forge
   work-pickup poller for fine-grained PAT compatibility. `ce playbook`
   lists, shows, and plans `run --dry-run` for public dual-use `PLAYBOOK.md`
   files by projecting them into the internal playbook descriptor without
@@ -120,11 +134,11 @@ platform evolves:
   verifies attribution and fast-forward/no-force policy, pushes through
   host-side git credentials, and records the publish to the Side-Effect Ledger.
   `ce harness-matrix`
-  is the ce-ops#220 PROBED harness-support capability matrix: it derives the
+  is the PROBED harness-support capability matrix: it derives the
   harness x {Ring-0, Ring-1, Ring-2, containment} support table by inspecting
   the live adapter specs / committed config at runtime (never hand-asserted in
   prose), emitting Markdown by default or `--json`. `ce containment-status`
-  is the ce-ops#222 fleet-wide containment attestation: it probes each requested
+  is the fleet-wide containment attestation: it probes each requested
   seat's live PID with `ce containment-probe` semantics and reports
   `{seat, contained, backend, herdr_session, ring1}` as JSON or a table, failing
   closed for unprobeable seats and never deriving containment from config or
