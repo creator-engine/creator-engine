@@ -5,8 +5,8 @@ for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-ma
 --head-ref ce243-self-review-broker` and requires this PR's `base..HEAD` diff to equal exactly
 the authorized path-set below; this carrier lists itself.
 
-Current branch HEAD SHA at carrier creation:
-`24f17402ab1b55326746213807cf04903150c06d`.
+Re-pinned after rebase onto `origin/main` (post #242/#469 merge); the authorized path-set below
+is unchanged (the rebase only merged the shared `tools/egress-broker/README.md` section).
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 

@@ -12,6 +12,16 @@ _REPO = "creator-engine/creator-engine"
 _HEAD = "a" * 40
 _SECRET = "ghs_abcdefghijklmnopqrstuvwxyz1234567890"
 
+# The seat in ``_config`` posts AS ``cedev4vps-coder`` (its App owner). A
+# distinct PR author keeps the author≠reviewer guard satisfied for the
+# happy-path tests; the guard-specific tests below override this.
+_OTHER_AUTHOR = "some-other-author"
+
+
+def _author(login=_OTHER_AUTHOR):
+    """Injectable author resolver: no live ``gh api`` call in unit tests."""
+    return lambda repo, pr_number: login
+
 
 def _config():
     return load_broker_config(
@@ -82,6 +92,7 @@ def test_comment_review_mints_and_injects_token_only_into_gh_env(caplog):
         resolve_id_fn=lambda seat: 123,
         mint_fn=mint,
         gh_spawn=spawn,
+        resolve_author_fn=_author(),
     )
 
     assert result.to_dict() == {
@@ -129,6 +140,7 @@ def test_request_changes_review_uses_same_review_api_shape():
         resolve_id_fn=lambda seat: 123,
         mint_fn=lambda req: _token(),
         gh_spawn=spawn,
+        resolve_author_fn=_author(),
     )
 
     assert result.event == "REQUEST_CHANGES"
@@ -150,6 +162,50 @@ def test_approve_is_refused_before_resolve_mint_or_transport():
         )
 
     assert "COMMENT or REQUEST_CHANGES" in str(exc.value)
+    assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+def test_author_is_refused_before_resolve_mint_or_transport():
+    # The seat posts AS ``cedev4vps-coder`` (its App owner). If the PR author
+    # resolves to that same login, the seat is reviewing its own PR — refused
+    # for COMMENT/REQUEST_CHANGES, before any installation/credential mint or
+    # source-host write (parity with the APPROVE refusal).
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.submit_self_review(
+            _request(),
+            config=_config(),
+            resolve_id_fn=lambda seat: called.__setitem__("resolve", called["resolve"] + 1),
+            mint_fn=lambda req: called.__setitem__("mint", called["mint"] + 1),
+            gh_spawn=lambda *args: called.__setitem__("spawn", called["spawn"] + 1),
+            resolve_author_fn=_author("cedev4vps-coder"),
+        )
+
+    assert "author≠reviewer" in str(exc.value)
+    assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+def test_unresolvable_author_fails_closed_before_resolve_mint_or_transport():
+    # Author resolution failure (network/API error) must REFUSE, never post.
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    def boom(repo, pr_number):
+        raise broker.SelfReviewRefused(
+            f"could not resolve PR author for {repo}#{pr_number}; refusing fail-closed"
+        )
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.submit_self_review(
+            _request(),
+            config=_config(),
+            resolve_id_fn=lambda seat: called.__setitem__("resolve", called["resolve"] + 1),
+            mint_fn=lambda req: called.__setitem__("mint", called["mint"] + 1),
+            gh_spawn=lambda *args: called.__setitem__("spawn", called["spawn"] + 1),
+            resolve_author_fn=boom,
+        )
+
+    assert "refusing fail-closed" in str(exc.value)
     assert called == {"resolve": 0, "mint": 0, "spawn": 0}
 
 
@@ -177,6 +233,7 @@ def test_missing_injected_credential_fails_closed_before_gh_spawn():
             resolve_id_fn=lambda seat: 123,
             mint_fn=lambda req: _token(value=""),
             gh_spawn=lambda *args: spawned.append(args),
+            resolve_author_fn=_author(),
         )
 
     assert spawned == []
@@ -199,6 +256,7 @@ def test_secret_redacted_from_failed_gh_stderr_and_response():
             resolve_id_fn=lambda seat: 123,
             mint_fn=lambda req: _token(),
             gh_spawn=spawn,
+            resolve_author_fn=_author(),
         )
 
     assert _SECRET not in str(exc.value)

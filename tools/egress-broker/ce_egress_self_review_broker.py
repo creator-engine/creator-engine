@@ -20,6 +20,7 @@ import os
 import re
 import socket
 import socketserver
+import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -63,6 +64,51 @@ _LOG = logging.getLogger("ce-egress-self-review")
 
 class SelfReviewRefused(Exception):
     """Fail-closed refusal before or during host-side review submission."""
+
+
+def _resolve_pr_author(repo: str, pr_number: int) -> str:
+    """Resolve the PR author login host-side via a read-only ``gh api`` call.
+
+    Mirrors the author-resolution idiom in ``forge/plan_approval.py`` and
+    ``forge/review_pickup.py`` (``repos/{repo}/pulls/{pr}`` → ``.user.login``)
+    so the author≠reviewer invariant is enforced consistently. The read uses
+    the host's ambient ``gh`` credentials — it runs BEFORE any scoped review
+    credential is minted, exactly like the APPROVE refusal.
+
+    Fails CLOSED: any transport/parse failure, a non-zero exit, or a missing
+    login raises :class:`SelfReviewRefused`. The author is never trusted from
+    the (untrusted) contained-seat request; it is resolved at the source host.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SelfReviewRefused(
+            f"could not resolve PR author for {repo}#{pr_number}; refusing fail-closed"
+        ) from exc
+    if proc.returncode != 0:
+        raise SelfReviewRefused(
+            f"could not resolve PR author for {repo}#{pr_number}; refusing fail-closed"
+        )
+    try:
+        pr_obj = json.loads(proc.stdout or "")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise SelfReviewRefused(
+            f"could not parse PR author for {repo}#{pr_number}; refusing fail-closed"
+        ) from exc
+    login = ""
+    if isinstance(pr_obj, Mapping):
+        login = str(((pr_obj.get("user") or {}) if isinstance(pr_obj.get("user"), Mapping) else {}).get("login") or "").strip()
+    if not login:
+        raise SelfReviewRefused(
+            f"PR author login empty for {repo}#{pr_number}; refusing fail-closed"
+        )
+    return login
 
 
 @dataclass(frozen=True)
@@ -160,6 +206,7 @@ def submit_self_review(
     now: Callable[[], float] | None = None,
     resolve_id_fn: Callable[[SeatAppConfig], int] | None = None,
     mint_fn: Callable[[TokenRequest], ScopedToken] | None = None,
+    resolve_author_fn: Callable[[str, int], str] | None = None,
 ) -> SelfReviewResult:
     """Mint a scoped review credential and submit COMMENT/REQUEST_CHANGES via ``gh api``.
 
@@ -167,6 +214,13 @@ def submit_self_review(
     re-checks the event as defense-in-depth before config lookup or source-host
     calls. Credentials are env-only through ``authenticated_gh_runner`` inside
     the existing credential-injection proxy helper.
+
+    Before minting any credential the broker enforces the **author≠reviewer**
+    invariant (mirroring ``forge/plan_approval.py`` /
+    ``forge/review_pickup.py``): the PR author is resolved host-side and a seat
+    is refused if it is the PR's own author — no seat may review a PR it wrote,
+    for ANY event (COMMENT / REQUEST_CHANGES / the already-refused APPROVE).
+    Author resolution fails CLOSED.
     """
     if request.event == "APPROVE" or request.event not in ALLOWED_EVENTS:
         raise SelfReviewRefused("review event must be COMMENT or REQUEST_CHANGES")
@@ -175,6 +229,19 @@ def submit_self_review(
         seat = config.seat(request.seat_id)
     except BrokerConfigError as exc:
         raise SelfReviewRefused(str(exc)) from exc
+
+    # Author≠reviewer guard. Positioned with the APPROVE refusal — BEFORE any
+    # installation/credential minting or source-host write. The seat's review
+    # identity is the App owner it mints + posts AS (``seat.app_owner``), the
+    # same login GitHub records as the review's author; compare it to the PR's
+    # resolved author. Resolution fails closed (refuse, never post).
+    resolve_author = resolve_author_fn or _resolve_pr_author
+    pr_author = resolve_author(config.repo, request.pr_number)
+    if pr_author and pr_author == seat.app_owner:
+        raise SelfReviewRefused(
+            "self-review refused: requesting seat is the PR author "
+            "(author≠reviewer invariant)"
+        )
 
     active_signer = signer or openssl_signer(seat.pem_path)
     resolver = resolve_id_fn or (
