@@ -25,6 +25,7 @@ opens or updates the PR, revokes the credential, and writes a value-free audit r
 ```
 tools/egress-broker/
   ce_egress_broker.py        # thin CLI (argparse → orchestrator.courier)
+  ce_egress_self_review_broker.py # host Unix-socket PR review broker
   apps.example.json          # per-App config template (dev-1/2/3/4)
   egress_broker/
     policy.py                # PURE fail-closed policy core (the TCB heart)
@@ -128,6 +129,56 @@ python tools/egress-broker/ce_egress_broker.py \
   --config ~/.ce-egress/broker.json \
   --apply
 ```
+
+## Contained-seat self-review broker (ce-ops#243)
+
+This repository does not currently contain a separate `ce_egress_self_push_broker.py`; the
+self-review daemon mirrors the closest existing host-side egress-broker pattern:
+`ce_egress_broker.py` plus the `egress_broker` config/minter seams. It runs outside the sandbox,
+listens on a Unix socket, accepts one bounded JSON request per connection, and submits only
+`COMMENT` or `REQUEST_CHANGES` PR reviews through `gh api`.
+
+Host daemon command:
+
+```bash
+python tools/egress-broker/ce_egress_self_review_broker.py \
+  --serve \
+  --socket "${XDG_RUNTIME_DIR:-/tmp}/ce-egress-self-review.sock" \
+  --config ~/.ce-egress/broker.json \
+  --verbose
+```
+
+The contained-seat request is value-only:
+
+```json
+{"seat_id":"seat-reviewer-1","pr_number":123,"head_sha":"<40-hex-head>","event":"COMMENT","body":"Review note."}
+```
+
+The host broker refuses `APPROVE` before config lookup, installation discovery, token minting,
+or any source-host call. For allowed `COMMENT` / `REQUEST_CHANGES`, it resolves the seat App,
+mints a short-lived repo-scoped token with `metadata:read` + `pull_requests:write`, and injects
+the token only into the trusted host child `gh api` environment. The token is never placed in
+argv, stdin, socket responses, durable request metadata, or logs.
+
+Opt-in live COMMENT smoke against a running daemon:
+
+```bash
+python tools/egress-broker/ce_egress_self_review_broker.py \
+  --send-comment \
+  --socket "${XDG_RUNTIME_DIR:-/tmp}/ce-egress-self-review.sock" \
+  --seat seat-reviewer-1 \
+  --pr-number 123 \
+  --head-sha "<40-hex-head>" \
+  --body "ce-ops#243 live smoke: brokered COMMENT review."
+```
+
+The smoke command is intentionally non-default and requires an existing throwaway PR head SHA.
+
+The host broker also enforces the **author≠reviewer** invariant: before minting any credential or
+making any source-host call, it resolves the PR author host-side (`gh api repos/{repo}/pulls/{pr}`)
+and refuses if the requesting seat is the PR's own author — for any event, fail-closed if the
+author cannot be resolved. This mirrors the existing `forge/plan_approval.py` /
+`forge/review_pickup.py` non-author guard.
 
 ## Before a live `--apply`
 
