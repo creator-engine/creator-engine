@@ -43,13 +43,27 @@ def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
     )
 
 
-def _make_proc(tmp_path: Path, pid: str, *, ns: dict[str, str], cgroup: str, status: str, root: str) -> None:
+def _make_proc(
+    tmp_path: Path,
+    pid: str,
+    *,
+    ns: dict[str, str],
+    cgroup: str,
+    status: str,
+    root: str,
+    cmdline: str | None = None,
+    comm: str | None = None,
+) -> None:
     base = tmp_path / pid
     for name, ident in ns.items():
         _write(base / "ns" / name, ident)
     _write(base / "cgroup", cgroup)
     _write(base / "status", status)
     _write(base / "root", root)
+    if cmdline is not None:
+        _write(base / "cmdline", "\0".join(cmdline.split(" ")) + "\0")
+    if comm is not None:
+        _write(base / "comm", comm + "\n")
 
 
 def _use_target_root(proc_root: Path, pid: str, target_root: Path) -> None:
@@ -87,6 +101,8 @@ def _contained_proc(proc_root: Path, pid: str) -> None:
         cgroup="0::/system.slice/runsc-seat.scope/runsc/container\n",
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
 
 
@@ -184,6 +200,110 @@ def test_explicit_seat_bindings_probe_each_pid_and_fail_closed(tmp_path: Path):
             "herdr_session": "none",
             "ring1": "none",
         },
+    ]
+
+
+def test_status_probes_target_pid_not_nearby_runsc_or_self_report(tmp_path: Path):
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _host_scope_proc(proc_root, "4242")
+    _make_proc(
+        proc_root,
+        "5151",
+        ns={
+            "mnt": "mnt:[4026532700]",
+            "pid": "pid:[4026531836]",
+            "net": "net:[4026532702]",
+            "user": "user:[4026531837]",
+        },
+        cgroup="0::/system.slice/docker-7c9d2f0e.scope\n",
+        status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
+        root="/",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
+    )
+    registry = tmp_path / "registry"
+    _write_yaml(
+        registry / "seat.yaml",
+        {
+            "seat": "codex",
+            "pid": 4242,
+            "contained": True,
+            "backend": "gvisor",
+            "contract": {"contained": True, "backend": "gvisor"},
+        },
+    )
+
+    result = containment_status.probe_fleet(
+        seat_specs=["codex"],
+        registry_paths=[registry],
+        proc_root=proc_root,
+        host_pid="1",
+    )
+
+    assert [row.payload for row in result.rows] == [
+        {
+            "seat": "codex",
+            "contained": False,
+            "backend": "none",
+            "herdr_session": "none",
+            "ring1": "none",
+        }
+    ]
+
+
+def test_direct_pid_cannot_override_live_registry_terminal_with_detached_runsc(
+    tmp_path: Path,
+):
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _host_scope_proc(proc_root, "4242")
+    _contained_proc(proc_root, "5151")
+
+    registry = tmp_path / "registry"
+    _write_yaml(registry / "matrix" / "codex.ce.yml", _seat_contract("seat-codex"))
+    _write_yaml(
+        registry / "panes" / "seat-codex.yaml",
+        {
+            "kind": "pane-registry-record",
+            "record_type": "pane_identity",
+            "schema_version": "1",
+            "controller_id": "ctrl-one",
+            "lane_id": "lane-one",
+            "claim_ref": "claims/ctrl-one/lane-one.yaml",
+            "host_id": "ce-dev-1",
+            "pane_id": "seat-codex",
+            "role": "implementer",
+            "status": "active",
+            "record_timestamp": "2026-06-23T00:00:00Z",
+            "registered_at": "2026-06-23T00:00:00Z",
+            "last_seen_at": "2026-06-23T00:00:00Z",
+            "visibility": "operator_visible",
+            "terminal": {
+                "kind": "tmux",
+                "session_id": "$1",
+                "window_id": "@1",
+                "pane_id": "%1",
+                "pane_pid": 4242,
+            },
+        },
+    )
+
+    result = containment_status.probe_fleet(
+        seat_specs=["codex=5151"],
+        registry_paths=[registry],
+        proc_root=proc_root,
+        host_pid="1",
+    )
+
+    assert [row.payload for row in result.rows] == [
+        {
+            "seat": "codex",
+            "contained": False,
+            "backend": "none",
+            "herdr_session": "none",
+            "ring1": "none",
+        }
     ]
 
 

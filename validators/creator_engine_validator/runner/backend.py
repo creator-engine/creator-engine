@@ -125,6 +125,9 @@ class RunResult:
     started_ref: str
     #: The run's value-free change-set pointers (``None`` for an inert/no-author run).
     change_set: RunChangeSet | None = None
+    #: Launch-owned runtime probe evidence for post-launch containment checks.
+    #: When present, callers still validate the binding before trusting it.
+    runtime_probe: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

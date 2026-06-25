@@ -54,12 +54,22 @@ class ProofTmuxAdapter:
 
 
 class ProofContainerRunner:
-    def __init__(self, *, available: bool = True, egress_enforceable: bool = True):
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        egress_enforceable: bool = True,
+        runtime_probe_pid: int | None = None,
+        runtime_probe_run_id: str | None = None,
+    ):
         self._available = available
         self._egress_enforceable = egress_enforceable
+        self._runtime_probe_pid = runtime_probe_pid
+        self._runtime_probe_run_id = runtime_probe_run_id
         self.available_calls = 0
         self.egress_calls = 0
         self.raw_run_calls = 0
+        self.runtime_probe_calls = 0
 
     def available(self) -> bool:
         self.available_calls += 1
@@ -72,6 +82,16 @@ class ProofContainerRunner:
     def run(self, argv, input_text=None):
         self.raw_run_calls += 1
         raise AssertionError("runtime bridge must start runsc argv on the visibility backend")
+
+    def runtime_probe(self, *, run_id, argv, surface):
+        self.runtime_probe_calls += 1
+        if self._runtime_probe_pid is None:
+            return None
+        return {
+            "pid": self._runtime_probe_pid,
+            "run_id": self._runtime_probe_run_id or run_id,
+            "source": "proof-container-runner",
+        }
 
 
 def _write(path: Path, content: str) -> None:
@@ -88,13 +108,27 @@ def _status(cap_eff: str, cap_bnd: str, nnp: str = "0") -> str:
     )
 
 
-def _make_proc(tmp_path: Path, pid: str, *, ns: dict[str, str], cgroup: str, status: str, root: str) -> None:
+def _make_proc(
+    tmp_path: Path,
+    pid: str,
+    *,
+    ns: dict[str, str],
+    cgroup: str,
+    status: str,
+    root: str,
+    cmdline: str | None = None,
+    comm: str | None = None,
+) -> None:
     base = tmp_path / pid
     for name, ident in ns.items():
         _write(base / "ns" / name, ident)
     _write(base / "cgroup", cgroup)
     _write(base / "status", status)
     _write(base / "root", root)
+    if cmdline is not None:
+        _write(base / "cmdline", "\0".join(cmdline.split(" ")) + "\0")
+    if comm is not None:
+        _write(base / "comm", comm + "\n")
 
 
 def _host_proc(proc_root: Path) -> None:
@@ -126,6 +160,8 @@ def _gvisor_proc(proc_root: Path, pid: str) -> None:
         cgroup="0::/system.slice/runsc-sandbox-proof.scope/runsc/container\n",
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/proof/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
 
 
@@ -216,8 +252,8 @@ def test_gvisor_launch_spawns_harness_inside_runsc_and_probe_proves_containment(
     _host_proc(proc_root)
     _gvisor_proc(proc_root, "5151")
     policy = _write_runtime_policy(tmp_path)
-    adapter = ProofTmuxAdapter(pane_pid=5151)
-    runner = ProofContainerRunner()
+    adapter = ProofTmuxAdapter(pane_pid=4242)
+    runner = ProofContainerRunner(runtime_probe_pid=5151)
 
     result = ce_cli.launch_runtime.launch(
         harness="hermes",
@@ -233,11 +269,13 @@ def test_gvisor_launch_spawns_harness_inside_runsc_and_probe_proves_containment(
     )
 
     assert result.spawned is True
-    assert result.terminal["pane_pid"] == 5151
+    assert result.terminal["pane_pid"] == 4242
     assert result.runner_runtime["backend_key"] == "gvisor-proxy"
+    assert result.runner_runtime["runtime_probe"]["pid"] == 5151
     assert runner.available_calls == 1
     assert runner.egress_calls == 1
     assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 1
 
     assert len(adapter.spawned) == 1
     docker_argv = adapter.spawned[0]["command"]
@@ -262,7 +300,7 @@ def test_raw_launch_probe_fails_closed_on_uncontained_host_process(tmp_path, mon
     proc_root = tmp_path / "proc"
     _host_proc(proc_root)
     _raw_host_proc(proc_root, "4242")
-    adapter = ProofTmuxAdapter(pane_pid=4242)
+    adapter = ProofTmuxAdapter(pane_pid=5151)
 
     result = ce_cli.launch_runtime.launch(
         harness="hermes",
@@ -320,9 +358,10 @@ def test_gvisor_launch_refuses_when_post_launch_probe_sees_raw_host_pid(
     proc_root = tmp_path / "proc"
     _host_proc(proc_root)
     _raw_host_proc(proc_root, "4242")
+    _gvisor_proc(proc_root, "5151")
     policy = _write_runtime_policy(tmp_path)
-    adapter = ProofTmuxAdapter(pane_pid=4242)
-    runner = ProofContainerRunner()
+    adapter = ProofTmuxAdapter(pane_pid=5151)
+    runner = ProofContainerRunner(runtime_probe_pid=4242)
 
     try:
         ce_cli.launch_runtime.launch(
@@ -347,4 +386,113 @@ def test_gvisor_launch_refuses_when_post_launch_probe_sees_raw_host_pid(
     assert runner.available_calls == 1
     assert runner.egress_calls == 1
     assert runner.raw_run_calls == 0
+    assert adapter.spawned
+
+
+def test_gvisor_launch_refuses_when_detached_pane_pid_has_no_launch_owned_probe(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _gvisor_proc(proc_root, "5151")
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter(pane_pid=5151)
+    runner = ProofContainerRunner()
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-detached-pid-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+            containment_proc_root=proc_root,
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        assert "no launch-owned runtime probe pid" in str(exc)
+    else:  # pragma: no cover - assertion above is the proof
+        raise AssertionError("contained launch must refuse detached pane_pid proof")
+
+    assert runner.available_calls == 1
+    assert runner.egress_calls == 1
+    assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 1
+    assert adapter.spawned
+
+
+def test_gvisor_launch_refuses_unprobeable_proc_data(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter(pane_pid=7373)
+    runner = ProofContainerRunner(runtime_probe_pid=7373)
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-unprobeable-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+            containment_proc_root=proc_root,
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        text = str(exc)
+        assert "failed containment probe" in text
+        assert "mnt-namespace undeterminable" in text
+    else:  # pragma: no cover - assertion above is the proof
+        raise AssertionError("contained launch must refuse unprobeable proc data")
+
+    assert runner.available_calls == 1
+    assert runner.egress_calls == 1
+    assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 1
+    assert adapter.spawned
+
+
+def test_gvisor_launch_refuses_runtime_probe_bound_to_wrong_run_id(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _gvisor_proc(proc_root, "5151")
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter(pane_pid=5151)
+    runner = ProofContainerRunner(runtime_probe_pid=5151, runtime_probe_run_id="other-run")
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-wrong-run-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+            containment_proc_root=proc_root,
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        assert "not bound to run_id" in str(exc)
+    else:  # pragma: no cover - assertion above is the proof
+        raise AssertionError("contained launch must refuse a mismatched runtime probe")
+
+    assert runner.available_calls == 1
+    assert runner.egress_calls == 1
+    assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 1
     assert adapter.spawned

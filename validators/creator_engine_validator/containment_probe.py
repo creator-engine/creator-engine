@@ -257,12 +257,12 @@ def _detect_backend(
     cmdline: str | None = None,
     comm: str | None = None,
 ) -> str:
-    """Classify the sandbox backend from process argv + cgroup + mount-root.
+    """Classify the sandbox backend from target-PID evidence.
 
-    * ``gvisor`` — the process argv/comm is a ``runsc`` sentry/gofer
-      host-process (the DEFINITIVE signal, since the gVisor sandbox PID's cgroup
-      is a plain ``docker-<id>.scope`` with no runsc marker), OR a ``runsc``
-      scope appears in the cgroup path / mount root (defense in depth).
+    * ``gvisor`` — ONLY when the probed process argv/comm is a ``runsc``
+      sentry/gofer host-process (the definitive target-local signal). Cgroup or
+      root strings are not accepted as gVisor proof because they can be stale,
+      inherited, or from another process in the proc fixture/fleet.
     * ``bwrap`` — a bubblewrap / ``runc`` / ``containerd`` / ``docker`` /
       ``libpod`` (Podman) container scope, or a ``newroot``/``bwrap`` mount root.
     * ``none`` — no sandbox markers (host).
@@ -273,8 +273,6 @@ def _detect_backend(
     # bwrap fallthrough, because a real gVisor sandbox PID has a plain
     # docker-scope cgroup that would otherwise classify as bwrap.
     if _cmdline_is_runsc(cmdline, comm):
-        return "gvisor"
-    if "runsc" in hay or "runsc" in root or "gvisor" in hay:
         return "gvisor"
     bwrap_markers = (
         "docker",
@@ -706,7 +704,7 @@ def probe_containment(
         sandbox_present = True  # backend=="gvisor" means the runsc sentry was seen
         gv_positive = (
             sandbox_present
-            and non_host_cgroup is not False
+            and non_host_cgroup is True
             and caps_dropped is True
         )
         if gv_positive:
