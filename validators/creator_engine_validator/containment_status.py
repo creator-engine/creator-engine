@@ -79,6 +79,7 @@ def probe_fleet(
     emitted: set[str] = set()
 
     for target in direct_specs:
+        target = _bind_direct_target(target, registry_targets)
         rows.append(
             _probe_target(
                 _with_default_herdr_socket(target, herdr_socket),
@@ -409,6 +410,29 @@ def _match_registry_target(name: str, targets: Iterable[SeatTarget]) -> SeatTarg
         if name == target.seat or name in target.aliases:
             return target
     return None
+
+
+def _bind_direct_target(target: SeatTarget, targets: Iterable[SeatTarget]) -> SeatTarget:
+    """Bind an explicit ``seat=pid`` request to the live registry terminal if present.
+
+    Direct PID input is useful for one-off probes, but it is not authoritative
+    over a matching live pane/seat-lifecycle record. If the registry says the
+    working seat's terminal PID is different, probe that terminal PID instead
+    of accepting an arbitrary detached runsc PID as the seat.
+    """
+    match = _match_registry_target(target.seat, targets)
+    if match is None or not match.pid or not match.terminal_kind:
+        return target
+    if target.pid and target.pid != match.pid:
+        return SeatTarget(
+            seat=target.seat,
+            pid=match.pid,
+            terminal_kind=match.terminal_kind,
+            herdr_socket=match.herdr_socket,
+            herdr_pane_id=match.herdr_pane_id,
+            aliases=match.aliases,
+        )
+    return target
 
 
 def _probe_target(

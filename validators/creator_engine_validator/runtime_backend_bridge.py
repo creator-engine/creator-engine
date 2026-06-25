@@ -35,6 +35,7 @@ class VisibleRunnerExecution:
     exit_code: int
     argv: tuple[str, ...]
     containment_attestation: dict[str, Any]
+    runtime_probe: dict[str, Any] | None
     surface: Any
 
     def to_dict(self) -> dict[str, Any]:
@@ -46,6 +47,7 @@ class VisibleRunnerExecution:
             "exit_code": self.exit_code,
             "argv": list(self.argv),
             "containment_attestation": dict(self.containment_attestation),
+            "runtime_probe": dict(self.runtime_probe) if self.runtime_probe is not None else None,
         }
 
 
@@ -57,6 +59,7 @@ class _SurfaceBoundContainerRunner:
         *,
         delegate: Any,
         visibility_backend: Any,
+        run_id: str,
         session: str,
         window: str,
         cwd: str | None,
@@ -65,6 +68,7 @@ class _SurfaceBoundContainerRunner:
     ) -> None:
         self._delegate = delegate
         self._visibility_backend = visibility_backend
+        self._run_id = run_id
         self._session = session
         self._window = window
         self._cwd = cwd
@@ -95,7 +99,30 @@ class _SurfaceBoundContainerRunner:
             env=self._env,
             seat_dir=self._seat_dir,
         )
-        return subprocess.CompletedProcess(list(self.argv), 0, stdout="", stderr="")
+        completed = subprocess.CompletedProcess(list(self.argv), 0, stdout="", stderr="")
+        runtime_probe = _runner_runtime_probe(
+            self._delegate,
+            run_id=self._run_id,
+            argv=self.argv,
+            surface=self.surface,
+        )
+        if runtime_probe is not None:
+            setattr(completed, "runtime_probe", runtime_probe)
+        return completed
+
+
+def _runner_runtime_probe(
+    delegate: Any,
+    *,
+    run_id: str,
+    argv: Sequence[str],
+    surface: Any,
+) -> dict[str, Any] | None:
+    probe = getattr(delegate, "runtime_probe", None)
+    if not callable(probe):
+        return None
+    payload = probe(run_id=run_id, argv=tuple(argv), surface=surface)
+    return dict(payload) if isinstance(payload, Mapping) else None
 
 
 def _runner_package() -> Any:
@@ -158,6 +185,7 @@ def run_visible_runtime(
     surface_runner = _SurfaceBoundContainerRunner(
         delegate=delegate,
         visibility_backend=visibility_backend,
+        run_id=run_id,
         session=session,
         window=window,
         cwd=cwd,
@@ -178,6 +206,8 @@ def run_visible_runtime(
         )
     containment_attestation = _probe_launched_surface_containment(
         surface_runner.surface,
+        runtime_probe=result.runtime_probe,
+        expected_run_id=run_id,
         proc_root=containment_proc_root,
         host_pid=containment_host_pid,
     )
@@ -189,6 +219,7 @@ def run_visible_runtime(
         exit_code=result.exit_code,
         argv=surface_runner.argv,
         containment_attestation=containment_attestation,
+        runtime_probe=dict(result.runtime_probe) if result.runtime_probe is not None else None,
         surface=surface_runner.surface,
     )
 
@@ -196,32 +227,41 @@ def run_visible_runtime(
 def _probe_launched_surface_containment(
     surface: Any,
     *,
+    runtime_probe: Mapping[str, Any] | None,
+    expected_run_id: str,
     proc_root: str | os.PathLike[str],
     host_pid: int | str,
 ) -> dict[str, Any]:
-    terminal = getattr(surface, "terminal", None)
-    if not isinstance(terminal, Mapping):
+    if runtime_probe is None:
         raise RuntimeBackendBridgeError(
-            "contained runtime launch returned no terminal record; refusing "
-            "unproven containment"
+            "contained runtime launch returned no launch-owned runtime probe "
+            "pid; refusing unproven containment"
         )
-    pid = terminal.get("pane_pid") or terminal.get("pid")
-    if pid is None:
+    probe_run_id = runtime_probe.get("run_id")
+    if probe_run_id != expected_run_id:
         raise RuntimeBackendBridgeError(
-            "contained runtime launch returned no probeable process pid; refusing "
-            "unproven containment"
+            "contained runtime launch returned a runtime probe pid not bound "
+            f"to run_id {expected_run_id!r}; refusing unproven containment"
+        )
+    pid = runtime_probe.get("pid")
+    pid_text = str(pid).strip() if pid is not None else ""
+    if not pid_text.isdigit() or int(pid_text) <= 0:
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch returned no launch-owned runtime probe "
+            "pid; refusing unproven containment"
         )
     verdict = containment_probe.probe_containment(
-        pid,
+        pid_text,
         reader=containment_probe.ProcReader(root=str(proc_root)),
         host_pid=host_pid,
     )
     payload = verdict.payload
-    payload["pid"] = str(pid)
+    payload["pid"] = pid_text
+    payload["run_id"] = expected_run_id
     payload["proc_root"] = str(proc_root)
     if not verdict.contained:
         raise RuntimeBackendBridgeError(
             "contained runtime launch failed containment probe for pid "
-            f"{pid}: {verdict.reason}"
+            f"{pid_text}: {verdict.reason}"
         )
     return payload

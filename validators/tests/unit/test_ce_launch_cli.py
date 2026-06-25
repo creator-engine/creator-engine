@@ -77,6 +77,8 @@ def _make_proc(
     cgroup: str,
     status: str,
     root: str,
+    cmdline: str | None = None,
+    comm: str | None = None,
 ) -> None:
     base = tmp_path / pid
     for name, ident in ns.items():
@@ -84,6 +86,10 @@ def _make_proc(
     _write(base / "cgroup", cgroup)
     _write(base / "status", status)
     _write(base / "root", root)
+    if cmdline is not None:
+        _write(base / "cmdline", "\0".join(cmdline.split(" ")) + "\0")
+    if comm is not None:
+        _write(base / "comm", comm + "\n")
 
 
 def _contained_proc(tmp_path: Path, pid: str) -> None:
@@ -112,6 +118,8 @@ def _contained_proc(tmp_path: Path, pid: str) -> None:
         cgroup="0::/system.slice/runsc-sandbox-proof.scope/runsc/container\n",
         status=_status(_DROPPED_CAP, _DROPPED_CAP, nnp="1"),
         root="/run/runsc/proof/rootfs",
+        cmdline="runsc-sandbox --platform=ptrace --root=/var/run/docker/runsc boot",
+        comm="runsc-sandbox",
     )
 
 
@@ -211,9 +219,16 @@ def _write_runtime_policy(
 
 
 class FakeContainerRunner:
-    def __init__(self, *, available: bool = True, egress_enforceable: bool = True):
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        egress_enforceable: bool = True,
+        runtime_probe_pid: int | None = None,
+    ):
         self._available = available
         self._egress = egress_enforceable
+        self._runtime_probe_pid = runtime_probe_pid
 
     def available(self) -> bool:
         return self._available
@@ -223,6 +238,15 @@ class FakeContainerRunner:
 
     def run(self, argv, input_text=None):  # pragma: no cover - bridge must not call it
         raise AssertionError("visible bridge should route runsc argv through tmux")
+
+    def runtime_probe(self, *, run_id, argv, surface):
+        if self._runtime_probe_pid is None:
+            return None
+        return {
+            "pid": self._runtime_probe_pid,
+            "run_id": run_id,
+            "source": "fake-container-runner",
+        }
 
 
 def _gvisor_plan_kwargs() -> dict:
@@ -369,7 +393,7 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
         backend="gvisor",
         repo_root=tmp_path,
         tmux_adapter=adapter,
-        container_runner=FakeContainerRunner(),
+        container_runner=FakeContainerRunner(runtime_probe_pid=4242),
         gvisor_plan_kwargs=_gvisor_plan_kwargs(),
         containment_proc_root=proc_root,
     )

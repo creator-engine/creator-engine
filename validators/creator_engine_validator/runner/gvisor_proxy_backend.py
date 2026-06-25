@@ -629,11 +629,13 @@ class GvisorProxyBackend(RunnerBackend):
             )
         argv = plan.docker_argv(request.command)
         completed = self._runner.run(argv)
+        runtime_probe = getattr(completed, "runtime_probe", None)
         return RunResult(
             exit_code=completed.returncode,
             stdout=completed.stdout or "",
             stderr=completed.stderr or "",
             started_ref=handle.ref,
+            runtime_probe=dict(runtime_probe) if isinstance(runtime_probe, dict) else None,
         )
 
     def collect(self, handle: ProvisionedHandle) -> CollectedEvidence:
