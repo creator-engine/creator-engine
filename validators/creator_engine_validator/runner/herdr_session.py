@@ -54,6 +54,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -213,6 +214,7 @@ class HerdrSession:
         runner: HerdrCommandRunner | None = None,
         steer_lock_dir: str | Path | None = None,
         steer_lock_ttl_s: float = HERDR_STEER_LOCK_TTL_S,
+        steer_lock_heartbeat_interval_s: float | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         #: The substrate-owned herdr control socket. Held by the CE
@@ -227,6 +229,7 @@ class HerdrSession:
             else Path(tempfile.gettempdir()) / "creator-engine" / "herdr-steer-locks"
         )
         self._steer_lock_ttl_s = steer_lock_ttl_s
+        self._steer_lock_heartbeat_interval_s = steer_lock_heartbeat_interval_s
         self._clock = clock
 
     @property
@@ -296,8 +299,59 @@ class HerdrSession:
         expires_at = self._parse_iso_utc(lease.get("expires_at"))
         return expires_at is None or now < expires_at
 
+    def _lease_expires_at(self, now: float) -> float:
+        return now + max(self._steer_lock_ttl_s, 0.0)
+
+    def _heartbeat_interval_s(self) -> float:
+        if self._steer_lock_heartbeat_interval_s is not None:
+            return max(self._steer_lock_heartbeat_interval_s, 0.001)
+        if self._steer_lock_ttl_s <= 0:
+            return 1.0
+        return max(min(self._steer_lock_ttl_s / 3.0, 30.0), 0.1)
+
+    def _refresh_steer_lease(self, pane: HerdrPane, *, lease_id: str) -> bool:
+        with self._steer_lock_file(pane) as lease_path:
+            current = self._read_steer_lease(lease_path)
+            if not current or current.get("lease_id") != lease_id:
+                return False
+            now = self._clock()
+            current["refreshed_at"] = self._iso_utc(now)
+            current["expires_at"] = self._iso_utc(self._lease_expires_at(now))
+            self._atomic_write_text(
+                lease_path,
+                json.dumps(current, sort_keys=True, indent=2),
+            )
+            return True
+
+    def _start_steer_lease_heartbeat(
+        self,
+        pane: HerdrPane,
+        *,
+        lease_id: str,
+    ) -> tuple[threading.Event, threading.Thread]:
+        stop = threading.Event()
+
+        def refresh_until_stopped() -> None:
+            while not stop.wait(self._heartbeat_interval_s()):
+                if not self._refresh_steer_lease(pane, lease_id=lease_id):
+                    return
+
+        thread = threading.Thread(
+            target=refresh_until_stopped,
+            name=f"herdr-steer-lock-{pane.pane_id}",
+            daemon=True,
+        )
+        thread.start()
+        return stop, thread
+
     @contextmanager
-    def _pane_steer_lease(self, pane: HerdrPane, *, owner: str) -> Iterator[None]:
+    def _pane_steer_lease(
+        self,
+        pane: HerdrPane,
+        *,
+        owner: str,
+        heartbeat: bool = False,
+    ) -> Iterator[None]:
         if owner not in {"dispatch", "operator"}:
             raise HerdrCommandError(f"invalid herdr steer lock owner: {owner!r}")
         lease_id = f"{owner}-{uuid.uuid4().hex}"
@@ -332,7 +386,7 @@ class HerdrSession:
                     f"herdr pane {pane.pane_id} is already held by {existing_owner} "
                     f"steering lease"
                 )
-            expires_at = now + max(self._steer_lock_ttl_s, 0.0)
+            expires_at = self._lease_expires_at(now)
             record = {
                 "kind": "herdr-steer-lock",
                 "version": 1,
@@ -346,15 +400,27 @@ class HerdrSession:
                     "operator steering" if owner == "operator" else "autonomous dispatch"
                 ),
                 "acquired_at": self._iso_utc(now),
+                "refreshed_at": self._iso_utc(now),
                 "expires_at": self._iso_utc(expires_at),
             }
             self._atomic_write_text(
                 lease_path,
                 json.dumps(record, sort_keys=True, indent=2),
             )
+        heartbeat_stop: threading.Event | None = None
+        heartbeat_thread: threading.Thread | None = None
+        if heartbeat:
+            heartbeat_stop, heartbeat_thread = self._start_steer_lease_heartbeat(
+                pane,
+                lease_id=lease_id,
+            )
         try:
             yield
         finally:
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=max(self._heartbeat_interval_s() * 2, 0.1))
             with self._steer_lock_file(pane) as lease_path:
                 current = self._read_steer_lease(lease_path)
                 if current and current.get("lease_id") == lease_id:
@@ -363,8 +429,13 @@ class HerdrSession:
                     except FileNotFoundError:
                         pass
 
-    def _operator_steer_lease(self, pane: HerdrPane) -> ContextManager[None]:
-        return self._pane_steer_lease(pane, owner="operator")
+    def _operator_steer_lease(
+        self,
+        pane: HerdrPane,
+        *,
+        heartbeat: bool = False,
+    ) -> ContextManager[None]:
+        return self._pane_steer_lease(pane, owner="operator", heartbeat=heartbeat)
 
     def _dispatch_steer_lease(self, pane: HerdrPane) -> ContextManager[None]:
         return self._pane_steer_lease(pane, owner="dispatch")
@@ -779,7 +850,7 @@ class HerdrSession:
         A/B/C: multi-session, resizable stream, interactive steer). Steering
         through an attached view holds the same per-pane lease as :meth:`send`.
         """
-        with self._operator_steer_lease(pane):
+        with self._operator_steer_lease(pane, heartbeat=True):
             self._run_foreground_ok(["pane", "attach", pane.pane_id])
 
     # -- observe ----------------------------------------------------------

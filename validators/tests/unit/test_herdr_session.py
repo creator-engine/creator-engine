@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import hashlib
 import subprocess
+import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -634,6 +636,7 @@ def test_expired_operator_steer_lock_self_releases_for_dispatch(tmp_path: Path) 
                 "status": "active",
                 "reason": "operator steering",
                 "acquired_at": session._iso_utc(now - 20),
+                "refreshed_at": session._iso_utc(now - 20),
                 "expires_at": session._iso_utc(now - 10),
             },
             sort_keys=True,
@@ -684,6 +687,80 @@ def test_attach_runs_foreground_pane_attach_with_operator_lease(tmp_path: Path) 
     assert lease_seen_during_attach[0]["owner"] == "operator"
     assert lease_seen_during_attach[0]["pane_id"] == "pane-1"
     assert lease_seen_during_attach[0]["reason"] == "operator steering"
+    assert (
+        lease_seen_during_attach[0]["refreshed_at"]
+        == lease_seen_during_attach[0]["acquired_at"]
+    )
+    assert not lease_path.exists()
+
+
+def test_attach_heartbeat_keeps_operator_lease_live_past_original_ttl(
+    tmp_path: Path,
+) -> None:
+    now = [1_800_000_000.0]
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+    attach_started = threading.Event()
+    lease_refreshed = threading.Event()
+    release_attach = threading.Event()
+    attach_errors: list[BaseException] = []
+    original_expires_at: list[str] = []
+
+    def inspect_long_running_attach(_args: list[str], _env: dict[str, str]) -> None:
+        _lock_path, lease_path = session._steer_lock_paths(pane)
+        initial = json.loads(lease_path.read_text(encoding="utf-8"))
+        original_expires_at.append(str(initial["expires_at"]))
+        now[0] += 20.0
+        attach_started.set()
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            refreshed = json.loads(lease_path.read_text(encoding="utf-8"))
+            refreshed_expiry = hs.HerdrSession._parse_iso_utc(refreshed["expires_at"])
+            if (
+                refreshed["refreshed_at"] != initial["refreshed_at"]
+                and refreshed["expires_at"] != original_expires_at[0]
+                and refreshed_expiry is not None
+                and now[0] < refreshed_expiry
+            ):
+                lease_refreshed.set()
+                break
+            time.sleep(0.01)
+        release_attach.wait(timeout=2.0)
+
+    runner = FakeRunner(on_foreground=inspect_long_running_attach)
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        steer_lock_dir=tmp_path,
+        steer_lock_ttl_s=10.0,
+        steer_lock_heartbeat_interval_s=0.01,
+        clock=lambda: now[0],
+    )
+
+    def run_attach() -> None:
+        try:
+            session.attach(pane)
+        except BaseException as exc:  # pragma: no cover - asserted after join
+            attach_errors.append(exc)
+
+    attach_thread = threading.Thread(target=run_attach)
+    attach_thread.start()
+    assert attach_started.wait(timeout=2.0)
+    assert lease_refreshed.wait(timeout=2.0)
+
+    with pytest.raises(
+        hs.HerdrSteeringDeferred,
+        match="deferred: operator steering pane pane-1",
+    ):
+        session.send(pane, "printf ready", submit_settle_s=0)
+
+    release_attach.set()
+    attach_thread.join(timeout=2.0)
+    assert not attach_thread.is_alive()
+    assert attach_errors == []
+    _lock_path, lease_path = session._steer_lock_paths(pane)
     assert not lease_path.exists()
 
 
