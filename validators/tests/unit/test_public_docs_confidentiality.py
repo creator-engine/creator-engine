@@ -145,6 +145,87 @@ def _offenses(path: Path) -> list[str]:
     return hits
 
 
+# --------------------------------------------------------------------------
+# Dangling internal-doc link guard (ce-ops#249).
+#
+# The README and served docs/ tree must never advertise a relative link to a
+# repo-relative path that no longer exists. A dead link both reads as careless
+# and — when it points at a now-removed internal roadmap/strategy doc — keeps
+# advertising the existence of internal material we deliberately deleted.
+#
+# We scan markdown links in the public doc surface (README.md + docs/**.md) and
+# fail if any RELATIVE link target does not resolve to a file in the repo.
+# Only relative links are checked: external (http/https), anchors (#...), and
+# mailto: links are skipped. Targets are resolved relative to the directory of
+# the containing file (or the repo root for site-absolute "/foo" links).
+# --------------------------------------------------------------------------
+
+# Markdown inline links: ](target) or ](target "title").
+_MD_LINK = re.compile(r"\]\(([^)]+)\)")
+
+
+def _doc_markdown_files() -> list[Path]:
+    """README plus every markdown file under docs/** (excluding this test)."""
+    files: list[Path] = []
+    if _README.is_file():
+        files.append(_README)
+    for path in sorted(_DOCS_ROOT.rglob("*.md")):
+        if path.resolve() == _SELF:
+            continue
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def _is_relative_doc_link(target: str) -> bool:
+    """True only for repo-relative links we should resolve to a file."""
+    low = target.lower()
+    if low.startswith(("http://", "https://", "mailto:")):
+        return False
+    if target.startswith("#") or not target:
+        return False
+    return True
+
+
+def _dangling_links(path: Path) -> list[str]:
+    """Return ``"<rel>:<line> -> <target>"`` for each dead relative link."""
+    rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
+    dead: list[str] = []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for match in _MD_LINK.finditer(line):
+            raw = match.group(1).strip()
+            # Strip an optional link title: ](path "Title").
+            target = raw.split(" ", 1)[0] if " " in raw else raw
+            if not _is_relative_doc_link(target):
+                continue
+            # Drop any anchor / query suffix before resolving the file path.
+            path_part = target.split("#", 1)[0].split("?", 1)[0]
+            if not path_part:
+                continue  # pure in-page anchor that slipped the prefix check
+            if path_part.startswith("/"):
+                resolved = _REPO_ROOT / path_part.lstrip("/")
+            else:
+                resolved = path.parent / path_part
+            if not resolved.exists():
+                dead.append(f"{rel}:{lineno} -> {target}")
+    return dead
+
+
+def test_public_docs_have_no_dangling_internal_doc_links():
+    """No public doc may link to a repo-relative path that does not exist."""
+    offenders: list[str] = []
+    for path in _doc_markdown_files():
+        offenders.extend(_dangling_links(path))
+
+    assert not offenders, (
+        "Public docs contain dangling relative links to nonexistent repo files. "
+        "Remove the link (and the sentence, if it only existed to point there), "
+        "or repoint it at the file's current location. Dead links:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_public_docs_contain_no_confidential_or_internal_references():
     """No NON-allowlisted public doc may leak a forbidden internal reference."""
     offenders: list[str] = []

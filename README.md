@@ -7,9 +7,7 @@ evidence capture, independent review, and human-ratified privileged gates.
 
 CE is **terminal-first**. You run `ce launch` and your own coding agent
 (Claude Code or Codex) opens in its native terminal UI — CE is the invisible
-governance wrapper around it, not a replacement editor or chat window. The
-forward plan lives in [`docs/v3.5-roadmap.md`](./docs/v3.5-roadmap.md); the
-historical gate map is kept in [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
+governance wrapper around it, not a replacement editor or chat window.
 
 ## What You Install
 
