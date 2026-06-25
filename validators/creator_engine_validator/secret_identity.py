@@ -13,10 +13,12 @@ OpenBao calls.
 from __future__ import annotations
 
 import abc
+import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -941,6 +943,41 @@ SecretMaterializer = Callable[[str, str], None]
 SecretZeroDeliverer = Callable[[str, SecretZeroPayload], str]
 
 
+def _file_target_path(target_ref: str) -> Path:
+    if target_ref.startswith("env:"):
+        raise SecretIdentityRefused("secret materialization target must be file-backed, not env")
+    if target_ref.startswith("file://"):
+        raw = target_ref.removeprefix("file://")
+    elif target_ref.startswith("file:"):
+        raw = target_ref.removeprefix("file:")
+    else:
+        raw = target_ref
+    path = Path(raw)
+    if not path.is_absolute():
+        raise SecretIdentityRefused("secret materialization file target must be an absolute path")
+    return path
+
+
+def _default_file_secret_materializer(target_ref: str, value: str) -> None:
+    path = _file_target_path(target_ref)
+    if path.exists() and path.is_symlink():
+        raise SecretMaterializationError("secret materialization target must not be a symlink")
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        raise SecretMaterializationError("secret materialization failed; backend value redacted") from None
+    try:
+        path.chmod(0o600)
+    except OSError:
+        raise SecretMaterializationError("secret materialization chmod failed; backend value redacted") from None
+
+
 class _SecretIdentityBase(abc.ABC):
     backend_key: str
 
@@ -968,11 +1005,11 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
     ) -> None:
         self._config = config
         self._runner = runner
-        self._materializer = materializer or (lambda _target_ref, _value: None)
+        self._materializer = materializer or _default_file_secret_materializer
         self._secret_zero_deliverer = secret_zero_deliverer
-        self._allowed_refs = set(allowed_refs or set())
+        self._allowed_refs = None if allowed_refs is None else set(allowed_refs)
         self._allowed_capabilities = _normalize_allowed_capabilities(
-            self._allowed_refs, allowed_capabilities
+            self._allowed_refs or set(), allowed_capabilities
         )
         self._allowed_secret_zero_seats = set(allowed_secret_zero_seats)
         self._clock = clock
@@ -1001,11 +1038,12 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
             backend_key=self.backend_key,
             kv_mount=self._config.kv_mount,
         )
-        _validate_runtime_policy_binding(
-            request,
-            allowed_refs=self._allowed_refs,
-            allowed_capabilities=self._allowed_capabilities,
-        )
+        if self._allowed_refs is not None:
+            _validate_runtime_policy_binding(
+                request,
+                allowed_refs=self._allowed_refs,
+                allowed_capabilities=self._allowed_capabilities,
+            )
         if not self._audit_checked:
             self.validate_config()
         now = self._clock()
@@ -1090,6 +1128,8 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
         materializer_error: SecretMaterializationError | None = None
         try:
             self._materializer(target_ref, value)
+        except SecretIdentityError:
+            raise
         except Exception:
             materializer_error = SecretMaterializationError(
                 "secret materialization failed; backend value redacted"
@@ -1268,3 +1308,41 @@ class OpenBaoSecretIdentityBackend(_SecretIdentityBase):
                 "is not allowed or does not match delivery"
             )
         return delivery_ref
+
+
+def _env_bool(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _openbao_backend_from_env() -> OpenBaoSecretIdentityBackend:
+    environ = os.environ
+    address = environ.get("BAO_ADDR") or environ.get("OPENBAO_ADDR") or ""
+    token_name = "BAO_TOKEN" if "BAO_TOKEN" in environ else "OPENBAO_TOKEN"
+    kv_mount = environ.get("CE_OPENBAO_KV_MOUNT") or environ.get("OPENBAO_KV_MOUNT") or "ce-kv"
+    verify_tls = _env_bool(
+        environ.get("CE_OPENBAO_VERIFY_TLS") or environ.get("OPENBAO_VERIFY_TLS"),
+        default=True,
+    )
+    ca_bundle = environ.get("BAO_CACERT") or environ.get("OPENBAO_CACERT")
+
+    from .openbao_p3 import OpenBaoHttpConfig, make_openbao_http_runner
+
+    config = OpenBaoConfig(
+        address=address,
+        token_supplier=lambda: environ.get(token_name, ""),
+        kv_mount=kv_mount,
+        verify_tls=verify_tls,
+    )
+    runner = make_openbao_http_runner(
+        OpenBaoHttpConfig(
+            address=address,
+            verify_tls=verify_tls,
+            ca_bundle=ca_bundle,
+        )
+    )
+    return OpenBaoSecretIdentityBackend(config, runner=runner)
+
+
+register_backend("openbao", _openbao_backend_from_env)

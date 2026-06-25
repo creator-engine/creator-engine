@@ -51,11 +51,22 @@ Durable records and logs must remain value-free. They may record that a marker
 was present and may record public claims or failure reasons, but they must never
 persist the verifier secret or any live credential. The capability text itself is
 public PR metadata and contains no secret; its authority comes only from the
-controller-side signature key. The bootstrap secret source is
-`CE_APPROVAL_CAPABILITY_SECRET`; production wiring should replace or wrap that
-supplier with `approval_wall_secret_supplier_from_secret_identity_backend`, which
-uses a `SecretIdentityBackend`/OpenBao grant plus an injected materialized-value
-reader.
+controller-side signature key.
+
+The daemon's primary production secret source is a configured
+`SecretIdentityBackend`/OpenBao supplier. `ce queue-daemon` builds a regular
+`SecretRequest` from the approval-wall SecretRef flags, materializes it to
+`--approval-wall-secret-target-ref`, and reads the materialized value through the
+injected reader used by
+`approval_wall_secret_supplier_from_secret_identity_backend`. The bootstrap
+secret source, `CE_APPROVAL_CAPABILITY_SECRET`, remains available only as a
+fallback when no SecretIdentityBackend supplier is configured. If backend flags
+are present, partial configuration, `env:` target refs, backend refusal, or an
+empty/falsy materialized value are treated as misconfiguration and the daemon
+fails closed instead of consulting the env fallback. Backend delivery must be
+file-backed so controller-minted verifier material is not placed in
+`os.environ`. With neither source configured and no durable armed state, the wall
+remains dormant.
 
 Controllers mint markers with:
 
