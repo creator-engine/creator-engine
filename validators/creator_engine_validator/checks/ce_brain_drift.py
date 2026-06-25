@@ -61,6 +61,28 @@ class DriftContext:
 
 
 @dataclass(frozen=True)
+class DriftFinding(ValidationError):
+    assertion_id: str
+    claimed: str
+    observed: str
+    evidence_ref: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "code": self.code,
+            "path": self.path,
+            "message": self.message,
+            "contract": self.contract,
+            "assertion_id": self.assertion_id,
+            "claimed": self.claimed,
+            "observed": self.observed,
+        }
+        if self.evidence_ref is not None:
+            payload["evidence_ref"] = self.evidence_ref
+        return payload
+
+
+@dataclass(frozen=True)
 class DriftResult:
     ok: bool
     ledger_path: Path
@@ -93,6 +115,30 @@ def _error(
     message: str,
 ) -> ValidationError:
     return make_error(code, path, _pointer(pointer_prefix + (field,)), message, CONTRACT)
+
+
+def _drift_error(
+    path: Path,
+    pointer_prefix: tuple[Any, ...],
+    field: str,
+    message: str,
+    *,
+    assertion_id: str,
+    claimed: str,
+    observed: str,
+    evidence_ref: str | None = None,
+) -> DriftFinding:
+    rendered_path = f"{path}:{_pointer(pointer_prefix + (field,))}"
+    return DriftFinding(
+        code=CODE_DRIFT,
+        path=rendered_path,
+        message=message,
+        contract=CONTRACT,
+        assertion_id=assertion_id,
+        claimed=claimed,
+        observed=observed,
+        evidence_ref=evidence_ref,
+    )
 
 
 def _active_record_indexes(records: list[Any]) -> list[int]:
@@ -251,6 +297,13 @@ def _resolve_artifact(evidence_ref: str, context: DriftContext) -> Path | None:
     return resolved if resolved.is_file() else None
 
 
+def _repo_root_from_state_root(state_root: Path | str) -> Path:
+    root = Path(state_root)
+    if root.name == "state" and root.parent.name == ".ce":
+        return root.parent.parent
+    return Path(".")
+
+
 def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], context: DriftContext) -> list[ValidationError]:
     probe_name = brain_probe.record_probe_name(record)
     if probe_name is None:
@@ -271,11 +324,23 @@ def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: 
             )
         ]
     observed = brain_probe.probe(probe_name, context.probe_context)
+    if observed.verdict == "unknown" and expected != "unknown":
+        return [
+            _error(
+                CODE_UNVERIFIABLE,
+                path,
+                pointer_prefix,
+                "claim",
+                (
+                    f"assertion {assertion_id}: probe {probe_name!r} is unverifiable; "
+                    f"claimed verdict={expected!r}, observed verdict='unknown'"
+                ),
+            )
+        ]
     if observed.verdict == expected:
         return []
     return [
-        _error(
-            CODE_DRIFT,
+        _drift_error(
             path,
             pointer_prefix,
             "claim",
@@ -283,6 +348,10 @@ def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: 
                 f"assertion {assertion_id}: probe {probe_name!r} drifted; "
                 f"claimed verdict={expected!r}, observed verdict={observed.verdict!r}"
             ),
+            assertion_id=assertion_id,
+            claimed=f"verdict={expected}",
+            observed=f"verdict={observed.verdict}",
+            evidence_ref=str(record.get("evidence_ref")),
         )
     ]
 
@@ -365,8 +434,7 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
         if claimed_hash == observed_hash:
             continue
         findings.append(
-            _error(
-                CODE_DRIFT,
+            _drift_error(
                 path,
                 pointer_prefix,
                 "claim",
@@ -374,6 +442,10 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
                     f"assertion {assertion_id}: artifact hash drifted for claim.{key}; "
                     f"claimed sha256={claimed_hash}, observed sha256={observed_hash}"
                 ),
+                assertion_id=assertion_id,
+                claimed=f"sha256={claimed_hash}",
+                observed=f"sha256={observed_hash}",
+                evidence_ref=evidence_ref,
             )
         )
 
@@ -398,8 +470,7 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
             if claimed_value == observed_value:
                 continue
             findings.append(
-                _error(
-                    CODE_DRIFT,
+                _drift_error(
                     path,
                     pointer_prefix,
                     "claim",
@@ -407,6 +478,10 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
                         f"assertion {assertion_id}: artifact value drifted for claim.{key}; "
                         f"claimed value={claimed_value!r}, observed value={observed_value!r}"
                     ),
+                    assertion_id=assertion_id,
+                    claimed=f"value={claimed_value!r}",
+                    observed=f"value={observed_value!r}",
+                    evidence_ref=evidence_ref,
                 )
             )
     return findings
@@ -458,6 +533,12 @@ def validate_file(path: Path, *, context: DriftContext | None = None) -> list[Va
 
 def verify_state_root(state_root: Path | str, *, context: DriftContext | None = None) -> DriftResult:
     path = brain_runtime.ledger_path(state_root)
+    if context is None:
+        repo_root = _repo_root_from_state_root(state_root)
+        context = DriftContext(
+            repo_root=repo_root,
+            probe_context=brain_probe.ProbeContext(repo_root=repo_root),
+        )
     findings = tuple(validate_file(path, context=context)) if path.is_file() else ()
     record_count = 0
     active_count = 0
