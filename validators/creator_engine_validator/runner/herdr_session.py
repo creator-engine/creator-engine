@@ -79,6 +79,9 @@ DEFAULT_HERDR_SOCKET = "herdr.sock"
 HERDR_SOCKET_ENV = "HERDR_SOCKET_PATH"
 LEGACY_HERDR_SOCKET_ENV = "HERDR_SOCKET"
 FORBIDDEN_SEAT_ENV_NAMES = frozenset({HERDR_SOCKET_ENV, LEGACY_HERDR_SOCKET_ENV})
+FORBIDDEN_REMOTE_ATTACH_PROGRAMS = frozenset(
+    {"docker", "podman", "kubectl", "nerdctl", "ctr", "sudo", "nsenter"}
+)
 HERDR_SEND_SUBMIT_SETTLE_S = 1.0
 HERDR_SEND_POLL_INTERVAL_S = 0.5
 HERDR_SEND_SUBMIT_MAX_ATTEMPTS = 3
@@ -200,6 +203,70 @@ class SubprocessHerdrCommandRunner:
             check=False,
             env=self._merged_env(env),
         )
+
+
+class SubprocessHerdrAttachRunner:
+    """Run an interactive herdr remote attach without leaking local socket env."""
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        merged_env = {
+            str(k): str(v)
+            for k, v in os.environ.items()
+            if k not in FORBIDDEN_SEAT_ENV_NAMES
+        }
+        for key, value in (env or {}).items():
+            if key in FORBIDDEN_SEAT_ENV_NAMES:
+                raise HerdrCommandError(
+                    f"refusing to pass {key} into herdr remote attach"
+                )
+            merged_env[str(key)] = str(value)
+        return subprocess.run(
+            list(argv),
+            check=False,
+            text=True,
+            env=merged_env,
+        )
+
+
+@dataclass(frozen=True)
+class HerdrRemoteAttachPlan:
+    """A value-only plan for operator reach via ``herdr --remote``.
+
+    ``argv`` is the exact command vector to execute. It intentionally contains no
+    container-runtime program, no ``sudo``, and no local ``HERDR_SOCKET_PATH``:
+    the operator reaches the contained seat through herdr's authenticated remote
+    client/server path, not through host-root or container-runtime attach.
+    """
+
+    remote_target: str
+    session: str | None
+    pane_id: str | None
+    herdr_binary: str
+    argv: tuple[str, ...]
+    reach_plane: str = "herdr-remote"
+    avoids_runtime_attach: tuple[str, ...] = (
+        "docker exec",
+        "podman exec",
+        "kubectl exec",
+        "sudo",
+        "host-root container runtime attach",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "remote_target": self.remote_target,
+            "session": self.session,
+            "pane_id": self.pane_id,
+            "herdr_binary": self.herdr_binary,
+            "argv": list(self.argv),
+            "reach_plane": self.reach_plane,
+            "avoids_runtime_attach": list(self.avoids_runtime_attach),
+        }
 
 
 class HerdrSession:
@@ -894,3 +961,115 @@ class HerdrSession:
     def close(self) -> None:
         """Release the client connection. Idempotent; never reaps a seat (reaper owns that)."""
         self._connected = False
+
+
+def _clean_remote_attach_value(value: str | Path, *, field: str) -> str:
+    text = str(value).strip()
+    if not text:
+        raise HerdrCommandError(f"herdr remote attach requires a non-empty {field}")
+    if text.startswith("-"):
+        raise HerdrCommandError(
+            f"herdr remote attach {field} must not start with '-': {text!r}"
+        )
+    return text
+
+
+def _program_name(value: str) -> str:
+    return Path(value).name.lower()
+
+
+def _assert_no_runtime_attach(argv: Sequence[str]) -> None:
+    programs = {_program_name(part) for part in argv}
+    forbidden = programs & FORBIDDEN_REMOTE_ATTACH_PROGRAMS
+    if forbidden:
+        raise HerdrCommandError(
+            "herdr remote attach must use herdr as the reach plane; refusing "
+            f"runtime/privileged attach token(s): {', '.join(sorted(forbidden))}"
+        )
+
+
+def build_remote_attach_command(
+    remote_target: str,
+    *,
+    session: str | None = None,
+    herdr_binary: str | Path = "herdr",
+) -> tuple[str, ...]:
+    """Build the authenticated herdr reach-plane command vector.
+
+    The supported remote attach API is ``herdr --remote <ssh-target>
+    [--session <name>]``. This builder deliberately does not compose
+    ``docker exec``, ``sudo``, or any host-root/container-runtime attach path.
+    """
+    binary = _clean_remote_attach_value(herdr_binary, field="herdr binary")
+    target = _clean_remote_attach_value(remote_target, field="remote target")
+    argv: list[str] = [binary, "--remote", target]
+    if session is not None:
+        session_text = _clean_remote_attach_value(session, field="session")
+        argv.extend(["--session", session_text])
+    _assert_no_runtime_attach(argv)
+    return tuple(argv)
+
+
+def plan_remote_attach(
+    *,
+    remote_target: str,
+    session: str | None = None,
+    pane: HerdrPane | None = None,
+    pane_id: str | None = None,
+    herdr_binary: str | Path = "herdr",
+) -> HerdrRemoteAttachPlan:
+    """Return a pure remote attach plan for a contained herdr seat surface."""
+    resolved_pane_id = pane.pane_id if pane is not None else pane_id
+    if resolved_pane_id is not None:
+        resolved_pane_id = _clean_remote_attach_value(resolved_pane_id, field="pane id")
+    argv = build_remote_attach_command(
+        remote_target,
+        session=session,
+        herdr_binary=herdr_binary,
+    )
+    return HerdrRemoteAttachPlan(
+        remote_target=str(remote_target).strip(),
+        session=str(session).strip() if session is not None else None,
+        pane_id=resolved_pane_id,
+        herdr_binary=str(herdr_binary),
+        argv=argv,
+    )
+
+
+def remote_attach(
+    *,
+    remote_target: str,
+    session: str | None = None,
+    pane: HerdrPane | None = None,
+    pane_id: str | None = None,
+    herdr_binary: str | Path = "herdr",
+    runner: HerdrCommandRunner | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Execute ``herdr --remote`` through an injectable runner.
+
+    The helper is intentionally runner-injectable for offline tests and for live
+    callers that need a PTY-aware runner. It passes an empty environment overlay
+    so tests can assert that no controller-held socket path is supplied to the
+    remote reach path.
+    """
+    plan = plan_remote_attach(
+        remote_target=remote_target,
+        session=session,
+        pane=pane,
+        pane_id=pane_id,
+        herdr_binary=herdr_binary,
+    )
+    command_runner = runner if runner is not None else SubprocessHerdrAttachRunner()
+    try:
+        completed = command_runner.run(plan.argv, env={})
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HerdrCommandError(
+            f"herdr remote attach failed to start: {plan.argv!r}: {exc}"
+        ) from exc
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        raise HerdrCommandError(
+            f"herdr remote attach exited {completed.returncode}: {plan.argv!r}"
+            + (f": {stderr}" if stderr else "")
+        )
+    return completed
