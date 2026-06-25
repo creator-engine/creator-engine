@@ -54,6 +54,7 @@ def test_review_pickup_unit_execstart(repo_root: Path):
     assert " --loop " in exec_start
     assert " --interval 120 " in exec_start
     assert " --apply " in exec_start
+    assert " --inbox-path .ce/state/controller-inbox/awaiting-review.json " in exec_start
     assert exec_start.endswith(" --json")
 
 
