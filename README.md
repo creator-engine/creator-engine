@@ -13,7 +13,7 @@ kept in [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
 
 ## Current Status
 
-As of June 19, 2026:
+As of June 25, 2026:
 
 - v3.1 is pilot-ready: the repo contains the v3 Scope-to-PR-to-review-to-merge
   substrate, the product CLI surface, cockpit/read-model work, and the two-mode
@@ -21,6 +21,36 @@ As of June 19, 2026:
 - v3.5 is the active program plan. Its critical workstreams are containment,
   team-mode throughput, install/pilot readiness, secret and identity custody,
   release integrity, and documentation/product surface currency.
+- The governed secret plane has landed in code: OpenBao is stood up behind the
+  `SecretIdentityBackend` (ce-ops#113/#135, ADR-0012), with a
+  `LocalSecretIdentityBackend` for offline development. The OpenBao VPS instance
+  is stood up, initialized, and unsealed under systemd; authenticated day-2
+  operations (audit verification, secret writes, least-privilege token mint)
+  proceed through the operator arming runbook
+  ([`docs/devops/openbao-approval-wall-arming.md`](./docs/devops/openbao-approval-wall-arming.md)).
+- The merge gate now runs an autonomous, fail-closed Integrator belt daemon
+  (ce-ops#216/#218): it discovers approved+green PRs, re-verifies the
+  current-head approval, validates the carrier and path manifest, and enqueues to
+  the GitHub merge queue under the human merge gate. An emergency-stop / dequeue
+  primitive (ce-ops#235) can pull a PR back out.
+- The approval-capability wall (ce-ops#234/#239) is wired to OpenBao: when armed,
+  a raw GitHub approval is no longer sufficient — the Integrator also requires a
+  controller-minted, value-only capability marker bound to the exact merge
+  candidate. Controller/integrator-only mint-on-approval (ce-ops#247) can auto-
+  mint that marker on a trusted, fully-gated approval. Arming the live DGX daemon
+  is the in-flight step; see
+  [`docs/devops/openbao-approval-wall-arming.md`](./docs/devops/openbao-approval-wall-arming.md).
+- Transport-deputy plumbing has landed (ce-ops#228/#242/#243): a credential-
+  injection proxy and policy seam let a zero-credential contained seat self-push
+  and self-submit a PR review through injected, scoped credentials.
+- Governed worker-role definitions for Claude-Code controllers/foremen are in
+  [`.claude/agents/`](./.claude/agents/README.md) (ce-ops#244): `architect_research`,
+  `implementer`, `verification`, and `reviewer`, each with a distinct mount,
+  egress, and credential boundary. They are additive role defs; runtime injection
+  remains a separate ratified step.
+- The N6 clean-room ship/slip rehearsal harness (ce-ops#191) and its
+  [`scripts/first-value.sh`](./scripts/first-value.sh) first-value path are in
+  tree for dogfooding a clean install.
 - The package artifacts are at `creator-engine-validator` version `0.2.0`.
   There is no public product tag or GitHub release yet; release publication is
   still a separate governed workstream. See
@@ -188,7 +218,9 @@ state as an authority source.
   [`docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md`](./docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md).
 - Per-developer identity custody is moving into the governed secret plane. The
   OpenBao decision record is
-  [`docs/decisions/0005-openbao-secret-identity-backend.md`](./docs/decisions/0005-openbao-secret-identity-backend.md).
+  [`docs/decisions/0005-openbao-secret-identity-backend.md`](./docs/decisions/0005-openbao-secret-identity-backend.md);
+  the stand-up of the OpenBao micro-unit and `SecretIdentityBackend` is recorded
+  in [`docs/decisions/ADR-0012-openbao-micro-unit-standup.md`](./docs/decisions/ADR-0012-openbao-micro-unit-standup.md).
 
 ## Containment Direction
 
@@ -261,6 +293,12 @@ under `.ce/pr-manifests/<branch-slug>.md` whose path list exactly matches
   [`docs/v3-roadmap.md`](./docs/v3-roadmap.md).
 - Architecture index:
   [`docs/architecture/README.md`](./docs/architecture/README.md).
+- Approval-capability wall:
+  [`docs/security/ce234-approval-capability-wall.md`](./docs/security/ce234-approval-capability-wall.md)
+  and the arming runbook
+  [`docs/devops/openbao-approval-wall-arming.md`](./docs/devops/openbao-approval-wall-arming.md).
+- Web control UI direction (accepted, design):
+  [`docs/decisions/ADR-0008-web-control-ui.md`](./docs/decisions/ADR-0008-web-control-ui.md).
 - Installer contract:
   [`docs/contracts/installer.md`](./docs/contracts/installer.md).
 - Pilot runbook:
