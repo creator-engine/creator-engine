@@ -77,11 +77,15 @@ from .eviction_detection import (
 from .credential_runner import authenticated_gh_runner
 from .cred_injection_proxy import (
     ContainedDispatch,
+    ContainedSeatReview,
+    ContainedSeatReviewResult,
     CredentialBinding,
     CredentialProxyRefused,
     OutboundTransportRequest,
     ProxyDispatchResult,
     dispatch_with_credential_injection,
+    gh_api_transport_adapter,
+    submit_contained_seat_pr_review,
 )
 from .deterministic_resolvers import (
     ResolverResult,
@@ -175,6 +179,8 @@ __all__ = [
     "ConfigResult",
     "ConflictState",
     "ContainedDispatch",
+    "ContainedSeatReview",
+    "ContainedSeatReviewResult",
     "ControllerEscalationEvent",
     "CredentialBinding",
     "CredentialProxyRefused",
@@ -240,6 +246,7 @@ __all__ = [
     "evaluate_transport_deputy_policy",
     "execute_integrator_repair",
     "extract_approval_capability_marker",
+    "gh_api_transport_adapter",
     "install_required_checks",
     "issue_approval_capability",
     "load_approval_wall_state",
@@ -257,6 +264,7 @@ __all__ = [
     "save_approval_wall_state",
     "set_codeowners",
     "submit_review",
+    "submit_contained_seat_pr_review",
     "upsert_ruleset",
     "verify_resolution",
 ]

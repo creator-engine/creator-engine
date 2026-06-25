@@ -26,11 +26,37 @@ def _request(**overrides) -> TransportRequest:
 
 def test_reviewer_can_submit_review_to_matching_pr():
     decision = evaluate(
-        _request(method="POST", path=f"/repos/{_REPO}/pulls/7/reviews")
+        _request(
+            method="POST",
+            path=f"/repos/{_REPO}/pulls/7/reviews",
+            body=f'{{"event":"COMMENT","commit_id":"{_HEAD}"}}',
+        )
     )
 
     assert decision.allowed is True
     assert decision.as_record()["verdict"] == "allow"
+
+
+def test_reviewer_review_submit_denies_approve_before_injection():
+    decision = evaluate(
+        _request(
+            method="POST",
+            path=f"/repos/{_REPO}/pulls/7/reviews",
+            body='{"event":"APPROVE","body":"not gate-valid"}',
+        )
+    )
+
+    assert decision.allowed is False
+    assert "COMMENT/REQUEST_CHANGES" in " ".join(decision.reasons)
+
+
+def test_reviewer_review_submit_requires_explicit_event():
+    decision = evaluate(
+        _request(method="POST", path=f"/repos/{_REPO}/pulls/7/reviews")
+    )
+
+    assert decision.allowed is False
+    assert "missing an explicit review event" in " ".join(decision.reasons)
 
 
 def test_destructive_delete_is_blocked_before_injection():
