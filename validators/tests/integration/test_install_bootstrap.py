@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -69,6 +71,78 @@ def _make_site(tmp_path: Path, repo_root: Path, *, tamper: bool = False) -> Path
     return site
 
 
+def _wheel_digest(data: bytes) -> str:
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+
+
+def _patch_site_app_wheel_from_source(tmp_path: Path, repo_root: Path, site: Path) -> None:
+    wheel_name = "creator_engine_validator-0.2.0-py3-none-any.whl"
+    wheel = site / "downloads" / "0.2.0" / wheel_name
+    member = "creator_engine_validator/v3_cli.py"
+    record = "creator_engine_validator-0.2.0.dist-info/RECORD"
+    replacement = (repo_root / "validators" / "creator_engine_validator" / "v3_cli.py").read_bytes()
+
+    with zipfile.ZipFile(wheel, "r") as zin:
+        entries = {info.filename: zin.read(info.filename) for info in zin.infolist()}
+        infos = zin.infolist()
+        record_rows = list(csv.reader(entries[record].decode("utf-8").splitlines()))
+    entries[member] = replacement
+    updated_rows = []
+    for row in record_rows:
+        if row[0] == member:
+            updated_rows.append([member, _wheel_digest(replacement), str(len(replacement))])
+        elif row[0] == record:
+            updated_rows.append([record, "", ""])
+        else:
+            updated_rows.append(row)
+    rendered_record = []
+    for row in updated_rows:
+        line = ",".join(row)
+        rendered_record.append(line)
+    entries[record] = ("\n".join(rendered_record) + "\n").encode("utf-8")
+
+    rewritten = wheel.with_suffix(".tmp")
+    with zipfile.ZipFile(rewritten, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+        for info in infos:
+            new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+            new_info.comment = info.comment
+            new_info.extra = info.extra
+            new_info.internal_attr = info.internal_attr
+            new_info.external_attr = info.external_attr
+            new_info.create_system = info.create_system
+            new_info.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(new_info, entries[info.filename])
+    rewritten.replace(wheel)
+
+    wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    sha256s = site / "downloads" / "0.2.0" / "SHA256SUMS"
+    sha_lines = []
+    for line in sha256s.read_text(encoding="utf-8").splitlines():
+        if line.endswith(f"  {wheel_name}"):
+            sha_lines.append(f"{wheel_hash}  {wheel_name}")
+        else:
+            sha_lines.append(line)
+    sha256s.write_text("\n".join(sha_lines) + "\n", encoding="utf-8")
+    sha256s_hash = hashlib.sha256(sha256s.read_bytes()).hexdigest()
+
+    spec_path = site / "llms-install.md"
+    spec = spec_path.read_text(encoding="utf-8")
+    spec = re.sub(r"(?m)^(  sha256s_sha256: ).*$", rf"\g<1>{sha256s_hash}", spec)
+    spec = re.sub(
+        rf"(?m)^(    - filename: {re.escape(wheel_name)}\n      url: .*\n      sha256: ).*$",
+        rf"\g<1>{wheel_hash}",
+        spec,
+    )
+    signing_root = tmp_path / "resigned-site"
+    signing_root.mkdir()
+    signed, trust_root = _sign_with_test_key(spec, signing_root)
+    spec_path.write_text(signed, encoding="utf-8")
+    (site / "keys" / "ce-root-v1").write_text(trust_root, encoding="utf-8")
+    key_id = _signature_key_id(signed)
+    fingerprint = v3_installer.public_key_fingerprint(trust_root)
+    (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
+
+
 def _fake_curl_bin(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -117,6 +191,28 @@ cp "$src" "$out"
     return bin_dir
 
 
+def _path_without_commands(tmp_path: Path, missing: set[str], prepend: list[Path] | None = None) -> str:
+    bin_dir = tmp_path / ("path-without-" + "-".join(sorted(missing)))
+    bin_dir.mkdir(exist_ok=True)
+    for raw_dir in os.environ["PATH"].split(os.pathsep):
+        if not raw_dir:
+            continue
+        source_dir = Path(raw_dir)
+        if not source_dir.is_dir():
+            continue
+        for candidate in source_dir.iterdir():
+            name = candidate.name
+            if name in missing or (bin_dir / name).exists() or not os.access(candidate, os.X_OK):
+                continue
+            try:
+                os.symlink(candidate, bin_dir / name)
+            except FileExistsError:
+                pass
+    parts = [str(path) for path in (prepend or [])]
+    parts.append(str(bin_dir))
+    return os.pathsep.join(parts)
+
+
 def _run_install(
     tmp_path: Path,
     repo_root: Path,
@@ -126,13 +222,17 @@ def _run_install(
     extra_env: dict[str, str] | None = None,
     answers: Path | None = None,
     extra_args: list[str] | None = None,
+    missing_commands: set[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = _fake_curl_bin(tmp_path)
     curl_log = tmp_path / "curl.log"
     install_root = install_root or (tmp_path / "install-root")
+    path = f"{fake_bin}:{os.environ['PATH']}"
+    if missing_commands:
+        path = _path_without_commands(tmp_path, missing_commands, prepend=[fake_bin])
     env = {
         **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PATH": path,
         "HOME": str(tmp_path / "home"),
         "FAKE_SITE": str(site),
         "FAKE_CURL_LOG": str(curl_log),
@@ -167,12 +267,32 @@ def _curl_urls(log_path: Path) -> list[str]:
     return urls
 
 
+def _combined_output(proc: subprocess.CompletedProcess[str]) -> str:
+    return proc.stdout + proc.stderr
+
+
+def _assert_clean_install_refusal(proc: subprocess.CompletedProcess[str], failure_class: str) -> str:
+    combined = _combined_output(proc)
+    assert proc.returncode != 0
+    assert combined.count("INSTALL_REFUSED") == 1
+    assert f"INSTALL_REFUSED {failure_class}" in combined
+    assert (
+        "Remediation:" in combined
+        or "remediation:" in combined
+        or re.search(rf"INSTALL_REFUSED {re.escape(failure_class)}: .+", combined)
+    )
+    assert "Traceback" not in combined
+    assert "FileNotFoundError" not in combined
+    return combined
+
+
 @requires_ssh_keygen
 def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root, tamper=True)
     install_root = tmp_path / "install-root"
     proc = _run_install(tmp_path, repo_root, site=site, install_root=install_root)
     assert proc.returncode != 0
+    _assert_clean_install_refusal(proc, "signature_refused")
     assert "signature_refused" in proc.stderr
     assert _curl_urls(tmp_path / "curl.log") == [
         "https://creator-engine.dev/llms-install.md",
@@ -328,11 +448,8 @@ def test_install_sh_repairs_partial_or_corrupt_verified_venv_state(tmp_path: Pat
 
 
 def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path, repo_root: Path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    (fake_bin / "curl").write_text("#!/usr/bin/env sh\nexit 99\n", encoding="utf-8")
-    (fake_bin / "curl").chmod(0o755)
-    env = {**os.environ, "PATH": str(fake_bin), "HOME": str(tmp_path / "home")}
+    path = _path_without_commands(tmp_path, {"ssh-keygen", "apt-get", "dnf", "apk", "pacman", "brew", "sudo"})
+    env = {**os.environ, "PATH": path, "HOME": str(tmp_path / "home")}
     proc = subprocess.run(
         [shutil.which("bash") or "bash", str(repo_root / "docs" / "install.sh"), "--install-root", str(tmp_path / "install")],
         cwd=repo_root,
@@ -351,6 +468,54 @@ def test_install_sh_missing_hard_dependency_refuses_before_fetch(tmp_path: Path,
     assert "brew install openssh" in proc.stderr
     assert "openssh-client" in proc.stderr
     assert "openssh-clients" in proc.stderr
+
+
+def test_install_sh_missing_curl_refuses_cleanly_before_fetch(tmp_path: Path, repo_root: Path):
+    fake_stock = tmp_path / "fake-stock"
+    fake_stock.mkdir()
+    (fake_stock / "ssh-keygen").write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    (fake_stock / "ssh-keygen").chmod(0o755)
+    path = _path_without_commands(tmp_path, {"curl"}, prepend=[fake_stock])
+    env = {**os.environ, "PATH": path, "HOME": str(tmp_path / "home")}
+    proc = subprocess.run(
+        [shutil.which("bash") or "bash", str(repo_root / "docs" / "install.sh"), "--install-root", str(tmp_path / "install")],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    combined = _assert_clean_install_refusal(proc, "missing_bootstrap_dependency")
+    assert "curl" in combined
+    assert "Install the OS bootstrap package set" in combined
+
+
+def test_install_sh_does_not_treat_git_as_a_bootstrap_dependency(repo_root: Path):
+    # ce-ops#191 (N1×N5 reconciliation): git is a FIRST-VALUE dependency surfaced as
+    # a read-only ``--inventory`` WARN row (N1), NOT a bootstrap refusal. install.sh
+    # must therefore NOT list git in its fail-closed bootstrap preflight command set
+    # (that set keeps N5's clean fail-closed refusal for genuine bootstrap deps like
+    # curl/ssh-keygen). The inventory note tells the operator where git IS checked.
+    script = (repo_root / "docs" / "install.sh").read_text(encoding="utf-8")
+    preflight = re.search(
+        r"preflight_bootstrap_commands\(\)\s*\{(.*?)\n\}",
+        script,
+        re.DOTALL,
+    )
+    assert preflight is not None, "preflight_bootstrap_commands() not found in install.sh"
+    bootstrap_loop = re.search(r"for cmd in ([^;]+); do", preflight.group(1))
+    assert bootstrap_loop is not None, "bootstrap command loop not found"
+    bootstrap_cmds = bootstrap_loop.group(1).split()
+    assert "git" not in bootstrap_cmds, (
+        "git must NOT be a fail-closed bootstrap dependency — it is surfaced as a "
+        "read-only inventory WARN row (ce-ops#191 N1)"
+    )
+    # The operator-facing contract still names where git is enforced.
+    assert "git is required for first-value and is checked in inventory" in script
+    # N5's clean-refusal rendering for an onboard child that DOES report a missing
+    # bootstrap dependency is retained verbatim (covered for the bootstrap-preflight
+    # classes by test_install_sh_missing_curl_refuses_cleanly_before_fetch).
+    assert 'onboard_class="missing_bootstrap_dependency"' in script
+    assert "onboard_refusal_detail" in script
 
 
 @requires_ssh_keygen
