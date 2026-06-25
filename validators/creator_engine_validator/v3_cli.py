@@ -286,10 +286,27 @@ def _emit(args: argparse.Namespace, code: int, lines: list[str], payload: dict[s
     return code
 
 
+# ce-ops#191 (N5) — fail-closed refusals carry their INSTALL_FAILURE_CLASS as the
+# leading token of the message. A *missing-dependency* refusal (this marker) is the one
+# class the read-only ``--inventory`` awareness path degrades gracefully on (per the N1
+# reconciliation): inventory is the awareness artifact, so a missing bootstrap dependency
+# surfaces as a WARN row (exit 0), NOT a refusal. Every OTHER refusal class — and the
+# ``--plan``/``--apply``/bootstrap path — keeps N5's clean fail-closed refusal.
+_MISSING_DEPENDENCY_MARKER = "missing_bootstrap_dependency"
 _MISSING_GIT_REFUSAL = (
-    "missing_bootstrap_dependency: required command missing: git. "
+    f"{_MISSING_DEPENDENCY_MARKER}: required command missing: git. "
     "Remediation: install Git with your OS package manager, then re-run this installer."
 )
+
+
+def _is_missing_dependency_refusal(exc: Exception) -> bool:
+    """A refusal whose failure class is ``missing_bootstrap_dependency``.
+
+    Used by the read-only ``--inventory`` path to distinguish a missing-tool
+    refusal (degrade to a WARN row, exit 0) from every other fail-closed refusal
+    (e.g. a tampered spec), which must still refuse.
+    """
+    return str(exc).startswith(f"{_MISSING_DEPENDENCY_MARKER}:")
 
 
 def _require_git() -> None:
@@ -3101,7 +3118,18 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         )
     project_root = Path.cwd()
     try:
-        brownfield_probe = _detect_brownfield_project(project_root)
+        try:
+            brownfield_probe = _detect_brownfield_project(project_root)
+        except v3_installer.InstallRefused as exc:
+            # ce-ops#191 (N1×N5 reconciliation): brownfield detection shells out to
+            # git, which fail-closes on a missing-dependency. For the read-only
+            # ``--inventory`` AWARENESS artifact this MUST NOT refuse — the missing
+            # tool is surfaced as a WARN dependency row (exit 0) below. The
+            # ``--plan``/``--apply`` path (and any NON-dependency refusal) re-raise
+            # and keep N5's clean fail-closed refusal.
+            if not (args.inventory and _is_missing_dependency_refusal(exc)):
+                raise
+            brownfield_probe = None
         detected.update(v3_installer.brownfield_detected_facts(brownfield_probe))
         # 4. --inventory: the awareness artifact (schema-derived, never hand-kept).
         if args.inventory:

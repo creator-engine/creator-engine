@@ -1350,7 +1350,51 @@ def test_git_read_refuses_missing_git(monkeypatch, tmp_path):
     assert "Remediation:" in detail
 
 
-def test_onboard_inventory_surfaces_brownfield_install_refusal(tmp_path, capsys, monkeypatch):
+def test_onboard_inventory_warns_when_brownfield_probe_misses_dependency(tmp_path, capsys, monkeypatch):
+    # ce-ops#191 (N1×N5 reconciliation): brownfield detection shells out to git,
+    # which N5 fail-closes on a missing dependency. But ``--inventory`` is the
+    # read-only AWARENESS artifact (N1) — a missing dependency must surface as a
+    # WARN row (exit 0), NOT a refusal. Only ``_which`` controls presence, so a
+    # genuinely-missing git is reproduced by masking it (the brownfield probe then
+    # raises the missing-dependency refusal internally, which inventory degrades).
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in ("python", "uv", "claude"),
+    )
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_spec(tmp_path)),
+        "--answers", str(_answers_file(tmp_path)),
+        "--inventory",
+        "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "onboard_inventory"
+    rows = {row["key"]: row for row in payload["inventory"]}
+    assert rows["dependencies.git"]["status"] == "WARN MISSING (needed for first-value)"
+
+
+def test_onboard_inventory_refuses_on_non_dependency_brownfield_fault(tmp_path, capsys, monkeypatch):
+    # N5 stays fail-closed for NON-dependency faults even on the read-only path:
+    # only the ``missing_bootstrap_dependency`` class degrades to a WARN row.
+    def refused(_root):
+        raise v3_installer.InstallRefused(
+            "artifact_hash_mismatch: brownfield baseline attestation tampered"
+        )
+
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", refused)
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "artifact_hash_mismatch" in payload["detail"]
+
+
+def test_onboard_plan_fails_closed_on_missing_git_dependency(tmp_path, capsys, monkeypatch):
+    # The reconciliation is scoped to ``--inventory``: ``--plan`` (the apply/bootstrap
+    # path) keeps N5's clean fail-closed refusal on a missing bootstrap dependency.
     def refused(_root):
         raise v3_installer.InstallRefused(
             "missing_bootstrap_dependency: required command missing: git. "
@@ -1358,7 +1402,7 @@ def test_onboard_inventory_surfaces_brownfield_install_refusal(tmp_path, capsys,
         )
 
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", refused)
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "refused"

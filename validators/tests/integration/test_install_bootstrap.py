@@ -489,23 +489,33 @@ def test_install_sh_missing_curl_refuses_cleanly_before_fetch(tmp_path: Path, re
     assert "Install the OS bootstrap package set" in combined
 
 
-@requires_ssh_keygen
-def test_install_sh_missing_git_refuses_cleanly_from_inventory_child(tmp_path: Path, repo_root: Path):
-    site = _make_site(tmp_path, repo_root)
-    _patch_site_app_wheel_from_source(tmp_path, repo_root, site)
-    answers = tmp_path / "answers.yaml"
-    answers.write_text("answers_version: 1\nprofile: solo-pilot\n", encoding="utf-8")
-
-    proc = _run_install(
-        tmp_path,
-        repo_root,
-        site=site,
-        answers=answers,
-        missing_commands={"git"},
+def test_install_sh_does_not_treat_git_as_a_bootstrap_dependency(repo_root: Path):
+    # ce-ops#191 (N1×N5 reconciliation): git is a FIRST-VALUE dependency surfaced as
+    # a read-only ``--inventory`` WARN row (N1), NOT a bootstrap refusal. install.sh
+    # must therefore NOT list git in its fail-closed bootstrap preflight command set
+    # (that set keeps N5's clean fail-closed refusal for genuine bootstrap deps like
+    # curl/ssh-keygen). The inventory note tells the operator where git IS checked.
+    script = (repo_root / "docs" / "install.sh").read_text(encoding="utf-8")
+    preflight = re.search(
+        r"preflight_bootstrap_commands\(\)\s*\{(.*?)\n\}",
+        script,
+        re.DOTALL,
     )
-
-    combined = _assert_clean_install_refusal(proc, "missing_bootstrap_dependency")
-    assert "required command missing: git" in combined
+    assert preflight is not None, "preflight_bootstrap_commands() not found in install.sh"
+    bootstrap_loop = re.search(r"for cmd in ([^;]+); do", preflight.group(1))
+    assert bootstrap_loop is not None, "bootstrap command loop not found"
+    bootstrap_cmds = bootstrap_loop.group(1).split()
+    assert "git" not in bootstrap_cmds, (
+        "git must NOT be a fail-closed bootstrap dependency — it is surfaced as a "
+        "read-only inventory WARN row (ce-ops#191 N1)"
+    )
+    # The operator-facing contract still names where git is enforced.
+    assert "git is required for first-value and is checked in inventory" in script
+    # N5's clean-refusal rendering for an onboard child that DOES report a missing
+    # bootstrap dependency is retained verbatim (covered for the bootstrap-preflight
+    # classes by test_install_sh_missing_curl_refuses_cleanly_before_fetch).
+    assert 'onboard_class="missing_bootstrap_dependency"' in script
+    assert "onboard_refusal_detail" in script
 
 
 @requires_ssh_keygen
