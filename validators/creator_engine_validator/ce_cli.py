@@ -149,6 +149,16 @@ def _herdr_session_module():
     return importlib.import_module("creator_engine_validator.runner.herdr_session")
 
 
+# Command groups shipped INTERNAL-only for now: present in the `ce` CLI (for
+# fleet/dev use) but intentionally kept OFF the public product surface. They are
+# hidden from `ce --help` and are EXEMPT from the public-README "documents every
+# command group" requirement (the inventory guard still tracks them so additions
+# are never silent). `herdr` (authenticated remote reach-plane) is internal pending
+# internal testing and GRADUATES to a public product command in a later release
+# (ce-ops#237).
+INTERNAL_COMMAND_GROUPS = frozenset({"herdr"})
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ce", description="Creator Engine kernel (v1.0 Gate 3 lane-launch surface)"
@@ -1108,9 +1118,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit the machine-readable JSON fleet status",
     )
 
+    # INTERNAL command (see INTERNAL_COMMAND_GROUPS): hidden from `ce --help` and
+    # not on the public product surface yet. Graduates to a public product command
+    # in a later release after internal testing (ce-ops#237).
     herdr = groups.add_parser(
         "herdr",
-        help="herdr operator reach-plane helpers",
+        help=argparse.SUPPRESS,
     )
     herdr_sub = herdr.add_subparsers(dest="herdr_cmd")
 

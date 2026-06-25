@@ -1,6 +1,6 @@
 # herdr Operator Reach Plane
 
-**Status**: Design note for ce-ops#237.
+**Status**: Internal design note — `ce herdr` ships internal-only for now and graduates to a public product command in a later release after internal testing.
 **Scope**: Operator attach path for contained seats.
 **Related boundary**:
 [`../architecture/HERDR_GOVERNANCE_BOUNDARY.md`](../architecture/HERDR_GOVERNANCE_BOUNDARY.md)
