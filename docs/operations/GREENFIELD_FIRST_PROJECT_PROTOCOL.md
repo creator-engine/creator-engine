@@ -45,7 +45,7 @@ the existing ratified binding.
 
 ## Plan Payload
 
-`ce onboard --answers ce-install.answers.yaml --plan --json` adds
+`cev3 onboard --answers ce-install.answers.yaml --plan --json` adds
 `first_project` when the merged answers describe `github.mode: new`:
 
 ```json
@@ -97,12 +97,12 @@ the first governed Scope and it cannot count as first ship.
 The E4 first Scope is human-shaped:
 
 1. The user chats freely in Frame.
-2. E3 detect-and-offer or explicit `ce scope` drafts a Scope.
+2. E3 detect-and-offer or explicit `cev3 scope` drafts a Scope.
 3. The user confirms and supplies the human-only Budget.
-4. `ce ratify <scope>` places the front-gate bet.
-5. `ce drive <scope> --spawn` starts Build.
-6. `ce pr ... --apply`, `ce review ... --spawn`, `ce collect ...`, and
-   `ce merge ... --apply` carry Review and Ship through existing forge gates.
+4. `cev3 ratify <scope>` places the front-gate bet.
+5. `cev3 drive <scope> --spawn` starts Build.
+6. `cev3 pr ... --apply`, `cev3 review ... --spawn`, `cev3 collect ...`, and
+   `cev3 merge ... --apply` carry Review and Ship through existing forge gates.
 
 First ship is counted only when a governed post-scaffold PR is opened through
 the forge leg, reviewed in a distinct venue or explicitly waived by a ratified
