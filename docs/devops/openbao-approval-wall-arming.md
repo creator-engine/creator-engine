@@ -10,8 +10,8 @@ daemon, or flip the production armed flag.
 
 Connection parameters verified by the infra lane:
 
-- `BAO_ADDR=https://ce-dev-1.tailf3cfef.ts.net:8200`
-- Alternate URL: `https://100.72.252.20:8200`
+- `BAO_ADDR=https://openbao.<tailnet>.ts.net:8200`
+- Alternate URL: `https://<tailnet-ip>:8200`
 - Client CA: `/usr/local/share/ca-certificates/ce-openbao-ca.crt`
 - Service CA source: `/etc/openbao/tls/ca.crt`
 - `CE_OPENBAO_KV_MOUNT=ce-kv`
@@ -23,7 +23,7 @@ Host status verified by the infra lane:
 - Shamir initialized and unsealed
 - 5 shares, threshold 3
 - Integrated raft HA active
-- Tailnet listener on `100.72.252.20:8200` and `100.72.252.20:8201`
+- Tailnet listener on `<tailnet-ip>:8200` and `:8201`
 - Audit file path exists at `/var/log/openbao/audit.log` with mode `0600` and
   owner `openbao:openbao`
 
@@ -81,7 +81,7 @@ Use a controlled shell on the authorized host. Keep secret values in memory or
 tmpfs only, and unset them at the end.
 
 ```bash
-export BAO_ADDR='https://ce-dev-1.tailf3cfef.ts.net:8200'
+export BAO_ADDR='https://openbao.<tailnet>.ts.net:8200'
 export BAO_CACERT='/usr/local/share/ca-certificates/ce-openbao-ca.crt'
 export CE_OPENBAO_KV_MOUNT='ce-kv'
 export BAO_TOKEN='<authorized-operator-token-from-approved-channel>'

@@ -10,7 +10,7 @@ fi
 OPENBAO_USER="${OPENBAO_USER:-openbao}"
 OPENBAO_GROUP="${OPENBAO_GROUP:-openbao}"
 OPENBAO_CLUSTER_NAME="${OPENBAO_CLUSTER_NAME:-ce-openbao-prod}"
-OPENBAO_NODE_ID="${OPENBAO_NODE_ID:-ce-openbao-hetzner-1}"
+OPENBAO_NODE_ID="${OPENBAO_NODE_ID:-ce-openbao-1}"
 OPENBAO_DATA_DIR="${OPENBAO_DATA_DIR:-/var/lib/openbao}"
 OPENBAO_RAFT_PATH="${OPENBAO_RAFT_PATH:-/var/lib/openbao/raft}"
 OPENBAO_CONFIG_DIR="${OPENBAO_CONFIG_DIR:-/etc/openbao}"
@@ -59,7 +59,7 @@ run() {
 
 require_apply_root() {
   if [[ "$MODE" == "--apply" && "$(id -u)" != "0" ]]; then
-    echo "--apply requires root/sudo on the Hetzner VPS for user, directory, and systemd setup" >&2
+    echo "--apply requires root/sudo on the VPS for user, directory, and systemd setup" >&2
     exit 77
   fi
 }

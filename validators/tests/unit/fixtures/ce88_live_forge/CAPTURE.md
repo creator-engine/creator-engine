@@ -40,7 +40,7 @@ review; values are byte-faithful to the API). They are reproducible by re-runnin
   (`login`/`id`/`type`) — private fields (email/name) elided. The driver reads `X-Oauth-Scopes`
   (→ CE bootstrap permissions) and `login`. This is a **classic** PAT (`ghp_`).
 - **`user_response_finegrained.txt`** — `gh api -i user` authenticated as a **fine-grained** PAT
-  (`github_pat_` prefix), captured **2026-06-16 on CE-DEV-1 (`ce-pilot-1`) as the `ce-dev-3` fine-grained
+  (`github_pat_` prefix), captured **2026-06-16 as a fine-grained
   bootstrap PAT** — the exact token that surfaced ce-ops#94. Capture command:
   `sudo -u ce-dev-3 gh api -i user`. The defining VERBATIM property: a fine-grained PAT emits **NO
   `X-Oauth-Scopes` header** (only `X-Accepted-Github-Permissions: allows_permissionless_access=true`,

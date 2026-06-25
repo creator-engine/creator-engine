@@ -41,9 +41,13 @@ evidence_refs:
     tag: openbao-audit
 policy_sha: "8b04004df48e8cec68d9bf5a4adbfd08222d0ca02dc0b2b08e873da7195c2d8f"
 ratification:
-  ratified_by: neckar
+  ratified_by: chmod735
   ratified_at: "2026-06-19"
   ratification_prompt_sha: "8b04004df48e8cec68d9bf5a4adbfd08222d0ca02dc0b2b08e873da7195c2d8f"
+  # N=1 native mode: ratified by the sole resolved human (chmod735 -> peer-operator
+  # in .ce/coordination.yml's identity_map). Honest solo quorum, NOT two-account
+  # laundering. Auto-expires the instant the identity map resolves a second human.
+  quorum: n1_solo
 crosswalk:
   informs:
     - ce-ops#113

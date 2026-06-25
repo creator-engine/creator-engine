@@ -42,16 +42,20 @@ crosswalk:
     - ce-ops#91
     - ce-ops#65
 ratification:
-  ratified_by: neckar
+  ratified_by: chmod735
   ratified_at: "2026-06-19"
   ratification_prompt_sha: bb69016797062f5b53f3f5a79164f495b59c885d19172828b87a1407904d9366
+  # N=1 native mode: ratified by the sole resolved human (chmod735 -> peer-operator
+  # in .ce/coordination.yml's identity_map). Honest solo quorum, NOT two-account
+  # laundering. Auto-expires the instant the identity map resolves a second human.
+  quorum: n1_solo
 ---
 
 # Derived Artifacts Out Of The Trust Path
 
 ## Ratification
 
-Operator neckar ratified this ADR on 2026-06-19 as Gate-1 design acceptance.
+The Operator ratified this ADR on 2026-06-19 as Gate-1 design acceptance.
 Gates 2-3 remain separate future ratified gates. This record remains
 design-only and does not authorize code, workflow, trust-root, or release
 artifact changes.

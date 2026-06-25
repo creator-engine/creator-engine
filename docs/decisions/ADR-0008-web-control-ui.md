@@ -22,7 +22,7 @@ ratification:
   # Operator-ratified brief ce-briefs/web-control-ui-adr.md.
 evidence_refs:
   - kind: doc
-    ref: "ce-briefs/web-control-ui-adr.md — Operator-ratified brief (neckar, 2026-06-20)"
+    ref: "ce-briefs/web-control-ui-adr.md — Operator-ratified brief (Operator, 2026-06-20)"
     tag: ratified-brief
   - kind: issue
     ref: "ce-ops#28 — mobile / web-L3 home ticket (names cockpit-serve + the tailnet perimeter)"
@@ -383,7 +383,7 @@ a decision's *technical source* footer — never in the explanation.
 ### Wireframe — CEO face (default): journey + where-am-I + what-needs-me
 
 ```
-┌─ CE ────────────────────────────────────  ◐ CEO | Dev   ⏻ neckar@tailnet ─┐
+┌─ CE ────────────────────────────────────  ◐ CEO | Dev   ⏻ Operator ─┐
 │                                                                            │
 │  WHERE THINGS ARE                                                          │
 │  ●───────●───────◍───────○───────○                                         │
@@ -433,7 +433,7 @@ a decision's *technical source* footer — never in the explanation.
 ### Wireframe — Dev face (toggle): board + posture + honest meters
 
 ```
-┌─ CE ───────────────────────────────────────────  CEO | ◐ Dev   ⏻ neckar ──┐
+┌─ CE ───────────────────────────────────────────  CEO | ◐ Dev   ⏻ Operator ──┐
 │ FRAME    SHAPE     BUILD      REVIEW     SHIP        posture: 2 hard-denies │
 │ ┌────┐  ┌────┐   ┌──────┐   ┌──────┐   ┌────┐       · governed seat: no push│
 │ │ce31│  │ce45│   │ce28  │◍  │ce08  │   │    │       · contained: no egress  │

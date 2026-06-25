@@ -11,7 +11,7 @@ Operator-controlled acts.
 
 Prerequisites:
 
-- Hetzner VPS is provisioned and reachable only on the tailnet.
+- The VPS is provisioned and reachable only on the tailnet.
 - `docs/devops/openbao/provision-openbao.sh --apply` has been run by an
   Operator with root/sudo on the VPS.
 - Internal TLS cert/key and client CA are staged at the paths configured in
