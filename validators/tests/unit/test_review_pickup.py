@@ -404,6 +404,205 @@ def test_poll_review_pickup_reports_existing_non_author_request_without_duplicat
     assert forge.review_requests == []
 
 
+def test_awaiting_review_inbox_includes_ce_dev_2_requested_reviewer():
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=21, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["record_count"] == 1
+    assert inbox["records"][0] == {
+        "pr": 21,
+        "repo": "o/r",
+        "author": "author-a",
+        "head_sha": "h" * 40,
+        "ci_state": {"combined": {"state": "success", "statuses": []}, "checks": {"total_count": 0, "check_runs": []}},
+        "requested_at": "2026-06-21T00:00:00Z",
+    }
+
+
+def test_awaiting_review_inbox_includes_ce_dev_2_requested_with_failed_ci():
+    forge = _FakeReviewPickupForge(
+        author="author-a",
+        requested=["ce-dev-2"],
+        combined_status={"state": "failure", "statuses": [{"context": "unit", "state": "failure"}]},
+    )
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=27, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    assert result.skipped[0]["reason"] == "ci_failed"
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["record_count"] == 1
+    assert inbox["records"][0]["pr"] == 27
+    assert inbox["records"][0]["ci_state"]["combined"]["state"] == "failure"
+
+
+def test_awaiting_review_inbox_filters_credentialless_requested_reviewers():
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-3", "ce-dev-4"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=22, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3", "ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["record_count"] == 0
+    assert inbox["records"] == []
+
+
+def test_awaiting_review_inbox_includes_mixed_requested_reviewers_when_ce_dev_2_requested():
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-3", "ce-dev-2"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=23, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3", "ce-dev-4"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items[0]["requested_reviewers"] == ["ce-dev-3", "ce-dev-2"]
+    assert result.items[0]["assigned_reviewer"] == "ce-dev-3"
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["record_count"] == 1
+    assert inbox["records"][0]["pr"] == 23
+    assert inbox["records"][0]["repo"] == "o/r"
+
+
+def test_awaiting_review_inbox_excludes_current_ce_dev_2_approval():
+    head = "g" * 40
+    reviews = [{"id": 44, "state": "APPROVED", "commit_id": head, "user": {"login": "ce-dev-2"}}]
+    forge = _FakeReviewPickupForge(author="author-a", head=head, requested=["ce-dev-2"], reviews=reviews)
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=24, pr=True)))])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=True,
+    )
+
+    assert result.items == ()
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["records"] == []
+
+
+def test_run_review_pickup_loop_writes_awaiting_review_inbox(tmp_path):
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=25, pr=True)))])
+    inbox_path = tmp_path / "controller-inbox" / "awaiting-review.json"
+
+    review_pickup.run_review_pickup_loop(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        apply=False,
+        iterations=1,
+        inbox_path=inbox_path,
+        clock=lambda: "2026-06-25T00:00:00Z",
+    )
+
+    payload = json.loads(inbox_path.read_text(encoding="utf-8"))
+    assert payload["controller_reviewer"] == "ce-dev-2"
+    assert payload["record_count"] == 1
+    assert payload["records"][0]["pr"] == 25
+
+
+def test_run_review_pickup_loop_fails_closed_when_inbox_write_fails():
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
+    transport = _fake_transport([(200, {}, _body(_hit(repo="o/r", number=26, pr=True)))])
+
+    def broken_writer(path, content):
+        raise OSError("disk full")
+
+    with pytest.raises(review_pickup.PickupError, match="awaiting-review inbox"):
+        review_pickup.run_review_pickup_loop(
+            token="ghp_fake",
+            reviewer_seats=["ce-dev-3"],
+            gh_runner=forge.runner,
+            transport=transport,
+            repo="o/r",
+            apply=False,
+            iterations=1,
+            inbox_path="ignored.json",
+            inbox_writer=broken_writer,
+        )
+
+
+def test_run_review_pickup_loop_preserves_inbox_on_rate_limit(tmp_path):
+    inbox_path = tmp_path / "controller-inbox" / "awaiting-review.json"
+    inbox_path.parent.mkdir(parents=True)
+    existing = {"records": [{"pr": 99, "repo": "o/r"}]}
+    inbox_path.write_text(json.dumps(existing), encoding="utf-8")
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
+
+    result = review_pickup.run_review_pickup_loop(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=_fake_transport([(429, {"Retry-After": "60"}, "{}")]),
+        repo="o/r",
+        iterations=1,
+        inbox_path=inbox_path,
+    )
+
+    assert result.passes[0].incomplete is True
+    assert result.passes[0].rate_limit["status"] == 429
+    assert json.loads(inbox_path.read_text(encoding="utf-8")) == existing
+
+
+def test_awaiting_review_inbox_paginates_past_routing_first_page():
+    forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
+    transport = _fake_transport([
+        (200, {}, _body(_hit(repo="o/r", number=28, pr=False))),
+        (200, {}, _body(_hit(repo="o/r", number=29, pr=True))),
+        (200, {}, _body()),
+    ])
+
+    result = review_pickup.poll_review_pickup(
+        token="ghp_fake",
+        reviewer_seats=["ce-dev-3"],
+        gh_runner=forge.runner,
+        transport=transport,
+        repo="o/r",
+        per_page=1,
+        apply=False,
+    )
+
+    assert result.items == ()
+    inbox = review_pickup.build_awaiting_review_inbox(result, clock=lambda: "2026-06-25T00:00:00Z")
+    assert inbox["record_count"] == 1
+    assert inbox["records"][0]["pr"] == 29
+
+
 def test_poll_review_pickup_dismisses_superseded_cr_and_rerequests_reviewer():
     head = "b" * 40
     reviews = [
@@ -514,6 +713,7 @@ def test_cev3_review_pickup_routes_with_json(monkeypatch, tmp_path, capsys):
         lambda: _fake_transport([(200, {}, _body(_hit(repo="o/r", number=12, pr=True)))]),
     )
     monkeypatch.setattr(v3_cli, "_review_pickup_gh_runner", lambda identity, token: forge.runner)
+    inbox_path = tmp_path / "awaiting-review.json"
 
     code = v3_cli.main([
         "review-pickup",
@@ -524,6 +724,7 @@ def test_cev3_review_pickup_routes_with_json(monkeypatch, tmp_path, capsys):
         "--apply",
         "--once",
         "--interval", "0",
+        "--inbox-path", str(inbox_path),
         "--json",
     ])
 
@@ -531,8 +732,11 @@ def test_cev3_review_pickup_routes_with_json(monkeypatch, tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is True
     assert out["mode"] == "once"
+    assert out["inbox_path"] == str(inbox_path)
+    assert out["awaiting_decision_count"] == 0
     assert out["items"][0]["assigned_reviewer"] == "ce-dev-3"
     assert out["items"][0]["requested"] is True
+    assert json.loads(inbox_path.read_text(encoding="utf-8"))["records"] == []
 
 
 def test_cev3_review_pickup_loop_requires_positive_interval(capsys):

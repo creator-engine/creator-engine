@@ -4053,6 +4053,8 @@ def _build_parser() -> argparse.ArgumentParser:
                               help="enable auto-merge (default: plan-only)")
     _add_root(p_auto_merge)
 
+    from .forge import review_pickup as review_pickup_module
+
     p_review_pickup = sub.add_parser(
         "review-pickup",
         help="controller review-pickup: route awaiting-review PRs to distinct non-author seats (ce-ops#188)",
@@ -4088,6 +4090,13 @@ def _build_parser() -> argparse.ArgumentParser:
                                  help="log planned routing decisions without requesting reviewers")
     p_review_pickup.add_argument("--no-stale-apply", action="store_true", dest="no_stale_apply",
                                  help="with --apply, do not auto-dismiss stale superseded reviews")
+    p_review_pickup.add_argument(
+        "--inbox-path",
+        default=str(review_pickup_module.DEFAULT_AWAITING_REVIEW_INBOX_PATH),
+        dest="inbox_path",
+        help="durable awaiting-review inbox path "
+             f"(default: {review_pickup_module.DEFAULT_AWAITING_REVIEW_INBOX_PATH})",
+    )
     p_review_pickup.add_argument("--json", action="store_true", dest="json_output",
                                  help="emit machine-readable JSON")
 
@@ -4959,6 +4968,7 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     dry_run = bool(getattr(args, "dry_run", False))
     applied = bool(getattr(args, "apply", False) and not dry_run)
     logger = review_pickup.JsonLineLogger(sys.stderr)
+    inbox_path = getattr(args, "inbox_path", None) or str(review_pickup.DEFAULT_AWAITING_REVIEW_INBOX_PATH)
 
     try:
         loop_result = review_pickup.run_review_pickup_loop(
@@ -4974,6 +4984,7 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
             iterations=None if loop_mode else 1,
             interval=interval,
             log_sink=logger,
+            inbox_path=inbox_path,
         )
         result = loop_result.passes[-1] if loop_result.passes else review_pickup.ReviewPickupResult()
     except KeyboardInterrupt:
@@ -5000,9 +5011,12 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
         "loop": loop_mode,
         "interval": interval if loop_mode else None,
         "rate_limit": result.rate_limit,
+        "inbox_path": inbox_path,
+        "awaiting_decisions": list(result.awaiting_decisions),
         "items": list(result.items),
         "skipped": list(result.skipped),
         "count": len(result.items),
+        "awaiting_decision_count": len(result.awaiting_decisions),
         "skipped_count": len(result.skipped),
     }
     return _emit(args, 0, lines, payload)

@@ -14,10 +14,15 @@ import edge is created. All I/O is injectable (``transport`` for Search,
 from __future__ import annotations
 
 import json
+import os
 import time
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from . import re_review
 from .github_repo_config import ForgeConfigError
@@ -29,16 +34,24 @@ from ..pickup_search import (
     PickupRateLimited,
     SearchQuery,
     Transport,
+    _ACCEPT,
+    _API_ROOT,
+    _API_VERSION,
     build_scoped_search_query,
     declared_search_scope,
     _PR_SEARCH_TYPE,
     _default_transport,
     _issue_number,
+    _rate_limited,
+    _rate_limit_payload,
     _search_once,
+    resolve_search_hit,
 )
 
 DEFAULT_REVIEW_PICKUP_PER_PAGE = DEFAULT_SEARCH_PER_PAGE
 DEFAULT_REVIEW_PICKUP_INTERVAL_SECONDS = 300
+DEFAULT_CONTROLLER_REVIEWER = "ce-dev-2"
+DEFAULT_AWAITING_REVIEW_INBOX_PATH = Path(".ce/state/controller-inbox/awaiting-review.json")
 
 LogSink = Callable[[Mapping[str, Any]], None]
 
@@ -65,8 +78,10 @@ class ReviewPickupResult:
     """
 
     items: tuple[dict[str, Any], ...] = ()
+    awaiting_decisions: tuple[dict[str, Any], ...] = ()
     skipped: tuple[dict[str, Any], ...] = ()
     rate_limit: Mapping[str, Any] | None = None
+    incomplete: bool = False
 
 
 class ReviewPickupSkip(Exception):
@@ -76,6 +91,20 @@ class ReviewPickupSkip(Exception):
         super().__init__(note or reason)
         self.reason = reason
         self.note = note
+
+
+@dataclass(frozen=True)
+class _ReviewPickupContext:
+    hit: Mapping[str, Any]
+    repo: str
+    number: int
+    pr: Mapping[str, Any]
+    author: str
+    head_sha: str
+    ci_state: Mapping[str, Any]
+    requested: tuple[str, ...]
+    non_author_requested: tuple[str, ...]
+    report: re_review.ReconcileReport
 
 
 @dataclass(frozen=True)
@@ -106,6 +135,71 @@ def review_pickup_query(*, repo: str | None = None, org: str | None = None) -> S
     return build_scoped_search_query("awaiting_review", ["is:open", _PR_SEARCH_TYPE], scope=scope)
 
 
+def _iter_additional_review_pickup_pages(
+    *,
+    token: str,
+    transport: Transport,
+    query: SearchQuery,
+    per_page: int,
+    first_page_count: int,
+) -> tuple[dict[str, Any], ...]:
+    if per_page < 1 or first_page_count < per_page:
+        return ()
+    items: list[dict[str, Any]] = []
+    page = 2
+    while True:
+        page_items, _rate_limit = _search_page_unlimited(
+            token=token,
+            transport=transport,
+            query=query,
+            per_page=per_page,
+            page=page,
+        )
+        items.extend(page_items)
+        if len(page_items) < per_page:
+            break
+        page += 1
+    return tuple(items)
+
+
+def _search_page_unlimited(
+    *,
+    token: str,
+    transport: Transport,
+    query: SearchQuery,
+    per_page: int,
+    page: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": _ACCEPT,
+        "X-GitHub-Api-Version": _API_VERSION,
+    }
+    params = urllib.parse.urlencode({
+        "q": query.query,
+        "per_page": str(per_page),
+        "page": str(page),
+        "sort": "updated",
+        "order": "desc",
+    })
+    status, resp_headers, body = transport("GET", f"{_API_ROOT}/search/issues?{params}", headers, None)
+    if status in (403, 429):
+        raise _rate_limited(status, resp_headers)
+    if not (200 <= status < 300):
+        raise PickupError(f"search poll failed (HTTP {status})")
+    try:
+        payload = json.loads(body) if body and body.strip() else {}
+    except (ValueError, TypeError) as exc:
+        raise PickupError(f"unparseable search payload: {exc}") from exc
+    hits = payload.get("items", []) if isinstance(payload, Mapping) else []
+    items: list[dict[str, Any]] = []
+    for raw in hits if isinstance(hits, list) else []:
+        item = resolve_search_hit(raw, query.reason) if isinstance(raw, Mapping) else None
+        if item is not None:
+            items.append(item)
+    return items, _rate_limit_payload(resp_headers)
+
+
 def poll_review_pickup(
     *,
     token: str,
@@ -121,6 +215,7 @@ def poll_review_pickup(
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
 ) -> ReviewPickupResult:
     """Route awaiting-review PRs to distinct non-author reviewer seats.
 
@@ -155,13 +250,21 @@ def poll_review_pickup(
     effective_apply = bool(apply and not dry_run)
     reviewer_load: dict[str, int] = {seat: 0 for seat in seats}
     items: list[dict[str, Any]] = []
+    awaiting_decisions: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for hit in page_items:
         if hit.get("subject_type") != "PullRequest":
             continue
         try:
-            item = plan_review_pickup_item(
-                hit,
+            context = _read_review_pickup_context(hit, gh_runner=gh_runner)
+            decision = _awaiting_decision_from_context(
+                context,
+                controller_reviewer=controller_reviewer,
+            )
+            if decision is not None:
+                awaiting_decisions.append(decision)
+            item = _plan_review_pickup_item_from_context(
+                context,
                 reviewer_seats=seats,
                 gh_runner=gh_runner,
                 apply=effective_apply,
@@ -204,7 +307,39 @@ def poll_review_pickup(
             items.append(item)
             _log_decision(log_sink, "routed", item)
 
-    return ReviewPickupResult(items=tuple(items), skipped=tuple(skipped), rate_limit=rate_limit or None)
+    for hit in _iter_additional_review_pickup_pages(
+        token=token.strip(),
+        transport=_transport,
+        query=query,
+        per_page=per_page,
+        first_page_count=len(page_items),
+    ):
+        if hit.get("subject_type") != "PullRequest":
+            continue
+        try:
+            context = _read_review_pickup_context(hit, gh_runner=gh_runner)
+            decision = _awaiting_decision_from_context(
+                context,
+                controller_reviewer=controller_reviewer,
+            )
+            if decision is not None:
+                awaiting_decisions.append(decision)
+        except (ReviewPickupSkip, PickupError, ForgeConfigError) as exc:
+            skipped.append({
+                "repo": hit.get("repo"),
+                "number": hit.get("number"),
+                "reason": "awaiting_decision_unreadable",
+                "note": str(exc),
+                "dry_run": dry_run,
+            })
+            continue
+
+    return ReviewPickupResult(
+        items=tuple(items),
+        awaiting_decisions=tuple(awaiting_decisions),
+        skipped=tuple(skipped),
+        rate_limit=rate_limit or None,
+    )
 
 
 def run_review_pickup_loop(
@@ -224,6 +359,10 @@ def run_review_pickup_loop(
     sleep: Callable[[float], None] = time.sleep,
     log_sink: LogSink | None = None,
     rate_limiter: SearchRateLimiter | None = None,
+    inbox_path: str | Path | None = None,
+    controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
+    clock: Callable[[], datetime | str] | None = None,
+    inbox_writer: Callable[[Path, str], None] | None = None,
 ) -> ReviewPickupLoopResult:
     """Run one or more bounded review-pickup passes.
 
@@ -254,6 +393,7 @@ def run_review_pickup_loop(
                 log_sink=log_sink,
                 rate_limiter=rate_limiter,
                 sleep=sleep,
+                controller_reviewer=controller_reviewer,
             )
         except PickupRateLimited as exc:
             _log_event(
@@ -263,8 +403,16 @@ def run_review_pickup_loop(
                 dry_run=dry_run,
                 **exc.to_payload(),
             )
-            result = ReviewPickupResult(rate_limit=exc.to_payload())
+            result = ReviewPickupResult(rate_limit=exc.to_payload(), incomplete=True)
         passes.append(result)
+        if inbox_path is not None and not result.incomplete:
+            write_awaiting_review_inbox(
+                inbox_path,
+                result,
+                controller_reviewer=controller_reviewer,
+                clock=clock,
+                writer=inbox_writer,
+            )
         _log_event(
             log_sink,
             "review_pickup_pass_complete",
@@ -300,6 +448,7 @@ def plan_review_pickup_item(
     apply_stale: bool = True,
     reviewer_load: dict[str, int] | None = None,
     dry_run: bool = False,
+    controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
 ) -> dict[str, Any] | None:
     """Plan/apply review routing for one PR Search hit.
 
@@ -307,18 +456,29 @@ def plan_review_pickup_item(
     (fresh approval, current non-author review request, or live CHANGES_REQUESTED
     on head). Otherwise returns a work-item-shaped routing record.
     """
+    context = _read_review_pickup_context(hit, gh_runner=gh_runner)
+    return _plan_review_pickup_item_from_context(
+        context,
+        reviewer_seats=reviewer_seats,
+        gh_runner=gh_runner,
+        apply=apply,
+        apply_stale=apply_stale,
+        reviewer_load=reviewer_load,
+        dry_run=dry_run,
+    )
+
+
+def _read_review_pickup_context(
+    hit: Mapping[str, Any],
+    *,
+    gh_runner: GhRunner,
+) -> _ReviewPickupContext:
     repo = str(hit.get("repo") or "")
     number = _issue_number(hit.get("number"))
     if not repo or number is None:
         raise PickupError("review pickup hit lacks repo/number")
 
     pr = _read_pull_request(repo, number, gh_runner)
-    draft = pr.get("draft")
-    if draft is True:
-        raise ReviewPickupSkip("draft_pull_request", f"{repo}#{number} is a draft PR")
-    if draft is not False:
-        raise ReviewPickupSkip("draft_state_unknown", f"{repo}#{number} lacks draft=false; refusing fail-closed")
-
     author = _login(pr.get("user"))
     head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
     head_sha = str(head.get("sha") or "")
@@ -326,10 +486,6 @@ def plan_review_pickup_item(
         raise PickupError(f"{repo}#{number} lacks author/head_sha; refusing fail-closed")
 
     ci_state = _read_head_ci_state(repo, head_sha, gh_runner)
-    ci_failures = _ci_failures(ci_state)
-    if ci_failures:
-        raise ReviewPickupSkip("ci_failed", f"{repo}#{number} head CI failed: {', '.join(ci_failures)}")
-
     requested = tuple(
         login for login in (
             _login(r) for r in pr.get("requested_reviewers", []) if isinstance(r, Mapping)
@@ -337,31 +493,79 @@ def plan_review_pickup_item(
         if login
     )
     non_author_requested = tuple(r for r in requested if r != author)
-    if reviewer_load is not None:
-        for reviewer in non_author_requested:
-            reviewer_load[reviewer] = reviewer_load.get(reviewer, 0) + 1
-
     report = re_review.reconcile_reviews(
         repo,
         number,
         head_sha,
         gh_runner=gh_runner,
-        apply=bool(apply and apply_stale),
+        apply=False,
+    )
+    return _ReviewPickupContext(
+        hit=hit,
+        repo=repo,
+        number=number,
+        pr=pr,
+        author=author,
+        head_sha=head_sha,
+        ci_state=ci_state,
+        requested=requested,
+        non_author_requested=non_author_requested,
+        report=report,
     )
 
-    if _has_current_non_author_approval(report, author):
+
+def _plan_review_pickup_item_from_context(
+    context: _ReviewPickupContext,
+    *,
+    reviewer_seats: Sequence[str],
+    gh_runner: GhRunner,
+    apply: bool = False,
+    apply_stale: bool = True,
+    reviewer_load: dict[str, int] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any] | None:
+    repo = context.repo
+    number = context.number
+    draft = context.pr.get("draft")
+    if draft is True:
+        raise ReviewPickupSkip("draft_pull_request", f"{repo}#{number} is a draft PR")
+    if draft is not False:
+        raise ReviewPickupSkip("draft_state_unknown", f"{repo}#{number} lacks draft=false; refusing fail-closed")
+
+    ci_failures = _ci_failures(context.ci_state)
+    if ci_failures:
+        raise ReviewPickupSkip("ci_failed", f"{repo}#{number} head CI failed: {', '.join(ci_failures)}")
+
+    non_author_requested = context.non_author_requested
+    if reviewer_load is not None:
+        for reviewer in non_author_requested:
+            reviewer_load[reviewer] = reviewer_load.get(reviewer, 0) + 1
+
+    report = context.report
+    if apply and apply_stale:
+        report = re_review.reconcile_reviews(
+            repo,
+            number,
+            context.head_sha,
+            gh_runner=gh_runner,
+            apply=True,
+        )
+
+    if _has_current_non_author_approval(report, context.author):
         return None
-    if _has_current_non_author_objection(report, author):
+    if _has_current_non_author_objection(report, context.author):
         return None
     if non_author_requested:
         return _review_pickup_item(
-            hit,
-            author=author,
-            head_sha=head_sha,
+            context.hit,
+            author=context.author,
+            head_sha=context.head_sha,
             reviewer=non_author_requested[0],
             reason="review_already_requested",
             requested=False,
             report=report,
+            ci_state=context.ci_state,
+            requested_reviewers=non_author_requested,
             dry_run=dry_run,
         )
 
@@ -371,10 +575,10 @@ def plan_review_pickup_item(
     stale_reviewers = tuple(
         v.review.reviewer
         for v in report.re_request_needed
-        if v.review.reviewer and v.review.reviewer != author and v.review.reviewer in governed_seats
+        if v.review.reviewer and v.review.reviewer != context.author and v.review.reviewer in governed_seats
     )
     reviewer = _choose_reviewer(
-        author=author,
+        author=context.author,
         reviewer_seats=reviewer_seats,
         preferred=stale_reviewers,
         reviewer_load=reviewer_load,
@@ -391,15 +595,40 @@ def plan_review_pickup_item(
         reviewer_load[reviewer] = reviewer_load.get(reviewer, 0) + 1
 
     return _review_pickup_item(
-        hit,
-        author=author,
-        head_sha=head_sha,
+        context.hit,
+        author=context.author,
+        head_sha=context.head_sha,
         reviewer=reviewer,
         reason=reason,
         requested=requested_now,
         report=report,
+        ci_state=context.ci_state,
+        requested_reviewers=non_author_requested,
         dry_run=dry_run,
     )
+
+
+def _awaiting_decision_from_context(
+    context: _ReviewPickupContext,
+    *,
+    controller_reviewer: str,
+) -> dict[str, Any] | None:
+    reviewer = str(controller_reviewer or "").strip()
+    if not reviewer:
+        raise PickupError("awaiting-review inbox requires a non-empty controller reviewer")
+    if reviewer not in context.non_author_requested:
+        return None
+    if _has_current_approval_by(context.report, reviewer):
+        return None
+    requested_at = context.hit.get("updated_at") or context.hit.get("created_at")
+    return {
+        "author": context.author,
+        "ci_state": dict(context.ci_state),
+        "head_sha": context.head_sha,
+        "pr": context.number,
+        "repo": context.repo,
+        "requested_at": requested_at,
+    }
 
 
 def _login(user: object) -> str | None:
@@ -442,6 +671,15 @@ def _has_current_non_author_approval(report: re_review.ReconcileReport, author: 
     )
 
 
+def _has_current_approval_by(report: re_review.ReconcileReport, reviewer: str) -> bool:
+    return any(
+        v.verdict == re_review.CURRENT
+        and v.review.state.upper() == "APPROVED"
+        and v.review.reviewer == reviewer
+        for v in report.verdicts
+    )
+
+
 def _has_current_non_author_objection(report: re_review.ReconcileReport, author: str) -> bool:
     return any(
         v.verdict == re_review.CURRENT
@@ -460,6 +698,8 @@ def _review_pickup_item(
     reason: str,
     requested: bool,
     report: re_review.ReconcileReport,
+    ci_state: Mapping[str, Any],
+    requested_reviewers: Sequence[str] = (),
     dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = str(hit.get("repo") or "")
@@ -475,12 +715,122 @@ def _review_pickup_item(
         "subject_type": "PullRequest",
         "author": author,
         "assigned_reviewer": reviewer,
+        "requested_reviewers": list(requested_reviewers),
+        "current_approval_reviewers": _current_approval_reviewers(report),
         "head_sha": head_sha,
+        "ci_state": dict(ci_state),
+        "requested_at": hit.get("updated_at") or hit.get("created_at"),
         "requested": requested,
         "dry_run": dry_run,
         "dismissed_review_ids": list(report.dismissed),
         "re_request_review_ids": [v.review.review_id for v in report.re_request_needed],
     }
+
+
+def _current_approval_reviewers(report: re_review.ReconcileReport) -> list[str]:
+    return sorted({
+        v.review.reviewer
+        for v in report.verdicts
+        if v.verdict == re_review.CURRENT and v.review.state.upper() == "APPROVED" and v.review.reviewer
+    })
+
+
+def build_awaiting_review_inbox(
+    result: ReviewPickupResult,
+    *,
+    controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
+    clock: Callable[[], datetime | str] | None = None,
+) -> dict[str, Any]:
+    """Build the durable controller inbox projection for actionable reviews."""
+    reviewer = str(controller_reviewer or "").strip()
+    if not reviewer:
+        raise PickupError("awaiting-review inbox requires a non-empty controller reviewer")
+    generated_at = _clock_timestamp(clock)
+    records: list[dict[str, Any]] = []
+    for record in result.awaiting_decisions:
+        records.append(_normalize_awaiting_decision_record(record, fallback_requested_at=generated_at))
+    records.sort(key=lambda r: (str(r["repo"]), int(r["pr"])))
+    return {
+        "controller_reviewer": reviewer,
+        "generated_at": generated_at,
+        "record_count": len(records),
+        "records": records,
+    }
+
+
+def write_awaiting_review_inbox(
+    path: str | Path,
+    result: ReviewPickupResult,
+    *,
+    controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
+    clock: Callable[[], datetime | str] | None = None,
+    writer: Callable[[Path, str], None] | None = None,
+) -> Path:
+    """Atomically write the controller awaiting-review inbox."""
+    inbox_path = Path(path)
+    try:
+        payload = build_awaiting_review_inbox(
+            result,
+            controller_reviewer=controller_reviewer,
+            clock=clock,
+        )
+        content = json.dumps(payload, sort_keys=True, indent=2) + "\n"
+        (writer or _atomic_write_text)(inbox_path, content)
+    except PickupError:
+        raise
+    except Exception as exc:
+        raise PickupError(f"failed to write awaiting-review inbox at {inbox_path}: {exc}") from exc
+    return inbox_path
+
+
+def _normalize_awaiting_decision_record(
+    record: Mapping[str, Any],
+    *,
+    fallback_requested_at: str,
+) -> dict[str, Any]:
+    repo = str(record.get("repo") or "")
+    pr = _issue_number(record.get("pr"))
+    author = str(record.get("author") or "")
+    head_sha = str(record.get("head_sha") or "")
+    ci_state = record.get("ci_state")
+    if not repo or pr is None or not author or not head_sha or not isinstance(ci_state, Mapping):
+        raise PickupError("awaiting-review inbox record is missing pr/repo/author/head_sha/ci_state")
+    requested_at = record.get("requested_at") or fallback_requested_at
+    if not isinstance(requested_at, str) or not requested_at.strip():
+        requested_at = fallback_requested_at
+    return {
+        "author": author,
+        "ci_state": dict(ci_state),
+        "head_sha": head_sha,
+        "pr": pr,
+        "repo": repo,
+        "requested_at": requested_at,
+    }
+
+
+def _clock_timestamp(clock: Callable[[], datetime | str] | None = None) -> str:
+    value = clock() if clock is not None else datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise PickupError("awaiting-review inbox clock returned no timestamp")
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f"{path.name}.tmp.{os.getpid()}.{uuid4().hex[:8]}"
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
 
 
 def _read_head_ci_state(repo: str, head_sha: str, gh_runner: GhRunner) -> Mapping[str, Any]:
