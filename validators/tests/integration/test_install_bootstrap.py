@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -67,6 +69,78 @@ def _make_site(tmp_path: Path, repo_root: Path, *, tamper: bool = False) -> Path
     fingerprint = v3_installer.public_key_fingerprint(trust_root)
     (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
     return site
+
+
+def _wheel_digest(data: bytes) -> str:
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+
+
+def _patch_site_app_wheel_from_source(tmp_path: Path, repo_root: Path, site: Path) -> None:
+    wheel_name = "creator_engine_validator-0.2.0-py3-none-any.whl"
+    wheel = site / "downloads" / "0.2.0" / wheel_name
+    member = "creator_engine_validator/v3_cli.py"
+    record = "creator_engine_validator-0.2.0.dist-info/RECORD"
+    replacement = (repo_root / "validators" / "creator_engine_validator" / "v3_cli.py").read_bytes()
+
+    with zipfile.ZipFile(wheel, "r") as zin:
+        entries = {info.filename: zin.read(info.filename) for info in zin.infolist()}
+        infos = zin.infolist()
+        record_rows = list(csv.reader(entries[record].decode("utf-8").splitlines()))
+    entries[member] = replacement
+    updated_rows = []
+    for row in record_rows:
+        if row[0] == member:
+            updated_rows.append([member, _wheel_digest(replacement), str(len(replacement))])
+        elif row[0] == record:
+            updated_rows.append([record, "", ""])
+        else:
+            updated_rows.append(row)
+    rendered_record = []
+    for row in updated_rows:
+        line = ",".join(row)
+        rendered_record.append(line)
+    entries[record] = ("\n".join(rendered_record) + "\n").encode("utf-8")
+
+    rewritten = wheel.with_suffix(".tmp")
+    with zipfile.ZipFile(rewritten, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+        for info in infos:
+            new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+            new_info.comment = info.comment
+            new_info.extra = info.extra
+            new_info.internal_attr = info.internal_attr
+            new_info.external_attr = info.external_attr
+            new_info.create_system = info.create_system
+            new_info.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(new_info, entries[info.filename])
+    rewritten.replace(wheel)
+
+    wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    sha256s = site / "downloads" / "0.2.0" / "SHA256SUMS"
+    sha_lines = []
+    for line in sha256s.read_text(encoding="utf-8").splitlines():
+        if line.endswith(f"  {wheel_name}"):
+            sha_lines.append(f"{wheel_hash}  {wheel_name}")
+        else:
+            sha_lines.append(line)
+    sha256s.write_text("\n".join(sha_lines) + "\n", encoding="utf-8")
+    sha256s_hash = hashlib.sha256(sha256s.read_bytes()).hexdigest()
+
+    spec_path = site / "llms-install.md"
+    spec = spec_path.read_text(encoding="utf-8")
+    spec = re.sub(r"(?m)^(  sha256s_sha256: ).*$", rf"\g<1>{sha256s_hash}", spec)
+    spec = re.sub(
+        rf"(?m)^(    - filename: {re.escape(wheel_name)}\n      url: .*\n      sha256: ).*$",
+        rf"\g<1>{wheel_hash}",
+        spec,
+    )
+    signing_root = tmp_path / "resigned-site"
+    signing_root.mkdir()
+    signed, trust_root = _sign_with_test_key(spec, signing_root)
+    spec_path.write_text(signed, encoding="utf-8")
+    (site / "keys" / "ce-root-v1").write_text(trust_root, encoding="utf-8")
+    key_id = _signature_key_id(signed)
+    fingerprint = v3_installer.public_key_fingerprint(trust_root)
+    (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
 
 
 def _fake_curl_bin(tmp_path: Path) -> Path:
@@ -418,6 +492,7 @@ def test_install_sh_missing_curl_refuses_cleanly_before_fetch(tmp_path: Path, re
 @requires_ssh_keygen
 def test_install_sh_missing_git_refuses_cleanly_from_inventory_child(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
+    _patch_site_app_wheel_from_source(tmp_path, repo_root, site)
     answers = tmp_path / "answers.yaml"
     answers.write_text("answers_version: 1\nprofile: solo-pilot\n", encoding="utf-8")
 
