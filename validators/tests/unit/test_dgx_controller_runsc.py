@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -327,7 +328,11 @@ def test_herdr_pane_list_parser_fails_closed_on_invalid_json() -> None:
 def test_controller_image_scaffolding_has_pinned_herdr_builder_and_tools() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert "FROM rust:1-bookworm AS herdr-builder" in text
+    assert re.search(
+        r"^FROM rust:1-bookworm(?:@sha256:[0-9a-f]{64})? AS herdr-builder$",
+        text,
+        re.M,
+    )
     assert "HERDR_CE_REF=" in text
     assert "cargo build" in text
     assert "--release" in text

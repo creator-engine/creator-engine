@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 rust:1-bookworm AS herdr-builder
+FROM --platform=linux/amd64 rust:1-bookworm@sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120 AS herdr-builder
 
 ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git
 ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef
@@ -37,7 +37,7 @@ RUN set -eux; \
     ldd target/release/herdr; \
     target/release/herdr --help >/tmp/herdr-help.txt
 
-FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
+FROM --platform=linux/amd64 debian:bookworm-slim@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4 AS runtime
 
 ARG CE_VPS_USER=cedev
 ARG CE_VPS_UID=1000

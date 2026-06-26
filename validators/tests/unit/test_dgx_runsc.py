@@ -727,7 +727,11 @@ def test_egress_broker_socket_absent_fails_closed_before_docker_run_under_nondry
 def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert "FROM rust:1-bookworm AS herdr-builder" in text
+    assert re.search(
+        r"^FROM rust:1-bookworm(?:@sha256:[0-9a-f]{64})? AS herdr-builder$",
+        text,
+        re.M,
+    )
     assert "ARG HERDR_CE_REF=ff924966bd789afabec1a52d74f24392f45838ef" in text
     assert "ARG ZIG_VERSION=0.15.2" in text
     assert "cargo build --locked --release --bin herdr" in text
