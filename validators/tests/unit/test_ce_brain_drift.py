@@ -3,9 +3,13 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+import yaml
+
 from creator_engine_validator import brain_probe
 from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator.checks import ce_brain_drift
+from creator_engine_validator.runtime_evidence_spine import CONTENT_HASH_FIELD, canonical_content_hash
 
 
 def _ledger_text(
@@ -33,8 +37,33 @@ def _write_ledger(tmp_path: Path, text: str) -> Path:
     return path
 
 
+def _ledger_text_with_verification_method(
+    *,
+    verification_method,
+    assertion_id: str = "brain-assertion-drift-0001",
+    claim: dict | None = None,
+    evidence_ref: str = "evidence.txt",
+) -> str:
+    data = yaml.safe_load(
+        _ledger_text(assertion_id=assertion_id, claim=claim, evidence_ref=evidence_ref)
+    )
+    record = data["records"][0]
+    record["verification_method"] = verification_method
+    record[CONTENT_HASH_FIELD] = canonical_content_hash(record)
+    return rt.serialize_ledger(data["records"])
+
+
 def _probe_result(verdict: brain_probe.Verdict) -> brain_probe.ProbeResult:
     return brain_probe.ProbeResult("unit_probe", verdict, {"source": "unit"})
+
+
+def _harness_fan_out_claim(verdict: brain_probe.Verdict = "present") -> dict:
+    return {
+        "subject": "capability",
+        "predicate": "probe-verdict",
+        "object": "harness_fan_out",
+        "verdict": verdict,
+    }
 
 
 def test_matching_probe_assertion_passes(tmp_path: Path):
@@ -120,6 +149,109 @@ def test_unknown_probe_observation_fails_closed(tmp_path: Path):
     assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
     assert "claimed verdict='present'" in errors[0].message
     assert "observed verdict='unknown'" in errors[0].message
+
+
+@pytest.mark.parametrize(
+    "verification_method",
+    [
+        "manual-attested",
+        {"type": "manual-attested", "evidence_ref": "missing.txt"},
+    ],
+)
+def test_manual_attested_verification_method_skips_artifact_resolution(tmp_path: Path, verification_method):
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text_with_verification_method(
+            verification_method=verification_method,
+            evidence_ref="missing.txt",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "verification_method",
+    [
+        "static",
+        {"type": "static", "evidence_ref": "probe:harness_fan_out"},
+    ],
+)
+def test_explicit_static_verification_method_uses_artifact_even_when_evidence_ref_looks_like_probe(
+    tmp_path: Path, verification_method
+):
+    evidence = tmp_path / "probe:harness_fan_out"
+    evidence.write_text("static evidence", encoding="utf-8")
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text_with_verification_method(
+            verification_method=verification_method,
+            claim={
+                "subject": "artifact",
+                "predicate": "value",
+                "object": "probe-like evidence",
+                "value": "static evidence",
+            },
+            evidence_ref="probe:harness_fan_out",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(
+        path,
+        context=ce_brain_drift.DriftContext(
+            repo_root=tmp_path,
+            probe_context=brain_probe.ProbeContext(env={"CE_HARNESS_FAN_OUT": "0"}),
+        ),
+    )
+
+    assert errors == []
+
+
+def test_real_harness_fan_out_probe_assertion_passes_with_injected_env(tmp_path: Path):
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            assertion_id="brain-assertion-drift-harness-fanout",
+            claim=_harness_fan_out_claim("present"),
+            evidence_ref="probe:harness_fan_out",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(
+        path,
+        context=ce_brain_drift.DriftContext(
+            repo_root=tmp_path,
+            probe_context=brain_probe.ProbeContext(env={"CE_HARNESS_FAN_OUT": "1"}),
+        ),
+    )
+
+    assert errors == []
+
+
+def test_real_harness_fan_out_probe_assertion_reports_planted_stale_verdict(tmp_path: Path):
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            assertion_id="brain-assertion-drift-harness-fanout",
+            claim=_harness_fan_out_claim("absent"),
+            evidence_ref="probe:harness_fan_out",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(
+        path,
+        context=ce_brain_drift.DriftContext(
+            repo_root=tmp_path,
+            probe_context=brain_probe.ProbeContext(env={"CE_HARNESS_FAN_OUT": "1"}),
+        ),
+    )
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_DRIFT]
+    assert "probe 'harness_fan_out' drifted" in errors[0].message
+    assert "claimed verdict='absent'" in errors[0].message
+    assert "observed verdict='present'" in errors[0].message
 
 
 def test_resolvable_artifact_without_hash_or_value_claim_fails_closed(tmp_path: Path):

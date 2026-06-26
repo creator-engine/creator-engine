@@ -204,6 +204,18 @@ def probe_all(context: ProbeContext | None = None) -> list[ProbeResult]:
 
 
 def record_probe_name(record: Mapping[str, Any]) -> str | None:
+    verification_method = record.get("verification_method")
+    if isinstance(verification_method, Mapping):
+        method_type = verification_method.get("type")
+        if method_type in {"static", "manual-attested"}:
+            return None
+        if method_type == "probe":
+            probe = verification_method.get("probe")
+            if isinstance(probe, str) and probe:
+                return probe
+    elif isinstance(verification_method, str):
+        if verification_method in {"static", "manual-attested"}:
+            return None
     evidence_ref = record.get("evidence_ref")
     if not isinstance(evidence_ref, str) or not evidence_ref.startswith(PROBE_EVIDENCE_PREFIX):
         return None
