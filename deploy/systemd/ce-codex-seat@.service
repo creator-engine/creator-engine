@@ -1,0 +1,22 @@
+[Unit]
+Description=Creator Engine detached Codex seat container (%i)
+Documentation=file:/workspace/creator-engine/deploy/systemd/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/workspace/creator-engine
+Environment=CE_CODEX_SEAT_LAUNCHER=deploy/dgx-runsc/run-codex-runsc.sh CE_CODEX_SEAT_CONTAINER_NAME=ce-dgx-codex CE_DGX_DETACH=1 CE_VPS_DETACH=1 CE_DGX_DOCKER_RESTART_POLICY=unless-stopped CE_VPS_DOCKER_RESTART_POLICY=unless-stopped
+EnvironmentFile=-/etc/creator-engine/ce-codex-seat-%i.env
+ExecStart=/bin/bash -lc '"${CE_CODEX_SEAT_LAUNCHER}" --detach tui'
+ExecStop=/bin/bash -lc 'docker rm -f "${CE_CODEX_SEAT_CONTAINER_NAME}"'
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

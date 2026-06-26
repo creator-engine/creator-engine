@@ -72,7 +72,6 @@ def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.Completed
                 "CE_DGX_SEAT_LOG_DIR": f"{runtime_dir}/seat-logs",
                 "CE_DGX_UID": "1000",
                 "CE_DGX_GID": "1000",
-                "CE_DGX_TTY_FLAGS": "-i",
             }
         )
         for key, value in env_overrides.items():
@@ -130,7 +129,6 @@ def run_wrapper_nondry_run_with_fake_docker(
                 "CE_DGX_SEAT_LOG_DIR": str(root / "seat-logs"),
                 "CE_DGX_UID": "1000",
                 "CE_DGX_GID": "1000",
-                "CE_DGX_TTY_FLAGS": "-i",
                 "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
             }
         )
@@ -208,7 +206,6 @@ def run_live_dgx_wrapper_with_fake_docker(
             "CE_DGX_SEAT_LOG_DIR": str(seat_logs),
             "CE_DGX_UID": "1000",
             "CE_DGX_GID": "1000",
-            "CE_DGX_TTY_FLAGS": "-i",
             "CE_DGX_DOCKER_NETWORK": "",
             "CE_DGX_NETWORK": "",
             "CE_TEST_HERDR_SESSION_FILE": str(
@@ -245,6 +242,13 @@ def test_codex_wrapper_shell_syntax_is_valid() -> None:
         )
 
         assert result.returncode == 0, result.stderr
+
+
+def test_dgx_launcher_has_no_host_tmux_dependency() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "command -v tmux" not in text
+    assert "tmux " not in text
 
 
 def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() -> None:
@@ -434,6 +438,38 @@ def test_codex_detach_flag_dry_run_uses_detached_lifecycle_flags() -> None:
     assert "--cap-drop=ALL" in argv
 
 
+def test_codex_default_dry_run_uses_detached_lifecycle_without_container_tty() -> None:
+    result = run_wrapper("exec", "hello")
+
+    argv = dry_run_argv(result)
+
+    assert "-d" in argv
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "ce-dgx-codex"
+    assert "--rm" not in argv
+    assert "-i" not in argv
+    assert "-t" not in argv
+    assert "-it" not in argv
+
+
+def test_codex_detach_honors_explicit_tty_flags_for_operator_diagnostics() -> None:
+    result = run_wrapper("--detach", "tui", CE_DGX_TTY_FLAGS="-t")
+
+    argv = dry_run_argv(result)
+
+    assert "-d" in argv
+    assert "-t" in argv
+
+
+def test_codex_detach_accepts_docker_restart_policy_for_supervision() -> None:
+    result = run_wrapper("tui", CE_DGX_DOCKER_RESTART_POLICY="unless-stopped")
+
+    argv = dry_run_argv(result)
+
+    assert "--restart=unless-stopped" in argv
+    assert "-d" in argv
+
+
 def test_codex_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     tmp_path: Path,
 ) -> None:
@@ -487,14 +523,24 @@ def test_codex_detach_custom_container_name_propagates_to_name_flag() -> None:
     assert "--rm" not in argv
 
 
-def test_codex_default_dry_run_keeps_rm_and_no_detach_flags() -> None:
-    result = run_wrapper("exec", "hello")
+def test_codex_foreground_dry_run_keeps_rm_and_no_detach_flags() -> None:
+    result = run_wrapper("--foreground", "exec", "hello")
 
     argv = dry_run_argv(result)
 
     assert "--rm" in argv
     assert "-d" not in argv
     assert "--name" not in argv
+    assert "-it" in argv
+
+
+def test_codex_foreground_env_keeps_legacy_rm_path() -> None:
+    result = run_wrapper("exec", "hello", CE_DGX_FOREGROUND="1")
+
+    argv = dry_run_argv(result)
+
+    assert "--rm" in argv
+    assert "-d" not in argv
 
 
 def test_codex_detach_env_without_flag_triggers_detached_argv() -> None:

@@ -55,7 +55,7 @@ def expected_contained_codex_config() -> str:
     )
 
 
-def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
+def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.pop("CE_LEDGER_ROOT", None)
     env.pop("CE_REVIEWER_AUTHORITY_REF", None)
@@ -71,13 +71,16 @@ def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess
                 "CE_VPS_SEAT_LOG_DIR": f"{runtime_dir}/seat-logs",
                 "CE_VPS_UID": "1234",
                 "CE_VPS_GID": "5678",
-                "CE_VPS_TTY_FLAGS": "-i",
                 "XDG_RUNTIME_DIR": runtime_dir,
                 "TERM": "xterm-256color",
                 "CLAUDE_CODE_OAUTH_TOKEN": "synthetic-secret-token-value",
             }
         )
-        env.update(env_overrides)
+        for key, value in env_overrides.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
         return subprocess.run(
             ["bash", str(SCRIPT), "--dry-run", *args],
             cwd=REPO_ROOT,
@@ -152,7 +155,6 @@ def run_live_wrapper_with_fake_docker(
             "CE_VPS_SEAT_LOG_DIR": str(seat_logs),
             "CE_VPS_UID": "1234",
             "CE_VPS_GID": "5678",
-            "CE_VPS_TTY_FLAGS": "-i",
             "CE_TEST_HERDR_SESSION_FILE": str(
                 seat_logs / "xdg" / "config" / "herdr" / "session.json"
             ),
@@ -181,6 +183,13 @@ def test_vps_launcher_shell_syntax_is_valid() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_vps_launcher_has_no_host_tmux_dependency() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "command -v tmux" not in text
+    assert "tmux " not in text
 
 
 def test_codex_dry_run_uses_vps_containment_defaults() -> None:
@@ -382,14 +391,33 @@ def test_vps_runsc_launch_guard_denies_credential_env_carrier() -> None:
         launch_spec.assert_no_container_credential_env(dirty_argv)
 
 
-def test_detach_dry_run_uses_named_persistent_run_without_rm() -> None:
-    argv = dry_run_argv(run_wrapper("--detach", "tui"))
+def test_default_dry_run_uses_detached_named_persistent_run_without_rm() -> None:
+    argv = dry_run_argv(run_wrapper("tui"))
 
     assert "-d" in argv
     assert "--name" in argv
     assert "ce-vps-codex" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-codex"
     assert "--rm" not in argv
+    assert "-i" not in argv
+    assert "-t" not in argv
+    assert "-it" not in argv
+
+
+def test_detach_dry_run_honors_explicit_tty_flags_for_operator_diagnostics() -> None:
+    argv = dry_run_argv(run_wrapper("--detach", "tui", CE_VPS_TTY_FLAGS="-t"))
+
+    assert "-d" in argv
+    assert "-t" in argv
+
+
+def test_detach_dry_run_accepts_docker_restart_policy_for_supervision() -> None:
+    argv = dry_run_argv(
+        run_wrapper("tui", CE_VPS_DOCKER_RESTART_POLICY="unless-stopped")
+    )
+
+    assert "--restart=unless-stopped" in argv
+    assert "-d" in argv
 
 
 def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
@@ -505,21 +533,30 @@ def test_detach_env_triggers_detached_argv() -> None:
     assert "--rm" not in argv
 
 
-def test_default_non_detached_exec_keeps_rm_without_detach_or_name_flags() -> None:
-    argv = dry_run_argv(run_wrapper("exec", "hello"))
+def test_foreground_exec_keeps_rm_without_detach_or_name_flags() -> None:
+    argv = dry_run_argv(run_wrapper("--foreground", "exec", "hello"))
 
     assert "--rm" in argv
     assert "-d" not in argv
     assert "--name" not in argv
+    assert "-it" in argv
 
 
-def test_default_tui_uses_canonical_container_name_without_detach() -> None:
-    argv = dry_run_argv(run_wrapper("tui"))
+def test_foreground_tui_uses_canonical_container_name_without_detach() -> None:
+    argv = dry_run_argv(run_wrapper("--foreground", "tui"))
 
     assert "--rm" in argv
     assert "-d" not in argv
     assert "--name" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-codex"
+    assert "-it" in argv
+
+
+def test_foreground_env_switch_keeps_legacy_rm_path() -> None:
+    argv = dry_run_argv(run_wrapper("tui", CE_VPS_FOREGROUND="1"))
+
+    assert "--rm" in argv
+    assert "-d" not in argv
 
 
 def test_detach_dry_run_still_generates_pretrusting_contained_config(
