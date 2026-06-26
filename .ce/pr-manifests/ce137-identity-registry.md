@@ -21,9 +21,10 @@ path-set below. This carrier lists itself.
 - **Declared work class:** story
 
 Scope:
-ce-ops#137 GitHub identity and infrastructure registry. This adds a non-secret
-machine-readable SSOT, its schema, CI validation in the existing Validate
-workflow, and the required governance carriers. Raw token values, PEM values,
+ce-ops#137 GitHub identity and infrastructure registry. Public artifact =
+schema + redacted example only (creator-engine is a public repo). The
+authoritative registry with real values is maintained internally (see
+follow-on internal registry ticket). Raw token values, PEM values,
 validator business logic, tools, deploy code, brain subsystem files, agent
 configuration, and `AGENTS.md` are out of scope.
 
@@ -32,9 +33,9 @@ Per-file purpose (closed path-set - 6 paths):
 - **`.ce/changelog/ce137-identity-registry.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce137-identity-registry.md`** *(A)* - this carrier.
 - **`.github/workflows/validate.yml`** *(M)* - existing Validate workflow gains
-  an identity-registry schema validation step.
-- **`docs/governance/identity-registry.yaml`** *(A)* - non-secret identity and
-  infrastructure registry.
+  an identity-registry schema validation step (validates example file).
+- **`docs/governance/identity-registry.example.yaml`** *(A)* - schema-conformance
+  sample with generic placeholders only; no real fleet identities.
 - **`schemas/identity-registry.schema.yaml`** *(A)* - registry validation schema.
 
 Canonicalization:
@@ -42,13 +43,13 @@ Canonicalization:
 
 AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=f220a7462d8ad0b442778972707e6caec0943698e695fb7d58cd053693a00531
+AUTHORIZED_PATHS_SHA256=8f899bf57a0105e29dd33abaa76f534a85df0bcbc6041bdfc24a508b24f25341
 
 ```text
 .ce/brain/assertions.yaml
 .ce/changelog/ce137-identity-registry.md
 .ce/pr-manifests/ce137-identity-registry.md
 .github/workflows/validate.yml
-docs/governance/identity-registry.yaml
+docs/governance/identity-registry.example.yaml
 schemas/identity-registry.schema.yaml
 ```

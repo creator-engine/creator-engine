@@ -102,7 +102,7 @@ jobs:
           import jsonschema
           import yaml
 
-          registry_path = pathlib.Path("docs/governance/identity-registry.yaml")
+          registry_path = pathlib.Path("docs/governance/identity-registry.example.yaml")
           schema_path = pathlib.Path("schemas/identity-registry.schema.yaml")
 
           registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))

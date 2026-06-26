@@ -70,9 +70,9 @@ records:
 - claim:
     object: merge-queue-checks-requested
     predicate: verified-by-sha256
-    sha256: 4a88c7c436ce086a00e05e07517a2c9d6029f4a7631053d85aa10444e81164bd
+    sha256: 89737e4aa187ed47b22354a335c3c6fc0939ed061114e629c71fba40d5decf53
     subject: convention
-  content_hash: e9c8901d6ab78392f240da528c38c668154c87809d522613051e481fa8150853
+  content_hash: 16e9d2b9e291f132ce9940f5910f5b7f9e74c654358afe721d6d946a674e64f6
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-fleet-mergequeue-trigger
   kind: brain-assertion
@@ -93,11 +93,11 @@ records:
     predicate: verified-by-sha256
     sha256: 88f8e46c67288c456bb72f2f7ba17e1ed3445bebc8285fe9b0e7fbdd8f07029a
     subject: convention
-  content_hash: 1946a783826f0335b7aadb0b91f348092fa69db1fd678afc9d28676d2e711e49
+  content_hash: 5976df96d82db370970aba85caf0b644f5f6debce97cb19d4f60597d3f7af778
   evidence_ref: docs/contracts/authoring-a-governed-pr.md
   id: brain-assertion-fleet-carrier-discipline
   kind: brain-assertion
-  prev_hash: e9c8901d6ab78392f240da528c38c668154c87809d522613051e481fa8150853
+  prev_hash: 16e9d2b9e291f132ce9940f5910f5b7f9e74c654358afe721d6d946a674e64f6
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -114,11 +114,11 @@ records:
     predicate: verified-by-sha256
     sha256: aa96a707b218958acafb1d9bdd561fbe8416a76234c0408e73a4c7fd8ac9111b
     subject: convention
-  content_hash: 2bbf02dd0a50e34c9fdb63340c568c7c283d03dccbe216a0ee7c34edae8bd5ca
+  content_hash: 36255ba84dbfc653b96646e89967952361a2808caa785995c92f53636ecba370
   evidence_ref: docs/architecture/work-claim-locks.md
   id: brain-assertion-fleet-claim-lock-discipline
   kind: brain-assertion
-  prev_hash: 1946a783826f0335b7aadb0b91f348092fa69db1fd678afc9d28676d2e711e49
+  prev_hash: 5976df96d82db370970aba85caf0b644f5f6debce97cb19d4f60597d3f7af778
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -143,11 +143,11 @@ records:
       - types
       type: yaml-path
     subject: workflow
-  content_hash: f5361be49f18a488e3b2e92235df199c0b5d50c0f35c5e5a23fa8130a56ee7dc
+  content_hash: d92628ae21707a8fe5727d0a40a1ed1c18ee4adcfdb9bf2bff385b0b9e2545c7
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-validate-workflow-drift-gate
   kind: brain-assertion
-  prev_hash: 2bbf02dd0a50e34c9fdb63340c568c7c283d03dccbe216a0ee7c34edae8bd5ca
+  prev_hash: 36255ba84dbfc653b96646e89967952361a2808caa785995c92f53636ecba370
   record_type: brain_assertion
   schema_version: '1'
   scope:
