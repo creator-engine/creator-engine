@@ -52,6 +52,7 @@ ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
+ce surfaces check-updates # read-only upstream version detection from surfaces/manifest.yaml
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ```
@@ -124,6 +125,7 @@ from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
+from .surfaces import check_updates as surfaces_check_updates
 from .tmux_adapter import TmuxAdapter
 
 
@@ -248,6 +250,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="out-of-band ce-root-v1 DNS TXT resolver URL",
     )
     update.add_argument("--json", action="store_true", dest="json_output")
+
+    surfaces = groups.add_parser(
+        "surfaces",
+        help="inspect rented surface metadata",
+    )
+    surfaces_sub = surfaces.add_subparsers(dest="surfaces_cmd")
+    surfaces_check = surfaces_sub.add_parser(
+        "check-updates",
+        help="read-only upstream version detection from surfaces/manifest.yaml",
+    )
+    surfaces_check.add_argument("--repo-root", default=".", help="repo root (default: cwd)")
+    surfaces_check.add_argument(
+        "--manifest",
+        default=None,
+        help="surface manifest path (default: <repo-root>/surfaces/manifest.yaml)",
+    )
+    surfaces_check.add_argument("--json", action="store_true", dest="json_output")
 
     # ce onboard — the ce-ops#197 first-run one-shot orchestrator. Sequences the
     # six phases (doctor → install → verify-install → fix-path → bootstrap →
@@ -4023,6 +4042,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _verify_install(args)
     if args.group == "update":
         return update_runtime.run_cli(args)
+    if args.group == "surfaces":
+        if getattr(args, "surfaces_cmd", None) != "check-updates":
+            parser.parse_args(["surfaces", "--help"])  # prints surfaces help, exits
+            return 2
+        return surfaces_check_updates.run_cli(args)
     if args.group == "onboard":
         return ce_onboard.run_cli(args)
     if args.group == "bootstrap":

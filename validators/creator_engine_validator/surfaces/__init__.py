@@ -1,0 +1,2 @@
+"""Rented-surface inspection helpers."""
+
