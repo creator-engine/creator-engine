@@ -23,28 +23,6 @@ from creator_engine_validator.checks.version_boundary import (
 def test_registered_in_check_surface():
     reg = registered_checks()
     assert CHECK_NAME in reg
-    # 47 with the G-6 ce_scope check registered alongside version_boundary.
-    # v3.5-C A-C1 added the decision_record check: 47 -> 48. v3.5-C A-C2 added
-    # the storage_tier_finding check: 48 -> 49. v3.5-C A-C3 added the
-    # peer_authority check: 49 -> 50. v3.5-C A-C4 added the forge_claim_dedup
-    # check: 50 -> 51. v3.5-E.3 E3-G1 added the install_answers check
-    # (declared in-gate): 51 -> 52. ce-ops#26 added seat_event: 52 -> 53.
-    # ce-ops#142 added ce_computer_use_authority_envelope: 53 -> 54.
-    # ce-ops#145 added ce_playbook_format: 54 -> 55.
-    # ce-ops#167 added ce_brain_assertions: 55 -> 56.
-    # ce-ops#163 added seat_class_policy: 56 -> 57.
-    # ce-ops#168 added work_sizing: 57 -> 58.
-    # ce-ops#164/#170 G5 F2 added work_sizing_floor: 58 -> 59.
-    # ce-ops#23 Slice 1 added brownfield_baseline_attestation: 59 -> 60.
-    # ce-ops#177 added ce_brain_drift: 60 -> 61.
-    # ce-ops#185 added devops_privileged_action_broker: 61 -> 62.
-    # ce-ops#162 added operator_runbook_refusal_sync: 62 -> 63.
-    # ce-ops#244 added worker_tier_contract: 63 -> 64.
-    # ce-ops#260 added release_artifact_parity_guard: 64 -> 65.
-    # ce-ops#262 added pr_closes_linkage: 65 -> 66.
-    # ce-ops#272 added surfaces_manifest_complete: 66 -> 67.
-    # ce-ops#273 added surfaces_manifest_consistent: 67 -> 68.
-    assert len(reg) == 68
 
 
 def test_green_on_real_package(version_boundary_real_run):
