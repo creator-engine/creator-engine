@@ -80,6 +80,10 @@ fi
 services=(
   ce-integrator-daemon.service
   ce-review-pickup-daemon.service
+  # ce-egress-broker.service uses its own EnvironmentFile (ce-egress-broker.env) which must
+  # include BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
+  # BROKER_APPROLE_SECRET_ID for vault-backed seats; create that file before starting.
+  ce-egress-broker.service
 )
 
 echo "scope: $scope"
