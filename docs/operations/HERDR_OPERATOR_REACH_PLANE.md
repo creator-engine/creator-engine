@@ -34,6 +34,13 @@ The reach plane is herdr itself:
 herdr --remote <ssh-target> [--session <name>]
 ```
 
+Acceptance contract: Operator reach is authenticated herdr remote reach
+(`reach_plane=herdr-remote`, `auth_channel=authenticated herdr remote reach`).
+The isolation plane is the runtime (`isolation_plane=runtime`), such as
+runsc/gVisor, Docker, Podman, or a future CE jail. These are independent
+decisions: remote pane reach never requires host root and never requires
+runtime attach (`requires_host_root=false`, `requires_runtime_attach=false`).
+
 The remote client authenticates to `<ssh-target>` with the deployment's
 Operator-approved SSH identity, then speaks to the herdr server over the
 server-side Unix socket. The herdr client/server Unix-socket protocol remains

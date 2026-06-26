@@ -1267,6 +1267,7 @@ def test_remote_attach_plan_carries_contained_pane_metadata_without_runtime_atta
     pane = hs.HerdrPane(
         pane_id="pane-1",
         surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+        workspace_id="workspace-1",
     )
 
     plan = hs.plan_remote_attach(
@@ -1277,9 +1278,22 @@ def test_remote_attach_plan_carries_contained_pane_metadata_without_runtime_atta
 
     assert plan.argv == ("herdr", "--remote", "operator@ce-vps-1", "--session", "ce-vps-codex")
     assert plan.pane_id == "pane-1"
+    assert plan.surface_ref == "herdr-surface-918aa1506d296ee1a72da70227854392"
+    assert plan.workspace_id == "workspace-1"
+    assert plan.auth_channel == "authenticated herdr remote reach"
     assert plan.reach_plane == "herdr-remote"
+    assert plan.isolation_plane == "runtime"
+    assert plan.requires_host_root is False
+    assert plan.requires_runtime_attach is False
     assert "docker exec" in plan.avoids_runtime_attach
     assert "host-root container runtime attach" in plan.avoids_runtime_attach
+    rendered_plan = json.dumps(plan.to_dict(), sort_keys=True)
+    assert "/run/ce/herdr/control.sock" not in rendered_plan
+    assert hs.HERDR_SOCKET_ENV not in rendered_plan
+    rendered_argv = " ".join(plan.argv)
+    assert "docker" not in rendered_argv
+    assert "podman" not in rendered_argv
+    assert "sudo" not in rendered_argv
 
 
 def test_remote_attach_executes_through_injectable_runner_without_socket_env() -> None:

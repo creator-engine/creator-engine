@@ -290,9 +290,15 @@ class HerdrRemoteAttachPlan:
     remote_target: str
     session: str | None
     pane_id: str | None
+    surface_ref: str | None
+    workspace_id: str | None
     herdr_binary: str
     argv: tuple[str, ...]
+    auth_channel: str = "authenticated herdr remote reach"
     reach_plane: str = "herdr-remote"
+    isolation_plane: str = "runtime"
+    requires_host_root: bool = False
+    requires_runtime_attach: bool = False
     avoids_runtime_attach: tuple[str, ...] = (
         "docker exec",
         "podman exec",
@@ -306,9 +312,15 @@ class HerdrRemoteAttachPlan:
             "remote_target": self.remote_target,
             "session": self.session,
             "pane_id": self.pane_id,
+            "surface_ref": self.surface_ref,
+            "workspace_id": self.workspace_id,
             "herdr_binary": self.herdr_binary,
             "argv": list(self.argv),
+            "auth_channel": self.auth_channel,
             "reach_plane": self.reach_plane,
+            "isolation_plane": self.isolation_plane,
+            "requires_host_root": self.requires_host_root,
+            "requires_runtime_attach": self.requires_runtime_attach,
             "avoids_runtime_attach": list(self.avoids_runtime_attach),
         }
 
@@ -1169,12 +1181,24 @@ def plan_remote_attach(
     session: str | None = None,
     pane: HerdrPane | None = None,
     pane_id: str | None = None,
+    surface_ref: str | None = None,
+    workspace_id: str | None = None,
     herdr_binary: str | Path = "herdr",
 ) -> HerdrRemoteAttachPlan:
     """Return a pure remote attach plan for a contained herdr seat surface."""
     resolved_pane_id = pane.pane_id if pane is not None else pane_id
     if resolved_pane_id is not None:
         resolved_pane_id = _clean_remote_attach_value(resolved_pane_id, field="pane id")
+    resolved_surface_ref = pane.surface_ref if pane is not None else surface_ref
+    if resolved_surface_ref is not None:
+        resolved_surface_ref = _clean_remote_attach_value(
+            resolved_surface_ref, field="surface ref"
+        )
+    resolved_workspace_id = pane.workspace_id if pane is not None else workspace_id
+    if resolved_workspace_id is not None:
+        resolved_workspace_id = _clean_remote_attach_value(
+            resolved_workspace_id, field="workspace id"
+        )
     argv = build_remote_attach_command(
         remote_target,
         session=session,
@@ -1184,6 +1208,8 @@ def plan_remote_attach(
         remote_target=str(remote_target).strip(),
         session=str(session).strip() if session is not None else None,
         pane_id=resolved_pane_id,
+        surface_ref=resolved_surface_ref,
+        workspace_id=resolved_workspace_id,
         herdr_binary=str(herdr_binary),
         argv=argv,
     )
@@ -1195,6 +1221,8 @@ def remote_attach(
     session: str | None = None,
     pane: HerdrPane | None = None,
     pane_id: str | None = None,
+    surface_ref: str | None = None,
+    workspace_id: str | None = None,
     herdr_binary: str | Path = "herdr",
     runner: HerdrCommandRunner | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -1210,6 +1238,8 @@ def remote_attach(
         session=session,
         pane=pane,
         pane_id=pane_id,
+        surface_ref=surface_ref,
+        workspace_id=workspace_id,
         herdr_binary=herdr_binary,
     )
     command_runner = runner if runner is not None else SubprocessHerdrAttachRunner()

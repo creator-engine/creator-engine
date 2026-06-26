@@ -1264,6 +1264,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional contained seat pane id to carry in the plan metadata",
     )
     herdr_remote_attach.add_argument(
+        "--surface-ref",
+        default=None,
+        help="optional contained herdr surface ref to carry in plan metadata",
+    )
+    herdr_remote_attach.add_argument(
+        "--workspace-id",
+        default=None,
+        help="optional herdr workspace id to carry in plan metadata",
+    )
+    herdr_remote_attach.add_argument(
         "--herdr-binary",
         default="herdr",
         help="herdr CLI binary (default: herdr)",
@@ -3321,6 +3331,8 @@ def _herdr_remote_attach(args) -> int:
             remote_target=args.remote_target,
             session=args.session,
             pane_id=args.pane_id,
+            surface_ref=getattr(args, "surface_ref", None),
+            workspace_id=getattr(args, "workspace_id", None),
             herdr_binary=args.herdr_binary,
         )
     except herdr_session.HerdrCommandError as exc:
@@ -3331,8 +3343,15 @@ def _herdr_remote_attach(args) -> int:
         print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
     elif getattr(args, "dry_run", False):
         print("ce herdr remote-attach: " + shlex.join(plan.argv))
+        print("auth_channel: authenticated herdr remote reach")
         print("reach_plane: herdr-remote")
-        print("runtime_attach: disabled (no docker exec, sudo, or host-root attach)")
+        print("isolation_plane: runtime")
+        print("requires_host_root: false")
+        print("requires_runtime_attach: false")
+        print(
+            "contract: reach is authenticated herdr remote; isolation is runtime "
+            "(runsc/docker/podman) and remains a separate decision"
+        )
 
     if getattr(args, "json_output", False) or getattr(args, "dry_run", False):
         return 0
@@ -3342,6 +3361,8 @@ def _herdr_remote_attach(args) -> int:
             remote_target=args.remote_target,
             session=args.session,
             pane_id=args.pane_id,
+            surface_ref=getattr(args, "surface_ref", None),
+            workspace_id=getattr(args, "workspace_id", None),
             herdr_binary=args.herdr_binary,
             runner=_make_herdr_attach_runner(),
         )

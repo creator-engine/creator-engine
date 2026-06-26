@@ -29,6 +29,10 @@ def test_herdr_remote_attach_dry_run_json_emits_exact_herdr_remote_command(capsy
             "ce-vps-codex",
             "--pane-id",
             "pane-1",
+            "--surface-ref",
+            "herdr-surface-918aa1506d296ee1a72da70227854392",
+            "--workspace-id",
+            "workspace-1",
             "--dry-run",
             "--json",
         ]
@@ -44,9 +48,16 @@ def test_herdr_remote_attach_dry_run_json_emits_exact_herdr_remote_command(capsy
         "ce-vps-codex",
     ]
     assert payload["pane_id"] == "pane-1"
+    assert payload["surface_ref"] == "herdr-surface-918aa1506d296ee1a72da70227854392"
+    assert payload["workspace_id"] == "workspace-1"
+    assert payload["auth_channel"] == "authenticated herdr remote reach"
     assert payload["reach_plane"] == "herdr-remote"
+    assert payload["isolation_plane"] == "runtime"
+    assert payload["requires_host_root"] is False
+    assert payload["requires_runtime_attach"] is False
     assert "docker exec" in payload["avoids_runtime_attach"]
     assert "host-root container runtime attach" in payload["avoids_runtime_attach"]
+    assert hs.HERDR_SOCKET_ENV not in json.dumps(payload)
     rendered = " ".join(payload["argv"])
     assert "docker exec" not in rendered
     assert "sudo" not in rendered
@@ -78,6 +89,31 @@ def test_herdr_remote_attach_json_without_dry_run_is_plan_only(monkeypatch, caps
         "ce-vps-codex",
     ]
     assert runner.calls == []
+
+
+def test_herdr_remote_attach_dry_run_text_states_reach_isolation_contract(capsys) -> None:
+    rc = ce_cli.main(
+        [
+            "herdr",
+            "remote-attach",
+            "--remote",
+            "ce-vps-1",
+            "--session",
+            "ce-vps-codex",
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ce herdr remote-attach: herdr --remote ce-vps-1 --session ce-vps-codex" in out
+    assert "auth_channel: authenticated herdr remote reach" in out
+    assert "reach_plane: herdr-remote" in out
+    assert "isolation_plane: runtime" in out
+    assert "requires_host_root: false" in out
+    assert "requires_runtime_attach: false" in out
+    assert "reach is authenticated herdr remote" in out
+    assert "isolation is runtime" in out
 
 
 def test_herdr_remote_attach_executes_with_injected_runner_no_live_ssh(monkeypatch) -> None:
