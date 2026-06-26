@@ -59,6 +59,9 @@ project-, tenant-, runtime-, model-, and harness-agnostic.
 | `reviewed_diff_or_commit_ref` | Reference to the diff range or commit-ish under review. For pre-merge review, the working diff range; for post-merge review, the merged commit-ish. |
 | `reviewer_identity_ref` | Repo-relative path to the ratified reviewer identity record under which this evidence is authored. The referenced identity record's `mutation_classes` MUST include the evidence-authoring class used. |
 | `reviewer_role_category` | Fixed to `reviewer`. Records with any other `role_category` are not governed review evidence under this template. |
+| `reviewer_model` | Reviewer-supplied model identifier used for mode-aware independence checks. This is evidence attestation only, not a normative upstream product/model binding. |
+| `authorship_obfuscated` | Boolean attestation that the reviewer received an authorship-obfuscated prompt or packet for this review. |
+| `adversarial_prompt` | Boolean attestation that the review prompt explicitly asked for adversarial blocking-finding discovery rather than agreement or approval. |
 | `review_mode` | Generic enum or free-text policy field describing the mode (e.g., `manual_human`, `manual_agent`, `mixed_human_and_agent`). Concrete tool/model/CLI selection is a deployment-time overlay decision and MUST NOT be hard-coded as an upstream binding here. |
 | `review_scope` | Human-readable scope statement: what was in scope and what was out of scope for this evidence. |
 | `mutation_classes_under_review` | Array of mutation classes (per [`../governance/MUTATION_CLASS_MODEL.md`](../governance/MUTATION_CLASS_MODEL.md)) that the change under review touches. |
@@ -110,6 +113,9 @@ authority for the reviewer.
 - reviewed_diff_or_commit_ref: <diff range or commit-ish>
 - reviewer_identity_ref: <repo-relative path to ratified reviewer identity record>
 - reviewer_role_category: reviewer
+- reviewer_model: <reviewer-supplied model identifier>
+- authorship_obfuscated: <true | false>
+- adversarial_prompt: <true | false>
 - review_mode: <manual_human | manual_agent | mixed_human_and_agent>
 - review_scope: <one or more sentences naming in-scope and out-of-scope items>
 - mutation_classes_under_review:
