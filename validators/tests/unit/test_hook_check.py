@@ -140,6 +140,63 @@ def test_governed_bash_git_push_denies():
 
 
 @pytest.mark.parametrize(
+    ("command", "action"),
+    [
+        pytest.param(
+            "cev3 configure-repo --app-config /tmp/app.yml --apply",
+            "forge_configure_repo",
+            id="configure_repo",
+        ),
+        pytest.param(
+            "cev3 ruleset --app-config /tmp/app.yml --apply",
+            "forge_ruleset",
+            id="ruleset",
+        ),
+        pytest.param(
+            "cev3 review-submit scope-1 --run run-1 --apply",
+            "forge_review_submit",
+            id="review_submit",
+        ),
+        pytest.param(
+            "cev3 auto-merge scope-1 --run run-1 --apply",
+            "forge_auto_merge",
+            id="auto_merge",
+        ),
+    ],
+)
+def test_governed_bash_forge_ops_deny_under_sec7_context(command, action):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    assert hook_check.classify_mechanics(command) == action
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert f"restricted mechanic ({action})" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("ce configure-repo --app-config /tmp/app.yml --apply", id="ce_configure_repo"),
+        pytest.param("cev3 ruleset --app-config /tmp/app.yml --apply", id="cev3_ruleset"),
+        pytest.param(
+            "python -m creator_engine_validator.v3_cli review-submit scope-1 --run run-1 --apply",
+            id="python_module_review_submit",
+        ),
+        pytest.param("cev3 auto-merge scope-1 --run run-1 --apply", id="cev3_auto_merge"),
+    ],
+)
+def test_non_governed_controller_context_allows_forge_ops(command):
+    ctx = hook_check.HookContext(posture="ungoverned", manifest_paths=MANIFEST)
+
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    assert decision.decision == "allow"
+    assert decision.hook_specific_output["permissionDecision"] == "allow"
+
+
+@pytest.mark.parametrize(
     "command",
     [
         pytest.param("git commit -m x", id="commit"),

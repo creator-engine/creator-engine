@@ -102,6 +102,7 @@ from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
 from .schema import validate_with_schema
+from .sec7_forge_guard import sec7_forge_refusal
 
 #: Where Scope artifacts live, relative to the local-state ``--root``.
 SCOPES_SUBDIR = "scopes"
@@ -2132,6 +2133,9 @@ def _run_scoped_cli_op(
     escalation_authority: tuple[tuple[str, str], ...],
     op,
 ):
+    refusal = sec7_forge_refusal(action)
+    if refusal is not None:
+        raise v3_forge_join.ForgeJoinRefused(refusal)
     token = v3_forge_join.mint_operation_token(
         app_config,
         run_id=action,

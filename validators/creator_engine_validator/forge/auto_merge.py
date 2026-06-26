@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..sec7_forge_guard import sec7_forge_refusal
 from ._redact import redact_gh_stderr
 from .change import ChangeRef
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
@@ -117,8 +118,12 @@ def enable_auto_merge(
     method: str = "squash",
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> AutoMergeResult:
     """Enable GitHub auto-merge for ``change`` via GraphQL (plan-by-default)."""
+    refusal = sec7_forge_refusal("auto-merge", sec7_context)
+    if refusal is not None:
+        raise AutoMergeRefused(refusal)
     pr_number, merge_method = _validate(change, method)
     runner = gh_runner or _default_gh_runner
     pr = _read_pr(runner, change)

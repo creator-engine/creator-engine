@@ -60,6 +60,21 @@ def test_review_submit_plan_does_not_post():
     assert fake.calls == []
 
 
+def test_review_submit_refuses_sec7_governed_context_before_call():
+    fake = FakeReviewGh()
+    with pytest.raises(ReviewSubmitRefused) as ei:
+        submit_review(_change(), apply=True, gh_runner=fake, sec7_context={"posture": "governed"})
+    assert "§7 governed-seat context" in str(ei.value)
+    assert fake.calls == []
+
+
+def test_review_submit_allows_non_governed_context():
+    fake = FakeReviewGh()
+    result = submit_review(_change(), apply=True, gh_runner=fake, sec7_context={"posture": "ungoverned"})
+    assert result.applied is True
+    assert fake.calls
+
+
 def test_review_submit_apply_posts_approve_with_commit_id():
     fake = FakeReviewGh()
     result = submit_review(_change(), apply=True, body="LGTM", gh_runner=fake)

@@ -74,6 +74,21 @@ def test_auto_merge_plan_reads_node_id_without_mutation():
     assert fake.mutation_calls() == []
 
 
+def test_auto_merge_refuses_sec7_governed_context_before_call():
+    fake = FakeAutoMergeGh()
+    with pytest.raises(AutoMergeRefused) as ei:
+        enable_auto_merge(_change(), apply=True, gh_runner=fake, sec7_context={"posture": "governed"})
+    assert "§7 governed-seat context" in str(ei.value)
+    assert fake.calls == []
+
+
+def test_auto_merge_allows_non_governed_context():
+    fake = FakeAutoMergeGh()
+    result = enable_auto_merge(_change(), apply=True, gh_runner=fake, sec7_context={"posture": "ungoverned"})
+    assert result.enabled is True
+    assert fake.calls
+
+
 def test_auto_merge_apply_mutates_exact_node_and_method():
     fake = FakeAutoMergeGh()
     result = enable_auto_merge(_change(), apply=True, gh_runner=fake)
