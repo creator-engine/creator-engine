@@ -1,4 +1,4 @@
-"""ce-ops#220 - probed CE harness-support capability matrix.
+"""Probed CE harness-support capability matrix.
 
 The matrix is the single source of truth for which external agent harnesses CE
 supports, and to what governance extent. It is deliberately derived from
@@ -78,7 +78,7 @@ class HarnessMatrix:
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "harness-support-matrix",
-            "issue": "ce-ops#220",
+            "issue": "harness-support-matrix",
             "capabilities": list(CAPABILITIES),
             "rows": [row.to_dict() for row in self.rows],
         }
@@ -222,8 +222,8 @@ def _codex_row(repo_root: Path) -> HarnessRow:
         else _none("codex_launch_spec evaluator/builder not importable", verified=False)
     )
 
-    # ce-ops#220's SSOT truth is intentionally conservative: Codex is supported
-    # at Ring 0 today; Codex Ring 1 remains the ce-ops#219 follow-on capability.
+    # The matrix's SSOT truth is intentionally conservative: Codex is supported
+    # at Ring 0 today; Codex Ring 1 remains a follow-on capability.
     # The probe cites any candidate managed-hook predicate but does not promote
     # the support cell until that follow-on is accepted as the support boundary.
     if _module_has("hook_pack_confirm", "confirm_codex_managed_hook_pack"):
