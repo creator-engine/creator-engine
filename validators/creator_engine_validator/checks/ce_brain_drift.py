@@ -25,6 +25,7 @@ CONTRACT = brain_runtime.CONTRACT
 
 CODE_DRIFT = "brain_assertion_drift"
 CODE_UNVERIFIABLE = "brain_assertion_unverifiable"
+CODE_AUTHORITATIVE_MISMATCH = "brain_assertion_authoritative_mismatch"
 
 _HASH_RE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
 _HASH_CLAIM_KEYS = (
@@ -298,10 +299,68 @@ def _resolve_artifact(evidence_ref: str, context: DriftContext) -> Path | None:
 
 
 def _repo_root_from_state_root(state_root: Path | str) -> Path:
-    root = Path(state_root)
-    if root.name == "state" and root.parent.name == ".ce":
-        return root.parent.parent
+    return brain_runtime.repo_root_from_state_root(state_root)
+
+
+def _repo_root_from_assertion_path(path: Path) -> Path:
+    if (
+        path.name == "assertions.yaml"
+        and path.parent.name == "brain"
+        and path.parent.parent.name == "state"
+        and path.parent.parent.parent.name == ".ce"
+    ):
+        return path.parent.parent.parent.parent
+    if (
+        path.name == "assertions.yaml"
+        and path.parent.name == "brain"
+        and path.parent.parent.name == ".ce"
+    ):
+        return path.parent.parent.parent
     return Path(".")
+
+
+def _is_loaded_runtime_ledger(path: Path) -> bool:
+    return (
+        path.name == "assertions.yaml"
+        and path.parent.name == "brain"
+        and path.parent.parent.name == "state"
+        and path.parent.parent.parent.name == ".ce"
+    )
+
+
+def _authoritative_mismatch_errors(path: Path, context: DriftContext) -> list[ValidationError]:
+    authoritative_path = brain_runtime.authoritative_ledger_path(context.root())
+    if not authoritative_path.is_file() or not path.is_file():
+        return []
+    try:
+        runtime_records = brain_runtime.load_records_from_path(path)
+        authoritative_records = brain_runtime.load_records_from_path(authoritative_path)
+    except brain_runtime.BrainLedgerInvalid:
+        return []
+    if runtime_records == authoritative_records:
+        return []
+    runtime_head = (
+        str(runtime_records[-1].get("content_hash"))
+        if runtime_records and isinstance(runtime_records[-1].get("content_hash"), str)
+        else "<none>"
+    )
+    authoritative_head = (
+        str(authoritative_records[-1].get("content_hash"))
+        if authoritative_records and isinstance(authoritative_records[-1].get("content_hash"), str)
+        else "<none>"
+    )
+    return [
+        make_error(
+            CODE_AUTHORITATIVE_MISMATCH,
+            path,
+            "/",
+            (
+                "loaded brain assertion ledger diverges from authoritative store "
+                f"{authoritative_path}; loaded head={runtime_head}, authoritative head={authoritative_head}"
+            ),
+            CONTRACT,
+        )
+    ]
 
 
 def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], context: DriftContext) -> list[ValidationError]:
@@ -550,7 +609,11 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
             repo_root=repo_root,
             probe_context=brain_probe.ProbeContext(repo_root=repo_root),
         )
-    findings = tuple(validate_file(path, context=context)) if path.is_file() else ()
+    findings_list: list[ValidationError] = []
+    if path.is_file():
+        findings_list.extend(validate_file(path, context=context))
+        findings_list.extend(_authoritative_mismatch_errors(path, context))
+    findings = tuple(findings_list)
     record_count = 0
     active_count = 0
     head_content_hash: str | None = None
@@ -575,9 +638,25 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
     )
 
 
-@register(CHECK_NAME, [CODE_DRIFT, CODE_UNVERIFIABLE])
+@register(CHECK_NAME, [CODE_DRIFT, CODE_UNVERIFIABLE, CODE_AUTHORITATIVE_MISMATCH])
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
+    checked_mismatch_paths: set[Path] = set()
     for path in iter_brain_assertion_files(paths):
-        errors.extend(validate_file(path))
+        repo_root = _repo_root_from_assertion_path(path)
+        context = DriftContext(
+            repo_root=repo_root,
+            probe_context=brain_probe.ProbeContext(repo_root=repo_root),
+        )
+        errors.extend(validate_file(path, context=context))
+        if not _is_loaded_runtime_ledger(path):
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in checked_mismatch_paths:
+            continue
+        checked_mismatch_paths.add(resolved)
+        errors.extend(_authoritative_mismatch_errors(path, context))
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))

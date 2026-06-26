@@ -37,6 +37,13 @@ def _write_ledger(tmp_path: Path, text: str) -> Path:
     return path
 
 
+def _write_authoritative_ledger(repo_root: Path, text: str) -> Path:
+    path = repo_root / ".ce" / "brain" / "assertions.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def _ledger_text_with_verification_method(
     *,
     verification_method,
@@ -459,6 +466,43 @@ def test_run_registers_drift_check_and_discovers_brain_ledger(tmp_path: Path):
     assert any(error.code == ce_brain_drift.CODE_UNVERIFIABLE for error in result.errors)
 
 
+def test_run_reports_stale_loaded_ledger_against_authoritative_once(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    authoritative = _ledger_text(
+        assertion_id="brain-assertion-drift-auth01",
+        claim={
+            "subject": "artifact",
+            "predicate": "value",
+            "object": "evidence",
+            "value": "current",
+        },
+    )
+    stale = _ledger_text(
+        assertion_id="brain-assertion-drift-stale1",
+        claim={
+            "subject": "artifact",
+            "predicate": "value",
+            "object": "evidence",
+            "value": "current",
+        },
+    )
+    (repo / "evidence.txt").write_text("current", encoding="utf-8")
+    _write_authoritative_ledger(repo, authoritative)
+    _write_ledger(repo, stale)
+
+    result = ce_brain_drift.run([repo, repo / ".ce" / "state"])
+
+    mismatch_errors = [
+        error
+        for error in result.errors
+        if error.code == ce_brain_drift.CODE_AUTHORITATIVE_MISMATCH
+    ]
+    assert not result.ok
+    assert len(mismatch_errors) == 1
+    assert ".ce/state/brain/assertions.yaml" in str(mismatch_errors[0].path)
+
+
 def test_verify_state_root_resolves_artifacts_from_repo_root(tmp_path: Path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -487,6 +531,73 @@ def test_verify_state_root_resolves_artifacts_from_repo_root(tmp_path: Path, mon
     assert drift.record_count == 1
     assert drift.active_count == 1
     assert drift.findings == ()
+
+
+def test_verify_state_root_reports_stale_loaded_ledger_against_authoritative(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    authoritative = _ledger_text(
+        assertion_id="brain-assertion-drift-auth01",
+        claim={
+            "subject": "artifact",
+            "predicate": "value",
+            "object": "evidence",
+            "value": "current",
+        },
+    )
+    stale = _ledger_text(
+        assertion_id="brain-assertion-drift-stale1",
+        claim={
+            "subject": "artifact",
+            "predicate": "value",
+            "object": "evidence",
+            "value": "current",
+        },
+    )
+    (repo / "evidence.txt").write_text("current", encoding="utf-8")
+    _write_authoritative_ledger(repo, authoritative)
+    _write_ledger(repo, stale)
+
+    drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
+
+    assert not drift.ok
+    assert any(error.code == ce_brain_drift.CODE_AUTHORITATIVE_MISMATCH for error in drift.findings)
+
+
+def test_verify_state_root_missing_runtime_copy_does_not_fail_fresh_checkout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_authoritative_ledger(repo, _ledger_text())
+
+    drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
+
+    assert drift.ok
+    assert drift.record_count == 0
+    assert drift.active_count == 0
+    assert drift.findings == ()
+
+
+def test_authoritative_migrated_assertions_validate_and_probe():
+    root = Path(__file__).resolve().parents[3]
+    path = rt.authoritative_ledger_path(root)
+
+    errors = ce_brain_drift.validate_file(
+        path,
+        context=ce_brain_drift.DriftContext(
+            repo_root=root,
+            probe_context=brain_probe.ProbeContext(repo_root=root, env={}),
+        ),
+    )
+
+    assert errors == []
+    records = rt.load_records_from_path(path)
+    active = [record for record in records if record["status"] == "active"]
+    assert len(active) == 6
+    assert {
+        brain_probe.record_probe_name(record)
+        for record in active
+        if brain_probe.record_probe_name(record) is not None
+    } == {"codex_fan_out_surfaces", "codex_pretooluse_hook", "harness_fan_out"}
 
 
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):

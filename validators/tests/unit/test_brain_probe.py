@@ -90,6 +90,35 @@ def test_harness_fan_out_requires_explicit_harness_signal():
     assert unknown.verdict == "unknown"
 
 
+def test_codex_pretooluse_hook_probe_reads_committed_entrypoint(tmp_path: Path):
+    hook = tmp_path / ".codex" / "hooks" / "ce-pretooluse-codex.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text(
+        "from creator_engine_validator.codex_pretooluse import main\n",
+        encoding="utf-8",
+    )
+
+    result = brain_probe.probe("codex_pretooluse_hook", brain_probe.ProbeContext(repo_root=tmp_path))
+
+    assert result.verdict == "present"
+    assert result.evidence["imports_validator_entrypoint"] is True
+
+
+def test_codex_fan_out_surfaces_probe_requires_governed_role_files(tmp_path: Path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    for name in ["architect_research.md", "implementer.md", "reviewer.md", "verification.md"]:
+        (agents / name).write_text("Governed worker role\n", encoding="utf-8")
+
+    present = brain_probe.probe("codex_fan_out_surfaces", brain_probe.ProbeContext(repo_root=tmp_path))
+    (agents / "reviewer.md").unlink()
+    absent = brain_probe.probe("codex_fan_out_surfaces", brain_probe.ProbeContext(repo_root=tmp_path))
+
+    assert present.verdict == "present"
+    assert absent.verdict == "absent"
+    assert absent.evidence["missing"]
+
+
 def test_wheelhouse_matches_source_uses_injected_checker(tmp_path: Path):
     present = brain_probe.probe(
         "wheelhouse_matches_source",

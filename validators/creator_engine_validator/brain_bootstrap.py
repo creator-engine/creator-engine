@@ -1,10 +1,11 @@
 """Deterministic Knowledge-SSOT bootstrap projection.
 
-This module is deliberately read-only. It reuses ``brain_runtime`` as the
-single source of truth for ledger parsing and hash-chain validation, then
-projects the current active assertions into a JSON-serializable bootstrap
-payload for a controller/foreman seat. It does not contact a network, open a
-datastore, use MCP, or migrate any memory substrate.
+It reuses ``brain_runtime`` as the single source of truth for ledger parsing
+and hash-chain validation, first refreshing the local runtime ledger from the
+repo-versioned authoritative ledger when one is present, then projecting the
+current active assertions into a JSON-serializable bootstrap payload for a
+controller/foreman seat. It does not contact a network, open a datastore, use
+MCP, or migrate any memory substrate.
 """
 
 from __future__ import annotations
@@ -110,6 +111,7 @@ class BootstrapRequest:
     role: str = DEFAULT_ROLE
     seat_class: str | None = DEFAULT_SEAT_CLASS
     state_root: Path | str = V3_LOCAL_STATE_ROOT
+    repo_root: Path | str | None = None
 
 
 def build_bootstrap_payload(
@@ -118,6 +120,7 @@ def build_bootstrap_payload(
     role: str = DEFAULT_ROLE,
     seat_class: str | None = DEFAULT_SEAT_CLASS,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
+    repo_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic JSON-serializable controller bootstrap payload.
 
@@ -125,7 +128,13 @@ def build_bootstrap_payload(
     returned.
     """
 
-    request = BootstrapRequest(scope=scope, role=role, seat_class=seat_class, state_root=state_root)
+    request = BootstrapRequest(
+        scope=scope,
+        role=role,
+        seat_class=seat_class,
+        state_root=state_root,
+        repo_root=repo_root,
+    )
     return bootstrap(request)
 
 
@@ -212,6 +221,15 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
     role = _require_non_empty_string("role", request.role)
     seat_class = resolve_seat_class(request.seat_class)
     normalized_scope = _normalize_scope(request.scope, role=role, seat_class=seat_class)
+    repo_root = (
+        brain_runtime.repo_root_from_state_root(request.state_root)
+        if request.repo_root is None
+        else Path(request.repo_root)
+    )
+    sync = brain_runtime.sync_authoritative_ledger(
+        state_root=request.state_root,
+        repo_root=repo_root,
+    )
     ledger_path = brain_runtime.ledger_path(request.state_root)
 
     verified = brain_runtime.verify_ledger(request.state_root)
@@ -244,6 +262,8 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
         },
         "operating_mode": _foreman_operating_mode(),
         "knowledge_ssot": {
+            "authoritative_ledger_path": str(sync.authoritative_path),
+            "authoritative_loaded": sync.authoritative_exists,
             "ledger_path": str(ledger_path),
             "record_count": len(records),
             "active_count": len(active),
