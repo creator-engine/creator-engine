@@ -24,6 +24,17 @@ def _event(command: str, cwd: Path) -> dict:
     }
 
 
+def _tool_event(tool_name: str, tool_input: dict, cwd: Path) -> dict:
+    return {
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "cwd": str(cwd),
+        "session_id": "codex-session",
+        "tool_use_id": "tool-use-1",
+        "ce": {"posture": "governed", "manifest_paths": ["docs/keep.md"]},
+    }
+
+
 def _run(payload: dict | str, cwd: Path) -> subprocess.CompletedProcess[str]:
     text = payload if isinstance(payload, str) else json.dumps(payload)
     env = dict(os.environ)
@@ -63,6 +74,14 @@ def test_codex_governed_git_push_denies(tmp_path):
     }
 
 
+def test_codex_governed_git_push_without_envelope_denies(tmp_path):
+    proc = _run(_event("git push origin main", tmp_path), tmp_path)
+
+    assert proc.returncode == 0
+    assert _permission(proc.stdout) == "deny"
+    assert "restricted mechanic (deploy)" in proc.stdout
+
+
 def test_codex_governed_git_status_allows_with_no_output(tmp_path):
     proc = _run(_event("git status --short", tmp_path), tmp_path)
 
@@ -70,6 +89,46 @@ def test_codex_governed_git_status_allows_with_no_output(tmp_path):
     assert proc.stdout == ""
     assert proc.stderr == ""
     assert _permission(proc.stdout) is None
+
+
+def test_codex_governed_credential_read_denies_without_secret_echo(tmp_path):
+    proc = _run(
+        _tool_event("Read", {"file_path": ".env", "token": "synthetic-secret-token-value"}, tmp_path),
+        tmp_path,
+    )
+
+    assert proc.returncode == 0
+    assert proc.stderr == ""
+    payload = json.loads(proc.stdout)
+    output = payload["hookSpecificOutput"]
+    assert output["hookEventName"] == "PreToolUse"
+    assert output["permissionDecision"] == "deny"
+    assert "credential-like path denied" in output["permissionDecisionReason"]
+    assert "synthetic-secret-token-value" not in proc.stdout
+
+
+def test_codex_governed_out_of_manifest_apply_patch_is_advisory_allow(tmp_path):
+    proc = _run(
+        _tool_event(
+            "apply_patch",
+            {
+                "command": (
+                    "*** Begin Patch\n"
+                    "*** Update File: docs/outside.md\n"
+                    "@@\n"
+                    "-old\n"
+                    "+new\n"
+                    "*** End Patch\n"
+                )
+            },
+            tmp_path,
+        ),
+        tmp_path,
+    )
+
+    assert proc.returncode == 0
+    assert proc.stdout == ""
+    assert proc.stderr == ""
 
 
 def test_codex_malformed_input_fails_closed(tmp_path):

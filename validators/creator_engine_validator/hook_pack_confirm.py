@@ -33,6 +33,7 @@ CODEX_REQUIREMENTS_PATH = Path(".codex/requirements.toml")
 CODEX_HOOK_SCRIPT = Path(".codex/hooks/ce-pretooluse-codex.py")
 CODEX_EXPECTED_PRETOOLUSE_TOOLS = (
     "Bash",
+    "Read",
     "apply_patch",
     "Edit",
     "Write",

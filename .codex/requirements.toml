@@ -4,7 +4,7 @@ allow_managed_hooks_only = true
 hooks = true
 
 [[hooks.PreToolUse]]
-matcher = "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
+matcher = "^(Bash|Read|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
