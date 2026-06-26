@@ -31,7 +31,7 @@ merge or deploy approval — those are governed by the sibling
 [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md).
 RC status is a **delivery-view bookkeeping state** on the path
 toward `Verified` per
-[`./BACKLOG.md`](./BACKLOG.md) §a.
+`./BACKLOG.md` §a.
 
 ## b. Source-of-truth relationship
 
@@ -48,7 +48,7 @@ toward `Verified` per
 | [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) §c–§l | Verifier-side scope audit consumed by the RC's evidence package. |
 | [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md) | Source-ratified envelope that bounds the batch under review. |
 | [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b | Ten post-merge completion-report fields the RC's evidence aligns with. |
-| [`./BACKLOG.md`](./BACKLOG.md) §a | Delivery-view status vocabulary, including `Verified` and `Ratified`. |
+| `./BACKLOG.md` §a | Delivery-view status vocabulary, including `Verified` and `Ratified`. |
 | [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) §4 exit gate #11 | Sprint 0 exit gate: release / merge / deploy governance is documented. |
 | [`../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md) | Canonical release / deployment strategy this policy is layered onto. |
 | Sibling Slice F docs ([`./MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md), [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md), [`./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md), [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md)) | Slice F policy authoring envelope; this document is one of four content docs bound by the index. |
@@ -167,14 +167,14 @@ impact, or post-merge cleanup state.
 
 | Field | Description | Source-of-truth check |
 |---|---|---|
-| RC identification | Envelope id, base commit, source branch, batch id, the dominant mutation class, and the declared ratifier. | Envelope per [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md); backlog row per [`./BACKLOG.md`](./BACKLOG.md). |
+| RC identification | Envelope id, base commit, source branch, batch id, the dominant mutation class, and the declared ratifier. | Envelope per [`./ASSIGNMENT_ENVELOPE_TEMPLATE.md`](./ASSIGNMENT_ENVELOPE_TEMPLATE.md); backlog row per `./BACKLOG.md`. |
 | Scope summary | One-paragraph summary of what changed, what intentionally did not change, and the surfaces that were declared `prohibited_surfaces`. | Envelope; backlog row. |
 | Validation evidence | Commands run, exit statuses, and any check skipped with rationale. | [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.2; [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.3. |
 | Review evidence | Reviewer identity record reference, reviewed-diff range, mutation classes under review, prohibited surfaces checked, verdict, and any blocking findings. | [`./REVIEW_GATE.md`](./REVIEW_GATE.md); [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md). |
 | Scope-audit evidence | Verifier report-back per §c.5 above, including changed-file boundary comparison, prohibited-surface check, no-mechanics check, `git diff --check`, stale-language scans, markdown link sanity, and branch / worktree isolation. | [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) §c–§l. |
 | Governance evidence | Mutation classes touched and the ratification record per Feature 001 FR-016 / FR-020a. | Feature 001 FR-008 / FR-016 / FR-020a; [`../governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](../governance/AUTHORITY_AND_RATIFICATION_MODEL.md). |
 | Readiness impact | Sprint 0 exit gate(s) that the batch advances or that remain blocked. | [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) §4. |
-| Deferred work | Items intentionally deferred by the batch, with the owning future slice or feature. | [`./BACKLOG.md`](./BACKLOG.md); [`./DEPENDENCIES.md`](./DEPENDENCIES.md). |
+| Deferred work | Items intentionally deferred by the batch, with the owning future slice or feature. | `./BACKLOG.md`; `./DEPENDENCIES.md`. |
 | Cleanup posture | Whether the feature branch is to be retained, deleted, or requires Source approval before deletion (default: retention pending explicit approval). | [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.9; [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.10. |
 
 Where a field overlaps with the ten post-merge fields, this checklist
@@ -205,7 +205,7 @@ To make the boundary unambiguous, the following are explicitly
 4. RC status does NOT amend the Feature 001 spec-status lifecycle.
    It is a delivery-view bookkeeping marker on the path toward
    `Verified` / `Ratified` per
-   [`./BACKLOG.md`](./BACKLOG.md) §a; the canonical lifecycle
+   `./BACKLOG.md` §a; the canonical lifecycle
    continues to use Feature 001 FR-013a values.
 5. RC status is NOT recorded on the canonical branch. It is a
    pre-merge state of a feature branch / worktree; canonical-branch

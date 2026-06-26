@@ -68,8 +68,8 @@ touches it, *and* validates its own config (the desired-state re-read in
 
 ## d. Reviewer identity
 
-The non-author approver is the **CE-managed reviewer identity** (`ubuntuaws745-cmyk`
-today, distinct from the author `chmod735`), declared in `.github/CODEOWNERS`.
+The non-author approver is the **CE-managed reviewer identity** (distinct from
+the author identity), declared in `.github/CODEOWNERS`.
 A `@creator-engine/ce-reviewers` *team* is the recommended future hardening
 (robust to single-account unavailability); CODEOWNERS is the only native way to
 require an individual identity, so the individual is used for the MVP.
@@ -110,7 +110,7 @@ check, a gate PR whose `base..HEAD` diff drifts from its carried manifest
 **cannot merge**. This converts scope-containment from post-hoc verification by
 the Controller into a machine gate. Because each PR's carrier has a distinct
 path, two concurrently-open gate PRs never conflict on the carrier file (the
-ce-ops#21 migration from the single shared `.ce/pr-path-manifest.md`).
+migration from the single shared `.ce/pr-path-manifest.md`).
 
 ## h. How the orchestrator uses this
 
@@ -158,7 +158,7 @@ overwhelming majority of PRs touching no workflow file): request `workflows: wri
 **iff** the run's manifest path-set touches `.github/workflows/**` (the path-set is
 already in `open_change_for_run`'s hands; the mint module accepts the scope unchanged).
 It is sequenced behind an ops act — verifying the live `workflows: write` grant on both
-per-dev Apps — and is tracked as a named follow-up micro-gate (ce-ops#16 §3.2). Until it
+per-dev Apps — and is tracked as a named follow-up micro-gate in an internal tracking issue. Until it
 lands, use the declared pre-push above.
 
 ## g. Concurrent-merge throughput (F6 Phase-0: two-tier change-block re-stamp)
@@ -204,12 +204,12 @@ authority semantics — it only changes the trusted integrator (the queue owns f
 integration; CE verifies the queued result is tree-equivalent to the ratified change-block).
 
 **Enablement is a gated controller/Operator action — see
-[`MERGE_QUEUE_ENABLEMENT_RUNBOOK.md`](MERGE_QUEUE_ENABLEMENT_RUNBOOK.md).** The CI
+`MERGE_QUEUE_ENABLEMENT_RUNBOOK.md`.** The CI
 prerequisite ships ahead of it as ordinary code.
 
 What Phase-1 changes:
 
-- **`merge_group` required-CI trigger (the load-bearing change, SHIPPED ce-ops#39).**
+- **`merge_group` required-CI trigger (the load-bearing change).**
   `validate.yml` triggers on `merge_group: { types: [checks_requested] }`; without it the
   required check never reports on `gh-readonly-queue/{base}` and the queue stalls forever.
   Guarded by `validators/tests/unit/test_workflow_merge_group_trigger.py`.
@@ -228,7 +228,7 @@ What Phase-1 changes:
 #### F6 — the "re-sign the merged head" question, adjudicated
 
 The merge-queue head (the `merge_group` synthetic commit, then the squash on `main`) differs
-from the reviewed head. The question framed by ce-ops#39 was: *who re-signs the merged head
+from the reviewed head. The question is: *who re-signs the merged head
 under `ce-root-v1` so the conserved head-pin survives the queue's rebase?*
 
 **The premise dissolves on inspection of what CE actually conserves.** CE does **not** hold a
@@ -276,6 +276,6 @@ never asserted with a key.
 > integrity gate for queue-merged heads. If the Operator instead wants a cryptographic
 > signature over merged heads, that is a *new* requirement (not a conservation of an existing
 > one) and would need: a delegated signer key trust-rooted under `ce-root-v1`, a custody home
-> for it (OpenBao per ce-ops#113, **not** CI secrets), and a controller-side post-merge
+> for it (OpenBao, **not** CI secrets), and a controller-side post-merge
 > signing step — none of which is built or should be invented here without that explicit
 > decision.

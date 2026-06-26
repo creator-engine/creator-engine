@@ -30,6 +30,11 @@ CE_VPS_TTY_FLAGS=-it
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
 Docker runtime still uses `runsc-gvproxy-ptrace` for process containment.
 
+The portable CE CLI/validator image lives in `deploy/oci`. It is not a
+replacement for this herdr/Codex seat image; use it as a validator/preflight
+payload under the same `runsc-gvproxy-ptrace` runtime when VPS evidence needs
+the packaged `ce` and `creator-engine-validator` commands.
+
 The launcher always applies (in both foreground and detached mode):
 
 - `--runtime=runsc-gvproxy-ptrace`

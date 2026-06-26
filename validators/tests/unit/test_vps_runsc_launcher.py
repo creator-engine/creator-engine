@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
 HOOK = REPO_ROOT / ".codex" / "hooks" / "ce-pretooluse-codex.py"
 HOOK_COMMAND = (
+    "CE_LEDGER_ROOT=/workspace/creator-engine/.hermes/active-work-ledger "
     "PYTHONPATH=/workspace/creator-engine/validators "
     "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
 )
@@ -41,7 +42,7 @@ def expected_contained_codex_config() -> str:
         "hooks = true\n"
         "\n"
         "[[hooks.PreToolUse]]\n"
-        'matcher = "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"\n'
+        'matcher = "^(Bash|Read|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"\n'
         "\n"
         "[[hooks.PreToolUse.hooks]]\n"
         'type = "command"\n'
@@ -56,6 +57,8 @@ def expected_contained_codex_config() -> str:
 
 def run_wrapper(*args: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
+    env.pop("CE_LEDGER_ROOT", None)
+    env.pop("CE_REVIEWER_AUTHORITY_REF", None)
     with tempfile.TemporaryDirectory(prefix="creator-engine-vps-runsc-test-") as runtime_dir:
         env.update(
             {
@@ -136,6 +139,8 @@ def run_live_wrapper_with_fake_docker(
     codex_bin.chmod(0o755)
 
     env = os.environ.copy()
+    env.pop("CE_LEDGER_ROOT", None)
+    env.pop("CE_REVIEWER_AUTHORITY_REF", None)
     env.update(
         {
             "CE_VPS_DRY_RUN": "0",
@@ -224,6 +229,7 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     text = config_path.read_text(encoding="utf-8")
     assert text == expected_contained_codex_config()
     assert "[[hooks.PreToolUse]]" in text
+    assert 'matcher = "^(Bash|Read|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"' in text
     assert HOOK_COMMAND in text
     assert HOOK.is_file()
     assert "--dangerously-bypass-hook-trust" in argv
@@ -231,6 +237,28 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
         argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
         == ["--dangerously-bypass-hook-trust"]
     )
+
+
+def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -> None:
+    config_path = tmp_path / "contained-codex.toml"
+    host_ledger = "/repo/creator-engine/.hermes/active-work-ledger"
+    host_ref = "/repo/creator-engine/.hermes/reviewer-authority.ce.yml"
+
+    run_wrapper(
+        "tui",
+        CE_VPS_CONTAINED_CODEX_CONFIG=str(config_path),
+        CE_LEDGER_ROOT=host_ledger,
+        CE_REVIEWER_AUTHORITY_REF=host_ref,
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "allow_managed_hooks_only = true" in text
+    assert (
+        "CE_LEDGER_ROOT=/workspace/creator-engine/.hermes/active-work-ledger "
+        "CE_REVIEWER_AUTHORITY_REF=/workspace/creator-engine/.hermes/reviewer-authority.ce.yml "
+        "PYTHONPATH=/workspace/creator-engine/validators "
+        "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
+    ) in text
 
 
 def test_codex_tui_dry_run_ends_at_image_without_literal_tui_subcommand() -> None:

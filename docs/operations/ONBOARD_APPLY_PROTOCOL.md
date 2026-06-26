@@ -1,6 +1,6 @@
 # Onboard Apply Protocol
 
-Status: E2 ratified implementation carrier for ce-ops#53.
+Status: E2 ratified implementation carrier.
 
 `ce onboard --apply` is the side-effecting E2 executor for the verified
 agent-native installer. Default `ce onboard`, `--inventory`, and `--plan` remain
@@ -54,7 +54,7 @@ The ratified E2 leg order is stable:
 Later legs run only after earlier required legs verify or are already satisfied.
 Greenfield repo reuse requires E2 ledger provenance plus live verification.
 
-### Adoption legs (ce-ops#85 E3 adoption-apply, mode-gated)
+### Adoption legs (E3 adoption-apply, mode-gated)
 
 For a genuine non-CE existing repo, when the dual escalation is authorized
 (`CE_FORGE_LIVE_FORGE=1` + `CE_FORGE_ADOPTION_WRITE=1`) and the repo is
@@ -91,8 +91,8 @@ With pins supplied, leg 14 scans the full mutation surface declared by the plan:
 scan tree, overlays every scaffold artifact there, runs the scanners over that
 materialized tree, and removes it before leg 15 can build/push/open the join PR.
 
-The `github_bootstrap_token_probe` requirement is **right-sized to the operation**
-(ce-ops#94): a **plain-join** (joining an already-CE repo) requires only a valid
+The `github_bootstrap_token_probe` requirement is **right-sized to the operation**:
+a **plain-join** (joining an already-CE repo) requires only a valid
 identity distinct from the App bot — the PAT writes nothing (forge ops ride the
 App's JIT token; protection is verify-only) — while a **greenfield** create
 requires `contents/administration/actions/workflows:write` (+ org repo-create
@@ -110,7 +110,7 @@ The JSON action is `onboard_apply`. Top-level counters are derived from actual
 leg outcomes: `applied`, `already_satisfied`, `verified_count`, `skipped`,
 `refused`, `failed`, `rolled_back`, `manual_rollback_required`,
 `greenfield_repos_created`, `repos_already_satisfied`, and
-`brownfield_deferred`. The adoption-apply counters (ce-ops#85) are
+`brownfield_deferred`. The adoption-apply counters are
 `brownfield_adopted` (a join PR opened **or** idempotently claimed **and verified**
 this run — the one counter rule), `brownfield_adoption_pr`
 (`{repo,branch,base,pr_number,head_sha,plan_ref}` when opened, else `null`),

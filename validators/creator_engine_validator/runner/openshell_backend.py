@@ -70,6 +70,7 @@ from typing import Any, Protocol
 
 import yaml
 
+from ..fs_mediation import FsMediationUnavailable
 from .backend import (
     BackendUnavailable,
     CollectedEvidence,
@@ -822,7 +823,12 @@ class OpenShellBackend(RunnerBackend):
         # is enforced by the RunnerBackend.provision template method before we get here.
         record = request.runtime_policy
         guard = self._effective_ring1_guard(record)
-        runtime = build_ring1_runtime(guard, DEFAULT_RING1_SHIM_DIR)
+        try:
+            runtime = build_ring1_runtime(guard, DEFAULT_RING1_SHIM_DIR)
+        except FsMediationUnavailable as exc:
+            if isinstance(self._client, _UnwiredSandboxClient):
+                raise BackendUnavailable(str(exc)) from exc
+            raise
         # Pure translation (no side effects), then assemble the create-spec.
         policy = translate_to_sandbox_policy(record)
         spec = SandboxCreateSpec(policy=policy, image=_image_ref_string(record))

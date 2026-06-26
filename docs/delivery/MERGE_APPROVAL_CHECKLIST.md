@@ -33,7 +33,7 @@ Definition of Done in
 when a work item is `Done`; this checklist specifies the gates that
 must be cleared **before** the merge mechanic that promotes the
 batch from `Ratified` to `Done` per
-[`./BACKLOG.md`](./BACKLOG.md) §a.
+`./BACKLOG.md` §a.
 
 ## b. Source-of-truth relationship
 
@@ -51,7 +51,7 @@ batch from `Ratified` to `Done` per
 | [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) §c–§l | Verifier-side scope audit consumed by this checklist. |
 | [`./RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md) | Pre-merge release-candidate evidence package this checklist builds on. |
 | [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b, §d | Ten post-merge completion-report fields and the post-merge update procedure. |
-| [`./BACKLOG.md`](./BACKLOG.md) §a | Delivery-view status vocabulary including `Verified`, `Ratified`, and `Done`. |
+| `./BACKLOG.md` §a | Delivery-view status vocabulary including `Verified`, `Ratified`, and `Done`. |
 | [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) §4 exit gate #11 | Sprint 0 exit gate: release / merge / deploy governance is documented. |
 | [`../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md) | Canonical release / deployment strategy this checklist layers onto. |
 | [`../governance/AUTHORITY_AND_RATIFICATION_MODEL.md`](../governance/AUTHORITY_AND_RATIFICATION_MODEL.md) | Authority matrix and the surface-validity rule for ratification. |
@@ -164,8 +164,8 @@ filled out after the merge: merge identification, scope summary,
 validation evidence, governance evidence, scope audit,
 documentation impact, deferred work, readiness impact, immediate
 next-task recommendation, and cleanup state.
-[`./BACKLOG.md`](./BACKLOG.md) and
-[`./KANBAN.md`](./KANBAN.md) will be refreshed per
+`./BACKLOG.md` and
+`./KANBAN.md` will be refreshed per
 [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §d.
 Post-release evidence expectations are layered onto these fields
 without amending them, per
@@ -277,8 +277,8 @@ using all ten fields without omission. The report:
    evidence, governance evidence, scope audit, documentation
    impact, deferred work, readiness impact, immediate next-task
    recommendation, and cleanup state.
-2. Refreshes [`./BACKLOG.md`](./BACKLOG.md) and
-   [`./KANBAN.md`](./KANBAN.md) per
+2. Refreshes `./BACKLOG.md` and
+   `./KANBAN.md` per
    [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §d so the
    merged item moves to `Done` and downstream items have their
    dependency states refreshed.
@@ -307,7 +307,7 @@ approval under this checklist:
 3. No force-push to the canonical branch. Force-push is
    destructive remote action and remains prohibited absent a
    separate Source-ratified envelope per
-   [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.8.
+   `./RISK_REGISTER.md` §c.8.
 4. No live-repository-settings or branch-protection mutation as a
    side effect. The landed `.github/BRANCH_PROTECTION_POLICY.md`
    is file-based policy only; live remote settings remain a
@@ -328,7 +328,7 @@ The following invariants apply to every merge-approval gate:
    substitute for Source ratification of the merge.
 2. **Source ratification is the only authority that promotes a
    batch past `Verified` to `Ratified` and onward to `Done`** per
-   [`./BACKLOG.md`](./BACKLOG.md) §a and
+   `./BACKLOG.md` §a and
    [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.5.
 3. **CI green is not Source ratification** (§e).
 4. **Review evidence is not Source ratification** per

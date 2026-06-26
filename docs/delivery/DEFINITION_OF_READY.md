@@ -40,10 +40,10 @@ It is layered on top of the Feature 001 substrate contract and does
 | Feature 001 FR-013 / FR-013a | Canonical spec-lifecycle readiness rule. A spec MUST NOT advance from `draft` to `ready` without non-empty `scope`, `acceptance_criteria`, and `verification` fields. |
 | [`docs/contracts/definition-of-ready.md`](../contracts/definition-of-ready.md) | Authoritative Feature 001 readiness contract. |
 | Feature 002 §Assignment Envelope (FR-005 through FR-011) | Operating-model envelope schema and the rule that `/speckit-implement` is permitted only inside a Hermes-authored envelope. |
-| [`./BACKLOG.md`](./BACKLOG.md) §a | Delivery-view status vocabulary, including `Ready`. |
+| `./BACKLOG.md` §a | Delivery-view status vocabulary, including `Ready`. |
 | [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) | Delivery-view counterpart for completion. |
-| [`./DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map consumed by the "dependencies / blockers" criterion. |
-| [`./RISK_REGISTER.md`](./RISK_REGISTER.md) | Standing risks that shape readiness checks (e.g., scope creep, privileged-class mis-classification). |
+| `./DEPENDENCIES.md` | Dependency map consumed by the "dependencies / blockers" criterion. |
+| `./RISK_REGISTER.md` | Standing risks that shape readiness checks (e.g., scope creep, privileged-class mis-classification). |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only. An external tracker entry MUST NOT, by itself, mark a repo work item as Ready. A fresh clone is sufficient to evaluate readiness; no external tracker credential or network state is required. |
 
 Where this document and the Feature 001 contract disagree, the
@@ -53,14 +53,14 @@ Feature 001 lifecycle.
 
 ## b. Ready criteria
 
-A work item is `Ready` (per [`./BACKLOG.md`](./BACKLOG.md) §a) only
+A work item is `Ready` (per `./BACKLOG.md` §a) only
 when every criterion below is satisfied. Each criterion is named so
 that a fresh clone reviewer can confirm the state from repository
 artifacts alone.
 
 ### b.1 Stable backlog id
 
-The work item appears in [`./BACKLOG.md`](./BACKLOG.md) with a stable
+The work item appears in `./BACKLOG.md` with a stable
 identifier (e.g., `sprint-0/slice-b/b2`, `feature-003`, `us3/a1`).
 Identifiers are introduced in `BACKLOG.md` and never invented in an
 envelope, a Kanban column, or an external tracker.
@@ -113,7 +113,7 @@ readiness gate.
 ### b.7 Dependencies / blockers
 
 Every dependency named on the backlog row is at `Ratified` or `Done`,
-per the rules in [`./DEPENDENCIES.md`](./DEPENDENCIES.md). Items
+per the rules in `./DEPENDENCIES.md`. Items
 with unresolved dependencies remain `Backlog` or `Blocked`; they MUST
 NOT be promoted to `Ready` until the named blocker clears.
 
@@ -194,7 +194,7 @@ per §c).
 ### d.1 `sprint-0/slice-b/b2` — Ready when authored; now `Done` on the delivery view
 
 - **b.1 stable backlog id**: `sprint-0/slice-b/b2`. Present in
-  [`./BACKLOG.md`](./BACKLOG.md) §c.2.2.
+  `./BACKLOG.md` §c.2.2.
 - **b.2 source of truth**: Sprint 0 execution README
   [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md)
   §5 (Slice B) and §4 (exit gates #2 and #3); the B1 README's deferred-file
@@ -237,8 +237,8 @@ mutation class is `docs`, not a privileged class. Readiness for B2
 therefore turned on whether B1 had reached `Ratified` or `Done`. B2
 was `Ready` once B1 cleared, the B2 envelope was consumed, and B2
 has since landed on the canonical branch; both B1 and B2 are now
-`Done` in [`./BACKLOG.md`](./BACKLOG.md) and
-[`./KANBAN.md`](./KANBAN.md), so the parent `sprint-0/slice-b` is
+`Done` in `./BACKLOG.md` and
+`./KANBAN.md`, so the parent `sprint-0/slice-b` is
 also `Done` on the delivery view.
 
 ### d.2 `sprint-0/slice-c`, `sprint-0/slice-d`, `sprint-0/slice-e`, and `sprint-0/slice-f` — each was Ready as next candidate envelope and has since landed as `Done`
@@ -279,7 +279,7 @@ canonical branch as PR #16 / commit `cb7f94a docs: add Slice F
 release deploy governance policy`, again under a dedicated
 Source-ratified bounded docs-only `governance` / `docs` envelope
 authoring the release / merge / deploy governance policy. The
-Slice F row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 is therefore
+Slice F row in `./BACKLOG.md` §c.6 is therefore
 `Done` on the delivery view. The same "Ready as candidate vs.
 authorized to implement" distinction now applies to any downstream
 feature batch (e.g., Feature 003 extension, Feature 005 dispatcher
@@ -296,8 +296,8 @@ deploy execution; each remains a separately ratified envelope.
 ## e. Operating-procedure rules
 
 1. Promoting an item to `Ready` is itself a delivery-view bookkeeping
-   action. The promotion is recorded in [`./BACKLOG.md`](./BACKLOG.md)
-   and reflected in [`./KANBAN.md`](./KANBAN.md). The promotion does
+   action. The promotion is recorded in `./BACKLOG.md`
+   and reflected in `./KANBAN.md`. The promotion does
    not by itself advance the Feature 001 spec-status lifecycle; the
    spec wrapper sidecar continues to use Feature 001 FR-013a values.
 2. A `Ready` item MAY be returned to `Backlog` (or marked `Blocked`)
