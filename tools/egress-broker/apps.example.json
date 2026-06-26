@@ -1,5 +1,5 @@
 {
-  "_comment": "ADR-0007 egress broker — per-App config template covering dev-1/2/3/4. Copy to a host-local path (e.g. ~/.ce-egress/broker.json), fill the real App ids + installation ids, and keep the PEMs RAM-only (/dev/shm). This file is a TEMPLATE: app_id / installation_id placeholders must be replaced by the controller before a live --apply run. The PEM is never read by the broker process — only by `openssl` at sign time.",
+  "_comment": "ADR-0007 egress broker — per-App config template covering dev-1/2/3/4. Copy to a host-local path (e.g. ~/.ce-egress/broker.json), fill the real App ids + installation ids. Key source: use 'secret_ref' (vault-backed, preferred per ce-ops#266) or 'pem_path' (legacy, RAM-only via /dev/shm). Exactly one must be set per seat. The PEM is never read by the broker process — only by `openssl` at sign time. For secret_ref seats the broker fetches the key from OpenBao KV v2 per-call (RAM-only, never written to disk).",
 
   "repo": "creator-engine/creator-engine",
   "installation_owner": "creator-engine",
@@ -17,24 +17,32 @@
 
   "seats": {
     "dev-1": {
+      "_comment": "legacy pem_path — migrate to secret_ref when OpenBao is live for dev-1",
       "app_id": "REPLACE_WITH_DEV1_APP_ID",
       "app_owner": "cedev1vps-cmd",
       "pem_path": "/dev/shm/ce-dev1/ce-forge-dev1.pem",
       "installation_id": null
     },
     "dev-2": {
+      "_comment": "legacy pem_path — dev-2 not yet migrated to OpenBao",
       "app_id": "4025879",
       "app_owner": "ubuntuaws745-cmyk",
       "pem_path": "/dev/shm/ce-dev2/ce-forge-dev2.pem",
       "installation_id": null
     },
     "dev-3": {
+      "_comment": "vault-backed (ce-ops#266): App key stored in OpenBao KV v2 at ce-kv/forge/dev-3 field private_key",
       "app_id": "REPLACE_WITH_DEV3_APP_ID",
       "app_owner": "ce-dev-3",
-      "pem_path": "/dev/shm/ce-dev3/ce-forge-dev3.pem",
+      "secret_ref": {
+        "mount": "ce-kv",
+        "path": "forge/dev-3",
+        "field": "private_key"
+      },
       "installation_id": null
     },
     "dev-4": {
+      "_comment": "legacy pem_path — dev-4 not yet migrated to OpenBao",
       "app_id": "4085526",
       "app_owner": "cedev4vps-coder",
       "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
