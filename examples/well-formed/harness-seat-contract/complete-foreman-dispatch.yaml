@@ -1,9 +1,6 @@
-# Models the committed Claude Code Controller seat (the reference instance). The same
-# schema validates a codex/hermes/openclaw seat (promoted in G2.007.1). full_permission_mode
-# is the efficient Controller mode, made safe by ring0_hook_pack_confirmed.
 seat_contract:
-  seat_id: seat-ce-claude-controller
-  harness: claude_code
+  seat_id: seat-ce-codex-controller
+  harness: codex
   launch_posture:
     model_pin: true
     effort: high
@@ -12,7 +9,7 @@ seat_contract:
     terminal_visibility: operator_visible
     strict_mcp_config: true
     full_permission_mode: true
-    permission_mode_flag: "--dangerously-skip-permissions"
+    permission_mode_flag: "--yolo"
     ring0_hook_pack_confirmed: true
   refused_modes:
     - bare
@@ -38,7 +35,7 @@ seat_contract:
         dispatch_surface:
           - multi_agent.reviewer
   required_hook_pack:
-    extension_id: ext-ce-claude-hook-pack
+    extension_id: ext-ce-codex-hook-pack
     extension_kind: hook_pack
     ring: ring_1
     enforcement_strength: defeasible
@@ -51,16 +48,7 @@ seat_contract:
         failure_posture: fail_open
         validator_binding: hook-check
         defeasible: true
-      - event: Stop
-        decision_protocol: advisory
-        failure_posture: fail_open
-        validator_binding: hook-check
-        defeasible: true
-    recorded_at: '2026-06-01T09:03:02Z'
+    recorded_at: '2026-06-01T12:07:05Z'
   emitting_role: operator
   operating_mode: strict
-  recorded_at: '2026-06-01T09:03:02Z'
-  metadata:
-    summary: >-
-      Reference Claude Code Controller seat-contract; harness-agnostic schema. Flags and
-      validators referenced by name only; no secret values.
+  recorded_at: '2026-06-01T12:07:05Z'

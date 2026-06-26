@@ -30,6 +30,9 @@ def test_well_formed_examples_pass(name):
         ("bad-mutation-class.yaml", "VAL-SEAT-CLASS-MUTATION"),
         ("secret-value.yaml", "VAL-SEAT-CLASS-SECRET"),
         ("bad-depth.yaml", "VAL-SEAT-CLASS-RECURSION"),
+        ("worker-seat-class.yaml", "VAL-SEAT-CLASS-FOREMAN"),
+        ("missing-foreman-dispatch.yaml", "VAL-SEAT-CLASS-FOREMAN-DISPATCH"),
+        ("incomplete-foreman-dispatch.yaml", "VAL-SEAT-CLASS-FOREMAN-DISPATCH"),
     ],
 )
 def test_malformed_examples_emit_expected_code(name, code):

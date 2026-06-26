@@ -1,12 +1,12 @@
 kind: seat-class-policy-record
 schema_version: "1"
-policy_id: seat-class-bad-depth
-policy_sha: "1111111111111111111111111111111111111111111111111111111111111111"
+policy_id: seat-class-incomplete-dispatch
+policy_sha: "4444444444444444444444444444444444444444444444444444444444444444"
 seat_class: foreman
 default_seat_class: foreman
 recursion:
   foreman_of_foreman_allowed: true
-  max_depth: 0
+  max_depth: 1
 delegation_required_mutation_classes:
   - code
 foreman_dispatch:
@@ -16,9 +16,6 @@ foreman_dispatch:
     researcher:
       dispatch_surface:
         - multi_agent.researcher
-    implementer:
-      dispatch_surface:
-        - multi_agent.implementer
     reviewer:
       dispatch_surface:
         - multi_agent.reviewer
