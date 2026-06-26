@@ -1,0 +1,20 @@
+[Unit]
+Description=Creator Engine contained-seat self-push egress broker
+Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/egress-broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/creator-engine/ce-egress-broker.env
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_push_broker.py \
+  --socket "$CE_EGRESS_BROKER_SOCKET" \
+  --seat "$CE_EGRESS_BROKER_SEAT" \
+  --host-repo-path "$CE_EGRESS_BROKER_REPO" \
+  --config "$CE_EGRESS_BROKER_CONFIG"
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=default.target

@@ -42,6 +42,9 @@ Environment:
   CE_VPS_UID                   Container uid (default: id -u)
   CE_VPS_GID                   Container gid (default: id -g)
   CE_VPS_SEAT_ID               Host log seat id (default: CE_VPS_CONTAINER_NAME)
+  CE_VPS_EGRESS_BROKER_SOCKET  Host self-push broker Unix socket to bind-mount (default: unset)
+  CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path
+                                (default: /run/ce-egress-broker.sock)
   CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
                                 (default: ~/.ce/logs/seats/<seat-id>)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
@@ -149,7 +152,13 @@ CE_VPS_UID="${CE_VPS_UID:-$(id -u)}"
 CE_VPS_GID="${CE_VPS_GID:-$(id -g)}"
 CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-ce-vps-${harness}}"
 CE_VPS_DOCKER_RESTART_POLICY="${CE_VPS_DOCKER_RESTART_POLICY:-}"
+CE_VPS_SEAT_ID_EXPLICIT=0
+if [ "${CE_VPS_SEAT_ID+x}" = "x" ]; then
+  CE_VPS_SEAT_ID_EXPLICIT=1
+fi
 CE_VPS_SEAT_ID="${CE_VPS_SEAT_ID:-${CE_VPS_CONTAINER_NAME}}"
+CE_VPS_EGRESS_BROKER_SOCKET="${CE_VPS_EGRESS_BROKER_SOCKET:-}"
+CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET:-/run/ce-egress-broker.sock}"
 CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
@@ -200,6 +209,32 @@ fi
 if [ "${CE_VPS_CODEX_HOME_MODE}" != "rw" ] && [ "${CE_VPS_CODEX_HOME_MODE}" != "ro" ]; then
   printf 'CE_VPS_CODEX_HOME_MODE must be rw or ro, got %s\n' "${CE_VPS_CODEX_HOME_MODE}" >&2
   exit 2
+fi
+if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
+  if [ "${CE_VPS_SEAT_ID_EXPLICIT}" != "1" ]; then
+    printf 'CE_VPS_SEAT_ID must be set explicitly when CE_VPS_EGRESS_BROKER_SOCKET is set\n' >&2
+    exit 2
+  fi
+  if [[ ! "${CE_VPS_SEAT_ID}" =~ ^dev-[0-9]+$ ]]; then
+    printf 'CE_VPS_SEAT_ID must be a broker seat id like dev-3 when CE_VPS_EGRESS_BROKER_SOCKET is set, got %s\n' "${CE_VPS_SEAT_ID}" >&2
+    exit 2
+  fi
+  case "${CE_VPS_EGRESS_BROKER_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_VPS_EGRESS_BROKER_SOCKET must be an absolute path, got %s\n' "${CE_VPS_EGRESS_BROKER_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
+  case "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET must be an absolute path, got %s\n' "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
 fi
 case "${CE_VPS_CONTAINED_CODEX_CONFIG}" in
   /*)
@@ -352,6 +387,12 @@ if [ "${dry_run}" != "1" ]; then
   if [ -n "${CE_VPS_CLAUDE_BIN}" ]; then
     [ -x "${CE_VPS_CLAUDE_BIN}" ] || { printf 'Claude binary not executable: %s\n' "${CE_VPS_CLAUDE_BIN}" >&2; exit 66; }
   fi
+  if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
+    [ -S "${CE_VPS_EGRESS_BROKER_SOCKET}" ] || {
+      printf 'egress broker socket not found: %s\n' "${CE_VPS_EGRESS_BROKER_SOCKET}" >&2
+      exit 66
+    }
+  fi
   backup_stale_herdr_session "${CE_VPS_SEAT_LOG_DIR}"
 fi
 
@@ -392,6 +433,10 @@ else
   codex_mount_args+=(
     --mount "type=bind,source=${CE_VPS_CODEX_BIN},target=/usr/local/bin/codex,readonly"
   )
+fi
+egress_broker_mount=""
+if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
+  egress_broker_mount="type=bind,source=${CE_VPS_EGRESS_BROKER_SOCKET},target=${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"
 fi
 
 # Foreground = ephemeral (--rm). Detached = named-persistent (no --rm, add -d
@@ -443,6 +488,14 @@ if [ "${image_harness}" = "claude" ]; then
       --mount "type=bind,source=${CE_VPS_CLAUDE_BIN},target=/usr/local/bin/claude,readonly"
     )
   fi
+fi
+
+if [ -n "${egress_broker_mount}" ]; then
+  docker_cmd+=(
+    --env "CE_EGRESS_BROKER_SOCKET=${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"
+    --env "CE_SEAT_ID=${CE_VPS_SEAT_ID}"
+    --mount "${egress_broker_mount}"
+  )
 fi
 
 docker_cmd+=("${tty_flags[@]}")
