@@ -12,11 +12,13 @@ stay offline.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from base64 import b64decode
 from collections.abc import Callable, Mapping, Sequence
@@ -65,6 +67,9 @@ DEFAULT_DAEMON_SEARCH_LIMIT = 50
 DEFAULT_GOVERNANCE_CHECK = "Validate governance artifacts"
 DEFAULT_TEST_CHECK_KEYWORDS = ("test", "pytest", "unit")
 DEFAULT_APPROVAL_SETTLE_SECONDS = 0.0
+DEFAULT_SWEEP_REPO = "creator-engine/creator-engine"
+DEFAULT_QUEUE_BRANCH = "main"
+DEFAULT_SWEEP_FIRST = 100
 
 
 class IntegratorBeltError(Exception):
@@ -287,6 +292,65 @@ class DaemonPassResult:
             "enqueue_count": self.enqueue_count,
             "skip_count": self.skip_count,
             "defer_count": self.defer_count,
+            "failed_count": self.failed_count,
+            "decisions": [decision.to_dict() for decision in self.decisions],
+        }
+
+
+@dataclass(frozen=True)
+class StrandedPullRequest:
+    """One open PR plus the author needed for independent-approval checks."""
+
+    pr: DaemonPullRequest
+    author_login: str
+
+
+@dataclass(frozen=True)
+class StrandedSweepDecision:
+    """One conveyor stranded-sweep enqueue/skip decision."""
+
+    status: str
+    reason: str
+    repo: str
+    pr_number: int
+    head_sha: str
+    evidence: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "head_sha": self.head_sha,
+            "evidence": list(self.evidence),
+        }
+
+
+@dataclass(frozen=True)
+class StrandedSweepResult:
+    """Result of one conveyor stranded-PR sweep."""
+
+    decisions: tuple[StrandedSweepDecision, ...]
+    dry_run: bool
+
+    @property
+    def enqueue_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.status == "enqueue")
+
+    @property
+    def skip_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.status == "skip")
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for decision in self.decisions if decision.reason == "enqueue_failed")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dry_run": self.dry_run,
+            "enqueue_count": self.enqueue_count,
+            "skip_count": self.skip_count,
             "failed_count": self.failed_count,
             "decisions": [decision.to_dict() for decision in self.decisions],
         }
@@ -918,6 +982,77 @@ def discover_daemon_candidates(
     return tuple(out)
 
 
+def run_stranded_sweep(
+    *,
+    repo: str = DEFAULT_SWEEP_REPO,
+    queue_branch: str = DEFAULT_QUEUE_BRANCH,
+    dry_run: bool = False,
+    gh_runner: GhRunner | None = None,
+    log_sink: LogSink | None = None,
+    candidates: Sequence[StrandedPullRequest] | None = None,
+    queued: set[tuple[str, int]] | None = None,
+) -> StrandedSweepResult:
+    """Enqueue approved+green open PRs that are not already in the merge queue."""
+
+    _split_repo(repo)
+    if not queue_branch.strip():
+        raise IntegratorBeltError("queue_branch is required")
+    runner = gh_runner or _default_gh_runner
+    if candidates is None or queued is None:
+        discovered_candidates, discovered_queued = discover_stranded_candidates(
+            repo=repo,
+            queue_branch=queue_branch,
+            gh_runner=runner,
+        )
+        if candidates is None:
+            candidates = discovered_candidates
+        if queued is None:
+            queued = discovered_queued
+
+    decisions: list[StrandedSweepDecision] = []
+    _log(log_sink, "stranded_sweep_start", repo=repo, queue_branch=queue_branch, dry_run=dry_run)
+    for candidate in sorted(candidates, key=lambda item: (item.pr.repo, item.pr.pr_number)):
+        decision = _sweep_candidate(candidate, queued, runner, dry_run=dry_run)
+        decisions.append(decision)
+        _log(log_sink, "stranded_sweep_decision", **decision.to_dict())
+    result = StrandedSweepResult(decisions=tuple(decisions), dry_run=dry_run)
+    _log(
+        log_sink,
+        "stranded_sweep_complete",
+        enqueue_count=result.enqueue_count,
+        skip_count=result.skip_count,
+        failed_count=result.failed_count,
+    )
+    return result
+
+
+def discover_stranded_candidates(
+    *,
+    repo: str = DEFAULT_SWEEP_REPO,
+    queue_branch: str = DEFAULT_QUEUE_BRANCH,
+    gh_runner: GhRunner | None = None,
+    first: int = DEFAULT_SWEEP_FIRST,
+) -> tuple[tuple[StrandedPullRequest, ...], set[tuple[str, int]]]:
+    """Read open PRs and current merge-queue membership in one GraphQL call."""
+
+    owner, name = _split_repo(repo)
+    if first < 1 or first > 100:
+        raise IntegratorBeltError("first must be between 1 and 100")
+    if queue_branch != DEFAULT_QUEUE_BRANCH:
+        raise IntegratorBeltError("only the main merge queue is supported by this sweep")
+    runner = gh_runner or _default_gh_runner
+    parsed = _gh_graphql(
+        runner,
+        _STRANDED_SWEEP_QUERY,
+        {"owner": owner, "name": name, "first": first},
+        purpose=f"discover stranded PRs for {repo}",
+    )
+    repository = ((parsed.get("data") or {}).get("repository") or {})
+    if not isinstance(repository, Mapping):
+        raise ForgeConfigError(f"unexpected stranded sweep response for {repo}")
+    return _parse_sweep_repository(repository)
+
+
 _DAEMON_SEARCH_QUERY = (
     "query($searchQuery:String!,$first:Int!){"
     "search(type:ISSUE,query:$searchQuery,first:$first){pageInfo{hasNextPage endCursor}nodes{"
@@ -932,6 +1067,31 @@ _DAEMON_SEARCH_QUERY = (
     "}}}}}} "
     "files(first:100){pageInfo{hasNextPage}nodes{path}}"
     "}}}}"
+)
+
+
+# Exact queued-membership query used by the sweep:
+# repository(owner:$owner,name:$name){mergeQueue{entries(first:100,branch:"main"){...}}}
+_STRANDED_SWEEP_QUERY = (
+    "query($owner:String!,$name:String!,$first:Int!){"
+    "repository(owner:$owner,name:$name){"
+    "mergeQueue{entries(first:100,branch:\"main\"){pageInfo{hasNextPage}nodes{"
+    "pullRequest{number repository{nameWithOwner}}"
+    "}}} "
+    "pullRequests(first:$first,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}){"
+    "pageInfo{hasNextPage endCursor}nodes{"
+    "number title url body isDraft reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName "
+    "author{login} repository{nameWithOwner} "
+    "latestOpinionatedReviews(first:20){nodes{id state author{login} commit{oid}}} "
+    "commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){"
+    "pageInfo{hasNextPage} nodes{__typename "
+    "... on CheckRun{name conclusion status completedAt startedAt} "
+    "... on StatusContext{context state updatedAt createdAt}"
+    "}}}}}} "
+    "files(first:100){pageInfo{hasNextPage}nodes{path}}"
+    "}}"
+    "}}"
+    "}"
 )
 
 
@@ -1004,6 +1164,127 @@ def _parse_daemon_pr(node: Mapping[str, Any]) -> DaemonPullRequest:
         checks_complete=((contexts.get("pageInfo") or {}).get("hasNextPage") is not True),
         is_draft=bool(node.get("isDraft")),
         approval_witnesses=approval_witnesses,
+    )
+
+
+def _sweep_candidate(
+    candidate: StrandedPullRequest,
+    queued: set[tuple[str, int]],
+    runner: GhRunner,
+    *,
+    dry_run: bool,
+) -> StrandedSweepDecision:
+    pr = candidate.pr
+    queued_key = (pr.repo, pr.pr_number)
+    if queued_key in queued:
+        return _stranded_decision(
+            pr, "skip", "already_queued", "merge_queue_entries_checked=true"
+        )
+    refusal, evidence = _stranded_gate_refusal(candidate)
+    if refusal is not None:
+        return _stranded_decision(pr, "skip", refusal, *evidence)
+    witness = _current_approval_witness(pr)
+    if witness is None:
+        return _stranded_decision(pr, "skip", "approval_reviewer_unconfirmed")
+    if dry_run:
+        return _stranded_decision(
+            pr,
+            "enqueue",
+            "eligible_dry_run",
+            "merge_queue_entries_checked=true",
+            "dry_run=true",
+        )
+    reverified, reverify_reason, reverify_evidence = _reverify_approval_before_enqueue(
+        pr,
+        runner,
+        witness,
+    )
+    if not reverified:
+        return _stranded_decision(pr, "skip", reverify_reason, *reverify_evidence)
+    enqueue = _enqueue_merge_queue(pr, runner)
+    return _stranded_decision(
+        pr,
+        "enqueue" if enqueue.returncode == 0 else "skip",
+        "stranded_enqueued" if enqueue.returncode == 0 else "enqueue_failed",
+        "merge_queue_entries_checked=true",
+        "gh_pr_merge_auto=true",
+        f"returncode={enqueue.returncode}",
+        f"stderr={redact_gh_stderr(enqueue.stderr or '')}",
+    )
+
+
+def _stranded_gate_refusal(candidate: StrandedPullRequest) -> tuple[str | None, tuple[str, ...]]:
+    pr = candidate.pr
+    if pr.merge_state_status != "CLEAN":
+        return "merge_state_not_clean", (f"merge_state_status={pr.merge_state_status or ''}",)
+    if pr.rollup_state != "SUCCESS":
+        return "required_checks_not_success", (f"rollup_state={pr.rollup_state or ''}",)
+    witness = _current_approval_witness(pr)
+    if witness is None:
+        return "approval_reviewer_unconfirmed", ()
+    if candidate.author_login and witness.reviewer_login.lower() == candidate.author_login.lower():
+        return "approval_not_independent", (f"reviewer={witness.reviewer_login}",)
+    gate = _daemon_non_wall_gate(pr, evidence=("approval_wall: not armed",))
+    if gate.refusal_reason is not None:
+        return gate.refusal_reason, gate.evidence
+    return None, gate.evidence
+
+
+def _parse_sweep_repository(
+    repository: Mapping[str, Any]
+) -> tuple[tuple[StrandedPullRequest, ...], set[tuple[str, int]]]:
+    raw_prs = repository.get("pullRequests")
+    if not isinstance(raw_prs, Mapping):
+        raise ForgeConfigError("stranded sweep response missing pullRequests")
+    if ((raw_prs.get("pageInfo") or {}).get("hasNextPage")) is True:
+        raise ForgeConfigError("stranded sweep returned more than one PR page; narrow scope")
+    raw_queue = repository.get("mergeQueue")
+    if not isinstance(raw_queue, Mapping):
+        raise ForgeConfigError("stranded sweep response missing mergeQueue")
+    raw_entries = raw_queue.get("entries")
+    if not isinstance(raw_entries, Mapping):
+        raise ForgeConfigError("stranded sweep response missing mergeQueue entries")
+    if ((raw_entries.get("pageInfo") or {}).get("hasNextPage")) is True:
+        raise ForgeConfigError("merge queue entries returned more than one page; narrow scope")
+
+    queued = _stranded_queued_numbers(raw_entries.get("nodes") or ())
+    candidates: list[StrandedPullRequest] = []
+    for node in raw_prs.get("nodes") or ():
+        if not isinstance(node, Mapping):
+            continue
+        author = str(((node.get("author") or {}).get("login") or "")).strip()
+        candidates.append(StrandedPullRequest(pr=_parse_daemon_pr(node), author_login=author))
+    return tuple(candidates), queued
+
+
+def _stranded_queued_numbers(nodes: Sequence[Any]) -> set[tuple[str, int]]:
+    queued: set[tuple[str, int]] = set()
+    for entry in nodes:
+        if not isinstance(entry, Mapping):
+            continue
+        pr = entry.get("pullRequest")
+        if not isinstance(pr, Mapping):
+            continue
+        repo = str(((pr.get("repository") or {}).get("nameWithOwner") or "")).strip()
+        number = pr.get("number")
+        if repo and isinstance(number, int):
+            queued.add((repo, number))
+    return queued
+
+
+def _stranded_decision(
+    pr: DaemonPullRequest,
+    status: str,
+    reason: str,
+    *evidence: str,
+) -> StrandedSweepDecision:
+    return StrandedSweepDecision(
+        status=status,
+        reason=reason,
+        repo=pr.repo,
+        pr_number=pr.pr_number,
+        head_sha=pr.head_sha,
+        evidence=tuple(item for item in evidence if item),
     )
 
 
@@ -2048,3 +2329,54 @@ class JsonLineLogger:
 
     def __call__(self, payload: Mapping[str, Any]) -> None:
         print(json.dumps(dict(payload), sort_keys=True), file=self.stream)
+
+
+def _build_module_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m creator_engine_validator.forge.integrator_belt")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sweep = sub.add_parser("stranded-sweep", help="enqueue approved+green PRs stranded outside merge queue")
+    sweep.add_argument("--repo", default=DEFAULT_SWEEP_REPO, help="owner/name repository scope")
+    sweep.add_argument("--queue-branch", default=DEFAULT_QUEUE_BRANCH, dest="queue_branch", help="merge queue branch")
+    sweep.add_argument("--token-env", default=DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
+    sweep.add_argument("--dry-run", action="store_true", help="log eligible PRs without enqueueing")
+    sweep.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    return parser
+
+
+def _cmd_stranded_sweep(args: argparse.Namespace) -> int:
+    try:
+        token = token_from_env(args.token_env)
+        result = run_stranded_sweep(
+            repo=args.repo,
+            queue_branch=args.queue_branch,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            gh_runner=gh_runner_with_token(token),
+            log_sink=JsonLineLogger(sys.stderr),
+        )
+    except IntegratorBeltError as exc:
+        print(f"ERROR: stranded-sweep refused: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive fail-closed module CLI
+        print(f"ERROR: stranded-sweep failed closed: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            "stranded-sweep: "
+            f"enqueue={result.enqueue_count} skip={result.skip_count} failed={result.failed_count}"
+        )
+    return 0 if result.failed_count == 0 else 1
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_module_parser()
+    args = parser.parse_args(argv)
+    if args.command == "stranded-sweep":
+        return _cmd_stranded_sweep(args)
+    parser.print_usage(sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":  # pragma: no cover - module CLI edge
+    raise SystemExit(main())

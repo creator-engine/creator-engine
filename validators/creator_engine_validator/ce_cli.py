@@ -26,6 +26,7 @@ ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
 ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
 ce queue poll        # run a bounded Integrator merge-queue repair poll
+ce conveyor sweep    # enqueue approved+green creator-engine PRs stranded outside merge queue
 ce dequeue           # dequeue one PR from GitHub's merge queue through the v3 forge bridge
 ce event append      # append a shape-only-signed CE-event block to a local chain (G2.003.1)
 ce event verify      # validate an on-disk CE-event chain + head manifest, read-only
@@ -2114,6 +2115,42 @@ def _queue_inspect(args) -> int:
     return 0 if result.ok else 1
 
 
+def _conveyor_bridge(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(prog="ce conveyor")
+    sub = parser.add_subparsers(dest="conveyor_cmd", required=True)
+    sweep = sub.add_parser(
+        "sweep",
+        help="enqueue approved+green creator-engine PRs stranded outside the merge queue",
+    )
+    sweep.add_argument("--repo", default="creator-engine/creator-engine", help="owner/name repository scope")
+    sweep.add_argument("--queue-branch", default="main", dest="queue_branch", help="merge queue branch")
+    sweep.add_argument("--token-env", default="GH_TOKEN", help="env var containing the GitHub token")
+    sweep.add_argument("--dry-run", action="store_true", help="log eligible PRs without enqueueing")
+    sweep.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    args = parser.parse_args(argv)
+    if args.conveyor_cmd != "sweep":
+        parser.print_usage(sys.stderr)
+        return 2
+    command = [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.forge.integrator_belt",
+        "stranded-sweep",
+        "--repo",
+        args.repo,
+        "--queue-branch",
+        args.queue_branch,
+        "--token-env",
+        args.token_env,
+    ]
+    if getattr(args, "dry_run", False):
+        command.append("--dry-run")
+    if getattr(args, "json_output", False):
+        command.append("--json")
+    proc = subprocess.run(command, check=False)
+    return int(proc.returncode)
+
+
 def _dequeue(args) -> int:
     argv = [
         sys.executable,
@@ -3877,6 +3914,10 @@ _HERDR_DISPATCH = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "conveyor":
+        return _conveyor_bridge(argv[1:])
     parser = _build_parser()
     args = parser.parse_args(argv)
 
