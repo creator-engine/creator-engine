@@ -308,11 +308,16 @@ def _peek_capability_line(target: dict[str, Any], key: str, label: str) -> str:
     state = capability.get("state", "—")
     mark = "✓" if capability.get("available") else "—"
     trigger = capability.get("trigger") or {}
-    trigger_text = (
-        f"{trigger.get('kind', '—')} pane {trigger.get('pane_id', '—')}"
-        if trigger
-        else capability.get("blocked_reason") or "—"
-    )
+    if trigger:
+        if trigger.get("pane_id"):
+            trigger_text = f"{trigger.get('kind', '—')} pane {trigger.get('pane_id')}"
+        else:
+            trigger_text = (
+                f"{trigger.get('kind', '—')} surface "
+                f"{trigger.get('surface_ref', '—')}"
+            )
+    else:
+        trigger_text = capability.get("blocked_reason") or "—"
     return f"{mark} {label}: {state} · {trigger_text}"
 
 
@@ -353,7 +358,10 @@ def build_peek_request(
     target = _peek_target(snapshot, lane_id)
     capability = (target.get("capabilities") or {}).get(action) or {}
     trigger = capability.get("trigger") or {}
-    routed = bool(capability.get("available") and trigger.get("driver") == "HerdrSession")
+    routed = bool(
+        capability.get("available")
+        and trigger.get("driver") in {"HerdrSession", "HeadlessSurface"}
+    )
     reason = None
     if not routed:
         reason = capability.get("blocked_reason") or capability.get("state") or "unavailable"
