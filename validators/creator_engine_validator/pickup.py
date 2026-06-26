@@ -41,7 +41,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import time
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -541,12 +543,19 @@ def lane_launch_command(environ: Mapping[str, str] | None = None) -> list[str]:
     and source-checkout fallbacks may set ``CE_LANE_LAUNCH_BIN`` (or ``CE_BIN``)
     to a shell-split command such as
     ``python -m creator_engine_validator.ce_cli``.
+
+    When neither override is set and the installed ``ce`` console script is not
+    on ``PATH`` (a source-checkout or not-yet-dogfooded host), fall back to the
+    module form so the belt still launches gracefully during the migration to
+    installed-``ce`` (ce-ops#198).
     """
     env = environ if environ is not None else os.environ
     raw = (env.get(CE_LANE_LAUNCH_BIN_ENV) or env.get(CE_BIN_ENV) or "").strip()
     if raw:
         return shlex.split(raw)
-    return ["ce"]
+    if shutil.which("ce") is not None:
+        return ["ce"]
+    return [sys.executable, "-m", "creator_engine_validator.ce_cli"]
 
 
 def build_seed(

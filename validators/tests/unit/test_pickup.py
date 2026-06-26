@@ -18,6 +18,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -750,8 +751,15 @@ def _assert_lane_launch_preconditions(argv, *, repo_root, ledger_root, identity,
     """Offline stand-in for the launch gates the belt must satisfy before spawn."""
     from creator_engine_validator import brain_runtime, lane_runtime
 
-    assert argv[0] == sys.executable
-    assert argv[1:5] == ["-m", "creator_engine_validator.ce_cli", "lane", "launch"]
+    # ce-ops#198: the belt now dogfoods the installed ``ce`` console script as the
+    # launch prefix, with a graceful fallback to the module form
+    # (``<python> -m creator_engine_validator.ce_cli``) when ``ce`` is not on PATH
+    # (a source-checkout / not-yet-dogfooded host). Accept either valid prefix so
+    # this contract holds regardless of the test host's PATH; the ``lane launch``
+    # subcommand and its flags follow whichever prefix the belt selected.
+    assert argv[0] == "ce" or argv[:3] == [sys.executable, "-m", "creator_engine_validator.ce_cli"]
+    launch_idx = argv.index("launch")
+    assert argv[launch_idx - 1 : launch_idx + 1] == ["lane", "launch"]
     assert "--json" in argv
     assert _argv_value(argv, "--controller-id") == identity
     assert _argv_value(argv, "--lane-id") == lane_id
@@ -782,7 +790,11 @@ def _assert_lane_launch_preconditions(argv, *, repo_root, ledger_root, identity,
     assert payload["kind"] == "brain-bootstrap-context"
 
 
-def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
+def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path, monkeypatch):
+    # Pin the launch prefix to the installed-``ce`` form so the assertion is
+    # deterministic regardless of whether ``ce`` is on the test host's PATH
+    # (ce-ops#198 made the default fall back to the module form when it is not).
+    monkeypatch.setenv("CE_LANE_LAUNCH_BIN", "ce")
     calls = []
     item = _item(kind="review_requested")
     run_id = "r1"
