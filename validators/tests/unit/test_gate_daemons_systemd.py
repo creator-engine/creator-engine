@@ -106,3 +106,63 @@ def test_integrator_authorized_reviewer_config_is_documented(repo_root: Path):
         assert "CE_GATE_AUTHORIZED_REVIEWERS" in text
 
     assert "CE_GATE_AUTHORIZED_REVIEWERS=reviewer-login[,reviewer-login...]" in installer
+
+
+# ---------------------------------------------------------------------------
+# Egress self-push broker systemd unit (ce-ops#265)
+# ---------------------------------------------------------------------------
+
+EGRESS_BROKER_UNIT = "ce-egress-broker.service"
+
+
+def test_egress_broker_unit_parses_and_has_required_sections(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+
+    assert unit.has_section("Unit")
+    assert unit.has_section("Service")
+    assert unit.has_section("Install")
+
+
+def test_egress_broker_unit_is_simple_type_with_restart(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+    service = unit["Service"]
+
+    assert service["Type"] == "simple"
+    assert service["Restart"] == "on-failure"
+    assert service["RestartSec"]
+
+
+def test_egress_broker_unit_uses_environment_file_not_inline_env(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+    service = unit["Service"]
+
+    assert service["EnvironmentFile"]
+    assert "Environment" not in service
+
+
+def test_egress_broker_unit_runs_host_broker_script(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+    exec_start = unit["Service"]["ExecStart"]
+
+    assert "ce_egress_self_push_broker.py" in exec_start
+    assert "--socket" in exec_start
+    assert "--seat" in exec_start
+    assert "--host-repo-path" in exec_start
+    assert "--config" in exec_start
+
+
+def test_egress_broker_unit_working_directory_is_repo(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+
+    assert unit["Service"]["WorkingDirectory"] == "/workspace/creator-engine"
+
+
+def test_egress_broker_unit_env_vars_are_parametric(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
+    exec_start = unit["Service"]["ExecStart"]
+
+    # All four required broker args must reference env vars (not hardcoded values)
+    assert "$CE_EGRESS_BROKER_SOCKET" in exec_start
+    assert "$CE_EGRESS_BROKER_SEAT" in exec_start
+    assert "$CE_EGRESS_BROKER_REPO" in exec_start
+    assert "$CE_EGRESS_BROKER_CONFIG" in exec_start

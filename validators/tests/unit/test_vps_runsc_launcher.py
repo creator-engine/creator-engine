@@ -623,3 +623,112 @@ def test_no_herdr_socket_path_carrier_or_host_socket_mount_reaches_docker_argv()
         arg.startswith("type=bind,") and (".sock" in arg or "socket" in arg.lower())
         for arg in argv
     )
+
+
+# ---------------------------------------------------------------------------
+# Egress self-push broker socket mount (ce-ops#265)
+# ---------------------------------------------------------------------------
+
+
+def test_egress_broker_socket_mount_requires_explicit_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_VPS_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-3.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_VPS_SEAT_ID must be set explicitly" in result.stderr
+
+
+def test_egress_broker_socket_mount_rejects_non_broker_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_VPS_SEAT_ID="ce-vps-codex",
+        CE_VPS_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-3.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_VPS_SEAT_ID must be a broker seat id like dev-3" in result.stderr
+
+
+def test_egress_broker_socket_mount_rejects_empty_explicit_seat_id() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_VPS_SEAT_ID="",
+        CE_VPS_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-3.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_VPS_SEAT_ID must be a broker seat id like dev-3" in result.stderr
+
+
+def test_egress_broker_socket_mounts_only_socket_and_value_env() -> None:
+    host_socket = "/run/user/1000/creator-engine/egress-broker/dev-3.sock"
+    container_socket = "/run/ce-egress-broker.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_SEAT_ID="dev-3",
+            CE_VPS_EGRESS_BROKER_SOCKET=host_socket,
+            CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET=container_socket,
+            GITHUB_TOKEN="ghp_0123456789abcdef0123456789abcdef0123",
+            GH_TOKEN="ghs_0123456789abcdef0123456789abcdef0123",
+            OPENBAO_TOKEN="hvs.0123456789abcdef",
+            CE_APP_KEY="-----BEGIN PRIVATE KEY-----",
+            SSH_AUTH_SOCK="/tmp/ssh-agent.sock",
+            DOCKER_HOST="unix:///var/run/docker.sock",
+            CE_EGRESS_BROKER_CONFIG="/home/ce/.ce-egress/broker.json",
+        )
+    )
+
+    assert f"CE_EGRESS_BROKER_SOCKET={container_socket}" in argv
+    assert "CE_SEAT_ID=dev-3" in argv
+    assert f"CE_VPS_EGRESS_BROKER_SOCKET={host_socket}" not in argv
+    assert not any("CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET=" in arg for arg in argv)
+    assert any(
+        arg == f"type=bind,source={host_socket},target={container_socket}"
+        for arg in argv
+    )
+    rendered = "\n".join(argv)
+    assert "ghp_0123456789abcdef0123456789abcdef0123" not in rendered
+    assert "ghs_0123456789abcdef0123456789abcdef0123" not in rendered
+    assert "hvs.0123456789abcdef" not in rendered
+    assert "-----BEGIN PRIVATE KEY-----" not in rendered
+    assert "/tmp/ssh-agent.sock" not in rendered
+    assert "/var/run/docker.sock" not in rendered
+    assert "/home/ce/.ce-egress/broker.json" not in rendered
+    assert not any("GITHUB_TOKEN" in arg or "GH_TOKEN" in arg for arg in argv)
+    assert not any(
+        "OPENBAO" in arg
+        or "APP_KEY" in arg
+        or "SSH_AUTH_SOCK" in arg
+        or "DOCKER_HOST" in arg
+        or "CE_EGRESS_BROKER_CONFIG" in arg
+        for arg in argv
+    )
+
+
+def test_no_egress_broker_mount_when_socket_unset() -> None:
+    argv = dry_run_argv(run_wrapper("tui"))
+
+    assert not any("CE_EGRESS_BROKER_SOCKET=" in arg for arg in argv)
+    assert not any("CE_SEAT_ID=" in arg for arg in argv)
+    assert not any(
+        arg.startswith("type=bind,") and "egress" in arg.lower() for arg in argv
+    )
+
+
+def test_egress_broker_socket_absent_fails_closed_before_docker_run_under_nondry_run(
+    tmp_path: Path,
+) -> None:
+    missing_socket = "/run/user/1000/creator-engine/egress-broker/missing.sock"
+    result = run_live_wrapper_with_fake_docker(
+        tmp_path,
+        "tui",
+        CE_VPS_SEAT_ID="dev-3",
+        CE_VPS_EGRESS_BROKER_SOCKET=missing_socket,
+    )
+
+    assert result.returncode == 66
+    assert f"egress broker socket not found: {missing_socket}" in result.stderr
+    assert "unexpected docker invocation" not in result.stderr
