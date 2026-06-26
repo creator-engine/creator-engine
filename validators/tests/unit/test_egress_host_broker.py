@@ -5,10 +5,17 @@ host-owned courier. Tests inject all live boundaries, so no real gh/git/network 
 """
 
 import json
+import socket
+import threading
+import time
 
 from creator_engine_validator.forge.scoped_token import ScopedToken
 from egress_broker.config import load_broker_config
-from egress_broker.host_broker import handle_self_push_json_line, handle_self_push_request
+from egress_broker.host_broker import (
+    handle_self_push_json_line,
+    handle_self_push_request,
+    serve_self_push_unix_socket,
+)
 from egress_broker.policy import CommitFacts
 
 _GOOD_FACTS = CommitFacts(
@@ -340,3 +347,77 @@ def test_json_line_seam_returns_one_secret_free_response_line(tmp_path):
     assert response["status"] == 200
     assert response["installation_id"] == 242
     assert _SENTINEL not in raw
+
+
+def test_serve_unix_socket_half_closed_client(tmp_path):
+    socket_path = tmp_path / "self-push.sock"
+    courier_started = threading.Event()
+    release_response = threading.Event()
+    server_exceptions = []
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        if len(courier_calls) == 1:
+            courier_started.set()
+            assert release_response.wait(timeout=2)
+        return type(
+            "Result",
+            (),
+            {
+                "seat_id": request.seat_id,
+                "branch": request.branch,
+                "head_sha": _GOOD_FACTS.head_sha,
+                "allowed": True,
+                "applied": True,
+                "pushed": True,
+                "pr_number": 242,
+                "installation_id": 242,
+            },
+        )()
+
+    def run_server():
+        try:
+            serve_self_push_unix_socket(
+                socket_path,
+                config=_config(tmp_path),
+                broker_seat_id="dev-4",
+                host_repo_path="/host/workspaces/creator-engine",
+                apply_default=True,
+                once=False,
+                courier_fn=fake_courier,
+            )
+        except Exception as exc:  # pragma: no cover - asserted through server_exceptions
+            server_exceptions.append(exc)
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    deadline = time.monotonic() + 2
+    while not socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert socket_path.exists()
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.connect(str(socket_path))
+        client.sendall((json.dumps(_request()) + "\n").encode("utf-8"))
+        assert courier_started.wait(timeout=2)
+
+    release_response.set()
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(2)
+        client.connect(str(socket_path))
+        client.sendall((json.dumps(_request()) + "\n").encode("utf-8"))
+        data = b""
+        while b"\n" not in data:
+            chunk = client.recv(65536)
+            assert chunk
+            data += chunk
+
+    response = json.loads(data.decode("utf-8"))
+    assert response["status"] == 200
+    assert response["pr_number"] == 242
+    assert courier_calls == ["ce242-live-self-push", "ce242-live-self-push"]
+    assert server_exceptions == []
+    assert server_thread.is_alive()

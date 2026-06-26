@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import socket
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -202,7 +203,13 @@ def serve_self_push_unix_socket(
                     courier_fn=courier_fn,
                     **host_courier_options,
                 )
-                conn.sendall(response.encode("utf-8"))
+                try:
+                    conn.sendall(response.encode("utf-8"))
+                except (BrokenPipeError, OSError):
+                    print(
+                        "[ce-egress-self-push] client disconnected before response; dropping connection",
+                        file=sys.stderr,
+                    )
             if once:
                 break
 
