@@ -100,6 +100,7 @@ DEFAULT_AGENT_REACTION_SIGNALS = (
     "codex rollout",
     "session rollout",
 )
+CE_HERDR_AGENT_REACTION_SIGNALS_ENV = "CE_HERDR_AGENT_REACTION_SIGNALS"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -149,6 +150,12 @@ def _compile_agent_reaction_re(signals: Sequence[str]) -> re.Pattern[str]:
         )
     patterns = [_reaction_signal_pattern(signal) for signal in signals]
     return re.compile("|".join(patterns), re.IGNORECASE)
+
+
+def _agent_reaction_signals_from_env(value: str | None) -> tuple[str, ...]:
+    if value is None or not value.strip():
+        return ()
+    return tuple(part for raw_part in value.split(",") if (part := raw_part.strip()))
 
 
 AGENT_REACTION_RE = _compile_agent_reaction_re(DEFAULT_AGENT_REACTION_SIGNALS)
@@ -325,6 +332,7 @@ class HerdrSession:
         steer_lock_heartbeat_interval_s: float | None = None,
         clock: Callable[[], float] = time.time,
         agent_reaction_signals: Sequence[str] | None = None,
+        extra_agent_reaction_signals: Sequence[str] | None = None,
     ) -> None:
         """Create a controller-side herdr session.
 
@@ -332,16 +340,32 @@ class HerdrSession:
         strings used by :meth:`deliver_brief` to detect post-dispatch agent
         activity. The configured sequence replaces the default set entirely;
         pass ``None`` to use :data:`DEFAULT_AGENT_REACTION_SIGNALS`.
+
+        ``extra_agent_reaction_signals`` and comma-separated literals from
+        :envvar:`CE_HERDR_AGENT_REACTION_SIGNALS` are appended to whichever base
+        set is selected, letting harness operators extend detection without
+        code changes.
         """
         #: The substrate-owned herdr control socket. Held by the CE
         #: substrate/controller, never handed to a governed seat (§2/§7).
         self._socket_path = Path(socket_path)
         self._herdr_binary = str(herdr_binary)
         self._runner = runner if runner is not None else SubprocessHerdrCommandRunner()
-        reaction_signals = (
+        base_reaction_signals = (
             DEFAULT_AGENT_REACTION_SIGNALS
             if agent_reaction_signals is None
             else agent_reaction_signals
+        )
+        if not base_reaction_signals:
+            raise HerdrCommandError(
+                "agent reaction signals must be a non-empty sequence of literal strings"
+            )
+        reaction_signals = (
+            *base_reaction_signals,
+            *_agent_reaction_signals_from_env(
+                os.environ.get(CE_HERDR_AGENT_REACTION_SIGNALS_ENV)
+            ),
+            *(extra_agent_reaction_signals or ()),
         )
         self._agent_reaction_re = _compile_agent_reaction_re(
             reaction_signals
