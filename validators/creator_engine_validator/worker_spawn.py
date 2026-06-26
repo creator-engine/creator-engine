@@ -33,6 +33,25 @@ WORKER_ROLES: dict[str, str] = {
     "reviewer": "review",
     "verification": "audit",
 }
+GOVERNED_WORKER_ROLES = frozenset({"researcher", "implementer", "reviewer"})
+WORKER_TIER_CONTRACT_SCHEMA = "schemas/worker-tier-contract.schema.yaml"
+WORKER_TIER_FOREMAN_DISPATCH_REF = "docs/contracts/harness-seat-contract.md#foreman_dispatch"
+WORKER_TIER_PROHIBITED_CAPABILITIES = (
+    "push",
+    "self_approve",
+    "create_issues",
+    "task_other_seats",
+)
+WORKER_TIER_ROLE_SURFACE_REFS = {
+    "researcher": ".claude/agents/architect_research.md",
+    "implementer": ".claude/agents/implementer.md",
+    "reviewer": ".claude/agents/reviewer.md",
+}
+WORKER_TIER_DECLARED_CAPABILITIES = {
+    "researcher": ("read", "research", "structured_result"),
+    "implementer": ("read", "edit", "test", "structured_result"),
+    "reviewer": ("read", "review", "structured_result"),
+}
 DEFAULT_MAX_DEPTH = 3
 WORKER_RECORD_REL = Path(".ce/state/workers")
 
@@ -136,7 +155,7 @@ class WorkerSpawnPlan:
 
     def to_record(self) -> dict[str, Any]:
         command = list(self.launch_command)
-        return {
+        record = {
             "kind": "ce-worker-spawn-record",
             "schema_version": "1",
             "worker_id": self.worker_id,
@@ -158,6 +177,10 @@ class WorkerSpawnPlan:
             "launch_state": "dry_run" if self.dry_run else "planned",
             "seat_refs": {},
         }
+        contract = governed_worker_contract(role=self.role, max_depth=self.max_depth)
+        if contract is not None:
+            record["governed_worker_contract"] = contract
+        return record
 
 
 @dataclass(frozen=True)
@@ -228,6 +251,41 @@ def _hash_bytes(data: bytes) -> str:
 
 def _hash_text(text: str) -> str:
     return _hash_bytes(text.encode("utf-8"))
+
+
+def governed_worker_contract(*, role: str, max_depth: int = DEFAULT_MAX_DEPTH) -> dict[str, Any] | None:
+    """Return the ce-ops#244 machine-readable contract for governed worker roles."""
+    normalized_role = role.strip().lower()
+    if normalized_role not in GOVERNED_WORKER_ROLES:
+        return None
+    return {
+        "schema_version": "1",
+        "contract_ref": WORKER_TIER_CONTRACT_SCHEMA,
+        "tier": "worker",
+        "execution_model": "in_process_sub_agent",
+        "role": normalized_role,
+        "role_surface_ref": WORKER_TIER_ROLE_SURFACE_REFS[normalized_role],
+        "foreman_dispatch_ref": WORKER_TIER_FOREMAN_DISPATCH_REF,
+        "inherited_governance": {
+            "ring": "ring_1",
+            "refusal": "inherited",
+            "envelope": "inherited",
+            "ambient_credentials": "none",
+        },
+        "declared_capabilities": list(WORKER_TIER_DECLARED_CAPABILITIES[normalized_role]),
+        "prohibited_capabilities": list(WORKER_TIER_PROHIBITED_CAPABILITIES),
+        "bounds": {
+            "max_depth": int(max_depth),
+            "may_push": False,
+            "may_self_approve": False,
+            "may_create_issues": False,
+            "may_task_other_seats": False,
+            "may_receive_ambient_credentials": False,
+        },
+        "result_protocol": {
+            "returns": "structured_result_to_foreman",
+        },
+    }
 
 
 def _slug(value: str) -> str:

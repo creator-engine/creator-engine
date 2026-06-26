@@ -77,6 +77,7 @@ from . import connector_substrate as connector_substrate  # noqa: E402,F401
 from . import extension_hook_contract as extension_hook_contract  # noqa: E402,F401
 from . import harness_seat_contract as harness_seat_contract  # noqa: E402,F401
 from . import seat_class_policy as seat_class_policy  # noqa: E402,F401
+from . import worker_tier_contract as worker_tier_contract  # noqa: E402,F401
 from . import reviewer_authority_envelope as reviewer_authority_envelope  # noqa: E402,F401
 from . import ce_computer_use_authority_envelope as ce_computer_use_authority_envelope  # noqa: E402,F401
 from . import ce_runtime_policy as ce_runtime_policy  # noqa: E402,F401

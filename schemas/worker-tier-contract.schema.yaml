@@ -1,0 +1,175 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/worker-tier-contract.schema.yaml"
+title: "Creator Engine governed worker tier contract"
+description: >-
+  ce-ops#244 shape for first-class governed in-process workers spawned by a
+  foreman. The worker carries inherited Ring-1/refusal/envelope governance, no
+  ambient credentials, bounded capabilities, and a structured result protocol.
+  This schema validates worker spawn records by requiring the embedded
+  governed_worker_contract block; it references, but does not duplicate, the
+  foreman dispatch contract.
+type: object
+required:
+  - kind
+  - schema_version
+  - worker_id
+  - role
+  - lane_kind
+  - depth
+  - max_depth
+  - governed_worker_contract
+properties:
+  kind:
+    type: string
+    const: ce-worker-spawn-record
+  schema_version:
+    type: string
+    const: "1"
+  worker_id:
+    type: string
+    minLength: 1
+  role:
+    type: string
+    enum: [researcher, implementer, reviewer]
+  lane_kind:
+    type: string
+    enum: [read-only, implementation, review]
+  depth:
+    type: integer
+    minimum: 1
+  max_depth:
+    type: integer
+    minimum: 1
+  governed_worker_contract:
+    $ref: "#/$defs/governed_worker_contract"
+additionalProperties: true
+$defs:
+  capability:
+    type: string
+    enum:
+      - read
+      - research
+      - edit
+      - test
+      - review
+      - structured_result
+      - push
+      - self_approve
+      - create_issues
+      - task_other_seats
+  governed_worker_contract:
+    type: object
+    required:
+      - schema_version
+      - contract_ref
+      - tier
+      - execution_model
+      - role
+      - role_surface_ref
+      - foreman_dispatch_ref
+      - inherited_governance
+      - declared_capabilities
+      - prohibited_capabilities
+      - bounds
+      - result_protocol
+    additionalProperties: false
+    properties:
+      schema_version:
+        type: string
+        const: "1"
+      contract_ref:
+        type: string
+        const: schemas/worker-tier-contract.schema.yaml
+      tier:
+        type: string
+        const: worker
+      execution_model:
+        type: string
+        const: in_process_sub_agent
+      role:
+        type: string
+        enum: [researcher, implementer, reviewer]
+      role_surface_ref:
+        type: string
+        enum:
+          - .claude/agents/architect_research.md
+          - .claude/agents/implementer.md
+          - .claude/agents/reviewer.md
+      foreman_dispatch_ref:
+        type: string
+        const: docs/contracts/harness-seat-contract.md#foreman_dispatch
+      inherited_governance:
+        type: object
+        required: [ring, refusal, envelope, ambient_credentials]
+        additionalProperties: false
+        properties:
+          ring:
+            type: string
+            const: ring_1
+          refusal:
+            type: string
+            const: inherited
+          envelope:
+            type: string
+            const: inherited
+          ambient_credentials:
+            type: string
+            const: none
+      declared_capabilities:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/capability"
+      prohibited_capabilities:
+        type: array
+        minItems: 4
+        uniqueItems: true
+        contains:
+          const: push
+        allOf:
+          - contains:
+              const: self_approve
+          - contains:
+              const: create_issues
+          - contains:
+              const: task_other_seats
+        items:
+          $ref: "#/$defs/capability"
+      bounds:
+        type: object
+        required:
+          - max_depth
+          - may_push
+          - may_self_approve
+          - may_create_issues
+          - may_task_other_seats
+          - may_receive_ambient_credentials
+        additionalProperties: false
+        properties:
+          max_depth:
+            type: integer
+            minimum: 1
+          may_push:
+            type: boolean
+            const: false
+          may_self_approve:
+            type: boolean
+            const: false
+          may_create_issues:
+            type: boolean
+            const: false
+          may_task_other_seats:
+            type: boolean
+            const: false
+          may_receive_ambient_credentials:
+            type: boolean
+            const: false
+      result_protocol:
+        type: object
+        required: [returns]
+        additionalProperties: false
+        properties:
+          returns:
+            type: string
+            const: structured_result_to_foreman

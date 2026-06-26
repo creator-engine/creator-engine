@@ -1027,10 +1027,17 @@ def _valid_worker_delegation_record(
     posture_root: str | None,
 ) -> dict | None:
     try:
+        from .checks.worker_tier_contract import validate_worker_tier_contract_record
+    except Exception:
+        return None
+    try:
         record = _yaml_safe_load_text(path.read_text(encoding="utf-8"))
     except Exception:
         return None
     if not isinstance(record, dict):
+        return None
+    repo_root = Path(posture_root) if posture_root is not None else None
+    if validate_worker_tier_contract_record(record, path, repo_root=repo_root):
         return None
     if record.get("kind") != "ce-worker-spawn-record":
         return None

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from creator_engine_validator import hook_check
+from creator_engine_validator import hook_check, worker_spawn
 from creator_engine_validator.checks import mutation_class
 from creator_engine_validator.checks import pane_registry
 
@@ -521,8 +521,15 @@ def _write_worker_record(
     lane_kind: str = "implementation",
     launch_state: str = "launched",
     worktree_path: Path | None = None,
+    include_contract: bool = True,
 ) -> Path:
     import yaml
+
+    surface_ref = worker_spawn.WORKER_TIER_ROLE_SURFACE_REFS.get(role)
+    if surface_ref is not None:
+        surface_path = root / surface_ref
+        surface_path.parent.mkdir(parents=True, exist_ok=True)
+        surface_path.write_text(f"# {role}\n", encoding="utf-8")
 
     path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -548,6 +555,10 @@ def _write_worker_record(
         "launch_state": launch_state,
         "seat_refs": {"seat_lifecycle_state": "active"},
     }
+    if include_contract:
+        contract = worker_spawn.governed_worker_contract(role=role, max_depth=3)
+        if contract is not None:
+            record["governed_worker_contract"] = contract
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
 
@@ -655,6 +666,25 @@ def test_foreman_worker_routed_implementation_allows_with_worker_id_state_ref(tm
 
     assert ctx.worker_delegation is not None
     assert decision.decision == "allow"
+
+
+def test_foreman_worker_routed_implementation_missing_worker_contract_fails_closed(tmp_path):
+    worker_ref = _write_worker_record(tmp_path, include_contract=False)
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_record_ref": str(worker_ref),
+    }
+
+    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "foreman_delegation_required" in decision.reason
 
 
 @pytest.mark.parametrize(
