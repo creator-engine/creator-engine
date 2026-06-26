@@ -24,6 +24,8 @@ import yaml
 from creator_engine_validator import brain_runtime, lane_runtime
 from creator_engine_validator.checks.pane_registry import run as pane_registry_run
 from creator_engine_validator.tmux_adapter import TmuxAdapter, TmuxPane
+pytestmark = pytest.mark.slow
+
 
 
 class DoubleAdapter:

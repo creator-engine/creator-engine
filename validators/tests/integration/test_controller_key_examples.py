@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from creator_engine_validator.cli import main
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_scan_controller_keys_accepts_well_formed_examples(capsys):

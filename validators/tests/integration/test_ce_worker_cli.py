@@ -15,6 +15,8 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli, worker_runtime
+pytestmark = pytest.mark.slow
+
 
 
 _POLICY_SHA = "a" * 64

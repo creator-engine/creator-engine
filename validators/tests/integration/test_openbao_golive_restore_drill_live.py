@@ -14,6 +14,8 @@ from creator_engine_validator.openbao_golive import (
     resolve_live_openbao_binary,
     validate_live_openbao_binary,
 )
+pytestmark = pytest.mark.slow
+
 
 
 _RESTORE_DRILL_LIVE_EXPECTATIONS = openbao_live_env_expectations("restore-drill")

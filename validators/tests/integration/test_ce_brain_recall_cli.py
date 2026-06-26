@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import brain_runtime, ce_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def _ingest(tmp_path: Path) -> tuple[Path, Path]:

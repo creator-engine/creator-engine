@@ -10,6 +10,10 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import ce_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def _fake_codex(tmp_path: Path, monkeypatch) -> Path:

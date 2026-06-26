@@ -26,6 +26,8 @@ from creator_engine_validator.runner import (
     SandboxCreateSpec,
 )
 from creator_engine_validator.runner.ring1_tool_guard import Ring1ToolGuardConfig
+pytestmark = pytest.mark.slow
+
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

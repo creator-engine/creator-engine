@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import bootstrap_runtime, ce_cli
+pytestmark = pytest.mark.slow
+
 
 
 def _python314() -> str:

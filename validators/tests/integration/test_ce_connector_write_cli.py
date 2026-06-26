@@ -14,6 +14,8 @@ import yaml
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator import connector_runtime
+pytestmark = pytest.mark.slow
+
 
 
 def _connector(tmp_path: Path, **override) -> Path:

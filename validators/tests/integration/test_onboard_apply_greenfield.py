@@ -6,6 +6,10 @@ import json
 
 from creator_engine_validator import onboard_apply
 from validators.tests.unit.test_onboard_apply import FakeDriver, _apply
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_onboard_apply_greenfield_converges_with_fake_driver(tmp_path):

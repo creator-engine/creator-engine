@@ -18,6 +18,8 @@ import yaml
 
 from creator_engine_validator.checks.pane_registry import validate_pane_registry_record
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 
 # ---------------------------------------------------------------------------

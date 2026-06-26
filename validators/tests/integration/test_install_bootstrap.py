@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import v3_installer
+pytestmark = pytest.mark.slow
+
 
 
 requires_ssh_keygen = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="stock ssh-keygen not available")

@@ -26,6 +26,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import brain_bootstrap
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRETOOLUSE = REPO_ROOT / ".claude/hooks/ce-pretooluse.sh"

@@ -1,4 +1,8 @@
 from creator_engine_validator.cli import main
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_a2_mutation_class_listed_via_cli(capsys):

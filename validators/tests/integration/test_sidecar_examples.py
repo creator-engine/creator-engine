@@ -1,4 +1,8 @@
 from creator_engine_validator.cli import main
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_us2_well_formed_examples_pass(capsys):

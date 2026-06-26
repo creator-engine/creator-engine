@@ -6,6 +6,8 @@ import pytest
 
 from creator_engine_validator.checks import seat_class_policy as chk
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

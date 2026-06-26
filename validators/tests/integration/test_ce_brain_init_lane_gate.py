@@ -21,6 +21,8 @@ import yaml
 
 from creator_engine_validator import brain_runtime, ce_cli
 from creator_engine_validator.tmux_adapter import TmuxPane
+pytestmark = pytest.mark.slow
+
 
 
 class FakeAdapter:

@@ -10,6 +10,10 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import ce_cli, cli as validator_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_ce_check_passes_wellformed_examples(repo_root: Path, capsys):

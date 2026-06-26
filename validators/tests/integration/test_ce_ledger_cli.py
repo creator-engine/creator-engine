@@ -12,6 +12,10 @@ from pathlib import Path
 import yaml
 
 from creator_engine_validator import ce_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 CONTROLLER = "hermes-primary"

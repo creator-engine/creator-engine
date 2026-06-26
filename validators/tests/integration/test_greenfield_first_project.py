@@ -7,6 +7,10 @@ from pathlib import Path
 
 from creator_engine_validator import v3_cli
 from validators.tests.unit.test_v3_cli import _GREENFIELD_ANSWERS_YAML, _brownfield_cli_probe, _spec
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_greenfield_onboard_plan_is_read_only_and_bootstrap_not_ship(tmp_path, capsys, monkeypatch):

@@ -25,6 +25,8 @@ from creator_engine_validator.secret_identity import (
     SecretRef,
     SecretRequest,
 )
+pytestmark = pytest.mark.slow
+
 
 
 def _free_port() -> int:

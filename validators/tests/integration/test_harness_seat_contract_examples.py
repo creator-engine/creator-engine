@@ -12,6 +12,8 @@ import pytest
 from creator_engine_validator.checks import extension_hook_contract as e
 from creator_engine_validator.checks import harness_seat_contract as h
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LEGACY_EXAMPLES = REPO_ROOT / "validators" / "examples" / "harness-seat-contract"

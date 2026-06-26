@@ -65,17 +65,15 @@ Parallelism is opt-in. `PYTHONPATH=validators` is required, and every form runs
 
 ```bash
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv-test/bin/python}"
-# 1. Full suite, serial — minimal environment, no xdist needed.
+# 1. Fast/unit tier — inner loop only: excludes both the memoized
+#    `check-examples` sweep and slow integration modules.
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q -m "not sweep and not slow"
+
+# 2. Slow/integration tier — exercises modules under validators/tests/integration.
+PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q -m "slow"
+
+# 3. Full merge gate — no tier marker deselection; CI may add xdist flags.
 PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q
-
-# 2. Full suite, parallel — THE merge-green gate. CI runs this with
-#    CE_VALIDATOR_PYTHON pointing at the job interpreter.
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q -n auto --dist loadgroup
-
-# 3. Fast lane — inner loop only: deselects the memoized `check-examples` sweep
-#    (its consumers carry the auto-applied `sweep` marker), cutting the wall-time
-#    floor. Use while iterating on an unrelated unit.
-PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m pytest validators/tests -q -n auto --dist loadgroup -m "not sweep"
 ```
 
 #### Validator-Python (`CE_VALIDATOR_PYTHON`)
@@ -93,9 +91,11 @@ Do not hardcode worktree-relative `.venv/bin/python`; use `$CE_VALIDATOR_PYTHON`
 
 The `sweep` marker is derived automatically at collection time from every test that
 requests the session-scoped `check_examples_result` fixture — there is no
-hand-maintained list to drift. **The fast lane (`-m "not sweep"`) is NEVER valid
-green-gate evidence**: it skips the example-sweep coverage on purpose. Only the
-full-suite parallel run (form 2) is a green-gate result; CI runs exactly that.
+hand-maintained list to drift. The `slow` marker is applied at module scope to
+integration tests. **The fast/unit tier (`-m "not sweep and not slow"`) is NEVER
+valid green-gate evidence**: it skips the example-sweep and integration coverage
+on purpose. Only the full merge gate (form 3, with any CI-owned parallel flags)
+is a green-gate result.
 
 ## Invocation
 

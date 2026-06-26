@@ -24,6 +24,8 @@ import yaml
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator.checks import ce_event_block as block_check
+pytestmark = pytest.mark.slow
+
 
 RECORDED = "2026-05-30T16:00:00Z"
 

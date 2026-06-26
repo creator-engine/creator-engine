@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

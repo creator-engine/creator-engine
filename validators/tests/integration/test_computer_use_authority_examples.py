@@ -5,6 +5,8 @@ import pytest
 
 from creator_engine_validator.checks import ce_computer_use_authority_envelope as c
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "validators" / "examples" / "computer-use-authority-envelope"

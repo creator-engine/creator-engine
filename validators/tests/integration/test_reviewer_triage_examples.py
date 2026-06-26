@@ -6,6 +6,8 @@ import pytest
 
 from creator_engine_validator.loader import load_yaml
 from creator_engine_validator.schema import validate_with_schema
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "examples" / "reviewer-triage"

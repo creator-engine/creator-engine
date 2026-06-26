@@ -78,6 +78,7 @@ live_systemd = pytest.mark.skipif(
 )
 
 pytestmark = [
+    pytest.mark.slow,
     pytest.mark.xdist_group("user-systemd"),
 ]
 
