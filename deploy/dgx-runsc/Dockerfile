@@ -52,7 +52,9 @@ RUN set -eux; \
       ca-certificates \
       git \
       procps \
+      python-is-python3 \
       python3 \
+      python3-pip \
       tini; \
     rm -rf /var/lib/apt/lists/*; \
     group_name="$(getent group "${CE_DGX_GID}" | cut -d: -f1 || true)"; \
@@ -64,6 +66,30 @@ RUN set -eux; \
     install -d -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /workspace/creator-engine; \
     install -d -m 0700 -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /run/creator-engine/herdr; \
     git config --system --add safe.directory /workspace/creator-engine
+
+RUN set -eux; \
+    python -m pip install \
+      --break-system-packages \
+      --no-cache-dir \
+      --disable-pip-version-check \
+      attrs==26.1.0 \
+      build==1.3.0 \
+      execnet==2.1.2 \
+      iniconfig==2.3.0 \
+      jsonschema==4.26.0 \
+      jsonschema-specifications==2025.9.1 \
+      packaging==26.2 \
+      pluggy==1.6.0 \
+      Pygments==2.20.0 \
+      pyproject_hooks==1.2.0 \
+      pytest==9.0.2 \
+      pytest-xdist==3.8.0 \
+      PyYAML==6.0.3 \
+      referencing==0.37.0 \
+      rpds-py==0.30.0 \
+      setuptools==82.0.1 \
+      wheel==0.47.0; \
+    python -m pytest --co -q -n auto --dist loadgroup --help > /dev/null 2>&1 && echo "pytest-xdist smoke: OK"
 
 COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint
