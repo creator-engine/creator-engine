@@ -337,6 +337,42 @@ def test_launch_refuses_tampered_brain_ledger_before_spawn(tmp_path):
     assert not (repo / ".ce" / "state" / "dispatches").exists()
 
 
+def test_launch_refuses_missing_foreman_dispatch_contract_before_spawn(monkeypatch, tmp_path):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(launch_runtime.brain_bootstrap, "FOREMAN_DISPATCH_CONTRACT", None)
+
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
+        launch_runtime.launch(
+            harness="claude",
+            session="missing-foreman-contract",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "foreman_dispatch_contract must be a mapping" in str(ei.value)
+    assert adapter.spawned == []
+    assert not (tmp_path / ".ce" / "state" / "dispatches").exists()
+
+
+def test_launch_refuses_malformed_foreman_dispatch_contract_before_spawn(monkeypatch, tmp_path):
+    adapter = FakeAdapter()
+    malformed = json.loads(json.dumps(launch_runtime.brain_bootstrap.FOREMAN_DISPATCH_CONTRACT))
+    malformed["roles"]["reviewer"]["dispatch_surface"] = []
+    monkeypatch.setattr(launch_runtime.brain_bootstrap, "FOREMAN_DISPATCH_CONTRACT", malformed)
+
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
+        launch_runtime.launch(
+            harness="claude",
+            session="malformed-foreman-contract",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "roles.reviewer.dispatch_surface" in str(ei.value)
+    assert adapter.spawned == []
+    assert not (tmp_path / ".ce" / "state" / "dispatches").exists()
+
+
 def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     adapter = FakeAdapter()
     result = launch_runtime.launch(
@@ -353,6 +389,13 @@ def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     assert payload["kind"] == "brain-bootstrap-context"
     assert payload["context"]["role"] == "controller"
     assert payload["context"]["seat_class"] == "foreman"
+    dispatch_contract = payload["operating_mode"]["foreman_dispatch_contract"]
+    assert dispatch_contract["launch_pinned"] is True
+    assert set(dispatch_contract["roles"]) == {
+        "researcher",
+        "implementer",
+        "reviewer",
+    }
     wrapper = (Path(result.events_ref).parent / "sentinel-wrapper.sh").read_text(encoding="utf-8")
     assert f"export CE_BRAIN_BOOTSTRAP_REF={shlex.quote(str(ref))}" in wrapper
     assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.plan.brain_bootstrap_sha256}" in wrapper
