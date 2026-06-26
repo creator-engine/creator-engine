@@ -12,7 +12,22 @@
     "authorized_emails": [],
     "authorized_logins": ["cedev1vps-cmd", "ubuntuaws745-cmyk", "ce-dev-3", "cedev4vps-coder"],
     "max_pushes_per_window": 30,
-    "window_seconds": 3600
+    "window_seconds": 3600,
+    "_comment_require_signed_commits": "require_signed_commits: omit or set true (default) for seats that can sign commits (GPG/SSH key available). Set false ONLY for contained seats that run in zero-key environments (e.g. gVisor sandboxes) where commit signing is not possible. When false, the signature gate is skipped but ALL other gates remain enforced: author allow-list, branch namespace, forbidden-branch, rate-limit, head-sha well-formedness, and preconditions. The broker's own authorization boundary is the trust boundary.",
+    "require_signed_commits": true
+  },
+
+  "_comment_contained_seat_example": "Example policy override for a contained seat that cannot sign (gVisor zero-key): set require_signed_commits=false in the policy block. All other gates — author allow-list, branch namespace, forbidden-branch, rate-limit — remain enforced.",
+
+  "_policy_contained_seat_example": {
+    "base_branch": "main",
+    "allowed_branch_namespaces": ["ce-"],
+    "forbidden_branches": ["main", "master", "develop", "gh-pages", "release"],
+    "authorized_emails": [],
+    "authorized_logins": ["ce-dev-3"],
+    "max_pushes_per_window": 20,
+    "window_seconds": 3600,
+    "require_signed_commits": false
   },
 
   "seats": {

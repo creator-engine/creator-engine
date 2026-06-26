@@ -150,6 +150,12 @@ def _build_policy(raw: object) -> BrokerPolicy:
         raise BrokerConfigError("policy.window_seconds must be an integer") from None
     if window <= 0:
         raise BrokerConfigError("policy.window_seconds must be positive")
+    # require_signed_commits: fail-closed default True when key is absent. Explicitly False
+    # (boolean) is the only accepted opt-out; any other falsy value (null, 0, "") keeps the
+    # default True so a typo or missing key is never silently permissive.
+    raw_rsc = raw.get("require_signed_commits")
+    require_signed_commits = False if raw_rsc is False else True
+
     return BrokerPolicy(
         base_branch=base_branch,
         allowed_branch_namespaces=namespaces,
@@ -158,6 +164,7 @@ def _build_policy(raw: object) -> BrokerPolicy:
         authorized_logins=logins,
         max_pushes_per_window=cap,
         window_seconds=window,
+        require_signed_commits=require_signed_commits,
     )
 
 
