@@ -38,6 +38,8 @@ from creator_engine_validator import (
     pickup,
     seat_lifecycle,
 )
+pytestmark = pytest.mark.slow
+
 
 # A production-length pickup lane_id is what the belt actually mints
 # (``pickup._lane_id`` → ``pickup-<repo-with-slashes-as-dashes>-<n>-<run_id>``);

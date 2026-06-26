@@ -15,6 +15,8 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WELL_FORMED = REPO_ROOT / "examples" / "well-formed" / "evidence-fan-in"

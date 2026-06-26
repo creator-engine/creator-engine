@@ -15,6 +15,8 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli
+pytestmark = pytest.mark.slow
+
 
 
 def _git(args, cwd: Path):

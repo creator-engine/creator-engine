@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import brain_recall_surface, ce_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 AS_OF = "2026-06-22T00:00:00Z"
 HYDRATION_QUERY = "brain recall hydration additive pointers core unchanged no inlined text"

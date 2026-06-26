@@ -9,6 +9,8 @@ import pytest
 
 from creator_engine_validator.checks import reviewer_authority_envelope as r
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "validators" / "examples" / "reviewer-authority-envelope"

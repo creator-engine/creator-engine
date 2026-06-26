@@ -32,11 +32,14 @@ from creator_engine_validator.runner.ring1_tool_guard import (
     build_runtime,
 )
 
-pytestmark = pytest.mark.skipif(
-    not fm.fs_mediation_available(),
-    reason="Landlock not available on this host; honest fail-closed fallback is "
-    "covered by tests/unit/test_fs_mediation.py",
-)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        not fm.fs_mediation_available(),
+        reason="Landlock not available on this host; honest fail-closed fallback is "
+        "covered by tests/unit/test_fs_mediation.py",
+    ),
+]
 
 
 def _read_probe(target: str) -> str:

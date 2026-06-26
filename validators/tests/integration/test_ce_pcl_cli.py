@@ -25,6 +25,8 @@ import pytest
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator.checks import pcl_record as pcl_check
+pytestmark = pytest.mark.slow
+
 
 RECORDED = "2026-05-31T16:48:41Z"
 

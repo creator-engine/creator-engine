@@ -16,6 +16,8 @@ import pytest
 
 from creator_engine_validator import brain_bootstrap
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

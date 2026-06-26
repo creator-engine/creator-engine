@@ -39,3 +39,9 @@ cockpit-serve = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["creator_engine_validator", "creator_engine_validator.*"]
+
+[tool.pytest.ini_options]
+markers = [
+  "slow: integration/live/long-running tests excluded from the fast unit lane",
+  "integration: tests that exercise CLI/runtime integration surfaces",
+]

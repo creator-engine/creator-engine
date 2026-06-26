@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import ce_cli, init_runtime
+pytestmark = pytest.mark.slow
+
 
 
 def _git(args, cwd: Path):

@@ -25,6 +25,8 @@ import pytest
 from creator_engine_validator.checks import state_version_record
 from creator_engine_validator.loader import LoaderError
 from creator_engine_validator.schema import load_schema
+pytestmark = pytest.mark.slow
+
 
 # A well-formed example whose check loads ONLY a RELATIVE package-schema constant
 # (``checks/state_version_record.py`` → ``SCHEMA = "schemas/state-version-record.schema.yaml"``)

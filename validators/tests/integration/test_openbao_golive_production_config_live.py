@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator.openbao_golive import openbao_live_env_expectations
+pytestmark = pytest.mark.slow
+
 
 
 @pytest.mark.skipif(

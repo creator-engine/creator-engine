@@ -8,6 +8,10 @@ from creator_engine_validator import brain_probe
 from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator import ce_cli
 from creator_engine_validator.checks import ce_brain_drift
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def _claim(value: str) -> str:

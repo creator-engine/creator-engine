@@ -1,6 +1,8 @@
 import pytest
 
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 
 def test_implementer_evidence_well_formed_example_passes(capsys):

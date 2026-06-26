@@ -11,6 +11,8 @@ import pytest
 
 from creator_engine_validator.checks import extension_hook_contract as e
 from creator_engine_validator.cli import main
+pytestmark = pytest.mark.slow
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "validators" / "examples" / "extension-hook-contract"

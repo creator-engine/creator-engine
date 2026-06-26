@@ -1,4 +1,8 @@
 from creator_engine_validator.cli import main
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_identity_well_formed_example_passes(capsys):

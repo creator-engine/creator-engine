@@ -30,6 +30,8 @@ import pytest
 import yaml
 
 from creator_engine_validator import ce_cli, fanin_runtime, integration_queue_dry_run as iq
+pytestmark = pytest.mark.slow
+
 
 
 def _git(args, cwd: Path):

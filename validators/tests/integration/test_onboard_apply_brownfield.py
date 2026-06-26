@@ -24,6 +24,10 @@ from validators.tests.unit.test_onboard_apply import (
     _brownfield_probe,
     _leg,
 )
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_onboard_apply_brownfield_adoption_opens_join_pr_with_fake_driver(tmp_path):

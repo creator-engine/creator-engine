@@ -11,6 +11,8 @@ from creator_engine_validator.runner.herdr_session import (
     HERDR_SOCKET_ENV,
     SubprocessHerdrCommandRunner,
 )
+pytestmark = pytest.mark.slow
+
 
 
 HERDR_LIVE_BINARY = Path(os.environ.get("HERDR_LIVE_BINARY", "/usr/local/bin/herdr"))

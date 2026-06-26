@@ -5,6 +5,10 @@ import sqlite3
 from pathlib import Path
 
 from creator_engine_validator import ce_cli
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 
 def test_ce_brain_ingest_cli_json_roundtrip(tmp_path: Path, monkeypatch, capsys):
