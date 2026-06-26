@@ -19,6 +19,9 @@ reviewed_artifact_refs:
 reviewed_diff_or_commit_ref: example/pre-merge-diff
 reviewer_identity_ref: tenants/example-tenant/reviewer/identity-record.yml
 reviewer_role_category: reviewer
+reviewer_model: reviewer-model-placeholder
+authorship_obfuscated: false
+adversarial_prompt: false
 review_mode: manual_human
 review_scope: >-
   In scope: the listed reviewed_artifact_refs and the diff range
