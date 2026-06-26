@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..grading_policy import approval_policy_sha
+
 if TYPE_CHECKING:
     from ..secret_identity import SecretIdentityBackend, SecretRequest
 
@@ -442,6 +444,21 @@ def issue_approval_capability(claims: ApprovalCapabilityClaims, secret: bytes | 
     )
     signature = _signature(payload_b64, secret_bytes)
     return f"{MARKER_PREFIX} {CAPABILITY_VERSION}.{payload_b64}.{signature}"
+
+
+def approval_capability_policy_sha(
+    *,
+    run_mode: str,
+    risk_tier: str,
+    policy_material: Mapping[str, Any] | None = None,
+) -> str:
+    """Derive the approval-wall policy digest bound to mode and risk tier."""
+
+    return approval_policy_sha(
+        run_mode=run_mode,
+        risk_tier=risk_tier,
+        policy_material=policy_material,
+    )
 
 
 def extract_approval_capability_marker(text: str | None) -> str | None:

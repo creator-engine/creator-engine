@@ -20,6 +20,9 @@ record and answer:
   (`reviewed_artifact_refs`, `reviewed_diff_or_commit_ref`);
 - which ratified reviewer identity authored the evidence
   (`reviewer_identity_ref`, `reviewer_role_category`);
+- which model-level independence attestation was recorded
+  (`reviewer_model`, `authorship_obfuscated`,
+  `adversarial_prompt`);
 - what review mode was used (`review_mode`);
 - what was in and out of scope (`review_scope`);
 - which mutation classes were touched and which prohibited
@@ -60,6 +63,9 @@ type rule below applies.
 | `reviewed_diff_or_commit_ref` | string | non-empty diff range or commit-ish reference. |
 | `reviewer_identity_ref` | string | non-empty repo-relative path to a ratified reviewer identity record. |
 | `reviewer_role_category` | const | fixed to `reviewer`. |
+| `reviewer_model` | string | non-empty reviewer-supplied model identifier used for independence checks; evidence attestation only, not a normative upstream product/model binding. |
+| `authorship_obfuscated` | boolean | true when the reviewer received an authorship-obfuscated prompt or packet for this review. |
+| `adversarial_prompt` | boolean | true when the review prompt explicitly asked for adversarial blocking-finding discovery rather than agreement or approval. |
 | `review_mode` | enum | one of `manual_human`, `manual_agent`, `mixed_human_and_agent`. |
 | `review_scope` | string | non-empty in/out-of-scope statement. |
 | `mutation_classes_under_review` | array<string> | non-empty; unique; each entry kebab-case slug. |
@@ -121,7 +127,8 @@ Per [`../delivery/REVIEW_EVIDENCE_TEMPLATE.md`](../delivery/REVIEW_EVIDENCE_TEMP
 - a hard-coded reviewer product, model, CLI, SaaS account, runner,
   source-host application, bot slug, or QA harness as a normative
   upstream binding (concrete selection is a deployment-time overlay
-  decision);
+  decision). `reviewer_model` is permitted only as a reviewer-supplied
+  evidence attestation for mode-aware independence checks;
 - real emails, tokens, secrets, credentials, source-host
   installation ids, durable actor ids, app slugs, or account names;
 - machine-local absolute paths, local terminal identifiers, local
