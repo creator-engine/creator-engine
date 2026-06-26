@@ -57,7 +57,7 @@ def _write_codex_pack(
 ):
     hooks = root / ".codex" / "hooks"
     hooks.mkdir(parents=True)
-    matcher = matcher or "^(Bash|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
+    matcher = matcher or "^(Bash|Read|apply_patch|Edit|Write|MultiEdit|mcp__.*)$"
     (root / ".codex" / "requirements.toml").write_text(
         f"allow_managed_hooks_only = {str(managed_only).lower()}\n\n"
         "[features]\n"
@@ -224,7 +224,7 @@ def test_confirm_codex_managed_hook_fails_without_hooks_feature_pin(tmp_path):
 
 
 def test_confirm_codex_managed_hook_fails_when_matcher_misses_mcp(tmp_path):
-    _write_codex_pack(tmp_path, matcher="^(Bash|apply_patch|Edit|Write|MultiEdit)$")
+    _write_codex_pack(tmp_path, matcher="^(Bash|Read|apply_patch|Edit|Write|MultiEdit)$")
     c = hpc.confirm_codex_managed_hook_pack(tmp_path, validator_probe=lambda: True)
     assert c.pretooluse_registered is False
     assert c.confirmed is False
