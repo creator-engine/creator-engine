@@ -1255,9 +1255,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_pr.add_argument(
         "--declared-work-class",
-        required=True,
         choices=pr_preflight.WORK_CLASSES,
-        help="declared PR work class from the PR body",
+        help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
     )
     validate_pr.add_argument(
         "--head-ref",
@@ -1268,6 +1267,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-dirty",
         action="store_true",
         help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
+    )
+    validate_pr.add_argument(
+        "--test-command",
+        default=pr_preflight.DEFAULT_TEST_COMMAND,
+        help=f"test command to compare at base and HEAD (default: {pr_preflight.DEFAULT_TEST_COMMAND})",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
