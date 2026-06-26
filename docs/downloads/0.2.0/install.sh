@@ -12,10 +12,13 @@ set -euo pipefail
 CE_SITE="${CE_SITE:-https://creator-engine.dev}"
 CE_ANSWERS="${CE_ANSWERS:-}"
 CE_INSTALL_ROOT="${CE_INSTALL_ROOT:-}"
+CE_INSTALL_MIN_TMP_KIB="${CE_INSTALL_MIN_TMP_KIB:-524288}"
 CE_TRUST_ANCHOR_URL="${CE_TRUST_ANCHOR_URL:-https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT}"
 CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-engine.dev}"
 CE_JSON=0
 CE_INVENTORY_ONLY=1
+CE_FIX_PATH=1
+UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
 downloaded=0
 reused=0
@@ -48,9 +51,30 @@ fail() {
   exit 1
 }
 
+single_line() {
+  printf '%s' "$*" | sed -E 's/[[:cntrl:]]+/ /g; s/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+onboard_refusal_detail() {
+  class="$1"
+  combined="$2"
+  code="$3"
+  if [ "$class" = "missing_bootstrap_dependency" ]; then
+    line="$(grep -m1 'missing_bootstrap_dependency' "$combined" 2>/dev/null || true)"
+    line="$(printf '%s' "$line" | sed -E 's/.*missing_bootstrap_dependency[: ]*//; s/[{}"\\]//g; s/^[[:space:]]+//; s/[[:space:]]+/ /g')"
+    if [ -n "$line" ]; then
+      single_line "$line"
+      return
+    fi
+    single_line "required bootstrap dependency missing. Remediation: install the missing command and re-run this installer."
+    return
+  fi
+  single_line "cev3 onboard --inventory exited ${code}. Remediation: fix the onboard inventory refusal and re-run this installer."
+}
+
 usage() {
   cat >&2 <<'EOF'
-Usage: install.sh [--answers PATH] [--inventory-only] [--json] [--install-root PATH] [--site URL]
+Usage: install.sh [--answers PATH] [--inventory-only] [--json] [--install-root PATH] [--site URL] [--no-fix-path]
 EOF
 }
 
@@ -67,6 +91,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --json)
       CE_JSON=1
+      shift
+      ;;
+    --no-fix-path)
+      CE_FIX_PATH=0
       shift
       ;;
     --install-root)
@@ -93,6 +121,9 @@ if { [ -n "${CE_TEST_UNAME_S:-}" ] || [ -n "${CE_TEST_UNAME_M:-}" ]; } \
   && [ "${CE_INSTALLER_TEST_MODE:-}" != "1" ]; then
   fail test_override_refused "CE_TEST_UNAME_S/CE_TEST_UNAME_M require CE_INSTALLER_TEST_MODE=1; refusing test platform override in real install"
 fi
+if [ -n "${CE_TEST_DF_AVAIL_KIB:-}" ] && [ "${CE_INSTALLER_TEST_MODE:-}" != "1" ]; then
+  fail test_override_refused "CE_TEST_DF_AVAIL_KIB requires CE_INSTALLER_TEST_MODE=1; refusing test disk-space override in real install"
+fi
 
 SPEC_URL="${CE_SITE}/llms-install.md"
 TRUST_ROOT_URL="${CE_SITE}/keys/ce-root-v1"
@@ -104,7 +135,119 @@ need_cmd() {
   fi
 }
 
-for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln; do
+is_root() {
+  [ "$(id -u 2>/dev/null || printf 99999)" = "0" ]
+}
+
+can_sudo_noninteractive() {
+  command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+run_privileged_or_remediate() {
+  root_command="$1"
+  sudo_command="$2"
+  if is_root; then
+    sh -c "$root_command"
+    return $?
+  fi
+  if can_sudo_noninteractive; then
+    sh -c "$sudo_command"
+    return $?
+  fi
+  return 125
+}
+
+ssh_keygen_install_plan() {
+  if command -v apt-get >/dev/null 2>&1; then
+    printf '%s\t%s\n' \
+      "apt-get update && apt-get install -y openssh-client" \
+      "sudo apt-get update && sudo apt-get install -y openssh-client"
+  elif command -v dnf >/dev/null 2>&1; then
+    printf '%s\t%s\n' "dnf install -y openssh-clients" "sudo dnf install -y openssh-clients"
+  elif command -v yum >/dev/null 2>&1; then
+    printf '%s\t%s\n' "yum install -y openssh-clients" "sudo yum install -y openssh-clients"
+  elif command -v apk >/dev/null 2>&1; then
+    printf '%s\t%s\n' "apk add openssh-client" "sudo apk add openssh-client"
+  elif command -v pacman >/dev/null 2>&1; then
+    printf '%s\t%s\n' "pacman -Sy --needed openssh" "sudo pacman -Sy --needed openssh"
+  elif command -v brew >/dev/null 2>&1; then
+    printf '%s\t%s\n' "brew install openssh" "brew install openssh"
+  else
+    return 1
+  fi
+}
+
+remediate_ssh_keygen() {
+  command -v ssh-keygen >/dev/null 2>&1 && return 0
+  plan="$(ssh_keygen_install_plan || true)"
+  if [ -z "$plan" ]; then
+    fail missing_bootstrap_dependency "required command missing: ssh-keygen
+
+Install OpenSSH client, then re-run this installer.
+Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y openssh-client
+Fedora/RHEL/CentOS: sudo dnf install -y openssh-clients
+Alpine: sudo apk add openssh-client
+Arch: sudo pacman -Sy --needed openssh
+macOS/Homebrew: brew install openssh"
+  fi
+  OLDIFS="$IFS"
+  IFS=$'\t'
+  read -r root_command sudo_command <<EOF
+$plan
+EOF
+  IFS="$OLDIFS"
+  say "ssh-keygen not found; attempting OpenSSH client install"
+  set +e
+  run_privileged_or_remediate "$root_command" "$sudo_command"
+  status="$?"
+  set -e
+  if [ "$status" -ne 0 ] || ! command -v ssh-keygen >/dev/null 2>&1; then
+    fail missing_bootstrap_dependency "required command missing: ssh-keygen
+
+Automatic OpenSSH client install was not possible or did not provide ssh-keygen.
+Run this exact remediation command, then re-run this installer:
+  $sudo_command"
+  fi
+  say "ssh-keygen installed"
+}
+
+append_word() {
+  if [ -n "$1" ]; then
+    printf '%s %s\n' "$1" "$2"
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
+preflight_bootstrap_commands() {
+  remediate_ssh_keygen
+  missing_cmds=""
+  for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar sh; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing_cmds="$(append_word "$missing_cmds" "$cmd")"
+    fi
+  done
+  if [ -n "$missing_cmds" ]; then
+    fail missing_bootstrap_dependency "required command(s) missing: $missing_cmds
+
+Install the OS bootstrap package set, then re-run this installer after reviewing the package action.
+
+Debian/Ubuntu:
+  sudo apt-get update && sudo apt-get install -y ca-certificates curl openssh-client tar coreutils sed gawk grep
+
+Fedora/RHEL/CentOS:
+  sudo dnf install -y ca-certificates curl openssh-clients tar coreutils sed gawk grep
+
+Alpine:
+  sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep
+
+Python 3.14 and uv are remediated after stock ssh-keygen verifies the signed spec: CE installs uv with the official Astral installer when needed, then runs uv python install 3.14 in user space if no compatible Python is already present. If auto-provisioning is not possible, the installer prints the exact command to run and fails closed."
+  fi
+}
+
+preflight_bootstrap_commands
+
+for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar sh; do
   need_cmd "$cmd"
 done
 
@@ -393,10 +536,74 @@ find_host_python() {
   return 1
 }
 
+prepend_path_dir() {
+  dir="$1"
+  case ":${PATH:-}:" in
+    *":${dir}:"*) ;;
+    *) PATH="${dir}${PATH:+:$PATH}"; export PATH ;;
+  esac
+}
+
+find_uv() {
+  for candidate in "${UV:-}" uv "${BOOTSTRAP_ROOT:-}/bin/uv" "${HOME:-}/.local/bin/uv" "${HOME:-}/.cargo/bin/uv"; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+uv_remediation() {
+  if [ -n "${HOME:-}" ]; then
+    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; export PATH=\"%s/.local/bin:\$PATH\"; uv --version\n" "$UV_INSTALLER_URL" "$HOME"
+  else
+    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; uv --version\n" "$UV_INSTALLER_URL"
+  fi
+}
+
+ensure_uv_available() {
+  UV_BIN="$(find_uv || true)"
+  if [ -n "$UV_BIN" ]; then
+    prepend_path_dir "$(dirname "$UV_BIN")"
+    return 0
+  fi
+  [ -n "${BOOTSTRAP_ROOT:-}" ] || fail uv_acquisition_failed "internal error: BOOTSTRAP_ROOT not set before uv acquisition"
+  UV_INSTALL_DIR="${BOOTSTRAP_ROOT}/bin"
+  mkdir -p "$UV_INSTALL_DIR" \
+    || fail uv_acquisition_failed "failed to create uv install directory $UV_INSTALL_DIR. Remediation: $(uv_remediation)"
+  say "uv not found; installing uv with the official Astral installer"
+  err="${TMPDIR_CE}/uv-installer.err"
+  rm -f "$err"
+  set +e
+  UV_INSTALL_DIR="$UV_INSTALL_DIR" sh -c "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" 2>"$err"
+  status="$?"
+  set -e
+  if [ "$status" -ne 0 ]; then
+    detail="$(tr '\n' ' ' <"$err" | sed 's/[[:space:]]\+/ /g')"
+    fail uv_acquisition_failed "uv is missing and official installer failed. Remediation: $(uv_remediation) detail=${detail:-uv installer failed}"
+  fi
+  UV_BIN="$(find_uv || true)"
+  [ -n "$UV_BIN" ] \
+    || fail uv_acquisition_failed "official uv installer completed but uv is not discoverable. Remediation: export PATH=\"${UV_INSTALL_DIR}:\$PATH\"; uv --version"
+  prepend_path_dir "$(dirname "$UV_BIN")"
+}
+
 state_value() {
   key="$1"
   [ -f "$STATE_FILE" ] || return 1
   awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); found = 1; exit } END { if (!found) exit 1 }' "$STATE_FILE"
+}
+
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
 }
 
 acquire_lock() {
@@ -408,10 +615,68 @@ acquire_lock() {
     return 0
   fi
   holder="$(cat "$lock/pid" 2>/dev/null || true)"
+  quoted_lock="$(shell_quote "$lock")"
   if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-    fail install_lock_held "another install is active (pid $holder, lock $lock)"
+    fail install_lock_held "another install is active (holder pid $holder, lock $lock). Inspect it with:
+ps -p $holder -o pid,ppid,command
+If that PID is not an installer, remove the lock with: rm -rf $quoted_lock"
   fi
-  fail stale_install_lock "stale lock at $lock; remove it after confirming no installer is running"
+  if [ -n "$holder" ]; then
+    fail stale_install_lock "stale lock at $lock (recorded pid $holder is not running). After confirming no installer is running, remove it with: rm -rf $quoted_lock"
+  fi
+  fail stale_install_lock "stale lock at $lock (no holder pid recorded). After confirming no installer is running, remove it with: rm -rf $quoted_lock"
+}
+
+is_unsigned_int() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+install_tmp_free_kib() {
+  path="$1"
+  if [ "${CE_INSTALLER_TEST_MODE:-}" = "1" ] && [ -n "${CE_TEST_DF_AVAIL_KIB:-}" ]; then
+    printf '%s\n' "$CE_TEST_DF_AVAIL_KIB"
+    return 0
+  fi
+  command -v df >/dev/null 2>&1 || return 1
+  df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4; found = 1; exit } END { if (!found) exit 1 }'
+}
+
+install_tmp_fallback_parent() {
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    printf '%s\n' "${XDG_CACHE_HOME%/}/creator-engine/install-tmp"
+    return 0
+  fi
+  [ -n "${HOME:-}" ] \
+    || fail missing_bootstrap_dependency "HOME is not set; cannot fall back from low-space tmp staging"
+  printf '%s\n' "${HOME%/}/.cache/creator-engine/install-tmp"
+}
+
+choose_install_tmp_parent() {
+  tmp_parent="${TMPDIR:-/tmp}"
+  [ -n "$tmp_parent" ] || tmp_parent="/tmp"
+  is_unsigned_int "$CE_INSTALL_MIN_TMP_KIB" \
+    || fail missing_bootstrap_dependency "CE_INSTALL_MIN_TMP_KIB must be an integer KiB threshold"
+  free_kib="$(install_tmp_free_kib "$tmp_parent" || true)"
+  if is_unsigned_int "$free_kib" && [ "$free_kib" -lt "$CE_INSTALL_MIN_TMP_KIB" ]; then
+    fallback_parent="$(install_tmp_fallback_parent)"
+    mkdir -p "$fallback_parent" \
+      || fail missing_bootstrap_dependency "failed to create fallback installer staging directory $fallback_parent"
+    say "warning: tmp target ${tmp_parent} has ${free_kib} KiB free below ${CE_INSTALL_MIN_TMP_KIB} KiB; staging installer artifacts under ${fallback_parent}"
+    printf '%s\n' "$fallback_parent"
+    return 0
+  fi
+  printf '%s\n' "$tmp_parent"
+}
+
+create_install_tmpdir() {
+  parent="$(choose_install_tmp_parent)"
+  parent="${parent%/}"
+  [ -n "$parent" ] || parent="/"
+  TMPDIR_CE="$(mktemp -d "${parent}/ce-install.XXXXXXXXXX")" \
+    || fail missing_bootstrap_dependency "failed to create installer staging directory under $parent"
 }
 
 write_state() {
@@ -465,11 +730,90 @@ install_cli_shims() {
   say "exposed CLI shims: ${LOCAL_BIN}/cev3 and ${LOCAL_BIN}/ce"
   case ":${PATH:-}:" in
     *":${LOCAL_BIN}:"*) ;;
-    *) say "warning: ${LOCAL_BIN} is not on PATH; add it to run ce/cev3 without an absolute path" ;;
+    *) say "${LOCAL_BIN} is not on current PATH; shell-profile update below makes future shells see ce/cev3" ;;
   esac
 }
 
-TMPDIR_CE="$(mktemp -d)"
+fix_shell_profile_path() {
+  if [ "$CE_FIX_PATH" != "1" ]; then
+    say "skipped shell profile PATH update (--no-fix-path)"
+    return 0
+  fi
+  [ -n "${HOME:-}" ] || fail profile_path_failed "HOME is not set; cannot update shell profile PATH"
+  profile="${HOME}/.profile"
+  notice="$("$PYTHON_BIN" - "$profile" <<'PY'
+from pathlib import Path
+import sys
+
+BEGIN_MARKER = "# >>> creator-engine PATH >>>"
+END_MARKER = "# <<< creator-engine PATH <<<"
+
+
+def build_path_block() -> str:
+    return "\n".join(
+        [
+            BEGIN_MARKER,
+            "# Added by Creator Engine. Delete this whole marked block to undo.",
+            "_ce_path_prepend() {",
+            '  case ":${PATH:-}:" in',
+            '    *":$1:"*) ;;',
+            '    *) PATH="$1${PATH:+:$PATH}" ;;',
+            "  esac",
+            "}",
+            '_ce_path_prepend "$HOME/.local/bin"',
+            '_ce_npm_bin=""',
+            "if command -v npm >/dev/null 2>&1; then",
+            '  _ce_npm_bin="$(npm bin -g 2>/dev/null || true)"',
+            '  if [ -z "$_ce_npm_bin" ]; then',
+            '    _ce_npm_prefix="$(npm prefix -g 2>/dev/null || true)"',
+            '    [ -z "$_ce_npm_prefix" ] || _ce_npm_bin="${_ce_npm_prefix%/}/bin"',
+            "  fi",
+            '  [ -z "$_ce_npm_bin" ] || _ce_path_prepend "$_ce_npm_bin"',
+            "fi",
+            "unset _ce_npm_bin _ce_npm_prefix",
+            "export PATH",
+            "unset -f _ce_path_prepend",
+            END_MARKER,
+            "",
+        ]
+    )
+
+
+def replace_or_append_block(text: str, block: str) -> str:
+    begin = text.find(BEGIN_MARKER)
+    end = text.find(END_MARKER)
+    if begin == -1 and end == -1:
+        prefix = text
+        if prefix and not prefix.endswith("\n"):
+            prefix += "\n"
+        spacer = "\n" if prefix else ""
+        return f"{prefix}{spacer}{block}"
+    if begin == -1 or end == -1 or end < begin:
+        raise RuntimeError("found incomplete creator-engine PATH markers; refusing to guess")
+    end += len(END_MARKER)
+    if end < len(text) and text[end : end + 1] == "\n":
+        end += 1
+    return text[:begin] + block + text[end:]
+
+
+path = Path(sys.argv[1])
+existing = path.read_text(encoding="utf-8") if path.exists() else ""
+updated = replace_or_append_block(existing, build_path_block())
+changed = updated != existing
+if changed:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(updated, encoding="utf-8")
+    print(f"updated shell profile PATH block: {path}")
+else:
+    print(f"shell profile PATH block already current: {path}")
+PY
+  )" \
+    || fail profile_path_failed "failed to update shell profile PATH block at $profile"
+  say "$notice"
+  say "PATH block is marked '# >>> creator-engine PATH >>>'; delete that block to undo"
+}
+
+create_install_tmpdir
 chmod 700 "$TMPDIR_CE"
 SPEC_FILE="$TMPDIR_CE/llms-install.md"
 TRUST_ROOT_FILE="$TMPDIR_CE/ce-root-v1"
@@ -593,21 +937,13 @@ ARTIFACT_CACHE="${BOOTSTRAP_ROOT}/artifacts/${SHA256S_SHA}"
 PYTHON_BIN="$(find_host_python || true)"
 if [ -z "$PYTHON_BIN" ]; then
   [ "$UV_TOOL" = "uv" ] || fail missing_bootstrap_dependency "no compatible Python and signed manifest does not permit uv acquisition"
-  need_cmd tar
-  UV_TARBALL="$TMPDIR_CE/uv.tar.gz"
-  UV_EXTRACT="$TMPDIR_CE/uv"
-  mkdir "$UV_EXTRACT"
-  say "no CPython >=3.14 found; acquiring uv ${UV_VERSION} from signed manifest"
-  fetch_url "$UV_URL" "$UV_TARBALL" python_acquisition_failed
-  verify_hash "$UV_SHA" "$UV_TARBALL" "uv-${UV_VERSION}"
-  tar -xzf "$UV_TARBALL" -C "$UV_EXTRACT" || fail python_acquisition_failed "uv extraction failed"
-  UV_BIN="$UV_EXTRACT/$UV_BIN_REL"
-  [ -x "$UV_BIN" ] || fail python_acquisition_failed "uv executable missing after extraction"
+  ensure_uv_available
+  say "no CPython >=3.14 found; installing CPython 3.14 with uv"
   "$UV_BIN" python install 3.14 >/dev/null 2>&1 \
-    || fail python_acquisition_failed "uv python install 3.14 failed (${UV_COMMAND})"
+    || fail python_acquisition_failed "uv python install 3.14 failed (${UV_COMMAND}). Remediation: uv python install 3.14"
   PYTHON_BIN="$("$UV_BIN" python find 3.14 2>/dev/null || true)"
   [ -n "$PYTHON_BIN" ] && compatible_python "$PYTHON_BIN" \
-    || fail python_acquisition_failed "uv installed Python but no compatible interpreter was found"
+    || fail python_acquisition_failed "uv installed Python but no compatible interpreter was found. Remediation: uv python find 3.14"
 fi
 say "using Python: ${PYTHON_BIN}"
 
@@ -711,6 +1047,7 @@ fi
 "${VENV_DIR}/bin/cev3" --help >/dev/null 2>&1 \
   || fail entrypoint_missing "verified venv exists but cev3 no longer runs"
 install_cli_shims
+fix_shell_profile_path
 write_state
 
 ONBOARD_ARGS=(
@@ -730,16 +1067,29 @@ if [ "$CE_JSON" = "1" ]; then
 fi
 
 say "running authenticated onboard inventory"
+ONBOARD_STDOUT="${TMPDIR_CE}/onboard.stdout"
+ONBOARD_STDERR="${TMPDIR_CE}/onboard.stderr"
+ONBOARD_COMBINED="${TMPDIR_CE}/onboard.combined"
 set +e
-"${ONBOARD_ARGS[@]}"
+"${ONBOARD_ARGS[@]}" >"$ONBOARD_STDOUT" 2>"$ONBOARD_STDERR"
 onboard_code="$?"
 set -e
 if [ "$onboard_code" -ne 0 ]; then
   failed=$((failed + 1))
-  printf '◆ CE · INSTALL_REFUSED onboard_inventory_failed: cev3 onboard --inventory exited %s\n' "$onboard_code" >&2
+  cat "$ONBOARD_STDOUT" "$ONBOARD_STDERR" >"$ONBOARD_COMBINED"
+  onboard_class="onboard_inventory_failed"
+  if grep -q 'missing_bootstrap_dependency' "$ONBOARD_COMBINED" 2>/dev/null; then
+    onboard_class="missing_bootstrap_dependency"
+  fi
+  onboard_detail="$(onboard_refusal_detail "$onboard_class" "$ONBOARD_COMBINED" "$onboard_code")"
+  printf '◆ CE · INSTALL_REFUSED %s: %s\n' "$onboard_class" "$onboard_detail" >&2
   exit "$onboard_code"
 fi
+cat "$ONBOARD_STDOUT"
+cat "$ONBOARD_STDERR" >&2
 
 say "state file: ${STATE_FILE}"
 say "summary: downloaded=${downloaded} reused=${reused} verified=${verified} installed=${installed} skipped_already_current=${skipped_already_current} failed=${failed}"
+say "next: reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell, so ce/cev3 are available"
+say "note: git is required for first-value and is checked in inventory"
 say "next: prepare ce-install.answers.yaml, then run ${VENV_DIR}/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --answers <file> --plan"
