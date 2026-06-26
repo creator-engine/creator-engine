@@ -321,6 +321,9 @@ def _mapping_scope_applies(assertion_scope: dict[str, Any], requested_scope: dic
 def _project_assertion(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(record["id"]),
+        "statement": str(record["statement"]),
+        "type": str(record["type"]),
+        "verification_method": copy.deepcopy(record["verification_method"]),
         "claim": copy.deepcopy(record["claim"]),
         "scope": copy.deepcopy(record["scope"]),
         "evidence_ref": str(record["evidence_ref"]),

@@ -38,7 +38,7 @@ def _assert(records=None, write=None, **override) -> rt.AssertResult:
         "evidence_ref": EVIDENCE,
         "assertion_id": "brain-assertion-runtime-0001",
         "state_root": Path(".ce/state"),
-        "records": records,
+        "records": [] if records is None else records,
         "write": write or CaptureWrite(),
     }
     kwargs.update(override)
@@ -56,6 +56,9 @@ def test_assert_check_roundtrip_with_injected_write():
     assert checked.record is not None
     assert checked.record["id"] == asserted.record["id"]
     assert checked.record["content_hash"] == asserted.content_hash
+    assert checked.record["statement"] == "brain mode ssot"
+    assert checked.record["type"] == "decision"
+    assert checked.record["verification_method"] == {"evidence_ref": EVIDENCE, "type": "static"}
 
 
 def test_correct_appends_supersede_marker_and_new_active_assertion():
@@ -151,6 +154,43 @@ def test_schema_invalid_ledger_fails_closed():
 
     with pytest.raises(rt.BrainLedgerInvalid):
         rt.check_claim(claim=CLAIM, scope=SCOPE, records=records)
+
+
+@pytest.mark.parametrize("field", ["statement", "type", "verification_method"])
+def test_canonical_assertion_fields_are_required(field: str):
+    sink = CaptureWrite()
+    _assert(write=sink)
+    records = sink.records
+    del records[0][field]
+
+    with pytest.raises(rt.BrainLedgerInvalid):
+        rt.check_claim(claim=CLAIM, scope=SCOPE, records=records)
+
+
+def test_probe_assertion_derives_verification_method():
+    sink = CaptureWrite()
+    _assert(
+        write=sink,
+        claim={
+            "subject": "capability",
+            "predicate": "probe-verdict",
+            "object": "harness_fan_out",
+            "verdict": "present",
+        },
+        assertion_type="capability",
+        evidence_ref="probe:harness_fan_out",
+        assertion_id="brain-assertion-runtime-probe",
+    )
+
+    record = sink.records[0]
+
+    assert record["type"] == "capability"
+    assert record["statement"] == "capability probe-verdict harness_fan_out"
+    assert record["verification_method"] == {
+        "evidence_ref": "probe:harness_fan_out",
+        "probe": "harness_fan_out",
+        "type": "probe",
+    }
 
 
 def test_on_disk_non_mapping_record_fails_closed_and_is_not_rewritten(tmp_path: Path):
