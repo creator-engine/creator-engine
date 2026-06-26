@@ -667,6 +667,20 @@ def test_review_requested_own_pr_is_refused(tmp_path):
     assert forge.assignees == []
 
 
+def test_controller_review_request_own_pr_is_refused(tmp_path):
+    forge = _FakeForge(pr_author="ce-dev-2")
+    outcome = pickup.claim_item(
+        _item(kind="review_request"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=tmp_path / "l.ndjson",
+        run_id="r", backoff_seconds=0,
+        pr_author_lookup=lambda item, runner: "ce-dev-2",
+    )
+    assert outcome.claimed is False
+    assert outcome.reason == "own_pr_review_refused"
+    assert forge.comments == []
+    assert forge.assignees == []
+
+
 def test_review_requested_unknown_pr_author_is_refused_fail_closed(tmp_path):
     forge = _FakeForge()
     ledger = tmp_path / "l.ndjson"
@@ -692,6 +706,18 @@ def test_review_requested_foreign_pr_is_claimable(tmp_path):
         pr_author_lookup=lambda item, runner: "another-dev",
     )
     assert outcome.claimed is True
+
+
+def test_controller_review_request_foreign_pr_is_claimable(tmp_path):
+    forge = _FakeForge()
+    outcome = pickup.claim_item(
+        _item(kind="review_request"), identity="ce-dev-2",
+        gh_runner=forge.runner("ce-dev-2"), ledger_path=tmp_path / "l.ndjson",
+        run_id="r", backoff_seconds=0,
+        pr_author_lookup=lambda item, runner: "another-dev",
+    )
+    assert outcome.claimed is True
+    assert "ce-dev-2" in forge.assignees
 
 
 def test_ledger_key_uses_server_fields_not_wall_clock():
@@ -806,6 +832,32 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
     cmd_idx = argv.index("--command")
     assert argv[cmd_idx + 1] == "claude"
     assert _argv_value(argv, "--worktree-path") == str(tmp_path)
+
+
+def test_controller_review_request_launches_reviewer_lane(tmp_path):
+    item = _item(kind="review_request")
+    seed = pickup.build_seed(
+        item,
+        identity="ce-dev-3",
+        run_id="r1",
+        claim_id="wclaim-review",
+        seed_root=tmp_path / "seeds",
+    )
+
+    argv = pickup.build_lane_argv(
+        item,
+        identity="ce-dev-3",
+        run_id="r1",
+        harness="codex",
+        seed=seed,
+        repo_root=str(tmp_path),
+        ledger_root=str(tmp_path / "awl"),
+    )
+
+    assert _argv_value(argv, "--role") == "reviewer"
+    assert _argv_value(argv, "--lane-kind") == "review"
+    assert _argv_value(argv, "--command") == "codex"
+    assert "reviewer lane" in Path(seed.path).read_text(encoding="utf-8")
 
 
 def test_launch_lane_failure_does_not_mark_launched(tmp_path):

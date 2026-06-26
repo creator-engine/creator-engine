@@ -381,8 +381,8 @@ def claim_item(
 
     Order (each gate fails closed before any side effect):
 
-    1. **Independent-reviewer refusal** — for a ``review_requested`` item whose PR
-       author IS this identity, refuse (we never review our own PR). NO post.
+    1. **Independent-reviewer refusal** — for a review work item whose PR author
+       IS this identity, refuse (we never review our own PR). NO post.
     2. **Dedup** — if ``(thread_id, <repo>:<number>, claim)`` is already in the
        ledger, short-circuit (``already_seen``); NO post.
     3. **Forge-arbitrated claim** — ``work_claims.acquire`` reads → refuses on a
@@ -402,7 +402,7 @@ def claim_item(
     key_tuple = ledger_key(thread_id, item_id, ACTION_CLAIM)
 
     # 1. Independent-reviewer refusal (own-PR review) — before any side effect.
-    if item.get("kind") == "review_requested":
+    if _is_review_work_item(item):
         lookup = pr_author_lookup or default_pr_author_lookup
         author = lookup(item, gh_runner)
         if not author:
@@ -471,10 +471,20 @@ import hashlib  # noqa: E402  (kept local to the S3 leg)
 #: ALL tmux coupling behind the lane primitive, the one seam). Tests inject a fake.
 Spawn = Callable[[Sequence[str]], "subprocess.CompletedProcess"]
 
+#: Work-item ``kind`` values that represent review work. ``review_requested`` is
+#: the per-seat Search feed shape; ``review_request`` is the controller
+#: review-pickup shape for awaiting-review PRs assigned to a non-author seat.
+_REVIEW_WORK_KINDS = frozenset({"review_requested", "review_request"})
+
+
+def _is_review_work_item(item: Mapping[str, Any]) -> bool:
+    return str(item.get("kind") or "") in _REVIEW_WORK_KINDS
+
+
 #: Work-item ``kind`` → the governed lane ``--role`` / ``--lane-kind``. A review
 #: request drives a reviewer/review lane; everything else an implementer lane.
-_KIND_TO_ROLE = {"review_requested": "reviewer"}
-_KIND_TO_LANE_KIND = {"review_requested": "review"}
+_KIND_TO_ROLE = {kind: "reviewer" for kind in _REVIEW_WORK_KINDS}
+_KIND_TO_LANE_KIND = {kind: "review" for kind in _REVIEW_WORK_KINDS}
 _DEFAULT_ROLE = "implementer"
 _DEFAULT_LANE_KIND = "implementation"
 
