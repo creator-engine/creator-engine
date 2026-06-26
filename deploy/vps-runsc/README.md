@@ -227,6 +227,32 @@ contained launch remains tokenless at the container boundary.
 
 ## Runtime Registration
 
+### Host Docker daemon prerequisites
+
+Contained seats that bind-mount host broker sockets require the
+`runsc-gvproxy-ptrace` runtime to allow host Unix-domain socket access. Persist
+that requirement in `/etc/docker/daemon.json` so it survives host reprovision:
+
+```json
+{
+  "runtimes": {
+    "runsc-gvproxy-ptrace": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": [
+        "--platform=ptrace",
+        "--host-uds=open"
+      ]
+    }
+  }
+}
+```
+
+Reload Docker after updating the daemon config:
+
+```bash
+sudo systemctl reload docker
+```
+
 Register a Docker runtime named `runsc-gvproxy-ptrace` on the VPS:
 
 ```json
@@ -235,7 +261,8 @@ Register a Docker runtime named `runsc-gvproxy-ptrace` on the VPS:
     "runsc-gvproxy-ptrace": {
       "path": "/usr/bin/runsc",
       "runtimeArgs": [
-        "--platform=ptrace"
+        "--platform=ptrace",
+        "--host-uds=open"
       ]
     }
   }
