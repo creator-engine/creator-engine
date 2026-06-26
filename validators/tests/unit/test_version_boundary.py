@@ -41,7 +41,8 @@ def test_registered_in_check_surface():
     # ce-ops#162 added operator_runbook_refusal_sync: 62 -> 63.
     # ce-ops#244 added worker_tier_contract: 63 -> 64.
     # ce-ops#260 added release_artifact_parity_guard: 64 -> 65.
-    assert len(reg) == 65
+    # ce-ops#262 added pr_closes_linkage: 65 -> 66.
+    assert len(reg) == 66
 
 
 def test_green_on_real_package(version_boundary_real_run):
