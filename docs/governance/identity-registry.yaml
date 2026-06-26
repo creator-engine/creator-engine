@@ -1,0 +1,85 @@
+accounts:
+  - login: ce-dev-1
+    github_id: 292754681
+    role: governed-seat
+    owning_seat: ce-dev-1
+    host: ce-pilot-1
+    noreply_commit_email: 292754681+ce-dev-1@users.noreply.github.com
+  - login: ce-dev-2
+    github_id: 286082568
+    role: reviewer-venue
+    owning_seat: TODO_VERIFY
+    host: TODO_VERIFY
+    noreply_commit_email: 286082568+ce-dev-2@users.noreply.github.com
+  - login: ce-overwatch
+    github_id: 150906340
+    role: authoring-account
+    owning_seat: TODO_VERIFY
+    host: TODO_VERIFY
+    noreply_commit_email: 150906340+ce-overwatch@users.noreply.github.com
+  - login: chmod735
+    github_id: TODO_VERIFY
+    role: historical-alias
+    owning_seat: TODO_VERIFY
+    host: TODO_VERIFY
+    noreply_commit_email: TODO_VERIFY
+  - login: ubuntuaws745-cmyk
+    github_id: TODO_VERIFY
+    role: historical-alias
+    owning_seat: TODO_VERIFY
+    host: TODO_VERIFY
+    noreply_commit_email: TODO_VERIFY
+
+apps:
+  - app_id: TODO_VERIFY
+    install_id: TODO_VERIFY
+    repo_scope: creator-engine/creator-engine
+    pem_custody: vault://TODO_VERIFY
+
+tokens:
+  - type: PAT
+    host_binding: ce-pilot-1
+    storage_pointer:
+      host: ce-pilot-1
+      path: ~/.ce-keys/ce-dev-1.pat
+    rotation_owner: ce-dev-1
+  - type: App
+    host_binding: TODO_VERIFY
+    storage_pointer:
+      host: TODO_VERIFY
+      path: TODO_VERIFY
+    rotation_owner: TODO_VERIFY
+
+signing_keys:
+  - key_name: ce-root-v1
+    custody_seat: TODO_VERIFY
+    custody_host: TODO_VERIFY
+    key_path_pointer: TODO_VERIFY
+  - key_name: ce-dev1-root-v1
+    custody_seat: TODO_VERIFY
+    custody_host: TODO_VERIFY
+    key_path_pointer: TODO_VERIFY
+
+host_topology:
+  - name: ce-pilot-1
+    host: ce-pilot-1
+    tailnet_ip: TODO_VERIFY
+    users:
+      - ce-dev-1
+    role: worker-host
+    reach_method: TODO_VERIFY
+
+authoring_review_matrix:
+  - seat: ce-dev-1
+    authors_as:
+      - ce-dev-1
+    may_review:
+      - ce-dev-2
+      - ce-overwatch
+    status: needs-rewire
+  - seat: peer-operator
+    authors_as:
+      - ce-overwatch
+    may_review:
+      - ce-dev-2
+    status: needs-rewire
