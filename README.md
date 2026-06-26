@@ -219,6 +219,15 @@ The agent-native install spec is served as
 execution. That file and the served installer are trust-root surfaces; ordinary
 documentation edits must not mutate them.
 
+**Trust anchor (independent channel):** the `ce-root-v1` signing key fingerprint
+is `SHA256:mkX7cRfHNrx6mtK8Ek30CcRn6fbfIPK/SU/6KKc0AOQ` (ed25519). This in-repo
+record — served by GitHub, independent of `creator-engine.dev` — is the primary
+out-of-band anchor. A matching DNS TXT record exists at
+`_ce-root-v1.creator-engine.dev`. Verify the served key's fingerprint against
+either anchor before trusting the signature. See
+[`docs/security/trust-anchors.md`](./docs/security/trust-anchors.md) for the full
+anchor table, both signing keys, and the trust model.
+
 ## Identity Model
 
 CE does not treat a shell account, local `git config`, or ambient `gh auth`
