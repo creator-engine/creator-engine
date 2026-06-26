@@ -130,4 +130,35 @@ records:
   verification_method:
     evidence_ref: docs/architecture/work-claim-locks.md
     type: static
+- claim:
+    object: validate
+    predicate: allows-merge-queue-validation
+    projection:
+      expected:
+      - checks_requested
+      normalize: string_set_contains
+      path:
+      - 'on'
+      - merge_group
+      - types
+      type: yaml-path
+    subject: workflow
+  content_hash: 91e8afdc31b5f8ec1f3c48359b1d924aa121eb9f3af7726bd6bcc3d13759a192
+  evidence_ref: .github/workflows/validate.yml
+  id: brain-assertion-validate-workflow-drift-gate
+  kind: brain-assertion
+  prev_hash: 7aa95baaa1fbe4e1cba5250623385f87397cee87f9de31d200e3295c5dbed1ea
+  record_type: brain_assertion
+  schema_version: '1'
+  scope:
+    artifact: .github/workflows/validate.yml
+    gate: drift-ci
+  sequence: 6
+  statement: validate workflow merge_group trigger includes checks_requested
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: .github/workflows/validate.yml
+    type: static
 schema_version: '1'

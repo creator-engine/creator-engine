@@ -3,15 +3,21 @@
 This check re-verifies the current active assertion view against each
 assertion's ``evidence_ref``. Probe-backed assertions use the live probe seam;
 local artifact assertions fail closed when their evidence cannot be resolved.
+Workflow/config artifacts are deliberately checked through semantic projections
+or probes instead of raw full-file hashes, so unrelated edit churn does not
+create false drift.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+import yaml
 
 from .. import brain_probe
 from .. import brain_runtime
@@ -22,6 +28,7 @@ from .ce_brain_assertions import iter_brain_assertion_files
 
 CHECK_NAME = "ce_brain_drift"
 CONTRACT = brain_runtime.CONTRACT
+AUTHORITATIVE_LEDGER_RELATIVE_PATH = Path(".ce") / "brain" / "assertions.yaml"
 
 CODE_DRIFT = "brain_assertion_drift"
 CODE_UNVERIFIABLE = "brain_assertion_unverifiable"
@@ -43,8 +50,18 @@ _VALUE_CLAIM_KEYS = (
     "artifact_value",
     "content_value",
 )
+_PROJECTION_CLAIM_KEYS = (
+    "projection",
+    "normalized_projection",
+    "semantic_projection",
+)
 _SUPPORTED_COMPARISON_KEYS = frozenset((*_HASH_CLAIM_KEYS, *_VALUE_CLAIM_KEYS))
 _HASH_LIKE_KEY_TOKENS = ("sha", "hash", "digest", "checksum")
+_VOLATILE_WORKFLOW_CONFIG_DIRS = (
+    (".github", "workflows"),
+)
+_FULL_ARTIFACT_ANCHOR_KEYS = frozenset((*_HASH_CLAIM_KEYS, *_VALUE_CLAIM_KEYS))
+_MISSING = object()
 
 
 def _default_read_bytes(path: Path) -> bytes:  # pragma: no cover - live edge
@@ -191,6 +208,19 @@ def _claimed_values(claim: Mapping[str, Any]) -> list[tuple[str, str]]:
     return out
 
 
+def _raw_projection_specs(claim: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    out: list[tuple[str, Any]] = []
+    for key in _PROJECTION_CLAIM_KEYS:
+        if key in claim:
+            out.append((key, claim[key]))
+    evidence = claim.get("evidence")
+    if isinstance(evidence, Mapping):
+        for key in _PROJECTION_CLAIM_KEYS:
+            if key in evidence:
+                out.append((f"evidence.{key}", evidence[key]))
+    return out
+
+
 def _comparison_malformed_errors(claim: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], assertion_id: str) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for key in _HASH_CLAIM_KEYS:
@@ -244,7 +274,7 @@ def _comparison_malformed_errors(claim: Mapping[str, Any], path: Path, pointer_p
 
 def _looks_like_unsupported_comparison_key(key: Any) -> bool:
     token = str(key).strip().lower().replace("-", "_")
-    if token in _SUPPORTED_COMPARISON_KEYS:
+    if token in _SUPPORTED_COMPARISON_KEYS or token in _PROJECTION_CLAIM_KEYS:
         return False
     return any(part in token for part in _HASH_LIKE_KEY_TOKENS) or token.endswith("_value")
 
@@ -298,24 +328,254 @@ def _resolve_artifact(evidence_ref: str, context: DriftContext) -> Path | None:
     return resolved if resolved.is_file() else None
 
 
+def _artifact_relative_parts(artifact: Path, context: DriftContext) -> tuple[str, ...]:
+    try:
+        relative = artifact.resolve().relative_to(context.root().resolve())
+    except (OSError, ValueError):
+        return artifact.parts
+    return relative.parts
+
+
+def _is_volatile_workflow_config_artifact(artifact: Path, context: DriftContext) -> bool:
+    parts = _artifact_relative_parts(artifact, context)
+    normalized = tuple(str(part) for part in parts)
+    return any(
+        len(normalized) >= len(prefix) + 1
+        and normalized[: len(prefix)] == prefix
+        and artifact.suffix.lower() in {".yml", ".yaml"}
+        for prefix in _VOLATILE_WORKFLOW_CONFIG_DIRS
+    )
+
+
+def _full_artifact_anchor_keys(claim: Mapping[str, Any]) -> list[str]:
+    keys = [key for key in _FULL_ARTIFACT_ANCHOR_KEYS if key in claim]
+    evidence = claim.get("evidence")
+    if isinstance(evidence, Mapping):
+        keys.extend(f"evidence.{key}" for key in _FULL_ARTIFACT_ANCHOR_KEYS if key in evidence)
+    return sorted(keys)
+
+
+def _is_workflow_claim(claim: Mapping[str, Any]) -> bool:
+    return claim.get("subject") == "workflow"
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _projection_specs(
+    claim: Mapping[str, Any],
+    path: Path,
+    pointer_prefix: tuple[Any, ...],
+    assertion_id: str,
+) -> tuple[list[tuple[str, Mapping[str, Any]]], list[ValidationError]]:
+    specs: list[tuple[str, Mapping[str, Any]]] = []
+    errors: list[ValidationError] = []
+    for key, raw in _raw_projection_specs(claim):
+        raw_specs = raw if isinstance(raw, list) else [raw]
+        if not isinstance(raw, (Mapping, list)):
+            errors.append(
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    f"assertion {assertion_id}: claim.{key} must be a projection mapping or list of mappings",
+                )
+            )
+            continue
+        for idx, spec in enumerate(raw_specs):
+            label = key if not isinstance(raw, list) else f"{key}[{idx}]"
+            if not isinstance(spec, Mapping):
+                errors.append(
+                    _error(
+                        CODE_UNVERIFIABLE,
+                        path,
+                        pointer_prefix,
+                        "claim",
+                        f"assertion {assertion_id}: claim.{label} must be a projection mapping",
+                    )
+                )
+                continue
+            specs.append((label, spec))
+    return specs, errors
+
+
+def _yaml_projection_path(spec: Mapping[str, Any]) -> Sequence[Any] | None:
+    raw_path = spec.get("path")
+    if isinstance(raw_path, str) and raw_path:
+        return tuple(part for part in raw_path.split(".") if part)
+    if isinstance(raw_path, list) and all(isinstance(part, (str, int)) for part in raw_path):
+        return tuple(raw_path)
+    return None
+
+
+def _mapping_get(value: Mapping[Any, Any], key: Any) -> Any:
+    if key in value:
+        return value[key]
+    if key == "on" and True in value:
+        return value[True]
+    return _MISSING
+
+
+def _select_yaml_path(document: Any, parts: Sequence[Any]) -> Any:
+    current = document
+    for part in parts:
+        if isinstance(current, Mapping):
+            current = _mapping_get(current, part)
+        elif isinstance(current, list) and isinstance(part, int) and not isinstance(part, bool):
+            current = current[part] if 0 <= part < len(current) else _MISSING
+        else:
+            return _MISSING
+        if current is _MISSING:
+            return _MISSING
+    return current
+
+
+def _as_string_set(value: Any) -> list[str]:
+    values = value if isinstance(value, list) else [value]
+    return sorted({str(item) for item in values})
+
+
+def _projection_verdict(
+    *,
+    document: Any,
+    spec: Mapping[str, Any],
+) -> tuple[bool, str, str, str | None]:
+    spec_type = spec.get("type", "yaml-path")
+    if spec_type not in {"yaml-path", "yaml_path"}:
+        return False, "", "", f"projection.type must be 'yaml-path', got {spec_type!r}"
+    parts = _yaml_projection_path(spec)
+    if parts is None:
+        return False, "", "", "projection.path must be a dotted string or list of string/int path parts"
+    if "expected" not in spec:
+        return False, "", "", "projection.expected is required"
+    normalize = spec.get("normalize", "json")
+    observed_raw = _select_yaml_path(document, parts)
+    expected_raw = spec["expected"]
+    if normalize == "presence":
+        observed = observed_raw is not _MISSING
+        expected = bool(expected_raw)
+        return observed == expected, f"presence={expected}", f"presence={observed}", None
+    if observed_raw is _MISSING:
+        return False, _stable_json(expected_raw), "<missing>", None
+    if normalize == "string_set":
+        observed_set = _as_string_set(observed_raw)
+        expected_set = _as_string_set(expected_raw)
+        return observed_set == expected_set, f"strings={_stable_json(expected_set)}", f"strings={_stable_json(observed_set)}", None
+    if normalize == "string_set_contains":
+        observed_set = _as_string_set(observed_raw)
+        expected_set = _as_string_set(expected_raw)
+        ok = set(expected_set).issubset(observed_set)
+        return ok, f"contains={_stable_json(expected_set)}", f"strings={_stable_json(observed_set)}", None
+    if normalize == "string":
+        observed = str(observed_raw)
+        expected = str(expected_raw)
+        return observed == expected, f"string={expected!r}", f"string={observed!r}", None
+    if normalize == "json":
+        observed = _stable_json(observed_raw)
+        expected = _stable_json(expected_raw)
+        return observed == expected, f"json={expected}", f"json={observed}", None
+    return False, "", "", f"projection.normalize {normalize!r} is not supported"
+
+
+def _verify_projection_claims(
+    *,
+    data: bytes,
+    specs: list[tuple[str, Mapping[str, Any]]],
+    path: Path,
+    pointer_prefix: tuple[Any, ...],
+    assertion_id: str,
+    evidence_ref: str,
+) -> list[ValidationError]:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return [
+            _error(
+                CODE_UNVERIFIABLE,
+                path,
+                pointer_prefix,
+                "evidence_ref",
+                f"assertion {assertion_id}: evidence_ref {evidence_ref!r} is not UTF-8 ({exc.__class__.__name__})",
+            )
+        ]
+    try:
+        document = yaml.safe_load(text)
+    except Exception as exc:
+        return [
+            _error(
+                CODE_UNVERIFIABLE,
+                path,
+                pointer_prefix,
+                "evidence_ref",
+                f"assertion {assertion_id}: evidence_ref {evidence_ref!r} is not parseable YAML ({exc.__class__.__name__})",
+            )
+        ]
+    findings: list[ValidationError] = []
+    for key, spec in specs:
+        ok, claimed, observed, error = _projection_verdict(document=document, spec=spec)
+        if error is not None:
+            findings.append(
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    f"assertion {assertion_id}: claim.{key} {error}",
+                )
+            )
+            continue
+        if ok:
+            continue
+        findings.append(
+            _drift_error(
+                path,
+                pointer_prefix,
+                "claim",
+                (
+                    f"assertion {assertion_id}: artifact projection drifted for claim.{key}; "
+                    f"claimed {claimed}, observed {observed}"
+                ),
+                assertion_id=assertion_id,
+                claimed=claimed,
+                observed=observed,
+                evidence_ref=evidence_ref,
+            )
+        )
+    return findings
+
+
 def _repo_root_from_state_root(state_root: Path | str) -> Path:
-    return brain_runtime.repo_root_from_state_root(state_root)
+    root = Path(state_root)
+    if root.name == "state" and root.parent.name == ".ce":
+        return root.parent.parent
+    return Path(".")
 
 
-def _repo_root_from_assertion_path(path: Path) -> Path:
-    if (
-        path.name == "assertions.yaml"
-        and path.parent.name == "brain"
-        and path.parent.parent.name == "state"
-        and path.parent.parent.parent.name == ".ce"
-    ):
-        return path.parent.parent.parent.parent
-    if (
-        path.name == "assertions.yaml"
-        and path.parent.name == "brain"
-        and path.parent.parent.name == ".ce"
-    ):
-        return path.parent.parent.parent
+def _repo_root_for_repo_local_state_root(state_root: Path | str) -> Path | None:
+    root = Path(state_root)
+    if root.name == "state" and root.parent.name == ".ce":
+        return root.parent.parent
+    return None
+
+
+def _drift_ledger_path(state_root: Path | str) -> Path:
+    state_ledger = brain_runtime.ledger_path(state_root)
+    if state_ledger.is_file():
+        return state_ledger
+    repo_root = _repo_root_for_repo_local_state_root(state_root)
+    if repo_root is None:
+        return state_ledger
+    authoritative = repo_root / AUTHORITATIVE_LEDGER_RELATIVE_PATH
+    return authoritative if authoritative.is_file() else state_ledger
+
+
+def _repo_root_from_ledger_path(path: Path) -> Path:
+    parts = path.parts
+    for idx, part in enumerate(parts):
+        if part == ".ce":
+            return Path(*parts[:idx]) if idx > 0 else Path(".")
     return Path(".")
 
 
@@ -468,12 +728,30 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
         *_comparison_malformed_errors(claim, path, pointer_prefix, assertion_id),
         *_comparison_unsupported_errors(claim, path, pointer_prefix, assertion_id),
     ]
+    claimed_projections, projection_errors = _projection_specs(claim, path, pointer_prefix, assertion_id)
+    comparison_errors.extend(projection_errors)
     if comparison_errors:
         return comparison_errors
 
     claimed_hashes = _claimed_hashes(claim)
     claimed_values = _claimed_values(claim)
-    if not claimed_hashes and not claimed_values:
+    if _is_workflow_claim(claim) and _is_volatile_workflow_config_artifact(artifact, context):
+        unstable_keys = _full_artifact_anchor_keys(claim)
+        if unstable_keys:
+            return [
+                _error(
+                    CODE_UNVERIFIABLE,
+                    path,
+                    pointer_prefix,
+                    "claim",
+                    (
+                        f"assertion {assertion_id}: workflow/config evidence {evidence_ref!r} "
+                        f"must not use full-artifact hash/value anchors ({', '.join(unstable_keys)}); "
+                        "use a probe, normalized projection, or stable contract artifact instead"
+                    ),
+                )
+            ]
+    if not claimed_hashes and not claimed_values and not claimed_projections:
         return [
             _error(
                 CODE_UNVERIFIABLE,
@@ -488,6 +766,17 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
         ]
 
     findings: list[ValidationError] = []
+    if claimed_projections:
+        findings.extend(
+            _verify_projection_claims(
+                data=data,
+                specs=claimed_projections,
+                path=path,
+                pointer_prefix=pointer_prefix,
+                assertion_id=assertion_id,
+                evidence_ref=evidence_ref,
+            )
+        )
     observed_hash = hashlib.sha256(data).hexdigest()
     for key, claimed_hash in claimed_hashes:
         if claimed_hash == observed_hash:
@@ -602,7 +891,7 @@ def validate_file(path: Path, *, context: DriftContext | None = None) -> list[Va
 
 
 def verify_state_root(state_root: Path | str, *, context: DriftContext | None = None) -> DriftResult:
-    path = brain_runtime.ledger_path(state_root)
+    path = _drift_ledger_path(state_root)
     if context is None:
         repo_root = _repo_root_from_state_root(state_root)
         context = DriftContext(
@@ -612,7 +901,8 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
     findings_list: list[ValidationError] = []
     if path.is_file():
         findings_list.extend(validate_file(path, context=context))
-        findings_list.extend(_authoritative_mismatch_errors(path, context))
+        if _is_loaded_runtime_ledger(path):
+            findings_list.extend(_authoritative_mismatch_errors(path, context))
     findings = tuple(findings_list)
     record_count = 0
     active_count = 0
@@ -643,7 +933,7 @@ def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
     checked_mismatch_paths: set[Path] = set()
     for path in iter_brain_assertion_files(paths):
-        repo_root = _repo_root_from_assertion_path(path)
+        repo_root = _repo_root_from_ledger_path(path)
         context = DriftContext(
             repo_root=repo_root,
             probe_context=brain_probe.ProbeContext(repo_root=repo_root),

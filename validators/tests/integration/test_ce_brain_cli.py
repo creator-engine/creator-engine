@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from creator_engine_validator import brain_probe
+from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator import ce_cli
 from creator_engine_validator.checks import ce_brain_drift
 
@@ -33,6 +34,40 @@ def _artifact_hash_claim(digest: str) -> str:
             "sha256": digest,
         }
     )
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_authoritative_validate_workflow_ledger(repo: Path) -> Path:
+    captured: list[tuple[Path, str]] = []
+    rt.assert_claim(
+        assertion_id="brain-assertion-validate-workflow-drift-gate",
+        statement="validate workflow merge_group trigger includes checks_requested",
+        assertion_type="capability",
+        scope={"artifact": ".github/workflows/validate.yml", "gate": "drift-ci"},
+        claim={
+            "subject": "workflow",
+            "predicate": "allows-merge-queue-validation",
+            "object": "validate",
+            "projection": {
+                "type": "yaml-path",
+                "path": ["on", "merge_group", "types"],
+                "normalize": "string_set_contains",
+                "expected": ["checks_requested"],
+            },
+        },
+        evidence_ref=".github/workflows/validate.yml",
+        verification_method={"type": "static", "evidence_ref": ".github/workflows/validate.yml"},
+        state_root=repo / ".ce",
+        records=[],
+        write=lambda path, text: captured.append((path, text)),
+    )
+    path, text = captured[-1]
+    _write_text(path, text)
+    return path
 
 
 def test_ce_brain_assert_check_correct_verify_roundtrip(tmp_path: Path, capsys):
@@ -285,6 +320,31 @@ def test_ce_brain_verify_drift_returns_nonzero_on_artifact_drift(tmp_path: Path,
     assert payload["drift"]["ok"] is False
     assert [finding["code"] for finding in payload["drift"]["findings"]] == [ce_brain_drift.CODE_DRIFT]
     assert any("brain-assertion-cli-0006" in error for error in payload["errors"])
+
+
+def test_ce_brain_verify_drift_falls_back_to_authoritative_ledger_and_fails_on_semantic_drift(
+    tmp_path: Path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    authoritative = _write_authoritative_validate_workflow_ledger(tmp_path)
+    _write_text(
+        tmp_path / ".github" / "workflows" / "validate.yml",
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [other_event]\n",
+    )
+
+    rc = ce_cli.main(["brain", "verify", "--drift", "--state-root", str(state_root), "--json"])
+
+    assert not state_root.exists()
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drift"]["ledger_path"] == str(authoritative)
+    assert payload["drift"]["record_count"] == 1
+    assert payload["drift"]["active_count"] == 1
+    assert [finding["code"] for finding in payload["drift"]["findings"]] == [ce_brain_drift.CODE_DRIFT]
+    assert "artifact projection drifted" in payload["errors"][0]
 
 
 def test_ce_brain_probe_unknown_capability_returns_unknown(capsys):
