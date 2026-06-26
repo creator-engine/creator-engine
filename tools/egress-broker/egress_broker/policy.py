@@ -96,6 +96,14 @@ class BrokerPolicy:
     no-reply author email. ``allowed_branch_namespaces`` are prefix matches.
     ``forbidden_branches`` is unioned with the always-forbidden floor and the base branch.
     ``max_pushes_per_window`` is the rate cap (``0`` disables the guard).
+
+    ``require_signed_commits`` controls whether commit-signature verification is enforced
+    (default ``True`` = back-compat, fail-closed). Set to ``False`` ONLY for contained seats
+    that cannot sign (e.g. gVisor zero-key environments). When ``False`` the signature gate is
+    skipped entirely but ALL other gates — author allow-list, branch namespace, forbidden-branch,
+    rate-limit, head-sha well-formedness, and preconditions — remain enforced. The broker's own
+    authorization boundary (GitHub login allow-list + branch namespace + rate-limit) is the
+    trust boundary in that configuration. The skip is logged explicitly.
     """
 
     base_branch: str
@@ -105,6 +113,7 @@ class BrokerPolicy:
     authorized_logins: frozenset[str]
     max_pushes_per_window: int
     window_seconds: int
+    require_signed_commits: bool = True
 
 
 @dataclass(frozen=True)
@@ -238,19 +247,35 @@ def evaluate(
             )
         )
 
-    # 2. signature — ONLY an exact "G" (good, fully trusted) passes. Fail-closed on any doubt.
-    status = facts.signature_status or ""
-    if status == GOOD_SIGNATURE:
-        checks.append(
-            CheckResult("signature_valid", True, f"git verified a good signature (%G?={status})")
-        )
+    # 2. signature — ONLY an exact "G" (good, fully trusted) passes by default (fail-closed).
+    #    When require_signed_commits is False (contained seats that cannot sign), the gate is
+    #    SKIPPED entirely and logged explicitly; all other gates remain enforced as normal.
+    if policy.require_signed_commits:
+        status = facts.signature_status or ""
+        if status == GOOD_SIGNATURE:
+            checks.append(
+                CheckResult("signature_valid", True, f"git verified a good signature (%G?={status})")
+            )
+        else:
+            shown = status or "NONE"
+            checks.append(
+                CheckResult(
+                    "signature_valid",
+                    False,
+                    f"signature is not a trusted-good signature (%G?={shown}); fail-closed deny",
+                )
+            )
     else:
-        shown = status or "NONE"
+        # Signature check disabled by policy (require_signed_commits=false). This is intended for
+        # contained seats that operate in zero-key gVisor environments and cannot sign commits.
+        # The broker's authorization boundary (author allow-list + branch namespace + rate-limit)
+        # is the enforced trust boundary. All other gates remain active and are NOT relaxed.
         checks.append(
             CheckResult(
                 "signature_valid",
-                False,
-                f"signature is not a trusted-good signature (%G?={shown}); fail-closed deny",
+                True,
+                "signature check disabled by policy (require_signed_commits=false); "
+                "broker authorization boundary enforced via other gates",
             )
         )
 
