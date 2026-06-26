@@ -961,10 +961,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     playbook = groups.add_parser(
         "playbook",
-        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+        help="discover, inspect, and run governed CE playbooks",
     )
     playbook_sub = playbook.add_subparsers(dest="playbook_cmd")
-    pl = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    pl = playbook_sub.add_parser("list", help="list governed CE playbooks")
     pl.add_argument(
         "--playbooks-root",
         "--root",
@@ -985,7 +985,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ps.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    prun = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    prun = playbook_sub.add_parser("run", help="run a governed CE playbook")
     prun.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
     prun.add_argument(
         "--playbooks-root",

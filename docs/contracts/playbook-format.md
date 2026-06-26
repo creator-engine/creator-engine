@@ -47,6 +47,30 @@ The workflow descriptor MUST declare:
 Stages reference gate IDs by name. A stage may not reference a gate that is not
 declared in `gates[]`.
 
+For executable playbooks, each `stages[]` entry MAY also include runtime fields:
+
+| Field | Rule |
+| --- | --- |
+| `description` | Human-readable stage description. |
+| `action` | Human-readable governed action to perform when no shell command is declared. |
+| `command` | Optional shell command. `ce playbook run` evaluates the command through the CE hook-check governance seam before execution. |
+| `expected_result` | Human-readable pass condition surfaced in run output. |
+
+`ce playbook run <name>` resolves playbooks from local `playbooks/` by id or
+path. `--dry-run` prints the ordered plan and executes nothing. A live run
+executes stages in order, emits `PASS`/`FAIL` for each stage, stops on the first
+failed command, and emits a final result. Stages without `command` are treated
+as action steps: the runner records the action as acknowledged and does not
+spawn a shell.
+
+Public dual-use `PLAYBOOK.md` files are accepted as a frontmatter authoring
+layer. Their frontmatter uses the same `id`, `title`, `goal`, `status`, `mode`,
+`work_class`, `gates`, `prerequisites`, `steps`, and `expected_outcome` fields
+validated by the public playbook runtime. Each `steps[]` entry MUST carry `id`
+and `action`; it MAY carry `description`, `command`, and `expected_result`.
+The runtime projects those entries into the internal `stages[]` descriptor above
+before listing, showing, dry-running, or running.
+
 ## Validator Behavior
 
 `ce_playbook_format` scans playbook directories when a path is `playbooks/`, a

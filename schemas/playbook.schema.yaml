@@ -99,6 +99,14 @@ properties:
           $ref: "#/$defs/slug"
         title:
           $ref: "#/$defs/non_empty_string"
+        description:
+          $ref: "#/$defs/non_empty_string"
+        action:
+          $ref: "#/$defs/non_empty_string"
+        command:
+          $ref: "#/$defs/non_empty_string"
+        expected_result:
+          $ref: "#/$defs/non_empty_string"
         brief:
           type: string
           pattern: "^briefs/[a-z0-9][a-z0-9-]*\\.md$"
