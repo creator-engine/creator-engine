@@ -103,6 +103,86 @@ _KNOWN_PENDING: frozenset[str] = frozenset(
     }
 )
 
+# Internal-tree guard exceptions (ce-ops#283).
+#
+# docs/operations/** and docs/delivery/** are internal operating/delivery
+# surfaces that currently live in the public docs tree. These explicit
+# allowlists are a debt ratchet: current files are listed so the guard passes
+# today, but future net-new files in either tree fail until they are moved or
+# deliberately added here.
+_KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
+    {
+        "docs/operations/ACTIVE_WORK_LEDGER_PROTOCOL.md",
+        "docs/operations/AGENT_NATIVE_BOOTSTRAP.md",
+        "docs/operations/AUTHOR_A_CE_VALID_PR.md",
+        "docs/operations/CE_EVENT_PROTOCOL.md",
+        "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md",
+        "docs/operations/CLAUDE_CODE_HOOK_PACK.md",
+        "docs/operations/CODEX_FIRST_CLASS_PROTOCOL.md",
+        "docs/operations/COMPLETION_REPORT_PROTOCOL.md",
+        "docs/operations/CONNECTOR_PROTOCOL.md",
+        "docs/operations/CONTAINED_CONTROLLER_PARITY_ACCEPTANCE.md",
+        "docs/operations/CONTROLLER_BOUNDARY_POLICY.md",
+        "docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md",
+        "docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md",
+        "docs/operations/DISTRIBUTED_IDENTITY_PROTOCOL.md",
+        "docs/operations/EVIDENCE_FAN_IN_PROTOCOL.md",
+        "docs/operations/EXTENSION_HOOK_CONTRACT.md",
+        "docs/operations/GITHUB_NATIVE_COORDINATION_PROTOCOL.md",
+        "docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md",
+        "docs/operations/GREENFIELD_FIRST_PROJECT_PROTOCOL.md",
+        "docs/operations/HARNESS_SEAT_CONTRACT.md",
+        "docs/operations/HARNESS_SUPPORT_CAPABILITY_MATRIX.md",
+        "docs/operations/HERDR_OPERATOR_REACH_PLANE.md",
+        "docs/operations/INSTALLED_CE_DOGFOOD_MIGRATION.md",
+        "docs/operations/INTEGRATION_QUEUE_DRY_RUN.md",
+        "docs/operations/NO_COPY_PASTE_PATTERN.md",
+        "docs/operations/ONBOARD_APPLY_PROTOCOL.md",
+        "docs/operations/PANE_REGISTRY_PROTOCOL.md",
+        "docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md",
+        "docs/operations/PCL_PROTOCOL.md",
+        "docs/operations/PCO_FANIN_PROTOCOL.md",
+        "docs/operations/REVIEWER_TRIAGE.md",
+        "docs/operations/REVIEWER_VENUE_AUTHORITY.md",
+        "docs/operations/REVIEW_GATE_REVIEWER_VENUE_DESIGN.md",
+        "docs/operations/ROLE_BOUNDARY_FAILSAFE_STAGE_1_DESIGN.md",
+        "docs/operations/ROOT_WORKTREE_INVARIANT.md",
+        "docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md",
+        "docs/operations/SEAT_REAPER_PROTOCOL.md",
+        "docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md",
+        "docs/operations/STATE_BOUNDARY_PROTOCOL.md",
+        "docs/operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md",
+        "docs/operations/WORKER_CONTAINER_PROTOCOL.md",
+        "docs/operations/WORKER_HOST_READINESS.md",
+        "docs/operations/WORKTREE_ALLOCATOR_PROTOCOL.md",
+        "docs/operations/WORKTREE_LEASE_PROTOCOL.md",
+        "docs/operations/session-continuity-protocol.md",
+    }
+)
+
+_KNOWN_DELIVERY_EXCEPTIONS: frozenset[str] = frozenset(
+    {
+        "docs/delivery/ASSIGNMENT_ENVELOPE_DRY_RUN.md",
+        "docs/delivery/ASSIGNMENT_ENVELOPE_TEMPLATE.md",
+        "docs/delivery/DEFINITION_OF_DONE.md",
+        "docs/delivery/DEFINITION_OF_READY.md",
+        "docs/delivery/DEPLOYMENT_APPROVAL_POLICY.md",
+        "docs/delivery/ENVELOPE_CONSUMPTION_CHECKLIST.md",
+        "docs/delivery/MERGE_APPROVAL_CHECKLIST.md",
+        "docs/delivery/NEXT_TASK_PROTOCOL.md",
+        "docs/delivery/README.md",
+        "docs/delivery/RELEASE_CANDIDATE_CHECKLIST.md",
+        "docs/delivery/RELEASE_DEPLOY_GOVERNANCE.md",
+        "docs/delivery/REVIEWER_IDENTITY_REQUIREMENTS.md",
+        "docs/delivery/REVIEW_EVIDENCE_TEMPLATE.md",
+        "docs/delivery/REVIEW_GATE.md",
+        "docs/delivery/ROLLBACK_AND_POST_RELEASE_EVIDENCE.md",
+        "docs/delivery/SCOPE_AUDIT_CHECKLIST.md",
+        "docs/delivery/VERSIONING_AND_RELEASE_POLICY.md",
+        "docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md",
+    }
+)
+
 
 def _public_doc_files() -> list[Path]:
     """All scanned public-doc files: README plus docs/** of scanned suffixes."""
@@ -124,6 +204,13 @@ def _display_rel(path: Path, *, repo_root: Path = _REPO_ROOT) -> str:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _internal_tree_files(root: Path) -> frozenset[str]:
+    """All files below an internal public-doc tree, repo-root relative."""
+    if not root.exists():
+        return frozenset()
+    return frozenset(_display_rel(path) for path in root.rglob("*") if path.is_file())
 
 
 def _offenses(path: Path, *, repo_root: Path = _REPO_ROOT) -> list[str]:
@@ -255,6 +342,33 @@ def test_public_docs_contain_no_confidential_or_internal_references():
         "Remove the reference (product-lens rewrite), or — only for the separate "
         "redact/relocate program — add the file to _KNOWN_PENDING. Offending "
         "lines:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_public_docs_internal_trees_have_only_known_exceptions():
+    """No new docs/operations or docs/delivery files may enter public docs."""
+    guarded_trees = (
+        ("docs/operations", _KNOWN_OPERATIONS_EXCEPTIONS),
+        ("docs/delivery", _KNOWN_DELIVERY_EXCEPTIONS),
+    )
+    unreviewed: list[str] = []
+    stale_exceptions: list[str] = []
+
+    for root_rel, known_exceptions in guarded_trees:
+        actual = _internal_tree_files(_REPO_ROOT / root_rel)
+        unreviewed.extend(sorted(actual - known_exceptions))
+        stale_exceptions.extend(sorted(known_exceptions - actual))
+
+    assert not unreviewed and not stale_exceptions, (
+        "Public docs contain internal operations/delivery files outside the "
+        "explicit exception ratchet, or the ratchet lists files that no longer "
+        "exist. Move net-new internal files out of the served docs tree, or "
+        "add them deliberately to _KNOWN_OPERATIONS_EXCEPTIONS / "
+        "_KNOWN_DELIVERY_EXCEPTIONS. Remove stale entries when files leave "
+        "these trees.\nUnreviewed files:\n  "
+        + ("\n  ".join(unreviewed) if unreviewed else "<none>")
+        + "\nStale exceptions:\n  "
+        + ("\n  ".join(stale_exceptions) if stale_exceptions else "<none>")
     )
 
 
