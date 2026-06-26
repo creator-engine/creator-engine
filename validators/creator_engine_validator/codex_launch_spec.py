@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 CLAUSE_HEADLESS = "CDX-D-1"
 CLAUSE_REMOTE = "CDX-D-2"
@@ -25,6 +26,7 @@ CLAUSE_ADD_DIR = "CDX-D-5"
 CLAUSE_BYPASS_MODE = "CDX-D-6"
 CLAUSE_ARG_ALLOWLIST = "CDX-D-7"
 CLAUSE_MANAGED_HOOK_PACK = "CDX-D-8"
+CLAUSE_CONTAINER_CREDENTIAL_ENV = "CDX-D-9"
 CODEX_HARNESS_ENV = "CE_CODEX_HARNESS"
 KNOWN_GOOD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -48,11 +50,50 @@ CREDENTIAL_ENV_UNSETS = (
     "GITHUB_TOKEN",
     "GH_ENTERPRISE_TOKEN",
     "GITHUB_ENTERPRISE_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "BAO_TOKEN",
+    "OPENBAO_TOKEN",
+    "VAULT_TOKEN",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "GOOGLE_APPLICATION_CREDENTIALS",
     "GITHUB_API_URL",
     "GH_HOST",
     "GH_CONFIG_DIR",
     "GH_DEBUG",
 )
+CREDENTIAL_ENV_NAMES = frozenset(
+    {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "BAO_TOKEN",
+        "OPENBAO_TOKEN",
+        "VAULT_TOKEN",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+    }
+)
+_CREDENTIAL_ENV_SUFFIXES = (
+    "_TOKEN",
+    "_OAUTH_TOKEN",
+    "_API_KEY",
+    "_SECRET",
+    "_PRIVATE_KEY",
+    "_AUTH_SOCK",
+    "_CREDENTIALS",
+)
+_DOCKER_ENV_FLAGS = frozenset({"--env", "-e"})
+_DOCKER_ENV_FILE_FLAGS = frozenset({"--env-file"})
 
 _VALUE_FLAGS = frozenset({"--model", "-m", "--reasoning-effort", "--effort", "--add-dir"})
 _SAFE_VALUE_FLAGS = frozenset({"--model", "-m", "--reasoning-effort", "--effort"})
@@ -80,6 +121,24 @@ class LaunchRefusal:
 
     def to_dict(self) -> dict:
         return {"clause": self.clause, "surface": self.surface, "detail": self.detail}
+
+
+@dataclass(frozen=True)
+class ContainerCredentialEnvFinding:
+    """A credential-bearing env carrier found in a container launch spec."""
+
+    clause: str
+    surface: str
+    name: str
+    detail: str
+
+    def to_dict(self) -> dict:
+        return {
+            "clause": self.clause,
+            "surface": self.surface,
+            "name": self.name,
+            "detail": self.detail,
+        }
 
 
 @dataclass(frozen=True)
@@ -232,6 +291,132 @@ def evaluate_codex_launch(
     return LaunchSpecResult(refusals=tuple(refusals), bypass_mode=bypass_mode)
 
 
+def is_credential_env_name(name: str) -> bool:
+    """Return True for env names that may carry credentials into a container."""
+    candidate = name.strip()
+    if not candidate:
+        return False
+    if candidate in CREDENTIAL_ENV_NAMES:
+        return True
+    return candidate.endswith(_CREDENTIAL_ENV_SUFFIXES)
+
+
+def _env_name_from_assignment(value: str) -> str:
+    return value.split("=", 1)[0].strip()
+
+
+def find_container_credential_env_carriers(
+    launch_spec: Sequence[str] | Mapping[str, Any],
+) -> tuple[ContainerCredentialEnvFinding, ...]:
+    """Find credential-bearing env carriers in a Docker argv or OCI-like spec.
+
+    The check is value-free: findings name only the environment variable and the
+    carrier surface. It catches Docker forms such as ``--env GH_TOKEN``,
+    ``--env=GH_TOKEN=...``, ``-e GH_TOKEN``, direct OCI ``Env`` entries like
+    ``GH_TOKEN=...``, and opaque ``--env-file`` carriers.
+    """
+    findings: list[ContainerCredentialEnvFinding] = []
+
+    def add(surface: str, name: str, detail: str) -> None:
+        findings.append(
+            ContainerCredentialEnvFinding(
+                CLAUSE_CONTAINER_CREDENTIAL_ENV,
+                surface,
+                name,
+                detail,
+            )
+        )
+
+    def scan_env_payload(surface: str, payload: str) -> None:
+        env_name = _env_name_from_assignment(payload)
+        if is_credential_env_name(env_name):
+            add(
+                surface,
+                env_name,
+                "contained launches must not pass credential env names or values into the container spec",
+            )
+
+    def scan_argv(argv: Sequence[str]) -> None:
+        expect_env_payload: str | None = None
+        expect_env_file = False
+        for raw in argv:
+            token = str(raw)
+            if expect_env_payload is not None:
+                scan_env_payload(expect_env_payload, token)
+                expect_env_payload = None
+                continue
+            if expect_env_file:
+                add(
+                    "--env-file",
+                    "<env-file>",
+                    "contained launches must not use opaque Docker env files",
+                )
+                expect_env_file = False
+                continue
+
+            if token in _DOCKER_ENV_FLAGS:
+                expect_env_payload = token
+                continue
+            if token in _DOCKER_ENV_FILE_FLAGS:
+                expect_env_file = True
+                continue
+            if token.startswith("--env="):
+                scan_env_payload("--env", token.split("=", 1)[1])
+                continue
+            if token.startswith("--env-file="):
+                add(
+                    "--env-file",
+                    "<env-file>",
+                    "contained launches must not use opaque Docker env files",
+                )
+                continue
+            if token.startswith("-e") and token != "-e":
+                scan_env_payload("-e", token[2:])
+                continue
+            if "=" in token:
+                scan_env_payload("Env", token)
+
+    def scan_spec(value: Any) -> None:
+        if isinstance(value, str):
+            if "=" in value:
+                scan_env_payload("Env", value)
+            return
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                key_text = str(key)
+                if is_credential_env_name(key_text):
+                    add(
+                        "environment",
+                        key_text,
+                        "contained launches must not pass credential env names or values into the container spec",
+                    )
+                scan_spec(child)
+            return
+        if isinstance(value, Sequence):
+            argv = [str(part) for part in value]
+            scan_argv(argv)
+            for child in value:
+                if not isinstance(child, str):
+                    scan_spec(child)
+
+    scan_spec(launch_spec)
+    return tuple(findings)
+
+
+def assert_no_container_credential_env(
+    launch_spec: Sequence[str] | Mapping[str, Any],
+) -> None:
+    """Raise when a contained launch spec carries credential-bearing env."""
+    findings = find_container_credential_env_carriers(launch_spec)
+    if findings:
+        names = ", ".join(f.name for f in findings)
+        surfaces = ", ".join(f.surface for f in findings)
+        raise GovernedCommandError(
+            "contained launch passes credential-bearing env into the container "
+            f"spec ({names}) via {surfaces}; use a broker/transport-deputy handoff instead"
+        )
+
+
 def _composed_path(path: str | None = None) -> str:
     parts: list[str] = []
     seen: set[str] = set()
@@ -284,3 +469,20 @@ def build_governed_codex_command(
         resolved,
         *list(base_argv),
     ]
+
+
+def _main(argv: Sequence[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "--check-contained-launch-argv":
+        try:
+            assert_no_container_credential_env(args[1:])
+        except GovernedCommandError as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 78
+        return 0
+    print("usage: codex_launch_spec.py --check-contained-launch-argv <argv...>", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised through launcher guards.
+    raise SystemExit(_main())

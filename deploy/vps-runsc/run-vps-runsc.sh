@@ -37,6 +37,16 @@ Environment:
 EOF
 }
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/../.." && pwd)"
+
+validate_no_credential_container_env() {
+  local validators_root="${CE_VPS_VALIDATORS_ROOT:-${repo_root}/validators}"
+  PYTHONPATH="${validators_root}${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m creator_engine_validator.codex_launch_spec \
+      --check-contained-launch-argv "$@"
+}
+
 dry_run="${CE_VPS_DRY_RUN:-0}"
 if [ "${1:-}" = "--dry-run" ]; then
   dry_run=1
@@ -352,18 +362,6 @@ docker_cmd=(
 )
 
 if [ "${image_harness}" = "claude" ]; then
-  # Secret-retention guard (ce-ops#408 review): a token-bearing --env lands in the
-  # container's inspectable metadata (docker inspect Config.Env). In detached/named-
-  # persistent mode that survives until an explicit `docker rm` — foreground --rm scrubbed
-  # it on container exit. Fail closed in detached mode unless the operator opts in.
-  if [ "${detach}" = "1" ] && [ "${CE_VPS_ALLOW_DETACHED_TOKEN_ENV:-0}" != "1" ]; then
-    printf 'REFUSED: detached launch would persist CLAUDE_CODE_OAUTH_TOKEN in the named-persistent container inspectable metadata (docker inspect Config.Env) until "docker rm". Run foreground (omit --detach; --rm scrubs it on exit), or set CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1 to accept this secret-retention tradeoff.\n' >&2
-    exit 78
-  fi
-  if [ "${detach}" = "1" ]; then
-    printf 'WARNING: CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1 set — CLAUDE_CODE_OAUTH_TOKEN will persist in container metadata until docker rm.\n' >&2
-  fi
-  docker_cmd+=(--env "CLAUDE_CODE_OAUTH_TOKEN")
   if [ -n "${CE_VPS_CLAUDE_BIN}" ]; then
     docker_cmd+=(
       --mount "type=bind,source=${CE_VPS_CLAUDE_BIN},target=/usr/local/bin/claude,readonly"
@@ -374,6 +372,8 @@ fi
 docker_cmd+=("${tty_flags[@]}")
 docker_cmd+=("${CE_VPS_IMAGE}")
 docker_cmd+=("${container_cmd[@]}")
+
+validate_no_credential_container_env "${docker_cmd[@]}"
 
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"

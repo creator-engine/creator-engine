@@ -9,6 +9,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from creator_engine_validator import codex_launch_spec as launch_spec
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "dgx-runsc" / "run-codex-runsc.sh"
@@ -287,6 +291,47 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
         for arg in argv
     )
     assert not any("/run/creator-engine/herdr" in arg and arg.startswith("type=bind,") for arg in argv)
+
+
+def test_dgx_runsc_launch_guard_allows_clean_argv_with_host_credentials() -> None:
+    result = run_wrapper(
+        "exec",
+        "print working tree status",
+        GH_TOKEN="ghs_dgx_should_not_cross_container_boundary",
+        GITHUB_TOKEN="github_pat_dgx_should_not_cross_container_boundary",
+        OPENAI_API_KEY="sk-dgx-should-not-cross-container-boundary",
+        CLAUDE_CODE_OAUTH_TOKEN="claude-dgx-should-not-cross-container-boundary",
+        BAO_TOKEN="hvs.dgx_should_not_cross_container_boundary",
+    )
+
+    argv = dry_run_argv(result)
+    rendered = "\n".join(argv)
+
+    launch_spec.assert_no_container_credential_env(argv)
+    for forbidden in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "OPENAI_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "BAO_TOKEN",
+        "ghs_dgx_should_not_cross_container_boundary",
+        "github_pat_dgx_should_not_cross_container_boundary",
+        "sk-dgx-should-not-cross-container-boundary",
+        "claude-dgx-should-not-cross-container-boundary",
+        "hvs.dgx_should_not_cross_container_boundary",
+    ):
+        assert forbidden not in rendered
+
+
+def test_dgx_runsc_launch_guard_denies_credential_env_carrier() -> None:
+    clean_argv = dry_run_argv(run_wrapper("tui"))
+    dirty_argv = clean_argv[:2] + ["--env", "GH_TOKEN"] + clean_argv[2:]
+
+    findings = launch_spec.find_container_credential_env_carriers(dirty_argv)
+
+    assert [finding.name for finding in findings] == ["GH_TOKEN"]
+    with pytest.raises(launch_spec.GovernedCommandError):
+        launch_spec.assert_no_container_credential_env(dirty_argv)
 
 
 def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:

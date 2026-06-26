@@ -51,6 +51,16 @@ Environment:
 EOF
 }
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/../.." && pwd)"
+
+validate_no_credential_container_env() {
+  local validators_root="${CE_DGX_VALIDATORS_ROOT:-${repo_root}/validators}"
+  PYTHONPATH="${validators_root}${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m creator_engine_validator.codex_launch_spec \
+      --check-contained-launch-argv "$@"
+}
+
 dry_run="${CE_DGX_DRY_RUN:-0}"
 if [ "${1:-}" = "--dry-run" ]; then
   dry_run=1
@@ -387,6 +397,8 @@ docker_cmd+=("${CE_DGX_IMAGE}")
 if [ "${#container_cmd[@]}" -gt 0 ]; then
   docker_cmd+=("${container_cmd[@]}")
 fi
+
+validate_no_credential_container_env "${docker_cmd[@]}"
 
 if [ "${dry_run}" = "1" ]; then
   printf '%q ' "${docker_cmd[@]}"

@@ -82,6 +82,52 @@ def test_build_governed_command_scrubs_github_credentials():
     assert command[-3:] == ["/opt/codex/bin/codex", "--model", "gpt-5"]
 
 
+def test_container_credential_env_guard_denies_known_names_without_values():
+    findings = spec.find_container_credential_env_carriers(
+        ["docker", "run", "--env", "GH_TOKEN", "--env=OPENAI_API_KEY=secret", "-eBAO_TOKEN"]
+    )
+
+    assert {finding.name for finding in findings} == {
+        "GH_TOKEN",
+        "OPENAI_API_KEY",
+        "BAO_TOKEN",
+    }
+    assert {finding.clause for finding in findings} == {spec.CLAUSE_CONTAINER_CREDENTIAL_ENV}
+    assert "secret" not in repr([finding.to_dict() for finding in findings])
+
+    with pytest.raises(spec.GovernedCommandError) as exc:
+        spec.assert_no_container_credential_env(["docker", "run", "--env", "GITHUB_TOKEN"])
+    assert "GITHUB_TOKEN" in str(exc.value)
+
+
+def test_container_credential_env_guard_allows_clean_launch_spec():
+    spec.assert_no_container_credential_env(
+        [
+            "docker",
+            "run",
+            "--env",
+            "HOME=/home/seat",
+            "--env",
+            "CODEX_HOME=/home/seat/.codex",
+            "--env",
+            "CE_DGX_HARNESS=codex",
+            "--mount",
+            "type=bind,source=/repo,target=/workspace/creator-engine",
+        ]
+    )
+
+
+def test_container_credential_env_guard_denies_oci_env_and_env_file():
+    findings = spec.find_container_credential_env_carriers(
+        {"Config": {"Env": ["HOME=/home/seat", "CLAUDE_CODE_OAUTH_TOKEN=secret"]}}
+    )
+    assert [finding.name for finding in findings] == ["CLAUDE_CODE_OAUTH_TOKEN"]
+    assert "secret" not in repr([finding.to_dict() for finding in findings])
+
+    env_file = spec.find_container_credential_env_carriers(["docker", "run", "--env-file", ".env"])
+    assert env_file[0].surface == "--env-file"
+
+
 def test_resolve_codex_harness_uses_composed_path(tmp_path, monkeypatch):
     bindir = tmp_path / "bin"
     bindir.mkdir()
