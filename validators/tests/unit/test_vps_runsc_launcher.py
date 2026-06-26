@@ -102,6 +102,9 @@ def make_live_fake_docker(root: Path) -> Path:
     docker = fake_bin / "docker"
     docker.write_text(
         "#!/bin/sh\n"
+        "if [ -n \"${CE_TEST_DOCKER_LOG:-}\" ]; then\n"
+        "  printf '%s\\n' \"$*\" >> \"${CE_TEST_DOCKER_LOG}\"\n"
+        "fi\n"
         "if [ \"$1\" = \"info\" ]; then\n"
         "  printf '{\"runsc-gvproxy-ptrace\":{}}\\n'\n"
         "  exit 0\n"
@@ -116,7 +119,12 @@ def make_live_fake_docker(root: Path) -> Path:
         "fi\n"
         "if [ \"$1\" = \"exec\" ]; then\n"
         "  case \" $* \" in\n"
-        "    *' pane list'*) printf '{\"panes\":[{\"id\":\"w1:p1\"}]}\\n' ;;\n"
+        "    *' pane list'*)\n"
+        "      if [ -n \"${CE_TEST_DOCKER_LOG:-}\" ]; then\n"
+        "        printf '%s\\n' 'pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}' >> \"${CE_TEST_DOCKER_LOG}\"\n"
+        "      fi\n"
+        "      printf '{\"panes\":[{\"id\":\"w1:p1\"}]}\\n'\n"
+        "      ;;\n"
         "  esac\n"
         "  exit 0\n"
         "fi\n"
@@ -158,6 +166,7 @@ def run_live_wrapper_with_fake_docker(
             "CE_TEST_HERDR_SESSION_FILE": str(
                 seat_logs / "xdg" / "config" / "herdr" / "session.json"
             ),
+            "CE_TEST_DOCKER_LOG": str(root / "docker-invocations.log"),
             "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
             "TERM": "xterm-256color",
         }
@@ -426,11 +435,16 @@ def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     session_file = tmp_path / "seat-logs" / "xdg" / "config" / "herdr" / "session.json"
     session_file.parent.mkdir(parents=True)
     session_file.write_text('{"windows":[{"id":"w1","stale":true}]}\n', encoding="utf-8")
+    codex_session = tmp_path / "codex-home" / "sessions" / "session.json"
+    codex_session.parent.mkdir(parents=True)
+    codex_session_text = '{"codex":"preserve-session-history"}\n'
+    codex_session.write_text(codex_session_text, encoding="utf-8")
 
     result = run_live_wrapper_with_fake_docker(tmp_path, "--detach", "tui")
 
     assert result.returncode == 0, result.stderr
     assert not session_file.exists()
+    assert codex_session.read_text(encoding="utf-8") == codex_session_text
     backups = list(session_file.parent.glob("session.json.prelaunch-backup.*"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == '{"windows":[{"id":"w1","stale":true}]}\n'
@@ -439,6 +453,16 @@ def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     ) == expected_contained_codex_config()
     assert "backed up stale herdr session" in result.stderr
     assert "container ce-vps-codex is ready" in result.stdout
+    docker_log = (tmp_path / "docker-invocations.log").read_text(encoding="utf-8")
+    assert "pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}" in docker_log
+    # The relaunch must not replay stale herdr windows (e.g. w2/w3 from a stale
+    # session.json). Match the herdr window-id token form ("wN:" pane ref or
+    # '"id":"wN"' json) rather than a bare "wN" substring: the captured docker
+    # argv embeds the tmp_path, which under pytest-xdist contains worker ids like
+    # ".../popen-gw3/..." that would spuriously match a bare "w3".
+    for stale_window in ("w2", "w3"):
+        assert f"{stale_window}:" not in docker_log
+        assert f'"id":"{stale_window}"' not in docker_log
 
 
 def test_detach_relaunch_dry_run_does_not_mutate_stale_herdr_session(
