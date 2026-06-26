@@ -73,8 +73,10 @@ RUN set -eux; \
 
 COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY deploy/dgx-runsc/herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint
+COPY deploy/dgx-controller-runsc/ce-controller-gh-guard.sh /usr/local/bin/ce-controller-gh-guard
 
 RUN set -eux; \
+    ln -s /usr/local/bin/ce-controller-gh-guard /usr/local/bin/gh; \
     { \
       printf '%s\n' '#!/usr/bin/env bash'; \
       printf '%s\n' 'set -euo pipefail'; \
@@ -93,12 +95,16 @@ RUN set -eux; \
     chmod 0755 \
       /usr/local/bin/herdr \
       /usr/local/bin/ce-herdr-harness-entrypoint \
+      /usr/local/bin/ce-controller-gh-guard \
       /usr/local/bin/ce-controller-harness; \
     test -x /usr/local/bin/herdr; \
     test -x /usr/local/bin/ce-herdr-harness-entrypoint; \
+    test -x /usr/local/bin/ce-controller-gh-guard; \
+    test -x /usr/local/bin/gh; \
     test -x /usr/local/bin/ce-controller-harness; \
     git --version; \
-    gh --version >/tmp/gh-version.txt; \
+    /usr/bin/gh --version >/tmp/gh-version.txt; \
+    CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection /usr/local/bin/gh auth status >/tmp/gh-guard-out.txt 2>/tmp/gh-guard-err.txt && exit 1 || test "$?" = "78"; \
     python3 -c 'import sys; sys.path.insert(0, "/workspace/creator-engine/validators"); print("creator_engine_validator import path scaffolded")'
 
 USER ${CE_DGX_UID}:${CE_DGX_GID}

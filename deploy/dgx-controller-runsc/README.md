@@ -9,16 +9,15 @@ capabilities, `no-new-privileges`, and a dedicated controller home.
 The detailed architecture, credential-injection seam, C3 parity plan, and C4
 cutover plan live in `deploy/dgx-controller-runsc/DESIGN.md`.
 
-C1 is intentionally a credential seam stub. The launcher does not pass
-`CLAUDE_CODE_OAUTH_TOKEN`, token values, token env names, secret refs, host auth
-files, or private-key material through Docker env, argv, or mounts. It only
-sets the non-secret marker
+C1 is intentionally a credential seam stub. The launcher does not pass token
+values, token env names, secret refs, host auth files, or private-key material
+through Docker env, argv, or mounts. It only sets the non-secret marker
 `CE_DGX_CREDENTIAL_INJECTION=SEAM-STUB` and
 `CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection`.
 
 C2 is blocked on ce-ops#239 / the transport-deputy path. Until that lands, this
 scaffold validates containment and operator flow but does not provide durable
-Claude auth.
+Claude auth or source-host authority.
 
 ## Containment Posture
 
@@ -47,6 +46,32 @@ An optional `CE_DGX_SUPERVISOR_SOCKET` remains as non-secret future plumbing and
 is mounted at `/run/ce-supervisor.sock` when supplied. The launcher refuses
 Docker, Podman, containerd, herdr, and tmux socket paths for that seam.
 
+## Credential Guard
+
+The image installs `deploy/dgx-controller-runsc/ce-controller-gh-guard.sh` as
+`/usr/local/bin/ce-controller-gh-guard` and shadows `gh` at `/usr/local/bin/gh`.
+While the seam is unfilled, every controller `gh` invocation must fail closed before
+performing GitHub or merge-gate work:
+
+```text
+CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection
+CE_DGX_CREDENTIAL_INJECTION=SEAM-STUB
+```
+
+The guard does not print argv, token names, token values, or host credential
+paths. It reports only the non-secret seam status and injection mode.
+
+The future ce-ops#239 ready interface is explicit and still value-free:
+
+```text
+CE_TRANSPORT_DEPUTY_SEAM_STATUS=ready-ce-ops-239-credential-injection
+CE_DGX_CREDENTIAL_INJECTION=TRANSPORT-DEPUTY
+CE_TRANSPORT_DEPUTY_GH_REAL=/usr/bin/gh
+```
+
+Until those ready markers are provided by the transport deputy, no credential
+means no gate action.
+
 ## Build Image
 
 Build from the repository root. The Dockerfile intentionally uses root build
@@ -70,7 +95,9 @@ DGX Codex seat image, installs `git`, `gh`, `python3`, and `tini`, sets
 harness entrypoint. Herdr is configured to execute
 `/usr/local/bin/ce-controller-harness`; that wrapper restores `PYTHONPATH`,
 exports the non-secret C1 seam markers, and then execs the mounted Claude binary
-at `/usr/local/bin/claude`.
+at `/usr/local/bin/claude`. The package `gh` binary remains at `/usr/bin/gh`;
+the controller-visible `/usr/local/bin/gh` path is the fail-closed
+`ce-controller-gh-guard`.
 
 Provide a Claude binary with `CE_DGX_CLAUDE_BIN=/path/to/claude`; it is mounted
 read-only at `/usr/local/bin/claude`. Do not bake auth into the image.
@@ -137,8 +164,8 @@ controller-home mount, the optional Claude binary mount,
 `CE_TRANSPORT_DEPUTY_SEAM_STATUS=stub-ce-ops-239-no-secret-injection`.
 
 The printed argv must not include a Docker `--network=` flag, `HERDR_SOCKET_PATH`,
-`CLAUDE_CODE_OAUTH_TOKEN`, token-looking values, Docker/Podman/containerd socket
-mounts, host herdr socket mounts, or host tmux socket mounts.
+token env names, token-looking values, Docker/Podman/containerd socket mounts,
+host herdr socket mounts, or host tmux socket mounts.
 
 ## Detached Launch
 
