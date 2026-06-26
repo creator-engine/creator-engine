@@ -57,36 +57,41 @@ def _pin_bootstrap_seat_class(monkeypatch, tmp_path: Path, seat_class: str) -> N
 def _write_worker_record(root: Path, worker_id: str) -> Path:
     import yaml
 
+    from creator_engine_validator import worker_spawn
+
+    role = "implementer"
+    surface_ref = worker_spawn.WORKER_TIER_ROLE_SURFACE_REFS.get(role)
+    if surface_ref is not None:
+        surface_path = root / surface_ref
+        surface_path.parent.mkdir(parents=True, exist_ok=True)
+        surface_path.write_text(f"# {role}\n", encoding="utf-8")
+
     path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "kind": "ce-worker-spawn-record",
-                "schema_version": "1",
-                "worker_id": worker_id,
-                "role": "implementer",
-                "lane_kind": "implementation",
-                "harness": "claude",
-                "scope_id": "ce-ops#163",
-                "parent_id": "ce-dev-4",
-                "worktree_path": str(root),
-                "prompt": {"kind": "brief", "ref": "inline-brief", "sha256": "a" * 64},
-                "depth": 1,
-                "max_depth": 3,
-                "record_path": str(path),
-                "launch_command": ["ce", "launch"],
-                "launch_command_sha256": "b" * 64,
-                "scrubbed_env_names": [],
-                "child_env_names": [],
-                "dry_run": False,
-                "launch_state": "launched",
-                "seat_refs": {"seat_lifecycle_state": "active"},
-            },
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
+    record = {
+        "kind": "ce-worker-spawn-record",
+        "schema_version": "1",
+        "worker_id": worker_id,
+        "role": role,
+        "lane_kind": "implementation",
+        "harness": "claude",
+        "scope_id": "ce-ops#163",
+        "parent_id": "ce-dev-4",
+        "worktree_path": str(root),
+        "prompt": {"kind": "brief", "ref": "inline-brief", "sha256": "a" * 64},
+        "depth": 1,
+        "max_depth": 3,
+        "record_path": str(path),
+        "launch_command": ["ce", "launch"],
+        "launch_command_sha256": "b" * 64,
+        "scrubbed_env_names": [],
+        "child_env_names": [],
+        "dry_run": False,
+        "launch_state": "launched",
+        "seat_refs": {"seat_lifecycle_state": "active"},
+        "governed_worker_contract": worker_spawn.governed_worker_contract(role=role, max_depth=3),
+    }
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -121,6 +126,7 @@ def test_hook_check_cli_allows_foreman_implementation_with_worker_record_env(cap
             "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
             "mutation_class": "code",
             "seat_class": "foreman",
+            "worker_id": "worker-from-env",
         },
     }
 
