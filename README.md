@@ -104,13 +104,13 @@ platform evolves:
 
 - **`ce`** is the retained v1 command-line runtime. It wraps the validator and
   provides local repo-native operations such as `check`, `doctor`, `init`,
-  `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `event`, `pcl`,
+  `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
   `pickup`, `playbook`, `bootstrap`, `verify-install`, `update`, `onboard`, `publish-branch`,
   `harness-matrix`, `containment-status`, and `validate-pr`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
-  `ce queue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
+  `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
   `ce playbook`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
@@ -146,7 +146,8 @@ platform evolves:
   committed `base..HEAD` state — the same gates CI enforces (check-examples,
   work-sizing, path-manifest, changelog, and the offline test suite) with a
   clean, scrubbed environment — so an author can confirm a PR is governance-valid
-  before pushing instead of discovering it in CI. `ce hud` is an alias for the
+  before pushing instead of discovering it in CI. `ce dequeue` removes one queued
+  PR from GitHub's merge queue through the governed v3 forge bridge. `ce hud` is an alias for the
   visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.

@@ -8,8 +8,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
-from creator_engine_validator import v3_cli
+from creator_engine_validator import ce_cli, v3_cli
 from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge.approval_capability import (
     ApprovalCapabilityClaims,
@@ -603,6 +604,55 @@ def test_daemon_settle_window_defers_first_approval_cycle_then_enqueues():
         "--match-head-commit",
         HEAD,
     ]]
+
+
+def test_daemon_configurable_settle_delay_sleeps_before_enqueue():
+    settle_seen: set[str] = set()
+    settle_ready_at: dict[str, float] = {}
+    now = {"value": 0.0}
+    sleeps: list[float] = []
+    pr = _daemon_pr(changed_paths=(CARRIER, "docs/a.md"))
+
+    first = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=FakeDaemonGh(),
+        approval_verifier=_approval_verifier(),
+        candidates=(pr,),
+        approval_settle_seen=settle_seen,
+        approval_settle_ready_at=settle_ready_at,
+        approval_settle_seconds=5.0,
+        clock=lambda: now["value"],
+        sleep=lambda seconds: sleeps.append(seconds),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert first.defer_count == 1
+    assert sleeps == []
+    now["value"] = 1.0
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now["value"] += seconds
+
+    second_gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    second = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=second_gh,
+        approval_verifier=_approval_verifier(),
+        candidates=(pr,),
+        approval_settle_seen=settle_seen,
+        approval_settle_ready_at=settle_ready_at,
+        approval_settle_seconds=5.0,
+        clock=lambda: now["value"],
+        sleep=sleep,
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+    )
+
+    assert sleeps == [4.0]
+    assert second.enqueue_count == 1
+    assert second.decisions[0].reason == "eligible_enqueued"
 
 
 def test_daemon_enqueues_when_required_rollup_has_stale_failure_then_latest_success():
@@ -2018,11 +2068,61 @@ def test_ce_queue_daemon_env_target_ref_rejected_as_fork_unsafe(
     assert "env: targets are fork-unsafe" in err
 
 
-def test_dequeue_merge_queue_disables_auto_and_optionally_drafts():
+_DEFAULT_PR_NODE = object()
+
+
+def _merge_queue_payload(*, pull_request: dict | None | object = _DEFAULT_PR_NODE, queued: bool = True) -> str:
+    pr = {"id": "PR_node", "number": PR} if pull_request is _DEFAULT_PR_NODE else pull_request
+    node_pr = {
+        "id": str(pr["id"]),
+        "number": pr["number"],
+        "repository": {"nameWithOwner": REPO},
+    } if pr and queued else None
+    return json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": pr,
+                    "mergeQueue": {
+                        "entries": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": ([{"pullRequest": node_pr}] if node_pr else []),
+                        }
+                    },
+                }
+            }
+        }
+    )
+
+
+def test_dequeue_merge_queue_queries_queue_then_dequeues_and_optionally_drafts():
     calls: list[list[str]] = []
 
     def gh(argv, input_text=None):
         calls.append(list(argv))
+        query_arg = next((arg for arg in argv if isinstance(arg, str) and arg.startswith("query=")), "")
+        if "dequeuePullRequest" in query_arg:
+            return subprocess.CompletedProcess(
+                list(argv),
+                0,
+                stdout=json.dumps(
+                    {
+                        "data": {
+                            "dequeuePullRequest": {
+                                "mergeQueueEntry": {
+                                    "pullRequest": {
+                                        "number": PR,
+                                        "repository": {"nameWithOwner": REPO},
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ),
+                stderr="",
+            )
+        if "mergeQueue" in query_arg:
+            return subprocess.CompletedProcess(list(argv), 0, stdout=_merge_queue_payload(), stderr="")
         return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
 
     result = belt.dequeue_merge_queue(
@@ -2033,12 +2133,83 @@ def test_dequeue_merge_queue_disables_auto_and_optionally_drafts():
     )
 
     assert result.ok is True
-    assert result.disabled_auto_merge is True
+    assert result.queued is True
+    assert result.dequeued is True
     assert result.converted_to_draft is True
-    assert calls == [
-        ["gh", "pr", "merge", str(PR), "--repo", REPO, "--disable-auto"],
-        ["gh", "pr", "ready", str(PR), "--repo", REPO, "--undo"],
-    ]
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in calls)
+    assert calls[-1] == ["gh", "pr", "ready", str(PR), "--repo", REPO, "--undo"]
+
+
+def test_dequeue_merge_queue_noops_when_pr_is_not_queued():
+    calls: list[list[str]] = []
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout=_merge_queue_payload(queued=False),
+            stderr="",
+        )
+
+    result = belt.dequeue_merge_queue(repo=REPO, pr_number=PR, gh_runner=gh, convert_to_draft=True)
+
+    assert result.ok is True
+    assert result.queued is False
+    assert result.dequeued is False
+    assert result.converted_to_draft is False
+    assert len(calls) == 1
+    assert "dequeue_noop=not_queued" in result.evidence
+
+
+def test_dequeue_merge_queue_noops_when_merge_queue_is_null():
+    calls: list[list[str]] = []
+
+    def gh(argv, input_text=None):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout=json.dumps(
+                {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {"id": "PR_node", "number": PR},
+                            "mergeQueue": None,
+                        }
+                    }
+                }
+            ),
+            stderr="",
+        )
+
+    result = belt.dequeue_merge_queue(repo=REPO, pr_number=PR, gh_runner=gh, convert_to_draft=True)
+
+    assert result.ok is True
+    assert result.queued is False
+    assert result.dequeued is False
+    assert result.converted_to_draft is False
+    assert len(calls) == 1
+    assert "dequeue_noop=not_queued" in result.evidence
+
+
+def test_dequeue_merge_queue_refuses_missing_pr():
+    def gh(argv, input_text=None):
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout=_merge_queue_payload(pull_request=None, queued=False),
+            stderr="",
+        )
+
+    raised = None
+    try:
+        belt.dequeue_merge_queue(repo=REPO, pr_number=PR, gh_runner=gh)
+    except belt.IntegratorBeltError as exc:
+        raised = exc
+
+    assert raised is not None
+    assert f"pull request does not exist: {REPO}#{PR}" in str(raised)
 
 
 def test_ce_queue_dequeue_cli_json(monkeypatch, capsys):
@@ -2054,6 +2225,8 @@ def test_ce_queue_dequeue_cli_json(monkeypatch, capsys):
             pr_number=kwargs["pr_number"],
             disabled_auto_merge=True,
             converted_to_draft=True,
+            queued=True,
+            dequeued=True,
             evidence=("gh_pr_merge_disable_auto=true", "draft_returncode=0"),
         )
 
@@ -2087,6 +2260,8 @@ def test_ce_emergency_stop_cli_json_dequeues_and_drafts(monkeypatch, capsys):
             pr_number=kwargs["pr_number"],
             disabled_auto_merge=True,
             converted_to_draft=True,
+            queued=True,
+            dequeued=True,
             evidence=("gh_pr_merge_disable_auto=true", "draft_returncode=0"),
         )
 
@@ -2105,3 +2280,39 @@ def test_ce_emergency_stop_cli_json_dequeues_and_drafts(monkeypatch, capsys):
     assert captured["pr_number"] == PR
     assert captured["convert_to_draft"] is True
     assert '"disabled_auto_merge": true' in capsys.readouterr().out
+
+
+def test_ce_cli_dequeue_bridges_to_v3_module_without_importing_forge(monkeypatch):
+    captured = {}
+
+    def fake_run(argv, check=False):
+        captured["argv"] = list(argv)
+        captured["check"] = check
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ce_cli.subprocess, "run", fake_run)
+
+    ret = ce_cli.main([
+        "dequeue",
+        str(PR),
+        "--repo", REPO,
+        "--token-env", "CE_TEST_TOKEN",
+        "--convert-to-draft",
+        "--json",
+    ])
+
+    assert ret == 0
+    assert captured["check"] is False
+    assert captured["argv"] == [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.v3_cli",
+        "queue-dequeue",
+        str(PR),
+        "--repo",
+        REPO,
+        "--token-env",
+        "CE_TEST_TOKEN",
+        "--convert-to-draft",
+        "--json",
+    ]

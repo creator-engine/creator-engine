@@ -4432,6 +4432,12 @@ def _build_parser() -> argparse.ArgumentParser:
     qd_mode.add_argument("--once", action="store_true", help="run one daemon pass and exit")
     qd_mode.add_argument("--loop", action="store_true", help="run continuously under a supervisor")
     p_queue_daemon.add_argument("--interval", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between loop passes")
+    p_queue_daemon.add_argument(
+        "--approval-settle-seconds",
+        type=float,
+        default=integrator_belt.DEFAULT_APPROVAL_SETTLE_SECONDS,
+        help="minimum seconds an approval must settle before enqueue",
+    )
     p_queue_daemon.add_argument("--dry-run", action="store_true", help="log enqueue decisions without running gh pr merge")
     p_queue_daemon.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
     p_queue_daemon.add_argument(
@@ -4549,13 +4555,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_emergency_stop = sub.add_parser(
         "emergency-stop",
-        help="emergency merge-queue stop: disable GitHub auto-merge for one PR",
+        help="emergency merge-queue stop: dequeue one queued PR",
     )
     _add_emergency_stop_args(p_emergency_stop)
 
     p_queue_dequeue = sub.add_parser(
         "queue-dequeue",
-        help="alias for emergency-stop; disable GitHub auto-merge for one PR",
+        help="alias for emergency-stop; dequeue one queued PR",
     )
     _add_emergency_stop_args(p_queue_dequeue)
 
@@ -4683,6 +4689,7 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             log_sink=logger,
             authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
             approval_marker_issuer=approval_marker_issuer,
+            approval_settle_seconds=float(getattr(args, "approval_settle_seconds", 0.0)),
         )
     except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
         print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
@@ -4736,7 +4743,7 @@ def _cmd_emergency_stop(args: argparse.Namespace) -> int:
         print(
             f"{CE_CMD} {command}: "
             f"repo={result.repo} pr={result.pr_number} "
-            f"disabled_auto_merge={result.disabled_auto_merge}{draft}"
+            f"queued={result.queued} dequeued={result.dequeued}{draft}"
         )
     return 0 if result.ok else 1
 
