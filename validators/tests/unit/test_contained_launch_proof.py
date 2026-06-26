@@ -351,6 +351,40 @@ def test_gvisor_launch_refuses_unhonored_backend_before_raw_visibility_spawn(
     assert adapter.spawned == []
 
 
+def test_gvisor_launch_refuses_non_empty_egress_without_enforcement_before_visibility_spawn(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter()
+    runner = ProofContainerRunner(available=True, egress_enforceable=False, runtime_probe_pid=5151)
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-egress-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        text = str(exc)
+        assert "no allowlist enforcement primitive is proven" in text
+        assert "refusing before container start" in text
+    else:  # pragma: no cover - the assertion above is the proof
+        raise AssertionError("gVisor launch must refuse unenforceable non-empty egress")
+
+    assert runner.egress_calls == 1
+    assert runner.available_calls == 0
+    assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 0
+    assert adapter.spawned == []
+
+
 def test_gvisor_launch_refuses_when_post_launch_probe_sees_raw_host_pid(
     tmp_path, monkeypatch
 ):
