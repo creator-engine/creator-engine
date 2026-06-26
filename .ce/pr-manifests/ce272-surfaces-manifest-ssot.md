@@ -16,9 +16,9 @@ manifest's completeness and currently derivable pins.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=14
 
-AUTHORIZED_PATHS_SHA256=fc7dfa0f1e1755218cb8a08efe017313963a8791764c6618435ba1e24600e969
+AUTHORIZED_PATHS_SHA256=47ee41495a1ba21800e6b8f23a4e1e751ca236ff66ebd7c02dd0ca985d1fe14d
 
 ```text
 .ce/changelog/ce272-surfaces-manifest-ssot.md
@@ -26,5 +26,13 @@ AUTHORIZED_PATHS_SHA256=fc7dfa0f1e1755218cb8a08efe017313963a8791764c6618435ba1e2
 surfaces/manifest.yaml
 validators/creator_engine_validator/checks/__init__.py
 validators/creator_engine_validator/checks/surfaces_manifest.py
+validators/tests/unit/test_app_jwt_runner.py
+validators/tests/unit/test_change_status.py
+validators/tests/unit/test_credential_runner.py
+validators/tests/unit/test_evidence_sink.py
+validators/tests/unit/test_merge.py
+validators/tests/unit/test_open_change.py
+validators/tests/unit/test_redact.py
 validators/tests/unit/test_surfaces_manifest.py
+validators/tests/unit/test_version_boundary.py
 ```
