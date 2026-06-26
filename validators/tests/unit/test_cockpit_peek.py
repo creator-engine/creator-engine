@@ -44,14 +44,18 @@ def _herdr_pane(lane_id: str = "lane-herdr") -> dict:
     )
 
 
-def _headless_pane(lane_id: str = "lane-headless") -> dict:
+def _headless_pane(lane_id: str = "lane-headless", *, with_input: bool = False) -> dict:
+    terminal = {
+        "kind": "headless",
+        "surface_ref": "/state/headless/surface.json",
+        "stream_ref": "/state/headless/stream.log",
+        "pid": 31337,
+    }
+    if with_input:
+        terminal["input_ref"] = "/state/headless/input.fifo"
     return _pane(
         lane_id,
-        terminal={
-            "kind": "headless",
-            "surface_ref": "/state/headless/surface.json",
-            "pid": 31337,
-        },
+        terminal=terminal,
     )
 
 
@@ -123,17 +127,37 @@ def test_peek_herdr_target_carries_attach_and_send_triggers() -> None:
     assert visual["trigger"]["driver"] == "HerdrSession"
 
 
-def test_peek_headless_target_is_not_interactive_and_does_not_tail_logs() -> None:
+def test_peek_headless_target_can_visually_inspect_without_tailing_logs() -> None:
     target = cockpit_readmodel.fold_snapshot(panes=[_headless_pane()])["peek"]["seats"][0]
 
     assert target["terminal_kind"] == "headless"
-    assert target["can_attach"] is False
+    assert target["can_attach"] is True
     assert target["can_send"] is False
     assert target["blocked_reason"]
-    assert "interactive attach/send-input seam" in target["blocked_reason"]
-    assert target["capabilities"]["visual_inspect"]["trigger"] is None
+    assert "input seam" in target["blocked_reason"]
+    visual = target["capabilities"]["visual_inspect"]
+    assert visual["available"] is True
+    assert visual["trigger"]["kind"] == "headless_visual_inspect"
+    assert visual["trigger"]["driver"] == "HeadlessSurface"
+    assert visual["trigger"]["stream_ref"] == "/state/headless/stream.log"
     assert target["capabilities"]["send_input"]["trigger"] is None
-    assert "stream.log" not in json.dumps(target)
+    assert target["capabilities"]["send_input"]["state"] == "unavailable"
+
+
+def test_peek_headless_target_with_input_ref_can_send() -> None:
+    target = cockpit_readmodel.fold_snapshot(
+        panes=[_headless_pane(with_input=True)],
+        operating_mode="dev",
+    )["peek"]["seats"][0]
+
+    assert target["state"] == "ok"
+    assert target["can_attach"] is True
+    assert target["can_send"] is True
+    send = target["capabilities"]["send_input"]
+    assert json.loads(json.dumps(target, sort_keys=True)) == target
+    assert send["trigger"]["kind"] == "headless_send_input"
+    assert send["trigger"]["driver"] == "HeadlessSurface"
+    assert send["trigger"]["input_ref"] == "/state/headless/input.fifo"
 
 
 def test_peek_mode_and_opt_in_resolve_from_environment(tmp_path: Path) -> None:
@@ -162,11 +186,15 @@ def test_peek_mode_and_opt_in_resolve_from_environment(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed")
-def test_l3_peek_request_routes_herdr_and_blocks_headless() -> None:
+def test_l3_peek_request_routes_herdr_and_headless_by_capability() -> None:
     from creator_engine_validator import v3_cockpit
 
     snapshot = cockpit_readmodel.fold_snapshot(
-        panes=[_herdr_pane(), _headless_pane()],
+        panes=[
+            _herdr_pane(),
+            _headless_pane(),
+            _headless_pane("lane-headless-input", with_input=True),
+        ],
     )
 
     attach = v3_cockpit.build_peek_request(
@@ -180,9 +208,20 @@ def test_l3_peek_request_routes_herdr_and_blocks_headless() -> None:
         action="send_input",
         data="status\n",
     )
-    blocked = v3_cockpit.build_peek_request(
+    headless_inspect = v3_cockpit.build_peek_request(
         snapshot,
         "lane-headless",
+        action="visual_inspect",
+    )
+    headless_blocked_send = v3_cockpit.build_peek_request(
+        snapshot,
+        "lane-headless",
+        action="send_input",
+        data="status\n",
+    )
+    headless_send = v3_cockpit.build_peek_request(
+        snapshot,
+        "lane-headless-input",
         action="send_input",
         data="status\n",
     )
@@ -192,8 +231,13 @@ def test_l3_peek_request_routes_herdr_and_blocks_headless() -> None:
     assert send["routed"] is True
     assert send["trigger"]["kind"] == "herdr_send_input"
     assert send["data"] == "status\n"
-    assert blocked["routed"] is False
-    assert "interactive attach/send-input seam" in blocked["reason"]
+    assert headless_inspect["routed"] is True
+    assert headless_inspect["trigger"]["kind"] == "headless_visual_inspect"
+    assert headless_blocked_send["routed"] is False
+    assert "input seam" in headless_blocked_send["reason"]
+    assert headless_send["routed"] is True
+    assert headless_send["trigger"]["kind"] == "headless_send_input"
+    assert headless_send["data"] == "status\n"
 
 
 @pytest.mark.skipif(not _HAS_TEXTUAL, reason="cockpit extra not installed")
