@@ -71,13 +71,14 @@ def _probe_runner(command):
 def _self_identity_record(
     state_root: Path,
     *,
+    assertion_id: str = "brain-assertion-bootstrap-self-identity",
     current_user: str = "controller",
     runtime_name: str,
     scope_seat: str | None = "controller",
     records: list[dict] | None = None,
 ) -> dict:
     result = rt.assert_claim(
-        assertion_id="brain-assertion-bootstrap-self-identity",
+        assertion_id=assertion_id,
         statement="self identity must match live runtime probe",
         assertion_type="capability",
         claim={
@@ -383,6 +384,55 @@ def test_bootstrap_skips_other_seat_self_identity_drift(tmp_path: Path):
 
     ids = [item["id"] for item in payload["knowledge_ssot"]["assertions"]]
     assert "brain-assertion-bootstrap-self-identity" not in ids
+
+
+def test_global_bootstrap_skips_foreign_self_identity_but_refuses_own_drift(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+    records = [*_records_with_assertions(state_root)]
+    foreign_identity = _self_identity_record(
+        state_root,
+        current_user="seat-a",
+        runtime_name="seat-a-host",
+        scope_seat="seat-a",
+        records=records,
+    )
+    _write_ledger(state_root, [*records, foreign_identity])
+
+    payload = bootstrap.build_bootstrap_payload(
+        state_root=state_root,
+        scope="global",
+        probe_context=brain_probe.ProbeContext(
+            env={"HOSTNAME": "seat-b-host", "USER": "seat-b"},
+            run=_probe_runner,
+        ),
+    )
+
+    ids = [item["id"] for item in payload["knowledge_ssot"]["assertions"]]
+    assert "brain-assertion-bootstrap-self-identity" not in ids
+
+    own_identity = _self_identity_record(
+        state_root,
+        assertion_id="brain-assertion-bootstrap-self-identity-seat-b",
+        current_user="seat-b",
+        runtime_name="seat-b-old-host",
+        scope_seat="seat-b",
+        records=[*records, foreign_identity],
+    )
+    _write_ledger(state_root, [*records, foreign_identity, own_identity])
+
+    with pytest.raises(bootstrap.BrainBootstrapRefused) as ei:
+        bootstrap.build_bootstrap_payload(
+            state_root=state_root,
+            scope="global",
+            probe_context=brain_probe.ProbeContext(
+                env={"HOSTNAME": "seat-b-host", "USER": "seat-b"},
+                run=_probe_runner,
+            ),
+        )
+
+    rendered = "\n".join(ei.value.errors)
+    assert "self-identity drift at runtime_name" in rendered
+    assert "remembered 'seat-b-old-host', live 'seat-b-host'" in rendered
 
 
 def test_bootstrap_refuses_mutated_hostname_self_identity_drift(tmp_path: Path, caplog):
