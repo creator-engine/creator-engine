@@ -1,0 +1,172 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/identity-registry.schema.yaml"
+title: "Creator Engine GitHub identity and infrastructure registry"
+description: >-
+  Machine-readable non-secret SSOT for GitHub identities, App installation
+  bindings, token storage pointers, signing-key custody pointers, host
+  topology, and author/reviewer separation status.
+type: object
+required:
+  - accounts
+  - apps
+  - tokens
+  - signing_keys
+  - host_topology
+  - authoring_review_matrix
+additionalProperties: false
+properties:
+  accounts:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/account"
+  apps:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/app"
+  tokens:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/token"
+  signing_keys:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/signing_key"
+  host_topology:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/host_topology_entry"
+  authoring_review_matrix:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/authoring_review_entry"
+$defs:
+  non_empty_string:
+    type: string
+    minLength: 1
+  todo_or_string:
+    type: string
+    minLength: 1
+  todo_or_integer:
+    oneOf:
+      - type: integer
+        minimum: 1
+      - type: string
+        const: TODO_VERIFY
+  noreply_email:
+    type: string
+    pattern: "^(TODO_VERIFY|[0-9]+\\+[A-Za-z0-9-]+@users\\.noreply\\.github\\.com)$"
+  string_list:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/non_empty_string"
+  pointer:
+    type: object
+    required: [host, path]
+    additionalProperties: false
+    properties:
+      host:
+        $ref: "#/$defs/todo_or_string"
+      path:
+        $ref: "#/$defs/todo_or_string"
+  account:
+    type: object
+    required:
+      - login
+      - github_id
+      - role
+      - owning_seat
+      - host
+      - noreply_commit_email
+    additionalProperties: false
+    properties:
+      login:
+        $ref: "#/$defs/non_empty_string"
+      github_id:
+        $ref: "#/$defs/todo_or_integer"
+      role:
+        $ref: "#/$defs/non_empty_string"
+      owning_seat:
+        $ref: "#/$defs/todo_or_string"
+      host:
+        $ref: "#/$defs/todo_or_string"
+      noreply_commit_email:
+        $ref: "#/$defs/noreply_email"
+  app:
+    type: object
+    required: [app_id, install_id, repo_scope, pem_custody]
+    additionalProperties: false
+    properties:
+      app_id:
+        $ref: "#/$defs/todo_or_integer"
+      install_id:
+        $ref: "#/$defs/todo_or_integer"
+      repo_scope:
+        $ref: "#/$defs/non_empty_string"
+      pem_custody:
+        type: string
+        pattern: "^(TODO_VERIFY|vault://[^\\s]+|openbao-ref:[^\\s]+)$"
+  token:
+    type: object
+    required: [type, host_binding, storage_pointer, rotation_owner]
+    additionalProperties: false
+    properties:
+      type:
+        type: string
+        enum: [PAT, gho_, App]
+      host_binding:
+        $ref: "#/$defs/todo_or_string"
+      storage_pointer:
+        $ref: "#/$defs/pointer"
+      rotation_owner:
+        $ref: "#/$defs/todo_or_string"
+  signing_key:
+    type: object
+    required: [key_name, custody_seat, custody_host, key_path_pointer]
+    additionalProperties: false
+    properties:
+      key_name:
+        $ref: "#/$defs/non_empty_string"
+      custody_seat:
+        $ref: "#/$defs/todo_or_string"
+      custody_host:
+        $ref: "#/$defs/todo_or_string"
+      key_path_pointer:
+        $ref: "#/$defs/todo_or_string"
+  host_topology_entry:
+    type: object
+    required: [name, host, tailnet_ip, users, role, reach_method]
+    additionalProperties: false
+    properties:
+      name:
+        $ref: "#/$defs/non_empty_string"
+      host:
+        $ref: "#/$defs/todo_or_string"
+      tailnet_ip:
+        $ref: "#/$defs/todo_or_string"
+      users:
+        $ref: "#/$defs/string_list"
+      role:
+        $ref: "#/$defs/non_empty_string"
+      reach_method:
+        $ref: "#/$defs/todo_or_string"
+  authoring_review_entry:
+    type: object
+    required: [seat, authors_as, may_review, status]
+    additionalProperties: false
+    properties:
+      seat:
+        $ref: "#/$defs/non_empty_string"
+      authors_as:
+        $ref: "#/$defs/string_list"
+      may_review:
+        $ref: "#/$defs/string_list"
+      status:
+        type: string
+        enum: [correct, needs-rewire]

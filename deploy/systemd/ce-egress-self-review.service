@@ -1,0 +1,24 @@
+[Unit]
+Description=Creator Engine contained-seat self-review broker
+Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/egress-broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# This EnvironmentFile must provide CE_EGRESS_SELF_REVIEW_SOCKET and
+# CE_EGRESS_SELF_REVIEW_CONFIG. For vault-backed seats (secret_ref) it MUST also
+# carry BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
+# BROKER_APPROLE_SECRET_ID — the broker fails closed (no fallback to disk) if any
+# required vault var is missing for a secret_ref seat.
+EnvironmentFile=%h/.config/creator-engine/ce-egress-self-review.env
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_review_broker.py \
+  --serve \
+  --socket "$CE_EGRESS_SELF_REVIEW_SOCKET" \
+  --config "$CE_EGRESS_SELF_REVIEW_CONFIG"
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=default.target

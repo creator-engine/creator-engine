@@ -84,6 +84,11 @@ services=(
   # include BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
   # BROKER_APPROLE_SECRET_ID for vault-backed seats; create that file before starting.
   ce-egress-broker.service
+  # ce-egress-self-review.service uses its own EnvironmentFile (ce-egress-self-review.env)
+  # which must include the same BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT,
+  # BROKER_APPROLE_ROLE_ID, and BROKER_APPROLE_SECRET_ID for vault-backed seats; create that
+  # file before starting.
+  ce-egress-self-review.service
 )
 
 echo "scope: $scope"

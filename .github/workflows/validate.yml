@@ -93,6 +93,32 @@ jobs:
               sys.exit(1)
           PYEOF
 
+      - name: YAML schema check — identity registry
+        run: |
+          python - <<'PYEOF'
+          import pathlib
+          import sys
+
+          import jsonschema
+          import yaml
+
+          registry_path = pathlib.Path("docs/governance/identity-registry.example.yaml")
+          schema_path = pathlib.Path("schemas/identity-registry.schema.yaml")
+
+          registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+          schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+          validator = jsonschema.Draft202012Validator(schema)
+          errors = sorted(validator.iter_errors(registry), key=lambda error: list(error.path))
+          if errors:
+              for error in errors:
+                  location = ".".join(str(part) for part in error.path) or "<root>"
+                  print(f"FAIL {registry_path}:{location}: {error.message}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK  {registry_path} validates against {schema_path}")
+          PYEOF
+
       - name: Creator Engine validator — well-formed examples
         run: |
           PYTHONPATH=validators python -m creator_engine_validator check examples/well-formed/
