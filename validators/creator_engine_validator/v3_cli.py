@@ -97,7 +97,7 @@ from .forge import (
     delete_ruleset,
     upsert_ruleset,
 )
-from .forge import approval_capability, fleet_status, integrator_belt, seats_status
+from .forge import approval_capability, controller_inbox, fleet_status, integrator_belt, seats_status
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
 from .runner.backend import CollectedEvidence
@@ -3948,10 +3948,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_playbook = sub.add_parser(
         "playbook",
-        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+        help="discover, inspect, and run governed CE playbooks",
     )
     playbook_sub = p_playbook.add_subparsers(dest="playbook_cmd")
-    p_playbook_list = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    p_playbook_list = playbook_sub.add_parser("list", help="list governed CE playbooks")
     p_playbook_list.add_argument(
         "--playbooks-root",
         "--root",
@@ -3970,7 +3970,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="root used to resolve playbook ids (default: cwd)",
     )
     p_playbook_show.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
-    p_playbook_run = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    p_playbook_run = playbook_sub.add_parser("run", help="run a governed CE playbook")
     p_playbook_run.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
     p_playbook_run.add_argument(
         "--playbooks-root",
@@ -4387,6 +4387,40 @@ def _build_parser() -> argparse.ArgumentParser:
     p_queue_poll.add_argument("--action", choices=("enqueue", "land", "merge"), default="enqueue", help="publish action after a deterministic repair")
     _add_root(p_queue_poll)  # adds --root + --json
 
+    def _add_controller_inbox_args(parser: argparse.ArgumentParser) -> None:
+        inbox_scope = parser.add_mutually_exclusive_group(required=True)
+        inbox_scope.add_argument("--repo", default=None, help="owner/name repository scope")
+        inbox_scope.add_argument("--org", default=None, help="org/user search scope")
+        parser.add_argument(
+            "--controller-login",
+            default=controller_inbox.DEFAULT_CONTROLLER_LOGIN,
+            help=f"controller GitHub login (default: {controller_inbox.DEFAULT_CONTROLLER_LOGIN})",
+        )
+        parser.add_argument(
+            "--token-env",
+            default=controller_inbox.DEFAULT_TOKEN_ENV,
+            help="env var containing the GitHub token",
+        )
+        parser.add_argument(
+            "--first",
+            type=int,
+            default=controller_inbox.DEFAULT_FIRST,
+            help="maximum scoped PRs to read (1-100)",
+        )
+        parser.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    p_inbox = sub.add_parser(
+        "inbox",
+        help="read-only controller awaiting-decision inbox (ce-ops#253)",
+    )
+    _add_controller_inbox_args(p_inbox)
+
+    p_controller_inbox = sub.add_parser(
+        "controller-inbox",
+        help="alias for inbox; read-only controller awaiting-decision inbox",
+    )
+    _add_controller_inbox_args(p_controller_inbox)
+
     p_queue_daemon = sub.add_parser(
         "queue-daemon",
         help="run the autonomous Integrator merge-queue daemon",
@@ -4599,6 +4633,30 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
             f"escalated={result.escalated_count} refused={result.refused_count}"
         )
     return 0 if result.escalated_count == 0 and result.refused_count == 0 else 1
+
+
+def _cmd_controller_inbox(args: argparse.Namespace) -> int:
+    """Read-only controller awaiting-decision inbox."""
+    try:
+        token = controller_inbox.token_from_env(args.token_env)
+        gh_runner = controller_inbox.gh_runner_with_token(token)
+        result = controller_inbox.collect_controller_inbox(
+            repo=getattr(args, "repo", None),
+            org=getattr(args, "org", None),
+            controller_login=getattr(args, "controller_login", controller_inbox.DEFAULT_CONTROLLER_LOGIN),
+            gh_runner=gh_runner,
+            first=getattr(args, "first", controller_inbox.DEFAULT_FIRST),
+        )
+    except controller_inbox.ControllerInboxError as exc:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · inbox REFUSED (input): {exc}"],
+            {"error": "controller_inbox_refused", "detail": str(exc)},
+        )
+    lines = [f"{_BRAND} · inbox read-only: {result.total_count} item(s)"]
+    lines.extend(controller_inbox.format_table(result).splitlines())
+    return _emit(args, 0, lines, result.to_dict())
 
 
 def _cmd_queue_daemon(args: argparse.Namespace) -> int:
@@ -5350,6 +5408,8 @@ _DISPATCH = {
     "cockpit": _cmd_cockpit,
     "carrier": _cmd_carrier,
     "queue-poll": _cmd_queue_poll,
+    "inbox": _cmd_controller_inbox,
+    "controller-inbox": _cmd_controller_inbox,
     "queue-daemon": _cmd_queue_daemon,
     "emergency-stop": _cmd_emergency_stop,
     "queue-dequeue": _cmd_queue_dequeue,

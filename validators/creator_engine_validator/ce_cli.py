@@ -961,10 +961,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     playbook = groups.add_parser(
         "playbook",
-        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+        help="discover, inspect, and run governed CE playbooks",
     )
     playbook_sub = playbook.add_subparsers(dest="playbook_cmd")
-    pl = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    pl = playbook_sub.add_parser("list", help="list governed CE playbooks")
     pl.add_argument(
         "--playbooks-root",
         "--root",
@@ -985,7 +985,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ps.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    prun = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    prun = playbook_sub.add_parser("run", help="run a governed CE playbook")
     prun.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
     prun.add_argument(
         "--playbooks-root",
@@ -1255,9 +1255,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_pr.add_argument(
         "--declared-work-class",
-        required=True,
         choices=pr_preflight.WORK_CLASSES,
-        help="declared PR work class from the PR body",
+        help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
     )
     validate_pr.add_argument(
         "--head-ref",
@@ -1268,6 +1267,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-dirty",
         action="store_true",
         help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
+    )
+    validate_pr.add_argument(
+        "--test-command",
+        default=pr_preflight.DEFAULT_TEST_COMMAND,
+        help=f"test command to compare at base and HEAD (default: {pr_preflight.DEFAULT_TEST_COMMAND})",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
