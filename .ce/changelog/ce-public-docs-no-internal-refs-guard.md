@@ -1,5 +1,5 @@
 ---
-slug: public-docs-no-internal-refs-guard
+slug: ce-public-docs-no-internal-refs-guard
 date: 2026-06-26
 kind: changed
 scope: public docs confidentiality guard
