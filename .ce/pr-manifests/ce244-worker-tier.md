@@ -39,15 +39,18 @@ Per-file purpose:
   conforming, missing, over-broad, depth-bound, and role-surface cases.
 - **`validators/tests/unit/test_hook_check.py`** *(M)* - covers missing worker
   contract fail-closed behavior in delegated implementation.
+- **`validators/tests/integration/test_hook_check_cli.py`** *(M)* - conforms
+  foreman-delegation CLI fixture to worker-tier contract (adds
+  governed_worker_contract field and role-surface file to worker record).
 - **`validators/tests/unit/test_*` count guards** *(M)* - update registered
   check count from 63 to 64 for the new worker-tier check.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=18
 
-AUTHORIZED_PATHS_SHA256=2da2bf86bfc0ca4e562a226801c71c99517a6b8254903774fdd31c07d0fda540
+AUTHORIZED_PATHS_SHA256=4bfcac8ddbc116b9b906a35ebfc23efa173d42e3417843a58fbbee5b352b79e8
 
 ```text
 .ce/changelog/ce244-worker-tier.md
@@ -57,6 +60,7 @@ validators/creator_engine_validator/checks/__init__.py
 validators/creator_engine_validator/checks/worker_tier_contract.py
 validators/creator_engine_validator/hook_check.py
 validators/creator_engine_validator/worker_spawn.py
+validators/tests/integration/test_hook_check_cli.py
 validators/tests/unit/test_app_jwt_runner.py
 validators/tests/unit/test_change_status.py
 validators/tests/unit/test_credential_runner.py
