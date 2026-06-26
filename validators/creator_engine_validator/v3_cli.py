@@ -3948,10 +3948,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_playbook = sub.add_parser(
         "playbook",
-        help="discover, inspect, and dry-run public PLAYBOOK.md workflows",
+        help="discover, inspect, and run governed CE playbooks",
     )
     playbook_sub = p_playbook.add_subparsers(dest="playbook_cmd")
-    p_playbook_list = playbook_sub.add_parser("list", help="list public PLAYBOOK.md workflows")
+    p_playbook_list = playbook_sub.add_parser("list", help="list governed CE playbooks")
     p_playbook_list.add_argument(
         "--playbooks-root",
         "--root",
@@ -3970,7 +3970,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="root used to resolve playbook ids (default: cwd)",
     )
     p_playbook_show.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
-    p_playbook_run = playbook_sub.add_parser("run", help="validate and plan a public playbook run")
+    p_playbook_run = playbook_sub.add_parser("run", help="run a governed CE playbook")
     p_playbook_run.add_argument("ref", help="playbook id, directory, or PLAYBOOK.md path")
     p_playbook_run.add_argument(
         "--playbooks-root",

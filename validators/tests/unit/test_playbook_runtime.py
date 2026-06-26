@@ -28,8 +28,11 @@ def _playbook_text(*, playbook_id: str = "first-governed-pr", title: str = "Ship
         steps:
           - id: plan
             action: "Frame the change and confirm done."
+            expected_result: "The change is framed."
           - id: author
             action: "Author the change on a branch."
+            command: "python -c 'print(1)'"
+            expected_result: "The branch is updated."
           - id: review
             action: "Review the current PR head."
           - id: merge
@@ -92,6 +95,9 @@ def test_public_playbook_projects_to_internal_schema(tmp_path: Path):
     assert descriptor["stages"][1] == {
         "id": "author",
         "title": "Author",
+        "action": "Author the change on a branch.",
+        "command": "python -c 'print(1)'",
+        "expected_result": "The branch is updated.",
         "brief": "briefs/author.md",
         "dispatch_target": "author-seat",
         "gates": ["author"],
@@ -142,15 +148,36 @@ def test_list_show_and_run_dry_run_cli(tmp_path: Path, capsys):
     assert planned["plan"]["dry_run"] is True
     assert planned["plan"]["mode"] == "dev"
     assert [stage["id"] for stage in planned["plan"]["stages"]] == ["plan", "author", "review", "merge"]
+    assert planned["plan"]["stages"][1]["command"] == "python -c 'print(1)'"
 
 
-def test_run_without_dry_run_fails_closed(tmp_path: Path, capsys):
-    _write_public_playbook(tmp_path)
+def test_run_with_mocked_executor_reports_step_and_final_status(tmp_path: Path):
+    path = _write_public_playbook(tmp_path)
+    playbook = playbook_runtime.load_playbook(path)
+    seen: list[str] = []
 
-    assert ce_cli.main(["playbook", "run", "first-governed-pr", "--playbooks-root", str(tmp_path), "--json"]) == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is False
-    assert "rerun with --dry-run" in payload["error"]
+    def executor(step: playbook_runtime.StepExecution, cwd: Path) -> playbook_runtime.StepExecution:
+        seen.append(step.id)
+        return playbook_runtime.StepExecution(
+            id=step.id,
+            title=step.title,
+            action=step.action,
+            command=step.command,
+            expected_result=step.expected_result,
+            returncode=0,
+            stdout=f"{step.id} ok\n",
+            stderr="",
+            governance_decision={"decision": "allow", "reason": "mocked"},
+        )
+
+    payload = playbook_runtime.run_playbook(playbook, executor=executor, cwd=tmp_path)
+
+    assert payload["ok"] is True
+    assert payload["action"] == "playbook_run_completed"
+    assert payload["final_status"] == "PASS"
+    assert [step["status"] for step in payload["steps"]] == ["PASS", "PASS", "PASS", "PASS"]
+    assert [step["id"] for step in payload["steps"]] == seen == ["plan", "author", "review", "merge"]
+    assert payload["steps"][1]["command"] == "python -c 'print(1)'"
 
 
 def test_v3_cli_exposes_playbook_dry_run(tmp_path: Path, capsys):
