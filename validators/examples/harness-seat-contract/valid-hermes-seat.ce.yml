@@ -23,6 +23,22 @@ seat_contract:
     - remote_control
     - settings_local_weakening
   enforcement_ring: ring_0
+  foreman_dispatch:
+    launch_pinned: true
+    contract_ref: docs/contracts/harness-seat-contract.md
+    roles:
+      researcher:
+        dispatch_capability: multi_agent researcher dispatch
+        dispatch_surface:
+          - multi_agent.researcher
+      implementer:
+        dispatch_capability: multi_agent implementer dispatch
+        dispatch_surface:
+          - multi_agent.implementer
+      reviewer:
+        dispatch_capability: multi_agent reviewer dispatch
+        dispatch_surface:
+          - multi_agent.reviewer
   required_hook_pack:
     extension_id: ext-ce-hermes-hook-pack
     extension_kind: hook_pack

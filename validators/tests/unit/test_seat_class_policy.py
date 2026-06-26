@@ -37,6 +37,21 @@ def _valid() -> dict:
             "brief.md",
             "docs/contracts/",
         ],
+        "foreman_dispatch": {
+            "launch_pinned": True,
+            "contract_ref": "docs/contracts/seat-class-policy.md",
+            "roles": {
+                "researcher": {
+                    "dispatch_surface": ["multi_agent.researcher"],
+                },
+                "implementer": {
+                    "dispatch_surface": ["multi_agent.implementer"],
+                },
+                "reviewer": {
+                    "dispatch_surface": ["multi_agent.reviewer"],
+                },
+            },
+        },
     }
 
 
@@ -65,6 +80,10 @@ def test_default_must_be_foreman(tmp_path):
     assert chk.CODE_DEFAULT in _codes(tmp_path, lambda r: r.update(default_seat_class="worker"))
 
 
+def test_seat_class_must_be_foreman(tmp_path):
+    assert chk.CODE_FOREMAN in _codes(tmp_path, lambda r: r.update(seat_class="worker"))
+
+
 def test_max_depth_must_be_at_least_one(tmp_path):
     assert chk.CODE_RECURSION in _codes(tmp_path, lambda r: r["recursion"].update(max_depth=0))
 
@@ -83,6 +102,17 @@ def test_secret_value_rejected(tmp_path):
     )
 
 
+def test_foreman_dispatch_required(tmp_path):
+    assert chk.CODE_FOREMAN_DISPATCH in _codes(tmp_path, lambda r: r.pop("foreman_dispatch"))
+
+
+def test_foreman_dispatch_requires_core_role_surfaces(tmp_path):
+    assert chk.CODE_FOREMAN_DISPATCH in _codes(
+        tmp_path,
+        lambda r: r["foreman_dispatch"]["roles"].pop("implementer"),
+    )
+
+
 def test_run_green_on_valid_dir(tmp_path):
     _write(tmp_path, _valid())
     result = chk.run([tmp_path])
@@ -92,4 +122,3 @@ def test_run_green_on_valid_dir(tmp_path):
 def test_run_ignores_non_policy_records(tmp_path):
     (tmp_path / "other.yaml").write_text(yaml.safe_dump({"kind": "scope-record"}), encoding="utf-8")
     assert chk.run([tmp_path]).ok
-

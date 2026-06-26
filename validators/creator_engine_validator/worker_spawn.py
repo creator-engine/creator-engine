@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from . import codex_launch_spec, lane_runtime, launch_runtime
+from . import brain_bootstrap, codex_launch_spec, lane_runtime, launch_runtime
 
 
 WORKER_ROLES: dict[str, str] = {
@@ -64,7 +64,6 @@ _SAFE_CE_METADATA_ENV_NAMES = frozenset(
         "CE_SEAT_ID",
     }
 )
-_SAFE_TMPDIR_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")
 
 
 class WorkerSpawnError(Exception):
@@ -101,6 +100,10 @@ class WorkerRecordReservationFailed(WorkerSpawnError):
 
 class WorkerLaunchFailed(WorkerSpawnError):
     code = "CE163-WORKER-LAUNCH-FAILED"
+
+
+class WorkerForemanContractRefused(WorkerSpawnError):
+    code = "CE163-WORKER-FOREMAN-CONTRACT-REFUSED"
 
 
 @dataclass(frozen=True)
@@ -261,8 +264,11 @@ def _is_credential_env_name(name: str) -> bool:
 
 def _is_safe_tmpdir(value: str, *, controller_home: str | None) -> bool:
     try:
-        resolved = Path(value).expanduser().resolve(strict=False)
+        path = Path(value).expanduser()
+        resolved = path.resolve(strict=False)
     except OSError:
+        return False
+    if not path.is_absolute() or not path.is_dir():
         return False
     if controller_home:
         try:
@@ -271,10 +277,7 @@ def _is_safe_tmpdir(value: str, *, controller_home: str | None) -> bool:
             home = None
         if home is not None and (resolved == home or home in resolved.parents):
             return False
-    return any(
-        str(resolved) == prefix or str(resolved).startswith(f"{prefix}/")
-        for prefix in _SAFE_TMPDIR_PREFIXES
-    )
+    return True
 
 
 def _allowed_child_env_name(name: str, value: str, *, controller_home: str | None) -> bool:
@@ -382,6 +385,13 @@ def plan_worker_spawn(
     environ: Mapping[str, str] | None = None,
 ) -> WorkerSpawnPlan:
     env = dict(os.environ if environ is None else environ)
+    try:
+        brain_bootstrap.require_foreman_dispatch_contract()
+    except brain_bootstrap.BrainBootstrapRefused as exc:
+        detail = "; ".join(exc.errors) if exc.errors else str(exc)
+        raise WorkerForemanContractRefused(
+            f"worker spawn requires a launch-pinned foreman dispatch contract: {detail}"
+        ) from exc
     normalized_role = role.strip().lower()
     if normalized_role not in WORKER_ROLES:
         raise InvalidWorkerRole(

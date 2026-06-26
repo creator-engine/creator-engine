@@ -10,9 +10,10 @@ description: >-
   CE does not privilege any harness: claude_code is the reference instance and
   codex/hermes/openclaw instantiate the same contract (promoted in G2.007.1). The seat
   posture invariants (required posture; refused-modes floor; full_permission_mode =>
-  ring0_hook_pack_confirmed; harness permission_mode_flag binding; a ring_1 defeasible
-  required hook-pack) are enforced by the `harness_seat_contract` validator. Shape-only:
-  no runtime, no .claude/** mutation, and no secret/credential values anywhere.
+  ring0_hook_pack_confirmed; harness permission_mode_flag binding; deterministic
+  foreman dispatch; a ring_1 defeasible required hook-pack) are enforced by the
+  `harness_seat_contract` validator. Shape-only: no runtime, no .claude/** mutation,
+  and no secret/credential values anywhere.
 type: object
 oneOf:
   - required: [seat_contract]
@@ -26,7 +27,7 @@ $defs:
     pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
   seat_contract:
     type: object
-    required: [seat_id, harness, launch_posture, refused_modes, enforcement_ring, required_hook_pack, emitting_role, operating_mode, recorded_at]
+    required: [seat_id, harness, launch_posture, refused_modes, enforcement_ring, foreman_dispatch, required_hook_pack, emitting_role, operating_mode, recorded_at]
     additionalProperties: false
     properties:
       seat_id:
@@ -44,6 +45,8 @@ $defs:
       enforcement_ring:
         type: string
         enum: [ring_0, ring_1, ring_2]
+      foreman_dispatch:
+        $ref: "#/$defs/foreman_dispatch"
       required_hook_pack:
         $ref: "#/$defs/required_hook_pack"
       emitting_role:
@@ -82,6 +85,44 @@ $defs:
         description: "The harness-specific flag implementing full_permission_mode (e.g. --dangerously-skip-permissions for claude_code, --yolo for codex). Never a secret."
       ring0_hook_pack_confirmed:
         type: boolean
+  foreman_dispatch:
+    type: object
+    description: "ce-ops#163 deterministic foreman operating model: governed harness seats launch pinned and dispatch substantive work to explicit worker roles."
+    required: [launch_pinned, contract_ref, roles]
+    additionalProperties: false
+    properties:
+      launch_pinned:
+        type: boolean
+        const: true
+      contract_ref:
+        type: string
+        minLength: 1
+      roles:
+        type: object
+        required: [researcher, implementer, reviewer]
+        additionalProperties: false
+        properties:
+          researcher:
+            $ref: "#/$defs/dispatch_role"
+          implementer:
+            $ref: "#/$defs/dispatch_role"
+          reviewer:
+            $ref: "#/$defs/dispatch_role"
+  dispatch_role:
+    type: object
+    required: [dispatch_capability, dispatch_surface]
+    additionalProperties: false
+    properties:
+      dispatch_capability:
+        type: string
+        minLength: 1
+      dispatch_surface:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
   required_hook_pack:
     type: object
     description: "An embedded G2.006.0 extension_contract (kind hook_pack, ring_1, defeasible/fail-open hooks); validated by reusing the extension_hook_contract vocabulary."

@@ -79,15 +79,33 @@ def test_bootstrap_payload_includes_mandatory_foreman_charter_and_worker_spawn(t
 
     operating_mode = payload["operating_mode"]
     charter = operating_mode["foreman_charter"]
+    dispatch_contract = operating_mode["foreman_dispatch_contract"]
     worker_spawn = operating_mode["capabilities"]["worker_spawn"]
     assert charter["id"] == bootstrap.FOREMAN_CHARTER_ID
     assert charter["mandatory"] is True
     assert charter["enforcement"] == "launcher-injected-non-optional"
     assert "delegate-substantive-implementation-review-and-build-work" in charter["directives"]
+    assert dispatch_contract["id"] == bootstrap.FOREMAN_DISPATCH_CONTRACT_ID
+    assert dispatch_contract["mandatory"] is True
+    assert dispatch_contract["launch_pinned"] is True
+    assert set(dispatch_contract["roles"]) == set(bootstrap.REQUIRED_FOREMAN_DISPATCH_ROLES)
     assert worker_spawn["id"] == bootstrap.WORKER_SPAWN_CAPABILITY_ID
     assert worker_spawn["mandatory"] is True
     assert worker_spawn["surface"]["cli"] == "ce worker spawn"
     assert worker_spawn["surface"]["module"] == "creator_engine_validator.worker_spawn"
+
+
+def test_bootstrap_refuses_malformed_foreman_dispatch_contract(tmp_path: Path, monkeypatch):
+    state_root = tmp_path / ".ce" / "state"
+    _write_ledger(state_root, _records_with_assertions(state_root))
+    malformed = dict(bootstrap.FOREMAN_DISPATCH_CONTRACT)
+    malformed["launch_pinned"] = False
+    monkeypatch.setattr(bootstrap, "FOREMAN_DISPATCH_CONTRACT", malformed)
+
+    with pytest.raises(bootstrap.BrainBootstrapRefused) as ei:
+        bootstrap.build_bootstrap_payload(state_root=state_root)
+
+    assert "foreman_dispatch_contract.launch_pinned must be true" in "\n".join(ei.value.errors)
 
 
 def test_tampered_chain_raises_and_refuses_payload(tmp_path: Path):
