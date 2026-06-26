@@ -378,7 +378,9 @@ if [ "${dry_run}" != "1" ]; then
   backup_stale_herdr_session "${CE_DGX_SEAT_LOG_DIR}"
 fi
 
-if [ "${CE_DGX_TTY_FLAGS+x}" != "x" ]; then
+if [ "${CE_DGX_TTY_FLAGS+x}" = "x" ]; then
+  :
+else
   if [ "${detach}" = "1" ]; then
     CE_DGX_TTY_FLAGS=""
   else

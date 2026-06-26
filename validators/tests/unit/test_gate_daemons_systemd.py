@@ -39,26 +39,31 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
     unit = _read_unit(repo_root, SEAT_UNIT_NAME)
     service = unit["Service"]
+    environment = service.get("Environment", "")
 
     assert unit.has_section("Unit")
     assert unit.has_section("Service")
     assert unit.has_section("Install")
     assert unit["Unit"]["Requires"] == "docker.service"
-    assert service["Type"] == "oneshot"
-    assert service["RemainAfterExit"] == "yes"
+    assert service["Type"] == "simple"
+    assert "RemainAfterExit" not in service
     assert service["WorkingDirectory"] == "/workspace/creator-engine"
-    assert "CE_DGX_DETACH=1" in service.get("Environment", "")
-    assert "CE_VPS_DETACH=1" in service.get("Environment", "")
-    assert "CE_DGX_DOCKER_RESTART_POLICY=unless-stopped" in service.get(
-        "Environment", ""
-    )
-    assert "CE_VPS_DOCKER_RESTART_POLICY=unless-stopped" in service.get(
-        "Environment", ""
-    )
+    assert "CE_DGX_DETACH=1" in environment
+    assert "CE_VPS_DETACH=1" in environment
+    assert "CE_DGX_DOCKER_RESTART_POLICY" not in environment
+    assert "CE_VPS_DOCKER_RESTART_POLICY" not in environment
     assert service["EnvironmentFile"] == "-/etc/creator-engine/ce-codex-seat-%i.env"
-    assert service["ExecStart"] == '/bin/bash -lc \'"${CE_CODEX_SEAT_LAUNCHER}" --detach tui\''
-    assert service["ExecStop"] == '/bin/bash -lc \'docker rm -f "${CE_CODEX_SEAT_CONTAINER_NAME}"\''
-    assert service["Restart"] == "on-failure"
+    assert 'docker rm -f "${container_name}"' in service["ExecStartPre"]
+    assert '"${CE_CODEX_SEAT_LAUNCHER}" --detach tui' in service["ExecStart"]
+    assert 'exec docker wait "${container_name}"' in service["ExecStart"]
+    assert 'export CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-${container_name}}"' in service[
+        "ExecStart"
+    ]
+    assert 'export CE_DGX_CONTAINER_NAME="${CE_DGX_CONTAINER_NAME:-${container_name}}"' in service[
+        "ExecStart"
+    ]
+    assert 'docker rm -f "${container_name}"' in service["ExecStop"]
+    assert service["Restart"] == "always"
     assert service["RestartSec"] == "15s"
 
 
