@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..sec7_forge_guard import sec7_forge_refusal
 from ._redact import redact_gh_stderr
 from .change import ChangeRef
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
@@ -92,8 +93,12 @@ def submit_review(
     body: str = "",
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> ReviewResult:
     """Submit an ``APPROVE`` review for ``change`` (plan-by-default)."""
+    refusal = sec7_forge_refusal("review-submit", sec7_context)
+    if refusal is not None:
+        raise ReviewSubmitRefused(refusal)
     pr_number, head_sha = _validate(change)
     if not apply:
         return ReviewResult(

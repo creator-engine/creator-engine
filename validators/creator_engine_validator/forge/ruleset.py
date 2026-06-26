@@ -13,6 +13,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from ..sec7_forge_guard import sec7_forge_refusal
 from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
@@ -418,8 +419,12 @@ def upsert_ruleset(
     *,
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> RulesetResult:
     """Create or update a named repository ruleset (plan-by-default)."""
+    refusal = sec7_forge_refusal("ruleset", sec7_context)
+    if refusal is not None:
+        raise RulesetRefused(refusal)
     _validate_repo(repo)
     desired = policy.to_put_payload()
     runner = gh_runner or _default_gh_runner
@@ -481,8 +486,12 @@ def delete_ruleset(
     *,
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> RulesetResult:
     """Delete a named repository ruleset when present (plan-by-default)."""
+    refusal = sec7_forge_refusal("ruleset", sec7_context)
+    if refusal is not None:
+        raise RulesetRefused(refusal)
     _validate_repo(repo)
     if not (name or "").strip():
         raise RulesetRefused("ruleset name must be non-empty")

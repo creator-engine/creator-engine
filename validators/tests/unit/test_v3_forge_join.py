@@ -343,6 +343,34 @@ def test_open_refuses_already_stamped_change(tmp_path):
     assert mint.calls == []
 
 
+def test_review_submit_for_run_refuses_sec7_governed_context_before_mint(tmp_path):
+    mint = FakeMintRunner()
+    with pytest.raises(ForgeJoinRefused) as ei:
+        v3_forge_join.submit_review_for_run(
+            tmp_path,
+            "run-ghost",
+            reviewer_app_config=_app_config(),
+            mint_gh_runner=mint,
+            sec7_context={"posture": "governed"},
+        )
+    assert "§7 governed-seat context" in str(ei.value)
+    assert mint.calls == []
+
+
+def test_auto_merge_for_run_refuses_sec7_governed_context_before_mint(tmp_path):
+    mint = FakeMintRunner()
+    with pytest.raises(ForgeJoinRefused) as ei:
+        v3_forge_join.enable_auto_merge_for_run(
+            tmp_path,
+            "run-ghost",
+            app_config=_app_config(),
+            mint_gh_runner=mint,
+            sec7_context={"posture": "governed"},
+        )
+    assert "§7 governed-seat context" in str(ei.value)
+    assert mint.calls == []
+
+
 # ---------------------------------------------------------------------------
 # Plan-by-default mutates nothing durable
 # ---------------------------------------------------------------------------

@@ -367,6 +367,26 @@ def test_subprocess_runner_egress_not_enforceable_with_policy_metadata_only(monk
 
 
 @pytest.mark.parametrize(
+    "runtime_metadata",
+    [
+        '{"path": "runsc"}',
+        '{"path": "runsc", "runtimeArgs": ["--platform=ptrace", "--egress-proxy=/usr/local/bin/gvproxy"]}',
+        '{"path": "runsc", "proxy": {"kind": "gvproxy", "denyByDefault": true}}',
+        '{"path": "runsc", "gvproxy": {"enabled": true, "egressPolicy": "/etc/ce-egress.json"}}',
+    ],
+)
+def test_subprocess_runner_egress_false_without_real_enforcement_even_with_proxy_metadata(
+    monkeypatch, runtime_metadata
+):
+    runner = subprocess_runner_with_docker_info(
+        monkeypatch,
+        f'{{"runsc-gvproxy-ptrace": {runtime_metadata}}}',
+    )
+
+    assert runner.egress_enforceable() is False
+
+
+@pytest.mark.parametrize(
     ("stdout", "returncode"),
     [
         ("not-json", 0),

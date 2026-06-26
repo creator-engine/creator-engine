@@ -72,6 +72,7 @@ from .forge.scoped_token import (
 )
 from .runner.backend import CollectedEvidence
 from .runtime_evidence_spine import RUN_OUTCOME_RECORD_TYPE, append as _spine_append
+from .sec7_forge_guard import sec7_forge_refusal
 
 #: The verified live host App-config convention (instance-local, outside the repo). The
 #: ``--app-config`` flag is REQUIRED on ``cev3 pr`` (host filenames differ); this is documentation
@@ -457,8 +458,12 @@ def submit_review_for_run(
     body: str = "",
     mint_gh_runner: GhRunner | None = None,
     token_spawn: Any = None,
+    sec7_context: object | None = None,
 ) -> ReviewResult:
     """Mint reviewer-App token -> submit independent APPROVE for the run's opened PR."""
+    refusal = sec7_forge_refusal("review-submit", sec7_context)
+    if refusal is not None:
+        raise ForgeJoinRefused(refusal)
     root = Path(root)
     change, plan_ref = _change_from_dispatch(root, run_id, reviewer_app_config.repo)
     token = mint_operation_token(
@@ -495,8 +500,12 @@ def enable_auto_merge_for_run(
     apply: bool = False,
     mint_gh_runner: GhRunner | None = None,
     token_spawn: Any = None,
+    sec7_context: object | None = None,
 ) -> AutoMergeResult:
     """Mint author-App token -> enable GraphQL auto-merge for the run's opened PR."""
+    refusal = sec7_forge_refusal("auto-merge", sec7_context)
+    if refusal is not None:
+        raise ForgeJoinRefused(refusal)
     root = Path(root)
     change, plan_ref = _change_from_dispatch(root, run_id, app_config.repo)
     token = mint_operation_token(
