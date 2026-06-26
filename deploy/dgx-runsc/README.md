@@ -50,6 +50,11 @@ The local runner evidence is in
   containment/routing only; a non-empty `egress_allowlist` must refuse unless a
   real allowlist enforcement primitive is proven.
 
+The portable CE CLI/validator image lives in `deploy/oci`. It is not a
+replacement for this herdr/Codex seat image; use it as a validator/preflight
+payload under the same `runsc-gvproxy-ptrace` runtime when DGX evidence needs
+the packaged `ce` and `creator-engine-validator` commands.
+
 On the DGX, mirror that deployment shape by registering a dedicated Docker
 runtime named `runsc-gvproxy-ptrace`. That runtime keeps the process under
 `runsc`, uses `ptrace` for Codex compatibility, and tells `runsc` to use the DGX
