@@ -29,6 +29,12 @@ from .integrator_escalation import (
     EscalationContext,
     escalate_unresolved_results,
 )
+from .integrator_llm_resolver import (
+    LLMClient,
+    LLMRepairArtifact,
+    OfflineEscalatingLLMClient,
+    resolve_conflict_text_with_llm,
+)
 from .search_rate_limiter import SearchRateLimiter
 
 
@@ -142,6 +148,7 @@ def run_once(
     poller: PollRepairNeeded | None = None,
     execute_repair: ExecuteRepair | None = None,
     plan_factory: PlanFactory | None = None,
+    llm_client: LLMClient | None = None,
     detected_at: str | None = None,
     rate_limiter: SearchRateLimiter | None = None,
 ) -> IntegratorRunResult:
@@ -169,6 +176,7 @@ def run_once(
             repair_adapter=repair_adapter,
             execute_repair=execute_repair,
             plan_factory=plan_factory,
+            llm_client=llm_client,
         )
         for event in poll.events
     )
@@ -181,6 +189,7 @@ def _handle_event(
     repair_adapter: IntegratorRepairAdapter,
     execute_repair: ExecuteRepair | None,
     plan_factory: PlanFactory | None,
+    llm_client: LLMClient | None,
 ) -> IntegratorEventOutcome:
     if not _event_is_live_action_eligible(event):
         return IntegratorEventOutcome(
@@ -193,7 +202,7 @@ def _handle_event(
         )
 
     work = repair_adapter.repair_work_item(event)
-    resolved_pairs = tuple((snapshot, _resolve(snapshot)) for snapshot in work.conflicts)
+    resolved_pairs = tuple((snapshot, _resolve(snapshot, llm_client=llm_client)) for snapshot in work.conflicts)
     resolver_results = tuple(result for _, result in resolved_pairs)
     unresolved = tuple(
         _escalatable_result(snapshot, result)
@@ -257,11 +266,60 @@ def _handle_event(
     )
 
 
-def _resolve(snapshot: ConflictSnapshot) -> ResolverResult:
-    return resolve_conflict(
+def _resolve(snapshot: ConflictSnapshot, *, llm_client: LLMClient | None) -> ResolverResult:
+    result = resolve_conflict(
         snapshot.path,
         snapshot.conflicted_text,
         context_files=dict(snapshot.context_files or {}),
+    )
+    if result.resolved:
+        return result
+    artifact = resolve_conflict_text_with_llm(
+        path=snapshot.path,
+        conflicted_text=snapshot.conflicted_text,
+        context_files=snapshot.context_files or {},
+        client=llm_client or OfflineEscalatingLLMClient(),
+    )
+    llm_result = _llm_artifact_to_result(snapshot.path, artifact)
+    if llm_result.unresolved and not result.applicable:
+        return ResolverResult(
+            resolver=llm_result.resolver,
+            applicable=True,
+            resolved=False,
+            unresolved=True,
+            changed_paths=(snapshot.path,),
+            reason=f"no deterministic mechanical resolver: {result.reason}; {llm_result.reason}",
+            evidence=tuple((*result.evidence, *llm_result.evidence)),
+        )
+    return llm_result
+
+
+def _llm_artifact_to_result(path: str, artifact: LLMRepairArtifact) -> ResolverResult:
+    if artifact.resolution_type == "escalate":
+        return ResolverResult(
+            resolver="llm_resolver",
+            applicable=True,
+            resolved=False,
+            unresolved=True,
+            changed_paths=(path,),
+            reason=artifact.rationale,
+            evidence=(
+                f"resolution_type={artifact.resolution_type}",
+                f"confidence={artifact.confidence:.3f}",
+            ),
+        )
+    return ResolverResult(
+        resolver=f"llm_resolver:{artifact.resolution_type}",
+        applicable=True,
+        resolved=True,
+        unresolved=False,
+        changed_paths=(path,),
+        reason=artifact.rationale,
+        evidence=(
+            f"resolution_type={artifact.resolution_type}",
+            f"confidence={artifact.confidence:.3f}",
+        ),
+        content=artifact.resolved_content,
     )
 
 
