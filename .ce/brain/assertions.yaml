@@ -161,4 +161,53 @@ records:
   verification_method:
     evidence_ref: .github/workflows/validate.yml
     type: static
+- claim:
+    expected_live_evidence:
+      arch: x86_64
+      current_user: ce-dev-1
+      runtime_name: ce-pilot-1
+    object: self_identity
+    predicate: probe-evidence
+    subject: self-identity
+    verdict: present
+  content_hash: 58fcf979c38acc25fa021d3036b4cc27f23d4f308fc8ffde8de53eb672243a95
+  evidence_ref: probe:self_identity
+  id: brain-assertion-fleet-self-identity-live
+  kind: brain-assertion
+  prev_hash: d92628ae21707a8fe5727d0a40a1ed1c18ee4adcfdb9bf2bff385b0b9e2545c7
+  record_type: brain_assertion
+  schema_version: '1'
+  scope:
+    seat: ce-dev-1
+  sequence: 7
+  statement: self identity must match live runtime probe
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: probe:self_identity
+    probe: self_identity
+    type: probe
+- claim:
+    object: worker_spawn_runtime_support
+    predicate: probe-verdict
+    subject: capability
+    verdict: present
+  content_hash: 5f73e7bbfaed4e91347923b7e3ea045477e7d0ea57d26d10dd42fb12e73997eb
+  evidence_ref: probe:worker_spawn_runtime_support
+  id: brain-assertion-fleet-worker-spawn-runtime-support
+  kind: brain-assertion
+  prev_hash: 58fcf979c38acc25fa021d3036b4cc27f23d4f308fc8ffde8de53eb672243a95
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 8
+  statement: worker spawn runtime support must be live-probed
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: probe:worker_spawn_runtime_support
+    probe: worker_spawn_runtime_support
+    type: probe
 schema_version: '1'

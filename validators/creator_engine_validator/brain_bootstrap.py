@@ -13,12 +13,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 from . import brain_runtime
+from . import brain_probe
 from ._versions import V3_LOCAL_STATE_ROOT
 from .runtime_evidence_spine import CONTENT_HASH_FIELD
 from .seat_class import resolve_seat_class
@@ -34,6 +36,7 @@ FOREMAN_CHARTER_ID = "ce-ops#163-born-a-foreman"
 WORKER_SPAWN_CAPABILITY_ID = "ce-ops#163-worker-spawn"
 FOREMAN_DISPATCH_CONTRACT_ID = "ce-ops#163-launch-pinned-foreman-dispatch"
 REQUIRED_FOREMAN_DISPATCH_ROLES = ("researcher", "implementer", "reviewer")
+LOGGER = logging.getLogger(__name__)
 
 FOREMAN_CHARTER = {
     "id": FOREMAN_CHARTER_ID,
@@ -112,6 +115,7 @@ class BootstrapRequest:
     seat_class: str | None = DEFAULT_SEAT_CLASS
     state_root: Path | str = V3_LOCAL_STATE_ROOT
     repo_root: Path | str | None = None
+    probe_context: brain_probe.ProbeContext | None = None
 
 
 def build_bootstrap_payload(
@@ -121,6 +125,7 @@ def build_bootstrap_payload(
     seat_class: str | None = DEFAULT_SEAT_CLASS,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
     repo_root: Path | str | None = None,
+    probe_context: brain_probe.ProbeContext | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic JSON-serializable controller bootstrap payload.
 
@@ -134,6 +139,7 @@ def build_bootstrap_payload(
         seat_class=seat_class,
         state_root=state_root,
         repo_root=repo_root,
+        probe_context=probe_context,
     )
     return bootstrap(request)
 
@@ -249,6 +255,12 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
 
     active = _active_current_view(records)
     relevant = [record for record in active if _scope_relevant(record.get("scope"), normalized_scope)]
+    _reconcile_live_self_identity_assertions(
+        active,
+        repo_root=repo_root,
+        probe_context=request.probe_context,
+        requested_scope=normalized_scope,
+    )
     assertions = [_project_assertion(record) for record in relevant]
     assertions.sort(key=lambda item: (item["sequence"], item["id"]))
 
@@ -356,6 +368,86 @@ def _head_content_hash(records: Sequence[dict[str, Any]]) -> str | None:
     if not records:
         return None
     return str(records[-1][CONTENT_HASH_FIELD])
+
+
+def _probe_context_for_bootstrap(
+    *,
+    repo_root: Path,
+    probe_context: brain_probe.ProbeContext | None,
+) -> brain_probe.ProbeContext:
+    if probe_context is None:
+        return brain_probe.ProbeContext(repo_root=repo_root)
+    if Path(probe_context.repo_root) == Path("."):
+        return brain_probe.ProbeContext(
+            repo_root=repo_root,
+            env=probe_context.env,
+            run=probe_context.run,
+            read_text=probe_context.read_text,
+            wheel_source_checker=probe_context.wheel_source_checker,
+            probes=probe_context.probes,
+        )
+    return probe_context
+
+
+def _reconcile_live_self_identity_assertions(
+    records: Sequence[dict[str, Any]],
+    *,
+    repo_root: Path,
+    probe_context: brain_probe.ProbeContext | None,
+    requested_scope: str | dict[str, Any],
+) -> None:
+    errors: list[str] = []
+    context = _probe_context_for_bootstrap(repo_root=repo_root, probe_context=probe_context)
+    observed_cache: dict[str, brain_probe.ProbeResult] = {}
+    for record in records:
+        probe_name = brain_probe.record_probe_name(record)
+        if probe_name != brain_probe.SELF_IDENTITY_PROBE:
+            continue
+        assertion_id = str(record.get("id", "<unknown>"))
+        observed = observed_cache.get(probe_name)
+        if observed is None:
+            observed = brain_probe.probe(probe_name, context)
+            observed_cache[probe_name] = observed
+        if not brain_probe.self_identity_record_applies_to_current_seat(
+            record,
+            observed,
+            requested_scope=requested_scope,
+        ):
+            continue
+        expected_verdict = brain_probe.record_expected_verdict(record)
+        if expected_verdict is None:
+            errors.append(
+                f"{assertion_id}: self-identity probe assertion must declare claim.verdict"
+            )
+        elif observed.verdict != expected_verdict:
+            errors.append(
+                f"{assertion_id}: self-identity verdict drift; "
+                f"remembered {expected_verdict!r}, live {observed.verdict!r}"
+            )
+        expected_evidence = brain_probe.record_expected_self_identity_evidence(record)
+        if expected_evidence is None:
+            errors.append(
+                f"{assertion_id}: self-identity probe assertion must declare "
+                f"claim.{brain_probe.SELF_IDENTITY_EXPECTED_EVIDENCE_KEY}"
+            )
+            continue
+        for key, expected_value in sorted(expected_evidence.items()):
+            path = brain_probe.SELF_IDENTITY_PROBE_EVIDENCE_PATHS.get(str(key), (str(key),))
+            observed_value = brain_probe.mapping_get_path(observed.evidence, path)
+            if observed_value == expected_value:
+                continue
+            errors.append(
+                f"{assertion_id}: self-identity drift at {key}; "
+                f"remembered {expected_value!r}, live {observed_value!r}"
+            )
+    if not errors:
+        return
+    for error in errors:
+        LOGGER.error("brain bootstrap self-identity drift: %s", error)
+    raise BrainBootstrapRefused(
+        "brain bootstrap refused live self-identity drift",
+        errors=tuple(errors),
+    )
 
 
 def _assert_json_serializable(payload: dict[str, Any]) -> None:

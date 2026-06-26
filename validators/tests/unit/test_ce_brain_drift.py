@@ -787,13 +787,24 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 7
+    assert len(active) == 9
     assert {
         brain_probe.record_probe_name(record)
         for record in active
         if brain_probe.record_probe_name(record) is not None
-    } == {"codex_fan_out_surfaces", "codex_pretooluse_hook", "harness_fan_out"}
+    } == {
+        "codex_fan_out_surfaces",
+        "codex_pretooluse_hook",
+        "harness_fan_out",
+        "self_identity",
+        "worker_spawn_runtime_support",
+    }
     assert any(record["id"] == "brain-assertion-validate-workflow-drift-gate" for record in active)
+    assert any(
+        record["id"] == "brain-assertion-fleet-self-identity-live"
+        and record["scope"] == {"seat": "ce-dev-1"}
+        for record in active
+    )
 
 
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):

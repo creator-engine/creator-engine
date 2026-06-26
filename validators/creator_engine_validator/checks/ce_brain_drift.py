@@ -643,6 +643,11 @@ def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: 
             )
         ]
     observed = brain_probe.probe(probe_name, context.probe_context)
+    if (
+        probe_name == brain_probe.SELF_IDENTITY_PROBE
+        and not brain_probe.self_identity_record_applies_to_current_seat(record, observed)
+    ):
+        return []
     if observed.verdict == "unknown" and expected != "unknown":
         return [
             _error(
