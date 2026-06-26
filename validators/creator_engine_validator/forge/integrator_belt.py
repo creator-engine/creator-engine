@@ -64,6 +64,7 @@ DEFAULT_INTERVAL_SECONDS = 60.0
 DEFAULT_DAEMON_SEARCH_LIMIT = 50
 DEFAULT_GOVERNANCE_CHECK = "Validate governance artifacts"
 DEFAULT_TEST_CHECK_KEYWORDS = ("test", "pytest", "unit")
+DEFAULT_APPROVAL_SETTLE_SECONDS = 0.0
 
 
 class IntegratorBeltError(Exception):
@@ -379,10 +380,12 @@ class MergeQueueDequeueResult:
     disabled_auto_merge: bool
     converted_to_draft: bool
     evidence: tuple[str, ...] = ()
+    queued: bool = False
+    dequeued: bool = False
 
     @property
     def ok(self) -> bool:
-        return self.disabled_auto_merge and all(
+        return (self.dequeued or not self.queued) and all(
             not item.startswith("draft_returncode=") or item == "draft_returncode=0"
             for item in self.evidence
         )
@@ -393,6 +396,8 @@ class MergeQueueDequeueResult:
             "pr_number": self.pr_number,
             "disabled_auto_merge": self.disabled_auto_merge,
             "converted_to_draft": self.converted_to_draft,
+            "queued": self.queued,
+            "dequeued": self.dequeued,
             "evidence": list(self.evidence),
         }
 
@@ -550,6 +555,8 @@ def run_daemon_loop(
     authorized_reviewers: Sequence[str] | None = None,
     approval_marker_issuer: ApprovalMarkerIssuer | None = None,
     pr_body_updater: PrBodyUpdater | None = None,
+    approval_settle_seconds: float = DEFAULT_APPROVAL_SETTLE_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> DaemonLoopResult:
     """Run the supervised autonomous merge daemon.
 
@@ -559,12 +566,15 @@ def run_daemon_loop(
 
     if interval_seconds < 0:
         raise IntegratorBeltError("interval_seconds must be >= 0")
+    if approval_settle_seconds < 0:
+        raise IntegratorBeltError("approval_settle_seconds must be >= 0")
     runner = gh_runner_with_token(token, gh_runner)
     _rate_limiter = rate_limiter
     if _rate_limiter is None and gh_runner is None:
         _rate_limiter = default_search_rate_limiter()
     ticks: list[DaemonLoopTick] = []
     approval_settle_seen: set[str] = set()
+    approval_settle_ready_at: dict[str, float] = {}
     index = 1
     while True:
         _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
@@ -581,6 +591,9 @@ def run_daemon_loop(
                 rate_limiter=_rate_limiter,
                 sleep=sleep,
                 approval_settle_seen=approval_settle_seen,
+                approval_settle_ready_at=approval_settle_ready_at,
+                approval_settle_seconds=approval_settle_seconds,
+                clock=clock,
                 authorized_reviewers=authorized_reviewers,
                 approval_marker_issuer=approval_marker_issuer,
                 pr_body_updater=pr_body_updater,
@@ -627,6 +640,9 @@ def run_daemon_pass(
     rate_limiter: SearchRateLimiter | None = None,
     sleep: Callable[[float], None] = time.sleep,
     approval_settle_seen: set[str] | None = None,
+    approval_settle_ready_at: dict[str, float] | None = None,
+    approval_settle_seconds: float = DEFAULT_APPROVAL_SETTLE_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
     authorized_reviewers: Sequence[str] | None = None,
     approval_marker_issuer: ApprovalMarkerIssuer | None = None,
     pr_body_updater: PrBodyUpdater | None = None,
@@ -638,8 +654,11 @@ def run_daemon_pass(
         raise IntegratorBeltError("repo and org are mutually exclusive")
     if not repo and not org:
         raise IntegratorBeltError("run_daemon_pass refuses an unscoped daemon; supply repo or org")
+    if approval_settle_seconds < 0:
+        raise IntegratorBeltError("approval_settle_seconds must be >= 0")
     runner = gh_runner or _default_gh_runner
     settle_seen = approval_settle_seen if approval_settle_seen is not None else set()
+    settle_ready_at = approval_settle_ready_at if approval_settle_ready_at is not None else {}
     authorized = _normalize_authorized_reviewers(authorized_reviewers)
     prs = tuple(candidates) if candidates is not None else discover_daemon_candidates(
         repo=repo,
@@ -670,7 +689,7 @@ def run_daemon_pass(
             else:
                 gate = DaemonGateEvaluation(None, non_wall_gate.evidence)
         if gate.refusal_reason is not None:
-            _clear_approval_settle_for_pr(settle_seen, pr)
+            _clear_approval_settle_for_pr(settle_seen, pr, settle_ready_at)
             decision = _decision(pr, "skip", gate.refusal_reason, evidence=gate.evidence)
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
@@ -684,6 +703,8 @@ def run_daemon_pass(
         approval_key = _approval_settle_key(pr, approval_witness)
         if approval_key not in settle_seen:
             settle_seen.add(approval_key)
+            if approval_settle_seconds:
+                settle_ready_at[approval_key] = clock() + approval_settle_seconds
             decision = _decision(
                 pr,
                 "defer",
@@ -696,6 +717,28 @@ def run_daemon_pass(
             decisions.append(decision)
             _log_daemon_decision(log_sink, decision)
             continue
+        ready_at = settle_ready_at.get(approval_key)
+        if ready_at is not None:
+            now = clock()
+            remaining = max(ready_at - now, 0.0)
+            if remaining:
+                sleep(remaining)
+                now = clock()
+            if now < ready_at:
+                decision = _decision(
+                    pr,
+                    "defer",
+                    "approval_settle_pending",
+                    evidence=(
+                        f"reviewer={approval_witness.reviewer_login}",
+                        f"head_sha={pr.head_sha}",
+                        f"settle_remaining_seconds={ready_at - now:.3f}",
+                    ),
+                )
+                decisions.append(decision)
+                _log_daemon_decision(log_sink, decision)
+                continue
+            settle_ready_at.pop(approval_key, None)
         authorized_witness, authorization_refusal = _authorized_approval_witness(pr, authorized)
         if authorized_witness is None:
             decision = _decision(
@@ -1161,11 +1204,17 @@ def _approval_settle_key(pr: DaemonPullRequest, witness: DaemonApprovalWitness) 
     return f"{pr.repo}#{pr.pr_number}:{pr.head_sha.lower()}:{review_part}"
 
 
-def _clear_approval_settle_for_pr(keys: set[str], pr: DaemonPullRequest) -> None:
+def _clear_approval_settle_for_pr(
+    keys: set[str],
+    pr: DaemonPullRequest,
+    ready_at: dict[str, float] | None = None,
+) -> None:
     prefix = f"{pr.repo}#{pr.pr_number}:"
     for key in tuple(keys):
         if key.startswith(prefix):
             keys.discard(key)
+            if ready_at is not None:
+                ready_at.pop(key, None)
 
 
 def _latest_required_checks(checks: Sequence[DaemonStatusCheck]) -> dict[str, DaemonStatusCheck]:
@@ -1418,6 +1467,23 @@ _DAEMON_APPROVAL_REVERIFY_QUERY = (
     "}}}"
 )
 
+_MERGE_QUEUE_DEQUEUE_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){"
+    "repository(owner:$owner,name:$name){"
+    "pullRequest(number:$number){id number}"
+    "mergeQueue{entries(first:100){pageInfo{hasNextPage}nodes{"
+    "pullRequest{id number repository{nameWithOwner}}"
+    "}}}"
+    "}}"
+)
+
+_DEQUEUE_PULL_REQUEST_MUTATION = (
+    "mutation($id:ID!){"
+    "dequeuePullRequest(input:{id:$id}){"
+    "mergeQueueEntry{pullRequest{number repository{nameWithOwner}}}"
+    "}}"
+)
+
 
 def _reverify_approval_before_enqueue(
     pr: DaemonPullRequest,
@@ -1498,21 +1564,72 @@ def dequeue_merge_queue(
 ) -> MergeQueueDequeueResult:
     """Emergency primitive for evicting a PR from GitHub's merge queue."""
 
-    _split_repo(repo)
+    owner, name = _split_repo(repo)
     if pr_number < 1:
         raise IntegratorBeltError("pr_number must be >= 1")
     runner = gh_runner or _default_gh_runner
-    disable = runner(
-        ["gh", "pr", "merge", str(pr_number), "--repo", repo, "--disable-auto"],
-        None,
+    parsed = _gh_graphql(
+        runner,
+        _MERGE_QUEUE_DEQUEUE_QUERY,
+        {"owner": owner, "name": name, "number": pr_number},
+        purpose=f"read merge queue membership for {repo}#{pr_number}",
     )
+    repository = (parsed.get("data") or {}).get("repository")
+    if not isinstance(repository, dict):
+        raise IntegratorBeltError(f"pull request does not exist: {repo}#{pr_number}")
+    pull_request = repository.get("pullRequest")
+    if not isinstance(pull_request, dict) or not pull_request.get("id"):
+        raise IntegratorBeltError(f"pull request does not exist: {repo}#{pr_number}")
+    pull_request_id = str(pull_request["id"])
+    merge_queue = repository.get("mergeQueue")
+    entries: dict[str, Any] = {}
+    nodes: list[Any] = []
+    if merge_queue is not None:
+        if not isinstance(merge_queue, dict):
+            raise ForgeConfigError(f"unexpected merge queue response for {repo}#{pr_number}")
+        raw_entries = merge_queue.get("entries")
+        if not isinstance(raw_entries, dict):
+            raise ForgeConfigError(f"unexpected merge queue response for {repo}#{pr_number}")
+        entries = raw_entries
+        raw_nodes = entries.get("nodes")
+        if not isinstance(raw_nodes, list):
+            raise ForgeConfigError(f"unexpected merge queue response for {repo}#{pr_number}")
+        nodes = raw_nodes
+    queued = any(
+        isinstance(node, dict)
+        and isinstance(node.get("pullRequest"), dict)
+        and str(node["pullRequest"].get("id") or "") == pull_request_id
+        for node in nodes
+    )
+    if not queued and isinstance(entries.get("pageInfo"), dict) and entries["pageInfo"].get("hasNextPage"):
+        raise ForgeConfigError(
+            f"merge queue membership for {repo}#{pr_number} spans more than 100 entries"
+        )
     evidence = [
-        "gh_pr_merge_disable_auto=true",
-        f"disable_returncode={disable.returncode}",
-        f"disable_stderr={redact_gh_stderr(disable.stderr or '')}",
+        "merge_queue_membership_checked=true",
+        f"queued={str(queued).lower()}",
     ]
+    if not queued:
+        return MergeQueueDequeueResult(
+            repo=repo,
+            pr_number=pr_number,
+            disabled_auto_merge=False,
+            converted_to_draft=False,
+            queued=False,
+            dequeued=False,
+            evidence=tuple((*evidence, "dequeue_noop=not_queued")),
+        )
+    mutation = _gh_graphql(
+        runner,
+        _DEQUEUE_PULL_REQUEST_MUTATION,
+        {"id": pull_request_id},
+        purpose=f"dequeue pull request {repo}#{pr_number}",
+    )
+    if mutation.get("errors"):
+        raise ForgeConfigError(f"could not dequeue pull request {repo}#{pr_number}: GraphQL returned errors")
+    evidence.append("dequeue_pull_request=true")
     converted = False
-    if disable.returncode == 0 and convert_to_draft:
+    if convert_to_draft:
         draft = runner(["gh", "pr", "ready", str(pr_number), "--repo", repo, "--undo"], None)
         converted = draft.returncode == 0
         evidence.extend(
@@ -1525,8 +1642,10 @@ def dequeue_merge_queue(
     return MergeQueueDequeueResult(
         repo=repo,
         pr_number=pr_number,
-        disabled_auto_merge=disable.returncode == 0,
+        disabled_auto_merge=True,
         converted_to_draft=converted,
+        queued=True,
+        dequeued=True,
         evidence=tuple(evidence),
     )
 
