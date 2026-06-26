@@ -19,13 +19,16 @@ ce-ops#260 adds an offline release artifact parity guard and refreshes the
 
 Note:
 Re-signing `docs/llms-install.md` requires the held `ce-root-v1` key and is
-controller work. This PR only flags that follow-up in the changelog.
+controller work. The controller signed the canonical bytes with `ce-root-v1`
+(namespace `ce-spec-v1`); this PR carries the refreshed `sha256s_sha256`,
+recomputed `content_sha256`, and the new SSHSIG `value`.
 
 Per-file purpose:
 - **`.ce/changelog/ce260-release-artifact-parity-guard.md`** *(A)* - changelog fragment, including the controller-only signing note.
 - **`.ce/pr-manifests/ce260-release-artifact-parity-guard.md`** *(A)* - this closed path-set carrier.
 - **`docs/downloads/0.2.0/SHA256SUMS`** *(M)* - refreshed `install.sh` digest.
 - **`docs/downloads/0.2.0/install.sh`** *(M)* - regenerated from `docs/install.sh`.
+- **`docs/llms-install.md`** *(M)* - refreshed `sha256s_sha256`, recomputed `content_sha256`, and re-signed SSHSIG `value` (ce-root-v1 / ce-spec-v1).
 - **`validators/creator_engine_validator/checks/__init__.py`** *(M)* - registers the new check in the offline gate.
 - **`validators/creator_engine_validator/checks/release_artifact_parity_guard.py`** *(A)* - release installer parity validator.
 - **`validators/tests/unit/test_app_jwt_runner.py`** *(M)* - updates the registry-count invariant for the new check.
@@ -41,15 +44,16 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=16
 
-AUTHORIZED_PATHS_SHA256=6c44da3da949b2e717488145da42246c0cdeda380b8a32f40e4237ddc36ffc6e
+AUTHORIZED_PATHS_SHA256=60492eccf30bca4249489d43b349462638cc01dd372a4d6ff0951b72988311d5
 
 ```text
 .ce/changelog/ce260-release-artifact-parity-guard.md
 .ce/pr-manifests/ce260-release-artifact-parity-guard.md
 docs/downloads/0.2.0/SHA256SUMS
 docs/downloads/0.2.0/install.sh
+docs/llms-install.md
 validators/creator_engine_validator/checks/__init__.py
 validators/creator_engine_validator/checks/release_artifact_parity_guard.py
 validators/tests/unit/test_app_jwt_runner.py
