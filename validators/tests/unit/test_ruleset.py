@@ -331,6 +331,34 @@ def test_ruleset_plan_does_not_mutate():
     assert fake.methods() == ["GET"]
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda fake, ctx: upsert_ruleset(REPO, _policy(), apply=True, gh_runner=fake, sec7_context=ctx),
+            id="upsert",
+        ),
+        pytest.param(
+            lambda fake, ctx: delete_ruleset(REPO, "ce-p1-devops", apply=True, gh_runner=fake, sec7_context=ctx),
+            id="delete",
+        ),
+    ],
+)
+def test_ruleset_ops_refuse_sec7_governed_context_before_gh_call(operation):
+    fake = FakeRulesetGh([{"id": 7, **_policy().to_put_payload()}])
+    with pytest.raises(RulesetRefused) as ei:
+        operation(fake, {"posture": "governed"})
+    assert "§7 governed-seat context" in str(ei.value)
+    assert fake.calls == []
+
+
+def test_ruleset_allows_non_governed_context():
+    fake = FakeRulesetGh([])
+    result = upsert_ruleset(REPO, _policy(), apply=False, gh_runner=fake, sec7_context={"posture": "ungoverned"})
+    assert result.changed is True
+    assert fake.methods() == ["GET"]
+
+
 def test_ruleset_apply_creates_and_verifies():
     fake = FakeRulesetGh([])
     result = upsert_ruleset(REPO, _policy(), apply=True, gh_runner=fake)

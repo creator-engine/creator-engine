@@ -43,6 +43,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 
+from ..sec7_forge_guard import sec7_forge_refusal
 from ._redact import redact_gh_stderr
 from .protection_diagnostics import api_error_text, protection_floor_unenforceable
 
@@ -386,6 +387,7 @@ def configure_repo(
     branch: str = "main",
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> ConfigResult:
     """Bring ``branch`` protection to ``policy`` (idempotent desired-state).
 
@@ -395,6 +397,9 @@ def configure_repo(
     (default) it reads + plans and mutates nothing; with ``apply=True`` it
     applies and re-reads to verify the live state now matches the policy.
     """
+    refusal = sec7_forge_refusal("configure-repo", sec7_context)
+    if refusal is not None:
+        raise ForgeConfigRefused(refusal)
     runner = gh_runner or _default_gh_runner
     current = _read_protection(runner, repo, branch)
     observed = _observe(current)
@@ -483,8 +488,12 @@ def allow_auto_merge(
     *,
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> ConfigResult:
     """Ensure the repository-level ``allow_auto_merge`` setting is enabled."""
+    refusal = sec7_forge_refusal("configure-repo", sec7_context)
+    if refusal is not None:
+        raise ForgeConfigRefused(refusal)
     runner = gh_runner or _default_gh_runner
     code, parsed, stderr = _gh_api(runner, f"repos/{repo}")
     if code != 0 or not isinstance(parsed, dict):
@@ -538,8 +547,12 @@ def configure_squash_only(
     *,
     apply: bool = False,
     gh_runner: GhRunner | None = None,
+    sec7_context: object | None = None,
 ) -> ConfigResult:
     """Ensure squash merge is the only enabled repository merge method."""
+    refusal = sec7_forge_refusal("configure-repo", sec7_context)
+    if refusal is not None:
+        raise ForgeConfigRefused(refusal)
     runner = gh_runner or _default_gh_runner
     code, parsed, stderr = _gh_api(runner, f"repos/{repo}")
     if code != 0 or not isinstance(parsed, dict):

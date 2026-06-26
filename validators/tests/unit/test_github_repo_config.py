@@ -291,6 +291,38 @@ def test_install_required_checks_read_failure_raises():
 # --------------------------------------------------------------------------
 # configure_repo
 # --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda fake, ctx: configure_repo(REPO, apply=True, gh_runner=fake, sec7_context=ctx),
+            id="configure_repo",
+        ),
+        pytest.param(
+            lambda fake, ctx: allow_auto_merge(REPO, apply=True, gh_runner=fake, sec7_context=ctx),
+            id="allow_auto_merge",
+        ),
+        pytest.param(
+            lambda fake, ctx: configure_squash_only(REPO, apply=True, gh_runner=fake, sec7_context=ctx),
+            id="configure_squash_only",
+        ),
+    ],
+)
+def test_configure_repo_ops_refuse_sec7_governed_context_before_gh_call(operation):
+    fake = FakeGh(_get_shape(code_owner=False))
+    with pytest.raises(ForgeConfigRefused) as ei:
+        operation(fake, {"posture": "governed"})
+    assert "§7 governed-seat context" in str(ei.value)
+    assert fake.calls == []
+
+
+def test_configure_repo_allows_non_governed_context():
+    fake = FakeGh(_get_shape(code_owner=True))
+    res = configure_repo(REPO, apply=True, gh_runner=fake, sec7_context={"posture": "ungoverned"})
+    assert res.verified is True
+    assert fake.calls
+
+
 def test_configure_repo_idempotent_when_already_desired():
     # current already matches DEFAULT_MAIN_PROTECTION's observation
     fake = FakeGh(_get_shape(code_owner=True))

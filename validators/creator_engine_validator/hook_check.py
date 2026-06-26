@@ -42,6 +42,7 @@ from .seat_class import (
     foreman_would_deny,
     resolve_seat_class,
 )
+from .sec7_forge_guard import forge_mechanic_label
 
 # v3.5-B.3 refusal-record seam: the SHARED hash-chain substrate only
 # (V1->shared is the allowed boundary edge). The v3 evidence-persistence sink
@@ -598,6 +599,44 @@ _CURL_OPTIONS_WITH_VALUE = frozenset(
     }
 )
 
+_PYTHON_EXECUTABLES = frozenset({"python", "python3"})
+
+
+def _is_python_executable(token: str) -> bool:
+    name = PurePosixPath(token).name
+    return name in _PYTHON_EXECUTABLES or bool(re.fullmatch(r"python3?\.\d+", name))
+
+
+def _classify_ce_forge_tokens(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable in {"ce", "cev3"} and len(tokens) >= 2:
+        return forge_mechanic_label(tokens[1])
+    if _is_python_executable(tokens[0]) and len(tokens) >= 4 and tokens[1] == "-m":
+        module = tokens[2]
+        if module == "creator_engine_validator.v3_cli":
+            return forge_mechanic_label(tokens[3])
+    return None
+
+
+def _classify_ce_forge_mechanics(command: str) -> str | None:
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return None
+    start = 0
+    for index, token in enumerate(tokens):
+        if token in _SHELL_SEPARATORS:
+            start = index + 1
+            continue
+        action = _classify_ce_forge_tokens(tuple(tokens[index:]))
+        if action is not None:
+            return action
+        if index == start and token in {"env", "/usr/bin/env"}:
+            continue
+    return None
+
 
 def _github_api_path_from_url(value: str) -> str | None:
     parsed = urlparse(value)
@@ -809,6 +848,9 @@ def classify_mechanics(command: Any) -> str | None:
     """
     if not isinstance(command, str):
         return None
+    forge_action = _classify_ce_forge_mechanics(command)
+    if forge_action is not None:
+        return forge_action
     git_action = _classify_git_mechanics(command)
     if git_action is not None:
         return git_action
@@ -1156,6 +1198,10 @@ _MECHANIC_RECORD_AXES: dict[str, tuple[str, str]] = {
     "pr_lifecycle": ("egress", "governance"),
     "live_lane_launch": ("exec", "governance"),
     "live_integration_queue": ("exec", "governance"),
+    "forge_configure_repo": ("egress", "governance"),
+    "forge_ruleset": ("egress", "governance"),
+    "forge_review_submit": ("egress", "governance"),
+    "forge_auto_merge": ("egress", "governance"),
     _GIT_OPAQUE_MECHANIC: ("vcs", "governance"),
 }
 
