@@ -14,6 +14,7 @@ ce worker terminate  # revoke broker grants, stop the container, write a stopped
 ce worker gc         # reap container-instance records that outlived a released claim
 ce worker status     # read a local container-instance record
 ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed environment
+ce worker run        # resolve a role definition, launch a governed worker, return findings
 ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce update            # signed in-place CE update; --check is read-only
@@ -113,6 +114,7 @@ from . import (
     update as update_runtime,
     version,
     work_claims,
+    worker_run,
     worker_spawn,
     worker_runtime,
 )
@@ -142,6 +144,21 @@ def _make_worker_broker():
 def _make_worker_spawn_launcher():
     """Factory for the worker-spawn launcher seam (monkeypatchable in tests)."""
     return worker_spawn.LaunchRuntimeWorkerLauncher()
+
+
+def _make_worker_run_launcher():
+    """Factory for worker-run launch (monkeypatchable in tests)."""
+    return worker_spawn.LaunchRuntimeWorkerLauncher()
+
+
+def _make_worker_run_seeder():
+    """Factory for worker-run prompt delivery (monkeypatchable in tests)."""
+    return worker_run.TmuxPromptSeeder()
+
+
+def _make_worker_run_collector(timeout_seconds: float):
+    """Factory for worker-run findings collection (monkeypatchable in tests)."""
+    return worker_run.FileFindingsCollector(timeout_seconds=timeout_seconds)
 
 
 def _make_herdr_attach_runner():
@@ -535,6 +552,26 @@ def _build_parser() -> argparse.ArgumentParser:
     wsp.add_argument("--parent-id", default=None, help="parent/foreman id; defaults from CE_WORKER_ID/CE_FOREMAN_ID/CE_CONTROLLER_ID")
     wsp.add_argument("--worker-id", default=None, help="optional stable worker id; otherwise derived from value-free inputs")
     wsp.add_argument("--json", action="store_true", dest="json_output")
+
+    wrun = worker_sub.add_parser(
+        "run",
+        help="run a sanctioned .claude/agents role brief in a governed worker lane and return findings",
+    )
+    wrun.add_argument("--role", required=True, help="role name from .claude/agents/<role>.md")
+    wrun.add_argument("--brief", required=True, help="brief file to run")
+    wrun.add_argument("--repo-root", default=".", help="repo root containing .claude/agents (default: cwd)")
+    wrun.add_argument("--worktree", default=None, help="existing worker worktree path (default: --repo-root)")
+    wrun.add_argument("--harness", default="claude", choices=sorted(launch_runtime.SUPPORTED_HARNESSES))
+    wrun.add_argument("--run-id", default=None, help="optional run id for .ce/state/worker-runs")
+    wrun.add_argument("--parent-id", default=None, help="parent/foreman id; defaults from worker-spawn environment")
+    wrun.add_argument("--worker-id", default=None, help="optional stable worker id for the spawned lane")
+    wrun.add_argument(
+        "--findings-timeout",
+        type=float,
+        default=300.0,
+        help="seconds to wait for the worker findings artifact (default: 300)",
+    )
+    wrun.add_argument("--json", action="store_true", dest="json_output")
 
     wse = worker_sub.add_parser(
         "scrub-env",
@@ -1811,6 +1848,32 @@ def _worker_spawn(args) -> int:
         verb = "planned" if result.plan.dry_run else "spawned"
         print(f"ce worker spawn: {verb} {result.plan.worker_id} ({result.plan.role}/{result.plan.harness})")
         print(f"record: {result.record_path}")
+    return 0
+
+
+def _worker_run(args) -> int:
+    try:
+        result = worker_run.run_worker_role(
+            role=args.role,
+            brief=args.brief,
+            repo_root=args.repo_root,
+            worktree=args.worktree,
+            harness=args.harness,
+            run_id=args.run_id,
+            parent_id=args.parent_id,
+            worker_id=args.worker_id,
+            launcher=_make_worker_run_launcher(),
+            seeder=_make_worker_run_seeder(),
+            collector=_make_worker_run_collector(args.findings_timeout),
+        )
+    except worker_run.WorkerRunError as exc:
+        print(f"ERROR: ce worker run refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce worker run: completed {result.run_id} ({result.role.name}/{args.harness})")
+        print(f"findings: {result.findings_path}")
     return 0
 
 
@@ -3717,6 +3780,7 @@ _LEDGER_DISPATCH = {
 }
 
 _WORKER_DISPATCH = {
+    "run": _worker_run,
     "spawn": _worker_spawn,
     "scrub-env": _worker_scrub_env,
     "allocate": _worker_allocate,

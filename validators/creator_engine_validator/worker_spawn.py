@@ -28,6 +28,7 @@ from . import brain_bootstrap, codex_launch_spec, lane_runtime, launch_runtime
 
 
 WORKER_ROLES: dict[str, str] = {
+    "architect_research": "read-only",
     "researcher": "read-only",
     "implementer": "implementation",
     "reviewer": "review",

@@ -121,6 +121,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # module and leaves later foreman injection/enforcement gates as data
         # consumers of the worker artifact.
         "worker_spawn",
+        # ce-ops#259: sanctioned one-call role-brief worker run path. Driven by
+        # the v1 ``ce worker`` kernel, resolving role definitions as data and
+        # composing ``worker_spawn``; imports no v3 module.
+        "worker_run",
     }
 )
 

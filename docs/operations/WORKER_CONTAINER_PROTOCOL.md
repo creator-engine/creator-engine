@@ -298,6 +298,8 @@ above into a local runtime:
 | `ce worker terminate` | `terminate_worker` (§e.8) | revoke broker grants, stop the container, write the stopped record, record a `container_stopped` side effect |
 | `ce worker gc` | `garbage_collect_worker` (§e.9) | reap container-instance records that hit the PCO-043 condition; update them deterministically |
 | `ce worker status` | local read | read a single container-instance record (read-only) |
+| `ce worker spawn` | `worker_spawn.spawn_worker` | spawn a harness-agnostic governed worker seat under a scrubbed environment, recording only prompt refs/hashes and value-free launch metadata |
+| `ce worker run --role <role> --brief <file>` | `worker_run.run_worker_role` | sanctioned one-call role-brief path: resolve `.claude/agents/<role>.md`, compose `worker_spawn`, wait for the declared findings artifact, and return structured findings |
 
 Runtime invariants: the container engine and credential broker are reached
 **only** through injectable seams (`PodmanCommandRunner`, `NullCredentialBroker`);
@@ -307,3 +309,26 @@ secret values never enter argv, records, side-effect details, or broker metadata
 (`G5-CONTROLLER-KEY-REFUSED`); a non-empty egress allowlist with no proven
 enforcement primitive is refused before container start (`G5-EGRESS-UNENFORCEABLE`);
 and every refusal raises before any side effect.
+
+### 7.1 `ce worker run` design note and deferrals
+
+`ce worker run --role <role> --brief <file>` is the sanctioned replacement for
+ad hoc harness fallback when a controller needs a governed role to answer a
+bounded brief. The command resolves only checked-in role files under
+`.claude/agents/`, fails closed for missing or unknown roles, composes the
+existing `worker_spawn` launch primitive, writes a deterministic prompt under
+`.ce/state/worker-runs/<run-id>/prompt.md`, seeds the launched pane with a
+pointer-only instruction to read that prompt and write the declared findings
+artifact, and collects the worker's YAML/JSON findings artifact. Prompt seeding
+and findings collection are injectable, so unit tests exercise the
+launch-to-findings round trip offline without a live model, tmux, or network.
+
+Deferred follow-up slices:
+
+- Egress-allowed research lane for `architect_research`: the role definition
+  declares `WebFetch`/`WebSearch`, but the governed runtime still needs an
+  explicit research-lane egress policy before live web research is enabled.
+- Declared-tools-vs-runtime capability probe/reconciliation: the role front
+  matter lists tool intent, but this slice records and surfaces it only. A later
+  capability probe must compare declared tools against the actual runtime
+  harness/tool boundary and fail closed or downgrade when they diverge.
