@@ -73,7 +73,7 @@ its worktree, and its branch are co-identified. The convention is:
 (`<repo-parent>` is local to a given Nefarious workstation and MUST
 NOT be propagated into governed artifacts beyond this envelope; it is
 an instance-local fact per
-[`./BACKLOG.md`](./BACKLOG.md) §f maintenance rule 4 and
+`./BACKLOG.md` §f maintenance rule 4 and
 [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §e.5.)
 
 ### c.2 Naming-convention invariants
@@ -82,7 +82,7 @@ an instance-local fact per
    preflight failure per §e.
 2. The branch class is selected by the envelope's dominant mutation
    class and MUST be recognizable by the canonical-branch CI policy
-   under [`./BACKLOG.md`](./BACKLOG.md) §c.3 once Feature 003 wires
+   under `./BACKLOG.md` §c.3 once Feature 003 wires
    classifier rules. Until then, the class label is delivery-view
    bookkeeping only.
 3. Scope slugs MUST be kebab-case ASCII, MUST be unique within a
@@ -172,7 +172,7 @@ envelope.
    authorizing the inclusion.
 3. Forensic / session-backup paths are instance-local facts and
    MUST NOT appear in governed artifacts per
-   [`./BACKLOG.md`](./BACKLOG.md) §f rule 4.
+   `./BACKLOG.md` §f rule 4.
 4. The author/approver separation contract still applies: a handoff
    artifact authored by Hermes/Nefarious is **not** Source
    ratification regardless of how detailed the handoff is.

@@ -75,7 +75,7 @@ controller_seat:
       github_app: github-app-installation-token
 ```
 
-The forbidden-surface floor makes the DGX Controller posture explicit:
+The forbidden-surface floor makes the GPU host Controller posture explicit:
 contained Controller records must not depend on host home, host tmux socket,
 host SSH agent, host `git push`, ACP host transport, raw host TUI authority,
 container runtime sockets, OpenBao root token, `ce-root-v1` private key, or

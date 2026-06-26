@@ -47,13 +47,13 @@ def test_claude_code_is_ring_0_1_2_full_and_file_backed():
     assert "hook_check.py" in row.cells["ring2"].provenance
 
 
-def test_codex_is_ring_0_only_with_ring_1_deferred_to_ce_ops_219():
+def test_codex_is_ring_0_only_with_ring_1_deferred_pending_containment():
     row = _row(_matrix(), "codex")
     assert row.cells["ring0"].value == hm.STATUS_FULL
     assert row.cells["ring0"].verified is True
     assert row.cells["ring1"].value == hm.STATUS_DEFERRED
     assert row.cells["ring1"].verified is False
-    assert "ce-ops#219" in row.cells["ring1"].provenance
+    assert "deferred pending containment acceptance" in row.cells["ring1"].provenance
     assert row.cells["ring2"].value == hm.STATUS_NONE
     assert row.cells["status"].value == hm.STATUS_PARTIAL
 

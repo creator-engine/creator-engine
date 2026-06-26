@@ -169,7 +169,7 @@ and any repository-setting mutation on any host.
 |---|---|
 | `predecessor_items` | `sprint-0/slice-d` (delivery-view predecessor edge). |
 | `predecessor_status_observed` | `Done` on the canonical branch (commit `6058661 docs: define reviewer evidence gate for Slice D`). |
-| `readiness_evidence` | The Slice E backlog row in [`./BACKLOG.md`](./BACKLOG.md) §c.5 satisfies the Ready criteria in [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §b for shaping; the privileged-class rule in §c is satisfied by this bounded Source-ratified envelope. |
+| `readiness_evidence` | The Slice E backlog row in `./BACKLOG.md` §c.5 satisfies the Ready criteria in [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §b for shaping; the privileged-class rule in §c is satisfied by this bounded Source-ratified envelope. |
 | `external_tracker_references` | None. A fresh clone is sufficient per [`./README.md`](./README.md) §d. |
 
 ### c.8 Implementation instructions

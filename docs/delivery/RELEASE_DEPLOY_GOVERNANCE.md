@@ -49,15 +49,15 @@ duplicate their content.
 | Feature 001 FR-006 / FR-007 / FR-008 / FR-016 / FR-017 / FR-018 / FR-020a | Substrate contract on mutation classes, author / approver separation, privileged-class ratification, ratification flow, agent-text-is-not-ratification, surface-validity, and ratification record storage. |
 | Feature 002 FR-013 | Verifies-not-ratifies invariant. |
 | [`./README.md`](./README.md) | Delivery control plane purpose, source-of-truth relationship, and tracker boundary. |
-| [`./BACKLOG.md`](./BACKLOG.md) §a, §c.6 | Delivery-view status vocabulary; Slice F row. |
-| [`./KANBAN.md`](./KANBAN.md) | Current Kanban view of the Slice F row. |
-| [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §b, §d.4, §h | Sprint 0 dependency chain (A → B → C → D → E → F); Feature 006 → Slice F edge; privileged-dependency rule. |
+| `./BACKLOG.md` §a, §c.6 | Delivery-view status vocabulary; Slice F row. |
+| `./KANBAN.md` | Current Kanban view of the Slice F row. |
+| `./DEPENDENCIES.md` §b, §d.4, §h | Sprint 0 dependency chain (A → B → C → D → E → F); Feature 006 → Slice F edge; privileged-dependency rule. |
 | [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §b, §c | Readiness criteria; privileged-class rule. |
 | [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b, §c, §d, §e | Done criteria; CI verifies / does not ratify; external tracker status cannot mark `Done`; reopen rule. |
 | [`./REVIEW_GATE.md`](./REVIEW_GATE.md) §c–§m | Review-gate semantics and standing invariants. |
 | [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) §c–§l | Verifier-side scope audit. |
 | [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b, §d, §e | Ten post-merge fields; post-merge update procedure; prohibited content. |
-| [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.3, §c.7, §c.8 | Risks bearing on Slice F policy. |
+| `./RISK_REGISTER.md` §c.3, §c.7, §c.8 | Risks bearing on Slice F policy. |
 | [`../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md) | Canonical release / deployment strategy this slice's policy layers onto. |
 | [`../product/ROADMAP.md`](../product/ROADMAP.md) §f | Feature 006 scope (release / deployment governance) and deferral rationale. |
 | [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) §4 exit gate #11; §5 Slice F | Sprint 0 exit gate and Slice F acceptance criteria. |
@@ -88,7 +88,7 @@ governs. The boundary is fixed:
 
 Slice F landing does **not**, by itself, authorize any Feature
 006 work. Per
-[`./DEPENDENCIES.md`](./DEPENDENCIES.md) §h, clearing the Slice F
+`./DEPENDENCIES.md` §h, clearing the Slice F
 → Feature 006 predecessor edge is not authorization to consume
 Feature 006; a separate Source-ratified privileged envelope is
 required.
@@ -132,7 +132,7 @@ human to mutate them:**
    `BRANCH_PROTECTION_POLICY.md`) is unchanged. Any extension of
    that baseline is Feature 003 surface under a separately
    ratified privileged envelope per
-   [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.1.
+   `./DEPENDENCIES.md` §d.1.
 2. **`CODEOWNERS`** — no `CODEOWNERS` file exists in the
    repository and no `CODEOWNERS` file is authored, modified, or
    added under Slice F.
@@ -142,7 +142,7 @@ human to mutate them:**
    Slice F. Live settings remain a separate privileged future
    decision per
    [`./README.md`](./README.md) §f and
-   [`./BACKLOG.md`](./BACKLOG.md) §e.3.
+   `./BACKLOG.md` §e.3.
 4. **Branch protection (live)** — no live branch-protection
    rule on the remote repository is created, modified, or
    removed under Slice F. The landed
@@ -226,7 +226,7 @@ index-document requirements:
 - Names the **boundary** between Sprint 0 Slice F policy
   authoring and Feature 006 execution / identities (§d) per
   [`../product/ROADMAP.md`](../product/ROADMAP.md) §f and
-  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4.
+  `./DEPENDENCIES.md` §d.4.
 - Restates the **no-deployment-targets** fact (§e), aligned with
   [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md)
   §e.

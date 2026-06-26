@@ -13,7 +13,7 @@ directly, then present that work as though it came from a delegated
 architect or implementer pane. Existing policy already forbids that
 behavior in [`./CONTROLLER_BOUNDARY_POLICY.md`](./CONTROLLER_BOUNDARY_POLICY.md)
 and records the standing risk as R-011 in
-[`../delivery/RISK_REGISTER.md`](../delivery/RISK_REGISTER.md). This Stage 1
+`../delivery/RISK_REGISTER.md`. This Stage 1
 design narrows the next change:
 
 - recommend the backlog placement;

@@ -228,11 +228,11 @@ def _codex_row(repo_root: Path) -> HarnessRow:
     # the support cell until that follow-on is accepted as the support boundary.
     if _module_has("hook_pack_confirm", "confirm_codex_managed_hook_pack"):
         provenance = (
-            f"{_rel(confirm_path)}: confirm_codex_managed_hook_pack exists, but ce-ops#220 records "
-            "Codex Ring 1 support as deferred to ce-ops#219 acceptance"
+            f"{_rel(confirm_path)}: confirm_codex_managed_hook_pack exists, but the matrix records "
+            "Codex Ring 1 support as deferred pending containment acceptance"
         )
     else:
-        provenance = "no Codex per-tool-call hook confirmation predicate is importable; ce-ops#219 deferred"
+        provenance = "no Codex per-tool-call hook confirmation predicate is importable; deferred pending containment acceptance"
     ring1 = _deferred(provenance)
 
     ring2 = _none(f"{_rel(launch_path)}: no Codex-owned Stop/closeout hook surface is wired")
@@ -257,7 +257,7 @@ def _hermes_row(_repo_root: Path) -> HarnessRow:
     ring0_candidate = _module_has("hermes_launch_spec", "evaluate_hermes_launch", "build_governed_hermes_command")
     ring0 = (
         _partial(
-            f"{_rel(launch_path)}: Hermes launch evaluator/builder exists, but ce-ops#220 classifies "
+            f"{_rel(launch_path)}: Hermes launch evaluator/builder exists, but the matrix classifies "
             "Hermes governance extent as unverified until a harness audit promotes it",
             verified=False,
         )
@@ -268,7 +268,7 @@ def _hermes_row(_repo_root: Path) -> HarnessRow:
     ring2 = _deferred("Hermes Stop/final-answer hook support is unverified")
     containment = _containment_cell()
     native_fanout = _deferred("Hermes native fan-out support is unverified")
-    status = _deferred("Hermes support is explicitly unverified in ce-ops#220")
+    status = _deferred("Hermes support is explicitly unverified in this matrix")
     return HarnessRow(
         "hermes",
         {
@@ -375,7 +375,7 @@ def build_matrix(repo_root: Path | str = ".") -> HarnessMatrix:
 def render_markdown(matrix: HarnessMatrix) -> str:
     headers = ["harness", "Ring 0", "Ring 1", "Ring 2", "containment", "native fan-out", "status"]
     lines = [
-        "# CE harness-support capability matrix (ce-ops#220)",
+        "# CE harness-support capability matrix",
         "",
         "This is the authoritative CE harness-support matrix. It is rendered from "
         "`creator_engine_validator.harness_matrix`; `*` marks a cell whose support "

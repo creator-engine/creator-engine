@@ -1,6 +1,6 @@
 # Greenfield First-Project Protocol
 
-Status: canonical for ce-ops#53 E4.
+Status: canonical for E4.
 
 This protocol defines the first project path for a new CE user creating a new
 repo. It extends the existing onboard journey; it does not create a second

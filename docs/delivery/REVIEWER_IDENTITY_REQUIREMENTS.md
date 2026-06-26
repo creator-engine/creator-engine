@@ -180,7 +180,7 @@ Slice D is an `identity` (privileged) / `docs` mutation under Feature
   [`./REVIEW_EVIDENCE_TEMPLATE.md`](./REVIEW_EVIDENCE_TEMPLATE.md).
 - Review gate that consumes review evidence and reviewer identity
   records: [`./REVIEW_GATE.md`](./REVIEW_GATE.md).
-- Backlog row for Slice D: [`./BACKLOG.md`](./BACKLOG.md) §c.4.
+- Backlog row for Slice D: `./BACKLOG.md` §c.4.
 - Sprint 0 exit gates #7 (governed roles) and #10 (QA / review
   evidence format):
   [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md)

@@ -230,7 +230,7 @@ does not replace it.
 2. Source ratification of the underlying change is the only
    authorization that promotes the batch past `Verified` to
    `Ratified` per
-   [`./BACKLOG.md`](./BACKLOG.md) §a.
+   `./BACKLOG.md` §a.
 3. For non-privileged classes (`docs`, `code`, `schema`) where
    Source has ratified delegation to a `ratifier` role, the
    `ratifier` may complete ratification under the delegation. The

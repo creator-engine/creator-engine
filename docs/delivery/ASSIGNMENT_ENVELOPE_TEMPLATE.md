@@ -60,7 +60,7 @@ their condition is met.
 
 | Field | Semantics |
 |---|---|
-| `envelope_id` | Stable identifier (e.g., `sprint-0/slice-e-assignment-runtime-protocol`). Matches the backlog id under [`./BACKLOG.md`](./BACKLOG.md) where one applies. |
+| `envelope_id` | Stable identifier (e.g., `sprint-0/slice-e-assignment-runtime-protocol`). Matches the backlog id under `./BACKLOG.md` where one applies. |
 | `envelope_title` | One-line human-readable title. |
 | `envelope_date` | Calendar date the envelope is authored (UTC date, `YYYY-MM-DD`). |
 | `repo` | Repo-relative path or canonical repo name (e.g., `creator-engine`). |
@@ -187,7 +187,7 @@ silently loosen any of the items above.
 
 | Field | Semantics |
 |---|---|
-| `predecessor_items` | Backlog ids whose status is required to be `Ratified` or `Done` before this envelope is consumed, per [`./DEPENDENCIES.md`](./DEPENDENCIES.md). |
+| `predecessor_items` | Backlog ids whose status is required to be `Ratified` or `Done` before this envelope is consumed, per `./DEPENDENCIES.md`. |
 | `predecessor_status_observed` | Observed delivery-view status of each predecessor at envelope-author time. |
 | `readiness_evidence` | Citation to the [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §b criteria the backlog row satisfied at promotion. |
 | `external_tracker_references` | Optional, **non-canonical** pointers (e.g., `ENG-1234`). MUST NOT substitute for any repo-visible field per [`./README.md`](./README.md) §d. |

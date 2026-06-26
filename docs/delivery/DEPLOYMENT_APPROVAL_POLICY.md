@@ -40,7 +40,7 @@ merge, or ratify any mutation. Deploy execution mechanics (release
 records, deploy attestations, rollback evidence, GitHub
 environments, dispatcher behaviour) are Feature 006 surface and
 remain deferred until Feature 006 is itself Source-ratified per
-[`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4.
+`./DEPENDENCIES.md` §d.4.
 
 ## b. Source-of-truth relationship
 
@@ -54,8 +54,8 @@ remain deferred until Feature 006 is itself Source-ratified per
 | [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §c | Privileged-class rule: Source ratification before implementation; no shortcuts. |
 | [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.5, §c | Source ratification record for privileged classes; CI verifies but does not ratify. |
 | [`./REVIEW_GATE.md`](./REVIEW_GATE.md) §f, §m.1, §m.2 | Privileged classes remain Source-ratified regardless of reviewer verdict; review evidence is not Source ratification. |
-| [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4, §h | Feature 006 depends on Slice F; privileged dependencies require ratification requests, not implementation shortcuts. |
-| [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.3, §c.7 | Risks R-003 (skipping Source ratification because CI / review passed) and R-007 (privileged classes implemented without ratification). |
+| `./DEPENDENCIES.md` §d.4, §h | Feature 006 depends on Slice F; privileged dependencies require ratification requests, not implementation shortcuts. |
+| `./RISK_REGISTER.md` §c.3, §c.7 | Risks R-003 (skipping Source ratification because CI / review passed) and R-007 (privileged classes implemented without ratification). |
 | Sibling Slice F docs ([`./RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md), [`./MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md), [`./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md`](./ROLLBACK_AND_POST_RELEASE_EVIDENCE.md), [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md)) | Slice F policy envelope; this document is one of four content docs bound by the index. |
 | [`../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md) | Canonical release / deployment strategy this policy layers onto. |
 | [`../governance/MUTATION_CLASS_MODEL.md`](../governance/MUTATION_CLASS_MODEL.md) | Authoritative `deploy` mutation-class definition; canonical surfaces that count as `deploy` even when the diff looks docs-only. |
@@ -179,7 +179,7 @@ authored, mutated, or implemented under Slice F:
    automated mechanism, etc.).
 
 The Feature 006 → Slice F dependency in
-[`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4 names this
+`./DEPENDENCIES.md` §d.4 names this
 boundary: Slice F authors the policy outline; Feature 006
 instantiates the execution surface under its own Source-ratified
 privileged envelope.
@@ -253,7 +253,7 @@ deployment-approval-policy requirements:
   attestations, rollback automation, GitHub environments, deploy
   gates) to Feature 006 (§f) per
   [`../product/ROADMAP.md`](../product/ROADMAP.md) §f and
-  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4.
+  `./DEPENDENCIES.md` §d.4.
 - Carries an explicit non-ratification statement for any CI /
   review / scope-audit / external-tracker verdict touching deploy
   (§g, §h.4–§h.5).

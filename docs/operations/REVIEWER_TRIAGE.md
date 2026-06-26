@@ -1,7 +1,7 @@
 # Reviewer Triage
 
 Reviewer triage is the plan-only assignment step for the `reviewer` role
-introduced in ce-ops#118. It computes who should review a PR from ownership,
+introduced as part of the reviewer-triage work. It computes who should review a PR from ownership,
 mutation class, risk tier, author identity, forge-enforcement facts, reviewer
 eligibility, and declared durable availability. The output is a
 `reviewer-triage-decision` record.
@@ -59,7 +59,7 @@ still has to prove that the source-host actor observed by `gh api user --jq
 .login` equals the expected reviewer actor before any reviewer-side source-host
 act is eligible.
 
-ce-ops#34 ticket triage is a separate tracker-ticket/advisory queue. This
+Ticket triage is a separate tracker-ticket/advisory queue. This
 document and the `reviewer-triage-decision` schema cover PR review triage only:
 PR-triggered, head-pinned, `type:review`, and non-authoritative until a distinct
 reviewer venue produces evidence through the reviewer authority path.

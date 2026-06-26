@@ -12,9 +12,9 @@ gates the report fields are evaluated against
 ([`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) and
 [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md)), the dependency
 map the next-task selection rules walk
-([`./DEPENDENCIES.md`](./DEPENDENCIES.md)), and the standing risks
+(`./DEPENDENCIES.md`), and the standing risks
 that bear on report authoring
-([`./RISK_REGISTER.md`](./RISK_REGISTER.md)). Where this protocol and
+(`./RISK_REGISTER.md`). Where this protocol and
 the Slice B2 documents reference the same field, the protocol
 controls for procedure; the Slice B2 documents control for the gate
 the procedure evaluates against.
@@ -29,8 +29,8 @@ state.
 
 This document specifies (i) the ten required completion-report fields,
 (ii) the procedure for refreshing
-[`./BACKLOG.md`](./BACKLOG.md) and
-[`./KANBAN.md`](./KANBAN.md), and (iii) the rules by which the next
+`./BACKLOG.md` and
+`./KANBAN.md`, and (iii) the rules by which the next
 task is selected.
 
 The ten fields below are the same ten fields named in
@@ -94,7 +94,7 @@ them; if none changed, state "none."
 
 Enumerate work explicitly deferred by this merge, with the owning
 future slice or feature. Deferred items MUST appear in
-[`./BACKLOG.md`](./BACKLOG.md) with status `Deferred` or `Blocked`
+`./BACKLOG.md` with status `Deferred` or `Blocked`
 and a named dependency / blocker.
 
 ### b.8 Readiness impact
@@ -133,7 +133,7 @@ rules in order. Stop at the first rule that yields a recommendation.
 Select the highest-priority backlog item whose status is `Ready` and
 whose dependencies are satisfied (every named dependency is at
 `Ratified` or `Done`). Priority is given by parent-slice ordering in
-[`./BACKLOG.md`](./BACKLOG.md): Sprint 0 slices precede post-Sprint-0
+`./BACKLOG.md`: Sprint 0 slices precede post-Sprint-0
 features; within Sprint 0, slices are sequenced A → B → C → D → E →
 F; sub-batches are sequenced numerically (e.g., B1 → B2 → B3 → B4).
 
@@ -187,9 +187,9 @@ repo-visible backlog.
 After applying §b and §c, perform the following before closing the
 report:
 
-1. Update [`./BACKLOG.md`](./BACKLOG.md) so that every item's status,
+1. Update `./BACKLOG.md` so that every item's status,
    dependencies, and evidence reference reflect the merged state.
-2. Update [`./KANBAN.md`](./KANBAN.md) so that every column reflects
+2. Update `./KANBAN.md` so that every column reflects
    the new backlog state. The Kanban view is a derivative; it does
    not introduce new ids.
 3. Confirm that the canonical documents in `docs/product/`,
@@ -272,8 +272,8 @@ This document satisfies the B1 envelope's protocol requirements and
 is cross-referenced from the Slice B2 documents
 ([`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md),
 [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md),
-[`./DEPENDENCIES.md`](./DEPENDENCIES.md),
-[`./RISK_REGISTER.md`](./RISK_REGISTER.md)) without altering the ten
+`./DEPENDENCIES.md`,
+`./RISK_REGISTER.md`) without altering the ten
 report fields:
 
 - All ten post-merge fields from
@@ -292,8 +292,8 @@ report fields:
 - The delivery-view status vocabulary (`Backlog`, `Ready`,
   `In Progress`, `Verified`, `Ratified`, `Done`, `Deferred`,
   `Blocked`) is consistent with
-  [`./BACKLOG.md`](./BACKLOG.md) §a and
-  [`./KANBAN.md`](./KANBAN.md) §a, and is explicitly delivery-view
+  `./BACKLOG.md` §a and
+  `./KANBAN.md` §a, and is explicitly delivery-view
   only — it does not amend the Feature 001 spec-status lifecycle.
 - Instance-local facts are explicitly prohibited from upstream
   delivery artifacts.

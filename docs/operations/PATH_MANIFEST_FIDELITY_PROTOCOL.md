@@ -191,7 +191,7 @@ changed between `<base>..HEAD` (`git diff --name-only`) to the ratified
 manifest path-set loaded from a **PR-carried manifest document**:
 
 ```bash
-# Per-PR carrier mode (the standard for gate PRs, ce-ops#21):
+# Per-PR carrier mode (the standard for gate PRs):
 PYTHONPATH=validators python -m creator_engine_validator \
   verify-path-manifest --base <PR base sha> \
   --manifest-dir .ce/pr-manifests --head-ref <PR head branch>

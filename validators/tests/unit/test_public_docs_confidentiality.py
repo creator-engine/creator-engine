@@ -98,16 +98,6 @@ _KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/downloads/0.2.0/scanners/scanner-mirror.fragment.yaml",
         "docs/guide/contributing-to-ce.md",
         "docs/keys/ce-root-v1",
-        "docs/operations/CONTAINED_LAUNCH_PROOF.md",
-        "docs/operations/GITHUB_NATIVE_COORDINATION_PROTOCOL.md",
-        "docs/operations/GREENFIELD_FIRST_PROJECT_PROTOCOL.md",
-        "docs/operations/HARNESS_SUPPORT_CAPABILITY_MATRIX.md",
-        "docs/operations/MERGE_QUEUE_ENABLEMENT_RUNBOOK.md",
-        "docs/operations/ONBOARD_APPLY_PROTOCOL.md",
-        "docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md",
-        "docs/operations/REVIEWER_TRIAGE.md",
-        "docs/operations/SEAT_REAPER_PROTOCOL.md",
-        "docs/operations/SWITCH_OPENAI_ACCOUNT.md",
         "docs/security/ce234-approval-capability-wall.md",
     }
 )

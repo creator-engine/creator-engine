@@ -32,7 +32,7 @@ concern. The Creator Engine v0.1 substrate names `deploy` as a
 privileged mutation class per Feature 001 FR-008 but does not
 implement deploy or rollback automation; both are Feature 006
 surface per
-[`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4. This document
+`./DEPENDENCIES.md` §d.4. This document
 authors the policy that any future automation will obey; it does
 not, and never becomes, a rollback mechanic.
 
@@ -49,7 +49,7 @@ not, and never becomes, a rollback mechanic.
 | [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b, §d, §e | Ten post-merge completion-report fields; post-merge update procedure; prohibited content. |
 | [`./REVIEW_GATE.md`](./REVIEW_GATE.md) §i, §m | What happens on blocking findings; standing invariants. |
 | [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md) §c–§l | Verifier-side scope audit; verification evidence. |
-| [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.3, §c.8 | R-003 (skipping Source ratification because CI / review passed); R-008 (cleanup deleting branches without approval). |
+| `./RISK_REGISTER.md` §c.3, §c.8 | R-003 (skipping Source ratification because CI / review passed); R-008 (cleanup deleting branches without approval). |
 | Sibling Slice F docs ([`./RELEASE_CANDIDATE_CHECKLIST.md`](./RELEASE_CANDIDATE_CHECKLIST.md), [`./MERGE_APPROVAL_CHECKLIST.md`](./MERGE_APPROVAL_CHECKLIST.md), [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md), [`./RELEASE_DEPLOY_GOVERNANCE.md`](./RELEASE_DEPLOY_GOVERNANCE.md)) | Slice F policy authoring envelope; this document is one of four content docs bound by the index. |
 | [`../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`](../devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md) | Canonical release / deployment strategy this policy layers onto. |
 | [`../product/ROADMAP.md`](../product/ROADMAP.md) §f | Feature 006 scope; release / deployment governance and rollback automation deferral. |
@@ -176,10 +176,10 @@ them. The mapping is:
 | §b.4 Governance evidence | Mutation classes touched and the Source ratification record per Feature 001 FR-016. For release-track merges: the merge-approval ratification. For a (future) deploy: the deploy ratification per [`./DEPLOYMENT_APPROVAL_POLICY.md`](./DEPLOYMENT_APPROVAL_POLICY.md) §c.3, distinct from any antecedent merge ratification. |
 | §b.5 Scope audit | The verifier scope audit per [`./SCOPE_AUDIT_CHECKLIST.md`](./SCOPE_AUDIT_CHECKLIST.md), confirming no prohibited surface was mutated. For a (future) deploy this expands to: no environment outside the ratified target was touched; no live repository setting or branch protection was mutated. |
 | §b.6 Documentation impact | Any canonical document, source-of-truth artifact, or contract changed or requiring follow-up. For release-track merges this includes Slice F documents themselves if they evolve (which is itself a privileged `governance` envelope per Feature 001 FR-008). |
-| §b.7 Deferred work | Items explicitly deferred by this release / deploy. For Slice F-adjacent merges this typically includes Feature 006 execution-side work that remains `Deferred` per [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4. |
+| §b.7 Deferred work | Items explicitly deferred by this release / deploy. For Slice F-adjacent merges this typically includes Feature 006 execution-side work that remains `Deferred` per `./DEPENDENCIES.md` §d.4. |
 | §b.8 Readiness impact | Sprint 0 exit gates advanced or still blocked. For a release-track merge under Slice F: gate #11 (release / merge / deploy governance documented) advances. |
 | §b.9 Immediate next-task recommendation | One next governed task with rationale. After a release-track merge under Slice F, the typical next recommendation is post-merge reconciliation of delivery-view artifacts, then a Source-directed decision on the next batch — not a deploy (because no deployment targets exist). |
-| §b.10 Cleanup state | Branch / worktree state; whether the feature branch is to be deleted, retained, or requires Source approval before deletion. Default posture is retention pending explicit approval per [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.9 and [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.8. |
+| §b.10 Cleanup state | Branch / worktree state; whether the feature branch is to be deleted, retained, or requires Source approval before deletion. Default posture is retention pending explicit approval per [`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.9 and `./RISK_REGISTER.md` §c.8. |
 
 The mapping above is **descriptive guidance**, not a schema
 amendment. The binding requirement remains that every post-merge
@@ -214,15 +214,15 @@ follows:
    plan. The envelope is Source-ratified per Feature 001 FR-016.
 3. The delivery-view status of the item moves from `Done` back to
    `In Progress` or `Blocked` per
-   [`./BACKLOG.md`](./BACKLOG.md) §a and is reflected on the
+   `./BACKLOG.md` §a and is reflected on the
    Kanban per
    [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §d.2.
 4. The Feature 001 spec-status lifecycle is updated under its own
    governed process (FR-013a). The delivery view does not skip,
    backfill, or amend the canonical lifecycle per
-   [`./BACKLOG.md`](./BACKLOG.md) §a and the lifecycle-confusion
+   `./BACKLOG.md` §a and the lifecycle-confusion
    risk R-005 in
-   [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §c.5.
+   `./RISK_REGISTER.md` §c.5.
 5. The remediation batch carries its own ratification record per
    Feature 001 FR-016 / FR-020a; it is not authorized by the
    original batch's ratification record.
@@ -302,7 +302,7 @@ rollback-and-post-release-evidence requirements:
 - States that automated rollback is deferred to Feature 006
   (§f) per
   [`../product/ROADMAP.md`](../product/ROADMAP.md) §f and
-  [`./DEPENDENCIES.md`](./DEPENDENCIES.md) §d.4.
+  `./DEPENDENCIES.md` §d.4.
 - Carries an explicit non-ratification statement throughout (§a,
   §c.1.5, §c.4.3, §g.1, §g.4, §g.5, §g.7) so reviewers cannot
   reasonably mistake any rollback policy artifact, CI verdict,

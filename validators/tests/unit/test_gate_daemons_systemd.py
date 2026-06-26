@@ -65,17 +65,15 @@ def test_gate_daemon_installer_is_valid_bash(repo_root: Path):
 
 
 def test_integrator_authorized_reviewer_config_is_documented(repo_root: Path):
+    # The detailed integrator operations runbook is maintained in the internal
+    # tracker (relocated from the public surface), so the public documentation of
+    # the authorized-reviewer config lives in the systemd README and installer.
     systemd_readme = (repo_root / "deploy" / "systemd" / "README.md").read_text(encoding="utf-8")
     installer = (
         repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
     ).read_text(encoding="utf-8")
-    operations_doc = (
-        repo_root / "docs" / "operations" / "INTEGRATOR_BELT_DAEMON.md"
-    ).read_text(encoding="utf-8")
 
-    for text in (systemd_readme, installer, operations_doc):
+    for text in (systemd_readme, installer):
         assert "CE_GATE_AUTHORIZED_REVIEWERS" in text
 
-    assert "--authorized-reviewer REVIEWER_LOGIN" in operations_doc
-    assert ' --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" ' in operations_doc
     assert "CE_GATE_AUTHORIZED_REVIEWERS=reviewer-login[,reviewer-login...]" in installer
