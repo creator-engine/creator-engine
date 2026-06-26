@@ -42,15 +42,13 @@ Per-file purpose:
   absent or malformed.
 - **`validators/tests/**`** *(M)* - covers schema, check, launch, and worker
   spawn enforcement.
-- **`tmp/UNIT_BRIEF.md`** *(A)* - unit continuation brief committed in the WIP
-  checkpoint and included in the closed path set.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=37
+AUTHORIZED_PATHS_COUNT=36
 
-AUTHORIZED_PATHS_SHA256=e522d8bb72ff4292857e175cd5a6d343de91d49941ff0bd93039fadd5f6b81ee
+AUTHORIZED_PATHS_SHA256=30beec5e639571083e9825df6c5ad60afe905b45e1e749ba3928201fabeb8ee2
 
 ```text
 .ce/changelog/ce163-foreman-canon-enforced.md
@@ -73,7 +71,6 @@ examples/well-formed/seat-class-policy/minimal.yaml
 examples/well-formed/seat-class-policy/worker.yaml
 schemas/harness-seat-contract.schema.yaml
 schemas/seat-class-policy.schema.yaml
-tmp/UNIT_BRIEF.md
 validators/creator_engine_validator/brain_bootstrap.py
 validators/creator_engine_validator/checks/harness_seat_contract.py
 validators/creator_engine_validator/checks/seat_class_policy.py
