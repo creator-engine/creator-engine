@@ -45,6 +45,10 @@ Environment:
   CE_VPS_EGRESS_BROKER_SOCKET  Host self-push broker Unix socket to bind-mount (default: unset)
   CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path
                                 (default: /run/ce-egress-broker.sock)
+  CE_VPS_EGRESS_SELF_REVIEW_SOCKET Host self-review broker Unix socket to bind-mount (default: unset)
+                                Requires CE_VPS_SEAT_ID to be set explicitly (same rule as self-push).
+  CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET Container self-review socket path
+                                (default: /run/ce-egress-review.sock)
   CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
                                 (default: ~/.ce/logs/seats/<seat-id>)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
@@ -159,6 +163,8 @@ fi
 CE_VPS_SEAT_ID="${CE_VPS_SEAT_ID:-${CE_VPS_CONTAINER_NAME}}"
 CE_VPS_EGRESS_BROKER_SOCKET="${CE_VPS_EGRESS_BROKER_SOCKET:-}"
 CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET:-/run/ce-egress-broker.sock}"
+CE_VPS_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_EGRESS_SELF_REVIEW_SOCKET:-}"
+CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET:-/run/ce-egress-review.sock}"
 CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
@@ -232,6 +238,32 @@ if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
       ;;
     *)
       printf 'CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET must be an absolute path, got %s\n' "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
+fi
+if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
+  if [ "${CE_VPS_SEAT_ID_EXPLICIT}" != "1" ]; then
+    printf 'CE_VPS_SEAT_ID must be set explicitly when CE_VPS_EGRESS_SELF_REVIEW_SOCKET is set\n' >&2
+    exit 2
+  fi
+  if [[ ! "${CE_VPS_SEAT_ID}" =~ ^dev-[0-9]+$ ]]; then
+    printf 'CE_VPS_SEAT_ID must be a broker seat id like dev-3 when CE_VPS_EGRESS_SELF_REVIEW_SOCKET is set, got %s\n' "${CE_VPS_SEAT_ID}" >&2
+    exit 2
+  fi
+  case "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_VPS_EGRESS_SELF_REVIEW_SOCKET must be an absolute path, got %s\n' "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" >&2
+      exit 2
+      ;;
+  esac
+  case "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}" in
+    /*)
+      ;;
+    *)
+      printf 'CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET must be an absolute path, got %s\n' "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}" >&2
       exit 2
       ;;
   esac
@@ -393,6 +425,12 @@ if [ "${dry_run}" != "1" ]; then
       exit 66
     }
   fi
+  if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
+    [ -S "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ] || {
+      printf 'egress self-review socket not found: %s\n' "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" >&2
+      exit 66
+    }
+  fi
   backup_stale_herdr_session "${CE_VPS_SEAT_LOG_DIR}"
 fi
 
@@ -437,6 +475,10 @@ fi
 egress_broker_mount=""
 if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
   egress_broker_mount="type=bind,source=${CE_VPS_EGRESS_BROKER_SOCKET},target=${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"
+fi
+egress_self_review_mount=""
+if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
+  egress_self_review_mount="type=bind,source=${CE_VPS_EGRESS_SELF_REVIEW_SOCKET},target=${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}"
 fi
 
 # Foreground = ephemeral (--rm). Detached = named-persistent (no --rm, add -d
@@ -495,6 +537,14 @@ if [ -n "${egress_broker_mount}" ]; then
     --env "CE_EGRESS_BROKER_SOCKET=${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"
     --env "CE_SEAT_ID=${CE_VPS_SEAT_ID}"
     --mount "${egress_broker_mount}"
+  )
+fi
+
+if [ -n "${egress_self_review_mount}" ]; then
+  docker_cmd+=(
+    --env "CE_EGRESS_SELF_REVIEW_SOCKET=${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}"
+    --env "CE_SEAT_ID=${CE_VPS_SEAT_ID}"
+    --mount "${egress_self_review_mount}"
   )
 fi
 

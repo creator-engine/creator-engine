@@ -11,12 +11,19 @@ Type=simple
 # carry BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
 # BROKER_APPROLE_SECRET_ID — the broker fails closed (no fallback to disk) if any
 # required vault var is missing for a secret_ref seat.
+# CE_EGRESS_SEAT_GID must match the container seat's gid (e.g. 1003 for cedev2/ce-dev-3).
+# Setting the group to the seat's gid (mode 0660) lets the contained seat uid connect
+# to the broker socket without requiring privileged capabilities or the docker group.
+# Default is left unset here; provide CE_EGRESS_SEAT_GID in the EnvironmentFile.
 EnvironmentFile=%h/.config/creator-engine/ce-egress-self-review.env
 WorkingDirectory=/workspace/creator-engine
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_review_broker.py \
   --serve \
   --socket "$CE_EGRESS_SELF_REVIEW_SOCKET" \
   --config "$CE_EGRESS_SELF_REVIEW_CONFIG"
+# Fix socket permissions so the contained seat uid (running as gid CE_EGRESS_SEAT_GID)
+# can connect. chown to the seat gid, mode 0660.
+ExecStartPost=/bin/sh -c 'chown :${CE_EGRESS_SEAT_GID} "$CE_EGRESS_SELF_REVIEW_SOCKET" && chmod 0660 "$CE_EGRESS_SELF_REVIEW_SOCKET"'
 Restart=on-failure
 RestartSec=30s
 
