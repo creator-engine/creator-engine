@@ -23,7 +23,7 @@ TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
 WORK_CLASSES = ("tiny", "story", "feature", "epic")
 DEFAULT_TEST_COMMAND = (
     f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider "
-    "validators/tests/unit -q"
+    'validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup'
 )
 DECLARED_WORK_CLASS_PATTERN = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?Declared work class(?:\*\*)?\s*:\s*(?:\*\*)?\s*"
