@@ -24,6 +24,7 @@ CLAUSE_PODMAN = "RED-G-3"
 CLAUSE_STATE_PATH = "RED-G-4"
 CLAUSE_HIDDEN_CONTINUATION = "RED-G-5"
 CLAUSE_PACKAGING = "RED-G-6"
+CLAUSE_INSTALLED_CE = "CE-DOGFOOD-1"
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,9 @@ class EnvironmentFacts:
     packaging: PackagingContractResult | None = None
     hidden_continuation: bool = False
     active_work_ledger_present: bool = True
+    ce_invocation: str = "unknown"
+    ce_package_origin: str = "unknown"
+    ce_dogfood_installed: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,7 @@ def evaluate(
     require_visible_launch: bool = False,
     require_worker: bool = False,
     check_packaging: bool = True,
+    require_installed_ce: bool = False,
 ) -> GuardResult:
     """Evaluate the six ungoverned-host clauses against ``facts``.
 
@@ -192,6 +197,24 @@ def evaluate(
             applicable=check_packaging,
             ok=packaging_ok,
             detail=packaging_detail,
+        )
+    )
+
+    dogfood_detail = (
+        "running through installed CE console script"
+        if facts.ce_dogfood_installed
+        else (
+            "not running through installed CE console script "
+            f"(invocation={facts.ce_invocation}, package_origin={facts.ce_package_origin})"
+        )
+    )
+    checks.append(
+        GuardCheck(
+            clause=CLAUSE_INSTALLED_CE,
+            name="installed-ce-dogfood-posture",
+            applicable=require_installed_ce,
+            ok=facts.ce_dogfood_installed,
+            detail=dogfood_detail,
         )
     )
 

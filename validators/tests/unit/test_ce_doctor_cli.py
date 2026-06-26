@@ -63,6 +63,8 @@ def test_doctor_json_passes_on_governed_host(inject_facts, capsys):
     assert payload["prerequisites"]["dependency_wheelhouse_offline"] is True
     assert payload["prerequisites"]["dependency_wheelhouse_violations"] == []
     assert payload["prerequisites"]["first_party_app_wheel_committed"] is False
+    assert payload["prerequisites"]["ce_dogfood_installed"] is False
+    assert payload["requested"]["require_installed_ce"] is False
 
 
 def test_doctor_refuses_out_of_contract_interpreter(inject_facts, capsys):
@@ -95,6 +97,77 @@ def test_doctor_refuses_rootful_podman_with_require_worker(inject_facts, capsys)
     assert ret != 0
     payload = json.loads(capsys.readouterr().out)
     assert guard.CLAUSE_PODMAN in payload["refused_clauses"]
+
+
+def test_doctor_refuses_source_checkout_when_installed_ce_required(inject_facts, capsys):
+    inject_facts(
+        ce_invocation="python_module",
+        ce_package_origin="source_checkout",
+        ce_dogfood_installed=False,
+    )
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", ".", "--require-installed-ce"])
+    assert ret != 0
+    payload = json.loads(capsys.readouterr().out)
+    assert guard.CLAUSE_INSTALLED_CE in payload["refused_clauses"]
+    assert payload["prerequisites"]["ce_dogfood_invocation"] == "python_module"
+    assert payload["prerequisites"]["ce_package_origin"] == "source_checkout"
+
+
+def test_doctor_accepts_installed_console_when_required(inject_facts, capsys):
+    inject_facts(
+        ce_invocation="console_script",
+        ce_package_origin="installed",
+        ce_dogfood_installed=True,
+    )
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", ".", "--require-installed-ce"])
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert guard.CLAUSE_INSTALLED_CE not in payload["refused_clauses"]
+    check = next(c for c in payload["checks"] if c["clause"] == guard.CLAUSE_INSTALLED_CE)
+    assert check["applicable"] is True
+    assert check["ok"] is True
+
+
+def test_doctor_detects_source_checkout_python_module(tmp_path):
+    repo_root = tmp_path / "repo"
+    module_file = repo_root / "validators" / "creator_engine_validator" / "doctor_runtime.py"
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("# test module\n", encoding="utf-8")
+
+    posture = doctor_runtime.detect_ce_dogfood_posture(
+        repo_root,
+        argv0="creator_engine_validator.ce_cli",
+        module_file=module_file,
+    )
+
+    assert posture["invocation"] == "python_module"
+    assert posture["package_origin"] == "source_checkout"
+    assert posture["installed_ce"] is False
+
+
+def test_doctor_detects_installed_console_script(tmp_path):
+    repo_root = tmp_path / "repo"
+    module_file = (
+        tmp_path
+        / "venv"
+        / "lib"
+        / "python3.14"
+        / "site-packages"
+        / "creator_engine_validator"
+        / "doctor_runtime.py"
+    )
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("# test module\n", encoding="utf-8")
+
+    posture = doctor_runtime.detect_ce_dogfood_posture(
+        repo_root,
+        argv0="/home/operator/.local/bin/cev3",
+        module_file=module_file,
+    )
+
+    assert posture["invocation"] == "console_script"
+    assert posture["package_origin"] == "installed"
+    assert posture["installed_ce"] is True
 
 
 def test_doctor_human_output_is_nonempty(inject_facts, capsys):

@@ -17,7 +17,7 @@ The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 * ``uv.lock`` is primary; ``requirements.txt`` is a lockstep export.
 * the first-party app wheel is not committed in ``validators/wheelhouse``.
 * build backend ``setuptools.build_meta``; distribution stays
-  ``creator-engine-validator`` (DP-1 = A); both console scripts retained.
+  ``creator-engine-validator`` (DP-1 = A); console scripts retained.
 
 It uses only stdlib (``tomllib`` is read-only TOML; no TOML *writer* dependency
 is introduced, per the format split B6/B7).
@@ -45,6 +45,7 @@ BUILD_BACKEND = "setuptools.build_meta"
 CONSOLE_SCRIPTS = {
     "creator-engine-validator": "creator_engine_validator.cli:main",
     "ce": "creator_engine_validator.ce_cli:main",
+    "cev3": "creator_engine_validator.v3_cli:main",
 }
 # Normalized (PEP 503) name -> exact pinned version.
 RUNTIME_PINS = {"pyyaml": "6.0.3", "jsonschema": "4.26.0"}

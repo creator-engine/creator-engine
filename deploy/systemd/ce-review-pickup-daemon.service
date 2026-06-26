@@ -8,8 +8,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
-Environment=PYTHONPATH=validators
-ExecStart=.venv/bin/python -m creator_engine_validator.v3_cli review-pickup --identity ce-dev-2 --repo "$CE_GATE_REPO" --seat ce-dev-1,ce-dev-3,ce-dev-4 --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
+ExecStart=/usr/bin/env cev3 review-pickup --identity ce-dev-2 --repo "$CE_GATE_REPO" --seat ce-dev-1,ce-dev-3,ce-dev-4 --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
 Restart=on-failure
 RestartSec=30s
 

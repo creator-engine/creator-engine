@@ -12,7 +12,7 @@ Locked contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
 * cp314-only dual-arch Linux offline wheelhouse — **no** cp311/cp312/cp313 artifacts.
 * ``uv.lock`` is the primary lock; ``requirements.txt`` is a lockstep export.
 * build backend ``setuptools.build_meta``; both ``creator-engine-validator`` and
-  ``ce`` console scripts retained; distribution **not** renamed (DP-1 = A).
+  ``ce``/``cev3`` console scripts retained; distribution **not** renamed (DP-1 = A).
 """
 from __future__ import annotations
 
@@ -77,6 +77,7 @@ def test_pyproject_retains_both_console_scripts(validators_dir: Path):
     scripts = data["project"]["scripts"]
     assert scripts["creator-engine-validator"] == "creator_engine_validator.cli:main"
     assert scripts["ce"] == "creator_engine_validator.ce_cli:main"
+    assert scripts["cev3"] == "creator_engine_validator.v3_cli:main"
 
 
 def test_pyproject_keeps_setuptools_build_meta(validators_dir: Path):

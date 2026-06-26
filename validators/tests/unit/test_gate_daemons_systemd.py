@@ -28,10 +28,12 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         assert unit.has_section("Install")
         assert unit["Service"]["EnvironmentFile"]
         assert unit["Service"]["WorkingDirectory"] == "/workspace/creator-engine"
-        assert unit["Service"]["Environment"] == "PYTHONPATH=validators"
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
-        assert unit["Service"]["ExecStart"].startswith(".venv/bin/python -m creator_engine_validator.v3_cli ")
+        assert "Environment" not in unit["Service"]
+        assert unit["Service"]["ExecStart"].startswith("/usr/bin/env cev3 ")
+        assert "PYTHONPATH=validators" not in unit["Service"]["ExecStart"]
+        assert "creator_engine_validator.v3_cli" not in unit["Service"]["ExecStart"]
 
 
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
