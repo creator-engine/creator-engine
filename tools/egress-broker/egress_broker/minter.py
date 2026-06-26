@@ -146,7 +146,6 @@ def _default_vault_http_fetch(
         with urllib.request.urlopen(request, timeout=10.0, context=ssl_context) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as exc:
-        raw_body = exc.read()
         raise EgressSignerError(
             f"OpenBao KV read for {ref.mount}/{ref.path} failed with HTTP {exc.code}; "
             "refusing to mint"
@@ -252,7 +251,7 @@ def vault_signer(
         try:
             # Write PEM bytes to the write end; openssl reads from /dev/fd/<read_fd>.
             try:
-                os.write(write_fd, bytes(pem_bytes))
+                os.write(write_fd, pem_bytes)
             finally:
                 os.close(write_fd)
                 write_fd = -1  # mark closed

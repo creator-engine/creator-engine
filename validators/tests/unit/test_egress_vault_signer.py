@@ -213,18 +213,24 @@ def test_vault_signer_fail_closed_on_empty_openssl_signature():
 
 
 def test_vault_signer_key_not_in_signer_error_message():
-    """EgressSignerError raised on failure must not expose key material."""
+    """The wrapping EgressSignerError raised by vault_signer must not expose key material.
+
+    If a fetcher raises a NON-EgressSignerError carrying key bytes in its message, vault_signer
+    must wrap it in a generic EgressSignerError that does NOT echo the key — never propagate the
+    raw, key-bearing message.
+    """
 
     def leaking_fetcher(ref: VaultSecretRef) -> str:
-        raise EgressSignerError(f"error fetching key; pem={_FAKE_PEM!r}")
+        # A buggy/3rd-party fetcher that wrongly puts the PEM in a plain exception message.
+        raise RuntimeError(f"error fetching key; pem={_FAKE_PEM!r}")
 
     signer = vault_signer(_VAULT_REF, _VAULT_CONFIG, fetcher=leaking_fetcher, runner=_ok_runner)
     with pytest.raises(EgressSignerError) as exc_info:
         signer(b"payload")
-    # The EgressSignerError from leaking_fetcher propagates as-is — its message is the
-    # responsibility of the fetcher, not vault_signer. We verify vault_signer itself does not
-    # add key material to any *wrapping* error it raises.
-    # (leaking_fetcher is a test anti-pattern; production fetchers never include key values)
+    msg = str(exc_info.value)
+    assert "BEGIN RSA PRIVATE KEY" not in msg
+    assert "BEGIN PRIVATE KEY" not in msg
+    assert "FAKEKEYDATA" not in msg  # the sentinel body in _FAKE_PEM
 
 
 # ---------------------------------------------------------------------------
