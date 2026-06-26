@@ -149,6 +149,53 @@ def _default_podman_runner(argv: Sequence[str]):
     return subprocess.run(list(argv), check=False, capture_output=True, text=True)
 
 
+def detect_ce_dogfood_posture(
+    repo_root: Path | str,
+    *,
+    argv0: str | None = None,
+    module_file: Path | str | None = None,
+) -> dict[str, Any]:
+    """Classify whether this process is dogfooding installed CE.
+
+    ``source_checkout`` means the imported package bytes resolve under this
+    checkout's ``validators/`` tree. ``installed`` means they do not. A true
+    dogfood posture requires both installed package bytes and a console-script
+    invocation (``ce``/``cev3``), not ``python -m`` from a checkout.
+    """
+    root = Path(repo_root).resolve()
+    module_path = Path(module_file) if module_file is not None else Path(__file__)
+    try:
+        resolved_module = module_path.resolve()
+    except OSError:
+        resolved_module = module_path.absolute()
+    source_pkg = root / "validators" / "creator_engine_validator"
+    try:
+        resolved_module.relative_to(source_pkg.resolve())
+        package_origin = "source_checkout"
+    except ValueError:
+        package_origin = "installed"
+
+    raw_argv0 = argv0 if argv0 is not None else sys.argv[0]
+    argv_name = Path(raw_argv0).name
+    if argv_name in {"ce", "cev3", "creator-engine-validator"}:
+        invocation = "console_script"
+    elif argv_name in {"ce_cli.py", "v3_cli.py", "__main__.py"}:
+        invocation = "python_module"
+    elif raw_argv0.endswith("creator_engine_validator.ce_cli") or raw_argv0.endswith(
+        "creator_engine_validator.v3_cli"
+    ):
+        invocation = "python_module"
+    else:
+        invocation = "unknown"
+
+    return {
+        "invocation": invocation,
+        "argv0": raw_argv0,
+        "package_origin": package_origin,
+        "installed_ce": invocation == "console_script" and package_origin == "installed",
+    }
+
+
 def detect_environment(
     repo_root: Path | str,
     *,
@@ -156,6 +203,7 @@ def detect_environment(
     tmux_adapter: Any | None = None,
     podman_runner: Any | None = None,
     hidden_continuation: bool = False,
+    argv0: str | None = None,
 ) -> guard.EnvironmentFacts:
     """Resolve the host-posture snapshot the guard reasons over (offline)."""
     root = Path(repo_root)
@@ -166,6 +214,7 @@ def detect_environment(
     is_git = _git_tracks_repo(root)
     packaging = verify_packaging_contract(root)
     awl_root = root / ".hermes" / "active-work-ledger"
+    dogfood = detect_ce_dogfood_posture(root, argv0=argv0)
     return guard.EnvironmentFacts(
         version_info=vi,
         repo_root_is_git=is_git,
@@ -177,6 +226,9 @@ def detect_environment(
         packaging=packaging,
         hidden_continuation=hidden_continuation,
         active_work_ledger_present=awl_root.is_dir(),
+        ce_invocation=str(dogfood["invocation"]),
+        ce_package_origin=str(dogfood["package_origin"]),
+        ce_dogfood_installed=bool(dogfood["installed_ce"]),
     )
 
 
@@ -186,6 +238,7 @@ def run_doctor(
     require_visible_launch: bool = False,
     require_worker: bool = False,
     check_packaging: bool = True,
+    require_installed_ce: bool = False,
     target_python: Path | str | None = None,
     check_seat_env: bool = False,
     version_info: Sequence[int] | None = None,
@@ -194,6 +247,7 @@ def run_doctor(
     podman_runner: Any | None = None,
     hidden_continuation: bool = False,
     mem_total_bytes: int | None = None,
+    argv0: str | None = None,
 ) -> DoctorReport:
     """Evaluate the guard and assemble a deterministic, JSON-safe report."""
     if facts is None:
@@ -203,12 +257,14 @@ def run_doctor(
             tmux_adapter=tmux_adapter,
             podman_runner=podman_runner,
             hidden_continuation=hidden_continuation,
+            argv0=argv0,
         )
     result = guard.evaluate(
         facts,
         require_visible_launch=require_visible_launch,
         require_worker=require_worker,
         check_packaging=check_packaging,
+        require_installed_ce=require_installed_ce,
     )
     payload = result.to_dict()
     payload["repo_root"] = str(Path(repo_root))
@@ -274,6 +330,9 @@ def run_doctor(
         "dependency_wheelhouse_offline": dependency_wheelhouse_ok,
         "dependency_wheelhouse_violations": dependency_wheelhouse_violations,
         "first_party_app_wheel_committed": first_party_app_wheel_committed,
+        "ce_dogfood_invocation": facts.ce_invocation,
+        "ce_package_origin": facts.ce_package_origin,
+        "ce_dogfood_installed": facts.ce_dogfood_installed,
         "target_python": str(resolved_target_python),
         "target_python_exists": resolved_target_python.is_file(),
         "controller_seat_app_installed": (
@@ -284,6 +343,7 @@ def run_doctor(
         "require_visible_launch": require_visible_launch,
         "require_worker": require_worker,
         "check_packaging": check_packaging,
+        "require_installed_ce": require_installed_ce,
         "check_seat_env": check_seat_env,
         "target_python": str(resolved_target_python),
     }

@@ -1091,6 +1091,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the dependency wheelhouse contract clause (RED-G-6)",
     )
+    doctor.add_argument(
+        "--require-installed-ce",
+        action="store_true",
+        help="refuse unless doctor is running via an installed ce/cev3 console script",
+    )
 
     # ce containment-probe — ce-ops#221 Fix-1. Containment is PROBED from the
     # live kernel runtime (/proc/<pid>), never self-reported. Fail-closed:
@@ -3080,8 +3085,10 @@ def _doctor(args) -> int:
         require_visible_launch=args.require_visible_launch,
         require_worker=args.require_worker,
         check_packaging=not args.no_check_packaging,
+        require_installed_ce=getattr(args, "require_installed_ce", False),
         target_python=target_python,
         check_seat_env=args.check_seat_env,
+        argv0=sys.argv[0],
     )
     if getattr(args, "json_output", False):
         print(json.dumps(report.payload, indent=2, sort_keys=True))

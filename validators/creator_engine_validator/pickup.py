@@ -42,8 +42,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
+import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -499,6 +499,8 @@ _DEFAULT_LANE_KIND = "implementation"
 #: for EVERY successful spawn (the seed/dedup bookkeeping never confirmed). Bind
 #: to the lifecycle constant so the sentinel tracks the runtime contract.
 LAUNCHED_STATE = seat_lifecycle.REGISTRATION_STATE_GOVERNED
+CE_LANE_LAUNCH_BIN_ENV = "CE_LANE_LAUNCH_BIN"
+CE_BIN_ENV = "CE_BIN"
 
 
 @dataclass(frozen=True)
@@ -530,6 +532,21 @@ def _lane_id(item: Mapping[str, Any], run_id: str) -> str:
 
 def _seed_path(item: Mapping[str, Any], *, run_id: str, seed_root: Path | str) -> Path:
     return Path(seed_root) / f"{_lane_id(item, run_id)}.seed.md"
+
+
+def lane_launch_command(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Return the executable prefix for the belt's governed lane launch.
+
+    The installed ``ce`` console script is the production/dogfood default. Tests
+    and source-checkout fallbacks may set ``CE_LANE_LAUNCH_BIN`` (or ``CE_BIN``)
+    to a shell-split command such as
+    ``python -m creator_engine_validator.ce_cli``.
+    """
+    env = environ if environ is not None else os.environ
+    raw = (env.get(CE_LANE_LAUNCH_BIN_ENV) or env.get(CE_BIN_ENV) or "").strip()
+    if raw:
+        return shlex.split(raw)
+    return ["ce"]
 
 
 def build_seed(
@@ -568,6 +585,7 @@ def build_seed(
 def build_lane_argv(
     item: Mapping[str, Any], *, identity: str, run_id: str, harness: str,
     seed: Seed, repo_root: str, ledger_root: str,
+    ce_command: Sequence[str] | None = None,
 ) -> list[str]:
     """Build the ``ce lane launch`` argv binding the seed as the prompt pointer + SHA (PURE).
 
@@ -578,7 +596,8 @@ def build_lane_argv(
     role = _KIND_TO_ROLE.get(str(item.get("kind")), _DEFAULT_ROLE)
     lane_kind = _KIND_TO_LANE_KIND.get(str(item.get("kind")), _DEFAULT_LANE_KIND)
     return [
-        sys.executable, "-m", "creator_engine_validator.ce_cli", "lane", "launch",
+        *(list(ce_command) if ce_command is not None else lane_launch_command()),
+        "lane", "launch",
         "--controller-id", identity,
         "--lane-id", _lane_id(item, run_id),
         "--role", role,
@@ -612,6 +631,7 @@ def launch_lane(
     item: Mapping[str, Any], *, identity: str, run_id: str, claim_id: str | None,
     harness: str, seed_root: Path | str, repo_root: str, ledger_root: str,
     spawn: Spawn | None = None,
+    ce_command: Sequence[str] | None = None,
 ) -> LaunchResult:
     """Write a seed and spawn a fresh governed ``ce lane launch`` for a claimed item.
 
@@ -667,6 +687,7 @@ def launch_lane(
     argv = build_lane_argv(
         item, identity=identity, run_id=run_id, harness=harness,
         seed=seed, repo_root=repo_root, ledger_root=ledger_root,
+        ce_command=ce_command,
     )
     try:
         proc = runner(argv)

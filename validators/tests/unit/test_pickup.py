@@ -18,7 +18,6 @@ import hashlib
 import json
 import re
 import subprocess
-import sys
 import urllib.parse
 from pathlib import Path
 
@@ -820,11 +819,7 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
     )
     assert result.launched is True
     argv = calls[0]
-    # invokes the lane CLI by module, independent of a bare `ce` executable on PATH.
-    assert argv[0] == sys.executable
-    assert argv[1:3] == ["-m", "creator_engine_validator.ce_cli"]
-    assert argv[0] != "ce"
-    assert argv[3:5] == ["lane", "launch"]
+    assert argv[:3] == ["ce", "lane", "launch"]
     assert "--prompt" in argv and "--prompt-sha" in argv
     # review_requested → a reviewer role lane; the harness rides --command.
     role_idx = argv.index("--role")
@@ -858,6 +853,28 @@ def test_controller_review_request_launches_reviewer_lane(tmp_path):
     assert _argv_value(argv, "--lane-kind") == "review"
     assert _argv_value(argv, "--command") == "codex"
     assert "reviewer lane" in Path(seed.path).read_text(encoding="utf-8")
+
+
+def test_build_lane_argv_can_use_python_module_compatibility_command(tmp_path):
+    seed = pickup.build_seed(
+        _item(kind="assigned"), identity="ce-dev-2", run_id="r1",
+        claim_id="wclaim-abc", seed_root=tmp_path / "seeds",
+    )
+    argv = pickup.build_lane_argv(
+        _item(kind="assigned"), identity="ce-dev-2", run_id="r1",
+        harness="codex", seed=seed, repo_root=str(tmp_path),
+        ledger_root=str(tmp_path / "awl"),
+        ce_command=["python", "-m", "creator_engine_validator.ce_cli"],
+    )
+    assert argv[:5] == ["python", "-m", "creator_engine_validator.ce_cli", "lane", "launch"]
+
+
+def test_lane_launch_command_env_override_is_shell_split(monkeypatch):
+    monkeypatch.setenv(
+        pickup.CE_LANE_LAUNCH_BIN_ENV,
+        "python -m creator_engine_validator.ce_cli",
+    )
+    assert pickup.lane_launch_command() == ["python", "-m", "creator_engine_validator.ce_cli"]
 
 
 def test_launch_lane_failure_does_not_mark_launched(tmp_path):
