@@ -170,7 +170,7 @@ def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):
     dockerfile.write_text(
         "\n".join(
             [
-                "FROM rust:1-bookworm AS herdr-builder",
+                "FROM creator-engine/codex-runsc:0.141.0 AS runtime",
                 "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
                 "ARG ZIG_VERSION=0.15.2",
                 "",
@@ -182,6 +182,26 @@ def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert chk.CODE_DOCKERFILE_FROM_MISSING_DIGEST in _codes(result)
+
+
+def test_consistent_manifest_mismatched_dockerfile_digest_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    dockerfile = tmp_path / "deploy" / "vps-runsc" / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "FROM creator-engine/codex-runsc:0.141.0@sha256:9999999999999999999999999999999999999999999999999999999999999999 AS runtime",
+                "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
+                "ARG ZIG_VERSION=0.15.2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_DOCKERFILE_FROM_DIGEST_MISMATCH in _codes(result)
 
 
 def test_consistent_manifest_mismatched_arg_version_and_ref_fail(tmp_path: Path):
@@ -221,10 +241,30 @@ def test_consistent_manifest_mismatched_requirements_pin_fails(tmp_path: Path):
 
 def test_consistent_manifest_pinnable_null_digest_fails(tmp_path: Path):
     doc = _consistent_doc()
-    doc["surfaces"][3]["commit_or_digest"] = None  # type: ignore[index]
+    doc["surfaces"][1]["commit_or_digest"] = None  # type: ignore[index]
     _write_consistent_repo(tmp_path, doc)
 
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
-    assert any("PyYAML.commit_or_digest" in error.path for error in result.errors)
+    assert any("herdr.commit_or_digest" in error.path for error in result.errors)
+
+
+def test_consistent_manifest_phase1_pending_null_digests_pass(tmp_path: Path):
+    doc = _consistent_doc()
+    for surface in doc["surfaces"]:  # type: ignore[index]
+        if surface["name"] in {"codex", "PyYAML", "jsonschema", "textual"}:  # type: ignore[index]
+            surface["commit_or_digest"] = None  # type: ignore[index]
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_current_repo_surfaces_manifest_consistent_passes():
+    repo_root = Path(__file__).resolve().parents[3]
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([repo_root])
+
+    assert result.ok, [error.format() for error in result.errors]

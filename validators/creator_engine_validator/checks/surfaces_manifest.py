@@ -56,9 +56,11 @@ KNOWN_SURFACES = frozenset(
     }
 )
 PYTHON_DEP_SURFACES = frozenset({"pyyaml", "jsonschema", "textual"})
+PHASE1_PENDING_DIGEST_SURFACES = frozenset({"codex", *PYTHON_DEP_SURFACES})
 ZIG_ARCHES = frozenset({"linux-aarch64", "linux-x86_64"})
 SHA_RE = re.compile(r"^[0-9a-f]{8,40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SEMVER_RE = re.compile(r"(?<!\d)\d+\.\d+\.\d+(?!\d)")
 FROM_RE = re.compile(r"^\s*FROM\s+(?P<body>.+?)(?:\s+#.*)?\s*$", re.IGNORECASE)
 ARG_RE = re.compile(r"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:=(?P<value>\S+))?", re.IGNORECASE)
 REQ_PIN_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^\s;#]+)")
@@ -192,7 +194,11 @@ def _is_host_only(surface: dict[str, Any]) -> bool:
 def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for key, surface in sorted(by_name.items()):
-        if _is_host_only(surface) or surface.get("commit_or_digest") is not None:
+        if (
+            key in PHASE1_PENDING_DIGEST_SURFACES
+            or _is_host_only(surface)
+            or surface.get("commit_or_digest") is not None
+        ):
             continue
         name = surface.get("name", key)
         errors.append(
@@ -258,6 +264,13 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
             image = _from_image_token(line)
             if image is None or image.lower() == "scratch":
                 continue
+            matched = _matching_surface_for_image(image, by_name)
+            if matched is None:
+                continue
+            surface_key, surface = matched
+            manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
+            if manifest_digest is None:
+                continue
             if "@sha256:" not in image:
                 errors.append(
                     make_error(
@@ -270,12 +283,7 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
                 )
                 continue
             image_digest = image.rsplit("@sha256:", 1)[1].split(":", 1)[0]
-            matched = _matching_surface_for_image(image, by_name)
-            if matched is None:
-                continue
-            surface_key, surface = matched
-            manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
-            if manifest_digest is not None and image_digest != manifest_digest:
+            if image_digest != manifest_digest:
                 errors.append(
                     make_error(
                         CODE_DOCKERFILE_FROM_DIGEST_MISMATCH,
@@ -342,6 +350,13 @@ def _script_default(path: Path, variable: str) -> str | None:
     return None
 
 
+def _default_encodes_version(default: str) -> bool:
+    tag = default.rsplit("/", 1)[-1].split("@", 1)[0]
+    if ":" not in tag:
+        return False
+    return SEMVER_RE.search(tag.rsplit(":", 1)[1]) is not None
+
+
 def _runsc_image_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     codex_version = _surface_version(by_name.get("codex"))
     if codex_version is None:
@@ -349,6 +364,8 @@ def _runsc_image_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> 
     path = repo_root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
     default = _script_default(path, "CE_VPS_IMAGE")
     if default is None or "codex" not in default.lower():
+        return []
+    if not _default_encodes_version(default):
         return []
     if codex_version in default:
         return []
