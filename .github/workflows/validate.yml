@@ -298,10 +298,28 @@ jobs:
           if [[ -n "${live_base_sha}" ]]; then
             fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
             if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
-              echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
-              exit 1
+              if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+                # The PR has fallen behind origin/${base_ref}. The merge queue
+                # (merge_group context) owns currency-to-HEAD for the actual
+                # merge, so do NOT hard-fail the PR-head check here. Fetch the
+                # PR's recorded base SHA explicitly and compare the PR diff
+                # against its own merge-base; that still correctly detects
+                # NEW failures the PR introduces.
+                if git fetch --no-tags --depth=100 origin "${live_base_sha}" >/dev/null 2>&1 &&
+                  git rev-parse "${live_base_sha}^{commit}" >/dev/null 2>&1; then
+                  echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}); comparing against PR merge-base from recorded base ${live_base_sha}"
+                  base_rev="${live_base_sha}"
+                else
+                  echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}) and not directly fetchable; comparing against origin/${base_ref} merge-base"
+                  base_rev="origin/${base_ref}"
+                fi
+              else
+                echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
+                exit 1
+              fi
+            else
+              base_rev="${live_base_sha}"
             fi
-            base_rev="${live_base_sha}"
           fi
 
           comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
@@ -312,8 +330,19 @@ jobs:
             if [[ -n "${live_base_sha}" ]]; then
               fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
               if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
-                echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
-                exit 1
+                if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+                  if git fetch --no-tags --depth=100 origin "${live_base_sha}" >/dev/null 2>&1 &&
+                    git rev-parse "${live_base_sha}^{commit}" >/dev/null 2>&1; then
+                    echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}); comparing against PR merge-base from recorded base ${live_base_sha}"
+                    base_rev="${live_base_sha}"
+                  else
+                    echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}) and not directly fetchable; comparing against origin/${base_ref} merge-base"
+                    base_rev="origin/${base_ref}"
+                  fi
+                else
+                  echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
+                  exit 1
+                fi
               fi
             fi
             comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
