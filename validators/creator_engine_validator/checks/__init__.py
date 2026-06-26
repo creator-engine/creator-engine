@@ -102,3 +102,4 @@ from . import devops_privileged_action_broker as devops_privileged_action_broker
 from . import operator_runbook_refusal_sync as operator_runbook_refusal_sync  # noqa: E402,F401
 from . import release_artifact_parity_guard as release_artifact_parity_guard  # noqa: E402,F401
 from . import pr_closes_linkage as pr_closes_linkage  # noqa: E402,F401
+from . import surfaces_manifest as surfaces_manifest  # noqa: E402,F401

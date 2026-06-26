@@ -1,0 +1,76 @@
+surfaces:
+  - name: codex
+    version: "0.141.0"
+    commit_or_digest: null
+    source: npm:@openai/codex
+    custody: rented
+    update_policy: downstream digest capture pending
+    last_evaluated: "2026-06-26"
+
+  - name: herdr
+    version: null
+    commit_or_digest: ff924966
+    source: https://github.com/creator-engine/herdr-ce.git
+    custody: fork
+    update_policy: pinned fork commit; update only by reviewed manifest change
+    last_evaluated: "2026-06-26"
+
+  - name: Zig toolchain
+    version: "0.15.2"
+    commit_or_digest:
+      linux-aarch64:
+        sha256: 958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f
+      linux-x86_64:
+        sha256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+    source: https://ziglang.org/download/0.15.2/
+    custody: upstream binary toolchain
+    update_policy: per-architecture sha256 required before use
+    last_evaluated: "2026-06-26"
+
+  - name: PyYAML
+    version: "6.0.3"
+    commit_or_digest: null
+    source: pypi:PyYAML
+    custody: pypi
+    update_policy: requirements pin; digest capture pending
+    last_evaluated: "2026-06-26"
+
+  - name: jsonschema
+    version: "4.26.0"
+    commit_or_digest: null
+    source: pypi:jsonschema
+    custody: pypi
+    update_policy: requirements pin; digest capture pending
+    last_evaluated: "2026-06-26"
+
+  - name: textual
+    version: "8.2.7"
+    commit_or_digest: null
+    source: pypi:textual
+    custody: pypi
+    update_policy: requirements-dev pin; digest capture pending
+    last_evaluated: "2026-06-26"
+
+  - name: OpenBao
+    version: null # requires host inventory
+    commit_or_digest: null # requires host inventory
+    source: host:openbao
+    custody: host-only
+    update_policy: host inventory required before pinning
+    last_evaluated: "2026-06-26"
+
+  - name: gVisor/runsc
+    version: null # requires host inventory
+    commit_or_digest: null # requires host inventory
+    source: host:runsc
+    custody: host-only
+    update_policy: host inventory required before pinning
+    last_evaluated: "2026-06-26"
+
+  - name: gvproxy
+    version: null # requires host inventory
+    commit_or_digest: null # requires host inventory
+    source: host:gvproxy
+    custody: host-only
+    update_policy: host inventory required before pinning
+    last_evaluated: "2026-06-26"
