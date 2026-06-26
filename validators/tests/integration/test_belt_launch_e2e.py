@@ -26,8 +26,8 @@ or tmux session is mutated.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,6 @@ from creator_engine_validator import (
     pickup,
     seat_lifecycle,
 )
-from creator_engine_validator.tmux_adapter import TmuxAdapter
 
 # A production-length pickup lane_id is what the belt actually mints
 # (``pickup._lane_id`` → ``pickup-<repo-with-slashes-as-dashes>-<n>-<run_id>``);
@@ -62,7 +61,9 @@ def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
-def _init_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _init_workspace(
+    tmp_path: Path, *, bootstrap_brain: bool = True
+) -> tuple[Path, Path, Path]:
     """Create a real git repo + ``.ce/state`` tree + bootstrapped brain ledger.
 
     Returns ``(repo_root, state_root, ledger_root)``.
@@ -80,19 +81,50 @@ def _init_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     ledger_root = state_root / "active-work-ledger"
     ledger_root.mkdir(parents=True, exist_ok=True)
 
-    # Workspace-init prerequisite: a per-repo brain assertion ledger MUST pre-exist
-    # at <repo-root>/.ce/state/brain/assertions.yaml or the lane runtime refuses
-    # with G3-BRAIN-BOOTSTRAP-REFUSED. A single genesis assertion writes a valid,
-    # hash-chained ledger — exactly what ``ce brain assert`` does.
-    brain_runtime.assert_claim(
-        assertion_id="brain-assertion-ce205-belt-e2e-0001",
-        claim={"subject": "belt", "predicate": "bootstrap", "object": "ready"},
-        scope="global",
-        evidence_ref="validators/tests/integration/test_belt_launch_e2e.py#bootstrap",
-        state_root=state_root,
-    )
-    assert brain_runtime.verify_ledger(state_root).ok
+    if bootstrap_brain:
+        # Workspace-init prerequisite: a per-repo brain assertion ledger MUST
+        # pre-exist at <repo-root>/.ce/state/brain/assertions.yaml or the lane
+        # runtime refuses with G3-BRAIN-BOOTSTRAP-REFUSED. A single genesis
+        # assertion writes a valid, hash-chained ledger — exactly what
+        # ``ce brain assert`` does.
+        brain_runtime.assert_claim(
+            assertion_id="brain-assertion-ce205-belt-e2e-0001",
+            claim={"subject": "belt", "predicate": "bootstrap", "object": "ready"},
+            scope="global",
+            evidence_ref="validators/tests/integration/test_belt_launch_e2e.py#bootstrap",
+            state_root=state_root,
+        )
+        assert brain_runtime.verify_ledger(state_root).ok
     return repo, state_root, ledger_root
+
+
+def _parse_lane_launch_argv(argv: list[str]) -> dict[str, str | bool]:
+    assert argv[:5] == [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.ce_cli",
+        "lane",
+        "launch",
+    ]
+    flags: dict[str, str | bool] = {}
+    i = 5
+    while i < len(argv):
+        tok = argv[i]
+        assert tok.startswith("--"), f"unexpected positional argv token: {tok!r}"
+        key = tok[2:]
+        if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+            flags[key] = argv[i + 1]
+            i += 2
+        else:
+            flags[key] = True
+            i += 1
+    return flags
+
+
+def _required_flag(flags: dict[str, str | bool], name: str) -> str:
+    value = flags.get(name)
+    assert isinstance(value, str) and value, f"missing --{name}"
+    return value
 
 
 def test_workspace_bootstrap_closes_the_brain_gate(tmp_path: Path) -> None:
@@ -187,42 +219,38 @@ def test_belt_launch_drives_all_pre_spawn_gates_offline(tmp_path: Path) -> None:
     conflict guard, the worktree-path check, the brain bootstrap, and the Ring-0
     governed-command build — failing ONLY at the unavailable tmux server.
     """
-    repo, _, ledger_root = _init_workspace(tmp_path)
+    repo, state_root, ledger_root = _init_workspace(tmp_path, bootstrap_brain=False)
+    assert not brain_runtime.verify_ledger(state_root).ok
 
-    class _NoTmux:
-        kind = "tmux"
+    class _UnavailableVisibility:
+        visibility_class = "operator_visible"
 
         def is_available(self) -> bool:
             return False
 
-    def _spawn(argv):
-        # Re-invoke lane_runtime.launch in-process with a no-tmux adapter so we
-        # see the typed refusal, not a subprocess exit code. We mirror the argv
-        # the belt built (parsing the flags it set) to keep this faithful.
-        flags = {}
-        i = 0
-        while i < len(argv):
-            tok = argv[i]
-            if tok.startswith("--"):
-                key = tok[2:]
-                if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
-                    flags[key] = argv[i + 1]
-                    i += 2
-                    continue
-                flags[key] = True
-            i += 1
+        def ensure_surface(self, **kwargs):  # pragma: no cover - availability gate stops first
+            raise AssertionError("offline harness must not materialize a live surface")
+
+    def _spawn(argv: list[str]) -> subprocess.CompletedProcess:
+        # Re-invoke lane_runtime.launch in-process with a fake unavailable
+        # visibility backend so we see the typed refusal, not a subprocess exit
+        # code. The parser mirrors ce_cli's production argv contract and forwards
+        # the exact values the belt emitted.
+        flags = _parse_lane_launch_argv(argv)
+        assert flags.get("json") is True
         with pytest.raises(lane_runtime.TmuxUnavailableError):
             lane_runtime.launch(
-                controller_id=flags["controller-id"],
-                lane_id=flags["lane-id"],
-                role=flags["role"],
-                prompt=flags["prompt"],
-                prompt_sha=flags["prompt-sha"],
-                repo_root=str(repo),
-                ledger_root=flags["ledger-root"],
-                command=[flags["command"]],
-                lane_kind=flags.get("lane-kind"),
-                tmux_adapter=_NoTmux(),
+                controller_id=_required_flag(flags, "controller-id"),
+                lane_id=_required_flag(flags, "lane-id"),
+                role=_required_flag(flags, "role"),
+                prompt=_required_flag(flags, "prompt"),
+                prompt_sha=_required_flag(flags, "prompt-sha"),
+                repo_root=_required_flag(flags, "repo-root"),
+                ledger_root=_required_flag(flags, "ledger-root"),
+                command=[_required_flag(flags, "command")],
+                lane_kind=_required_flag(flags, "lane-kind"),
+                worktree_path=_required_flag(flags, "worktree-path"),
+                visibility_backend=_UnavailableVisibility(),
             )
         # Surface a sentinel exit so launch_lane reports the spawn step is all
         # that remains.
@@ -241,9 +269,10 @@ def test_belt_launch_drives_all_pre_spawn_gates_offline(tmp_path: Path) -> None:
     assert result.launched is False  # the tmux spawn is the sole remaining step
     claim_path = ledger_root / "claims" / _IDENTITY / f"{result.lane_id}.yaml"
     assert claim_path.is_file()  # the pre-spawn claim gate is satisfied
+    assert brain_runtime.verify_ledger(state_root).ok  # launch_lane bootstrapped it
 
 
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="real tmux binary required for the visible spawn")
+@pytest.mark.skip(reason="live tmux smoke is intentionally excluded from the deterministic offline e2e")
 def test_belt_launch_reaches_launched_state_with_real_tmux(tmp_path: Path) -> None:
     """The full belt path drives to ``LAUNCHED_STATE`` (a real spawned governed
     lane) when a tmux server is available — the complete e2e to a live seat.

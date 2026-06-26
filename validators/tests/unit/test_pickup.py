@@ -14,6 +14,7 @@ S1 — observe-only. S2 — claim + dedup ledger (dry-run). S3 — ``ce lane lau
 behind a per-seat enable flag (canary, default OFF).
 """
 
+import hashlib
 import json
 import re
 import subprocess
@@ -712,14 +713,68 @@ def test_build_seed_writes_file_and_returns_sha(tmp_path):
     body = Path(seed.path).read_text(encoding="utf-8")
     assert "o/r" in body and "#10" in body
     # the SHA matches the file bytes (the do_not_replan SHA-binding shape).
-    import hashlib
     assert seed.sha256 == hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _argv_value(argv, flag):
+    idx = argv.index(flag)
+    return argv[idx + 1]
+
+
+def _assert_lane_launch_preconditions(argv, *, repo_root, ledger_root, identity, lane_id, role, lane_kind):
+    """Offline stand-in for the launch gates the belt must satisfy before spawn."""
+    from creator_engine_validator import brain_runtime, lane_runtime
+
+    assert argv[0] == sys.executable
+    assert argv[1:5] == ["-m", "creator_engine_validator.ce_cli", "lane", "launch"]
+    assert "--json" in argv
+    assert _argv_value(argv, "--controller-id") == identity
+    assert _argv_value(argv, "--lane-id") == lane_id
+    assert _argv_value(argv, "--role") == role
+    assert _argv_value(argv, "--lane-kind") == lane_kind
+    assert _argv_value(argv, "--repo-root") == str(repo_root)
+    assert _argv_value(argv, "--worktree-path") == str(repo_root)
+    assert Path(_argv_value(argv, "--worktree-path")).is_dir()
+    assert _argv_value(argv, "--ledger-root") == str(ledger_root)
+
+    prompt = Path(_argv_value(argv, "--prompt"))
+    assert prompt.is_file()
+    prompt_sha = hashlib.sha256(prompt.read_bytes()).hexdigest()
+    assert _argv_value(argv, "--prompt-sha") == prompt_sha
+
+    claim_path = lane_runtime._claim_path(Path(ledger_root), identity, lane_id)
+    assert claim_path.is_file()
+    claim = yaml.safe_load(claim_path.read_text(encoding="utf-8"))
+    assert claim["controller_id"] == identity
+    assert claim["lane_id"] == lane_id
+    assert "released_at" not in claim
+    assert validate_active_work_ledger_record(claim, claim_path) == []
+
+    state_root = Path(repo_root) / ".ce" / "state"
+    verify = brain_runtime.verify_ledger(state_root)
+    assert verify.ok, verify.errors
+    payload = lane_runtime._build_lane_brain_bootstrap(state_root=state_root, role=role)
+    assert payload["kind"] == "brain-bootstrap-context"
 
 
 def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
     calls = []
+    item = _item(kind="review_requested")
+    run_id = "r1"
+    identity = "ce-dev-2"
+    awl = tmp_path / "awl"
+    lane_id = pickup._lane_id(item, run_id)
 
     def fake_spawn(argv):
+        _assert_lane_launch_preconditions(
+            argv,
+            repo_root=tmp_path,
+            ledger_root=awl,
+            identity=identity,
+            lane_id=lane_id,
+            role="reviewer",
+            lane_kind="review",
+        )
         calls.append(argv)
         # ce-ops#205: a fully-governed ``ce lane launch --json`` reports
         # ``seat_lifecycle_state: "alive"`` (seat_lifecycle.REGISTRATION_STATE_GOVERNED),
@@ -732,10 +787,10 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
         )
 
     result = pickup.launch_lane(
-        _item(kind="review_requested"), identity="ce-dev-2", run_id="r1",
+        item, identity=identity, run_id=run_id,
         claim_id="wclaim-abc", harness="claude",
         seed_root=tmp_path / "seeds", repo_root=str(tmp_path),
-        ledger_root=str(tmp_path / "awl"), spawn=fake_spawn,
+        ledger_root=str(awl), spawn=fake_spawn,
     )
     assert result.launched is True
     argv = calls[0]
@@ -750,6 +805,7 @@ def test_launch_lane_invokes_lane_launch_with_seed_and_harness(tmp_path):
     assert argv[role_idx + 1] == "reviewer"
     cmd_idx = argv.index("--command")
     assert argv[cmd_idx + 1] == "claude"
+    assert _argv_value(argv, "--worktree-path") == str(tmp_path)
 
 
 def test_launch_lane_failure_does_not_mark_launched(tmp_path):
@@ -888,6 +944,82 @@ def test_launch_lane_allocation_refusal_fails_closed_without_spawn(tmp_path, mon
     assert spawn_calls == []
 
 
+def test_launch_lane_missing_repo_root_fails_closed_without_materializing_or_spawning(tmp_path, monkeypatch):
+    """A typo/missing checkout must refuse before brain bootstrap, allocation, or spawn."""
+    from creator_engine_validator import lane_runtime
+
+    awl = tmp_path / "awl"
+    missing_repo_root = tmp_path / "missing-checkout"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="assigned", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+    spawn_calls = []
+    allocate_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
+
+    def spy_allocate(*args, **kwargs):
+        allocate_calls.append((args, kwargs))
+        raise AssertionError("allocate_in_place must not run for an invalid repo root")
+
+    monkeypatch.setattr(pickup.pco_allocator, "allocate_in_place", spy_allocate)
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="c",
+        harness="codex", seed_root=missing_repo_root / "seeds",
+        repo_root=str(missing_repo_root), ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert result.seed_path == str(missing_repo_root / "seeds" / f"{expected_lane_id}.seed.md")
+    assert "repo/worktree invalid" in (result.note or "")
+    assert spawn_calls == []
+    assert allocate_calls == []
+    assert not missing_repo_root.exists()
+    assert not lane_runtime._claim_path(awl, identity, expected_lane_id).exists()
+
+
+def test_launch_lane_brain_bootstrap_refusal_fails_closed_without_spawn(tmp_path):
+    """A corrupt repo-local brain ledger must refuse before allocation/spawn."""
+    from creator_engine_validator import brain_runtime, lane_runtime
+
+    awl = tmp_path / "awl"
+    identity = "ce-dev-2"
+    run_id = "r1"
+    item = _item(kind="assigned", repo="o/r", number=10)
+    expected_lane_id = pickup._lane_id(item, run_id)
+    state_root = tmp_path / ".ce" / "state"
+    ledger_path = brain_runtime.ledger_path(state_root)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+
+    spawn_calls = []
+
+    def spy_spawn(argv):
+        spawn_calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout=json.dumps({"seat_lifecycle_state": "alive"}), stderr="")
+
+    result = pickup.launch_lane(
+        item, identity=identity, run_id=run_id, claim_id="c",
+        harness="codex", seed_root=tmp_path / "s", repo_root=str(tmp_path),
+        ledger_root=str(awl), spawn=spy_spawn,
+    )
+
+    assert result.launched is False
+    assert result.lane_id == expected_lane_id
+    assert "brain bootstrap refused" in (result.note or "")
+    assert spawn_calls == []
+    assert not lane_runtime._claim_path(awl, identity, expected_lane_id).exists()
+
+
 def test_launch_lane_malformed_existing_claim_fails_closed_without_spawn(tmp_path):
     """End-to-end (no monkeypatch): a malformed unreleased claim already on disk at
     the lane's claim path makes the REAL ``allocate_in_place`` fail closed, so the
@@ -950,7 +1082,7 @@ def test_mark_thread_read_only_after_launched(tmp_path):
     assert any("notifications/threads/t1" in a for c in calls for a in c)
 
 
-def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatch, tmp_path, capsys):
+def test_cli_enable_launch_offline_e2e_asserts_full_lane_contract(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
     forge = _FakeForge()
@@ -968,8 +1100,21 @@ def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatc
     monkeypatch.setattr(ce_cli, "_make_pickup_gh_runner", lambda identity: forge.runner(identity))
 
     launched_argvs = []
+    awl = tmp_path / "awl"
+    expected_item = _item(kind="assigned", repo="o/r", number=21)
+    expected_lane_id = pickup._lane_id(expected_item, "run-z")
 
     def fake_spawn(argv):
+        _assert_lane_launch_preconditions(
+            argv,
+            repo_root=tmp_path,
+            ledger_root=awl,
+            identity="ce-dev-2",
+            lane_id=expected_lane_id,
+            role="implementer",
+            lane_kind="implementation",
+        )
+        assert _argv_value(argv, "--command") == "codex"
         launched_argvs.append(argv)
         return subprocess.CompletedProcess(
             argv, 0,
@@ -981,7 +1126,7 @@ def test_cli_enable_launch_does_not_mark_synthetic_search_thread_read(monkeypatc
         "pickup", "poll", "--identity", "ce-dev-2", "--keys-dir", str(tmp_path),
         "--claim", "--enable-launch", "--harness", "codex",
         "--ledger-root", str(tmp_path / "pickup"),
-        "--repo-root", str(tmp_path), "--lane-ledger-root", str(tmp_path / "awl"),
+        "--repo-root", str(tmp_path), "--lane-ledger-root", str(awl),
         "--run-id", "run-z", "--backoff-seconds", "0", "--json",
     ])
     assert code == 0

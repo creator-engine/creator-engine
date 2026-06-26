@@ -518,6 +518,10 @@ def _lane_id(item: Mapping[str, Any], run_id: str) -> str:
     return f"pickup-{repo}-{item.get('number')}-{run_id}"
 
 
+def _seed_path(item: Mapping[str, Any], *, run_id: str, seed_root: Path | str) -> Path:
+    return Path(seed_root) / f"{_lane_id(item, run_id)}.seed.md"
+
+
 def build_seed(
     item: Mapping[str, Any], *, identity: str, run_id: str, claim_id: str | None,
     seed_root: Path | str,
@@ -546,7 +550,7 @@ def build_seed(
         f"for the item above; reach green, commit locally, then hand off push/merge "
         f"to the controller (a §7-governed seat cannot push).\n"
     )
-    path = root / f"{_lane_id(item, run_id)}.seed.md"
+    path = _seed_path(item, run_id=run_id, seed_root=root)
     path.write_text(body, encoding="utf-8")
     return Seed(path=str(path), sha256=hashlib.sha256(body.encode("utf-8")).hexdigest())
 
@@ -572,10 +576,26 @@ def build_lane_argv(
         "--prompt", seed.path,
         "--prompt-sha", seed.sha256,
         "--repo-root", repo_root,
+        "--worktree-path", repo_root,
         "--ledger-root", ledger_root,
         "--command", harness,
         "--json",
     ]
+
+
+def _ensure_lane_brain_bootstrap(repo_root: str | Path) -> None:
+    """Idempotently bootstrap the brain ledger lane launch expects under repo_root."""
+    from . import brain_runtime, ce_cli
+
+    state_root = Path(repo_root) / ".ce" / "state"
+    try:
+        ce_cli.brain_init(state_root)
+    except ce_cli.BrainInitError as exc:
+        errors = "; ".join(exc.errors)
+        detail = f"{exc}: {errors}" if errors else str(exc)
+        raise PickupError(f"brain bootstrap refused: {detail}") from exc
+    except brain_runtime.BrainRuntimeError as exc:
+        raise PickupError(f"brain bootstrap refused: {exc}") from exc
 
 
 def launch_lane(
@@ -590,8 +610,25 @@ def launch_lane(
     notification read marker; the claim ledger remains the idempotency gate.
     """
     runner = spawn or _default_spawn
-    seed = build_seed(item, identity=identity, run_id=run_id, claim_id=claim_id, seed_root=seed_root)
     lane_id = _lane_id(item, run_id)
+    repo_path = Path(repo_root)
+    if not repo_path.is_dir():
+        return LaunchResult(
+            launched=False,
+            seed_path=str(_seed_path(item, run_id=run_id, seed_root=seed_root)),
+            lane_id=lane_id,
+            note=f"repo/worktree invalid: {repo_path} is not an existing directory",
+        )
+
+    seed = build_seed(item, identity=identity, run_id=run_id, claim_id=claim_id, seed_root=seed_root)
+
+    try:
+        _ensure_lane_brain_bootstrap(repo_root)
+    except PickupError as exc:
+        return LaunchResult(
+            launched=False, seed_path=seed.path, lane_id=lane_id,
+            note=str(exc),
+        )
 
     # ce-ops#200: ``ce lane launch`` hard-requires a live, unreleased Active-Work
     # claim YAML at <ledger_root>/claims/<identity>/<lane_id>.yaml (RV1-030,
