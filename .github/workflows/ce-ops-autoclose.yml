@@ -1,13 +1,26 @@
 name: CE Ops Autoclose
 
-# Cross-repo issue closure for creator-engine/ce-ops.
+# Cross-repo issue closure for creator-engine/ce-ops (ce-ops#262).
+#
+# GitHub does NOT auto-close issues across repositories via `Closes` keywords
+# in PR descriptions: merged PRs in creator-engine/creator-engine only produce
+# a CrossReferencedEvent in ce-ops issues, never a ConnectedEvent/close.
+# This bot closes them via the API using a dedicated least-privilege token.
+#
 # Required repository secret:
-#   CE_OPS_TOKEN: fine-grained token or GitHub App installation token with
-#   issues:write on creator-engine/ce-ops only.
-# Do not use GITHUB_TOKEN here; it is scoped to this repository and cannot close
-# creator-engine/ce-ops issues. Only explicit closing refs are honored:
-# `Closes ce-ops#N`, `Fixes ce-ops#N`, or `Resolves ce-ops#N` (ce-ops#154,
-# authoring convention tracked toward ce-ops#65).
+#   CE_CROSS_REPO_TOKEN: fine-grained PAT or GitHub App installation token
+#   with issues:write on creator-engine/ce-ops ONLY.  Never substitute
+#   GITHUB_TOKEN — it is scoped to this repository.
+#
+# Fail-open: if the secret is absent/empty the step logs a warning and exits 0,
+# so this workflow never blocks a merge.
+#
+# Issue refs are extracted via two paths:
+#   1. Title scan  — every ce-ops#N token in the PR title (CE convention:
+#      `feat(ce-ops#NNN): ...` embeds the issue directly, no keyword needed).
+#   2. Body keyword scan — `Closes ce-ops#N`, `Fixes ce-ops#N`,
+#      `Resolves ce-ops#N` (and inflections) in the PR body.
+# Parsing logic lives in tools/ce-ops-autoclose/parse_issue_refs.py.
 
 on:
   pull_request:
@@ -24,14 +37,15 @@ jobs:
     continue-on-error: true
 
     steps:
-      - name: Checkout workflow scripts
+      - name: Checkout (needed for parser module)
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           persist-credentials: false
 
-      - name: Close ce-ops issues from explicit refs
+      - name: Close ce-ops issues from title and explicit body refs
         continue-on-error: true
         env:
-          CE_OPS_TOKEN: ${{ secrets.CE_OPS_TOKEN }}
+          GH_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          CE_CROSS_REPO_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
         run: |
           python3 .github/scripts/ceops_autoclose.py
