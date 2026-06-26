@@ -4,8 +4,9 @@ These units keep the autonomous gate daemons alive after host reboot:
 
 - `ce-integrator-daemon.service`: runs `queue-daemon` for merge-queue repair.
 - `ce-review-pickup-daemon.service`: runs `review-pickup` for review fan-out.
-- `ce-codex-seat@.service`: starts a detached runsc Codex seat container through
-  the checked-in launcher and leaves Docker's restart policy on the container.
+- `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
+  a fresh detached runsc container through the checked-in launcher, and keeps
+  `docker wait <container>` in the foreground so systemd owns restart.
 
 Install from the repository root:
 
@@ -44,11 +45,12 @@ enabled.
 ## Detached Codex Seat Template
 
 `ce-codex-seat@.service` is a system-level template for contained Codex seats.
-It runs the selected launcher with `--detach tui`; the launcher renders
+Before each start, it removes any stale container with the configured seat name.
+It then runs the selected launcher with `--detach tui`; the launcher renders
 `docker run -d --name ...`, polls herdr readiness through `docker exec`, and
-returns. The unit sets `CE_DGX_DOCKER_RESTART_POLICY=unless-stopped` and
-`CE_VPS_DOCKER_RESTART_POLICY=unless-stopped`, so Docker supervises the
-container after the one-shot launch completes. No host tmux is required.
+returns. The unit keeps `docker wait <container>` in the foreground after the
+detached launch, so systemd owns the seat lifecycle and restarts the unit when
+the container exits. No host tmux is required.
 
 Create one env file per instance:
 
