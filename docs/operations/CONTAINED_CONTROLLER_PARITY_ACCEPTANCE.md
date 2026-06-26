@@ -12,8 +12,7 @@ socket transport. The live C1 image path may later bind these same checks to a
 real adapter, but the baseline harness remains offline until that image exists.
 
 Out of scope: image build scripts, deploy scaffolding, runtime registration, and
-live DGX containment evidence. Those remain in the C1 lane and the existing
-[contained launch proof](./CONTAINED_LAUNCH_PROOF.md).
+live DGX containment evidence. Those remain in the C1 lane.
 
 ## Required Parity Capabilities
 
@@ -45,12 +44,6 @@ credential invocation, and offline/live transport declaration.
 
 ## Related Contracts
 
-- [Contained Launch Proof](./CONTAINED_LAUNCH_PROOF.md) owns live containment
-  evidence and C1 runtime proof.
-- [Integrator Belt Daemon](./INTEGRATOR_BELT_DAEMON.md) defines the controller
-  integrator daemon surface.
-- [Review Pickup Daemon](./REVIEW_PICKUP_DAEMON.md) defines review routing and
-  credential placement expectations.
 - [Controller Runtime Contract Protocol](./CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md)
   anchors controller runtime behavior.
 - [Pane Registry Protocol](./PANE_REGISTRY_PROTOCOL.md) anchors visible terminal
