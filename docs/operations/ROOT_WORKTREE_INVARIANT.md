@@ -187,13 +187,13 @@ MUST NOT be read as authorizing, any of the following:
   check, a CLI preflight, schemas, tests, or check code; that work is
   deferred to its own Source-ratified envelope and is named in the
   backlog as the "checks/preflight" deferred child gate (see
-  [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e).
+  `../delivery/BACKLOG.md` §e).
 - Reconciliation of a specific instance's currently dirty root. This
   policy is generic and substrate-internal; it does not reach into
   any specific operator's clone, branch, untracked file, in-flight
   worktree, or in-flight handoff. The current-root reconciliation
   work is named as a separate deferred child gate in
-  [`../delivery/BACKLOG.md`](../delivery/BACKLOG.md) §e and requires
+  `../delivery/BACKLOG.md` §e and requires
   its own Source-ratified envelope.
 - GitHub repository settings, topics, homepage, branch protection
   rulesets, Actions, secrets, repository visibility, public-launch

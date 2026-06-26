@@ -53,4 +53,4 @@ CE = an **MCP tool surface + the `ce` CLI + the session frame/skin**, observed/d
 This branded structured layer **is** the pre-cockpit product identity — what makes "your agent under CE" a distinct product, not your bare agent. It is also the **seed that graduates into the full CE Cockpit** (a mission-control board + cost meter + fleet view; *"ACP makes CE a cockpit"*) post-pilot — same language, same stages, same artifacts, re-rendered visually.
 
 ## Companions
-[`pilot-roadmap.md`](./pilot-roadmap.md) · [`pilot-deployment-transport.md`](./pilot-deployment-transport.md) · [`agent-interaction-model.md`](./agent-interaction-model.md).
+`pilot-roadmap.md` · [`pilot-deployment-transport.md`](./pilot-deployment-transport.md) · [`agent-interaction-model.md`](./agent-interaction-model.md).

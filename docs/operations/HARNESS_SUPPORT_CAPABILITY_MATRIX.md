@@ -1,4 +1,4 @@
-# CE harness-support capability matrix (ce-ops#220)
+# CE harness-support capability matrix
 
 This is the authoritative CE harness-support matrix. It is rendered from `creator_engine_validator.harness_matrix`; `*` marks a cell whose support is deferred or otherwise not verified by committed wiring.
 
@@ -25,19 +25,19 @@ This is the authoritative CE harness-support matrix. It is rendered from `creato
 
 ### codex
 - **ring0** = `full` - validators/creator_engine_validator/codex_launch_spec.py: evaluate_codex_launch + build_governed_codex_command scrubs ambient repo credentials
-- **ring1** = `deferred` [unverified/deferred] - validators/creator_engine_validator/hook_pack_confirm.py: confirm_codex_managed_hook_pack exists, but ce-ops#220 records Codex Ring 1 support as deferred to ce-ops#219 acceptance
+- **ring1** = `deferred` [unverified/deferred] - validators/creator_engine_validator/hook_pack_confirm.py: confirm_codex_managed_hook_pack exists, but the matrix records Codex Ring 1 support as deferred pending containment acceptance
 - **ring2** = `none` - validators/creator_engine_validator/codex_launch_spec.py: no Codex-owned Stop/closeout hook surface is wired
 - **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
 - **native_fanout** = `none` - no Codex native governed fan-out wiring is present in CE
 - **status** = `partial` - rollup of verified Ring 0/1/2 support: 1/3
 
 ### hermes
-- **ring0** = `partial` [unverified/deferred] - validators/creator_engine_validator/hermes_launch_spec.py: Hermes launch evaluator/builder exists, but ce-ops#220 classifies Hermes governance extent as unverified until a harness audit promotes it
+- **ring0** = `partial` [unverified/deferred] - validators/creator_engine_validator/hermes_launch_spec.py: Hermes launch evaluator/builder exists, but the matrix classifies Hermes governance extent as unverified until a harness audit promotes it
 - **ring1** = `deferred` [unverified/deferred] - Hermes per-tool-call hook support is unverified
 - **ring2** = `deferred` [unverified/deferred] - Hermes Stop/final-answer hook support is unverified
 - **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
 - **native_fanout** = `deferred` [unverified/deferred] - Hermes native fan-out support is unverified
-- **status** = `deferred` [unverified/deferred] - Hermes support is explicitly unverified in ce-ops#220
+- **status** = `deferred` [unverified/deferred] - Hermes support is explicitly unverified in this matrix
 
 ### opencode
 - **ring0** = `deferred` [unverified/deferred] - OpenCode launch envelope / cred-scrub support is unverified

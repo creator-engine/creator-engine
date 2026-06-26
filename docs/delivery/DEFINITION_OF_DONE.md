@@ -24,18 +24,18 @@ the canonical completion contract.
 
 This Definition of Done is a **delivery-view** completion statement.
 It is layered on top of the Feature 001 substrate contract and the
-delivery-view status vocabulary in [`./BACKLOG.md`](./BACKLOG.md)
+delivery-view status vocabulary in `./BACKLOG.md`
 §a, and does **not** amend either.
 
 | Upstream source | Role |
 |---|---|
 | Feature 001 FR-014 / FR-013a | Canonical Definition of Done: a spec MUST NOT enter `done` without an attestation record satisfying FR-004 and FR-008. The six-state lifecycle (`draft → ready → in_progress → verified → ratified → done`) is authoritative. The corresponding Feature 001 substrate contract lives at `specs/001-v0-1-governance-substrate/spec.md` and the contract surfaces under [`../contracts/`](../contracts/). |
 | Feature 002 FR-013, FR-017 | Verifies-not-ratifies invariant: CI evidence is verification, never ratification; agent-authored review text is not ratification for privileged classes. |
-| [`./BACKLOG.md`](./BACKLOG.md) §a | Delivery-view status `Done` semantics ("merged on the canonical branch with finalized attestation"). |
+| `./BACKLOG.md` §a | Delivery-view status `Done` semantics ("merged on the canonical branch with finalized attestation"). |
 | [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) | Ten post-merge completion-report fields that a `Done` item MUST be reconstructable from. |
 | [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) | The readiness gate; a `Done` item entered execution as `Ready`. |
-| [`./DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map; downstream items unblock only after this item is `Done` (or `Ratified` per the rule in §c). |
-| [`./RISK_REGISTER.md`](./RISK_REGISTER.md) | Standing risks that bear on Done evidence (e.g., stale Kanban after merge, skipping Source ratification because CI passed). |
+| `./DEPENDENCIES.md` | Dependency map; downstream items unblock only after this item is `Done` (or `Ratified` per the rule in §c). |
+| `./RISK_REGISTER.md` | Standing risks that bear on Done evidence (e.g., stale Kanban after merge, skipping Source ratification because CI passed). |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only. An external tracker status MUST NOT mark a repo work item Done. A fresh clone is sufficient to evaluate completion; no external tracker credential or network state is required. |
 
 Where this document and the Feature 001 contract disagree, the
@@ -43,7 +43,7 @@ Feature 001 contract controls until Source ratifies a correction.
 
 ## b. Done criteria
 
-A work item is `Done` (per [`./BACKLOG.md`](./BACKLOG.md) §a) only
+A work item is `Done` (per `./BACKLOG.md` §a) only
 when every criterion below is satisfied. Each criterion is named so
 that a fresh clone reviewer can confirm the state from repository
 artifacts alone.
@@ -143,7 +143,7 @@ state. A report that omits any of the ten fields is incomplete per
 
 ### b.8 Backlog and Kanban updated after merge
 
-[`./BACKLOG.md`](./BACKLOG.md) and [`./KANBAN.md`](./KANBAN.md)
+`./BACKLOG.md` and `./KANBAN.md`
 reflect the merged state: the item is moved to `Done` (with durable
 evidence cited — typically the canonical-branch merge commit
 subject); downstream items have their dependency states refreshed;
@@ -222,7 +222,7 @@ consequences for Done:
 
 1. Closing an external tracker ticket does NOT mark the repo work
    item `Done`. The repo-visible artifacts in
-   [`./BACKLOG.md`](./BACKLOG.md), [`./KANBAN.md`](./KANBAN.md), and
+   `./BACKLOG.md`, `./KANBAN.md`, and
    the post-merge report are the authoritative completion record.
 2. If the external tracker and the repo-visible backlog disagree
    about completion, the repo-visible backlog controls until Source
@@ -267,7 +267,7 @@ requirements:
 
 - Names this as a delivery-view DoD layered on top of Feature 001
   FR-014 and on the delivery statuses in
-  [`./BACKLOG.md`](./BACKLOG.md).
+  `./BACKLOG.md`.
 - Enumerates the Done criteria (§b.1–§b.10) covering scope
   conformance, validation evidence, scope audit, independent review
   evidence (when applicable), Source ratification (privileged

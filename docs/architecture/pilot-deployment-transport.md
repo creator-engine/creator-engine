@@ -38,4 +38,4 @@ The decisive axis is **auth/billing × ToS, NOT vendor.** Authority is ALWAYS CE
 - **API-key seats** = **API-$ metered** — fleet-able. (The tokenomics gate enforces the spend envelope either way.)
 
 ## Companions
-[`pilot-roadmap.md`](./pilot-roadmap.md) · [`pilot-uiux-model.md`](./pilot-uiux-model.md) · [`v3-secure-runtime.md`](./v3-secure-runtime.md) (Plane C).
+`pilot-roadmap.md` · [`pilot-uiux-model.md`](./pilot-uiux-model.md) · [`v3-secure-runtime.md`](./v3-secure-runtime.md) (Plane C).

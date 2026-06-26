@@ -38,7 +38,7 @@ the remote repository remain a separate privileged future decision:
 the landed `.github/BRANCH_PROTECTION_POLICY.md` is file-based
 policy only and PR #12 did not mutate live repository settings.
 With Slice F landed, the Slice F row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.6 is now `Done` with durable
+`./BACKLOG.md` §c.6 is now `Done` with durable
 evidence PR #16 / `cb7f94a`. The Slice F documents are policy /
 docs only; they do not, and never become, deploy automation. Live
 deploy automation, GitHub environments, branch protection settings,
@@ -57,44 +57,44 @@ and PR #23 (`3dc45a1 fix: harden workflow validator follow-ups
 (#23)`) hardened the workflow validator with CI validator
 improvements and follow-up fixes. These four PRs are
 post-Sprint-0 substrate and are not Sprint 0 Slice A-F items; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.8 and §e.9.
+`./BACKLOG.md` §e.8 and §e.9.
 CFC-1 (`post-sprint-0/cfc-1-codex-first-class`) governance scope and
 operations protocol substrate has landed on the canonical branch via
-PR #25 / merge commit `30a3e8c`; see [`./BACKLOG.md`](./BACKLOG.md)
+PR #25 / merge commit `30a3e8c`; see `./BACKLOG.md`
 §e.10. CFC follow-on Batch 2A (`post-sprint-0/cfc-2a-codex-role-decision`)
 has landed as PR #27 / `6b51882`; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.11. CFC follow-on Batch 2B
+`./BACKLOG.md` §e.11. CFC follow-on Batch 2B
 (`post-sprint-0/cfc-2b-codex-architecture-matrix`) has landed as
-PR #28 / `c06a3e7`; see [`./BACKLOG.md`](./BACKLOG.md) §e.12. CFC
+PR #28 / `c06a3e7`; see `./BACKLOG.md` §e.12. CFC
 follow-on Batch 2C (`post-sprint-0/cfc-2c-codex-identity-decision`)
 has landed as PR #29 / `66a8074`; Source ratified eight §6 decisions;
-see [`./BACKLOG.md`](./BACKLOG.md) §e.13. The Codex identity record
+see `./BACKLOG.md` §e.13. The Codex identity record
 authoring envelope
 (`post-sprint-0/cfc-codex-identity-record-authoring`) has since
 landed on the canonical branch as PR #31 / merge commit `78b57a4
 docs: author Codex identity record (#31)`; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.14. CFC follow-on Batch 2D.1
+`./BACKLOG.md` §e.14. CFC follow-on Batch 2D.1
 review-evidence schema
 (`post-sprint-0/cfc-2d-1-review-evidence-schema`) has since landed
 as PR #34 / merge commit `e1f5ffc feat: add review evidence schema
 contract (#34)` (PR head SHA `2a8fe0f`); see
-[`./BACKLOG.md`](./BACKLOG.md) §e.15. CFC follow-on Batch 2D.2
+`./BACKLOG.md` §e.15. CFC follow-on Batch 2D.2
 architect-evidence schema
 (`post-sprint-0/cfc-2d-2-architect-evidence-schema`) has since landed
 as PR #36 / merge commit `51a2134 feat: add architect evidence schema
 contract (#36)` (PR head SHA `451be39`); see
-[`./BACKLOG.md`](./BACKLOG.md) §e.16. CFC follow-on Batch 2D.3
+`./BACKLOG.md` §e.16. CFC follow-on Batch 2D.3
 implementer-evidence schema
 (`post-sprint-0/cfc-2d-3-implementer-evidence-schema`) has since
 landed as PR #38 / merge commit `01f21a5 feat: add implementer
 evidence schema contract (#38)` (PR head SHA `0b630be`); see
-[`./BACKLOG.md`](./BACKLOG.md) §e.17. Gate 2 Lane A has since landed
+`./BACKLOG.md` §e.17. Gate 2 Lane A has since landed
 on the canonical branch as PR #40 / merge commit `a63304a docs: add
 parallel pair rehearsal runbook (#40)`; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.18. Gate 2 Lane B has since landed
+`./BACKLOG.md` §e.18. Gate 2 Lane B has since landed
 on the canonical branch as PR #41 / merge commit `8dd18a0 docs: add
 external contributor intake boundary (#41)`; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.19. PR #42 / merge commit `921d46d
+`./BACKLOG.md` §e.19. PR #42 / merge commit `921d46d
 docs: reconcile gate 2 delivery ledgers (#42)` landed the Gate 2
 delivery-ledger reconciliation. The delivery view now reflects
 canonical main at commit `4db2a222c15d33b5d5d8e04b07db2d8b3a661459`.
@@ -113,7 +113,7 @@ now `Done`, the `post-sprint-0/root-worktree-lifecycle/audit` child
 remains `Done`, and the
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
-children remain `Deferred`; see [`./BACKLOG.md`](./BACKLOG.md)
+children remain `Deferred`; see `./BACKLOG.md`
 §e.20. The deferred
 `post-sprint-0/root-worktree-lifecycle/checks-preflight` and
 `post-sprint-0/root-worktree-lifecycle/current-root-reconciliation`
@@ -124,9 +124,9 @@ parent `post-sprint-0/public-readiness` and its
 the canonical branch as PR #46 / merge commit
 `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public readiness
 continuation gate (#46)`, landing
-[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) as the
+`./PUBLIC_READINESS_GATE.md` as the
 canonical delivery-view public-readiness gate artifact; see
-[`./BACKLOG.md`](./BACKLOG.md) §e.21 and §e.21.1. The
+`./BACKLOG.md` §e.21 and §e.21.1. The
 `post-sprint-0/public-readiness/visibility-flip` child has since
 been ratified and consumed under its own separately-Source-
 ratified privileged envelope; the canonical repository is now
@@ -135,13 +135,13 @@ public on the remote at live main SHA
 readiness ledger watermark (#48)`), verified under the post-flight
 read-only verification archive
 `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`;
-see [`./BACKLOG.md`](./BACKLOG.md) §e.21.2. Items remaining
+see `./BACKLOG.md` §e.21.2. Items remaining
 separately Source-ratified and unimplemented beyond the verified
 launch posture are: any CODEOWNERS decision; any future redaction-
 gate corpus; any future deploy / release execution automation
 (Feature 006); and any further live GitHub-settings mutation beyond
 the verified launch posture per
-[`./PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) §e and
+`./PUBLIC_READINESS_GATE.md` §e and
 §f. The post-flight verification observed one bot-originated
 dependency follow-up PR against the now-public canonical repository
 (Dependabot bump of `pytest` under `validators/`); bot-originated
@@ -206,7 +206,7 @@ repository. It does not redefine them.
 | [`specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md) | Sprint 0 execution sequence, exit gates, and post-merge next-task protocol fields. |
 | Spec Kit `tasks.md` and Creator Engine sidecars (`spec.creator-engine.yml`, `plan.creator-engine.yml`, `tasks.creator-engine.yml`) | Canonical work-item records for governed batches. |
 | Optional external trackers (Jira, Linear, GitHub Projects, etc.) | **Non-canonical** mirrors only; never substitutes for repo-visible artifacts. |
-| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md), [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3`, PR #23 / `3dc45a1`, and PR #44 / `30327aa`. Upstream evidence for R-011 and R-012 mitigations in [`./RISK_REGISTER.md`](./RISK_REGISTER.md) §a; the root-worktree navigation/orchestration-only invariant is sourced from [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md). |
+| Workflow-hardening protocol set ([`../operations/CONTROLLER_BOUNDARY_POLICY.md`](../operations/CONTROLLER_BOUNDARY_POLICY.md), [`../operations/NO_COPY_PASTE_PATTERN.md`](../operations/NO_COPY_PASTE_PATTERN.md), [`../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md`](../operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md), [`../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md`](../operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md), [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md)) | Post-Sprint-0 substrate; durable evidence landed under PR #22 / `d892cd3`, PR #23 / `3dc45a1`, and PR #44 / `30327aa`. Upstream evidence for R-011 and R-012 mitigations in `./RISK_REGISTER.md` §a; the root-worktree navigation/orchestration-only invariant is sourced from [`../operations/ROOT_WORKTREE_INVARIANT.md`](../operations/ROOT_WORKTREE_INVARIANT.md). |
 
 Where this control plane and any upstream source of truth disagree,
 the upstream source of truth wins until Source ratifies a correction.
@@ -214,7 +214,7 @@ the upstream source of truth wins until Source ratifies a correction.
 The Feature 001 spec-status lifecycle remains the canonical lifecycle
 for spec/plan/tasks artifacts. The delivery statuses used here are a
 separate **delivery view** layered on top of it; see
-[`./BACKLOG.md`](./BACKLOG.md) §a for the boundary.
+`./BACKLOG.md` §a for the boundary.
 
 ## d. Tracker boundary
 
@@ -251,8 +251,8 @@ This boundary aligns with
 | File | Role |
 |---|---|
 | [`README.md`](./README.md) | This file. Orients the control plane, names the tracker boundary, and lists deferrals. |
-| [`BACKLOG.md`](./BACKLOG.md) | Governed backlog of Sprint 0 slices and downstream features, with the delivery-view work-item row schema. |
-| [`KANBAN.md`](./KANBAN.md) | Current Kanban view summarized from `BACKLOG.md`. Eight delivery-view status columns. |
+| `BACKLOG.md` | Governed backlog of Sprint 0 slices and downstream features, with the delivery-view work-item row schema. |
+| `KANBAN.md` | Current Kanban view summarized from `BACKLOG.md`. Eight delivery-view status columns. |
 | [`NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) | Post-merge completion report fields and next-task selection rules. |
 
 ### B2 (present)
@@ -261,8 +261,8 @@ This boundary aligns with
 |---|---|
 | [`DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) | Delivery-view DoR for governed work items, layered onto Feature 001 FR-013 / FR-013a. |
 | [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) | Delivery-view DoD, layered onto Feature 001 FR-014. |
-| [`DEPENDENCIES.md`](./DEPENDENCIES.md) | Dependency map across Sprint 0 slices and downstream features. |
-| [`RISK_REGISTER.md`](./RISK_REGISTER.md) | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
+| `DEPENDENCIES.md` | Dependency map across Sprint 0 slices and downstream features. |
+| `RISK_REGISTER.md` | Risk register for Sprint 0 execution and immediate post-Sprint-0 work. |
 
 ### Slice F delivery docs (landed)
 
@@ -276,7 +276,7 @@ never become, a merge, deploy, or rollback mechanic. Execution-side
 concerns (release agent identity, deploy attestations, GitHub
 environments, deploy gates, rollback automation) remain Feature
 006 surface under a separately ratified privileged envelope. The
-Slice F row in [`./BACKLOG.md`](./BACKLOG.md) §c.6 is `Done` on the
+Slice F row in `./BACKLOG.md` §c.6 is `Done` on the
 delivery view with durable evidence PR #16 / `cb7f94a`. Each Slice F
 document carries an explicit non-ratification statement and cites
 upstream sources of truth including Feature 001 FR-007 / FR-008 /
@@ -296,7 +296,7 @@ This document landed on the canonical branch under PR #46 / merge
 commit `2ee63ddde7608c1bb7c9dc52dab2eadb097d2233 docs: add public
 readiness continuation gate (#46)`, authored under a Source-ratified
 docs-only envelope (`post-sprint-0/public-readiness/gate-artifact`);
-see [`./BACKLOG.md`](./BACKLOG.md) §e.21.1. It is a delivery-view
+see `./BACKLOG.md` §e.21.1. It is a delivery-view
 artifact recording public-readiness gate semantics, the substrate
 already landed (PR #20 / `35bf85f`, PR #21 / `5b762f9`, and the
 landed visibility flip — live remote state at live main SHA
@@ -311,11 +311,11 @@ mutation beyond the verified launch posture), the explicit
 statement that this gate did not itself authorize the visibility
 flip, and the named privileged envelope
 `post-sprint-0/public-readiness/visibility-flip` (now `Done` per
-[`./BACKLOG.md`](./BACKLOG.md) §e.21.2) that did.
+`./BACKLOG.md` §e.21.2) that did.
 
 | File | Role |
 |---|---|
-| [`PUBLIC_READINESS_GATE.md`](./PUBLIC_READINESS_GATE.md) | Canonical delivery-view public-readiness gate artifact. Records gate semantics, landed substrate (including the now-landed visibility flip with durable evidence in the live remote state at live main SHA `4db2a222c15d33b5d5d8e04b07db2d8b3a661459` and the post-flight read-only verification archive `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`), residual checklist for items still `Deferred` beyond the verified launch posture (further live branch-protection / ruleset application; any CODEOWNERS decision; any future redaction-gate corpus; any further GitHub-settings mutation beyond the verified launch posture; any release / deploy execution automation under Feature 006), explicit statement that this gate did not itself authorize the visibility flip, and the named privileged `post-sprint-0/public-readiness/visibility-flip` envelope that did. |
+| `PUBLIC_READINESS_GATE.md` | Canonical delivery-view public-readiness gate artifact. Records gate semantics, landed substrate (including the now-landed visibility flip with durable evidence in the live remote state at live main SHA `4db2a222c15d33b5d5d8e04b07db2d8b3a661459` and the post-flight read-only verification archive `ce-public-launch-post-flight-read-only-verification-20260519T092126Z`), residual checklist for items still `Deferred` beyond the verified launch posture (further live branch-protection / ruleset application; any CODEOWNERS decision; any future redaction-gate corpus; any further GitHub-settings mutation beyond the verified launch posture; any release / deploy execution automation under Feature 006), explicit statement that this gate did not itself authorize the visibility flip, and the named privileged `post-sprint-0/public-readiness/visibility-flip` envelope that did. |
 
 ### Slice E delivery docs (landed)
 
@@ -328,7 +328,7 @@ content). They define the contract that any future governed
 implementation envelope will obey; they do not instantiate any
 automation surface, which remains Feature 005 scope under a
 separately ratified privileged envelope. The Slice E row in
-[`./BACKLOG.md`](./BACKLOG.md) §c.5 is `Done` on the delivery view.
+`./BACKLOG.md` §c.5 is `Done` on the delivery view.
 
 | File | Role |
 |---|---|
@@ -346,7 +346,7 @@ define a generic, implementation-agnostic reviewer identity
 pattern, review evidence template, and review gate. They do **not**
 instantiate a real reviewer identity; that work is downstream
 Feature 004 scope under its own per-batch privileged envelope. The
-Slice D row in [`./BACKLOG.md`](./BACKLOG.md) §c.4 is `Done` on the
+Slice D row in `./BACKLOG.md` §c.4 is `Done` on the
 delivery view.
 
 | File | Role |
@@ -412,7 +412,7 @@ After every merge to the canonical branch:
 
 1. The merge author / Hermes runs the post-merge completion report
    per [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md).
-2. [`./BACKLOG.md`](./BACKLOG.md) and [`./KANBAN.md`](./KANBAN.md) are
+2. `./BACKLOG.md` and `./KANBAN.md` are
    updated to reflect the new state (status transitions, new items if
    ratified).
 3. The completion report names the immediate next-task recommendation,

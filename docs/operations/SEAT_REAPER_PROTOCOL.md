@@ -1,11 +1,11 @@
-# Seat / Venue Retirement Reaper Protocol (ce-ops#43)
+# Seat / Venue Retirement Reaper Protocol
 
 The reaper mechanizes the manual seat/venue retirement runbook — *archive the
 transcript → tear down the terminal venue → release the secondary worktree →
 release the instance-local ledger markers* — so spent seats are retired within
 minutes of their terminal event with **zero orchestrator involvement**.
 
-It is triggered by the **terminal lifecycle facts** the seat sentinel (ce-ops#26)
+It is triggered by the **terminal lifecycle facts** the seat sentinel
 writes to each seat's append-only `events.jsonl`, never by orchestrator memory,
 live pane discovery, or inferred scheduler intent.
 
@@ -72,7 +72,7 @@ state yields identical classifications and counts.
 | `failed` | an attempted step failed after a previous step succeeded |
 
 Staleness is **advisory** — a stale or dangling-`launched` seat **escalates**; it is
-never auto-killed. This composes with the dangling-launched reconciler (ce-ops#35);
+never auto-killed. This composes with the dangling-launched reconciler;
 the reaper uses the same classification facts but does not supersede its authority.
 
 ## Retirement pipeline (ordered, verified)
