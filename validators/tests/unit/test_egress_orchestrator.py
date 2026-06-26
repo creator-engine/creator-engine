@@ -555,6 +555,42 @@ def test_render_pr_body_notes_authorship_and_gateway_push():
     assert "a" * 40 in body
 
 
+def test_render_pr_body_includes_declared_work_class_from_changelog(tmp_path):
+    changelog = tmp_path / ".ce" / "changelog" / "ce-x.md"
+    changelog.parent.mkdir(parents=True)
+    changelog.write_text(
+        "---\n"
+        "issue: ce-ops#290\n"
+        "work_class: tiny\n"
+        "---\n"
+        "\n"
+        "Broker PR body work-class injection.\n",
+        encoding="utf-8",
+    )
+
+    body = render_pr_body(seat_id="dev-4", branch="ce-x", head_sha="a" * 40, repo_path=str(tmp_path))
+
+    assert "- **Declared work class:** tiny" in body
+
+
+@pytest.mark.parametrize(
+    ("changelog_text", "branch"),
+    [
+        pytest.param(None, "ce-missing", id="missing"),
+        pytest.param("---\nwork_class: [tiny\n---\n", "ce-malformed", id="malformed"),
+    ],
+)
+def test_render_pr_body_omits_declared_work_class_when_changelog_unusable(tmp_path, changelog_text, branch):
+    if changelog_text is not None:
+        changelog = tmp_path / ".ce" / "changelog" / f"{branch}.md"
+        changelog.parent.mkdir(parents=True)
+        changelog.write_text(changelog_text, encoding="utf-8")
+
+    body = render_pr_body(seat_id="dev-4", branch=branch, head_sha="a" * 40, repo_path=str(tmp_path))
+
+    assert "- **Declared work class:**" not in body
+
+
 def _gh_fake(existing=None, calls=None):
     import json
 
