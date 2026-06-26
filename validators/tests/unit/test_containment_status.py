@@ -481,6 +481,7 @@ def test_unprobeable_and_prose_only_seats_fail_closed_false(tmp_path: Path):
     )
 
     assert [row.seat for row in result.rows] == list(hm.HARNESSES)
+    assert "lane" in [row.seat for row in result.rows]
     assert all(row.contained is False and row.backend == "none" for row in result.rows)
     assert "prose-seat" not in {row.seat for row in result.rows}
     assert result.ok is False

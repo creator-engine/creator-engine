@@ -10,6 +10,17 @@ from creator_engine_validator import ce_cli
 from creator_engine_validator import harness_matrix as hm
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+EXPECTED_HARNESSES = (
+    "claude_code",
+    "codex",
+    "lane",
+    "hermes",
+    "opencode",
+    "copilot_cli",
+    "nanoclaw",
+    "discord",
+    "slack",
+)
 
 
 def _matrix() -> hm.HarnessMatrix:
@@ -22,7 +33,8 @@ def _row(matrix: hm.HarnessMatrix, harness: str) -> hm.HarnessRow:
 
 def test_matrix_covers_required_harnesses_and_columns():
     matrix = _matrix()
-    assert tuple(row.harness for row in matrix.rows) == hm.HARNESSES
+    assert hm.HARNESSES == EXPECTED_HARNESSES
+    assert tuple(row.harness for row in matrix.rows) == EXPECTED_HARNESSES
     assert hm.CAPABILITIES == ("ring0", "ring1", "ring2", "containment", "native_fanout", "status")
     for row in matrix.rows:
         assert tuple(row.cells) == hm.CAPABILITIES
@@ -56,6 +68,31 @@ def test_codex_is_ring_0_only_with_ring_1_deferred_pending_containment():
     assert "deferred pending containment acceptance" in row.cells["ring1"].provenance
     assert row.cells["ring2"].value == hm.STATUS_NONE
     assert row.cells["status"].value == hm.STATUS_PARTIAL
+
+
+def test_lane_row_is_restored_and_ring1_is_probed_from_lane_invariants():
+    row = _row(_matrix(), "lane")
+    assert row.cells["ring0"].value == hm.STATUS_FULL
+    assert row.cells["ring1"].value == hm.STATUS_FULL
+    assert row.cells["ring1"].verified is True
+    assert ".claude/settings.json" in row.cells["ring1"].provenance
+    assert "CE_LEDGER_ROOT" in row.cells["ring1"].provenance
+    assert "lane_runtime.py" in row.cells["ring1"].provenance
+    assert row.cells["ring2"].value == hm.STATUS_FULL
+    assert row.cells["native_fanout"].value == hm.STATUS_FULL
+    assert row.cells["status"].value == hm.STATUS_FULL
+
+
+def test_lane_ring1_drift_does_not_promote_from_ring0(monkeypatch):
+    monkeypatch.setattr(hm, "_lane_ledger_root_env_wired", lambda: False)
+
+    row = _row(_matrix(), "lane")
+
+    assert row.cells["ring0"].value == hm.STATUS_FULL
+    assert row.cells["ring0"].verified is True
+    assert row.cells["ring1"].verified is False
+    assert row.cells["ring1"].value != hm.STATUS_FULL
+    assert "CE_LEDGER_ROOT" in row.cells["ring1"].provenance
 
 
 @pytest.mark.parametrize("harness", ["hermes", "opencode", "copilot_cli"])
@@ -92,6 +129,7 @@ def test_cli_renders_markdown(capsys):
     assert "CE harness-support capability matrix" in out
     assert "| claude_code | full | full | full |" in out
     assert "| codex | full | deferred * | none |" in out
+    assert "| lane | full | full | full |" in out
 
 
 def test_cli_renders_json(capsys):

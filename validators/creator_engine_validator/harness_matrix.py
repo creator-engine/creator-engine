@@ -27,6 +27,7 @@ CAPABILITIES = ("ring0", "ring1", "ring2", "containment", "native_fanout", "stat
 HARNESSES = (
     "claude_code",
     "codex",
+    "lane",
     "hermes",
     "opencode",
     "copilot_cli",
@@ -252,6 +253,106 @@ def _codex_row(repo_root: Path) -> HarnessRow:
     )
 
 
+def _lane_ledger_root_env_wired() -> bool:
+    """True when lane launch exports the ledger root into the launched pane env."""
+    import inspect
+
+    try:
+        lane_runtime = import_module("creator_engine_validator.lane_runtime")
+    except Exception:
+        return False
+    env_const = getattr(lane_runtime, "CE_LEDGER_ROOT_ENV", None)
+    if not isinstance(env_const, str) or not env_const:
+        return False
+    launch = getattr(lane_runtime, "launch", None)
+    if launch is None:
+        return False
+    try:
+        source = inspect.getsource(launch)
+    except (OSError, TypeError):
+        return False
+    return (
+        "CE_LEDGER_ROOT_ENV" in source
+        and "pane_env" in source
+        and "env=pane_env" in source
+    )
+
+
+def _lane_ring1_probe(repo_root: Path) -> Cell:
+    """Derive lane Ring 1 from the real wrapped-harness hook invariant."""
+    lane_path = _module_file("lane_runtime")
+    settings_path = repo_root / ".claude" / "settings.json"
+
+    pretooluse_ok = False
+    try:
+        confirm_mod = import_module("creator_engine_validator.hook_pack_confirm")
+        pretooluse_ok = confirm_mod.confirm_hook_pack(repo_root).pretooluse_registered
+    except Exception:
+        pretooluse_ok = False
+
+    env_wired = _lane_ledger_root_env_wired()
+
+    if pretooluse_ok and env_wired:
+        return _full(
+            f"{_rel(settings_path, repo_root=repo_root)}: committed PreToolUse hook-pack + "
+            f"{_rel(lane_path)}: launch() exports CE_LEDGER_ROOT into the pane env so the wrapped "
+            "harness's in-band Ring 1 hook resolves posture from the seat's real claim"
+        )
+
+    missing = []
+    if not pretooluse_ok:
+        missing.append("no committed .claude/settings.json PreToolUse hook-pack")
+    if not env_wired:
+        missing.append("lane_runtime.launch does not wire the CE_LEDGER_ROOT pane env")
+    provenance = (
+        f"{_rel(lane_path)}: lane Ring 1 invariant unconfirmed - {'; '.join(missing)}"
+    )
+    if pretooluse_ok or env_wired:
+        return _partial(provenance, verified=False)
+    return _none(provenance, verified=False)
+
+
+def _lane_row(repo_root: Path) -> HarnessRow:
+    lane_path = _module_file("lane_runtime")
+
+    ring0_ok = _module_has("lane_runtime", "launch", "ClaudeLaunchRefused")
+    ring0 = (
+        _full(
+            f"{_rel(lane_path)}: launch() runs governed lane Ring 0 refusal before side effects"
+        )
+        if ring0_ok
+        else _none("lane_runtime launch / ClaudeLaunchRefused not importable", verified=False)
+    )
+
+    ring1 = _lane_ring1_probe(repo_root)
+
+    ring2_ok = _module_has("lane_runtime", "verify", "verify_closeout")
+    ring2 = (
+        _full(f"{_rel(lane_path)}: verify() + verify_closeout provide lane closeout checks")
+        if ring2_ok
+        else _none("lane_runtime verify / verify_closeout not importable", verified=False)
+    )
+
+    containment = _containment_cell()
+    native_fanout = (
+        _full(f"{_rel(lane_path)}: launch() materializes governed worker lane fan-out")
+        if _module_has("lane_runtime", "launch")
+        else _none("lane_runtime launch not importable", verified=False)
+    )
+    status = _status_from_cells(ring0, ring1, ring2)
+    return HarnessRow(
+        "lane",
+        {
+            "ring0": ring0,
+            "ring1": ring1,
+            "ring2": ring2,
+            "containment": containment,
+            "native_fanout": native_fanout,
+            "status": status,
+        },
+    )
+
+
 def _hermes_row(_repo_root: Path) -> HarnessRow:
     launch_path = _module_file("hermes_launch_spec")
     ring0_candidate = _module_has("hermes_launch_spec", "evaluate_hermes_launch", "build_governed_hermes_command")
@@ -362,6 +463,7 @@ def build_matrix(repo_root: Path | str = ".") -> HarnessMatrix:
         rows=(
             _claude_row(root),
             _codex_row(root),
+            _lane_row(root),
             _hermes_row(root),
             _unverified_actor_row("opencode", "OpenCode"),
             _unverified_actor_row("copilot_cli", "Copilot CLI"),

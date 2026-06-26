@@ -6,6 +6,7 @@ This is the authoritative CE harness-support matrix. It is rendered from `creato
 | --- | --- | --- | --- | --- | --- | --- |
 | claude_code | full | full | full | deferred * | partial | full |
 | codex | full | deferred * | none | deferred * | none | partial |
+| lane | full | full | full | deferred * | full | full |
 | hermes | partial * | deferred * | deferred * | deferred * | deferred * | deferred * |
 | opencode | deferred * | deferred * | deferred * | deferred * | deferred * | deferred * |
 | copilot_cli | deferred * | deferred * | deferred * | deferred * | deferred * | deferred * |
@@ -30,6 +31,14 @@ This is the authoritative CE harness-support matrix. It is rendered from `creato
 - **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
 - **native_fanout** = `none` - no Codex native governed fan-out wiring is present in CE
 - **status** = `partial` - rollup of verified Ring 0/1/2 support: 1/3
+
+### lane
+- **ring0** = `full` - validators/creator_engine_validator/lane_runtime.py: launch() runs governed lane Ring 0 refusal before side effects
+- **ring1** = `full` - .claude/settings.json: committed PreToolUse hook-pack + validators/creator_engine_validator/lane_runtime.py: launch() exports CE_LEDGER_ROOT into the pane env so the wrapped harness's in-band Ring 1 hook resolves posture from the seat's real claim
+- **ring2** = `full` - validators/creator_engine_validator/lane_runtime.py: verify() + verify_closeout provide lane closeout checks
+- **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
+- **native_fanout** = `full` - validators/creator_engine_validator/lane_runtime.py: launch() materializes governed worker lane fan-out
+- **status** = `full` - rollup of verified Ring 0/1/2 support: 3/3
 
 ### hermes
 - **ring0** = `partial` [unverified/deferred] - validators/creator_engine_validator/hermes_launch_spec.py: Hermes launch evaluator/builder exists, but the matrix classifies Hermes governance extent as unverified until a harness audit promotes it
