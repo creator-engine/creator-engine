@@ -688,14 +688,23 @@ def _peek_default_enabled(mode: str) -> bool:
     return mode == MODE_DEV
 
 
-def _peek_trigger(kind: str, terminal: Mapping[str, Any]) -> dict[str, Any]:
+def _peek_trigger(
+    kind: str,
+    terminal: Mapping[str, Any],
+    *,
+    driver: str,
+    requires: list[str],
+) -> dict[str, Any]:
     return {
         "kind": kind,
-        "driver": "HerdrSession",
+        "driver": driver,
         "surface_ref": terminal.get("surface_ref"),
         "pane_id": terminal.get("pane_id"),
         "pid": terminal.get("pid"),
-        "requires": ["controller_herdr_session", "herdr_control_endpoint"],
+        "stream_ref": terminal.get("stream_ref"),
+        "input_ref": terminal.get("input_ref"),
+        "control_ref": terminal.get("control_ref"),
+        "requires": requires,
     }
 
 
@@ -735,34 +744,73 @@ def _peek_surface_for_pane(pane: Mapping[str, Any], *, enabled: bool) -> dict[st
         and terminal.get("surface_ref")
         and terminal.get("pane_id")
     )
+    headless_ready = bool(
+        live
+        and terminal_kind == "headless"
+        and terminal.get("surface_ref")
+        and terminal.get("pid")
+    )
+    headless_input_ready = bool(
+        headless_ready and (terminal.get("input_ref") or terminal.get("control_ref"))
+    )
 
     blocked_reason = None
     if not live:
         blocked_reason = "seat is not in a live cockpit status"
-    elif terminal_kind == "headless":
-        blocked_reason = (
-            "headless log surface has no interactive attach/send-input seam; "
-            "herdr surface metadata is required"
-        )
-    elif terminal_kind == "herdr":
+    elif terminal_kind == "headless" and not headless_ready:
+        blocked_reason = "headless surface metadata is incomplete"
+    elif terminal_kind == "headless" and not headless_input_ready:
+        blocked_reason = "headless surface does not advertise an input seam"
+    elif terminal_kind == "herdr" and not herdr_ready:
         blocked_reason = "herdr surface metadata is incomplete"
-    else:
+    elif terminal_kind not in {"herdr", "headless"}:
         blocked_reason = (
             f"terminal kind {terminal_kind or 'unknown'} is not exposed through "
             "the cockpit herdr peek seam"
         )
 
-    inspect_trigger = _peek_trigger("herdr_attach", terminal) if herdr_ready else None
-    send_trigger = _peek_trigger("herdr_send_input", terminal) if herdr_ready else None
+    if herdr_ready:
+        inspect_trigger = _peek_trigger(
+            "herdr_attach",
+            terminal,
+            driver="HerdrSession",
+            requires=["controller_herdr_session", "herdr_control_endpoint"],
+        )
+        send_trigger = _peek_trigger(
+            "herdr_send_input",
+            terminal,
+            driver="HerdrSession",
+            requires=["controller_herdr_session", "herdr_control_endpoint"],
+        )
+    elif headless_ready:
+        inspect_trigger = _peek_trigger(
+            "headless_visual_inspect",
+            terminal,
+            driver="HeadlessSurface",
+            requires=["headless_surface_manifest"],
+        )
+        send_trigger = (
+            _peek_trigger(
+                "headless_send_input",
+                terminal,
+                driver="HeadlessSurface",
+                requires=["headless_surface_manifest", "headless_input_endpoint"],
+            )
+            if headless_input_ready
+            else None
+        )
+    else:
+        inspect_trigger = None
+        send_trigger = None
     visual_inspect = _peek_capability(
         enabled=enabled,
-        substrate_ready=herdr_ready,
+        substrate_ready=herdr_ready or headless_ready,
         trigger=inspect_trigger,
         blocked_reason=blocked_reason,
     )
     send_input = _peek_capability(
         enabled=enabled,
-        substrate_ready=herdr_ready,
+        substrate_ready=herdr_ready or headless_input_ready,
         trigger=send_trigger,
         blocked_reason=blocked_reason,
     )
@@ -784,6 +832,9 @@ def _peek_surface_for_pane(pane: Mapping[str, Any], *, enabled: bool) -> dict[st
         "surface_ref": terminal.get("surface_ref"),
         "pane_id": terminal.get("pane_id"),
         "pid": terminal.get("pid"),
+        "stream_ref": terminal.get("stream_ref"),
+        "input_ref": terminal.get("input_ref"),
+        "control_ref": terminal.get("control_ref"),
         "can_attach": bool(visual_inspect["available"]),
         "can_send": bool(send_input["available"]),
         "state": state,
