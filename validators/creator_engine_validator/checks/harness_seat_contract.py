@@ -4,7 +4,8 @@ A shape-only, harness-agnostic record family that declares a Controller-seat con
 the harness occupying the seat, the required launch posture, the genuinely
 posture-defeating modes it must refuse, the full-permission mode (the efficient
 Controller operating mode) and its harness-specific flag, the enforcement ring, and the
-required hook-pack (a G2.006.0 ``extension_contract``).
+required deterministic foreman dispatch model plus hook-pack (a G2.006.0
+``extension_contract``).
 
 CE does not privilege any harness — ``claude_code`` is the reference instance and
 ``codex``/``hermes``/``openclaw`` instantiate the same contract (promoted in G2.007.1).
@@ -59,6 +60,7 @@ CODE_POSTURE = "VAL-SEAT-POSTURE"
 CODE_PROHIBITED = "VAL-SEAT-PROHIBITED"
 CODE_FULL_PERMISSION = "VAL-SEAT-FULL-PERMISSION"
 CODE_PERMISSION_FLAG = "VAL-SEAT-PERMISSION-FLAG"
+CODE_FOREMAN_DISPATCH = "VAL-SEAT-FOREMAN-DISPATCH"
 CODE_HOOKPACK = "VAL-SEAT-HOOKPACK"
 CODE_ROLE = "VAL-SEAT-ROLE"
 CODE_MODE = "VAL-SEAT-MODE"
@@ -79,6 +81,7 @@ HARNESS_FULL_PERMISSION_FLAGS = {
     "codex": "--yolo",
     "hermes": "--profile creator-engine",
 }
+REQUIRED_FOREMAN_DISPATCH_ROLES = ("researcher", "implementer", "reviewer")
 
 _YAML_SUFFIXES = {".yml", ".yaml"}
 _MD_SUFFIXES = {".md", ".markdown"}
@@ -183,6 +186,43 @@ def _validate_required_hook_pack(rec: dict[str, Any], path: Path, pre: tuple[Any
     return errors
 
 
+def _role_has_dispatch_capability_surface(role_config: Any) -> bool:
+    if not isinstance(role_config, dict):
+        return False
+    capability = role_config.get("dispatch_capability")
+    if not isinstance(capability, str) or not capability.strip():
+        return False
+    surface = role_config.get("dispatch_surface")
+    if not isinstance(surface, list) or not surface:
+        return False
+    return all(isinstance(entry, str) and entry.strip() for entry in surface)
+
+
+def _validate_foreman_dispatch(rec: dict[str, Any], path: Path, pre: tuple[Any, ...]) -> list[ValidationError]:
+    dispatch = rec.get("foreman_dispatch")
+    dispatch_ok = isinstance(dispatch, dict) and dispatch.get("launch_pinned") is True
+    if dispatch_ok:
+        contract_ref = dispatch.get("contract_ref")
+        dispatch_ok = isinstance(contract_ref, str) and bool(contract_ref.strip())
+    roles = dispatch.get("roles") if isinstance(dispatch, dict) else None
+    if dispatch_ok:
+        dispatch_ok = isinstance(roles, dict) and all(
+            _role_has_dispatch_capability_surface(roles.get(role))
+            for role in REQUIRED_FOREMAN_DISPATCH_ROLES
+        )
+    if dispatch_ok:
+        return []
+    return [
+        make_error(
+            CODE_FOREMAN_DISPATCH,
+            path,
+            _pointer(pre + ("foreman_dispatch",)),
+            "foreman_dispatch must be launch-pinned and define non-empty dispatch_capability and dispatch_surface for researcher, implementer, and reviewer",
+            CONTRACT,
+        )
+    ]
+
+
 def validate_seat_contract_file(path: Path) -> list[ValidationError]:
     path = Path(path)
     if path.suffix.lower() in _MD_SUFFIXES:
@@ -238,6 +278,9 @@ def validate_seat_contract_file(path: Path) -> list[ValidationError]:
         if str(posture.get("permission_mode_flag", "")).strip() != expected:
             errors.append(make_error(CODE_PERMISSION_FLAG, path, _pointer(ppre + ("permission_mode_flag",)), f"for harness {harness!r}, full_permission_mode must declare permission_mode_flag {expected!r}", CONTRACT))
 
+    # --- deterministic foreman dispatch (ce-ops#163) ---
+    errors.extend(_validate_foreman_dispatch(rec, path, pre))
+
     # --- required hook-pack (reuse G2.006.0 vocabulary) ---
     errors.extend(_validate_required_hook_pack(rec, path, pre))
 
@@ -255,7 +298,7 @@ def validate_seat_contract_file(path: Path) -> list[ValidationError]:
 
 @register(
     CHECK_NAME,
-    [CODE_SCHEMA, CODE_HARNESS, CODE_POSTURE, CODE_PROHIBITED, CODE_FULL_PERMISSION, CODE_PERMISSION_FLAG, CODE_HOOKPACK, CODE_ROLE, CODE_MODE, CODE_SECRET, CODE_NO_INLINE],
+    [CODE_SCHEMA, CODE_HARNESS, CODE_POSTURE, CODE_PROHIBITED, CODE_FULL_PERMISSION, CODE_PERMISSION_FLAG, CODE_FOREMAN_DISPATCH, CODE_HOOKPACK, CODE_ROLE, CODE_MODE, CODE_SECRET, CODE_NO_INLINE],
 )
 def run_harness_seat_contract(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []

@@ -10,4 +10,16 @@ recursion:
 delegation_required_mutation_classes:
   - code
   - tracker_mirror
-
+foreman_dispatch:
+  launch_pinned: true
+  contract_ref: docs/contracts/seat-class-policy.md
+  roles:
+    researcher:
+      dispatch_surface:
+        - multi_agent.researcher
+    implementer:
+      dispatch_surface:
+        - multi_agent.implementer
+    reviewer:
+      dispatch_surface:
+        - multi_agent.reviewer

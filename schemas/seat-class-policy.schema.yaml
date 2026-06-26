@@ -3,8 +3,9 @@ $id: "https://creator-engine.local/schemas/seat-class-policy.schema.yaml"
 title: "Creator Engine Seat-Class Policy Record"
 description: |
   Shape for the foreman-delegation Slice 1 policy. Every CE seat is born a
-  foreman by default; worker posture must be launch-pinned and explicit. This
-  schema is record-shape only. Live hook arming, worker spawning, action-count
+  foreman by default; governed policy records pin foreman posture and explicit
+  dispatch surfaces. This schema is record-shape only. Live hook arming,
+  worker spawning, action-count
   thresholds, and line-count thresholds are intentionally deferred.
 type: object
 required:
@@ -16,6 +17,7 @@ required:
   - default_seat_class
   - recursion
   - delegation_required_mutation_classes
+  - foreman_dispatch
 unevaluatedProperties: false
 properties:
   kind:
@@ -34,10 +36,11 @@ properties:
       Opaque digest of the ratified policy content. This is not a credential.
   seat_class:
     type: string
-    enum: [foreman, worker]
+    const: foreman
     description: |
-      Launch-pinned class for this seat. Unknown/absent values resolve to
-      foreman in the pure resolver and later live hook wiring.
+      Launch-pinned class for governed seats. Valid policy records are foreman
+      by construction; unknown/absent runtime values resolve to foreman in the
+      pure resolver and later live hook wiring.
   default_seat_class:
     type: string
     const: foreman
@@ -67,4 +70,44 @@ properties:
     items:
       type: string
       minLength: 1
+  foreman_dispatch:
+    type: object
+    required: [launch_pinned, contract_ref, roles]
+    unevaluatedProperties: false
+    properties:
+      launch_pinned:
+        type: boolean
+        const: true
+        description: |
+          Dispatch authority is pinned at launch and may not be inferred from
+          mutable runtime posture.
+      contract_ref:
+        type: string
+        minLength: 1
+        description: |
+          Contract or policy artifact that defines the foreman's dispatch duty.
+      roles:
+        type: object
+        required: [researcher, implementer, reviewer]
+        unevaluatedProperties: false
+        properties:
+          researcher:
+            $ref: "#/$defs/dispatch_role"
+          implementer:
+            $ref: "#/$defs/dispatch_role"
+          reviewer:
+            $ref: "#/$defs/dispatch_role"
 
+$defs:
+  dispatch_role:
+    type: object
+    required: [dispatch_surface]
+    unevaluatedProperties: false
+    properties:
+      dispatch_surface:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
