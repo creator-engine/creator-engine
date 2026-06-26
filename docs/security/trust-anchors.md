@@ -14,7 +14,7 @@ of the serving origin. This file, published in the GitHub repository
 serves a different origin and trust path than the Pages mirror, so a compromise of
 `creator-engine.dev` alone cannot forge an agreeing record here.
 
-Related: [SECURITY_MODEL.md](./SECURITY_MODEL.md) · ce-ops#81 · ce-ops#158
+Related: [SECURITY_MODEL.md](./SECURITY_MODEL.md)
 
 ---
 
@@ -40,7 +40,7 @@ Related: [SECURITY_MODEL.md](./SECURITY_MODEL.md) · ce-ops#81 · ce-ops#158
 | Fingerprint | `SHA256:tqPyyLJiJSJA3gdujT2tPv7MiJvdAevxHZSQCdPHC+s` |
 | Namespace   | `ce-spec-v1` |
 | Custody     | CE-DEV-1-held private key, encrypted at rest; never enters the repo or any governed seat |
-| Ratified    | 2026-06-11 (ce-ops#6) |
+| Ratified    | 2026-06-11 |
 
 ---
 
