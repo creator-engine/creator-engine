@@ -1,17 +1,17 @@
 # Contained Controller Parity
 
-ce-ops#241 Leg C moves the gate-holding controller into a contained runtime.
+the contained-controller acceptance work Leg C moves the gate-holding controller into a contained runtime.
 C3 is the acceptance side of that move: it defines the behavioral proof that the
 contained controller still behaves like the host controller before C4 cutover.
 
 ## Design Position
 
-C1, ce-ops#240, produces the image and launch path. C3 consumes it only through
+C1, the contained-controller image leg, produces the image and launch path. C3 consumes it only through
 a capability adapter. The adapter must expose dispatch, merge-gate, daemon,
 operator-attach, credential-injection, and transport-declaration surfaces; it
 must not require test code to understand image internals.
 
-C2, ce-ops#239, owns the gate credential injection seam. C3 treats that seam as
+C2, the gate credential-injection seam, owns the gate credential injection seam. C3 treats that seam as
 mandatory: the contained controller receives a credential handle, neutralizes
 ambient `GH_TOKEN` and `GITHUB_TOKEN`, injects the scoped value only into the
 child gate environment, and keeps the value out of argv, stdin/input, and logs.

@@ -1,6 +1,6 @@
 # Contained Controller Parity Acceptance
 
-This is the C3 acceptance contract for ce-ops#241. It defines how the contained
+This is the C3 acceptance contract for the contained-controller acceptance work. It defines how the contained
 controller must prove parity with the current host controller before C4 cutover.
 The proof is capability-level and independent of C1 image internals.
 
@@ -23,7 +23,7 @@ live DGX containment evidence. Those remain in the C1 lane and the existing
 | Merge gate | The controller may approve and enqueue governed PRs only after approved review, green required checks, and an expected head SHA are present. It must not self-merge, self-review, bypass branch protection, or merge directly from the harness. |
 | Gate daemons | The integrator daemon and review-pickup daemon are present, runnable, configurable, and bound to explicit credential handles. Credential values must not be embedded in daemon config. |
 | Operator attach | The Operator can attach through the A4 reach plane and the visible `launch-resume-herdr` attach surface. A hidden continuation-only path is not sufficient. |
-| Gate credential custody | Gate credentials enter only through the C2/ce-ops#239 injection seam. Inherited `GH_TOKEN` and `GITHUB_TOKEN` are neutralized for gate operations, and the injected value must not appear in argv, stdin/input text, or logs. |
+| Gate credential custody | Gate credentials enter only through the C2/the gate credential-injection seam injection seam. Inherited `GH_TOKEN` and `GITHUB_TOKEN` are neutralized for gate operations, and the injected value must not appear in argv, stdin/input text, or logs. |
 | Offline harness | The C3 harness uses injected fakes and performs zero live transport. It does not invoke Docker, runsc, subprocess execution, sockets, or the C1 image. |
 
 ## Harness Entry Point
