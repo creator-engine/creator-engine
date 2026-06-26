@@ -792,6 +792,20 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_state_root(ba)
     _add_required_scope(ba)
     ba.add_argument("--id", dest="assertion_id", default=None, help="optional brain-assertion-* id")
+    ba.add_argument("--statement", default=None, help="required SSOT statement (derived from claim when omitted)")
+    ba.add_argument(
+        "--type",
+        dest="assertion_type",
+        default=None,
+        choices=sorted(brain_runtime.ASSERTION_TYPES),
+        help="assertion type (default: decision)",
+    )
+    ba.add_argument(
+        "--verification-method",
+        default=None,
+        choices=sorted(brain_runtime.VERIFICATION_METHOD_TYPES),
+        help="verification method (derived from evidence-ref when omitted)",
+    )
     ba.add_argument("--claim-json", required=True, help="structured claim mapping as JSON")
     ba.add_argument("--evidence-ref", required=True, help="required local/opaque evidence reference")
     ba.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
@@ -807,6 +821,20 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_optional_scope(bco)
     bco.add_argument("--id", dest="assertion_id", required=True, help="active brain-assertion-* id to supersede")
     bco.add_argument("--new-id", dest="new_assertion_id", default=None, help="optional corrected brain-assertion-* id")
+    bco.add_argument("--statement", default=None, help="corrected SSOT statement (derived from claim when omitted)")
+    bco.add_argument(
+        "--type",
+        dest="assertion_type",
+        default=None,
+        choices=sorted(brain_runtime.ASSERTION_TYPES),
+        help="corrected assertion type (default: previous assertion type)",
+    )
+    bco.add_argument(
+        "--verification-method",
+        default=None,
+        choices=sorted(brain_runtime.VERIFICATION_METHOD_TYPES),
+        help="corrected verification method (derived from evidence-ref when omitted)",
+    )
     bco.add_argument("--claim-json", required=True, help="corrected structured claim mapping as JSON")
     bco.add_argument("--evidence-ref", required=True, help="required correction evidence reference")
     bco.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
@@ -2273,6 +2301,9 @@ def _brain_assert(args) -> int:
             claim=_brain_claim(args, context="assert"),
             scope=_brain_scope(args, required=True),
             evidence_ref=args.evidence_ref,
+            statement=args.statement,
+            assertion_type=args.assertion_type,
+            verification_method=args.verification_method,
             state_root=args.state_root,
             assertion_id=args.assertion_id,
         )
@@ -2328,6 +2359,9 @@ def _brain_correct(args) -> int:
             claim=_brain_claim(args, context="correct"),
             scope=_brain_scope(args, required=False),
             evidence_ref=args.evidence_ref,
+            statement=args.statement,
+            assertion_type=args.assertion_type,
+            verification_method=args.verification_method,
             state_root=args.state_root,
             new_assertion_id=args.new_assertion_id,
         )

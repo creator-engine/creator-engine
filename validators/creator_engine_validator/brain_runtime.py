@@ -37,6 +37,9 @@ ASSERTION_KIND = "brain-assertion"
 ASSERTION_RECORD_TYPE = "brain_assertion"
 SCHEMA_VERSION = "1"
 LEDGER_RELATIVE_PATH = Path("brain") / "assertions.yaml"
+ASSERTION_TYPES = frozenset({"capability", "convention", "decision", "gotcha"})
+VERIFICATION_METHOD_TYPES = frozenset({"probe", "static", "manual-attested"})
+DEFAULT_ASSERTION_TYPE = "decision"
 
 CODE_SCHEMA = "brain_assertion_schema_violation"
 CODE_CONTENT_ADDRESS = "brain_assertion_content_address"
@@ -62,6 +65,7 @@ _FORBIDDEN_KEYS = {
     "secret",
     "token",
 }
+_PROBE_EVIDENCE_PREFIX = "probe:"
 
 Writer = Callable[[Path, str], None]
 
@@ -160,6 +164,70 @@ def _normalize_scope(scope: Any) -> str | dict[str, Any]:
     if isinstance(scope, dict) and scope:
         return _stable_copy(scope)
     raise BrainAssertionRefused("scope must be a non-empty string or mapping")
+
+
+def _statement_from_claim(claim: dict[str, Any]) -> str:
+    subject = claim.get("subject")
+    predicate = claim.get("predicate")
+    obj = claim.get("object")
+    if all(isinstance(part, str) and part for part in (subject, predicate, obj)):
+        return f"{subject} {predicate} {obj}"
+    fact = claim.get("fact")
+    if isinstance(fact, str) and fact:
+        return fact
+    return _stable_json(claim)
+
+
+def _normalize_statement(statement: str | None, claim: dict[str, Any]) -> str:
+    normalized = _statement_from_claim(claim) if statement is None else statement
+    if not isinstance(normalized, str) or not normalized.strip():
+        raise BrainAssertionRefused("statement must be a non-empty string")
+    normalized = normalized.strip()
+    if len(normalized) > 1024:
+        raise BrainAssertionRefused("statement must be 1024 characters or fewer")
+    return normalized
+
+
+def _normalize_assertion_type(assertion_type: str | None) -> str:
+    normalized = DEFAULT_ASSERTION_TYPE if assertion_type is None else assertion_type
+    if normalized not in ASSERTION_TYPES:
+        raise BrainAssertionRefused(
+            "assertion type must be one of capability, convention, decision, or gotcha"
+        )
+    return normalized
+
+
+def _normalize_verification_method(value: Any, evidence_ref: str) -> dict[str, Any]:
+    if value is None:
+        if evidence_ref.startswith(_PROBE_EVIDENCE_PREFIX):
+            probe_name = evidence_ref.removeprefix(_PROBE_EVIDENCE_PREFIX)
+            if not probe_name:
+                raise BrainAssertionRefused("probe evidence_ref must include a probe name")
+            return {"evidence_ref": evidence_ref, "probe": probe_name, "type": "probe"}
+        return {"evidence_ref": evidence_ref, "type": "static"}
+    if isinstance(value, str):
+        value = {"type": value}
+    if not isinstance(value, dict):
+        raise BrainAssertionRefused("verification_method must be a mapping or method name")
+    normalized = _stable_copy(value)
+    method_type = normalized.get("type")
+    if method_type not in VERIFICATION_METHOD_TYPES:
+        raise BrainAssertionRefused("verification_method.type must be probe, static, or manual-attested")
+    method_evidence = normalized.get("evidence_ref", evidence_ref)
+    if not isinstance(method_evidence, str) or not method_evidence or "://" in method_evidence:
+        raise BrainAssertionRefused("verification_method.evidence_ref must be a non-empty local or opaque reference")
+    if method_type == "probe":
+        probe_name = normalized.get("probe")
+        if probe_name is None and method_evidence.startswith(_PROBE_EVIDENCE_PREFIX):
+            probe_name = method_evidence.removeprefix(_PROBE_EVIDENCE_PREFIX)
+        if not isinstance(probe_name, str) or not probe_name:
+            raise BrainAssertionRefused("probe verification_method requires a non-empty probe")
+        normalized["probe"] = probe_name
+        normalized["evidence_ref"] = method_evidence
+    else:
+        normalized.pop("probe", None)
+        normalized["evidence_ref"] = method_evidence
+    return normalized
 
 
 def _assertion_id(seed: dict[str, Any]) -> str:
@@ -439,6 +507,9 @@ def assert_claim(
     claim: dict[str, Any],
     scope: str | dict[str, Any],
     evidence_ref: str,
+    statement: str | None = None,
+    assertion_type: str | None = None,
+    verification_method: dict[str, Any] | str | None = None,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
     assertion_id: str | None = None,
     records: Sequence[dict[str, Any]] | None = None,
@@ -451,8 +522,19 @@ def assert_claim(
     normalized_scope = _normalize_scope(scope)
     if not isinstance(evidence_ref, str) or not evidence_ref or "://" in evidence_ref:
         raise BrainAssertionRefused("evidence_ref must be a non-empty local or opaque reference")
+    normalized_statement = _normalize_statement(statement, normalized_claim)
+    normalized_type = _normalize_assertion_type(assertion_type)
+    normalized_verification = _normalize_verification_method(verification_method, evidence_ref)
     rid = assertion_id or _assertion_id(
-        {"op": "assert", "scope": normalized_scope, "claim": normalized_claim, "evidence_ref": evidence_ref}
+        {
+            "op": "assert",
+            "scope": normalized_scope,
+            "statement": normalized_statement,
+            "type": normalized_type,
+            "claim": normalized_claim,
+            "verification_method": normalized_verification,
+            "evidence_ref": evidence_ref,
+        }
     )
     _validate_id(rid)
     latest, _indexes = _latest_by_id(current)
@@ -466,6 +548,9 @@ def assert_claim(
         "record_type": ASSERTION_RECORD_TYPE,
         "schema_version": SCHEMA_VERSION,
         "id": rid,
+        "statement": normalized_statement,
+        "type": normalized_type,
+        "verification_method": normalized_verification,
         "claim": normalized_claim,
         "scope": normalized_scope,
         "evidence_ref": evidence_ref,
@@ -493,6 +578,9 @@ def correct_claim(
     assertion_id: str,
     claim: dict[str, Any],
     evidence_ref: str,
+    statement: str | None = None,
+    assertion_type: str | None = None,
+    verification_method: dict[str, Any] | str | None = None,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
     new_assertion_id: str | None = None,
     scope: str | dict[str, Any] | None = None,
@@ -511,12 +599,18 @@ def correct_claim(
     normalized_scope = _normalize_scope(scope if scope is not None else old.get("scope"))
     if not isinstance(evidence_ref, str) or not evidence_ref or "://" in evidence_ref:
         raise BrainAssertionRefused("evidence_ref must be a non-empty local or opaque reference")
+    normalized_statement = _normalize_statement(statement, normalized_claim)
+    normalized_type = _normalize_assertion_type(assertion_type or old.get("type"))
+    normalized_verification = _normalize_verification_method(verification_method, evidence_ref)
     new_id = new_assertion_id or _assertion_id(
         {
             "op": "correct",
             "supersedes": assertion_id,
             "scope": normalized_scope,
+            "statement": normalized_statement,
+            "type": normalized_type,
             "claim": normalized_claim,
+            "verification_method": normalized_verification,
             "evidence_ref": evidence_ref,
         }
     )
@@ -532,6 +626,9 @@ def correct_claim(
         "record_type": ASSERTION_RECORD_TYPE,
         "schema_version": SCHEMA_VERSION,
         "id": assertion_id,
+        "statement": str(old["statement"]),
+        "type": str(old["type"]),
+        "verification_method": copy.deepcopy(old["verification_method"]),
         "claim": copy.deepcopy(old["claim"]),
         "scope": copy.deepcopy(old["scope"]),
         "evidence_ref": evidence_ref,
@@ -544,6 +641,9 @@ def correct_claim(
         "record_type": ASSERTION_RECORD_TYPE,
         "schema_version": SCHEMA_VERSION,
         "id": new_id,
+        "statement": normalized_statement,
+        "type": normalized_type,
+        "verification_method": normalized_verification,
         "claim": normalized_claim,
         "scope": normalized_scope,
         "evidence_ref": evidence_ref,

@@ -488,7 +488,18 @@ def _verify_artifact_record(record: Mapping[str, Any], path: Path, pointer_prefi
 
 
 def _verify_record(record: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], context: DriftContext) -> list[ValidationError]:
-    if brain_probe.record_probe_name(record) is not None:
+    verification_method = record.get("verification_method")
+    if isinstance(verification_method, Mapping):
+        method_type = verification_method.get("type")
+    elif isinstance(verification_method, str):
+        method_type = verification_method
+    else:
+        method_type = None
+    if method_type == "manual-attested":
+        return []
+    if method_type == "static":
+        return _verify_artifact_record(record, path, pointer_prefix, context)
+    if method_type == "probe" or brain_probe.record_probe_name(record) is not None:
         return _verify_probe_record(record, path, pointer_prefix, context)
     return _verify_artifact_record(record, path, pointer_prefix, context)
 
