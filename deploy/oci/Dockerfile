@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG PYTHON_IMAGE=python:3.14-slim-bookworm
+ARG PYTHON_IMAGE=python:3.14-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9
 
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS wheel-builder
 
