@@ -35,8 +35,16 @@ def _entrypoint_harness_env_block() -> str:
 def test_dockerfile_builds_herdr_from_source_in_compatible_stage() -> None:
     text = _dockerfile()
 
-    assert "FROM --platform=linux/amd64 rust:1-bookworm AS herdr-builder" in text
-    assert "FROM --platform=linux/amd64 debian:bookworm-slim AS runtime" in text
+    assert re.search(
+        r"^FROM --platform=linux/amd64 rust:1-bookworm(?:@sha256:[0-9a-f]{64})? AS herdr-builder$",
+        text,
+        re.M,
+    )
+    assert re.search(
+        r"^FROM --platform=linux/amd64 debian:bookworm-slim(?:@sha256:[0-9a-f]{64})? AS runtime$",
+        text,
+        re.M,
+    )
     assert "ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git" in text
     assert "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef" in text
     assert "ARG ZIG_VERSION=0.15.2" in text
