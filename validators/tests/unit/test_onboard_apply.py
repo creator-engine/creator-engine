@@ -102,6 +102,25 @@ def _request(
     )
 
 
+def _brownfield_probe_without_origin() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "project_root": ".",
+        "history": {
+            "mode": "git_history_absent",
+            "head_sha": None,
+            "default_branch": None,
+            "commit_count": 0,
+            "dirty": False,
+        },
+        "github": {"origin_remote": None},
+        "ci": {"workflows": [], "current_required_checks": [], "workflow_present": False},
+        "tests": {"commands": []},
+        "conventions": {"branch_patterns": [], "commit_styles": []},
+        "secrets": {"preflight": "required", "status": "not_run", "scanner_available": None, "findings": []},
+    }
+
+
 class FakeDriver(onboard_apply.ApplyDriver):
     def __init__(
         self,
@@ -1068,3 +1087,63 @@ def test_adoption_waiver_missing_ratification_rejected_at_schema(tmp_path):
     answers["brownfield"] = {"secrets": {"waivers": [{"finding_id": "f1"}]}}
     problems = v3_installer.validate_answers(answers, schema=_schema())
     assert any("ratification" in p for p in problems)
+
+
+def test_cli_apply_userspace_install_uses_selected_driver(tmp_path, capsys, monkeypatch):
+    from creator_engine_validator import v3_cli
+
+    class SelectedDriver(FakeDriver):
+        def __init__(self):
+            super().__init__()
+            self.installed_userspace_tools: tuple[str, ...] = ()
+
+        def install_dependencies(self, tools, *, sudo_tools, userspace_tools):
+            self.installed_userspace_tools = tuple(userspace_tools)
+            return super().install_dependencies(
+                tools, sudo_tools=sudo_tools, userspace_tools=userspace_tools
+            )
+
+    selected = SelectedDriver()
+    selector_calls: list[dict[str, Any]] = []
+
+    def select_driver(*, merged, policy_sha, adoption):
+        selector_calls.append({
+            "adoption": adoption,
+            "userspace_install": merged.value("host.userspace_install"),
+            "policy_sha": policy_sha,
+        })
+        return selected
+
+    spec = tmp_path / "signed-install.md"
+    spec.write_bytes(_signed_spec())
+    answers = tmp_path / "answers.yaml"
+    answers.write_text(yaml.safe_dump(_answers(tmp_path), sort_keys=True), encoding="utf-8")
+
+    monkeypatch.setattr(v3_cli, "_select_onboard_apply_driver", select_driver)
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_probe_without_origin())
+    monkeypatch.setattr(
+        v3_cli,
+        "_which",
+        lambda tool: tool in {"git", "python", "runsc", "proxy", "codex"},
+    )
+
+    code = v3_cli.main([
+        "onboard",
+        "--spec",
+        str(spec),
+        "--answers",
+        str(answers),
+        "--apply",
+        "--non-interactive",
+        "--root",
+        str(tmp_path / "state"),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    assert selector_calls and selector_calls[0]["adoption"] is False
+    assert selector_calls[0]["userspace_install"] is True
+    assert selected.installed_userspace_tools == ("uv",)
+    assert "install_dependencies" in selected.calls
