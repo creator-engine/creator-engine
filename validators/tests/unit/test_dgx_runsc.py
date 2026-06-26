@@ -505,8 +505,14 @@ def test_codex_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     assert "herdr is ready in detached container ce-dgx-codex" in result.stdout
     docker_log = (tmp_path / "docker-invocations.log").read_text(encoding="utf-8")
     assert "pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}" in docker_log
-    assert "w2" not in docker_log
-    assert "w3" not in docker_log
+    # The relaunch must not replay stale herdr windows (e.g. w2/w3 from a stale
+    # session.json). Match the herdr window-id token form ("wN:" pane ref or
+    # '"id":"wN"' json) rather than a bare "wN" substring: the captured docker
+    # argv embeds the tmp_path, which under pytest-xdist contains worker ids like
+    # ".../popen-gw3/..." that would spuriously match a bare "w3".
+    for stale_window in ("w2", "w3"):
+        assert f"{stale_window}:" not in docker_log
+        assert f'"id":"{stale_window}"' not in docker_log
 
 
 def test_codex_detach_relaunch_dry_run_does_not_mutate_stale_herdr_session(
