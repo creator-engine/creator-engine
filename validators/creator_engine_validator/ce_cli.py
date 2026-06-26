@@ -1446,14 +1446,14 @@ def _build_parser() -> argparse.ArgumentParser:
     hud = groups.add_parser("hud", help="alias/seam label for `ce launch` (not a CE-native TUI)")
     _add_launch_args(hud)
 
-    # ce harness-matrix — ce-ops#220 PROBED harness-support capability matrix (SSOT).
+    # ce harness-matrix — PROBED harness-support capability matrix (SSOT).
     # Emits a HARNESS x CAPABILITY matrix DERIVED from the adapter specs/config at
     # runtime (never hand-asserted), with a provenance note per cell. The antidote
     # to the containment-probe incident (ce-ops#221): the matrix shows the PROBED
     # truth, not a prose claim.
     harness_matrix_p = groups.add_parser(
         "harness-matrix",
-        help="emit the PROBED harness-support capability matrix (ce-ops#220 SSOT)",
+        help="emit the PROBED harness-support capability matrix",
     )
     harness_matrix_p.add_argument(
         "--repo-root", default=".", help="repo root to probe (default: cwd)"
@@ -2923,7 +2923,7 @@ def _init(args) -> int:
 
 
 def _harness_matrix(args) -> int:
-    """Emit the ce-ops#220 PROBED harness-support capability matrix.
+    """Emit the PROBED harness-support capability matrix.
 
     Every cell is derived by inspecting the live adapter specs / committed config
     at runtime (never hand-asserted); each carries a provenance note. The antidote
