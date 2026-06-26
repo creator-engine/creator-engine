@@ -61,11 +61,15 @@ class ProofContainerRunner:
         egress_enforceable: bool = True,
         runtime_probe_pid: int | None = None,
         runtime_probe_run_id: str | None = None,
+        runtime_probe_launch_owned: bool = True,
+        runtime_probe_contract: str = "ce-launch-owned-probe-v1",
     ):
         self._available = available
         self._egress_enforceable = egress_enforceable
         self._runtime_probe_pid = runtime_probe_pid
         self._runtime_probe_run_id = runtime_probe_run_id
+        self._runtime_probe_launch_owned = runtime_probe_launch_owned
+        self._runtime_probe_contract = runtime_probe_contract
         self.available_calls = 0
         self.egress_calls = 0
         self.raw_run_calls = 0
@@ -90,6 +94,8 @@ class ProofContainerRunner:
         return {
             "pid": self._runtime_probe_pid,
             "run_id": self._runtime_probe_run_id or run_id,
+            "launch_owned": self._runtime_probe_launch_owned,
+            "probe_contract": self._runtime_probe_contract,
             "source": "proof-container-runner",
         }
 
@@ -421,6 +427,42 @@ def test_gvisor_launch_refuses_when_detached_pane_pid_has_no_launch_owned_probe(
     assert runner.available_calls == 1
     assert runner.egress_calls == 1
     assert runner.raw_run_calls == 0
+    assert runner.runtime_probe_calls == 1
+    assert adapter.spawned
+
+
+def test_gvisor_launch_refuses_runtime_probe_without_launch_owned_contract(
+    tmp_path, monkeypatch
+):
+    _disable_brain_bootstrap(monkeypatch)
+    proc_root = tmp_path / "proc"
+    _host_proc(proc_root)
+    _gvisor_proc(proc_root, "5151")
+    policy = _write_runtime_policy(tmp_path)
+    adapter = ProofTmuxAdapter(pane_pid=5151)
+    runner = ProofContainerRunner(
+        runtime_probe_pid=5151,
+        runtime_probe_launch_owned=False,
+    )
+
+    try:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            session="proof-not-launch-owned-refusal",
+            window="seat",
+            runtime_policy=policy,
+            backend="gvisor",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            container_runner=runner,
+            gvisor_plan_kwargs=_gvisor_plan_kwargs(),
+            containment_proc_root=proc_root,
+        )
+    except ce_cli.launch_runtime.RuntimePolicyRefused as exc:
+        assert "not launch-owned" in str(exc)
+    else:  # pragma: no cover - assertion above is the proof
+        raise AssertionError("contained launch must refuse a non-launch-owned probe")
+
     assert runner.runtime_probe_calls == 1
     assert adapter.spawned
 

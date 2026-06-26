@@ -20,6 +20,9 @@ from typing import Any, Mapping, Sequence
 from . import containment_probe
 
 
+LAUNCH_PROBE_CONTRACT = "ce-launch-owned-probe-v1"
+
+
 class RuntimeBackendBridgeError(Exception):
     """The requested runtime backend cannot be honored by the visible launcher."""
 
@@ -242,6 +245,16 @@ def _probe_launched_surface_containment(
         raise RuntimeBackendBridgeError(
             "contained runtime launch returned a runtime probe pid not bound "
             f"to run_id {expected_run_id!r}; refusing unproven containment"
+        )
+    if runtime_probe.get("launch_owned") is not True:
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch returned a runtime probe that was not "
+            "launch-owned; refusing unproven containment"
+        )
+    if runtime_probe.get("probe_contract") != LAUNCH_PROBE_CONTRACT:
+        raise RuntimeBackendBridgeError(
+            "contained runtime launch returned a runtime probe without the "
+            f"{LAUNCH_PROBE_CONTRACT!r} contract; refusing unproven containment"
         )
     pid = runtime_probe.get("pid")
     pid_text = str(pid).strip() if pid is not None else ""

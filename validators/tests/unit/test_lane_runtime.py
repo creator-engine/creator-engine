@@ -81,6 +81,8 @@ class FakeContainerRunner:
         return {
             "pid": self._runtime_probe_pid,
             "run_id": run_id,
+            "launch_owned": True,
+            "probe_contract": "ce-launch-owned-probe-v1",
             "source": "fake-container-runner",
         }
 
