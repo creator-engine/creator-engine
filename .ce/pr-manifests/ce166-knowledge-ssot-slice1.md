@@ -35,9 +35,6 @@ Per-file purpose:
   routes probe, static, and manual-attested verification methods deterministically.
 - **`validators/creator_engine_validator/ce_cli.py`** *(M)* - exposes explicit
   assertion fields through `ce brain assert` and correction flows.
-- **`validators/creator_engine_validator/worker_spawn.py`** *(M)* - preserves
-  safe absolute `TMPDIR` values outside controller HOME for unit-suite
-  robustness on this base.
 - **`validators/tests/unit/test_brain_runtime.py`** *(M)* - covers required
   assertion fields and probe-method derivation.
 - **`validators/tests/unit/test_ce_brain_drift.py`** *(M)* - covers method
@@ -46,9 +43,9 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=11
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=3f2571b9dab36695133231a9dd8d82351fb8b27512d183bc9355b170518939fd
+AUTHORIZED_PATHS_SHA256=86df15b8ba51d6a0a008fd73629a0c29ff292aacd4d2ef01507af0fe4818b351
 
 ```text
 .ce/changelog/ce166-knowledge-ssot-slice1.md
@@ -59,7 +56,6 @@ validators/creator_engine_validator/brain_probe.py
 validators/creator_engine_validator/brain_runtime.py
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/checks/ce_brain_drift.py
-validators/creator_engine_validator/worker_spawn.py
 validators/tests/unit/test_brain_runtime.py
 validators/tests/unit/test_ce_brain_drift.py
 ```
