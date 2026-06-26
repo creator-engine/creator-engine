@@ -27,7 +27,8 @@ workflow, and the required governance carriers. Raw token values, PEM values,
 validator business logic, tools, deploy code, brain subsystem files, agent
 configuration, and `AGENTS.md` are out of scope.
 
-Per-file purpose (closed path-set - 5 paths):
+Per-file purpose (closed path-set - 6 paths):
+- **`.ce/brain/assertions.yaml`** *(M)* - brain ledger re-sealed to match current validate.yml sha256 (bug-fix; chain hashes re-derived).
 - **`.ce/changelog/ce137-identity-registry.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce137-identity-registry.md`** *(A)* - this carrier.
 - **`.github/workflows/validate.yml`** *(M)* - existing Validate workflow gains
@@ -39,11 +40,12 @@ Per-file purpose (closed path-set - 5 paths):
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=f7ec4e901bfdfab537d412816991f844bf8ad20198bcd2ed4466fbc6b2a045ea
+AUTHORIZED_PATHS_SHA256=f220a7462d8ad0b442778972707e6caec0943698e695fb7d58cd053693a00531
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce137-identity-registry.md
 .ce/pr-manifests/ce137-identity-registry.md
 .github/workflows/validate.yml
