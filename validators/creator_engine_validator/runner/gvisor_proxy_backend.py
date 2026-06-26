@@ -27,10 +27,12 @@ Defensive only — hardens our own agent runtime; never an offensive capability.
 
 from __future__ import annotations
 
-import re
+import hashlib
 import json
+import re
 import shutil
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -55,6 +57,9 @@ DEFAULT_DOCKER_RUNTIME = "runsc-gvproxy-ptrace"
 DEFAULT_CONTAINER_HOME = "/home/cedev4"
 DEFAULT_CONTAINER_CODEX_HOME = f"{DEFAULT_CONTAINER_HOME}/.codex"
 DEFAULT_CODEX_BIN_TARGET = "/usr/local/bin/codex"
+LAUNCH_PROBE_CONTRACT = "ce-launch-owned-probe-v1"
+LAUNCH_PROBE_RUN_ID_LABEL = "creator-engine.run-id"
+LAUNCH_PROBE_CONTRACT_LABEL = "creator-engine.probe-contract"
 
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RUNTIME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -394,9 +399,18 @@ class ContainerRunner(Protocol):
 class SubprocessContainerRunner:
     """Default runner: shells out to Docker. Availability-gated; the only live-exec path."""
 
-    def __init__(self, binary: str = DOCKER_BINARY, required_runtime: str = DEFAULT_DOCKER_RUNTIME) -> None:
+    def __init__(
+        self,
+        binary: str = DOCKER_BINARY,
+        required_runtime: str = DEFAULT_DOCKER_RUNTIME,
+        *,
+        probe_timeout_seconds: float = 2.0,
+        probe_interval_seconds: float = 0.05,
+    ) -> None:
         self._binary = binary
         self._required_runtime = required_runtime
+        self._probe_timeout_seconds = max(0.0, float(probe_timeout_seconds))
+        self._probe_interval_seconds = max(0.0, float(probe_interval_seconds))
 
     def available(self) -> bool:
         return shutil.which(self._binary) is not None and self._runtime_registered()
@@ -442,6 +456,78 @@ class SubprocessContainerRunner:
         return subprocess.run(
             list(argv), input=input_text, capture_output=True, text=True, check=False
         )
+
+    def runtime_probe(
+        self,
+        *,
+        run_id: str,
+        argv: Sequence[str],
+        surface: Any,
+    ) -> dict[str, Any] | None:
+        """Observe the launched Docker/runsc container and return its host PID.
+
+        The visible launch path starts ``docker run`` in an operator-visible
+        surface, not through this runner. This method is therefore a separate
+        launch-owned observation step: it accepts only argv carrying the CE-owned
+        name/label contract and then verifies those labels through Docker inspect
+        before returning the PID that the containment probe must independently
+        check.
+        """
+        del surface  # the ownership proof is Docker-observed name/labels.
+        expected_name = _launch_probe_container_name(run_id)
+        if not _argv_carries_launch_probe_contract(argv, run_id=run_id, name=expected_name):
+            return None
+        deadline = time.monotonic() + self._probe_timeout_seconds
+        while True:
+            payload = self._inspect_launch_probe_container(expected_name, run_id=run_id)
+            if payload is not None:
+                return payload
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(self._probe_interval_seconds)
+
+    def _inspect_launch_probe_container(self, name: str, *, run_id: str) -> dict[str, Any] | None:
+        try:
+            completed = subprocess.run(
+                [self._binary, "inspect", "--format", "{{json .}}", name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return None
+        if completed.returncode != 0:
+            return None
+        try:
+            inspected = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(inspected, dict):
+            return None
+        config = inspected.get("Config")
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        if not isinstance(labels, dict):
+            return None
+        if labels.get(LAUNCH_PROBE_RUN_ID_LABEL) != run_id:
+            return None
+        if labels.get(LAUNCH_PROBE_CONTRACT_LABEL) != LAUNCH_PROBE_CONTRACT:
+            return None
+        state = inspected.get("State")
+        pid = state.get("Pid") if isinstance(state, dict) else None
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            return None
+        if pid_int <= 0:
+            return None
+        return {
+            "pid": str(pid_int),
+            "run_id": run_id,
+            "launch_owned": True,
+            "probe_contract": LAUNCH_PROBE_CONTRACT,
+            "source": "docker-inspect",
+            "container_name": name,
+        }
 
 
 def _runtime_declares_host_network(config: dict[str, Any]) -> bool:
@@ -496,6 +582,63 @@ def _sequence_has_network_value(parts: list[str], expected: str) -> bool:
         if part in {"--network", "network", "--net", "net"} and parts[index + 1] == expected:
             return True
     return False
+
+
+def _launch_probe_container_name(run_id: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(run_id)).strip("-._")
+    if not cleaned or not cleaned[0].isalnum():
+        cleaned = f"run-{cleaned}" if cleaned else "run"
+    digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()[:12]
+    base = cleaned[:48].rstrip("-._") or "run"
+    return f"ce-probe-{base}-{digest}"
+
+
+def _launch_probe_contract_args(run_id: str) -> tuple[str, ...]:
+    name = _launch_probe_container_name(run_id)
+    return (
+        "--name",
+        name,
+        "--label",
+        f"{LAUNCH_PROBE_RUN_ID_LABEL}={run_id}",
+        "--label",
+        f"{LAUNCH_PROBE_CONTRACT_LABEL}={LAUNCH_PROBE_CONTRACT}",
+    )
+
+
+def _bind_launch_owned_probe_contract(argv: Sequence[str], *, run_id: str) -> tuple[str, ...]:
+    parts = tuple(str(part) for part in argv)
+    if len(parts) < 2 or parts[1] != "run":
+        return (*_launch_probe_contract_args(run_id), *parts)
+    insert_at = 2
+    if len(parts) > insert_at and parts[insert_at] == "--rm":
+        insert_at += 1
+    return (*parts[:insert_at], *_launch_probe_contract_args(run_id), *parts[insert_at:])
+
+
+def _argv_carries_launch_probe_contract(
+    argv: Sequence[str],
+    *,
+    run_id: str,
+    name: str,
+) -> bool:
+    parts = [str(part) for part in argv]
+    labels = {
+        f"{LAUNCH_PROBE_RUN_ID_LABEL}={run_id}",
+        f"{LAUNCH_PROBE_CONTRACT_LABEL}={LAUNCH_PROBE_CONTRACT}",
+    }
+    if "--name" not in parts:
+        return False
+    try:
+        if parts[parts.index("--name") + 1] != name:
+            return False
+    except IndexError:
+        return False
+    seen_labels = {
+        parts[index + 1]
+        for index, part in enumerate(parts[:-1])
+        if part == "--label"
+    }
+    return labels.issubset(seen_labels)
 
 
 def _normalize_metadata_key(value: str) -> str:
@@ -585,7 +728,10 @@ class GvisorProxyBackend(RunnerBackend):
             raise BackendUnavailable(
                 f"no provisioned Docker/runsc plan for handle {handle.ref!r}; refusing unproven handle"
             )
-        argv = plan.docker_argv(request.command)
+        argv = _bind_launch_owned_probe_contract(
+            plan.docker_argv(request.command),
+            run_id=handle.run_id,
+        )
         completed = self._runner.run(argv)
         runtime_probe = getattr(completed, "runtime_probe", None)
         return RunResult(

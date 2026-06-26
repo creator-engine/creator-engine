@@ -6,8 +6,9 @@ tests perform ZERO live subprocess. Non-empty egress allowlists fail closed
 unless the runner proves a real allowlist enforcement primitive.
 """
 
-import subprocess
+import json
 import shutil
+import subprocess
 
 import pytest
 
@@ -454,6 +455,99 @@ def test_full_lifecycle_through_injected_runner():
     assert evidence.handle_ref == handle.ref
     teardown = backend.teardown(handle)
     assert teardown.released is True
+
+
+def test_backend_run_binds_launch_owned_probe_contract_to_docker_argv():
+    fake = FakeRunner(returncode=0, stdout="hello")
+    backend = backend_with_inputs(fake)
+    handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run/owned-7"))
+
+    backend.run(handle, RunRequest(command=("echo", "hi")))
+
+    run_argv = fake.run_calls[0]
+    assert "--name" in run_argv
+    name = run_argv[run_argv.index("--name") + 1]
+    assert name.startswith("ce-probe-run-owned-7-")
+    labels = {
+        run_argv[index + 1]
+        for index, part in enumerate(run_argv[:-1])
+        if part == "--label"
+    }
+    assert "creator-engine.run-id=run/owned-7" in labels
+    assert "creator-engine.probe-contract=ce-launch-owned-probe-v1" in labels
+
+
+def test_subprocess_runner_runtime_probe_uses_docker_inspect_owned_labels(monkeypatch):
+    fake = FakeRunner(returncode=0, stdout="hello")
+    backend = backend_with_inputs(fake)
+    handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-owned-8"))
+    backend.run(handle, RunRequest(command=("echo", "hi")))
+    run_argv = fake.run_calls[0]
+    name = run_argv[run_argv.index("--name") + 1]
+
+    def docker_inspect(argv, **_kwargs):
+        assert argv == ["docker", "inspect", "--format", "{{json .}}", name]
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "Config": {
+                        "Labels": {
+                            "creator-engine.run-id": "run-owned-8",
+                            "creator-engine.probe-contract": "ce-launch-owned-probe-v1",
+                        }
+                    },
+                    "State": {"Pid": 5151},
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", docker_inspect)
+    runner = SubprocessContainerRunner(probe_timeout_seconds=0)
+
+    payload = runner.runtime_probe(run_id="run-owned-8", argv=run_argv, surface=object())
+
+    assert payload == {
+        "pid": "5151",
+        "run_id": "run-owned-8",
+        "launch_owned": True,
+        "probe_contract": "ce-launch-owned-probe-v1",
+        "source": "docker-inspect",
+        "container_name": name,
+    }
+
+
+def test_subprocess_runner_runtime_probe_rejects_mismatched_inspect_labels(monkeypatch):
+    fake = FakeRunner(returncode=0, stdout="hello")
+    backend = backend_with_inputs(fake)
+    handle = backend.provision(ProvisionRequest(runtime_policy=valid_policy(), run_id="run-owned-9"))
+    backend.run(handle, RunRequest(command=("echo", "hi")))
+    run_argv = fake.run_calls[0]
+
+    def docker_inspect(argv, **_kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "Config": {
+                        "Labels": {
+                            "creator-engine.run-id": "some-other-run",
+                            "creator-engine.probe-contract": "ce-launch-owned-probe-v1",
+                        }
+                    },
+                    "State": {"Pid": 5151},
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", docker_inspect)
+    runner = SubprocessContainerRunner(probe_timeout_seconds=0)
+
+    assert runner.runtime_probe(run_id="run-owned-9", argv=run_argv, surface=object()) is None
 
 
 def test_run_unknown_handle_refuses_without_docker_exec_fallback():
