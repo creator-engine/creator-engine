@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 import re
 from pathlib import Path
+import subprocess
 import sys
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 import yaml
 
@@ -27,6 +29,8 @@ SCHEMA_PATH = "schemas/playbook.schema.yaml"
 CODE_PUBLIC = "PLAYBOOK-PUBLIC-FORMAT"
 CODE_SCHEMA = "PLAYBOOK-INTERNAL-SCHEMA"
 PLAYBOOK_FILE = "PLAYBOOK.md"
+WORKFLOW_FILE = "workflow.ce.yml"
+GOVERNED_COMMAND_DENY_EXIT = 121
 
 STATUS_VALUES = {"active", "draft", "deprecated"}
 MODE_VALUES = {"ceo", "dev"}
@@ -65,20 +69,43 @@ class PublicPlaybook:
     frontmatter: dict[str, Any]
     body: str
     descriptor: dict[str, Any]
+    source_format: str = "public-frontmatter"
 
     @property
     def id(self) -> str:
+        playbook = self.descriptor.get("playbook")
+        if isinstance(playbook, dict) and playbook.get("name"):
+            return str(playbook["name"])
         return str(self.frontmatter["id"])
 
     def summary(self) -> dict[str, Any]:
+        playbook = self.descriptor["playbook"]
+        metadata = self.descriptor.get("metadata") if isinstance(self.descriptor.get("metadata"), dict) else {}
         return {
             "id": self.id,
-            "title": self.frontmatter["title"],
-            "mode": self.frontmatter["mode"],
-            "work_class": self.frontmatter["work_class"],
-            "status": self.frontmatter["status"],
+            "title": playbook["title"],
+            "mode": metadata.get("mode", "dev"),
+            "work_class": metadata.get("work_class", "story"),
+            "status": playbook["status"],
             "path": str(self.path),
+            "source_format": self.source_format,
         }
+
+
+@dataclass(frozen=True)
+class StepExecution:
+    id: str
+    title: str
+    action: str
+    command: str | None
+    expected_result: str | None
+    returncode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    governance_decision: dict[str, Any] | None = None
+
+
+StepExecutor = Callable[[StepExecution, Path], StepExecution]
 
 
 def _error(path: Path, field: str, message: str, *, code: str = CODE_PUBLIC) -> ValidationError:
@@ -160,6 +187,16 @@ def _validate_step_list(
         if not isinstance(text, str) or not text.strip():
             errors.append(
                 _error(path, f"{pointer}/{required_text_key}", f"{required_text_key} must be a non-empty string")
+            )
+        command = item.get("command")
+        if command is not None and (not isinstance(command, str) or not command.strip()):
+            errors.append(_error(path, f"{pointer}/command", "command must be a non-empty string when present"))
+        expected_result = item.get("expected_result")
+        if expected_result is not None and (
+            not isinstance(expected_result, str) or not expected_result.strip()
+        ):
+            errors.append(
+                _error(path, f"{pointer}/expected_result", "expected_result must be a non-empty string when present")
             )
 
 
@@ -291,13 +328,7 @@ def project_public_playbook(data: dict[str, Any], *, source_path: Path | None = 
             for gate in gates
         ],
         "stages": [
-            {
-                "id": step["id"],
-                "title": _human_title(step["id"]),
-                "brief": f"briefs/{step['id']}.md",
-                "dispatch_target": _DISPATCH_TARGETS.get(step["id"], "governed-seat"),
-                "gates": _stage_gate_refs(step["id"], gates),
-            }
+            _stage_from_public_step(step, gates)
             for step in steps
         ],
         "references": list(data.get("related") or []),
@@ -314,6 +345,25 @@ def project_public_playbook(data: dict[str, Any], *, source_path: Path | None = 
     if not descriptor["references"]:
         descriptor.pop("references")
     return descriptor
+
+
+def _stage_from_public_step(step: dict[str, Any], gates: list[str]) -> dict[str, Any]:
+    stage = {
+        "id": step["id"],
+        "title": _human_title(step["id"]),
+        "brief": f"briefs/{step['id']}.md",
+        "dispatch_target": _DISPATCH_TARGETS.get(step["id"], "governed-seat"),
+        "gates": _stage_gate_refs(step["id"], gates),
+    }
+    if step.get("description"):
+        stage["description"] = step["description"]
+    if step.get("action"):
+        stage["action"] = step["action"]
+    if step.get("command"):
+        stage["command"] = step["command"]
+    if step.get("expected_result"):
+        stage["expected_result"] = step["expected_result"]
+    return stage
 
 
 def _validate_descriptor(path: Path, descriptor: dict[str, Any]) -> list[ValidationError]:
@@ -343,6 +393,8 @@ def _validate_descriptor(path: Path, descriptor: dict[str, Any]) -> list[Validat
 
 def load_playbook(path: str | Path) -> PublicPlaybook:
     resolved = _resolve_playbook_path(Path(path))
+    if resolved.name == WORKFLOW_FILE:
+        return load_workflow_playbook(resolved)
     frontmatter, body = _split_frontmatter(resolved)
     public_errors = _validate_public_frontmatter(resolved, frontmatter, body)
     if public_errors:
@@ -354,19 +406,63 @@ def load_playbook(path: str | Path) -> PublicPlaybook:
     return PublicPlaybook(path=resolved, frontmatter=frontmatter, body=body, descriptor=descriptor)
 
 
+def load_workflow_playbook(path: str | Path) -> PublicPlaybook:
+    resolved = Path(path)
+    try:
+        data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PlaybookError(f"cannot read playbook {resolved}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise PlaybookError(
+            f"{resolved} is not valid YAML",
+            [_error(resolved, "/", f"workflow YAML parse failed: {exc}", code=CODE_SCHEMA)],
+        ) from exc
+    if not isinstance(data, dict):
+        raise PlaybookError(
+            f"{resolved} must parse to a mapping",
+            [_error(resolved, "/", "workflow.ce.yml must parse to a YAML mapping", code=CODE_SCHEMA)],
+        )
+    descriptor_errors = _validate_descriptor(resolved, data)
+    if descriptor_errors:
+        raise PlaybookError(f"{resolved} is not a valid playbook workflow", descriptor_errors)
+    playbook = data["playbook"]
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    frontmatter = {
+        "id": playbook["name"],
+        "title": playbook["title"],
+        "goal": playbook.get("summary", ""),
+        "status": playbook["status"],
+        "mode": metadata.get("mode", "dev"),
+        "work_class": metadata.get("work_class", "story"),
+    }
+    return PublicPlaybook(
+        path=resolved,
+        frontmatter=frontmatter,
+        body="",
+        descriptor=data,
+        source_format="workflow",
+    )
+
+
 def _resolve_playbook_path(path: Path) -> Path:
     if path.is_dir():
         candidate = path / PLAYBOOK_FILE
         if candidate.is_file():
             return candidate
+        workflow = path / WORKFLOW_FILE
+        if workflow.is_file():
+            return workflow
     if path.is_file():
         return path
-    raise PlaybookError(f"no {PLAYBOOK_FILE} at {path}")
+    raise PlaybookError(f"no {PLAYBOOK_FILE} or {WORKFLOW_FILE} at {path}")
 
 
 def discover_playbooks(root: str | Path = ".") -> list[PublicPlaybook]:
     root_path = Path(root)
-    candidates = sorted(root_path.rglob(PLAYBOOK_FILE)) if root_path.is_dir() else [_resolve_playbook_path(root_path)]
+    if root_path.is_dir():
+        candidates = sorted({*root_path.rglob(PLAYBOOK_FILE), *root_path.rglob(WORKFLOW_FILE)})
+    else:
+        candidates = [_resolve_playbook_path(root_path)]
     return [load_playbook(candidate) for candidate in candidates]
 
 
@@ -379,8 +475,8 @@ def resolve_playbook(ref: str | Path, *, root: str | Path = ".") -> PublicPlaybo
         raise PlaybookError(f"playbook id {ref_text!r} is not a valid slug")
     matches = [
         candidate
-        for candidate in sorted(Path(root).rglob(PLAYBOOK_FILE))
-        if candidate.parent.name == ref_text
+        for candidate in sorted({*Path(root).rglob(PLAYBOOK_FILE), *Path(root).rglob(WORKFLOW_FILE)})
+        if _candidate_id(candidate) == ref_text
     ]
     if not matches:
         raise PlaybookError(f"playbook {ref_text!r} not found under {root}")
@@ -390,19 +486,215 @@ def resolve_playbook(ref: str | Path, *, root: str | Path = ".") -> PublicPlaybo
     return load_playbook(matches[0])
 
 
+def _candidate_id(path: Path) -> str:
+    if path.name == PLAYBOOK_FILE:
+        return path.parent.name
+    if path.name == WORKFLOW_FILE:
+        return path.parent.name
+    return path.stem
+
+
 def dry_run_plan(playbook: PublicPlaybook) -> dict[str, Any]:
     descriptor = playbook.descriptor
-    metadata = descriptor["metadata"]
+    metadata = descriptor.get("metadata") if isinstance(descriptor.get("metadata"), dict) else {}
     return {
         "dry_run": True,
         "id": playbook.id,
-        "title": playbook.frontmatter["title"],
-        "mode": metadata["mode"],
-        "work_class": metadata["work_class"],
-        "status": playbook.frontmatter["status"],
+        "title": descriptor["playbook"]["title"],
+        "mode": metadata.get("mode", "dev"),
+        "work_class": metadata.get("work_class", "story"),
+        "status": descriptor["playbook"]["status"],
         "gates": descriptor["gates"],
-        "stages": descriptor["stages"],
+        "stages": _step_plan(playbook),
         "descriptor": descriptor,
+    }
+
+
+def _step_plan(playbook: PublicPlaybook) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for stage in playbook.descriptor.get("stages", []):
+        if not isinstance(stage, dict):
+            continue
+        command = stage.get("command")
+        action = stage.get("action") or stage.get("description") or f"Run stage {stage.get('id')}"
+        item: dict[str, Any] = {
+            "id": stage["id"],
+            "title": stage["title"],
+            "action": action,
+            "command": command if isinstance(command, str) and command.strip() else None,
+            "expected_result": stage.get("expected_result"),
+            "dispatch_target": stage.get("dispatch_target"),
+            "gates": list(stage.get("gates") or []),
+        }
+        item["execution"] = "command" if item["command"] else "action"
+        steps.append(item)
+    return steps
+
+
+def _step_execution(step: Mapping[str, Any]) -> StepExecution:
+    command = step.get("command")
+    return StepExecution(
+        id=str(step["id"]),
+        title=str(step["title"]),
+        action=str(step.get("action") or ""),
+        command=str(command) if isinstance(command, str) and command.strip() else None,
+        expected_result=str(step["expected_result"]) if isinstance(step.get("expected_result"), str) else None,
+    )
+
+
+def _hook_check_command(command: str, cwd: Path, *, env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(cwd),
+        "ce": {
+            "posture": "governed",
+            "evidence_root": ".ce/state/playbook",
+        },
+    }
+    argv = [
+        sys.executable,
+        "-m",
+        "creator_engine_validator",
+        "hook-check",
+        "--stdin",
+        "--format",
+        "raw",
+        "--posture",
+        "governed",
+        "--posture-root",
+        str(cwd),
+        "--evidence-root",
+        ".ce/state/playbook",
+    ]
+    ledger_root = (env or os.environ).get("CE_LEDGER_ROOT")
+    if ledger_root:
+        argv.extend(["--ledger-root", ledger_root])
+    completed = subprocess.run(
+        argv,
+        input=json.dumps(event),
+        cwd=cwd,
+        env=dict(os.environ, **dict(env or {})),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return {
+            "decision": "deny",
+            "reason": f"hook-check invocation failed: {completed.stderr.strip() or completed.stdout.strip()}",
+        }
+    try:
+        payload = json.loads(completed.stdout)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return {"decision": "deny", "reason": f"hook-check returned invalid JSON: {exc}"}
+    if not isinstance(payload, dict):
+        return {"decision": "deny", "reason": "hook-check returned a non-object decision"}
+    return payload
+
+
+def default_step_executor(step: StepExecution, cwd: Path) -> StepExecution:
+    if not step.command:
+        return StepExecution(
+            id=step.id,
+            title=step.title,
+            action=step.action,
+            command=None,
+            expected_result=step.expected_result,
+            returncode=0,
+            stdout="",
+            stderr="action step acknowledged; no shell command declared",
+        )
+    decision = _hook_check_command(step.command, cwd)
+    if decision.get("decision") == "deny":
+        return StepExecution(
+            id=step.id,
+            title=step.title,
+            action=step.action,
+            command=step.command,
+            expected_result=step.expected_result,
+            returncode=GOVERNED_COMMAND_DENY_EXIT,
+            stderr=str(decision.get("reason") or "governance denied command"),
+            governance_decision=decision,
+        )
+    completed = subprocess.run(
+        step.command,
+        shell=True,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return StepExecution(
+        id=step.id,
+        title=step.title,
+        action=step.action,
+        command=step.command,
+        expected_result=step.expected_result,
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        governance_decision=decision,
+    )
+
+
+def run_playbook(
+    playbook: PublicPlaybook,
+    *,
+    dry_run: bool = False,
+    cwd: str | Path = ".",
+    executor: StepExecutor | None = None,
+) -> dict[str, Any]:
+    plan = dry_run_plan(playbook)
+    if dry_run:
+        return {
+            "ok": True,
+            "action": "playbook_run_planned",
+            "dry_run": True,
+            "has_authority": False,
+            "mode": plan["mode"],
+            "work_class": plan["work_class"],
+            "gates": plan["gates"],
+            "stages": plan["stages"],
+            "plan": plan,
+        }
+
+    runner = executor or default_step_executor
+    results: list[dict[str, Any]] = []
+    final_status = "PASS"
+    run_cwd = Path(cwd)
+    for step in plan["stages"]:
+        execution = runner(_step_execution(step), run_cwd)
+        status = "PASS" if execution.returncode == 0 else "FAIL"
+        if status == "FAIL":
+            final_status = "FAIL"
+        results.append(
+            {
+                "id": execution.id,
+                "title": execution.title,
+                "status": status,
+                "returncode": execution.returncode,
+                "action": execution.action,
+                "command": execution.command,
+                "expected_result": execution.expected_result,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "governance_decision": execution.governance_decision,
+            }
+        )
+        if status == "FAIL":
+            break
+    return {
+        "ok": final_status == "PASS",
+        "action": "playbook_run_completed",
+        "dry_run": False,
+        "has_authority": True,
+        "mode": plan["mode"],
+        "work_class": plan["work_class"],
+        "playbook": playbook.summary(),
+        "steps": results,
+        "final_status": final_status,
     }
 
 
@@ -449,23 +741,21 @@ def run_cli(args: Any) -> int:
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         if command == "run":
-            if not getattr(args, "dry_run", False):
-                raise PlaybookError("live playbook execution is not implemented; rerun with --dry-run")
             playbook = resolve_playbook(getattr(args, "ref"), root=root)
-            plan = dry_run_plan(playbook)
-            payload = {
-                "ok": True,
-                "action": "playbook_run_planned",
-                "dry_run": True,
-                "has_authority": False,
-                "mode": plan["mode"],
-                "work_class": plan["work_class"],
-                "gates": plan["gates"],
-                "stages": plan["stages"],
-                "plan": plan,
-            }
-            print(json.dumps(payload, indent=2, sort_keys=True))
-            return 0
+            payload = run_playbook(playbook, dry_run=bool(getattr(args, "dry_run", False)))
+            if json_output:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                if payload["dry_run"]:
+                    print(f"PLAN {playbook.id}: {payload['mode']} / {payload['work_class']}")
+                    for step in payload["stages"]:
+                        detail = step["command"] or step["action"]
+                        print(f"STEP {step['id']}: {detail}")
+                else:
+                    for step in payload["steps"]:
+                        print(f"STEP {step['id']}: {step['status']}")
+                    print(f"RESULT: {payload['final_status']}")
+            return 0 if payload["ok"] else 1
     except PlaybookError as exc:
         return _emit_error(str(command or "unknown"), exc, json_output=json_output)
     return 2

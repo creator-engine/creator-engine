@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import shlex
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,15 +21,29 @@ from typing import TextIO
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
 WORK_CLASSES = ("tiny", "story", "feature", "epic")
+DEFAULT_TEST_COMMAND = (
+    f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider "
+    "validators/tests/unit -q"
+)
+DECLARED_WORK_CLASS_PATTERN = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?Declared work class(?:\*\*)?\s*:\s*(?:\*\*)?\s*"
+    r"`?([A-Za-z][A-Za-z0-9_-]*)`?\s*(?:<!--.*-->)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+PYTEST_FAILURE_PATTERN = re.compile(
+    r"^(?:FAILED|ERROR)\s+([^\s]+(?:::[^\s]+)*)",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
 class PreflightConfig:
     repo_root: Path
     base: str
-    declared_work_class: str
+    declared_work_class: str | None = None
     head_ref: str | None = None
     allow_dirty: bool = False
+    test_command: str = DEFAULT_TEST_COMMAND
 
 
 @dataclass(frozen=True)
@@ -34,6 +51,13 @@ class CommandResult:
     returncode: int
     stdout: str = ""
     stderr: str = ""
+
+
+@dataclass(frozen=True)
+class CheckDetail:
+    name: str
+    ok: bool
+    detail: str
 
 
 Runner = Callable[[Sequence[str], Path, Mapping[str, str] | None], CommandResult]
@@ -94,6 +118,13 @@ def _git_capture(argv: Sequence[str], repo_root: Path, runner: Runner) -> str:
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or f"git {' '.join(argv)} failed"
         raise RuntimeError(detail)
+    return result.stdout
+
+
+def _git_capture_optional(argv: Sequence[str], repo_root: Path, runner: Runner) -> str:
+    result = runner(["git", *argv], repo_root, None)
+    if result.returncode != 0:
+        return ""
     return result.stdout
 
 
@@ -170,6 +201,128 @@ def _python_env(repo_root: Path, *, pytest: bool = False) -> dict[str, str]:
     return env
 
 
+def _extract_declared_work_classes(text: str) -> list[str]:
+    return [match.group(1) for match in DECLARED_WORK_CLASS_PATTERN.finditer(text)]
+
+
+def _changed_paths(repo_root: Path, base: str, runner: Runner) -> list[str]:
+    stdout = _git_capture_optional(["diff", "--name-only", f"{base}..HEAD"], repo_root, runner)
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def _resolve_declared_work_class(
+    config: PreflightConfig,
+    comparison_base: str,
+    runner: Runner,
+) -> str:
+    if config.declared_work_class:
+        declared = config.declared_work_class
+        if declared not in WORK_CLASSES:
+            raise RuntimeError(
+                f"declared work class {declared!r} is invalid; expected one of: {', '.join(WORK_CLASSES)}"
+            )
+        return declared
+
+    from .checks.path_manifest_fidelity import MANIFEST_DIR, branch_slug
+
+    if not config.head_ref:
+        raise RuntimeError("could not resolve head ref for declared work class discovery")
+
+    expected_slug = branch_slug(config.head_ref)
+    changed = _changed_paths(config.repo_root, comparison_base, runner)
+    carrier = f"{MANIFEST_DIR}/{expected_slug}.md"
+    candidates: list[Path] = []
+    if carrier in changed:
+        candidates.append(config.repo_root / carrier)
+    else:
+        candidates.extend(config.repo_root / path for path in changed if path.endswith(".md"))
+
+    found: list[tuple[Path, str]] = []
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        found.extend((path, value) for value in _extract_declared_work_classes(text))
+
+    values = [value for _, value in found]
+    if len(values) != 1:
+        locations = ", ".join(str(path.relative_to(config.repo_root)) for path, _ in found) or "none"
+        raise RuntimeError(
+            "PR body/carrier must contain exactly one declared work class line: "
+            "'- **Declared work class:** <tiny|story|feature|epic>' "
+            f"(found {len(values)}; locations: {locations})"
+        )
+    declared = values[0]
+    if declared not in WORK_CLASSES:
+        raise RuntimeError(
+            f"declared work class {declared!r} is invalid; expected one of: {', '.join(WORK_CLASSES)}"
+        )
+    return declared
+
+
+def _test_command_argv(command: str) -> list[str]:
+    try:
+        argv = shlex.split(command)
+    except ValueError as exc:
+        raise RuntimeError(f"test command is not shell-parseable: {exc}") from exc
+    if not argv:
+        raise RuntimeError("test command must not be empty")
+    return argv
+
+
+def _failure_ids(result: CommandResult) -> set[str]:
+    text = result.stdout + "\n" + result.stderr
+    failures = {match.group(1) for match in PYTEST_FAILURE_PATTERN.finditer(text)}
+    if result.returncode != 0 and not failures:
+        failures.add(f"command_exit_{result.returncode}")
+    return failures
+
+
+def _run_baseline_diff_tests(
+    config: PreflightConfig,
+    comparison_base: str,
+    *,
+    runner: Runner,
+    out: TextIO,
+    err: TextIO,
+) -> str:
+    argv = _test_command_argv(config.test_command)
+    with tempfile.TemporaryDirectory(prefix="ce-validate-pr-base-") as temp:
+        base_worktree = Path(temp) / "base"
+        add = runner(
+            ["git", "worktree", "add", "--detach", str(base_worktree), comparison_base],
+            config.repo_root,
+            None,
+        )
+        _print_streams(add, out, err)
+        if add.returncode != 0:
+            raise RuntimeError(f"could not create baseline worktree for {comparison_base}")
+        try:
+            baseline = runner(argv, base_worktree, _python_env(base_worktree, pytest=True))
+            _print_streams(baseline, out, err)
+            head = runner(argv, config.repo_root, _python_env(config.repo_root, pytest=True))
+            _print_streams(head, out, err)
+        finally:
+            remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
+            _print_streams(remove, out, err)
+
+    baseline_failures = _failure_ids(baseline)
+    head_failures = _failure_ids(head)
+    new_failures = sorted(head_failures - baseline_failures)
+    if new_failures:
+        preview = ", ".join(new_failures[:5])
+        more = "" if len(new_failures) <= 5 else f" (+{len(new_failures) - 5} more)"
+        raise RuntimeError(
+            "baseline-diff test gate found new failure(s): "
+            f"{preview}{more} (baseline={len(baseline_failures)}, head={len(head_failures)})"
+        )
+    return (
+        "zero new failures "
+        f"(baseline={len(baseline_failures)}, head={len(head_failures)}, command={config.test_command!r})"
+    )
+
+
 def _yaml_parse(paths: Sequence[Path], label: str, err: TextIO) -> None:
     import yaml
 
@@ -232,6 +385,25 @@ def _workflow_permissions_audit(repo_root: Path) -> None:
     print("OK: no write permissions found in YAML structure")
 
 
+def _run_check(name: str, func: Callable[[], str | None], out: TextIO, err: TextIO) -> CheckDetail:
+    print(f"==> {name}", file=out)
+    try:
+        detail = func() or "ok"
+    except Exception as exc:
+        detail = str(exc)
+        print(f"  FAIL {name}: {detail}", file=err)
+        return CheckDetail(name=name, ok=False, detail=detail)
+    print(f"  PASS {name}: {detail}", file=out)
+    return CheckDetail(name=name, ok=True, detail=detail)
+
+
+def _print_summary(checks: Sequence[CheckDetail], out: TextIO) -> None:
+    ok = all(check.ok for check in checks)
+    print(f"{'PASS' if ok else 'FAIL'}: PR preflight", file=out)
+    for check in checks:
+        print(f"  [{'PASS' if check.ok else 'FAIL'}] {check.name}: {check.detail}", file=out)
+
+
 def run_preflight(
     config: PreflightConfig,
     *,
@@ -239,7 +411,8 @@ def run_preflight(
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
 ) -> int:
-    """Run the local PR preflight. Prints exactly one final GREEN/FAIL summary."""
+    """Run the local PR preflight. Prints one final PASS/FAIL summary plus check detail."""
+    checks: list[CheckDetail] = []
     try:
         repo_root = _repo_root(config.repo_root, runner)
         config = PreflightConfig(
@@ -248,75 +421,150 @@ def run_preflight(
             declared_work_class=config.declared_work_class,
             head_ref=config.head_ref or current_branch(repo_root, runner),
             allow_dirty=config.allow_dirty,
+            test_command=config.test_command,
         )
-        if config.declared_work_class not in WORK_CLASSES:
-            raise RuntimeError(
-                f"declared work class {config.declared_work_class!r} is invalid; expected one of: {', '.join(WORK_CLASSES)}"
-            )
-        _assert_clean_tree(config, runner, out)
-        comparison_base = _resolve_comparison_base(config, runner, out, err)
+    except Exception as exc:
+        checks.append(CheckDetail(name="preflight setup", ok=False, detail=str(exc)))
+        _print_summary(checks, out)
+        print(f"FAIL: PR preflight failed: {exc}", file=err)
+        return 1
 
-        py_env = _python_env(config.repo_root)
-        pytest_env = _python_env(config.repo_root, pytest=True)
-        py = sys.executable
+    comparison_base: dict[str, str] = {}
+    declared_work_class: dict[str, str] = {}
+    py_env = _python_env(config.repo_root)
+    py = sys.executable
 
-        _run_checked(
-            "Creator Engine validator - pytest suite",
-            [
-                py,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                "validators/tests/",
-                "-m",
-                "not wheel_bake_gate",
-                "-q",
-                "-n",
-                "auto",
-                "--dist",
-                "loadgroup",
-            ],
-            config.repo_root,
-            runner=runner,
-            env=pytest_env,
-            out=out,
-            err=err,
+    checks.append(
+        _run_check(
+            "clean worktree",
+            lambda: (_assert_clean_tree(config, runner, out), "clean or explicitly allowed")[1],
+            out,
+            err,
         )
-
-        print("==> YAML parse check - workflow files", file=out)
-        _yaml_parse(_workflow_yaml_paths(config.repo_root), "workflow YAML parse", err)
-        print("==> YAML parse check - schemas/templates/docs/contracts/examples/playbooks", file=out)
-        _yaml_parse(_artifact_yaml_paths(config.repo_root), "artifact YAML parse", err)
-
-        _run_checked(
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "comparison base",
+            lambda: comparison_base.setdefault("value", _resolve_comparison_base(config, runner, out, err)),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "declared work class",
+            lambda: declared_work_class.setdefault(
+                "value",
+                _resolve_declared_work_class(config, comparison_base.get("value", config.base), runner),
+            ),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "baseline-diff test command",
+            lambda: _run_baseline_diff_tests(
+                config,
+                comparison_base["value"],
+                runner=runner,
+                out=out,
+                err=err,
+            ),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "YAML parse - workflow files",
+            lambda: (_yaml_parse(_workflow_yaml_paths(config.repo_root), "workflow YAML parse", err), "valid YAML")[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "YAML parse - schemas/templates/docs/contracts/examples/playbooks",
+            lambda: (
+                _yaml_parse(_artifact_yaml_paths(config.repo_root), "artifact YAML parse", err),
+                "valid YAML",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - check-examples aggregate gate",
-            [py, "-m", "creator_engine_validator", "check-examples"],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - check-examples aggregate gate",
+                    [py, "-m", "creator_engine_validator", "check-examples"],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
         )
-        _run_checked(
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - well-formed examples",
-            [py, "-m", "creator_engine_validator", "check", "examples/well-formed/"],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - well-formed examples",
+                    [py, "-m", "creator_engine_validator", "check", "examples/well-formed/"],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
         )
-        _run_checked(
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - ce_playbook_format gate",
-            [py, "-m", "creator_engine_validator", "check", "playbooks/"],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - ce_playbook_format gate",
+                    [py, "-m", "creator_engine_validator", "check", "playbooks/"],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
         )
+    )
 
+    def malformed_gate() -> str:
         print("==> Creator Engine validator - malformed examples (expect failures)", file=out)
         malformed = runner(
             [py, "-m", "creator_engine_validator", "check", "examples/malformed/"],
@@ -327,86 +575,127 @@ def run_preflight(
         if malformed.returncode == 0:
             raise RuntimeError("malformed examples unexpectedly passed")
         print("OK: malformed examples correctly rejected", file=out)
+        return "malformed examples rejected"
 
-        _run_checked(
+    checks.append(_run_check("Creator Engine validator - malformed examples", malformed_gate, out, err))
+    checks.append(
+        _run_check(
             "Creator Engine validator - list checks",
-            [py, "-m", "creator_engine_validator", "--list-checks"],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - list checks",
+                    [py, "-m", "creator_engine_validator", "--list-checks"],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
         )
-        _run_checked(
-            "Creator Engine validator - brain drift check",
-            [
-                py,
-                "-m",
-                "creator_engine_validator.ce_cli",
-                "brain",
-                "verify",
-                "--drift",
-                "--state-root",
-                ".ce/state",
-            ],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
-        )
-        _run_checked(
-            "Creator Engine validator - work-sizing floor PR-diff gate",
-            [
-                py,
-                "-m",
-                "creator_engine_validator",
-                "verify-work-sizing-floor",
-                "--base",
-                comparison_base,
-                "--declared-work-class",
-                config.declared_work_class,
-                ".",
-            ],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
-        )
-        _run_checked(
-            "Creator Engine validator - path-manifest PR-diff gate",
-            [
-                py,
-                "-m",
-                "creator_engine_validator",
-                "verify-path-manifest",
-                "--base",
-                comparison_base,
-                "--manifest-dir",
-                ".ce/pr-manifests",
-                "--head-ref",
-                config.head_ref or "",
-                "--require-carrier",
-            ],
-            config.repo_root,
-            runner=runner,
-            env=py_env,
-            out=out,
-            err=err,
-        )
-        print("==> Workflow permissions audit", file=out)
-        _workflow_permissions_audit(config.repo_root)
-    except Exception as exc:
-        print(f"FAIL: PR preflight failed: {exc}", file=err)
-        return 1
-
-    print(
-        f"GREEN: PR preflight passed for {config.head_ref} against {config.base} "
-        f"with declared work class {config.declared_work_class}",
-        file=out,
     )
-    return 0
+    checks.append(
+        _run_check(
+            "Creator Engine validator - brain drift check",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - brain drift check",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator.ce_cli",
+                        "brain",
+                        "verify",
+                        "--drift",
+                        "--state-root",
+                        ".ce/state",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Creator Engine validator - work-sizing floor PR-diff gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - work-sizing floor PR-diff gate",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator",
+                        "verify-work-sizing-floor",
+                        "--base",
+                        comparison_base["value"],
+                        "--declared-work-class",
+                        declared_work_class["value"],
+                        ".",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Creator Engine validator - path-manifest PR-diff gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - path-manifest PR-diff gate",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator",
+                        "verify-path-manifest",
+                        "--base",
+                        comparison_base["value"],
+                        "--manifest-dir",
+                        ".ce/pr-manifests",
+                        "--head-ref",
+                        config.head_ref or "",
+                        "--require-carrier",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Workflow permissions audit",
+            lambda: (_workflow_permissions_audit(config.repo_root), "no write permissions")[1],
+            out,
+            err,
+        )
+    )
+
+    _print_summary(checks, out)
+    return 0 if all(check.ok for check in checks) else 1
 
 
 def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
@@ -415,15 +704,19 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
     parser.add_argument("--base", default="origin/main", help="base branch/ref to fetch and merge-base against (default: origin/main)")
     parser.add_argument(
         "--declared-work-class",
-        required=True,
         choices=WORK_CLASSES,
-        help="declared PR work class from the PR body",
+        help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
     )
     parser.add_argument("--head-ref", default=None, help="PR head branch name for carrier slug (default: current branch)")
     parser.add_argument(
         "--allow-dirty",
         action="store_true",
         help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
+    )
+    parser.add_argument(
+        "--test-command",
+        default=DEFAULT_TEST_COMMAND,
+        help=f"test command to compare at base and HEAD (default: {DEFAULT_TEST_COMMAND})",
     )
     return parser
 
@@ -436,6 +729,7 @@ def run_cli(args: argparse.Namespace) -> int:
             declared_work_class=args.declared_work_class,
             head_ref=args.head_ref,
             allow_dirty=args.allow_dirty,
+            test_command=args.test_command,
         )
     )
 
