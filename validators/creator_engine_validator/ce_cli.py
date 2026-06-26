@@ -25,6 +25,7 @@ ce fanin inspect     # verify a fan-in packet's content hash + shape, read-only
 ce queue dry-run     # preview a serialized canonical-branch landing order, no authority (RV1-082)
 ce queue inspect     # verify a dry-run landing preview's content hash + shape, read-only
 ce queue poll        # run a bounded Integrator merge-queue repair poll
+ce dequeue           # dequeue one PR from GitHub's merge queue through the v3 forge bridge
 ce event append      # append a shape-only-signed CE-event block to a local chain (G2.003.1)
 ce event verify      # validate an on-disk CE-event chain + head manifest, read-only
 ce event sign        # refresh a draft block's shape-only signature + content hash (no crypto)
@@ -75,6 +76,7 @@ import importlib
 import json
 import os
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -172,6 +174,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # when the flag is passed, never on every command).
     version.add_version_flag(parser)
     groups = parser.add_subparsers(dest="group")
+
+    dequeue = groups.add_parser(
+        "dequeue",
+        help="dequeue one GitHub merge-queue PR through the v3 forge bridge",
+    )
+    dequeue.add_argument("pr_number", type=int, metavar="PR", help="pull request number")
+    dequeue.add_argument("--repo", required=True, help="owner/name repository scope")
+    dequeue.add_argument("--token-env", default="GH_TOKEN", help="env var containing the GitHub token")
+    dequeue.add_argument(
+        "--convert-to-draft",
+        action="store_true",
+        help="also convert the PR back to draft after dequeue",
+    )
+    dequeue.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     verify_install = groups.add_parser(
         "verify-install",
@@ -2020,6 +2036,26 @@ def _queue_inspect(args) -> int:
     return 0 if result.ok else 1
 
 
+def _dequeue(args) -> int:
+    argv = [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.v3_cli",
+        "queue-dequeue",
+        str(args.pr_number),
+        "--repo",
+        args.repo,
+        "--token-env",
+        args.token_env,
+    ]
+    if getattr(args, "convert_to_draft", False):
+        argv.append("--convert-to-draft")
+    if getattr(args, "json_output", False):
+        argv.append("--json")
+    proc = subprocess.run(argv, check=False)
+    return int(proc.returncode)
+
+
 def _event_append(args) -> int:
     try:
         event = json.loads(args.event_json)
@@ -3752,6 +3788,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.group == "dequeue":
+        return _dequeue(args)
     if args.group == "lane":
         lane_cmd = getattr(args, "lane_cmd", None)
         handler = _LANE_DISPATCH.get(lane_cmd)
