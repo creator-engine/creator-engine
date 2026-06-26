@@ -224,12 +224,10 @@ container deterministically, polls for herdr readiness, prints the
 attach/teardown commands, and returns so the operator drives the seat through
 herdr.
 
-Launch detached with the flag or the env var:
+Detached launch is the default; the flag is accepted for explicitness:
 
 ```bash
-CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --detach tui
-# or
-CE_DGX_DETACH=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
+CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 ```
 
 What detached mode changes versus foreground:
@@ -238,14 +236,20 @@ What detached mode changes versus foreground:
   (default `ce-dgx-codex`, overridable via `CE_DGX_CONTAINER_NAME`). Every other
   posture invariant is unchanged: `--runtime`, `--security-opt=no-new-privileges`,
   `--cap-drop=ALL`, `--user`, `--workdir`, `--tmpfs`, all `--env`, all `--mount`,
-  the TTY flags (`-it`, kept so the Codex TUI renders into the herdr pane), and
-  the network-refusal logic.
+  and the network-refusal logic.
+- Detached mode does not allocate a container-level TTY by default. The herdr
+  server creates the in-container PTY used by Codex, so `docker run -d` is
+  enough. Set `CE_DGX_TTY_FLAGS=-t` only for an operator-directed diagnostic
+  that proves the image entrypoint needs a Docker TTY. Legacy foreground mode
+  is available only via `--foreground` or `CE_DGX_FOREGROUND=1`; it keeps
+  `docker run --rm` and defaults to `-it`.
 - **Deliberate `--rm` decision:** detached containers are NOT removed with
   `--rm`. A crashed or stopped seat must stay inspectable — `docker logs` and the
   recorded exit code are the forensic record. A live outage was worsened because
   `--rm` deleted that state on exit. Foreground mode keeps `--rm` unchanged.
 - **Readiness poll:** after `docker run -d` returns, the script polls
-  `docker exec "${CE_DGX_CONTAINER_NAME}" herdr pane read w1:p1` in a bounded loop
+  `docker exec "${CE_DGX_CONTAINER_NAME}" herdr pane list` against the
+  container-local socket in a bounded loop
   (up to ~60 tries, 0.5s apart). If herdr never responds, the script fails loudly,
   names the container, and prints the teardown command. The poll is skipped under
   `CE_DGX_DRY_RUN=1`.
@@ -255,6 +259,28 @@ Attach to the running seat (the canonical drive path):
 ```bash
 docker exec -it ce-dgx-codex herdr
 ```
+
+No host tmux is part of that path. To verify herdr drive without tmux:
+
+```bash
+command -v tmux >/dev/null && echo "tmux present but unused" || echo "tmux absent OK"
+CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-dgx-codex herdr pane list
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-dgx-codex herdr pane read w1:p1
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-dgx-codex herdr pane send w1:p1 $'printf detached-herdr-ok\\n\\n'
+```
+
+In workspaces where Docker/runsc/herdr are unavailable, the deterministic
+verification is the dry-run argv plus unit coverage:
+
+```bash
+CE_DGX_DRY_RUN=1 ./deploy/dgx-runsc/run-codex-runsc.sh tui
+PYTHONPATH=validators python -m pytest validators/tests/unit/test_dgx_runsc.py
+```
+
+Expected dry-run evidence: `docker run -d --name ce-dgx-codex`, no `--rm`, no
+container `-t` unless `CE_DGX_TTY_FLAGS` is explicitly set, and no host `tmux`
+probe in the launcher.
 
 Retire the seat when done:
 
@@ -302,8 +328,8 @@ CE_DGX_HARNESS=codex
 CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock
 CE_DGX_SUBSTRATE_RUN_DIR=/run/creator-engine
 CE_DGX_TERMINAL_KIND=herdr
-CE_DGX_TTY_FLAGS=-it
-CE_DGX_DETACH=0
+CE_DGX_TTY_FLAGS=<empty in detached mode, -it in legacy foreground mode>
+CE_DGX_DETACH=1
 CE_DGX_CONTAINER_NAME=ce-dgx-codex
 CE_DGX_EGRESS_BROKER_SOCKET=
 CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET=/run/ce-egress-broker.sock

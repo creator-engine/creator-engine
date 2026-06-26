@@ -4,8 +4,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach] [tui] [harness args...]
-  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach] exec [harness exec args...]
+  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach|--foreground] [tui] [harness args...]
+  run-vps-runsc.sh [--dry-run] [--harness codex|claude|controller] [--detach|--foreground] exec [harness exec args...]
+
+Launch mode:
+  --detach                    Default. Launch with docker run -d under a named
+                              persistent container, poll herdr readiness, and return.
+  --foreground                Legacy migration mode. Launch foreground with docker
+                              run --rm and block the caller's terminal.
 
 Environment:
   CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64)
@@ -13,9 +19,12 @@ Environment:
   CE_VPS_DOCKER_NETWORK        Docker --network value (default: host)
   CE_VPS_HARNESS               Harness: codex, claude, or controller (default: codex)
   CE_DGX_HARNESS               Deprecated alias for CE_VPS_HARNESS
-  CE_VPS_DETACH                Launch detached (docker run -d, named-persistent) when set to 1
+  CE_VPS_DETACH                Launch detached when set to 1 (default: 1)
+  CE_VPS_FOREGROUND            Legacy foreground mode when set to 1
   CE_VPS_CONTAINER_NAME        Container --name for detached launch
                                 (default: ce-vps-<harness>, e.g. ce-vps-codex)
+  CE_VPS_DOCKER_RESTART_POLICY Detached docker --restart policy
+                                (default: empty; systemd template sets unless-stopped)
   CE_VPS_REPO                  Host repo path (default: current directory)
   CE_VPS_CODEX_HOME            Host codex home (default: $HOME/.codex)
   CE_VPS_CODEX_HOME_MODE       Mount mode for codex home: rw or ro (default: rw)
@@ -36,6 +45,7 @@ Environment:
   CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
                                 (default: ~/.ce/logs/seats/<seat-id>)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
+                                Detached default is empty; herdr owns the in-container PTY.
   CE_VPS_DRY_RUN               Print docker argv instead of executing when set to 1
 EOF
 }
@@ -60,11 +70,26 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-# --detach is parsed early (like --dry-run) so it works whether placed before
-# or after the optional --harness, as long as it precedes the tui/exec token.
-detach="${CE_VPS_DETACH:-0}"
-if [ "${1:-}" = "--detach" ]; then
-  detach=1
+detach="${CE_VPS_DETACH:-1}"
+if [ "${CE_VPS_FOREGROUND:-0}" = "1" ]; then
+  detach=0
+fi
+parse_launch_mode_flag() {
+  case "${1:-}" in
+    --detach)
+      detach=1
+      return 0
+      ;;
+    --foreground)
+      detach=0
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+if parse_launch_mode_flag "${1:-}"; then
   shift
 fi
 
@@ -78,10 +103,14 @@ if [ "${1:-}" = "--harness" ]; then
   shift 2
 fi
 
-# Allow --detach after --harness as well (parse order tolerance).
-if [ "${1:-}" = "--detach" ]; then
-  detach=1
+# Allow launch-mode flags after --harness as well (parse order tolerance).
+if parse_launch_mode_flag "${1:-}"; then
   shift
+fi
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
 fi
 
 mode="tui"
@@ -118,8 +147,8 @@ CE_VPS_CONTAINER_HOME="/home/${CE_VPS_CONTAINER_USER}"
 CE_VPS_CONTAINER_CODEX_HOME="${CE_VPS_CONTAINER_HOME}/.codex"
 CE_VPS_UID="${CE_VPS_UID:-$(id -u)}"
 CE_VPS_GID="${CE_VPS_GID:-$(id -g)}"
-CE_VPS_TTY_FLAGS="${CE_VPS_TTY_FLAGS:--it}"
 CE_VPS_CONTAINER_NAME="${CE_VPS_CONTAINER_NAME:-ce-vps-${harness}}"
+CE_VPS_DOCKER_RESTART_POLICY="${CE_VPS_DOCKER_RESTART_POLICY:-}"
 CE_VPS_SEAT_ID="${CE_VPS_SEAT_ID:-${CE_VPS_CONTAINER_NAME}}"
 CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
@@ -326,6 +355,13 @@ if [ "${dry_run}" != "1" ]; then
   backup_stale_herdr_session "${CE_VPS_SEAT_LOG_DIR}"
 fi
 
+if [ "${CE_VPS_TTY_FLAGS+x}" != "x" ]; then
+  if [ "${detach}" = "1" ]; then
+    CE_VPS_TTY_FLAGS=""
+  else
+    CE_VPS_TTY_FLAGS="-it"
+  fi
+fi
 tty_flags=()
 if [ -n "${CE_VPS_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_VPS_TTY_FLAGS}"
@@ -364,6 +400,9 @@ fi
 docker_run_flags=()
 if [ "${detach}" = "1" ]; then
   docker_run_flags+=(-d --name "${CE_VPS_CONTAINER_NAME}")
+  if [ -n "${CE_VPS_DOCKER_RESTART_POLICY}" ]; then
+    docker_run_flags+=("--restart=${CE_VPS_DOCKER_RESTART_POLICY}")
+  fi
 else
   docker_run_flags+=(--rm)
   if [ "${mode}" = "tui" ]; then

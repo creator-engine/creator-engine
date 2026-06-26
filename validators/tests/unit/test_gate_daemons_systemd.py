@@ -9,6 +9,7 @@ SERVICE_NAMES = (
     "ce-integrator-daemon.service",
     "ce-review-pickup-daemon.service",
 )
+SEAT_UNIT_NAME = "ce-codex-seat@.service"
 
 
 def _read_unit(repo_root: Path, name: str) -> configparser.ConfigParser:
@@ -31,6 +32,32 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
         assert unit["Service"]["ExecStart"].startswith(".venv/bin/python -m creator_engine_validator.v3_cli ")
+
+
+def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
+    unit = _read_unit(repo_root, SEAT_UNIT_NAME)
+    service = unit["Service"]
+
+    assert unit.has_section("Unit")
+    assert unit.has_section("Service")
+    assert unit.has_section("Install")
+    assert unit["Unit"]["Requires"] == "docker.service"
+    assert service["Type"] == "oneshot"
+    assert service["RemainAfterExit"] == "yes"
+    assert service["WorkingDirectory"] == "/workspace/creator-engine"
+    assert "CE_DGX_DETACH=1" in service.get("Environment", "")
+    assert "CE_VPS_DETACH=1" in service.get("Environment", "")
+    assert "CE_DGX_DOCKER_RESTART_POLICY=unless-stopped" in service.get(
+        "Environment", ""
+    )
+    assert "CE_VPS_DOCKER_RESTART_POLICY=unless-stopped" in service.get(
+        "Environment", ""
+    )
+    assert service["EnvironmentFile"] == "-/etc/creator-engine/ce-codex-seat-%i.env"
+    assert service["ExecStart"] == '/bin/bash -lc \'"${CE_CODEX_SEAT_LAUNCHER}" --detach tui\''
+    assert service["ExecStop"] == '/bin/bash -lc \'docker rm -f "${CE_CODEX_SEAT_CONTAINER_NAME}"\''
+    assert service["Restart"] == "on-failure"
+    assert service["RestartSec"] == "15s"
 
 
 def test_integrator_unit_execstart(repo_root: Path):

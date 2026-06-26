@@ -4,17 +4,19 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  run-codex-runsc.sh [--dry-run] [--detach] [tui] [codex args...]
-  run-codex-runsc.sh [--dry-run] [--detach] exec [codex exec args...]
+  run-codex-runsc.sh [--dry-run] [--detach|--foreground] [tui] [codex args...]
+  run-codex-runsc.sh [--dry-run] [--detach|--foreground] exec [codex exec args...]
 
 Detached mode:
-  --detach                  Launch with `docker run -d` under a named persistent
+  --detach                  Default. Launch with `docker run -d` under a named persistent
                             container (default name: ce-dgx-codex) instead of the
                             foreground `docker run --rm`. The script polls for
                             herdr readiness, prints attach/teardown commands, and
                             returns 0 without blocking. A crashed seat is left
                             inspectable (`docker logs`, exit code) because the
                             detached container is NOT removed with --rm.
+  --foreground              Legacy migration mode. Launch foreground with docker
+                            run --rm and block the caller's terminal.
 
 Environment:
   CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
@@ -43,8 +45,13 @@ Environment:
   CE_DGX_SEAT_LOG_DIR       Host log dir mounted at /var/log/ce-seat
                             (default: ~/.ce/logs/seats/<seat-id>)
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
+                            Detached default is empty; herdr owns the in-container PTY.
   CE_DGX_DETACH             Launch detached (docker run -d, named container) when set to 1
+                            (default: 1)
+  CE_DGX_FOREGROUND         Legacy foreground mode when set to 1
   CE_DGX_CONTAINER_NAME     Detached container name (default: ce-dgx-codex)
+  CE_DGX_DOCKER_RESTART_POLICY Detached docker --restart policy
+                            (default: empty; systemd template sets unless-stopped)
   CE_DGX_DRY_RUN            Print docker argv instead of executing when set to 1
   CE_DGX_ALLOW_PLAIN_RUNSC  Allow CE_DGX_RUNTIME=runsc despite DGX root-netns failure (default: 0)
   CE_DGX_ALLOW_SYSTRAP_CODEX
@@ -69,9 +76,26 @@ if [ "${1:-}" = "--dry-run" ]; then
   dry_run=1
   shift
 fi
-detach="${CE_DGX_DETACH:-0}"
-if [ "${1:-}" = "--detach" ]; then
-  detach=1
+detach="${CE_DGX_DETACH:-1}"
+if [ "${CE_DGX_FOREGROUND:-0}" = "1" ]; then
+  detach=0
+fi
+parse_launch_mode_flag() {
+  case "${1:-}" in
+    --detach)
+      detach=1
+      return 0
+      ;;
+    --foreground)
+      detach=0
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+if parse_launch_mode_flag "${1:-}"; then
   shift
 fi
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -100,8 +124,8 @@ CE_DGX_CONTAINER_HOME="/home/${CE_DGX_CONTAINER_USER}"
 CE_DGX_CONTAINER_CODEX_HOME="${CE_DGX_CONTAINER_HOME}/.codex"
 CE_DGX_UID="${CE_DGX_UID:-$(id -u)}"
 CE_DGX_GID="${CE_DGX_GID:-$(id -g)}"
-CE_DGX_TTY_FLAGS="${CE_DGX_TTY_FLAGS:--it}"
 CE_DGX_CONTAINER_NAME="${CE_DGX_CONTAINER_NAME:-ce-dgx-codex}"
+CE_DGX_DOCKER_RESTART_POLICY="${CE_DGX_DOCKER_RESTART_POLICY:-}"
 CE_DGX_SEAT_ID_EXPLICIT=0
 if [ "${CE_DGX_SEAT_ID+x}" = "x" ]; then
   CE_DGX_SEAT_ID_EXPLICIT=1
@@ -354,6 +378,13 @@ if [ "${dry_run}" != "1" ]; then
   backup_stale_herdr_session "${CE_DGX_SEAT_LOG_DIR}"
 fi
 
+if [ "${CE_DGX_TTY_FLAGS+x}" != "x" ]; then
+  if [ "${detach}" = "1" ]; then
+    CE_DGX_TTY_FLAGS=""
+  else
+    CE_DGX_TTY_FLAGS="-it"
+  fi
+fi
 tty_flags=()
 if [ -n "${CE_DGX_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_DGX_TTY_FLAGS}"
@@ -383,6 +414,9 @@ fi
 lifecycle_flags=(--rm)
 if [ "${detach}" = "1" ]; then
   lifecycle_flags=(-d --name "${CE_DGX_CONTAINER_NAME}")
+  if [ -n "${CE_DGX_DOCKER_RESTART_POLICY}" ]; then
+    lifecycle_flags+=("--restart=${CE_DGX_DOCKER_RESTART_POLICY}")
+  fi
 elif [ "${mode}" = "tui" ]; then
   lifecycle_flags=(--rm --name "${CE_DGX_CONTAINER_NAME}")
 fi

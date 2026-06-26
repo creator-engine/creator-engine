@@ -24,7 +24,8 @@ CE_VPS_CODEX_PACKAGE_ROOT=<autodetected for npm @openai/codex installs>
 CE_VPS_CONTAINER_REPO=/workspace/creator-engine
 CE_VPS_UID=$(id -u)
 CE_VPS_GID=$(id -g)
-CE_VPS_TTY_FLAGS=-it
+CE_VPS_TTY_FLAGS=<empty in detached mode, -it in legacy foreground mode>
+CE_VPS_DETACH=1
 ```
 
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
@@ -48,10 +49,10 @@ The launcher always applies (in both foreground and detached mode):
 ## Detached launch (canonical)
 
 The canonical way to drive a contained VPS seat is a detached, named-persistent
-launch. Pass `--detach` (or set `CE_VPS_DETACH=1`):
+launch. Detached is the default; `--detach` is accepted as an explicit no-op:
 
 ```bash
-CE_VPS_REPO="$PWD" deploy/vps-runsc/run-vps-runsc.sh --detach tui
+CE_VPS_REPO="$PWD" deploy/vps-runsc/run-vps-runsc.sh tui
 ```
 
 Detached mode runs `docker run -d --name <name>` instead of `docker run --rm`:
@@ -67,20 +68,46 @@ Detached mode runs `docker run -d --name <name>` instead of `docker run --rm`:
   `--security-opt=no-new-privileges`, `--cap-drop=ALL`, `--user`, every mount
   and non-credential env, the generated contained config) are identical to
   foreground mode.
-- TTY flags (`-it` by default) are preserved so the harness TUI renders into the
-  herdr pane.
+- Detached mode does not allocate a container-level TTY by default. The herdr
+  server creates the in-container PTY used by the harness, so `docker run -d`
+  is enough. Set `CE_VPS_TTY_FLAGS=-t` only for an operator-directed diagnostic
+  that proves the image entrypoint needs a Docker TTY.
+- Legacy foreground mode is available only via `--foreground` or
+  `CE_VPS_FOREGROUND=1`; it keeps `docker run --rm` and defaults to `-it`.
 
 After `docker run -d` returns, the launcher polls
-`docker exec <name> herdr pane read w1:p1` in a bounded loop (up to ~60 tries,
-0.5s apart). If herdr never responds it fails loudly, naming the container and
-printing the teardown command. On success it prints the attach hint and the
-retire command.
+`docker exec <name> herdr pane list` against the container-local socket in a
+bounded loop (up to ~60 tries, 0.5s apart). If herdr never responds it fails
+loudly, naming the container and printing the teardown command. On success it
+prints the attach hint and the retire command.
 
 The **canonical drive path** is then to attach to herdr:
 
 ```bash
 docker exec -it ce-vps-codex herdr
 ```
+
+No host tmux is part of that path. To verify herdr drive without tmux:
+
+```bash
+command -v tmux >/dev/null && echo "tmux present but unused" || echo "tmux absent OK"
+CE_VPS_REPO="$PWD" deploy/vps-runsc/run-vps-runsc.sh tui
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane list
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane read w1:p1
+docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane send w1:p1 $'printf detached-herdr-ok\\n\\n'
+```
+
+In workspaces where Docker/runsc/herdr are unavailable, the deterministic
+verification is the dry-run argv plus unit coverage:
+
+```bash
+CE_VPS_DRY_RUN=1 deploy/vps-runsc/run-vps-runsc.sh tui
+PYTHONPATH=validators python -m pytest validators/tests/unit/test_vps_runsc_launcher.py
+```
+
+Expected dry-run evidence: `docker run -d --name ce-vps-codex`, no `--rm`, no
+container `-t` unless `CE_VPS_TTY_FLAGS` is explicitly set, and no host `tmux`
+probe in the launcher.
 
 Retire the seat when done:
 
@@ -108,8 +135,7 @@ the Docker group so new shells inherit the group membership:
 sudo usermod -aG docker <seat-user>
 ```
 
-Stage a clean home before launching the contained TUI (foreground form shown;
-prefer the detached launch above for durable seats):
+Stage a clean home before launching the contained TUI:
 
 ```bash
 deploy/vps-runsc/run-vps-runsc.sh tui
