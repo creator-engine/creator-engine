@@ -1,10 +1,9 @@
 """Integration tests for the bundled harness-seat-contract fixtures + the hook-pack template.
 
-The valid example (modeling the committed Claude Code seat) passes the
-`harness_seat_contract` check; each invalid fixture fails with its specific `VAL-SEAT-*`
-code; `templates/hook-pack.template.yaml` independently validates against the G2.006.0
-`extension_hook_contract`; and the check is registered + surfaces end-to-end through
-`ce check`. Offline.
+The valid examples pass the `harness_seat_contract` check; each invalid fixture fails
+with its specific `VAL-SEAT-*` code; `templates/hook-pack.template.yaml` independently
+validates against the G2.006.0 `extension_hook_contract`; and the check is registered +
+surfaces end-to-end through `ce check`. Offline.
 """
 from pathlib import Path
 
@@ -15,7 +14,9 @@ from creator_engine_validator.checks import harness_seat_contract as h
 from creator_engine_validator.cli import main
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EXAMPLES = REPO_ROOT / "validators" / "examples" / "harness-seat-contract"
+LEGACY_EXAMPLES = REPO_ROOT / "validators" / "examples" / "harness-seat-contract"
+WELL_FORMED = REPO_ROOT / "examples" / "well-formed" / "harness-seat-contract"
+MALFORMED = REPO_ROOT / "examples" / "malformed" / "harness-seat-contract"
 TEMPLATE = REPO_ROOT / "templates" / "hook-pack.template.yaml"
 
 
@@ -25,26 +26,24 @@ def _cwd_repo_root(monkeypatch):
 
 
 def _codes(name: str) -> set[str]:
-    return {err.code for err in h.run_harness_seat_contract([EXAMPLES / name]).errors}
+    return {err.code for err in h.run_harness_seat_contract([MALFORMED / name]).errors}
 
 
-@pytest.mark.parametrize("name", [
-    "valid-claude-code-seat.ce.yml",   # G2.007.0 reference instance
-    "valid-codex-seat.ce.yml",         # G2.007.1: codex binds --yolo
-    "valid-hermes-seat.ce.yml",        # G2.007.1: hermes binds --profile creator-engine
-    "valid-openclaw-seat.ce.yml",      # G2.007.1: openclaw SEAM (full_permission_mode: false)
+@pytest.mark.parametrize("path", [
+    WELL_FORMED / "complete-foreman-dispatch.yaml",
+    LEGACY_EXAMPLES / "valid-claude-code-seat.ce.yml",
+    LEGACY_EXAMPLES / "valid-codex-seat.ce.yml",
+    LEGACY_EXAMPLES / "valid-hermes-seat.ce.yml",
+    LEGACY_EXAMPLES / "valid-openclaw-seat.ce.yml",
 ])
-def test_valid_examples_pass(name):
-    assert h.run_harness_seat_contract([EXAMPLES / name]).errors == ()
+def test_valid_examples_pass(path):
+    assert h.run_harness_seat_contract([path]).errors == ()
 
 
 @pytest.mark.parametrize("name,code", [
-    ("invalid-unknown-harness.ce.yml", "VAL-SEAT-HARNESS"),
-    ("invalid-full-permission-without-ring0.ce.yml", "VAL-SEAT-FULL-PERMISSION"),
-    ("invalid-permission-flag-mismatch.ce.yml", "VAL-SEAT-PERMISSION-FLAG"),
-    ("invalid-permits-prohibited-flag.ce.yml", "VAL-SEAT-PROHIBITED"),
-    ("invalid-nondefeasible-hookpack.ce.yml", "VAL-SEAT-HOOKPACK"),
-    ("invalid-hermes-flag-mismatch.ce.yml", "VAL-SEAT-PERMISSION-FLAG"),  # G2.007.1 hermes binding
+    ("missing-foreman-dispatch.yaml", "VAL-SEAT-FOREMAN-DISPATCH"),
+    ("incomplete-foreman-dispatch.yaml", "VAL-SEAT-FOREMAN-DISPATCH"),
+    ("unpinned-foreman-dispatch.yaml", "VAL-SEAT-FOREMAN-DISPATCH"),
 ])
 def test_invalid_examples_emit_expected_code(name, code):
     assert code in _codes(name)
@@ -60,10 +59,11 @@ def test_list_checks_includes_harness_seat_contract(capsys):
     out = capsys.readouterr().out
     assert "harness_seat_contract" in out
     assert "VAL-SEAT-FULL-PERMISSION" in out
+    assert "VAL-SEAT-FOREMAN-DISPATCH" in out
 
 
 def test_cli_check_surfaces_failure_end_to_end(capsys):
-    assert main(["check", "validators/examples/harness-seat-contract/invalid-full-permission-without-ring0.ce.yml"]) == 1
+    assert main(["check", "examples/malformed/harness-seat-contract/unpinned-foreman-dispatch.yaml"]) == 1
     out = capsys.readouterr().out
     assert "FAIL harness_seat_contract" in out
-    assert "VAL-SEAT-FULL-PERMISSION" in out
+    assert "VAL-SEAT-FOREMAN-DISPATCH" in out

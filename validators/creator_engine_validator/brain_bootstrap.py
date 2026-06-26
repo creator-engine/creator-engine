@@ -31,6 +31,8 @@ BOOTSTRAP_REF_ENV = "CE_BRAIN_BOOTSTRAP_REF"
 BOOTSTRAP_SHA256_ENV = "CE_BRAIN_BOOTSTRAP_SHA256"
 FOREMAN_CHARTER_ID = "ce-ops#163-born-a-foreman"
 WORKER_SPAWN_CAPABILITY_ID = "ce-ops#163-worker-spawn"
+FOREMAN_DISPATCH_CONTRACT_ID = "ce-ops#163-launch-pinned-foreman-dispatch"
+REQUIRED_FOREMAN_DISPATCH_ROLES = ("researcher", "implementer", "reviewer")
 
 FOREMAN_CHARTER = {
     "id": FOREMAN_CHARTER_ID,
@@ -62,6 +64,28 @@ WORKER_SPAWN_CAPABILITY = {
         "value-free-worker-record",
         "launch-runtime-governed-seat",
     ],
+}
+
+FOREMAN_DISPATCH_CONTRACT = {
+    "id": FOREMAN_DISPATCH_CONTRACT_ID,
+    "mandatory": True,
+    "enforcement": "launch-pinned-non-optional",
+    "contract_ref": "docs/contracts/harness-seat-contract.md#foreman_dispatch",
+    "launch_pinned": True,
+    "roles": {
+        "researcher": {
+            "dispatch_capability": "multi_agent researcher dispatch",
+            "dispatch_surface": ["multi_agent.researcher"],
+        },
+        "implementer": {
+            "dispatch_capability": "multi_agent implementer dispatch",
+            "dispatch_surface": ["multi_agent.implementer"],
+        },
+        "reviewer": {
+            "dispatch_capability": "multi_agent reviewer dispatch",
+            "dispatch_surface": ["multi_agent.reviewer"],
+        },
+    },
 }
 
 
@@ -135,6 +159,55 @@ def payload_env(path: Path | str, sha256: str) -> dict[str, str]:
     }
 
 
+def validate_foreman_dispatch_contract(contract: Any | None = None) -> tuple[str, ...]:
+    rec = FOREMAN_DISPATCH_CONTRACT if contract is None else contract
+    errors: list[str] = []
+    if not isinstance(rec, dict):
+        return ("foreman_dispatch_contract must be a mapping",)
+    if rec.get("id") != FOREMAN_DISPATCH_CONTRACT_ID:
+        errors.append(f"foreman_dispatch_contract.id must be {FOREMAN_DISPATCH_CONTRACT_ID!r}")
+    if rec.get("mandatory") is not True:
+        errors.append("foreman_dispatch_contract.mandatory must be true")
+    if rec.get("enforcement") != "launch-pinned-non-optional":
+        errors.append("foreman_dispatch_contract.enforcement must be launch-pinned-non-optional")
+    if rec.get("launch_pinned") is not True:
+        errors.append("foreman_dispatch_contract.launch_pinned must be true")
+    contract_ref = rec.get("contract_ref")
+    if not isinstance(contract_ref, str) or not contract_ref.strip():
+        errors.append("foreman_dispatch_contract.contract_ref must be non-empty")
+    roles = rec.get("roles")
+    if not isinstance(roles, dict):
+        errors.append("foreman_dispatch_contract.roles must be a mapping")
+        return tuple(errors)
+    for role in REQUIRED_FOREMAN_DISPATCH_ROLES:
+        role_config = roles.get(role)
+        if not isinstance(role_config, dict):
+            errors.append(f"foreman_dispatch_contract.roles.{role} must be a mapping")
+            continue
+        capability = role_config.get("dispatch_capability")
+        if not isinstance(capability, str) or not capability.strip():
+            errors.append(f"foreman_dispatch_contract.roles.{role}.dispatch_capability must be non-empty")
+        surface = role_config.get("dispatch_surface")
+        if (
+            not isinstance(surface, list)
+            or not surface
+            or not all(isinstance(entry, str) and entry.strip() for entry in surface)
+        ):
+            errors.append(f"foreman_dispatch_contract.roles.{role}.dispatch_surface must be a non-empty string list")
+    return tuple(errors)
+
+
+def require_foreman_dispatch_contract(contract: Any | None = None) -> dict[str, Any]:
+    rec = FOREMAN_DISPATCH_CONTRACT if contract is None else contract
+    errors = validate_foreman_dispatch_contract(rec)
+    if errors:
+        raise BrainBootstrapRefused(
+            "brain bootstrap refused missing or malformed launch-pinned foreman dispatch contract",
+            errors=errors,
+        )
+    return copy.deepcopy(rec)
+
+
 def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
     role = _require_non_empty_string("role", request.role)
     seat_class = resolve_seat_class(request.seat_class)
@@ -186,6 +259,7 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
 def _foreman_operating_mode() -> dict[str, Any]:
     return {
         "foreman_charter": copy.deepcopy(FOREMAN_CHARTER),
+        "foreman_dispatch_contract": require_foreman_dispatch_contract(),
         "capabilities": {
             "worker_spawn": copy.deepcopy(WORKER_SPAWN_CAPABILITY),
         },

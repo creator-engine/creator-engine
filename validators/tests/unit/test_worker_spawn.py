@@ -211,6 +211,27 @@ def test_dry_run_has_no_side_effect_and_does_not_call_launcher(tmp_path):
     assert result.record["dry_run"] is True
 
 
+def test_spawn_refuses_missing_foreman_contract_before_record_or_launcher(tmp_path, monkeypatch):
+    parent, worker = _worktrees(tmp_path)
+    launcher = FakeLauncher()
+    monkeypatch.setattr(worker_spawn.brain_bootstrap, "FOREMAN_DISPATCH_CONTRACT", None)
+
+    with pytest.raises(worker_spawn.WorkerForemanContractRefused):
+        worker_spawn.spawn_worker(
+            role="implementer",
+            harness="claude",
+            worktree=worker,
+            scope_id="ce-ops#163",
+            brief="build it",
+            parent_worktree=parent,
+            environ={},
+            launcher=launcher,
+        )
+
+    assert launcher.calls == []
+    assert not (worker / ".ce/state/workers").exists()
+
+
 def test_live_spawn_uses_injected_launcher_and_writes_value_free_record(tmp_path):
     parent, worker = _worktrees(tmp_path)
     launcher = FakeLauncher()

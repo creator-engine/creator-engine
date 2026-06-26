@@ -33,6 +33,24 @@ def _valid() -> dict:
         },
         "refused_modes": ["bare", "print_headless", "background_agents", "remote_control", "settings_local_weakening"],
         "enforcement_ring": "ring_0",
+        "foreman_dispatch": {
+            "launch_pinned": True,
+            "contract_ref": "docs/contracts/harness-seat-contract.md",
+            "roles": {
+                "researcher": {
+                    "dispatch_capability": "multi_agent researcher dispatch",
+                    "dispatch_surface": ["multi_agent.researcher"],
+                },
+                "implementer": {
+                    "dispatch_capability": "multi_agent implementer dispatch",
+                    "dispatch_surface": ["multi_agent.implementer"],
+                },
+                "reviewer": {
+                    "dispatch_capability": "multi_agent reviewer dispatch",
+                    "dispatch_surface": ["multi_agent.reviewer"],
+                },
+            },
+        },
         "required_hook_pack": {
             "extension_id": "ext-ce-claude-hook-pack",
             "extension_kind": "hook_pack",
@@ -137,6 +155,24 @@ def test_openclaw_seam_no_flag_passes(tmp_path):
         r["launch_posture"].update(full_permission_mode=False, ring0_hook_pack_confirmed=False)
         r["launch_posture"].pop("permission_mode_flag", None)
     assert _codes(tmp_path, to_openclaw) == set()
+
+
+# --- deterministic foreman dispatch (ce-ops#163) ---
+def test_missing_foreman_dispatch_rejected(tmp_path):
+    assert "VAL-SEAT-FOREMAN-DISPATCH" in _codes(tmp_path, lambda r: r.pop("foreman_dispatch"))
+
+
+def test_unpinned_foreman_dispatch_rejected(tmp_path):
+    assert "VAL-SEAT-FOREMAN-DISPATCH" in _codes(tmp_path, lambda r: r["foreman_dispatch"].update(launch_pinned=False))
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda r: r["foreman_dispatch"]["roles"].pop("reviewer"),
+    lambda r: r["foreman_dispatch"]["roles"]["implementer"].update(dispatch_surface=[]),
+    lambda r: r["foreman_dispatch"]["roles"]["researcher"].update(dispatch_capability=""),
+])
+def test_incomplete_foreman_dispatch_rejected(tmp_path, mutate):
+    assert "VAL-SEAT-FOREMAN-DISPATCH" in _codes(tmp_path, mutate)
 
 
 # --- required hook-pack (G2.006.0 reuse) ---

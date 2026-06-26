@@ -341,6 +341,16 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
         ) from exc
 
 
+def _require_launch_pinned_foreman_contract() -> None:
+    try:
+        brain_bootstrap.require_foreman_dispatch_contract()
+    except brain_bootstrap.BrainBootstrapRefused as exc:
+        details = "; ".join(exc.errors) if exc.errors else str(exc)
+        raise BrainBootstrapLaunchRefused(
+            f"refusing Controller launch before spawn: {details}"
+        ) from exc
+
+
 def _materialize_brain_bootstrap(
     *,
     seat_dir: Path,
@@ -409,6 +419,7 @@ def launch(
         dry_run=dry_run,
         extra_args=extra_args,
     )
+    _require_launch_pinned_foreman_contract()
 
     # The CE-owned strict MCP config path for the claude harness, resolved in the
     # Ring-0 branch below and provisioned just before the tmux spawn (defect-a).

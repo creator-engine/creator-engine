@@ -1,4 +1,4 @@
-"""ce-ops#220 harness-support capability matrix tests."""
+"""Harness-support capability matrix tests."""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ def test_matrix_covers_required_harnesses_and_columns():
 def test_matrix_payload_is_json_safe():
     payload = json.loads(hm.render_json(_matrix()))
     assert payload["kind"] == "harness-support-matrix"
-    assert payload["issue"] == "ce-ops#220"
+    assert payload["issue"] == "harness-support-matrix"
     assert payload["capabilities"] == list(hm.CAPABILITIES)
     assert [row["harness"] for row in payload["rows"]] == list(hm.HARNESSES)
 

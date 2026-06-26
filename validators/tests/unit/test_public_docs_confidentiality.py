@@ -7,9 +7,9 @@ content:
 1. **Confidential ``ce-ops#NNN`` ticket references.** The ``ce-ops`` tracker is
    a private, internal issue tracker. Its ticket numbers must never appear in
    any public doc.
-2. **Internal host / network identifiers.** Tailnet hostnames, the internal VPS
-   IP, and the hosting-provider name are internal fleet topology and must never
-   appear in any public doc.
+2. **Internal host / network identifiers.** Tailnet hostnames, seat-login
+   markers, the internal VPS IP, and the hosting-provider name are internal
+   fleet topology and must never appear in any public doc.
 
 The guard scans the public doc surface (``README.md`` plus ``docs/**``) and
 fails the build, listing every offending file and line, if a forbidden pattern
@@ -41,6 +41,7 @@ _SELF = Path(__file__).resolve()
 # debuggable failure output.
 _FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("confidential ce-ops# ticket reference", re.compile(r"ce-ops#\d+")),
+    ("internal seat-login marker", re.compile(r"\bce-dev-\d+\b")),
     ("internal tailnet hostname", re.compile(r"\.tailf3cfef\.ts\.net")),
     ("internal VPS IP", re.compile(r"100\.72\.252\.20")),
     ("internal hosting-provider name", re.compile(r"Hetzner")),
@@ -118,9 +119,16 @@ def _public_doc_files() -> list[Path]:
     return files
 
 
-def _offenses(path: Path) -> list[str]:
+def _display_rel(path: Path, *, repo_root: Path = _REPO_ROOT) -> str:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _offenses(path: Path, *, repo_root: Path = _REPO_ROOT) -> list[str]:
     """Return ``"<rel>:<line> [<label>] <line-text>"`` for each offending line."""
-    rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
+    rel = _display_rel(path, repo_root=repo_root)
     hits: list[str] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -132,6 +140,24 @@ def _offenses(path: Path) -> list[str]:
             if pattern.search(line):
                 hits.append(f"{rel}:{lineno} [{label}] {line.strip()}")
     return hits
+
+
+def test_offenses_reports_planted_confidential_ticket_ref(tmp_path: Path):
+    doc = tmp_path / "README.md"
+    doc.write_text("Public prose must not mention ce-ops#123.\n", encoding="utf-8")
+
+    hits = _offenses(doc, repo_root=tmp_path)
+
+    assert len(hits) == 1
+    assert "README.md:1 [confidential ce-ops# ticket reference]" in hits[0]
+
+
+def test_offenses_accepts_clean_temp_doc(tmp_path: Path):
+    doc = tmp_path / "docs" / "clean.md"
+    doc.parent.mkdir()
+    doc.write_text("Public prose with no internal ticket, seat, or host markers.\n", encoding="utf-8")
+
+    assert _offenses(doc, repo_root=tmp_path) == []
 
 
 # --------------------------------------------------------------------------
