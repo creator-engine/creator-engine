@@ -16,6 +16,7 @@ import yaml
 
 from creator_engine_validator import ce_cli, worker_runtime
 from creator_engine_validator import worker_spawn
+from creator_engine_validator import worker_run
 
 
 _POLICY_SHA = "a" * 64
@@ -70,11 +71,48 @@ class FakeSpawnLauncher:
         return worker_spawn.WorkerLaunchOutcome(
             spawned=True,
             attached=False,
-            terminal={"kind": "tmux", "session_id": plan.worker_id, "window_id": "worker"},
+            terminal={
+                "kind": "tmux",
+                "session_id": plan.worker_id,
+                "window_id": "worker",
+                "pane_id": "%99",
+            },
             events_ref=f"{plan.worktree_path}/.ce/state/workers/{plan.worker_id}/events.jsonl",
             seat_record_ref=f"{plan.worktree_path}/.ce/state/active-work-ledger/seats/{plan.worker_id}.yaml",
             seat_lifecycle_state="active",
         )
+
+
+class FakeRunSeeder:
+    def __init__(self):
+        self.calls = []
+
+    def seed(self, **kwargs):
+        self.calls.append(kwargs)
+        return worker_run.render_seed_instruction(
+            prompt_path=kwargs["prompt_path"],
+            findings_path=kwargs["findings_path"],
+        )
+
+
+class FakeRunCollector:
+    def __init__(self):
+        self.calls = []
+
+    def collect(self, **kwargs):
+        self.calls.append(kwargs)
+        kwargs["findings_path"].write_text(
+            yaml.safe_dump(
+                {
+                    "status": "completed",
+                    "summary": "cli round trip",
+                    "findings": [{"kind": "cli", "message": "ok"}],
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        return worker_run.normalize_findings(kwargs["findings_path"])
 
 
 def _write(path: Path, record: dict) -> Path:
@@ -208,6 +246,13 @@ def test_worker_help_is_reachable():
     assert exc.value.code == 0
 
 
+def test_worker_run_help_is_discoverable(capsys):
+    with pytest.raises(SystemExit) as exc:
+        ce_cli.main(["worker", "--help"])
+    assert exc.value.code == 0
+    assert "run" in capsys.readouterr().out
+
+
 def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     worktree = tmp_path / "worker"
@@ -285,3 +330,109 @@ def test_worker_spawn_live_uses_injected_launcher_and_scrubs_tokens(
     assert "github_pat_secret" not in stdout_text
     assert str(controller_home / ".config" / "gh") not in stdout_text
     assert str(controller_home / ".ssh" / "agent.sock") not in stdout_text
+
+
+def test_worker_run_cli_round_trip_uses_injected_launch_and_collector(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    roles = repo / ".claude" / "agents"
+    roles.mkdir(parents=True)
+    (roles / "architect_research.md").write_text(
+        "---\n"
+        "name: architect_research\n"
+        "tools: Read, Grep, Glob, WebFetch, WebSearch\n"
+        "---\n"
+        "# Architect Research\n",
+        encoding="utf-8",
+    )
+    brief = tmp_path / "brief.md"
+    brief.write_text("research this\n", encoding="utf-8")
+    launcher = FakeSpawnLauncher()
+    seeder = FakeRunSeeder()
+    collector = FakeRunCollector()
+    monkeypatch.setattr(ce_cli, "_make_worker_run_launcher", lambda: launcher)
+    monkeypatch.setattr(ce_cli, "_make_worker_run_seeder", lambda: seeder)
+    monkeypatch.setattr(ce_cli, "_make_worker_run_collector", lambda timeout: collector)
+
+    rc = ce_cli.main([
+        "worker", "run",
+        "--role", "architect_research",
+        "--brief", str(brief),
+        "--repo-root", str(repo),
+        "--worktree", str(repo),
+        "--run-id", "ce259-cli",
+        "--worker-id", "ce259-cli-worker",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["run_id"] == "ce259-cli"
+    assert payload["role"]["name"] == "architect_research"
+    assert payload["findings"]["findings"] == [{"kind": "cli", "message": "ok"}]
+    assert len(launcher.calls) == 1
+    assert launcher.calls[0].role == "architect_research"
+    assert len(seeder.calls) == 1
+    assert str(seeder.calls[0]["prompt_path"]).endswith("prompt.md")
+    assert str(seeder.calls[0]["findings_path"]).endswith("findings.yaml")
+    assert len(collector.calls) == 1
+
+
+def test_worker_run_cli_defaults_worktree_to_repo_root(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    roles = repo / ".claude" / "agents"
+    roles.mkdir(parents=True)
+    (roles / "architect_research.md").write_text(
+        "---\n"
+        "name: architect_research\n"
+        "tools: Read, Grep, Glob, WebFetch, WebSearch\n"
+        "---\n"
+        "# Architect Research\n",
+        encoding="utf-8",
+    )
+    brief = tmp_path / "brief.md"
+    brief.write_text("research this\n", encoding="utf-8")
+    launcher = FakeSpawnLauncher()
+    seeder = FakeRunSeeder()
+    collector = FakeRunCollector()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ce_cli, "_make_worker_run_launcher", lambda: launcher)
+    monkeypatch.setattr(ce_cli, "_make_worker_run_seeder", lambda: seeder)
+    monkeypatch.setattr(ce_cli, "_make_worker_run_collector", lambda timeout: collector)
+
+    rc = ce_cli.main([
+        "worker", "run",
+        "--role", "architect_research",
+        "--brief", str(brief),
+        "--repo-root", ".",
+        "--run-id", "ce259-default-worktree",
+        "--worker-id", "ce259-default-worker",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = yaml.safe_load(capsys.readouterr().out)
+    assert payload["run_id"] == "ce259-default-worktree"
+    assert len(launcher.calls) == 1
+    assert launcher.calls[0].worktree_path == repo.resolve()
+    assert launcher.calls[0].role == "architect_research"
+
+
+def test_worker_run_cli_unknown_role_fails_closed(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "agents").mkdir(parents=True)
+    brief = tmp_path / "brief.md"
+    brief.write_text("brief\n", encoding="utf-8")
+
+    rc = ce_cli.main([
+        "worker", "run",
+        "--role", "unknown",
+        "--brief", str(brief),
+        "--repo-root", str(repo),
+    ])
+
+    assert rc == 1
+    assert "CE259-WORKER-RUN-ROLE-UNKNOWN" in capsys.readouterr().err
