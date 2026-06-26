@@ -96,6 +96,7 @@ def isolate_default_steer_lock_dir(
         "_default_steer_lock_dir",
         lambda: tmp_path / "herdr-steer-locks",
     )
+    monkeypatch.delenv(hs.CE_HERDR_AGENT_REACTION_SIGNALS_ENV, raising=False)
 
 
 class MutableClock:
@@ -469,6 +470,36 @@ def test_deliver_brief_baseline_read_is_bounded_by_reaction_timeout() -> None:
     assert read_timeouts[0] == 2.5
 
 
+def test_deliver_brief_hanging_baseline_read_fails_closed_with_budget() -> None:
+    class HangingBaselineRead(FakeRunner):
+        def run(self, argv, *, env=None, timeout_s=None):
+            if list(argv)[1:3] == ["pane", "read"]:
+                self.calls.append((list(argv), dict(env or {})))
+                self.timeouts.append(timeout_s)
+                raise subprocess.TimeoutExpired(cmd=list(argv), timeout=timeout_s)
+            return super().run(argv, env=env, timeout_s=timeout_s)
+
+    runner = HangingBaselineRead()
+    session = hs.HerdrSession(herdr_binary="/opt/herdr", runner=runner)
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    with pytest.raises(hs.HerdrCommandError, match="herdr command timed out"):
+        session.deliver_brief(
+            pane,
+            "brief body",
+            reaction_timeout_s=2.5,
+            reaction_poll_interval_s=0,
+            sleep=lambda _seconds: None,
+            clock=MutableClock(),
+        )
+
+    assert [call[0][1:3] for call in runner.calls] == [["pane", "read"]]
+    assert runner.timeouts == [2.5]
+
+
 def test_deliver_brief_reaction_deadline_starts_before_baseline_read() -> None:
     clock = MutableClock(current=100.0)
 
@@ -719,6 +750,62 @@ def test_deliver_brief_accepts_injected_reaction_signal_set() -> None:
         herdr_binary="/opt/herdr",
         runner=runner,
         agent_reaction_signals=("acknowledged",),
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        "brief body",
+        reaction_timeout_s=1,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == hs.HerdrSession._brief_marker("brief body")
+
+
+def test_deliver_brief_accepts_extra_reaction_signal_without_replacing_defaults() -> None:
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Harness accepted"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
+        extra_agent_reaction_signals=("harness accepted",),
+    )
+    pane = hs.HerdrPane(
+        pane_id="pane-1",
+        surface_ref="herdr-surface-918aa1506d296ee1a72da70227854392",
+    )
+
+    assert session.deliver_brief(
+        pane,
+        "brief body",
+        reaction_timeout_s=1,
+        reaction_poll_interval_s=0,
+        sleep=lambda _seconds: None,
+    ) == hs.HerdrSession._brief_marker("brief body")
+    assert (
+        hs.HerdrSession._agent_reaction_score(
+            "Working",
+            reaction_re=session._agent_reaction_re,
+        )
+        == 1
+    )
+
+
+def test_deliver_brief_accepts_env_extra_reaction_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert hs._agent_reaction_signals_from_env("foo, ") == ("foo",)
+    assert hs._agent_reaction_signals_from_env("  ") == ()
+    monkeypatch.setenv(
+        hs.CE_HERDR_AGENT_REACTION_SIGNALS_ENV,
+        " harness accepted , rollout acknowledged, ",
+    )
+    runner = FakeRunner(read_outputs=["Ready", "prompt cleared", "Rollout acknowledged"])
+    session = hs.HerdrSession(
+        herdr_binary="/opt/herdr",
+        runner=runner,
     )
     pane = hs.HerdrPane(
         pane_id="pane-1",
