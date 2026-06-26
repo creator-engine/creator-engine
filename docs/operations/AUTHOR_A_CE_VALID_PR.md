@@ -22,6 +22,11 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    - **Declared work class:** <tiny|story|feature|epic>
    ```
 
+   These are CE ceremony tiers, not Agile work item types. The declaration
+   states the PR's minimum governance ceremony, not whether the change is a
+   Scrum story, product feature, or roadmap epic. The work-sizing gate derives
+   a minimum tier from the diff and rejects declarations below that floor.
+
 4. Run the local preflight before push:
 
    ```sh
