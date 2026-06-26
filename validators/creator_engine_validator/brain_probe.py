@@ -6,7 +6,13 @@ answers and they never convert an unknown capability into a guessed verdict.
 
 from __future__ import annotations
 
+import getpass
+import importlib
+import json
 import os
+import platform
+import shutil
+import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +36,14 @@ _FAN_OUT_ENV_KEYS = (
     "CE_MULTI_AGENT_FAN_OUT",
     "CODEX_SUBAGENTS",
 )
+SELF_IDENTITY_PROBE = "self_identity"
+SELF_IDENTITY_EXPECTED_EVIDENCE_KEY = "expected_live_evidence"
+SELF_IDENTITY_PROBE_EVIDENCE_PATHS = {
+    "arch": ("arch",),
+    "current_user": ("os_users", "current_user"),
+    "runtime_name": ("runtime_name",),
+}
+SELF_IDENTITY_SEAT_SCOPE_KEYS = ("seat", "seat_id", "current_user")
 
 
 def _default_run(command: Sequence[str]) -> Any:  # pragma: no cover - live edge
@@ -96,11 +110,20 @@ def _unknown(name: str, *, reason: str, error: BaseException | None = None) -> P
     return _result(name, "unknown", evidence)
 
 
+def _returncode(completed: Any) -> int:
+    return int(getattr(completed, "returncode"))
+
+
+def _stdout(completed: Any) -> str:
+    value = getattr(completed, "stdout", "")
+    return value if isinstance(value, str) else ""
+
+
 def _gh_authenticated(context: ProbeContext) -> ProbeResult:
     command = ["gh", "auth", "status"]
     try:
         completed = context.run(command)
-        returncode = int(getattr(completed, "returncode"))
+        returncode = _returncode(completed)
     except Exception as exc:
         return _unknown("gh_authenticated", reason="probe_error", error=exc)
     verdict: Verdict = "present" if returncode == 0 else "absent"
@@ -210,13 +233,158 @@ def _wheelhouse_matches_source(context: ProbeContext) -> ProbeResult:
     )
 
 
+def _current_user(env: Mapping[str, str]) -> str:
+    for key in ("USER", "LOGNAME", "USERNAME"):
+        value = str(env.get(key, "")).strip()
+        if value:
+            return value
+    try:
+        return getpass.getuser()
+    except Exception:
+        return ""
+
+
+def _local_os_users(env: Mapping[str, str]) -> dict[str, Any]:
+    user = _current_user(env)
+    evidence: dict[str, Any] = {
+        "current_user": user,
+        "effective_uid": os.geteuid() if hasattr(os, "geteuid") else None,
+    }
+    try:
+        import pwd  # pylint: disable=import-outside-toplevel
+
+        evidence["known_users"] = sorted({entry.pw_name for entry in pwd.getpwall() if entry.pw_name})
+    except Exception as exc:
+        evidence["known_users"] = []
+        evidence["known_users_error"] = exc.__class__.__name__
+    return evidence
+
+
+def _tailnet_identity(context: ProbeContext) -> dict[str, Any]:
+    command = ["tailscale", "status", "--json"]
+    try:
+        completed = context.run(command)
+        returncode = _returncode(completed)
+    except Exception as exc:
+        return {"command": command, "status": "unavailable", "error": exc.__class__.__name__, "reachable_peers": []}
+    if returncode != 0:
+        return {"command": command, "status": "absent", "returncode": returncode, "reachable_peers": []}
+    try:
+        payload = json.loads(_stdout(completed) or "{}")
+    except json.JSONDecodeError as exc:
+        return {
+            "command": command,
+            "status": "unparseable",
+            "error": exc.__class__.__name__,
+            "reachable_peers": [],
+        }
+    self_info = payload.get("Self") if isinstance(payload, dict) else None
+    peers = payload.get("Peer") if isinstance(payload, dict) else None
+    reachable: list[str] = []
+    if isinstance(peers, Mapping):
+        for peer in peers.values():
+            if not isinstance(peer, Mapping) or peer.get("Online") is not True:
+                continue
+            label = peer.get("DNSName") or peer.get("HostName") or peer.get("ID")
+            if isinstance(label, str) and label:
+                reachable.append(label.rstrip("."))
+    return {
+        "command": command,
+        "status": "present",
+        "self": {
+            "dns_name": self_info.get("DNSName", "").rstrip(".") if isinstance(self_info, Mapping) else "",
+            "host_name": self_info.get("HostName", "") if isinstance(self_info, Mapping) else "",
+            "tailnet_ips": sorted(self_info.get("TailscaleIPs", [])) if isinstance(self_info, Mapping) else [],
+        },
+        "reachable_peers": sorted(set(reachable)),
+    }
+
+
+def _gpu_identity(context: ProbeContext) -> dict[str, Any]:
+    command = ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]
+    try:
+        completed = context.run(command)
+        returncode = _returncode(completed)
+    except Exception as exc:
+        return {"command": command, "status": "unavailable", "error": exc.__class__.__name__, "devices": []}
+    if returncode != 0:
+        return {"command": command, "status": "absent", "returncode": returncode, "devices": []}
+    devices = sorted(line.strip() for line in _stdout(completed).splitlines() if line.strip())
+    return {"command": command, "status": "present" if devices else "absent", "devices": devices}
+
+
+def _self_identity(context: ProbeContext) -> ProbeResult:
+    env = context.environ()
+    env_hostname = str(env.get("HOSTNAME", "")).strip()
+    try:
+        socket_hostname = socket.gethostname()
+    except Exception:
+        socket_hostname = ""
+    runtime_name = env_hostname or socket_hostname
+    arch = platform.machine() or platform.processor()
+    os_users = _local_os_users(env)
+    tailnet = _tailnet_identity(context)
+    gpu = _gpu_identity(context)
+    evidence = {
+        "arch": arch,
+        "gpu": gpu,
+        "os_users": os_users,
+        "reachable_peers": tailnet.get("reachable_peers", []),
+        "runtime_name": runtime_name,
+        "socket_hostname": socket_hostname,
+        "sources": {
+            "arch": "platform.machine",
+            "gpu": "nvidia-smi",
+            "os_users": "os/getpass/pwd",
+            "runtime_name": "env.HOSTNAME or socket.gethostname",
+            "tailnet": "tailscale status --json",
+        },
+        "tailnet_self": tailnet,
+    }
+    verdict: Verdict = "present" if runtime_name and arch and os_users.get("current_user") else "unknown"
+    return _result(SELF_IDENTITY_PROBE, verdict, evidence)
+
+
+def _worker_spawn_runtime_support(context: ProbeContext) -> ProbeResult:
+    evidence: dict[str, Any] = {
+        "module": "creator_engine_validator.worker_spawn",
+        "required_entrypoints": ["plan_worker_spawn", "spawn_worker"],
+    }
+    try:
+        module = importlib.import_module("creator_engine_validator.worker_spawn")
+    except Exception as exc:
+        evidence["module_error"] = exc.__class__.__name__
+        return _result("worker_spawn_runtime_support", "absent", evidence)
+    missing_entrypoints = [
+        name for name in evidence["required_entrypoints"] if not callable(getattr(module, name, None))
+    ]
+    evidence["missing_entrypoints"] = missing_entrypoints
+    git_path = shutil.which("git")
+    evidence["git_available"] = git_path is not None
+    if git_path is None:
+        return _result("worker_spawn_runtime_support", "absent", evidence)
+    command = [git_path, "-C", str(context.root()), "worktree", "list", "--porcelain"]
+    evidence["worktree_command"] = command
+    try:
+        completed = context.run(command)
+        returncode = _returncode(completed)
+    except Exception as exc:
+        evidence["worktree_error"] = exc.__class__.__name__
+        return _result("worker_spawn_runtime_support", "unknown", evidence)
+    evidence["worktree_returncode"] = returncode
+    verdict: Verdict = "present" if not missing_entrypoints and returncode == 0 else "absent"
+    return _result("worker_spawn_runtime_support", verdict, evidence)
+
+
 PROBES: dict[str, ProbeFn] = {
     "codex_fan_out_surfaces": _codex_fan_out_surfaces,
     "codex_pretooluse_hook": _codex_pretooluse_hook,
     "gh_authenticated": _gh_authenticated,
     "harness_fan_out": _harness_fan_out,
     "merge_group_trigger": _merge_group_trigger,
+    SELF_IDENTITY_PROBE: _self_identity,
     "wheelhouse_matches_source": _wheelhouse_matches_source,
+    "worker_spawn_runtime_support": _worker_spawn_runtime_support,
 }
 
 
@@ -272,3 +440,66 @@ def record_expected_verdict(record: Mapping[str, Any]) -> Verdict | None:
     if verdict in _VERDICTS:
         return verdict  # type: ignore[return-value]
     return None
+
+
+def mapping_get_path(value: Mapping[str, Any], path: Sequence[str]) -> Any:
+    current: Any = value
+    for part in path:
+        if not isinstance(current, Mapping) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def record_expected_self_identity_evidence(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    claim = record.get("claim")
+    if not isinstance(claim, Mapping):
+        return None
+    expected = claim.get(SELF_IDENTITY_EXPECTED_EVIDENCE_KEY)
+    return expected if isinstance(expected, Mapping) else None
+
+
+def _scope_declared_seat(scope: Any) -> str | None:
+    if not isinstance(scope, Mapping):
+        return None
+    for key in SELF_IDENTITY_SEAT_SCOPE_KEYS:
+        value = scope.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def self_identity_declared_seat(record: Mapping[str, Any]) -> str | None:
+    scoped = _scope_declared_seat(record.get("scope"))
+    if scoped is not None:
+        return scoped
+    expected = record_expected_self_identity_evidence(record)
+    if expected is None:
+        return None
+    value = expected.get("current_user")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def self_identity_current_seat(
+    observed: ProbeResult,
+    *,
+    requested_scope: str | Mapping[str, Any] | None = None,
+) -> str | None:
+    scoped = _scope_declared_seat(requested_scope)
+    if scoped is not None:
+        return scoped
+    value = mapping_get_path(observed.evidence, ("os_users", "current_user"))
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def self_identity_record_applies_to_current_seat(
+    record: Mapping[str, Any],
+    observed: ProbeResult,
+    *,
+    requested_scope: str | Mapping[str, Any] | None = None,
+) -> bool:
+    declared = self_identity_declared_seat(record)
+    if declared is None:
+        return True
+    current = self_identity_current_seat(observed, requested_scope=requested_scope)
+    return current == declared

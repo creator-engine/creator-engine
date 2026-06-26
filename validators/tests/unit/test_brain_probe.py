@@ -7,9 +7,9 @@ from creator_engine_validator import brain_probe
 
 
 class FakeCompleted:
-    def __init__(self, returncode: int) -> None:
+    def __init__(self, returncode: int, stdout: str = "") -> None:
         self.returncode = returncode
-        self.stdout = ""
+        self.stdout = stdout
         self.stderr = ""
 
 
@@ -88,6 +88,79 @@ def test_harness_fan_out_requires_explicit_harness_signal():
     assert present.verdict == "present"
     assert absent.verdict == "absent"
     assert unknown.verdict == "unknown"
+
+
+def test_self_identity_probe_is_deterministic_with_injected_runtime(tmp_path: Path):
+    tailscale_payload = {
+        "Self": {
+            "DNSName": "seat-one.tailnet.example.",
+            "HostName": "seat-one",
+            "TailscaleIPs": ["100.64.0.10"],
+        },
+        "Peer": {
+            "peer-a": {"DNSName": "peer-a.tailnet.example.", "Online": True},
+            "peer-b": {"DNSName": "peer-b.tailnet.example.", "Online": False},
+        },
+    }
+
+    def run(command):
+        if command[:3] == ["tailscale", "status", "--json"]:
+            return FakeCompleted(0, json.dumps(tailscale_payload))
+        if command[:1] == ["nvidia-smi"]:
+            return FakeCompleted(0, "NVIDIA A100\n")
+        return FakeCompleted(0)
+
+    context = brain_probe.ProbeContext(
+        repo_root=tmp_path,
+        env={"HOSTNAME": "seat-one", "USER": "controller"},
+        run=run,
+    )
+
+    first = brain_probe.probe("self_identity", context).to_dict()
+    second = brain_probe.probe("self_identity", context).to_dict()
+
+    assert first == second
+    assert first["verdict"] == "present"
+    assert first["evidence"]["runtime_name"] == "seat-one"
+    assert first["evidence"]["os_users"]["current_user"] == "controller"
+    assert first["evidence"]["tailnet_self"]["self"]["dns_name"] == "seat-one.tailnet.example"
+    assert first["evidence"]["reachable_peers"] == ["peer-a.tailnet.example"]
+
+
+def test_self_identity_probe_reflects_mutated_hostname(tmp_path: Path):
+    def run(command):
+        if command[:1] == ["tailscale"]:
+            return FakeCompleted(1)
+        if command[:1] == ["nvidia-smi"]:
+            return FakeCompleted(1)
+        return FakeCompleted(0)
+
+    before = brain_probe.probe(
+        "self_identity",
+        brain_probe.ProbeContext(repo_root=tmp_path, env={"HOSTNAME": "seat-a", "USER": "controller"}, run=run),
+    )
+    after = brain_probe.probe(
+        "self_identity",
+        brain_probe.ProbeContext(repo_root=tmp_path, env={"HOSTNAME": "seat-b", "USER": "controller"}, run=run),
+    )
+
+    assert before.evidence["runtime_name"] == "seat-a"
+    assert after.evidence["runtime_name"] == "seat-b"
+
+
+def test_worker_spawn_runtime_support_checks_module_and_git_worktree(tmp_path: Path):
+    def run(command):
+        assert command[-3:] == ["worktree", "list", "--porcelain"]
+        return FakeCompleted(0, f"worktree {tmp_path}\n")
+
+    result = brain_probe.probe(
+        "worker_spawn_runtime_support",
+        brain_probe.ProbeContext(repo_root=tmp_path, run=run),
+    )
+
+    assert result.verdict == "present"
+    assert result.evidence["missing_entrypoints"] == []
+    assert result.evidence["git_available"] is True
 
 
 def test_codex_pretooluse_hook_probe_reads_committed_entrypoint(tmp_path: Path):
