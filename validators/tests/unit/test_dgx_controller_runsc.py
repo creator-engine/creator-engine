@@ -11,6 +11,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "run-controller-runsc.sh"
 DOCKERFILE = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "Dockerfile"
+GH_GUARD = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "ce-controller-gh-guard.sh"
+README = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "README.md"
+DESIGN = REPO_ROOT / "deploy" / "dgx-controller-runsc" / "DESIGN.md"
 TOKEN_ENV_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 SYNTHETIC_TOKEN = "synthetic-secret-token-value"
 
@@ -66,15 +69,72 @@ def assert_no_claude_token_leaked(
 
 
 def test_controller_wrapper_shell_syntax_is_valid() -> None:
+    for script in (SCRIPT, GH_GUARD):
+        result = subprocess.run(
+            ["bash", "-n", str(script)],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, f"{script}: {result.stderr}"
+
+
+def test_controller_gh_guard_defaults_to_fail_closed_without_credential_seam() -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            TOKEN_ENV_NAME: SYNTHETIC_TOKEN,
+            "CE_DGX_CREDENTIAL_INJECTION": "SEAM-STUB",
+            "CE_TRANSPORT_DEPUTY_SEAM_STATUS": "stub-ce-ops-239-no-secret-injection",
+        }
+    )
+
     result = subprocess.run(
-        ["bash", "-n", str(SCRIPT)],
+        ["bash", str(GH_GUARD), "auth", "status", SYNTHETIC_TOKEN],
         cwd=REPO_ROOT,
+        env=env,
         text=True,
         capture_output=True,
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 78
+    assert "Refusing controller gh action" in result.stderr
+    assert "gate/source-host actions fail closed" in result.stderr
+    assert "stub-ce-ops-239-no-secret-injection" in result.stderr
+    assert "ready-ce-ops-239-credential-injection" in result.stderr
+    assert "TRANSPORT-DEPUTY" in result.stderr
+    assert "auth status" not in result.stderr
+    assert TOKEN_ENV_NAME not in result.stderr
+    assert SYNTHETIC_TOKEN not in result.stderr
+    assert result.stdout == ""
+
+
+def test_controller_gh_guard_refuses_partial_ready_marker() -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "CE_DGX_CREDENTIAL_INJECTION": "SEAM-STUB",
+            "CE_TRANSPORT_DEPUTY_SEAM_STATUS": "ready-ce-ops-239-credential-injection",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(GH_GUARD), "pr", "merge"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 78
+    assert "Refusing controller gh action" in result.stderr
+    assert "pr merge" not in result.stderr
+    assert TOKEN_ENV_NAME not in result.stderr
+    assert SYNTHETIC_TOKEN not in result.stderr
 
 
 def test_controller_tui_dry_run_uses_contained_defaults() -> None:
@@ -278,6 +338,11 @@ def test_controller_image_scaffolding_has_pinned_herdr_builder_and_tools() -> No
     assert "git" in text
     assert "PYTHONPATH=/workspace/creator-engine/validators" in text
     assert "creator_engine_validator" in text
+    assert "COPY deploy/dgx-controller-runsc/ce-controller-gh-guard.sh /usr/local/bin/ce-controller-gh-guard" in text
+    assert "ln -s /usr/local/bin/ce-controller-gh-guard /usr/local/bin/gh" in text
+    assert "/usr/bin/gh --version" in text
+    assert "/usr/local/bin/gh auth status" in text
+    assert 'test "$?" = "78"' in text
     assert "} >/usr/local/bin/ce-controller-harness" in text
     assert 'export PYTHONPATH="${validator_path}${PYTHONPATH:+:${PYTHONPATH}}"' in text
     assert 'export CE_DGX_CREDENTIAL_INJECTION="${CE_DGX_CREDENTIAL_INJECTION:-SEAM-STUB}"' in text
@@ -288,3 +353,17 @@ def test_controller_image_scaffolding_has_pinned_herdr_builder_and_tools() -> No
     assert 'exec /usr/local/bin/claude "$@"' in text
     assert TOKEN_ENV_NAME not in text
     assert SYNTHETIC_TOKEN not in text
+
+
+def test_controller_docs_state_gh_guard_refusal_contract() -> None:
+    readme = README.read_text(encoding="utf-8")
+    design = DESIGN.read_text(encoding="utf-8")
+
+    for text in (readme, design):
+        assert "/usr/local/bin/gh" in text
+        assert "ce-controller-gh-guard" in text
+        assert "stub-ce-ops-239-no-secret-injection" in text
+        assert "ready-ce-ops-239-credential-injection" in text
+        assert "TRANSPORT-DEPUTY" in text
+        assert "CE_TRANSPORT_DEPUTY_GH_REAL=/usr/bin/gh" in text
+        assert "fail closed" in text

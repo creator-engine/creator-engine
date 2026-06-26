@@ -59,6 +59,26 @@ short grant handles and injects only the scoped credential material required for
 the controller action, with TTL and audit records. That transport lands in C2,
 not C1.
 
+The C1 image therefore installs an explicit fail-closed guard for the primary
+source-host credential surface. `deploy/dgx-controller-runsc/ce-controller-gh-guard.sh`
+is copied to `/usr/local/bin/ce-controller-gh-guard` and shadows `gh` at
+`/usr/local/bin/gh`; the package binary remains available only as `/usr/bin/gh`.
+When the seam is stubbed, the guard refuses every `gh` action before it can
+touch GitHub, merge gates, or source-host credentials. The refusal output is
+value-free: it does not echo argv, token names, token values, or host credential
+paths.
+
+The future ready interface for C2 is intentionally narrow:
+
+```text
+CE_TRANSPORT_DEPUTY_SEAM_STATUS=ready-ce-ops-239-credential-injection
+CE_DGX_CREDENTIAL_INJECTION=TRANSPORT-DEPUTY
+CE_TRANSPORT_DEPUTY_GH_REAL=/usr/bin/gh
+```
+
+Until the transport deputy sets those ready markers, no credential means no
+gate action. The default/unfilled seam must fail closed.
+
 ## Security Boundaries
 
 The target boundary is rootless container execution with gVisor/runsc as the
@@ -121,6 +141,9 @@ C1 verification is dry-run/static only:
   home, dropped capabilities, and absence of forbidden mounts/sockets;
 - run static wrapper tests for refusal paths such as host `$HOME`, plain
   `runsc`, Docker network overrides, and forbidden host control sockets;
+- run static and offline guard tests proving `/usr/local/bin/gh` is the
+  `ce-controller-gh-guard`, the stub seam refuses by default, and the refusal
+  does not expose token names or values;
 - confirm the image/wrapper documentation states that credential injection is a
   stub and that C2 is blocked on ce-ops#239.
 
