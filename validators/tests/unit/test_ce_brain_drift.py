@@ -37,8 +37,43 @@ def _write_ledger(tmp_path: Path, text: str) -> Path:
     return path
 
 
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def _write_authoritative_ledger(repo_root: Path, text: str) -> Path:
     path = repo_root / ".ce" / "brain" / "assertions.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _write_authoritative_validate_workflow_ledger(repo: Path) -> Path:
+    captured: list[tuple[Path, str]] = []
+    rt.assert_claim(
+        assertion_id="brain-assertion-validate-workflow-drift-gate",
+        statement="validate workflow merge_group trigger includes checks_requested",
+        assertion_type="capability",
+        scope={"artifact": ".github/workflows/validate.yml", "gate": "drift-ci"},
+        claim={
+            "subject": "workflow",
+            "predicate": "allows-merge-queue-validation",
+            "object": "validate",
+            "projection": {
+                "type": "yaml-path",
+                "path": ["on", "merge_group", "types"],
+                "normalize": "string_set_contains",
+                "expected": ["checks_requested"],
+            },
+        },
+        evidence_ref=".github/workflows/validate.yml",
+        verification_method={"type": "static", "evidence_ref": ".github/workflows/validate.yml"},
+        state_root=repo / ".ce",
+        records=[],
+        write=lambda path, text: captured.append((path, text)),
+    )
+    path, text = captured[-1]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
@@ -420,6 +455,115 @@ def test_artifact_value_drift_reports_drift(tmp_path: Path):
     assert "observed value='observed'" in errors[0].message
 
 
+def test_workflow_raw_hash_anchor_fails_closed_as_unstable(tmp_path: Path):
+    workflow = tmp_path / ".github" / "workflows" / "validate.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "jobs:\n"
+        "  validate:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps: []\n",
+        encoding="utf-8",
+    )
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "workflow",
+                "predicate": "has-full-file-hash",
+                "object": "validate",
+                "sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
+            },
+            evidence_ref=".github/workflows/validate.yml",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_UNVERIFIABLE]
+    assert "must not use full-artifact hash/value anchors" in errors[0].message
+    assert "normalized projection" in errors[0].message
+
+
+def test_workflow_normalized_projection_accepts_unrelated_variation(tmp_path: Path):
+    workflow = tmp_path / ".github" / "workflows" / "validate.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: renamed validation workflow\n"
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested, checks_requested]\n"
+        "  pull_request:\n"
+        "jobs:\n"
+        "  extra-docs-check:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps: []\n"
+        "  validate:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps: []\n",
+        encoding="utf-8",
+    )
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "workflow",
+                "predicate": "allows-merge-queue",
+                "object": "validate",
+                "projection": {
+                    "type": "yaml-path",
+                    "path": ["on", "merge_group", "types"],
+                    "normalize": "string_set_contains",
+                    "expected": ["checks_requested"],
+                },
+            },
+            evidence_ref=".github/workflows/validate.yml",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert errors == []
+
+
+def test_workflow_normalized_projection_reports_semantic_drift(tmp_path: Path):
+    workflow = tmp_path / ".github" / "workflows" / "validate.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [other_event]\n",
+        encoding="utf-8",
+    )
+    path = _write_ledger(
+        tmp_path,
+        _ledger_text(
+            claim={
+                "subject": "workflow",
+                "predicate": "allows-merge-queue",
+                "object": "validate",
+                "projection": {
+                    "type": "yaml-path",
+                    "path": "on.merge_group.types",
+                    "normalize": "string_set_contains",
+                    "expected": ["checks_requested"],
+                },
+            },
+            evidence_ref=".github/workflows/validate.yml",
+        ),
+    )
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert [error.code for error in errors] == [ce_brain_drift.CODE_DRIFT]
+    assert "artifact projection drifted" in errors[0].message
+    assert errors[0].to_dict()["claimed"] == 'contains=["checks_requested"]'
+    assert errors[0].to_dict()["observed"] == 'strings=["other_event"]'
+
+
 def test_unverifiable_artifact_fails_closed(tmp_path: Path):
     path = _write_ledger(tmp_path, _ledger_text(evidence_ref="missing.txt"))
 
@@ -567,14 +711,65 @@ def test_verify_state_root_reports_stale_loaded_ledger_against_authoritative(tmp
 def test_verify_state_root_missing_runtime_copy_does_not_fail_fresh_checkout(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    _write_authoritative_ledger(repo, _ledger_text())
+    (repo / "evidence.txt").write_text("current", encoding="utf-8")
+    _write_authoritative_ledger(
+        repo,
+        _ledger_text(
+            claim={
+                "subject": "artifact",
+                "predicate": "value",
+                "object": "evidence",
+                "value": "current",
+            },
+        ),
+    )
 
     drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
 
     assert drift.ok
-    assert drift.record_count == 0
-    assert drift.active_count == 0
+    assert drift.record_count == 1
+    assert drift.active_count == 1
     assert drift.findings == ()
+
+
+def test_verify_state_root_falls_back_to_authoritative_ledger_and_reports_drift(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_text(
+        repo / ".github" / "workflows" / "validate.yml",
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [other_event]\n",
+    )
+    authoritative = _write_authoritative_validate_workflow_ledger(repo)
+
+    drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
+
+    assert not (repo / ".ce" / "state").exists()
+    assert drift.ledger_path == authoritative
+    assert drift.record_count == 1
+    assert drift.active_count == 1
+    assert not drift.ok
+    assert [finding.code for finding in drift.findings] == [ce_brain_drift.CODE_DRIFT]
+    assert "artifact projection drifted" in drift.findings[0].message
+
+
+def test_registered_run_discovers_authoritative_brain_ledger(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_text(
+        repo / ".github" / "workflows" / "validate.yml",
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [other_event]\n",
+    )
+    _write_authoritative_validate_workflow_ledger(repo)
+
+    result = ce_brain_drift.run([repo])
+
+    assert result.name == ce_brain_drift.CHECK_NAME
+    assert not result.ok
+    assert [error.code for error in result.errors] == [ce_brain_drift.CODE_DRIFT]
 
 
 def test_authoritative_migrated_assertions_validate_and_probe():
@@ -592,12 +787,13 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 6
+    assert len(active) == 7
     assert {
         brain_probe.record_probe_name(record)
         for record in active
         if brain_probe.record_probe_name(record) is not None
     } == {"codex_fan_out_surfaces", "codex_pretooluse_hook", "harness_fan_out"}
+    assert any(record["id"] == "brain-assertion-validate-workflow-drift-gate" for record in active)
 
 
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):
