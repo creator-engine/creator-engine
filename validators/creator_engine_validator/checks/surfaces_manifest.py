@@ -14,6 +14,8 @@ from . import register
 
 CHECK_NAME = "surfaces_manifest_complete"
 CONTRACT = "ce-ops#272"
+CONSISTENT_CHECK_NAME = "surfaces_manifest_consistent"
+CONSISTENT_CONTRACT = "ce-ops#273"
 
 CODE_MISSING_MANIFEST = "surfaces_manifest_missing"
 CODE_MALFORMED = "surfaces_manifest_malformed"
@@ -21,6 +23,12 @@ CODE_MISSING_SURFACE = "surfaces_manifest_missing_surface"
 CODE_MISSING_FIELD = "surfaces_manifest_missing_field"
 CODE_PINNABLE_MISSING_DIGEST = "surfaces_manifest_pinnable_missing_digest"
 CODE_PYTHON_DIGEST_WARNING = "surfaces_manifest_python_digest_pending"
+CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST = "surfaces_manifest_consistency_pinnable_missing_digest"
+CODE_DOCKERFILE_FROM_MISSING_DIGEST = "surfaces_manifest_dockerfile_from_missing_digest"
+CODE_DOCKERFILE_FROM_DIGEST_MISMATCH = "surfaces_manifest_dockerfile_from_digest_mismatch"
+CODE_ARG_MISMATCH = "surfaces_manifest_arg_mismatch"
+CODE_RUNSC_IMAGE_MISMATCH = "surfaces_manifest_runsc_image_mismatch"
+CODE_REQUIREMENTS_PIN_MISMATCH = "surfaces_manifest_requirements_pin_mismatch"
 
 MANIFEST = Path("surfaces/manifest.yaml")
 REQUIRED_FIELDS = frozenset(
@@ -51,6 +59,10 @@ PYTHON_DEP_SURFACES = frozenset({"pyyaml", "jsonschema", "textual"})
 ZIG_ARCHES = frozenset({"linux-aarch64", "linux-x86_64"})
 SHA_RE = re.compile(r"^[0-9a-f]{8,40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+FROM_RE = re.compile(r"^\s*FROM\s+(?P<body>.+?)(?:\s+#.*)?\s*$", re.IGNORECASE)
+ARG_RE = re.compile(r"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:=(?P<value>\S+))?", re.IGNORECASE)
+REQ_PIN_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^\s;#]+)")
+SHELL_DEFAULT_RE = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)[:-](?P<value>[^}]+)\}")
 
 
 def _surface_key(name: object) -> str:
@@ -148,6 +160,256 @@ def _index_surfaces(path: Path, surfaces: list[dict[str, Any]]) -> tuple[dict[st
     return by_name, errors
 
 
+def _surface_version(surface: dict[str, Any] | None) -> str | None:
+    if surface is None:
+        return None
+    version = surface.get("version")
+    return version if isinstance(version, str) and version else None
+
+
+def _surface_commit_or_digest(surface: dict[str, Any] | None) -> object:
+    if surface is None:
+        return None
+    return surface.get("commit_or_digest")
+
+
+def _normal_sha256(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.removeprefix("sha256:")
+    if SHA256_RE.fullmatch(stripped):
+        return stripped
+    return None
+
+
+def _is_host_only(surface: dict[str, Any]) -> bool:
+    source = str(surface.get("source", "")).lower()
+    custody = str(surface.get("custody", "")).lower()
+    update_policy = str(surface.get("update_policy", "")).lower()
+    return source.startswith("host:") or "host-only" in custody or "host inventory" in update_policy
+
+
+def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    for key, surface in sorted(by_name.items()):
+        if _is_host_only(surface) or surface.get("commit_or_digest") is not None:
+            continue
+        name = surface.get("name", key)
+        errors.append(
+            make_error(
+                CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST,
+                path,
+                f"{name}.commit_or_digest",
+                f"pinnable non-host-only surface {name!r} must carry a digest or commit",
+                CONSISTENT_CONTRACT,
+            )
+        )
+    return errors
+
+
+def _iter_dockerfiles(repo_root: Path) -> Iterable[Path]:
+    seen: set[Path] = set()
+    for pattern in ("Dockerfile", "Dockerfile.*", "*.Dockerfile"):
+        for path in repo_root.rglob(pattern):
+            if not path.is_file() or ".git" in path.parts:
+                continue
+            resolved = path.resolve(strict=False)
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            yield path
+
+
+def _from_image_token(line: str) -> str | None:
+    match = FROM_RE.match(line)
+    if not match:
+        return None
+    tokens = match.group("body").split()
+    index = 0
+    while index < len(tokens) and tokens[index].startswith("--"):
+        index += 1
+    if index >= len(tokens):
+        return None
+    return tokens[index]
+
+
+def _matching_surface_for_image(image: str, by_name: dict[str, dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    image_key = _surface_key(image.replace("/", "-").replace(":", "-"))
+    for key, surface in by_name.items():
+        aliases = {key, key.split("-")[0]}
+        if key == "gvisor/runsc":
+            aliases.add("runsc")
+        if any(alias and alias in image_key for alias in aliases):
+            return key, surface
+    return None
+
+
+def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    for path in _iter_dockerfiles(repo_root):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(
+                make_error(CODE_MALFORMED, path, "", f"could not read Dockerfile: {exc}", CONSISTENT_CONTRACT)
+            )
+            continue
+        for line_no, line in enumerate(lines, start=1):
+            image = _from_image_token(line)
+            if image is None or image.lower() == "scratch":
+                continue
+            if "@sha256:" not in image:
+                errors.append(
+                    make_error(
+                        CODE_DOCKERFILE_FROM_MISSING_DIGEST,
+                        path,
+                        f"line {line_no}",
+                        f"Dockerfile FROM image {image!r} must use @sha256 digest form",
+                        CONSISTENT_CONTRACT,
+                    )
+                )
+                continue
+            image_digest = image.rsplit("@sha256:", 1)[1].split(":", 1)[0]
+            matched = _matching_surface_for_image(image, by_name)
+            if matched is None:
+                continue
+            surface_key, surface = matched
+            manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
+            if manifest_digest is not None and image_digest != manifest_digest:
+                errors.append(
+                    make_error(
+                        CODE_DOCKERFILE_FROM_DIGEST_MISMATCH,
+                        path,
+                        f"line {line_no}",
+                        f"Dockerfile FROM image for {surface_key!r} must match manifest digest",
+                        CONSISTENT_CONTRACT,
+                    )
+                )
+    return errors
+
+
+def _compatible_ref(actual: str, expected: str) -> bool:
+    return actual == expected or actual.startswith(expected) or expected.startswith(actual)
+
+
+def _arg_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    zig_version = _surface_version(by_name.get("zig-toolchain"))
+    herdr_ref = _surface_commit_or_digest(by_name.get("herdr"))
+    for path in _iter_dockerfiles(repo_root):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line_no, line in enumerate(lines, start=1):
+            match = ARG_RE.match(line)
+            if not match:
+                continue
+            name = match.group("name")
+            value = (match.group("value") or "").strip("'\"")
+            if name == "ZIG_VERSION" and zig_version is not None and value != zig_version:
+                errors.append(
+                    make_error(
+                        CODE_ARG_MISMATCH,
+                        path,
+                        f"line {line_no}",
+                        f"ZIG_VERSION default {value!r} must match manifest version {zig_version!r}",
+                        CONSISTENT_CONTRACT,
+                    )
+                )
+            if name in {"HERDR_SOURCE_REF", "HERDR_CE_REF"} and isinstance(herdr_ref, str):
+                if not _compatible_ref(value, herdr_ref):
+                    errors.append(
+                        make_error(
+                            CODE_ARG_MISMATCH,
+                            path,
+                            f"line {line_no}",
+                            f"{name} default {value!r} must match manifest herdr ref {herdr_ref!r}",
+                            CONSISTENT_CONTRACT,
+                        )
+                    )
+    return errors
+
+
+def _script_default(path: Path, variable: str) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for match in SHELL_DEFAULT_RE.finditer(text):
+        if match.group("name") == variable:
+            return match.group("value")
+    return None
+
+
+def _runsc_image_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    codex_version = _surface_version(by_name.get("codex"))
+    if codex_version is None:
+        return []
+    path = repo_root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
+    default = _script_default(path, "CE_VPS_IMAGE")
+    if default is None or "codex" not in default.lower():
+        return []
+    if codex_version in default:
+        return []
+    return [
+        make_error(
+            CODE_RUNSC_IMAGE_MISMATCH,
+            path,
+            "CE_VPS_IMAGE",
+            f"CE_VPS_IMAGE default {default!r} must include manifest codex version {codex_version!r}",
+            CONSISTENT_CONTRACT,
+        )
+    ]
+
+
+def _requirement_pins(path: Path) -> dict[str, tuple[str, int]]:
+    pins: dict[str, tuple[str, int]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return pins
+    for line_no, line in enumerate(lines, start=1):
+        match = REQ_PIN_RE.match(line)
+        if match:
+            pins[_surface_key(match.group("name"))] = (match.group("version"), line_no)
+    return pins
+
+
+def _requirements_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    files = [repo_root / "validators" / "requirements.txt", repo_root / "validators" / "requirements-dev.txt"]
+    pins_by_file = {path: _requirement_pins(path) for path in files}
+    for surface_key in sorted(PYTHON_DEP_SURFACES):
+        expected = _surface_version(by_name.get(surface_key))
+        if expected is None:
+            continue
+        matches = [(path, pins[surface_key]) for path, pins in pins_by_file.items() if surface_key in pins]
+        if not matches:
+            errors.append(
+                make_error(
+                    CODE_REQUIREMENTS_PIN_MISMATCH,
+                    repo_root / "validators",
+                    surface_key,
+                    f"requirements files must pin {surface_key!r} to manifest version {expected!r}",
+                    CONSISTENT_CONTRACT,
+                )
+            )
+            continue
+        for path, (actual, line_no) in matches:
+            if actual != expected:
+                errors.append(
+                    make_error(
+                        CODE_REQUIREMENTS_PIN_MISMATCH,
+                        path,
+                        f"line {line_no}",
+                        f"{surface_key!r} pin {actual!r} must match manifest version {expected!r}",
+                        CONSISTENT_CONTRACT,
+                    )
+                )
+    return errors
+
+
 def _validate_herdr(path: Path, surface: dict[str, Any] | None) -> list[ValidationError]:
     if surface is None:
         return []
@@ -228,6 +490,21 @@ def validate_repo(repo_root: Path) -> CheckResult:
     return CheckResult(name=CHECK_NAME, errors=tuple(errors), warnings=tuple(warnings))
 
 
+def validate_repo_consistent(repo_root: Path) -> CheckResult:
+    manifest = repo_root / MANIFEST
+    surfaces, errors = _load_manifest(manifest)
+    if surfaces:
+        errors.extend(_missing_required_fields(manifest, surfaces))
+        by_name, index_errors = _index_surfaces(manifest, surfaces)
+        errors.extend(index_errors)
+        errors.extend(_pinnable_null_digest_errors(manifest, by_name))
+        errors.extend(_dockerfile_errors(repo_root, by_name))
+        errors.extend(_arg_errors(repo_root, by_name))
+        errors.extend(_runsc_image_errors(repo_root, by_name))
+        errors.extend(_requirements_errors(repo_root, by_name))
+    return CheckResult(name=CONSISTENT_CHECK_NAME, errors=tuple(errors))
+
+
 @register(CHECK_NAME, [CONTRACT])
 def run(paths: Iterable[Path]) -> CheckResult:
     roots = _repo_roots(paths or [Path(".")])
@@ -241,3 +518,16 @@ def run(paths: Iterable[Path]) -> CheckResult:
         errors.extend(result.errors)
         warnings.extend(result.warnings)
     return CheckResult(name=CHECK_NAME, errors=tuple(errors), warnings=tuple(warnings))
+
+
+@register(CONSISTENT_CHECK_NAME, [CONSISTENT_CONTRACT])
+def run_consistent(paths: Iterable[Path]) -> CheckResult:
+    roots = _repo_roots(paths or [Path(".")])
+    if not roots:
+        roots = [Path.cwd()]
+
+    errors: list[ValidationError] = []
+    for root in roots:
+        result = validate_repo_consistent(root)
+        errors.extend(result.errors)
+    return CheckResult(name=CONSISTENT_CHECK_NAME, errors=tuple(errors))

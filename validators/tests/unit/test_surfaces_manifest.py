@@ -49,6 +49,25 @@ def _complete_doc() -> dict[str, object]:
     }
 
 
+def _consistent_doc() -> dict[str, object]:
+    doc = _complete_doc()
+    digests = {
+        "codex": "1" * 64,
+        "PyYAML": "2" * 64,
+        "jsonschema": "3" * 64,
+        "textual": "4" * 64,
+    }
+    for surface in doc["surfaces"]:  # type: ignore[index]
+        name = surface["name"]  # type: ignore[index]
+        if name in digests:
+            surface["commit_or_digest"] = digests[name]  # type: ignore[index]
+        if name in {"OpenBao", "gVisor/runsc", "gvproxy"}:
+            surface["source"] = f"host:{name}"  # type: ignore[index]
+            surface["custody"] = "host-only"  # type: ignore[index]
+            surface["update_policy"] = "host inventory required before pinning"  # type: ignore[index]
+    return doc
+
+
 def _write_manifest(root: Path, doc: dict[str, object]) -> Path:
     path = root / "surfaces" / "manifest.yaml"
     path.parent.mkdir(parents=True)
@@ -57,12 +76,43 @@ def _write_manifest(root: Path, doc: dict[str, object]) -> Path:
     return path
 
 
+def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> None:
+    _write_manifest(root, doc or _consistent_doc())
+    dockerfile = root / "deploy" / "vps-runsc" / "Dockerfile"
+    dockerfile.parent.mkdir(parents=True, exist_ok=True)
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "FROM --platform=linux/amd64 rust:1-bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa AS herdr-builder",
+                "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
+                "ARG ZIG_VERSION=0.15.2",
+                "FROM debian:bookworm-slim@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb AS runtime",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
+    runner.write_text(
+        'CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:0.141.0-x86_64}"\n',
+        encoding="utf-8",
+    )
+    validators = root / "validators"
+    validators.mkdir(exist_ok=True)
+    (validators / "requirements.txt").write_text("jsonschema==4.26.0\npyyaml==6.0.3\n", encoding="utf-8")
+    (validators / "requirements-dev.txt").write_text("textual==8.2.7\n", encoding="utf-8")
+
+
 def _codes(result) -> set[str]:
     return {error.code for error in result.errors}
 
 
 def test_surfaces_manifest_complete_is_registered():
     assert chk.CHECK_NAME in registered_checks()
+
+
+def test_surfaces_manifest_consistent_is_registered():
+    assert chk.CONSISTENT_CHECK_NAME in registered_checks()
 
 
 def test_complete_manifest_passes_with_python_digest_warnings(tmp_path: Path):
@@ -104,3 +154,77 @@ def test_host_only_null_versions_and_digests_are_permitted(tmp_path: Path):
 
     assert result.ok, [error.format() for error in result.errors]
     assert not any("OpenBao" in error.path or "gVisor" in error.path or "gvproxy" in error.path for error in result.errors)
+
+
+def test_consistent_manifest_and_repo_files_pass(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    dockerfile = tmp_path / "deploy" / "vps-runsc" / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "FROM rust:1-bookworm AS herdr-builder",
+                "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
+                "ARG ZIG_VERSION=0.15.2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_DOCKERFILE_FROM_MISSING_DIGEST in _codes(result)
+
+
+def test_consistent_manifest_mismatched_arg_version_and_ref_fail(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    dockerfile = tmp_path / "deploy" / "vps-runsc" / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "FROM rust:1-bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "ARG HERDR_CE_REF=deadbeef",
+                "ARG ZIG_VERSION=0.15.1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_ARG_MISMATCH in _codes(result)
+    assert any("HERDR_CE_REF" in error.message for error in result.errors)
+    assert any("ZIG_VERSION" in error.message for error in result.errors)
+
+
+def test_consistent_manifest_mismatched_requirements_pin_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    (tmp_path / "validators" / "requirements.txt").write_text(
+        "jsonschema==4.26.0\npyyaml==6.0.2\n",
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_REQUIREMENTS_PIN_MISMATCH in _codes(result)
+    assert any("pyyaml" in error.message for error in result.errors)
+
+
+def test_consistent_manifest_pinnable_null_digest_fails(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"][3]["commit_or_digest"] = None  # type: ignore[index]
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
+    assert any("PyYAML.commit_or_digest" in error.path for error in result.errors)
