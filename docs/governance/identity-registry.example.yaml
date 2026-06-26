@@ -1,0 +1,77 @@
+# EXAMPLE ONLY — schema-conformance sample.
+# The authoritative CE identity registry with real values is maintained
+# INTERNALLY (not in this public repo). Do not put real fleet identities,
+# accounts, App/installation IDs, host IPs, or credential paths here.
+
+accounts:
+  - login: EXAMPLE_LOGIN_SEAT_A
+    github_id: TODO_VERIFY
+    role: governed-seat
+    owning_seat: EXAMPLE_SEAT_A
+    host: EXAMPLE_HOST_A
+    noreply_commit_email: TODO_VERIFY
+  - login: EXAMPLE_LOGIN_REVIEWER
+    github_id: TODO_VERIFY
+    role: reviewer-venue
+    owning_seat: EXAMPLE_SEAT_B
+    host: EXAMPLE_HOST_B
+    noreply_commit_email: TODO_VERIFY
+  - login: EXAMPLE_LOGIN_AUTOMATION
+    github_id: TODO_VERIFY
+    role: authoring-account
+    owning_seat: EXAMPLE_SEAT_C
+    host: EXAMPLE_HOST_C
+    noreply_commit_email: TODO_VERIFY
+
+apps:
+  - app_id: TODO_VERIFY
+    install_id: TODO_VERIFY
+    repo_scope: EXAMPLE_ORG/EXAMPLE_REPO
+    pem_custody: vault://EXAMPLE/path
+
+tokens:
+  - type: PAT
+    host_binding: EXAMPLE_HOST_A
+    storage_pointer:
+      host: EXAMPLE_HOST_A
+      path: EXAMPLE_STORAGE_POINTER
+    rotation_owner: EXAMPLE_SEAT_A
+  - type: App
+    host_binding: TODO_VERIFY
+    storage_pointer:
+      host: TODO_VERIFY
+      path: TODO_VERIFY
+    rotation_owner: TODO_VERIFY
+
+signing_keys:
+  - key_name: EXAMPLE_KEY_NAME_A
+    custody_seat: TODO_VERIFY
+    custody_host: TODO_VERIFY
+    key_path_pointer: TODO_VERIFY
+  - key_name: EXAMPLE_KEY_NAME_B
+    custody_seat: TODO_VERIFY
+    custody_host: TODO_VERIFY
+    key_path_pointer: TODO_VERIFY
+
+host_topology:
+  - name: EXAMPLE_HOST_A
+    host: EXAMPLE_HOST_A
+    tailnet_ip: TODO_VERIFY
+    users:
+      - EXAMPLE_SEAT_A
+    role: worker-host
+    reach_method: TODO_VERIFY
+
+authoring_review_matrix:
+  - seat: EXAMPLE_SEAT_A
+    authors_as:
+      - EXAMPLE_LOGIN_SEAT_A
+    may_review:
+      - EXAMPLE_LOGIN_REVIEWER
+    status: needs-rewire
+  - seat: EXAMPLE_OPERATOR_SEAT
+    authors_as:
+      - EXAMPLE_LOGIN_AUTOMATION
+    may_review:
+      - EXAMPLE_LOGIN_REVIEWER
+    status: needs-rewire
