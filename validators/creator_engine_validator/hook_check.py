@@ -197,6 +197,19 @@ _MECHANIC_RULES_NONVOCAB: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bgh\s+pr\s+(close|reopen)\b"), "pr_lifecycle"),
     (re.compile(r"\bce\s+(launch|lane\s+launch)\b"), "live_lane_launch"),
     (re.compile(r"\bce\s+(integration-queue|iq)\b"), "live_integration_queue"),
+    # Ring-1 toolchain self-update block (ce-ops#271).
+    # Global JS package manager installs: npm/pnpm/yarn install -g or add/update/upgrade --global.
+    (re.compile(r"\b(npm|pnpm|yarn)\s+install\s+(?:.*\s+)?(-g|--global)\b"), "toolchain_self_update"),
+    (re.compile(r"\b(npm|pnpm|yarn)\s+(add|update|upgrade)\s+(?:.*\s+)?(-g|--global)\b"), "toolchain_self_update"),
+    # pip install/upgrade from index. The --no-index flag exempts CE's own VenvSwapper
+    # (update.py: `pip install --no-index --find-links <wheelhouse> <package>`).
+    (re.compile(r"\bpip[0-9.]*\s+(install|upgrade)\b(?!.*--no-index)"), "toolchain_self_update"),
+    # System package managers.
+    (re.compile(r"\b(apt|apt-get)\s+(install|upgrade|dist-upgrade)\b"), "toolchain_self_update"),
+    (re.compile(r"\bdpkg\s+-i\b"), "toolchain_self_update"),
+    # Pipe-to-shell installer patterns (curl|sh, wget|sh).
+    (re.compile(r"\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "toolchain_self_update"),
+    (re.compile(r"\bwget\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "toolchain_self_update"),
 )
 
 _GIT_OPAQUE_MECHANIC = "git_opaque"
@@ -945,12 +958,22 @@ def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
     return False
 
 
+_TOOLCHAIN_SELF_UPDATE_DENY_REASON = (
+    "toolchain self-update ({matched}) denied in governed seats; "
+    "surface updates are deliberate manifest bumps (surfaces/manifest.yaml) "
+    "rolled out canonically — see ce-ops#271 / rented-surface governance"
+)
+
+
 def _mechanics_would_deny(command: Any, context: HookContext) -> str | None:
     action = classify_mechanics(command)
     if action is None:
         return None
     if _authority_covers(context.side_effect_authority, action, command):
         return None
+    if action == "toolchain_self_update":
+        matched = command.split()[0] if isinstance(command, str) and command.split() else str(command)
+        return _TOOLCHAIN_SELF_UPDATE_DENY_REASON.format(matched=matched)
     return (
         f"restricted mechanic ({action}) is denied without a matching ratified "
         "reviewer-venue side-effect-authority envelope (G2.007.2)"
@@ -1209,6 +1232,7 @@ _MECHANIC_RECORD_AXES: dict[str, tuple[str, str]] = {
     "forge_ruleset": ("egress", "governance"),
     "forge_review_submit": ("egress", "governance"),
     "forge_auto_merge": ("egress", "governance"),
+    "toolchain_self_update": ("exec", "governance"),
     _GIT_OPAQUE_MECHANIC: ("vcs", "governance"),
 }
 
