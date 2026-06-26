@@ -9,6 +9,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from creator_engine_validator import codex_launch_spec as launch_spec
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
@@ -321,7 +325,7 @@ def test_codex_npm_symlink_mounts_package_root_instead_of_broken_bin_symlink(
     assert not any(arg.endswith(",target=/usr/local/bin/codex,readonly") for arg in argv)
 
 
-def test_controller_variant_uses_claude_harness_marker_without_secret_value() -> None:
+def test_controller_variant_uses_claude_harness_marker_without_credential_env() -> None:
     result = run_wrapper("--harness", "controller", "tui")
 
     argv = dry_run_argv(result)
@@ -330,13 +334,52 @@ def test_controller_variant_uses_claude_harness_marker_without_secret_value() ->
     assert "CE_DGX_HARNESS=claude" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
     assert "--dangerously-bypass-hook-trust" not in argv
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in argv
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in argv
     assert "synthetic-secret-token-value" not in result.stdout
     assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
     assert any(
         arg == "type=bind,source=/opt/claude/bin/claude,target=/usr/local/bin/claude,readonly"
         for arg in argv
     )
+    launch_spec.assert_no_container_credential_env(argv)
+
+
+def test_vps_runsc_launch_guard_allows_clean_argv_with_host_credentials() -> None:
+    result = run_wrapper(
+        "exec",
+        "summarize status",
+        GH_TOKEN="ghs_vps_should_not_cross_container_boundary",
+        GITHUB_TOKEN="github_pat_vps_should_not_cross_container_boundary",
+        OPENAI_API_KEY="sk-vps-should-not-cross-container-boundary",
+        BAO_TOKEN="hvs.vps_should_not_cross_container_boundary",
+    )
+
+    argv = dry_run_argv(result)
+    rendered = "\n".join(argv)
+
+    launch_spec.assert_no_container_credential_env(argv)
+    for forbidden in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "OPENAI_API_KEY",
+        "BAO_TOKEN",
+        "ghs_vps_should_not_cross_container_boundary",
+        "github_pat_vps_should_not_cross_container_boundary",
+        "sk-vps-should-not-cross-container-boundary",
+        "hvs.vps_should_not_cross_container_boundary",
+    ):
+        assert forbidden not in rendered
+
+
+def test_vps_runsc_launch_guard_denies_credential_env_carrier() -> None:
+    clean_argv = dry_run_argv(run_wrapper("tui"))
+    dirty_argv = clean_argv[:2] + ["--env", "CLAUDE_CODE_OAUTH_TOKEN"] + clean_argv[2:]
+
+    findings = launch_spec.find_container_credential_env_carriers(dirty_argv)
+
+    assert [finding.name for finding in findings] == ["CLAUDE_CODE_OAUTH_TOKEN"]
+    with pytest.raises(launch_spec.GovernedCommandError):
+        launch_spec.assert_no_container_credential_env(dirty_argv)
 
 
 def test_detach_dry_run_uses_named_persistent_run_without_rm() -> None:
@@ -417,7 +460,6 @@ def test_detach_after_harness_uses_harness_aware_container_name() -> None:
             "controller",
             "--detach",
             "tui",
-            CE_VPS_ALLOW_DETACHED_TOKEN_ENV="1",
         )
     )
 
@@ -427,17 +469,15 @@ def test_detach_after_harness_uses_harness_aware_container_name() -> None:
     assert "--rm" not in argv
 
 
-def test_detach_claude_harness_refuses_token_env_without_optin() -> None:
-    # ce-ops#408 review: a token-bearing harness in detached/named-persistent mode would
-    # leave CLAUDE_CODE_OAUTH_TOKEN in inspectable container metadata until `docker rm`.
-    # Codex detached stays tokenless (unaffected); claude/controller fails closed by default.
+def test_detach_claude_harness_remains_tokenless() -> None:
     result = run_wrapper("--harness", "controller", "--detach", "tui")
 
-    assert result.returncode == 78, result.stderr
-    assert "REFUSED" in result.stderr
-    assert "CE_VPS_ALLOW_DETACHED_TOKEN_ENV=1" in result.stderr
+    argv = dry_run_argv(result)
+    assert "-d" in argv
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in argv
     assert "synthetic-secret-token-value" not in result.stdout
     assert "synthetic-secret-token-value" not in result.stderr
+    launch_spec.assert_no_container_credential_env(argv)
 
 
 def test_detach_codex_harness_needs_no_optin_tokenless() -> None:

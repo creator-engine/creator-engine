@@ -139,6 +139,15 @@ actions (see
   reference signing policy per FR-001 but do not embed live
   credentials. Token rotation is a `security`/`identity` mutation
   per FR-008.
+- **No credential env in contained launch specs.** Contained Docker/runsc
+  launches MUST NOT pass credential-bearing environment names or values
+  through container argv, Docker `--env`/`-e`, opaque env files, or OCI
+  `Config.Env`. Names such as `GH_TOKEN`, `GITHUB_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `BAO_TOKEN`, and `OPENAI_API_KEY` are
+  denied at the launch boundary. Contained seats that need privileged
+  transport must use a brokered transport-deputy handoff; onecli
+  transport-deputy delivery is follow-on scope and is not provided by
+  the runsc launcher env.
 
 The full secrets contract is owned by Feature 001 (and any tenant
 secret-store overlay). This document references rather than

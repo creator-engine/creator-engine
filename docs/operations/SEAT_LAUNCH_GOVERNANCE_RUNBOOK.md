@@ -242,6 +242,7 @@ spec modules.
 | CDX-D-6 | Codex | Missing explicit or verified bypass mode. | Set exactly the accepted top-level Codex config keys in `~/.codex/config.toml`: `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`, or use the approved explicit argv path by passing `--codex-arg=--dangerously-bypass-approvals-and-sandbox` through the launcher. Other key names, values, or raw `codex` invocations are not accepted. |
 | CDX-D-7 | Codex | Non-allowlisted Codex launch flags. | Remove the flag. Add support in the pure launch spec only after governance review and tests. |
 | CDX-D-8 | Codex | Managed Codex PreToolUse hook-pack is not confirmed. | Install/repair the CE Codex managed hook requirements layer and committed hook shim, then relaunch through `ce launch --harness codex`. Do not bypass hook trust or launch raw Codex. |
+| CDX-D-9 | Codex | A credential-bearing environment variable is carried into the contained launch (`--env`/`-e` `GH_TOKEN`-style names, `--env-file`, or OCI `Env` entries) — it would land in the container environment and persist in `docker inspect` metadata. | Remove the credential from the container launch spec. Inject credentials at request time via the transport-deputy seam; never pass secret names or values through container env. |
 <!-- ce-launch-refusal-clauses:end -->
 
 ## 7. Containment Response

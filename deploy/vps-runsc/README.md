@@ -65,7 +65,8 @@ Detached mode runs `docker run -d --name <name>` instead of `docker run --rm`:
   exit. Foreground mode keeps `--rm` unchanged.
 - All posture invariants (`--runtime`, `--network=host`,
   `--security-opt=no-new-privileges`, `--cap-drop=ALL`, `--user`, every mount
-  and env, the generated contained config) are identical to foreground mode.
+  and non-credential env, the generated contained config) are identical to
+  foreground mode.
 - TTY flags (`-it` by default) are preserved so the harness TUI renders into the
   herdr pane.
 
@@ -192,6 +193,12 @@ deploy/vps-runsc/run-vps-runsc.sh tui
 `controller` is an alias for the image entrypoint's Claude harness marker:
 `CE_DGX_HARNESS=claude`. `--harness claude` is also accepted.
 
+The VPS launcher does not pass `CLAUDE_CODE_OAUTH_TOKEN`, GitHub tokens,
+OpenAI keys, Bao/OpenBao tokens, or other credential-bearing env names through
+Docker `--env`/`-e` or the container env spec. Claude/controller auth through a
+onecli transport-deputy handoff is follow-on scope; until that exists, the
+contained launch remains tokenless at the container boundary.
+
 ## Runtime Registration
 
 Register a Docker runtime named `runsc-gvproxy-ptrace` on the VPS:
@@ -245,9 +252,10 @@ deploy/vps-runsc/run-vps-runsc.sh tui
 ```
 
 The printed argv must include `CE_DGX_HARNESS=claude`. It must not include
-`CE_DGX_HERDR_SOCKET_PATH`, raw `HERDR_SOCKET` carriers, or any host socket bind
-mount. The herdr control socket path is substrate-internal and resolved by the
-image entrypoint default only.
+`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `OPENAI_API_KEY`,
+`BAO_TOKEN`, `CE_DGX_HERDR_SOCKET_PATH`, raw `HERDR_SOCKET` carriers, or any
+host socket bind mount. The herdr control socket path is substrate-internal and
+resolved by the image entrypoint default only.
 
 ## Caveats
 
@@ -259,6 +267,7 @@ image entrypoint default only.
 - The image must provide the herdr harness entrypoint. The launcher passes
   harness markers to that entrypoint; only exec launches pass an `exec`
   subcommand after the image.
-- Auth and config stay on the host and enter the container only through explicit
-  mounts or named environment forwarding. The image has Node plus a Codex
-  package wrapper, but no baked Codex package, auth, or user config.
+- Config stays on the host and enters the container only through explicit
+  non-secret mounts. Credential-bearing env forwarding is denied at launch; the
+  image has Node plus a Codex package wrapper, but no baked Codex package,
+  auth, or user config.

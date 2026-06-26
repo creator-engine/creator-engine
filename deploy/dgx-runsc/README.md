@@ -172,6 +172,14 @@ diagnostics.
    env, GitHub/OpenBao tokens, App keys, SSH agent sockets, Docker sockets, or the host broker
    config path.
 
+   The launcher also fails closed if any contained Docker argv/spec attempts to
+   pass credential-bearing env names or values such as `GH_TOKEN`,
+   `GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `BAO_TOKEN`, or
+   `OPENAI_API_KEY` via Docker `--env`/`-e`, opaque env files, or OCI
+   `Config.Env`. Credential delivery to contained seats is broker/transport
+   deputy work; onecli transport-deputy delivery is follow-on scope and is not
+   implemented by this DGX launcher.
+
 6. Start the interactive Codex TUI in the repo:
 
    ```bash
