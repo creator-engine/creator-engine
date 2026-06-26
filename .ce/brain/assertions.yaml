@@ -70,9 +70,9 @@ records:
 - claim:
     object: merge-queue-checks-requested
     predicate: verified-by-sha256
-    sha256: 8e01d16683ef4754ed83fb77a3197eb72c5926c43a7e5797e693f03e3f7adcad
+    sha256: 598735ee073d79a2dda10e83ac26b9bed165b9b225287b5299e5caf8a560a83d
     subject: convention
-  content_hash: eea6d01ae0e85f3a8a71d6edd1319e56f97d8bbc674ccd55bfae3f3a211b8a9e
+  content_hash: b8f6a82523ecb90d5b023e65179fb68027a6cb43deae9bb85a98e65f574553a0
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-fleet-mergequeue-trigger
   kind: brain-assertion
@@ -93,11 +93,11 @@ records:
     predicate: verified-by-sha256
     sha256: 88f8e46c67288c456bb72f2f7ba17e1ed3445bebc8285fe9b0e7fbdd8f07029a
     subject: convention
-  content_hash: fbcdd35c54e91e9093534fb39c2a3076c3ba568f649fe95282a2a8883cdd8327
+  content_hash: 10364f4fd4b525cf5ecb5522586774b8fc706fd81fdcce0856058b1aa592600d
   evidence_ref: docs/contracts/authoring-a-governed-pr.md
   id: brain-assertion-fleet-carrier-discipline
   kind: brain-assertion
-  prev_hash: eea6d01ae0e85f3a8a71d6edd1319e56f97d8bbc674ccd55bfae3f3a211b8a9e
+  prev_hash: b8f6a82523ecb90d5b023e65179fb68027a6cb43deae9bb85a98e65f574553a0
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -114,11 +114,11 @@ records:
     predicate: verified-by-sha256
     sha256: aa96a707b218958acafb1d9bdd561fbe8416a76234c0408e73a4c7fd8ac9111b
     subject: convention
-  content_hash: dfffe21f48d519ba50f2328206d145e4f61d1df1f208fbaf02e6812e6bb6d68d
+  content_hash: 7aa95baaa1fbe4e1cba5250623385f87397cee87f9de31d200e3295c5dbed1ea
   evidence_ref: docs/architecture/work-claim-locks.md
   id: brain-assertion-fleet-claim-lock-discipline
   kind: brain-assertion
-  prev_hash: fbcdd35c54e91e9093534fb39c2a3076c3ba568f649fe95282a2a8883cdd8327
+  prev_hash: 10364f4fd4b525cf5ecb5522586774b8fc706fd81fdcce0856058b1aa592600d
   record_type: brain_assertion
   schema_version: '1'
   scope: global
