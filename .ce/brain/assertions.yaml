@@ -1,0 +1,133 @@
+kind: brain-assertion-ledger
+record_type: brain_assertion_ledger
+records:
+- claim:
+    object: codex_fan_out_surfaces
+    predicate: probe-verdict
+    subject: capability
+    verdict: present
+  content_hash: ab1d0c5287f22ebb10023fd323d9574ef10c557ba6100662f5338994ebaee279
+  evidence_ref: probe:codex_fan_out_surfaces
+  id: brain-assertion-fleet-codex-fanout-surfaces
+  kind: brain-assertion
+  prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 0
+  statement: capability probe-verdict codex_fan_out_surfaces
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: probe:codex_fan_out_surfaces
+    probe: codex_fan_out_surfaces
+    type: probe
+- claim:
+    object: codex_pretooluse_hook
+    predicate: probe-verdict
+    subject: capability
+    verdict: present
+  content_hash: fbe657e0bc2caddce0fc2563da3fcc8d9eb0795012e037dea7e4291c67f46588
+  evidence_ref: probe:codex_pretooluse_hook
+  id: brain-assertion-fleet-codex-pretooluse-hook
+  kind: brain-assertion
+  prev_hash: ab1d0c5287f22ebb10023fd323d9574ef10c557ba6100662f5338994ebaee279
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 1
+  statement: capability probe-verdict codex_pretooluse_hook
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: probe:codex_pretooluse_hook
+    probe: codex_pretooluse_hook
+    type: probe
+- claim:
+    object: harness_fan_out
+    predicate: probe-verdict
+    subject: capability
+    verdict: unknown
+  content_hash: 1b88d0057b4fe4a71beb55d65a77a3c28e6bf3379e5dfdc8b7161bb00220945e
+  evidence_ref: probe:harness_fan_out
+  id: brain-assertion-fleet-harness-fanout-signal
+  kind: brain-assertion
+  prev_hash: fbe657e0bc2caddce0fc2563da3fcc8d9eb0795012e037dea7e4291c67f46588
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 2
+  statement: capability probe-verdict harness_fan_out
+  status: active
+  superseded_by: null
+  type: capability
+  verification_method:
+    evidence_ref: probe:harness_fan_out
+    probe: harness_fan_out
+    type: probe
+- claim:
+    object: merge-queue-checks-requested
+    predicate: verified-by-sha256
+    sha256: 8e01d16683ef4754ed83fb77a3197eb72c5926c43a7e5797e693f03e3f7adcad
+    subject: convention
+  content_hash: eea6d01ae0e85f3a8a71d6edd1319e56f97d8bbc674ccd55bfae3f3a211b8a9e
+  evidence_ref: .github/workflows/validate.yml
+  id: brain-assertion-fleet-mergequeue-trigger
+  kind: brain-assertion
+  prev_hash: 1b88d0057b4fe4a71beb55d65a77a3c28e6bf3379e5dfdc8b7161bb00220945e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 3
+  statement: convention verified-by-sha256 merge-queue-checks-requested
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/validate.yml
+    type: static
+- claim:
+    object: per-pr-carrier-discipline
+    predicate: verified-by-sha256
+    sha256: 88f8e46c67288c456bb72f2f7ba17e1ed3445bebc8285fe9b0e7fbdd8f07029a
+    subject: convention
+  content_hash: fbcdd35c54e91e9093534fb39c2a3076c3ba568f649fe95282a2a8883cdd8327
+  evidence_ref: docs/contracts/authoring-a-governed-pr.md
+  id: brain-assertion-fleet-carrier-discipline
+  kind: brain-assertion
+  prev_hash: eea6d01ae0e85f3a8a71d6edd1319e56f97d8bbc674ccd55bfae3f3a211b8a9e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 4
+  statement: convention verified-by-sha256 per-pr-carrier-discipline
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/authoring-a-governed-pr.md
+    type: static
+- claim:
+    object: in-compose-lock-before-work
+    predicate: verified-by-sha256
+    sha256: aa96a707b218958acafb1d9bdd561fbe8416a76234c0408e73a4c7fd8ac9111b
+    subject: convention
+  content_hash: dfffe21f48d519ba50f2328206d145e4f61d1df1f208fbaf02e6812e6bb6d68d
+  evidence_ref: docs/architecture/work-claim-locks.md
+  id: brain-assertion-fleet-claim-lock-discipline
+  kind: brain-assertion
+  prev_hash: fbcdd35c54e91e9093534fb39c2a3076c3ba568f649fe95282a2a8883cdd8327
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 5
+  statement: convention verified-by-sha256 in-compose-lock-before-work
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/architecture/work-claim-locks.md
+    type: static
+schema_version: '1'

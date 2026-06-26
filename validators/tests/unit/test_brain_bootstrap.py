@@ -15,6 +15,12 @@ def _write_ledger(state_root: Path, records: list[dict]) -> None:
     path.write_text(rt.serialize_ledger(records), encoding="utf-8")
 
 
+def _write_authoritative_ledger(repo_root: Path, records: list[dict]) -> None:
+    path = rt.authoritative_ledger_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rt.serialize_ledger(records), encoding="utf-8")
+
+
 def _records_with_assertions(state_root: Path) -> list[dict]:
     first = rt.assert_claim(
         assertion_id="brain-assertion-bootstrap-0001",
@@ -220,6 +226,43 @@ def test_corrected_assertion_is_reflected_on_next_bootstrap(tmp_path: Path):
     )
 
     assert before["knowledge_ssot"]["assertions"][0]["claim"]["object"] == "worker"
+    assert [item["id"] for item in after["knowledge_ssot"]["assertions"]] == ["brain-assertion-bootstrap-0004"]
+    assert after["knowledge_ssot"]["assertions"][0]["claim"]["object"] == "foreman"
+
+
+def test_authoritative_correction_is_synced_on_next_bootstrap(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    state_root = repo_root / ".ce" / "state"
+    asserted = rt.assert_claim(
+        assertion_id="brain-assertion-bootstrap-0001",
+        claim={"subject": "lane", "predicate": "seat", "object": "worker"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_brain_bootstrap.py#original",
+        state_root=state_root,
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    _write_authoritative_ledger(repo_root, [asserted.record])
+
+    before = bootstrap.build_bootstrap_payload(state_root=state_root)
+
+    correction = rt.correct_claim(
+        assertion_id="brain-assertion-bootstrap-0001",
+        new_assertion_id="brain-assertion-bootstrap-0004",
+        claim={"subject": "lane", "predicate": "seat", "object": "foreman"},
+        scope="global",
+        evidence_ref="validators/tests/unit/test_brain_bootstrap.py#correction",
+        state_root=state_root,
+        records=[asserted.record],
+        write=lambda _path, _text: None,
+    )
+    _write_authoritative_ledger(repo_root, [asserted.record, correction.superseded_record, correction.record])
+
+    after = bootstrap.build_bootstrap_payload(state_root=state_root)
+
+    assert before["knowledge_ssot"]["authoritative_loaded"] is True
+    assert before["knowledge_ssot"]["assertions"][0]["claim"]["object"] == "worker"
+    assert rt.load_records(state_root) == [asserted.record, correction.superseded_record, correction.record]
     assert [item["id"] for item in after["knowledge_ssot"]["assertions"]] == ["brain-assertion-bootstrap-0004"]
     assert after["knowledge_ssot"]["assertions"][0]["claim"]["object"] == "foreman"
 

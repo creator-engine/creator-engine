@@ -1,8 +1,9 @@
-"""Knowledge-SSOT assertion ledger runtime (``ce brain`` first slice).
+"""Knowledge-SSOT assertion ledger runtime.
 
-The brain ledger is a local, deterministic, schema-gated assertion chain under
-``.ce/state``. It deliberately stops at the SSOT layer: no datastore, no MCP
-server, no recall/vector path, and no MEMORY migration shim.
+The versioned authoritative assertion ledger lives in the repo and is copied
+deterministically into the local runtime ledger under ``.ce/state`` at
+bootstrap. It deliberately stops at the SSOT layer: no datastore, no MCP server,
+no recall/vector path, and no MEMORY migration shim.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ ASSERTION_KIND = "brain-assertion"
 ASSERTION_RECORD_TYPE = "brain_assertion"
 SCHEMA_VERSION = "1"
 LEDGER_RELATIVE_PATH = Path("brain") / "assertions.yaml"
+AUTHORITATIVE_LEDGER_RELATIVE_PATH = Path(".ce") / "brain" / "assertions.yaml"
 ASSERTION_TYPES = frozenset({"capability", "convention", "decision", "gotcha"})
 VERIFICATION_METHOD_TYPES = frozenset({"probe", "static", "manual-attested"})
 DEFAULT_ASSERTION_TYPE = "decision"
@@ -125,6 +127,17 @@ class VerifyResult:
     errors: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class SyncResult:
+    authoritative_path: Path
+    ledger_path: Path
+    record_count: int
+    active_count: int
+    head_content_hash: str | None
+    updated: bool
+    authoritative_exists: bool
+
+
 class _NoAliasSafeDumper(yaml.SafeDumper):
     def ignore_aliases(self, data):  # type: ignore[override]
         return True
@@ -132,6 +145,17 @@ class _NoAliasSafeDumper(yaml.SafeDumper):
 
 def ledger_path(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> Path:
     return Path(state_root) / LEDGER_RELATIVE_PATH
+
+
+def repo_root_from_state_root(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> Path:
+    root = Path(state_root)
+    if root.name == "state" and root.parent.name == ".ce":
+        return root.parent.parent
+    return Path(".")
+
+
+def authoritative_ledger_path(repo_root: Path | str = Path(".")) -> Path:
+    return Path(repo_root) / AUTHORITATIVE_LEDGER_RELATIVE_PATH
 
 
 def _default_write(path: Path, text: str) -> None:  # pragma: no cover - live writer
@@ -293,15 +317,89 @@ def load_ledger_text(text: str) -> list[dict[str, Any]]:
     return _records_from_doc(data, "<brain-ledger-text>")
 
 
+def load_records_from_path(path: Path | str) -> list[dict[str, Any]]:
+    source = Path(path)
+    try:
+        data = load_yaml(source)
+    except LoaderError as exc:
+        raise BrainLedgerInvalid(str(exc)) from exc
+    return _records_from_doc(data, source)
+
+
 def load_records(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> list[dict[str, Any]]:
     path = ledger_path(state_root)
     if not path.is_file():
         return []
-    try:
-        data = load_yaml(path)
-    except LoaderError as exc:
-        raise BrainLedgerInvalid(str(exc)) from exc
-    return _records_from_doc(data, path)
+    return load_records_from_path(path)
+
+
+def load_authoritative_records(repo_root: Path | str = Path(".")) -> list[dict[str, Any]]:
+    return load_records_from_path(authoritative_ledger_path(repo_root))
+
+
+def authoritative_ledger_exists(repo_root: Path | str = Path(".")) -> bool:
+    return authoritative_ledger_path(repo_root).is_file()
+
+
+def sync_authoritative_ledger(
+    *,
+    state_root: Path | str = V3_LOCAL_STATE_ROOT,
+    repo_root: Path | str | None = None,
+    write: Writer | None = None,
+) -> SyncResult:
+    """Copy the repo-versioned assertion ledger into local runtime state.
+
+    If the authoritative ledger is absent, the function is a no-op so tests and
+    older checkouts that only provide a local ledger keep the prior behavior.
+    When present, the authoritative ledger is schema/hash-chain validated before
+    any runtime file is touched.
+    """
+
+    resolved_repo_root = repo_root_from_state_root(state_root) if repo_root is None else Path(repo_root)
+    source = authoritative_ledger_path(resolved_repo_root)
+    target = ledger_path(state_root)
+    if not source.is_file():
+        return SyncResult(
+            authoritative_path=source,
+            ledger_path=target,
+            record_count=0,
+            active_count=0,
+            head_content_hash=None,
+            updated=False,
+            authoritative_exists=False,
+        )
+
+    records = load_records_from_path(source)
+    _require_valid_records(records, source)
+    source_text = source.read_text(encoding="utf-8")
+    current_text = target.read_text(encoding="utf-8") if target.is_file() else None
+    updated = current_text != source_text
+    if updated:
+        (write or _default_write)(target, source_text)
+    latest, _indexes = _latest_by_id(records)
+    active = [record for record in latest.values() if record.get("status") == "active"]
+    return SyncResult(
+        authoritative_path=source,
+        ledger_path=target,
+        record_count=len(records),
+        active_count=len(active),
+        head_content_hash=str(records[-1][CONTENT_HASH_FIELD]) if records else None,
+        updated=updated,
+        authoritative_exists=True,
+    )
+
+
+def records_equal_authoritative(
+    *,
+    state_root: Path | str = V3_LOCAL_STATE_ROOT,
+    repo_root: Path | str | None = None,
+) -> bool:
+    resolved_repo_root = repo_root_from_state_root(state_root) if repo_root is None else Path(repo_root)
+    source = authoritative_ledger_path(resolved_repo_root)
+    target = ledger_path(state_root)
+    if not source.is_file() or not target.is_file():
+        return True
+    return load_records_from_path(target) == load_records_from_path(source)
 
 
 def _pointer(parts: tuple[Any, ...]) -> str:

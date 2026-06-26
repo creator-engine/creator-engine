@@ -158,6 +158,45 @@ def _harness_fan_out(context: ProbeContext) -> ProbeResult:
     )
 
 
+def _codex_pretooluse_hook(context: ProbeContext) -> ProbeResult:
+    path = context.root() / ".codex" / "hooks" / "ce-pretooluse-codex.py"
+    try:
+        text = context.read_text(path)
+    except Exception as exc:
+        return _unknown("codex_pretooluse_hook", reason="probe_error", error=exc)
+    expected = "from creator_engine_validator.codex_pretooluse import main"
+    present = path.is_file() and expected in text
+    return _result(
+        "codex_pretooluse_hook",
+        "present" if present else "absent",
+        {"hook": str(path), "imports_validator_entrypoint": expected in text},
+    )
+
+
+def _codex_fan_out_surfaces(context: ProbeContext) -> ProbeResult:
+    root = context.root()
+    required = [
+        root / ".claude" / "agents" / "architect_research.md",
+        root / ".claude" / "agents" / "implementer.md",
+        root / ".claude" / "agents" / "reviewer.md",
+        root / ".claude" / "agents" / "verification.md",
+    ]
+    missing: list[str] = []
+    for path in required:
+        try:
+            text = context.read_text(path)
+        except Exception:
+            missing.append(str(path))
+            continue
+        if "Governed" not in text and "governed" not in text:
+            missing.append(str(path))
+    return _result(
+        "codex_fan_out_surfaces",
+        "absent" if missing else "present",
+        {"required": [str(path) for path in required], "missing": missing},
+    )
+
+
 def _wheelhouse_matches_source(context: ProbeContext) -> ProbeResult:
     try:
         violations = context.wheel_source_checker(context.root())
@@ -172,6 +211,8 @@ def _wheelhouse_matches_source(context: ProbeContext) -> ProbeResult:
 
 
 PROBES: dict[str, ProbeFn] = {
+    "codex_fan_out_surfaces": _codex_fan_out_surfaces,
+    "codex_pretooluse_hook": _codex_pretooluse_hook,
     "gh_authenticated": _gh_authenticated,
     "harness_fan_out": _harness_fan_out,
     "merge_group_trigger": _merge_group_trigger,
