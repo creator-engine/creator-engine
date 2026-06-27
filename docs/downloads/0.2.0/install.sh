@@ -177,6 +177,60 @@ ssh_keygen_install_plan() {
   fi
 }
 
+git_install_plan() {
+  if command -v apt-get >/dev/null 2>&1; then
+    printf '%s\t%s\n' \
+      "apt-get update && apt-get install -y git" \
+      "sudo apt-get update && sudo apt-get install -y git"
+  elif command -v dnf >/dev/null 2>&1; then
+    printf '%s\t%s\n' "dnf install -y git" "sudo dnf install -y git"
+  elif command -v yum >/dev/null 2>&1; then
+    printf '%s\t%s\n' "yum install -y git" "sudo yum install -y git"
+  elif command -v apk >/dev/null 2>&1; then
+    printf '%s\t%s\n' "apk add git" "sudo apk add git"
+  elif command -v pacman >/dev/null 2>&1; then
+    printf '%s\t%s\n' "pacman -Sy --needed git" "sudo pacman -Sy --needed git"
+  elif command -v brew >/dev/null 2>&1; then
+    printf '%s\t%s\n' "brew install git" "brew install git"
+  else
+    return 1
+  fi
+}
+
+remediate_git() {
+  command -v git >/dev/null 2>&1 && return 0
+  plan="$(git_install_plan || true)"
+  if [ -z "$plan" ]; then
+    fail missing_bootstrap_dependency "required command missing: git
+
+Install Git, then re-run this installer.
+Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y git
+Fedora/RHEL/CentOS: sudo dnf install -y git
+Alpine: sudo apk add git
+Arch: sudo pacman -Sy --needed git
+macOS/Homebrew: brew install git"
+  fi
+  OLDIFS="$IFS"
+  IFS=$'\t'
+  read -r root_command sudo_command <<EOF
+$plan
+EOF
+  IFS="$OLDIFS"
+  say "git not found; attempting Git install"
+  set +e
+  run_privileged_or_remediate "$root_command" "$sudo_command"
+  status="$?"
+  set -e
+  if [ "$status" -ne 0 ] || ! command -v git >/dev/null 2>&1; then
+    fail missing_bootstrap_dependency "required command missing: git
+
+Automatic Git install was not possible or did not provide git.
+Run this exact remediation command, then re-run this installer:
+  $sudo_command"
+  fi
+  say "git installed"
+}
+
 remediate_ssh_keygen() {
   command -v ssh-keygen >/dev/null 2>&1 && return 0
   plan="$(ssh_keygen_install_plan || true)"
@@ -220,6 +274,7 @@ append_word() {
 }
 
 preflight_bootstrap_commands() {
+  remediate_git
   remediate_ssh_keygen
   missing_cmds=""
   for cmd in curl ssh-keygen sed awk grep base64 mktemp chmod uname date mkdir rm cp mv ln tar sh; do
