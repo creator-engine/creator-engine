@@ -2,6 +2,8 @@
 
 These units keep the autonomous gate daemons alive after host reboot:
 
+- `ce-belt-daemon.service`: runs `ce pickup poll` in observe-only mode for the
+  work-pickup conveyor belt; it does not claim work or launch seats.
 - `ce-integrator-daemon.service`: runs `queue-daemon` for merge-queue repair.
 - `ce-review-pickup-daemon.service`: runs `review-pickup` for review fan-out.
 - `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
@@ -17,7 +19,8 @@ deploy/systemd/install-gate-daemons-systemd.sh
 The default install target is the user systemd manager at
 `~/.config/systemd/user`. Use `--system` to install into `/etc/systemd/system`.
 The installer renders the checked-in unit templates with the current source
-checkout path, runs `daemon-reload`, enables both services, and starts them.
+checkout path, runs `daemon-reload`, enables the gate daemon services, and
+starts them.
 Use `--no-start` to render/enable without starting.
 
 Create the env file before starting services. Defaults:
@@ -30,8 +33,11 @@ Example:
 ```sh
 CE_GATE_REPO=creator-engine/creator-engine
 CE_GATE_AUTHORIZED_REVIEWERS=<the configured reviewer seats>
-GH_TOKEN=ghp_integrator_token
-CE_PICKUP_TOKEN=ghp_review_pickup_token
+CE_BELT_IDENTITY=ce-dev-4
+CE_BELT_INTERVAL_SECONDS=120
+CE_BELT_LABELS=enhancement
+GH_TOKEN=<integrator-token>
+CE_PICKUP_TOKEN=<review-pickup-token>
 ```
 
 `GH_TOKEN` and `CE_GATE_AUTHORIZED_REVIEWERS` are required by the integrator
@@ -41,6 +47,15 @@ missing or empty config fails closed. Review pickup first uses
 `CE_PICKUP_TOKEN`; if it is absent, the CLI falls back to the configured
 reviewer seats' local credential files unless ambient `gh` auth is explicitly
 enabled.
+
+The belt daemon requires `CE_BELT_IDENTITY` because `ce pickup poll` resolves
+credentials from `CE_PICKUP_TOKEN` or `~/.ce-keys/<identity>.pat` by default.
+It runs a simple systemd-supervised loop around the one-shot poll command and
+keeps the poll observe-only: no `--claim`, no `--enable-launch`, and no ambient
+`gh` credential use unless the operator changes the command to pass the CLI's
+explicit ambient-auth flag. Set optional `CE_BELT_LABELS` to pass one scoped
+`--label` filter such as `enhancement`; leave it unset to observe the default
+pickup queries.
 
 ## Detached Codex Seat Template
 

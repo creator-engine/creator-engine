@@ -1,0 +1,16 @@
+[Unit]
+Description=Creator Engine work-pickup conveyor belt daemon (observe-only)
+Documentation=./README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/usr/bin/env bash -lc 'while true; do ce pickup poll --identity "$CE_BELT_IDENTITY" --repo "$CE_GATE_REPO" ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} --json; sleep "${CE_BELT_INTERVAL_SECONDS:-120}"; done'
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=default.target

@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 SERVICE_NAMES = (
+    "ce-belt-daemon.service",
     "ce-integrator-daemon.service",
     "ce-review-pickup-daemon.service",
 )
@@ -31,9 +32,24 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
         assert "Environment" not in unit["Service"]
-        assert unit["Service"]["ExecStart"].startswith("/usr/bin/env cev3 ")
+        assert unit["Service"]["ExecStart"].startswith(("/usr/bin/env cev3 ", "/usr/bin/env bash "))
         assert "PYTHONPATH=validators" not in unit["Service"]["ExecStart"]
         assert "creator_engine_validator.v3_cli" not in unit["Service"]["ExecStart"]
+
+
+def test_belt_daemon_unit_execstart_is_observe_only_poll_loop(repo_root: Path):
+    unit = _read_unit(repo_root, "ce-belt-daemon.service")
+    exec_start = unit["Service"]["ExecStart"]
+    assert exec_start.startswith("/usr/bin/env bash -lc ")
+    assert "while true; do ce pickup poll " in exec_start
+    assert ' --identity "$CE_BELT_IDENTITY" ' in exec_start
+    assert ' --repo "$CE_GATE_REPO" ' in exec_start
+    assert ' ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} ' in exec_start
+    assert exec_start.endswith('sleep "${CE_BELT_INTERVAL_SECONDS:-120}"; done\'')
+    assert " --json;" in exec_start
+    assert "--claim" not in exec_start
+    assert "--enable-launch" not in exec_start
+    assert "--allow-ambient-gh" not in exec_start
 
 
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
