@@ -3,6 +3,14 @@
 # INTERNALLY (not in this public repo). Do not put real fleet identities,
 # accounts, App/installation IDs, host IPs, or credential paths here.
 
+repos:
+  - name: EXAMPLE_REPO
+    visibility: public
+    owner: EXAMPLE_OWNER
+    purpose: EXAMPLE_REPO_PURPOSE
+    access:
+      - EXAMPLE_ACCESS_GROUP
+
 accounts:
   - login: EXAMPLE_LOGIN_SEAT_A
     github_id: TODO_VERIFY
@@ -10,18 +18,21 @@ accounts:
     owning_seat: EXAMPLE_SEAT_A
     host: EXAMPLE_HOST_A
     noreply_commit_email: TODO_VERIFY
+    email_of_record: TODO_VERIFY
   - login: EXAMPLE_LOGIN_REVIEWER
     github_id: TODO_VERIFY
     role: reviewer-venue
     owning_seat: EXAMPLE_SEAT_B
     host: EXAMPLE_HOST_B
     noreply_commit_email: TODO_VERIFY
+    email_of_record: TODO_VERIFY
   - login: EXAMPLE_LOGIN_AUTOMATION
     github_id: TODO_VERIFY
     role: authoring-account
     owning_seat: EXAMPLE_SEAT_C
     host: EXAMPLE_HOST_C
     noreply_commit_email: TODO_VERIFY
+    email_of_record: TODO_VERIFY
 
 apps:
   - app_id: TODO_VERIFY
@@ -36,12 +47,20 @@ tokens:
       host: EXAMPLE_HOST_A
       path: EXAMPLE_STORAGE_POINTER
     rotation_owner: EXAMPLE_SEAT_A
+    permission_scopes:
+      - EXAMPLE_SCOPE_READ
+    resource_owner: EXAMPLE_OWNER
+    expiry: TODO_VERIFY
   - type: App
     host_binding: TODO_VERIFY
     storage_pointer:
       host: TODO_VERIFY
       path: TODO_VERIFY
     rotation_owner: TODO_VERIFY
+    permission_scopes:
+      - EXAMPLE_SCOPE_APP
+    resource_owner: TODO_VERIFY
+    expiry: TODO_VERIFY
 
 signing_keys:
   - key_name: EXAMPLE_KEY_NAME_A
@@ -61,6 +80,8 @@ host_topology:
       - EXAMPLE_SEAT_A
     role: worker-host
     reach_method: TODO_VERIFY
+    credential_pointers:
+      - openbao-ref:EXAMPLE_MOUNT/EXAMPLE_PATH
 
 authoring_review_matrix:
   - seat: EXAMPLE_SEAT_A
