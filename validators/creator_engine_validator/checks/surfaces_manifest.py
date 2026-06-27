@@ -16,6 +16,8 @@ CHECK_NAME = "surfaces_manifest_complete"
 CONTRACT = "ce-ops#272"
 CONSISTENT_CHECK_NAME = "surfaces_manifest_consistent"
 CONSISTENT_CONTRACT = "ce-ops#273"
+CARRIER_CHECK_NAME = "surfaces_bump_has_carrier"
+CARRIER_CONTRACT = "ce-ops#277"
 
 CODE_MISSING_MANIFEST = "surfaces_manifest_missing"
 CODE_MALFORMED = "surfaces_manifest_malformed"
@@ -29,8 +31,11 @@ CODE_DOCKERFILE_FROM_DIGEST_MISMATCH = "surfaces_manifest_dockerfile_from_digest
 CODE_ARG_MISMATCH = "surfaces_manifest_arg_mismatch"
 CODE_RUNSC_IMAGE_MISMATCH = "surfaces_manifest_runsc_image_mismatch"
 CODE_REQUIREMENTS_PIN_MISMATCH = "surfaces_manifest_requirements_pin_mismatch"
+CODE_BUMP_MISSING_CARRIER = "surfaces_bump_missing_carrier"
 
 MANIFEST = Path("surfaces/manifest.yaml")
+CARRIERS_DIR = Path("carriers")
+CARRIER_GLOB = "surface-bump-*.md"
 REQUIRED_FIELDS = frozenset(
     {
         "name",
@@ -97,6 +102,16 @@ def _repo_roots(paths: Iterable[Path]) -> list[Path]:
         seen.add(resolved)
         roots.append(root)
     return roots
+
+
+def _path_is_manifest_for_root(path: Path, repo_root: Path) -> bool:
+    raw = Path(path)
+    if raw == MANIFEST:
+        return True
+    manifest = repo_root / MANIFEST
+    if raw.is_absolute():
+        return raw.resolve(strict=False) == manifest.resolve(strict=False)
+    return (Path.cwd() / raw).resolve(strict=False) == manifest.resolve(strict=False)
 
 
 def _load_manifest(path: Path) -> tuple[list[dict[str, Any]], list[ValidationError]]:
@@ -522,6 +537,24 @@ def validate_repo_consistent(repo_root: Path) -> CheckResult:
     return CheckResult(name=CONSISTENT_CHECK_NAME, errors=tuple(errors))
 
 
+def validate_repo_carrier(repo_root: Path) -> CheckResult:
+    carriers = repo_root / CARRIERS_DIR
+    if carriers.is_dir() and any(path.is_file() for path in carriers.glob(CARRIER_GLOB)):
+        return CheckResult(name=CARRIER_CHECK_NAME)
+    return CheckResult(
+        name=CARRIER_CHECK_NAME,
+        errors=(
+            make_error(
+                CODE_BUMP_MISSING_CARRIER,
+                carriers,
+                CARRIER_GLOB,
+                "manifest bumps must include a surface-bump carrier",
+                CARRIER_CONTRACT,
+            ),
+        ),
+    )
+
+
 @register(CHECK_NAME, [CONTRACT])
 def run(paths: Iterable[Path]) -> CheckResult:
     roots = _repo_roots(paths or [Path(".")])
@@ -548,3 +581,19 @@ def run_consistent(paths: Iterable[Path]) -> CheckResult:
         result = validate_repo_consistent(root)
         errors.extend(result.errors)
     return CheckResult(name=CONSISTENT_CHECK_NAME, errors=tuple(errors))
+
+
+@register(CARRIER_CHECK_NAME, [CARRIER_CONTRACT])
+def run_carrier(paths: Iterable[Path]) -> CheckResult:
+    input_paths = [Path(path) for path in paths]
+    roots = _repo_roots(input_paths)
+    if not roots:
+        roots = [Path.cwd()]
+
+    errors: list[ValidationError] = []
+    for root in roots:
+        if not any(_path_is_manifest_for_root(path, root) for path in input_paths):
+            continue
+        result = validate_repo_carrier(root)
+        errors.extend(result.errors)
+    return CheckResult(name=CARRIER_CHECK_NAME, errors=tuple(errors))
