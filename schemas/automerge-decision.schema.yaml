@@ -1,0 +1,87 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/automerge-decision.schema.yaml"
+title: "Creator Engine Auto-Merge Decision Record"
+description: |
+  Value-only auto-merge decision record emitted by automerge-decide (dry-run
+  or live classification).  Never secret-bearing.  Safe to write to disk or
+  emit as JSON for audit.
+
+  decision="AUTO" means the policy engine would auto-merge if armed (PR-B).
+  decision="GESTURE_REQUIRED" means a human Operator gesture is required.
+
+  This record is produced by decide_automerge() in automerge_policy.py and is
+  the authoritative output of the automerge-decide CLI subcommand.
+type: object
+required:
+  - decision
+  - mutation_class
+  - size_band
+  - minimum_work_class
+  - ratification_gates
+  - run_mode
+  - kill_switch
+  - class_flag
+  - checks_green
+  - review_decision_blocked
+  - rationale
+additionalProperties: false
+properties:
+  decision:
+    type: string
+    enum: [AUTO, GESTURE_REQUIRED]
+    description: |
+      The policy decision for this PR.  AUTO means all guards passed and the
+      policy engine would auto-merge (if armed).  GESTURE_REQUIRED means a
+      human Operator gesture is needed.
+  mutation_class:
+    type: string
+    description: |
+      The highest-risk mutation class across all changed paths, as returned
+      by mutation_class_for_paths().  Fail-closed classifier.
+  size_band:
+    type: string
+    description: |
+      The size band returned by classify_change_size().  "unknown" when
+      change_stats were not provided.
+    enum: [target_advisory, warn, explain_or_split, split_required, unknown]
+  minimum_work_class:
+    type: string
+    description: |
+      The minimum work class required by the size band.
+  ratification_gates:
+    type: array
+    items:
+      type: string
+    description: |
+      The ratification gates from size_ceremony(work_class, mutation_class).
+      Drives the AUTO vs GESTURE_REQUIRED decision.
+  run_mode:
+    type: string
+    description: The run_mode from the policy state at decision time.
+  kill_switch:
+    type: boolean
+    description: The kill_switch value from the policy state at decision time.
+  class_flag:
+    type: boolean
+    description: |
+      The per-class auto_merge flag from the policy state for this
+      mutation_class at decision time.
+  checks_green:
+    type: boolean
+    description: True if all required checks were green at classification time.
+  review_decision_blocked:
+    type: boolean
+    description: True if reviewDecision was CHANGES_REQUESTED.
+  rationale:
+    type: array
+    items:
+      type: string
+    description: |
+      Human-readable list of guard evaluation steps explaining why the
+      decision was AUTO or GESTURE_REQUIRED.
+  pr_number:
+    type: [integer, "null"]
+    description: Optional PR number for audit correlation.
+  head_sha:
+    type: [string, "null"]
+    description: Optional PR head SHA for audit correlation.

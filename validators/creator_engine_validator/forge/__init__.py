@@ -132,6 +132,24 @@ from .github_repo_config import (
     set_codeowners,
 )
 from .auto_merge import AutoMergeRefused, AutoMergeResult, enable_auto_merge
+from .mutation_classifier import (
+    AUTO_CLASSES,
+    GESTURE_CLASSES,
+    PRIVILEGED_CLASSES,
+    mutation_class_for_paths,
+)
+from .automerge_policy import (
+    AUTOMERGE_DECISION_AUTO,
+    AUTOMERGE_DECISION_GESTURE,
+    AutoMergeClassPolicy,
+    AutoMergeDecision,
+    AutoMergePolicyState,
+    AutoMergePolicyStateError,
+    automerge_policy_state_path,
+    decide_automerge,
+    load_automerge_policy_state,
+    save_automerge_policy_state,
+)
 from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
 from .review_submit import ReviewResult, ReviewSubmitRefused, submit_review
@@ -202,8 +220,17 @@ __all__ = [
     "ExecutorAdapter",
     "ExecutorPublishResult",
     "ExecutorRefs",
+    "AUTO_CLASSES",
+    "AUTOMERGE_DECISION_AUTO",
+    "AUTOMERGE_DECISION_GESTURE",
+    "AutoMergeClassPolicy",
+    "AutoMergeDecision",
     "AutoMergeRefused",
     "AutoMergeResult",
+    "AutoMergePolicyState",
+    "AutoMergePolicyStateError",
+    "GESTURE_CLASSES",
+    "PRIVILEGED_CLASSES",
     "RepairNeededEvent",
     "RepairPollResult",
     "IntegratorExecutionResult",
@@ -229,6 +256,11 @@ __all__ = [
     "app_jwt_gh_runner",
     "authenticated_gh_runner",
     "allow_auto_merge",
+    "automerge_policy_state_path",
+    "decide_automerge",
+    "load_automerge_policy_state",
+    "mutation_class_for_paths",
+    "save_automerge_policy_state",
     "approval_wall_secret_supplier_from_env",
     "approval_wall_secret_supplier_from_secret_identity_backend",
     "approval_wall_state_path",
