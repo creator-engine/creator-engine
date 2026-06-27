@@ -388,7 +388,7 @@ jobs:
             echo "head_sha=${live_head_sha}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Creator Engine validator — rename-aware work-sizing floor PR-diff gate (G5)
+      - name: Creator Engine validator — work-sizing floor PR-diff gate (G5)
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
