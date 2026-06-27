@@ -99,3 +99,34 @@ def test_non_main_base_ref_is_noop(tmp_path, monkeypatch, capsys):
 
     assert autoclose.main() == 0
     assert "not main" in capsys.readouterr().out
+
+
+def test_title_bare_ce_num_egress_format():
+    """[ce-egress] ce-NNN titles must be parsed from title."""
+    from pathlib import Path
+    import importlib.util
+    parser_path = Path(__file__).resolve().parents[3] / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
+    spec = importlib.util.spec_from_file_location("parse_issue_refs", parser_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # bare ce-NNN in title
+    assert mod.parse_title_refs("[ce-egress] ce-271 deploy broker fix") == [271]
+    # standard ce-ops#NNN still works
+    assert mod.parse_title_refs("feat(ce-ops#296): close-bot fix") == [296]
+    # both in same title -> deduped, title order
+    assert mod.parse_title_refs("feat(ce-ops#296): ce-296 also here") == [296]
+
+
+def test_body_bare_ce_num_not_matched_without_keyword():
+    """bare ce-NNN in body (no keyword) must NOT be parsed (false-positive guard)."""
+    from pathlib import Path
+    import importlib.util
+    parser_path = Path(__file__).resolve().parents[3] / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
+    spec = importlib.util.spec_from_file_location("parse_issue_refs", parser_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # bare mention in body -- must NOT close
+    assert mod.parse_body_closing_refs("Related to ce-271") == []
+    assert mod.parse_body_closing_refs("[ce-egress] ce-271 was merged") == []

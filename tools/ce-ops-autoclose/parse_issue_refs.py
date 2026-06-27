@@ -31,6 +31,12 @@ _BARE_REF_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bare ce-NNN token in PR titles (e.g. "[ce-egress] ce-271 ...")
+_BARE_CE_NUM_RE = re.compile(
+    r"(?<![a-zA-Z0-9#-])ce-(\d+)(?![-a-zA-Z#])",
+    re.IGNORECASE,
+)
+
 # Closing-keyword line/sentence pattern (used for body scan)
 _KEYWORD = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 _REF_CLUSTER = (
@@ -62,13 +68,20 @@ def _extract_from_clause(clause_text: str, seen: set[int], numbers: list[int]) -
 def parse_title_refs(title: str) -> list[int]:
     """Return ce-ops issue numbers found anywhere in *title*.
 
-    No closing keyword is required; every ``ce-ops#N`` token is accepted
-    because CE PR titles embed the tracked issue directly, e.g.
-    ``feat(ce-ops#262): ...``.
+    No closing keyword is required. Two token forms are matched:
+      - ``ce-ops#N`` / ``creator-engine/ce-ops#N``  (existing)
+      - bare ``ce-N`` (e.g. ``[ce-egress] ce-271 ...``)  (new)
+
+    Results are deduplicated in encounter order.
     """
     seen: set[int] = set()
     numbers: list[int] = []
     for m in _BARE_REF_RE.finditer(title):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.add(n)
+            numbers.append(n)
+    for m in _BARE_CE_NUM_RE.finditer(title):
         n = int(m.group(1))
         if n not in seen:
             seen.add(n)
