@@ -33,6 +33,13 @@ accounts:
     host: EXAMPLE_HOST_C
     noreply_commit_email: TODO_VERIFY
     email_of_record: TODO_VERIFY
+  - login: EXAMPLE_LOGIN_HUMAN_CONTRIBUTOR
+    github_id: TODO_VERIFY
+    role: human-contributor
+    noreply_commit_email: TODO_VERIFY
+    email_of_record: TODO_VERIFY
+    trust_tier: external
+    onboarding_date: TODO_VERIFY
 
 apps:
   - app_id: TODO_VERIFY

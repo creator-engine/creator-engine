@@ -119,8 +119,6 @@ $defs:
       - login
       - github_id
       - role
-      - owning_seat
-      - host
       - noreply_commit_email
     additionalProperties: false
     properties:
@@ -138,6 +136,19 @@ $defs:
         $ref: "#/$defs/noreply_email"
       email_of_record:
         $ref: "#/$defs/todo_or_string"
+      trust_tier:
+        type: string
+        enum: [external, trusted-external, TODO_VERIFY]
+      onboarding_date:
+        $ref: "#/$defs/todo_or_string"
+    if:
+      properties:
+        role:
+          not:
+            const: human-contributor
+      required: [role]
+    then:
+      required: [owning_seat, host]
   app:
     type: object
     required: [app_id, install_id, repo_scope, pem_custody]
