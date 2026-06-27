@@ -293,9 +293,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
     }
 )
 
-# --- Baselined shared->version couplings (ratchet floor; derived from the full
-#     import graph on main @ ab482ee, post-grounding). Each entry is a real,
-#     pre-existing edge with a justification. The allowlist only shrinks. ---
+# --- Baselined shared->version couplings (ratchet floor; 4 edges derived from
+#     the full import graph on main @ ab482ee, post-grounding). Each entry is a
+#     real, pre-existing edge with a justification. The allowlist only shrinks. ---
 BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
     {
         # The unified validator CLI hosts v1 launcher subcommands (lazy imports).
@@ -305,6 +305,9 @@ BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
         # The shared env/packaging-contract guard reuses the v1 packaging contract
         # types; candidate for extraction into a shared packaging-contract module.
         ("environment_guard", "packaging_runtime"),
+        # 4th baselined edge, ce-ops#297: ClaudeCodeAdapter must verify the v1
+        # Claude hook pack before reporting enforcement installed.
+        ("harness_adapters.claude_code_adapter", "hook_pack_confirm"),
     }
 )
 
