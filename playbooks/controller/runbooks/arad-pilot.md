@@ -40,7 +40,7 @@ current and safe (four-way artifact hash match incl. the release-artifact parity
 guard).
 
 ```bash
-curl -fsSL https://creator-engine.dev/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
 source ~/.profile
 command -v ce      # must resolve — this is the PATH check; do not proceed until it does
 ```
