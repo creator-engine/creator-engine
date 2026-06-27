@@ -592,16 +592,14 @@ _GH_API_OPTIONS_NO_VALUE = frozenset(
 
 _CURL_METHOD_OPTIONS = frozenset({"-X", "--request"})
 _CURL_URL_OPTIONS = frozenset({"--url"})
+_CURL_DATA_OPTIONS = frozenset({"-d", "--data", "--data-raw", "--data-binary"})
 _CURL_OPTIONS_WITH_VALUE = frozenset(
     {
         "-A",
         "--user-agent",
         "-b",
         "--cookie",
-        "-d",
-        "--data",
-        "--data-raw",
-        "--data-binary",
+        *_CURL_DATA_OPTIONS,
         "--data-urlencode",
         "-H",
         "--header",
@@ -658,6 +656,16 @@ def _github_api_path_from_url(value: str) -> str | None:
     return parsed.path or "/"
 
 
+def _github_api_path_from_curl_target(value: str) -> str | None:
+    path = _github_api_path_from_url(value)
+    if path is not None:
+        return path
+    stripped = value.split("?", 1)[0].split("#", 1)[0]
+    if stripped.startswith("/repos/") or stripped.startswith("repos/"):
+        return _normalize_github_api_path(value)
+    return None
+
+
 def _normalize_github_api_path(value: str) -> str:
     parsed = urlparse(value)
     if parsed.scheme == "https" and parsed.netloc.lower() == "api.github.com":
@@ -669,7 +677,7 @@ def _normalize_github_api_path(value: str) -> str:
 
 def _field_value_is_approve_event(value: str) -> bool:
     key, sep, raw = value.partition("=")
-    return bool(sep) and key.strip() == "event" and raw.strip().upper() == "APPROVE"
+    return bool(sep) and key.strip().lower() == "event" and raw.strip().upper() == "APPROVE"
 
 
 _INLINE_APPROVE_EVENT_RE = re.compile(
@@ -683,6 +691,15 @@ _INLINE_APPROVE_EVENT_RE = re.compile(
 
 def _command_mentions_approve_event(command: str) -> bool:
     return bool(_INLINE_APPROVE_EVENT_RE.search(command))
+
+
+def _body_value_is_approve_event(value: str) -> bool:
+    return _field_value_is_approve_event(value) or _command_mentions_approve_event(value)
+
+
+def _body_value_is_unreadable(value: str) -> bool:
+    stripped = value.strip()
+    return stripped == "-" or stripped.startswith("@")
 
 
 def _github_review_pr_number(path: str) -> int | None:
@@ -784,9 +801,11 @@ def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str, bool] | None:
     )
 
 
-def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
+def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str, bool] | None:
     method: str | None = None
     url: str | None = None
+    data_implies_post = False
+    approve_event = False
     i = 0
     while i < len(args):
         token = args[i]
@@ -810,18 +829,39 @@ def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
         if token in _CURL_URL_OPTIONS:
             if i + 1 >= len(args):
                 return None
-            candidate = _github_api_path_from_url(args[i + 1])
+            candidate = _github_api_path_from_curl_target(args[i + 1])
             if candidate is not None:
                 url = args[i + 1]
             i += 2
             continue
         if _token_value(token, _CURL_URL_OPTIONS) is not None:
             candidate_url = _token_value(token, _CURL_URL_OPTIONS) or ""
-            if _github_api_path_from_url(candidate_url) is not None:
+            if _github_api_path_from_curl_target(candidate_url) is not None:
                 url = candidate_url
             i += 1
             continue
-        candidate = _github_api_path_from_url(token)
+        if token in _CURL_DATA_OPTIONS:
+            data_implies_post = True
+            if i + 1 < len(args):
+                approve_event = approve_event or _body_value_is_approve_event(args[i + 1])
+                approve_event = approve_event or _body_value_is_unreadable(args[i + 1])
+            i += 2 if i + 1 < len(args) else 1
+            continue
+        data_value = _token_value(token, tuple(_CURL_DATA_OPTIONS - {"-d"}))
+        if data_value is not None:
+            data_implies_post = True
+            approve_event = approve_event or _body_value_is_approve_event(data_value)
+            approve_event = approve_event or _body_value_is_unreadable(data_value)
+            i += 1
+            continue
+        if token.startswith("-d") and token != "-d":
+            data_implies_post = True
+            data_value = token[2:]
+            approve_event = approve_event or _body_value_is_approve_event(data_value)
+            approve_event = approve_event or _body_value_is_unreadable(data_value)
+            i += 1
+            continue
+        candidate = _github_api_path_from_curl_target(token)
         if candidate is not None:
             url = token
             i += 1
@@ -835,7 +875,11 @@ def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
         i += 1
     if url is None:
         return None
-    return ((method or "GET").upper(), _github_api_path_from_url(url) or "/")
+    return (
+        (method or ("POST" if data_implies_post else "GET")).upper(),
+        _github_api_path_from_curl_target(url) or "/",
+        approve_event,
+    )
 
 
 def _repo_path_tail(path: str) -> tuple[str, ...] | None:
@@ -920,7 +964,12 @@ def _classify_github_api_mechanics(command: str) -> str | None:
         if _is_curl_executable(token):
             parsed = _parse_curl_api_call(tuple(tokens[index + 1 :]))
             if parsed is not None:
-                action = _classify_github_api_request(*parsed)
+                method, path, body_approve_event = parsed
+                action = _classify_github_api_request(
+                    method,
+                    path,
+                    approve_event=body_approve_event or inline_approve_event,
+                )
                 if action is not None:
                     return action
     return None
@@ -935,22 +984,28 @@ def _is_raw_gh_api_review_approve(command: Any) -> bool:
         return False
     inline_approve_event = _command_mentions_approve_event(command)
     for index, token in enumerate(tokens):
-        if not (
-            _is_gh_executable(token)
-            and index + 1 < len(tokens)
-            and tokens[index + 1] == "api"
-        ):
-            continue
-        parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
-        if parsed is None:
-            continue
-        method, path, field_approve_event = parsed
-        if (
-            method.upper() in {"DELETE", "PATCH", "PUT", "POST"}
-            and (field_approve_event or inline_approve_event)
-            and _github_review_pr_number(path) is not None
-        ):
-            return True
+        if _is_gh_executable(token) and index + 1 < len(tokens) and tokens[index + 1] == "api":
+            parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
+            if parsed is None:
+                continue
+            method, path, field_approve_event = parsed
+            if (
+                method.upper() in {"DELETE", "PATCH", "PUT", "POST"}
+                and (field_approve_event or inline_approve_event)
+                and _github_review_pr_number(path) is not None
+            ):
+                return True
+        if _is_curl_executable(token):
+            parsed = _parse_curl_api_call(tuple(tokens[index + 1 :]))
+            if parsed is None:
+                continue
+            method, path, body_approve_event = parsed
+            if (
+                method.upper() in {"DELETE", "PATCH", "PUT", "POST"}
+                and (body_approve_event or inline_approve_event)
+                and _github_review_pr_number(path) is not None
+            ):
+                return True
     return False
 
 
@@ -1049,6 +1104,12 @@ def _extract_pr_number(command: Any) -> int | None:
     for index, token in enumerate(tokens):
         if _is_gh_executable(token) and index + 1 < len(tokens) and tokens[index + 1] == "api":
             parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
+            if parsed is not None:
+                pr_number = _github_review_pr_number(parsed[1])
+                if pr_number is not None:
+                    return pr_number
+        if _is_curl_executable(token):
+            parsed = _parse_curl_api_call(tuple(tokens[index + 1 :]))
             if parsed is not None:
                 pr_number = _github_review_pr_number(parsed[1])
                 if pr_number is not None:
