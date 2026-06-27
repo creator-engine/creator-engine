@@ -1,7 +1,7 @@
 # Build context: the REPOSITORY ROOT (not deploy/vps-runsc/). The validator
 # venv stage below COPYs validators/** (pyproject + sources + offline
 # wheelhouses), so this image must be built with the repo root as the context:
-#   docker build -f deploy/vps-runsc/Dockerfile -t creator-engine/codex-runsc:x86_64 .
+#   deploy/vps-runsc/build-image.sh
 # This mirrors deploy/oci/Dockerfile, which also COPYs validators/** from root.
 #
 # CI-parity validator venv builder (ce-ops#309). CI runs the validator on
@@ -9,13 +9,23 @@
 # wheelhouses, and validators/pyproject.toml pins requires-python >=3.14. The
 # bookworm runtime below ships Python 3.11, whose ABI cannot load the cp314
 # wheels in validators/wheelhouse*/. We therefore bake a Python-3.14 venv from
-# the SAME python:3.14 bookworm base used by deploy/oci/Dockerfile, install the
+# the SAME Python 3.14 bookworm base declared in surfaces/manifest.yaml, install the
 # validator runtime + dev deps OFFLINE from the vendored wheelhouses (no network
 # — the seat runs under gVisor), and relocate it into the runtime stage. This
 # supersedes the prior system-Python pip install into 3.11 (ce-ops#261), which
 # was neither CI-parity (3.11 vs 3.14, online resolution vs the vendored cp314
 # wheels) nor able to satisfy the worktree-lease Ed25519 gate (libsodium).
-FROM --platform=linux/amd64 python:3.14-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9 AS validator-venv-builder
+ARG OCI_CPYTHON_BASE_IMAGE_SOURCE=UNSET
+ARG OCI_CPYTHON_BASE_IMAGE_VERSION=UNSET
+ARG OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=UNSET
+ARG RUST_SOURCE=UNSET
+ARG RUST_VERSION=UNSET
+ARG RUST_COMMIT_OR_DIGEST=UNSET
+ARG DEBIAN_SOURCE=UNSET
+ARG DEBIAN_VERSION=UNSET
+ARG DEBIAN_COMMIT_OR_DIGEST=UNSET
+
+FROM --platform=linux/amd64 ${OCI_CPYTHON_BASE_IMAGE_SOURCE}:${OCI_CPYTHON_BASE_IMAGE_VERSION}@sha256:${OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST} AS validator-venv-builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -46,11 +56,14 @@ RUN set -eux; \
     /opt/ce-validator-venv/bin/python -c "import pytest, yaml, jsonschema, xdist; print('validator venv imports OK')"; \
     /opt/ce-validator-venv/bin/pytest --version
 
-FROM --platform=linux/amd64 rust:1-bookworm@sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120 AS herdr-builder
+FROM --platform=linux/amd64 ${RUST_SOURCE}:${RUST_VERSION}@sha256:${RUST_COMMIT_OR_DIGEST} AS herdr-builder
 
-ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git
-ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef
-ARG ZIG_VERSION=0.15.2
+ARG HERDR_SOURCE=UNSET
+ARG HERDR_COMMIT_OR_DIGEST=UNSET
+ARG ZIG_TOOLCHAIN_SOURCE=UNSET
+ARG ZIG_TOOLCHAIN_VERSION=UNSET
+ARG ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256=UNSET
+ARG ZIG_TOOLCHAIN_LINUX_X86_64_SHA256=UNSET
 
 RUN set -eux; \
     apt-get update; \
@@ -62,11 +75,11 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     arch="$(dpkg --print-architecture)"; \
     case "${arch}" in \
-      arm64) zig_arch="aarch64"; zig_sha256="958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f" ;; \
-      amd64) zig_arch="x86_64"; zig_sha256="02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239" ;; \
+      arm64) zig_arch="aarch64"; zig_sha256="${ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256}" ;; \
+      amd64) zig_arch="x86_64"; zig_sha256="${ZIG_TOOLCHAIN_LINUX_X86_64_SHA256}" ;; \
       *) echo "unsupported Zig architecture: ${arch}" >&2; exit 66 ;; \
     esac; \
-    zig_url="https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"; \
+    zig_url="${ZIG_TOOLCHAIN_SOURCE%/}/zig-${zig_arch}-linux-${ZIG_TOOLCHAIN_VERSION}.tar.xz"; \
     curl -fsSL "${zig_url}" -o /tmp/zig.tar.xz; \
     echo "${zig_sha256}  /tmp/zig.tar.xz" | sha256sum -c -; \
     mkdir -p /opt/zig; \
@@ -78,14 +91,14 @@ ENV PATH="/opt/zig:${PATH}"
 WORKDIR /build
 
 RUN set -eux; \
-    git clone "${HERDR_SOURCE_REPO}" herdr; \
+    git clone "${HERDR_SOURCE}" herdr; \
     cd herdr; \
-    git checkout --detach "${HERDR_SOURCE_REF}"; \
+    git checkout --detach "${HERDR_COMMIT_OR_DIGEST}"; \
     cargo build --locked --release --bin herdr; \
     ldd target/release/herdr; \
     target/release/herdr --help >/tmp/herdr-help.txt
 
-FROM --platform=linux/amd64 debian:bookworm-slim@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4 AS runtime
+FROM --platform=linux/amd64 ${DEBIAN_SOURCE}:${DEBIAN_VERSION}@sha256:${DEBIAN_COMMIT_OR_DIGEST} AS runtime
 
 ARG CE_VPS_USER=cedev
 ARG CE_VPS_UID=1000

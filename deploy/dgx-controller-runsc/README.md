@@ -80,13 +80,7 @@ context so it can copy the shared herdr harness entrypoint from
 
 ```bash
 cd /path/to/creator-engine
-docker build \
-  -f deploy/dgx-controller-runsc/Dockerfile \
-  -t creator-engine/claude-controller-runsc:c1 \
-  --build-arg CE_DGX_USER="$(id -un)" \
-  --build-arg CE_DGX_UID="$(id -u)" \
-  --build-arg CE_DGX_GID="$(id -g)" \
-  .
+deploy/dgx-controller-runsc/build-image.sh
 ```
 
 The image builds `herdr` from the same pinned herdr-ce source revision as the

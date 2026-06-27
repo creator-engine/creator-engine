@@ -109,13 +109,7 @@ diagnostics.
 
    ```bash
    cd /path/to/creator-engine
-   docker build \
-     -f deploy/dgx-runsc/Dockerfile \
-     -t creator-engine/codex-runsc:0.141.0-aarch64 \
-     --build-arg CE_DGX_USER="$(id -un)" \
-     --build-arg CE_DGX_UID="$(id -u)" \
-     --build-arg CE_DGX_GID="$(id -g)" \
-     deploy/dgx-runsc
+   deploy/dgx-runsc/build-image.sh
    ```
 
    The image builds `herdr` from the pinned herdr-ce source revision in a
@@ -196,13 +190,7 @@ diagnostics.
 8. Dogfood the herdr terminalized launch and containment probe:
 
    ```bash
-   docker build \
-     -f deploy/dgx-runsc/Dockerfile \
-     -t creator-engine/codex-runsc:0.141.0-aarch64 \
-     --build-arg CE_DGX_USER="$(id -un)" \
-     --build-arg CE_DGX_UID="$(id -u)" \
-     --build-arg CE_DGX_GID="$(id -g)" \
-     deploy/dgx-runsc
+   deploy/dgx-runsc/build-image.sh
 
    CE_DGX_REPO="$PWD" \
      ./deploy/dgx-runsc/run-codex-runsc.sh exec "printf 'herdr runsc dogfood\n'; sleep 300"
@@ -422,7 +410,7 @@ command -v hadolint >/dev/null && hadolint deploy/dgx-runsc/Dockerfile || true
 DGX apply checks:
 
 ```bash
-docker build -f deploy/dgx-runsc/Dockerfile -t creator-engine/codex-runsc:0.141.0-aarch64 deploy/dgx-runsc
+deploy/dgx-runsc/build-image.sh
 docker run --rm --runtime=runsc-gvproxy-ptrace creator-engine/codex-runsc:0.141.0-aarch64 \
   sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --dry-run exec --version

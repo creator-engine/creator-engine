@@ -64,8 +64,8 @@ def test_build_args_render_happy_path(tmp_path: Path):
     assert render._lines(rendered) == [
         "--build-arg HERDR_COMMIT_OR_DIGEST=ff924966",
         "--build-arg HERDR_SOURCE=https://github.com/creator-engine/herdr-ce.git",
-        "--build-arg RUST_COMMIT_OR_DIGEST=sha256:" + "c" * 64,
-        "--build-arg RUST_SOURCE=docker.io/library/rust:1-bookworm",
+        "--build-arg RUST_COMMIT_OR_DIGEST=" + "c" * 64,
+        "--build-arg RUST_SOURCE=docker.io/library/rust",
         "--build-arg RUST_VERSION=1-bookworm",
         "--build-arg ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256=" + "a" * 64,
         "--build-arg ZIG_TOOLCHAIN_LINUX_X86_64_SHA256=" + "b" * 64,

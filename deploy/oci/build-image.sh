@@ -63,6 +63,10 @@ require_buildx() {
   fi
 }
 
+render_surface_build_args() {
+  python3 "${repo_root}/surfaces/render.py" build-args
+}
+
 print_stage_context_commands() {
   quote_cmd rm -rf "${context_dir}/validators"
   quote_cmd mkdir -p "${context_dir}/validators"
@@ -126,12 +130,21 @@ if [ "${dry_run}" != "1" ]; then
   require_buildx
 fi
 
+surface_build_args=()
+surface_build_args_file="$(mktemp "${TMPDIR:-/tmp}/ce-surface-build-args.XXXXXX")"
+render_surface_build_args > "${surface_build_args_file}"
+while read -r flag assignment; do
+  surface_build_args+=("${flag}" "${assignment}")
+done < "${surface_build_args_file}"
+rm -f "${surface_build_args_file}"
+
 source_commit="$(git -C "${repo_root}" rev-parse --verify HEAD)"
 
 docker_cmd=(
   docker buildx build
   --file "${repo_root}/deploy/oci/Dockerfile"
   --platform "${platform}"
+  "${surface_build_args[@]}"
   --build-arg "SOURCE_DATE_EPOCH=${source_date_epoch}"
   --build-arg "CE_IMAGE_REVISION=${source_commit}"
   --tag "${image}"

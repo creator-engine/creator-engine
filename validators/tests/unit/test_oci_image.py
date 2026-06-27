@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -53,8 +54,14 @@ def _dry_run(*args: str) -> list[list[str]]:
 def test_oci_dockerfile_builds_first_party_wheel_from_repo_source() -> None:
     text = _dockerfile()
 
-    assert "ARG PYTHON_IMAGE=python:3.14-slim-bookworm" in text
-    assert "FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS wheel-builder" in text
+    assert "ARG OCI_CPYTHON_BASE_IMAGE_SOURCE=UNSET" in text
+    assert "ARG OCI_CPYTHON_BASE_IMAGE_VERSION=UNSET" in text
+    assert "ARG OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=UNSET" in text
+    assert (
+        "FROM --platform=$BUILDPLATFORM "
+        "${OCI_CPYTHON_BASE_IMAGE_SOURCE}:${OCI_CPYTHON_BASE_IMAGE_VERSION}@sha256:${OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST} "
+        "AS wheel-builder"
+    ) in text
     assert "COPY validators/pyproject.toml validators/pyproject.toml" in text
     assert "COPY validators/creator_engine_validator validators/creator_engine_validator" in text
     assert "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" in text
@@ -84,7 +91,11 @@ def test_oci_dockerfile_installs_wheelhouse_offline_and_exposes_cli() -> None:
 def test_oci_dockerfile_is_non_root_and_multi_arch_friendly() -> None:
     text = _dockerfile()
 
-    assert "FROM --platform=$TARGETPLATFORM ${PYTHON_IMAGE} AS runtime" in text
+    assert (
+        "FROM --platform=$TARGETPLATFORM "
+        "${OCI_CPYTHON_BASE_IMAGE_SOURCE}:${OCI_CPYTHON_BASE_IMAGE_VERSION}@sha256:${OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST} "
+        "AS runtime"
+    ) in text
     assert "ARG TARGETARCH" in text
     assert "arm64|amd64|unknown" in text
     assert "FROM --platform=linux/amd64" not in text
@@ -123,6 +134,9 @@ def test_oci_build_script_shell_syntax_and_dry_run_contract() -> None:
     assert "--platform" in docker_cmd
     assert docker_cmd[docker_cmd.index("--platform") + 1] == "linux/arm64"
     assert "--build-arg" in docker_cmd
+    assert "OCI_CPYTHON_BASE_IMAGE_SOURCE=docker.io/library/python" in docker_cmd
+    assert "OCI_CPYTHON_BASE_IMAGE_VERSION=3.14-slim-bookworm" in docker_cmd
+    assert any(re.fullmatch(r"OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=[0-9a-f]{64}", arg) for arg in docker_cmd)
     assert "SOURCE_DATE_EPOCH=946684800" in docker_cmd
     assert "--tag" in docker_cmd
     assert "creator-engine/ce-validator:test" in docker_cmd

@@ -1,8 +1,18 @@
-FROM rust:1-bookworm@sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120 AS herdr-builder
+ARG RUST_SOURCE=UNSET
+ARG RUST_VERSION=UNSET
+ARG RUST_COMMIT_OR_DIGEST=UNSET
+ARG DEBIAN_SOURCE=UNSET
+ARG DEBIAN_VERSION=UNSET
+ARG DEBIAN_COMMIT_OR_DIGEST=UNSET
 
-ARG HERDR_CE_REPO=https://github.com/creator-engine/herdr-ce.git
-ARG HERDR_CE_REF=ff924966bd789afabec1a52d74f24392f45838ef
-ARG ZIG_VERSION=0.15.2
+FROM ${RUST_SOURCE}:${RUST_VERSION}@sha256:${RUST_COMMIT_OR_DIGEST} AS herdr-builder
+
+ARG HERDR_SOURCE=UNSET
+ARG HERDR_COMMIT_OR_DIGEST=UNSET
+ARG ZIG_TOOLCHAIN_SOURCE=UNSET
+ARG ZIG_TOOLCHAIN_VERSION=UNSET
+ARG ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256=UNSET
+ARG ZIG_TOOLCHAIN_LINUX_X86_64_SHA256=UNSET
 
 RUN set -eux; \
     apt-get update; \
@@ -14,11 +24,11 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     arch="$(dpkg --print-architecture)"; \
     case "${arch}" in \
-      arm64) zig_arch="aarch64"; zig_sha256="958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f" ;; \
-      amd64) zig_arch="x86_64"; zig_sha256="02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239" ;; \
+      arm64) zig_arch="aarch64"; zig_sha256="${ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256}" ;; \
+      amd64) zig_arch="x86_64"; zig_sha256="${ZIG_TOOLCHAIN_LINUX_X86_64_SHA256}" ;; \
       *) echo "unsupported Zig architecture: ${arch}" >&2; exit 66 ;; \
     esac; \
-    zig_url="https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"; \
+    zig_url="${ZIG_TOOLCHAIN_SOURCE%/}/zig-${zig_arch}-linux-${ZIG_TOOLCHAIN_VERSION}.tar.xz"; \
     curl -fsSL "${zig_url}" -o /tmp/zig.tar.xz; \
     echo "${zig_sha256}  /tmp/zig.tar.xz" | sha256sum -c -; \
     mkdir -p /opt/zig; \
@@ -29,14 +39,14 @@ ENV PATH="/opt/zig:${PATH}"
 
 WORKDIR /build
 RUN set -eux; \
-    git clone "${HERDR_CE_REPO}" herdr; \
+    git clone "${HERDR_SOURCE}" herdr; \
     cd herdr; \
-    git checkout --detach "${HERDR_CE_REF}"; \
+    git checkout --detach "${HERDR_COMMIT_OR_DIGEST}"; \
     cargo build --locked --release --bin herdr; \
     ldd target/release/herdr; \
     target/release/herdr --help >/tmp/herdr-help.txt
 
-FROM debian:bookworm-slim@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4
+FROM ${DEBIAN_SOURCE}:${DEBIAN_VERSION}@sha256:${DEBIAN_COMMIT_OR_DIGEST}
 
 ARG CE_DGX_USER=cedev4
 ARG CE_DGX_UID=1000

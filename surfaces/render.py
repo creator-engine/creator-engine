@@ -75,10 +75,23 @@ def _load_surfaces(manifest: Path) -> list[Mapping[str, Any]]:
     return surfaces
 
 
-def _digest_entries(prefix: str, digest: object, surface_name: object) -> tuple[tuple[str, str], ...]:
+def _is_docker_image_source(source: object) -> bool:
+    return isinstance(source, str) and source.startswith("docker.io/")
+
+
+def _digest_entries(
+    prefix: str,
+    digest: object,
+    surface_name: object,
+    *,
+    build_args: bool,
+    source: object,
+) -> tuple[tuple[str, str], ...]:
     if isinstance(digest, str):
         if not digest:
             raise RenderError(f"{surface_name}: commit_or_digest must not be empty")
+        if build_args and _is_docker_image_source(source):
+            digest = digest.removeprefix("sha256:")
         return ((f"{prefix}_COMMIT_OR_DIGEST", digest),)
     if isinstance(digest, Mapping):
         entries: list[tuple[str, str]] = []
@@ -93,16 +106,35 @@ def _digest_entries(prefix: str, digest: object, surface_name: object) -> tuple[
     raise RenderError(f"{surface_name}: commit_or_digest must be a string, mapping, or null")
 
 
-def _base_entries(surface: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+def _source_value(surface: Mapping[str, Any], *, build_args: bool) -> str | None:
+    source = surface.get("source")
+    if not isinstance(source, str) or not source:
+        return None
+    version = surface.get("version")
+    if build_args and isinstance(version, str) and version and source.endswith(f":{version}"):
+        return source[: -(len(version) + 1)]
+    return source
+
+
+def _base_entries(surface: Mapping[str, Any], *, build_args: bool) -> tuple[tuple[str, str], ...]:
     prefix = _env_key(surface["name"])
     entries: list[tuple[str, str]] = []
     version = surface.get("version")
-    source = surface.get("source")
-    if isinstance(source, str) and source:
+    raw_source = surface.get("source")
+    source = _source_value(surface, build_args=build_args)
+    if source is not None:
         entries.append((f"{prefix}_SOURCE", source))
     if isinstance(version, str) and version:
         entries.append((f"{prefix}_VERSION", version))
-    entries.extend(_digest_entries(prefix, surface.get("commit_or_digest"), surface["name"]))
+    entries.extend(
+        _digest_entries(
+            prefix,
+            surface.get("commit_or_digest"),
+            surface["name"],
+            build_args=build_args,
+            source=raw_source,
+        )
+    )
     return tuple(entries)
 
 
@@ -126,9 +158,9 @@ def _collect_values(surfaces: Iterable[Mapping[str, Any]], *, build_args: bool) 
                 if not build_args:
                     partial = []
                     prefix = _env_key(name)
-                    source = surface.get("source")
+                    source = _source_value(surface, build_args=build_args)
                     version = surface.get("version")
-                    if isinstance(source, str) and source:
+                    if source is not None:
                         partial.append((f"{prefix}_SOURCE", source))
                     if isinstance(version, str) and version:
                         partial.append((f"{prefix}_VERSION", version))
@@ -141,7 +173,7 @@ def _collect_values(surfaces: Iterable[Mapping[str, Any]], *, build_args: bool) 
             if build_args:
                 continue
 
-        values.extend(_base_entries(surface))
+        values.extend(_base_entries(surface, build_args=build_args))
 
     return Rendered(values=tuple(sorted(values)), warnings=tuple(warnings))
 
