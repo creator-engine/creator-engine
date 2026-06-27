@@ -18,6 +18,27 @@ from egress_broker.host_broker import (
 )
 from egress_broker.policy import CommitFacts
 
+
+def _connect_when_ready(socket_path, *, timeout=5.0):
+    """Return a connected AF_UNIX client, retrying until the server is listening.
+
+    The server binds the socket path (the file appears on disk) *before* it calls
+    ``listen()``. A client that connects in that window gets ``ConnectionRefusedError``
+    (Errno 111), and the path may not yet exist at all (``FileNotFoundError``). Both are
+    transient readiness conditions, not failures, so retry the connect until the deadline.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.connect(str(socket_path))
+            return client
+        except (ConnectionRefusedError, FileNotFoundError):
+            client.close()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
 _GOOD_FACTS = CommitFacts(
     head_sha="a" * 40,
     signature_status="G",
@@ -393,21 +414,14 @@ def test_serve_unix_socket_half_closed_client(tmp_path):
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    deadline = time.monotonic() + 2
-    while not socket_path.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert socket_path.exists()
-
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
+    with _connect_when_ready(socket_path) as client:
         client.sendall((json.dumps(_request()) + "\n").encode("utf-8"))
         assert courier_started.wait(timeout=2)
 
     release_response.set()
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    with _connect_when_ready(socket_path) as client:
         client.settimeout(2)
-        client.connect(str(socket_path))
         client.sendall((json.dumps(_request()) + "\n").encode("utf-8"))
         data = b""
         while b"\n" not in data:
