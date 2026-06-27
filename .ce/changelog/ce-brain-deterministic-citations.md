@@ -1,5 +1,5 @@
 ---
-slug: deterministic-citations-brain-gotcha
+slug: ce-brain-deterministic-citations
 date: 2026-06-27
 kind: added
 scope: knowledge-ssot / design learning (internal)

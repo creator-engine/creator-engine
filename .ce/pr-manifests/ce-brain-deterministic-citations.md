@@ -1,16 +1,16 @@
-# PR path manifest - deterministic-citations-brain-gotcha
+# PR path manifest - ce-brain-deterministic-citations
 
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21 convention).
 CI runs:
 
 ```bash
-verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref deterministic-citations-brain-gotcha --require-carrier
+verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref ce-brain-deterministic-citations --require-carrier
 ```
 
 and requires this PR's `base..HEAD` diff to equal exactly the authorized
 path-set below. This carrier lists itself.
 
-- **Declared work class:** feat
+- **Declared work class:** tiny
 
 Scope (ce-ops#310):
 Persist a durable, discoverable design learning in CE's Knowledge-SSOT: any
@@ -28,9 +28,9 @@ Per-file purpose:
   (scope global, verification static, content-addressed to the design note).
 - **`.ce/brain/notes/deterministic-citations.md`** *(A)* - the tracked design
   note the assertion cites (resolvable in a fresh clone).
-- **`.ce/changelog/deterministic-citations-brain-gotcha.md`** *(A)* - changelog
+- **`.ce/changelog/ce-brain-deterministic-citations.md`** *(A)* - changelog
   fragment.
-- **`.ce/pr-manifests/deterministic-citations-brain-gotcha.md`** *(A)* - this
+- **`.ce/pr-manifests/ce-brain-deterministic-citations.md`** *(A)* - this
   closed path-set carrier.
 - **`validators/tests/unit/test_ce_brain_drift.py`** *(M)* - authoritative-ledger
   test updated for the new active assertion (count 9 -> 10) and its presence.
@@ -40,12 +40,12 @@ Canonicalization:
 
 AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=593ab9959f2387a2392f3b67e699ca0b48d1a5cad417b7a36561c045d01e03b8
+AUTHORIZED_PATHS_SHA256=5957d46ab8ddda7fb3432d8254812f735ff0b1e176236a797cd60169c078c73d
 
 ```text
 .ce/brain/assertions.yaml
 .ce/brain/notes/deterministic-citations.md
-.ce/changelog/deterministic-citations-brain-gotcha.md
-.ce/pr-manifests/deterministic-citations-brain-gotcha.md
+.ce/changelog/ce-brain-deterministic-citations.md
+.ce/pr-manifests/ce-brain-deterministic-citations.md
 validators/tests/unit/test_ce_brain_drift.py
 ```
