@@ -546,7 +546,7 @@ def run_with_base(
     and enforce diff == that carrier's path-set. See :func:`_run_with_base_per_pr`.
 
     **Single-manifest mode** (``manifest`` supplied) / **neutral** (neither
-    supplied): compute ``git diff --name-only <base>..HEAD`` and compare it to the
+    supplied): compute ``git diff --name-only --find-renames <base>..HEAD`` and compare it to the
     ratified manifest path-set loaded from ``manifest`` (a PR-committed doc carrying
     a fenced ``*_PATHS`` manifest, parsed by ``extract_manifest_paths_from_file``):
 
@@ -589,14 +589,16 @@ def run_with_base(
         )
         return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
-    returncode, stdout, stderr = _run_git(["diff", "--name-only", f"{base}..HEAD"], repo_root)
+    returncode, stdout, stderr = _run_git(
+        ["diff", "--name-only", "--find-renames", f"{base}..HEAD"], repo_root
+    )
     if returncode != 0:
         errors.append(
             make_error(
                 "path_manifest_diff_git_failed",
                 str(repo_root),
                 "",
-                f"git diff --name-only {base}..HEAD failed: {stderr.strip() or 'unknown error'}",
+                f"git diff --name-only --find-renames {base}..HEAD failed: {stderr.strip() or 'unknown error'}",
                 DIFF_GATE_CONTRACT,
             )
         )
@@ -675,7 +677,7 @@ def _run_with_base_per_pr(
         return CheckResult(name=CHECK_NAME, errors=tuple(errors))
 
     returncode, stdout, stderr = _run_git(
-        ["diff", "--name-status", "--no-renames", f"{base}..HEAD"], repo_root
+        ["diff", "--name-status", "--find-renames", f"{base}..HEAD"], repo_root
     )
     if returncode != 0:
         errors.append(

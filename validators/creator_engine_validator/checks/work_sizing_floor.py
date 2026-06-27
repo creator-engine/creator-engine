@@ -335,13 +335,13 @@ def run_with_base(
     *,
     declared_work_class: str,
 ) -> CheckResult:
-    """PR-diff gate for ``git diff --numstat --no-renames <base>..HEAD``."""
+    """PR-diff gate for ``git diff --numstat --find-renames <base>..HEAD``."""
     raw_paths = [Path(p) for p in paths] or [Path(".")]
     repo_root = _repo_root_for(raw_paths[0])
     errors: list[ValidationError] = []
 
     returncode, stdout, _stderr = _run_git(
-        ["diff", "--numstat", "--no-renames", f"{base}..HEAD"],
+        ["diff", "--numstat", "--find-renames", f"{base}..HEAD"],
         repo_root,
     )
     if returncode != 0:

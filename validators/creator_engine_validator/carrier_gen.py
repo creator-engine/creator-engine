@@ -87,10 +87,10 @@ def compute_path_set(
 
     root = Path(repo_root)
     runner = git_runner or _default_git_runner
-    returncode, stdout, stderr = runner(["diff", "--name-only", f"{base}..HEAD"], root)
+    returncode, stdout, stderr = runner(["diff", "--name-only", "--find-renames", f"{base}..HEAD"], root)
     if returncode != 0:
         detail = stderr.strip() or "unknown error"
-        raise RuntimeError(f"git diff --name-only {base}..HEAD failed: {detail}")
+        raise RuntimeError(f"git diff --name-only --find-renames {base}..HEAD failed: {detail}")
 
     manifest_path = f"{MANIFEST_DIR}/{slug}.md"
     raw_paths = list(stdout.splitlines()) + [manifest_path]

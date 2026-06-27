@@ -136,7 +136,7 @@ exit 99
 
 
 def test_validate_workflow_runs_work_sizing_floor_gate_from_pr_body():
-    step = _validate_step("Creator Engine validator — work-sizing floor PR-diff gate (G5)")
+    step = _validate_step("Creator Engine validator — rename-aware work-sizing floor PR-diff gate (G5)")
     assert step.get("if") == "${{ github.event_name == 'pull_request' }}"
 
     run = step["run"]
