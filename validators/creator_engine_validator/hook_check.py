@@ -667,9 +667,50 @@ def _normalize_github_api_path(value: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
+def _field_value_is_approve_event(value: str) -> bool:
+    key, sep, raw = value.partition("=")
+    return bool(sep) and key.strip() == "event" and raw.strip().upper() == "APPROVE"
+
+
+_INLINE_APPROVE_EVENT_RE = re.compile(
+    r"""(?ix)
+    \\?["']event\\?["']
+    \s*:\s*
+    \\?["']APPROVE\\?["']
+    """
+)
+
+
+def _command_mentions_approve_event(command: str) -> bool:
+    return bool(_INLINE_APPROVE_EVENT_RE.search(command))
+
+
+def _github_review_pr_number(path: str) -> int | None:
+    parts = tuple(part for part in path.split("/") if part)
+    if (
+        len(parts) == 6
+        and parts[0] == "repos"
+        and parts[3] == "pulls"
+        and parts[5] == "reviews"
+        and parts[4].isdigit()
+    ):
+        return int(parts[4])
+    if (
+        len(parts) == 8
+        and parts[0] == "repos"
+        and parts[3] == "pulls"
+        and parts[5] == "reviews"
+        and parts[7] == "events"
+        and parts[4].isdigit()
+    ):
+        return int(parts[4])
+    return None
+
+
+def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str, bool] | None:
     method: str | None = None
     field_implies_post = False
+    approve_event = False
     path: str | None = None
     i = 0
     while i < len(args):
@@ -693,14 +734,30 @@ def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
             continue
         if token in _GH_API_FIELD_OPTIONS:
             field_implies_post = True
+            if i + 1 < len(args) and _field_value_is_approve_event(args[i + 1]):
+                approve_event = True
             i += 2 if i + 1 < len(args) else 1
             continue
-        if _token_value(token, ("--field", "--raw-field")) is not None:
+        field_value = _token_value(token, ("--field", "--raw-field"))
+        if field_value is not None:
             field_implies_post = True
+            if _field_value_is_approve_event(field_value):
+                approve_event = True
             i += 1
             continue
         if (token.startswith("-f") or token.startswith("-F")) and token not in {"-f", "-F"}:
             field_implies_post = True
+            if _field_value_is_approve_event(token[2:]):
+                approve_event = True
+            i += 1
+            continue
+        if token == "--input":
+            approve_event = True
+            i += 2 if i + 1 < len(args) else 1
+            continue
+        input_value = _token_value(token, ("--input",))
+        if input_value is not None:
+            approve_event = True
             i += 1
             continue
         if token in _GH_API_OPTIONS_WITH_VALUE:
@@ -720,7 +777,11 @@ def _parse_gh_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
         i += 1
     if path is None:
         return None
-    return ((method or ("POST" if field_implies_post else "GET")).upper(), _normalize_github_api_path(path))
+    return (
+        (method or ("POST" if field_implies_post else "GET")).upper(),
+        _normalize_github_api_path(path),
+        approve_event,
+    )
 
 
 def _parse_curl_api_call(args: tuple[str, ...]) -> tuple[str, str] | None:
@@ -811,12 +872,19 @@ _GITHUB_REPO_SETTINGS_SEGMENTS = frozenset(
 )
 
 
-def _classify_github_api_request(method: str, path: str) -> str | None:
+def _classify_github_api_request(
+    method: str,
+    path: str,
+    *,
+    approve_event: bool = False,
+) -> str | None:
     method = method.upper()
     if method in {"GET", "HEAD"}:
         return None
     if method not in {"DELETE", "PATCH", "PUT", "POST"}:
         return None
+    if approve_event and _github_review_pr_number(path) is not None:
+        return "pr_review"
     tail = _repo_path_tail(path)
     if tail is None:
         return None
@@ -836,11 +904,17 @@ def _classify_github_api_mechanics(command: str) -> str | None:
         tokens = _shell_tokens(command)
     except ValueError:
         return "alter_repo_settings" if "api.github.com/repos/" in command else None
+    inline_approve_event = _command_mentions_approve_event(command)
     for index, token in enumerate(tokens):
         if _is_gh_executable(token) and index + 1 < len(tokens) and tokens[index + 1] == "api":
             parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
             if parsed is not None:
-                action = _classify_github_api_request(*parsed)
+                method, path, field_approve_event = parsed
+                action = _classify_github_api_request(
+                    method,
+                    path,
+                    approve_event=field_approve_event or inline_approve_event,
+                )
                 if action is not None:
                     return action
         if _is_curl_executable(token):
@@ -850,6 +924,34 @@ def _classify_github_api_mechanics(command: str) -> str | None:
                 if action is not None:
                     return action
     return None
+
+
+def _is_raw_gh_api_review_approve(command: Any) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return False
+    inline_approve_event = _command_mentions_approve_event(command)
+    for index, token in enumerate(tokens):
+        if not (
+            _is_gh_executable(token)
+            and index + 1 < len(tokens)
+            and tokens[index + 1] == "api"
+        ):
+            continue
+        parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
+        if parsed is None:
+            continue
+        method, path, field_approve_event = parsed
+        if (
+            method.upper() in {"DELETE", "PATCH", "PUT", "POST"}
+            and (field_approve_event or inline_approve_event)
+            and _github_review_pr_number(path) is not None
+        ):
+            return True
+    return False
 
 
 def classify_mechanics(command: Any) -> str | None:
@@ -938,7 +1040,20 @@ def _extract_pr_number(command: Any) -> int | None:
     if not isinstance(command, str):
         return None
     match = _PR_REVIEW_NUMBER_RE.search(command)
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return None
+    for index, token in enumerate(tokens):
+        if _is_gh_executable(token) and index + 1 < len(tokens) and tokens[index + 1] == "api":
+            parsed = _parse_gh_api_call(tuple(tokens[index + 2 :]))
+            if parsed is not None:
+                pr_number = _github_review_pr_number(parsed[1])
+                if pr_number is not None:
+                    return pr_number
+    return None
 
 
 def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
@@ -953,6 +1068,8 @@ def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
     if str(rec.get("mechanic", "")).strip().lower() != action:
         return False
     if action == "pr_review":
+        if _is_raw_gh_api_review_approve(command):
+            return False
         pr = _extract_pr_number(command)
         return pr is not None and pr == rec.get("pr_number")
     return False
