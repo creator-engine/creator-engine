@@ -328,12 +328,10 @@ def test_herdr_pane_list_parser_fails_closed_on_invalid_json() -> None:
 def test_controller_image_scaffolding_has_pinned_herdr_builder_and_tools() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert re.search(
-        r"^FROM rust:1-bookworm(?:@sha256:[0-9a-f]{64})? AS herdr-builder$",
-        text,
-        re.M,
-    )
-    assert "HERDR_CE_REF=" in text
+    assert "FROM ${RUST_SOURCE}:${RUST_VERSION}@sha256:${RUST_COMMIT_OR_DIGEST} AS herdr-builder" in text
+    assert "FROM ${DEBIAN_SOURCE}:${DEBIAN_VERSION}@sha256:${DEBIAN_COMMIT_OR_DIGEST}" in text
+    assert "ARG HERDR_SOURCE=UNSET" in text
+    assert "ARG HERDR_COMMIT_OR_DIGEST=UNSET" in text
     assert "cargo build" in text
     assert "--release" in text
     assert "--locked" in text

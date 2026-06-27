@@ -35,23 +35,22 @@ def _entrypoint_harness_env_block() -> str:
 def test_dockerfile_builds_herdr_from_source_in_compatible_stage() -> None:
     text = _dockerfile()
 
-    assert re.search(
-        r"^FROM --platform=linux/amd64 rust:1-bookworm(?:@sha256:[0-9a-f]{64})? AS herdr-builder$",
-        text,
-        re.M,
-    )
-    assert re.search(
-        r"^FROM --platform=linux/amd64 debian:bookworm-slim(?:@sha256:[0-9a-f]{64})? AS runtime$",
-        text,
-        re.M,
-    )
-    assert "ARG HERDR_SOURCE_REPO=https://github.com/creator-engine/herdr-ce.git" in text
-    assert "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef" in text
-    assert "ARG ZIG_VERSION=0.15.2" in text
-    assert 'git clone "${HERDR_SOURCE_REPO}" herdr' in text
-    assert 'git checkout --detach "${HERDR_SOURCE_REF}"' in text
+    assert (
+        "FROM --platform=linux/amd64 ${RUST_SOURCE}:${RUST_VERSION}@sha256:${RUST_COMMIT_OR_DIGEST} "
+        "AS herdr-builder"
+    ) in text
+    assert (
+        "FROM --platform=linux/amd64 ${DEBIAN_SOURCE}:${DEBIAN_VERSION}@sha256:${DEBIAN_COMMIT_OR_DIGEST} "
+        "AS runtime"
+    ) in text
+    assert "ARG HERDR_SOURCE=UNSET" in text
+    assert "ARG HERDR_COMMIT_OR_DIGEST=UNSET" in text
+    assert "ARG ZIG_TOOLCHAIN_SOURCE=UNSET" in text
+    assert "ARG ZIG_TOOLCHAIN_VERSION=UNSET" in text
+    assert 'git clone "${HERDR_SOURCE}" herdr' in text
+    assert 'git checkout --detach "${HERDR_COMMIT_OR_DIGEST}"' in text
     assert "--branch" not in text
-    assert "HERDR_SOURCE_REF=main" not in text
+    assert "HERDR_COMMIT_OR_DIGEST=main" not in text
     assert "cargo build --locked --release --bin herdr" in text
     assert "ldd target/release/herdr" in text
     assert "target/release/herdr --help >/tmp/herdr-help.txt" in text
@@ -75,12 +74,11 @@ def test_dockerfile_bakes_ci_parity_validator_venv() -> None:
     text = _dockerfile()
 
     # Python-3.14 builder stage (matches deploy/oci/Dockerfile's base family).
-    assert re.search(
-        r"^FROM --platform=linux/amd64 python:3\.14-slim-bookworm"
-        r"(?:@sha256:[0-9a-f]{64})? AS validator-venv-builder$",
-        text,
-        re.M,
-    )
+    assert (
+        "FROM --platform=linux/amd64 "
+        "${OCI_CPYTHON_BASE_IMAGE_SOURCE}:${OCI_CPYTHON_BASE_IMAGE_VERSION}@sha256:${OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST} "
+        "AS validator-venv-builder"
+    ) in text
     # Offline install from BOTH vendored wheelhouses, mirroring validate.yml.
     assert "python3.14 -m venv /opt/ce-validator-venv" in text
     assert "--no-index --find-links validators/wheelhouse" in text

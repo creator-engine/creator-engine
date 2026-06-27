@@ -76,6 +76,13 @@ def _surface_key(name: object) -> str:
     return re.sub(r"[\s_]+", "-", str(name).strip().lower())
 
 
+def _env_key(value: object) -> str:
+    key = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip().upper()).strip("_")
+    if key and key[0].isdigit():
+        key = f"CE_{key}"
+    return key
+
+
 def _repo_root_for(path: Path) -> Path | None:
     raw = Path(path)
     if not raw.is_absolute():
@@ -265,6 +272,17 @@ def _matching_surface_for_image(image: str, by_name: dict[str, dict[str, Any]]) 
     return None
 
 
+def _matches_manifest_arg_ref(image: str, surface: dict[str, Any]) -> bool:
+    prefix = _env_key(surface.get("name", ""))
+    if not prefix:
+        return False
+    return (
+        f"${{{prefix}_SOURCE}}" in image
+        and f"${{{prefix}_VERSION}}" in image
+        and f"@sha256:${{{prefix}_COMMIT_OR_DIGEST}}" in image
+    )
+
+
 def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for path in _iter_dockerfiles(repo_root):
@@ -285,6 +303,8 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
             surface_key, surface = matched
             manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
             if manifest_digest is None:
+                continue
+            if _matches_manifest_arg_ref(image, surface):
                 continue
             if "@sha256:" not in image:
                 errors.append(

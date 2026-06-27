@@ -51,7 +51,7 @@ The launcher always applies (in both foreground and detached mode):
 Build from the **repository root** as the Docker context (not this directory):
 
 ```bash
-docker build -f deploy/vps-runsc/Dockerfile -t creator-engine/codex-runsc:x86_64 .
+deploy/vps-runsc/build-image.sh
 ```
 
 The repo-root context is required (ce-ops#309) because the image bakes a
