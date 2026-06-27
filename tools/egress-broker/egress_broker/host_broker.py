@@ -14,11 +14,13 @@ from __future__ import annotations
 import json
 import re
 import socket
+import struct
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from egress_broker.audit import append_audit
 from egress_broker.config import BrokerConfig
 from egress_broker.orchestrator import (
     ContainedSeatSelfPushRequest,
@@ -164,6 +166,9 @@ def serve_self_push_unix_socket(
     apply_default: bool = True,
     once: bool = False,
     mode: int = 0o600,
+    expected_peer_uids: frozenset[int] | None = None,
+    expected_peer_gids: frozenset[int] | None = None,
+    reject_unexpected_peer: bool = False,
     courier_fn: CourierFn = contained_seat_self_push,
     **host_courier_options: Any,
 ) -> None:
@@ -185,6 +190,30 @@ def serve_self_push_unix_socket(
         while True:
             conn, _addr = server.accept()
             with conn:
+                peer_record = _audit_self_push_peercred(
+                    conn,
+                    config=config,
+                    broker_seat_id=broker_seat_id,
+                    expected_peer_uids=expected_peer_uids,
+                    expected_peer_gids=expected_peer_gids,
+                    reject_unexpected_peer=reject_unexpected_peer,
+                )
+                if peer_record["decision"] == "reject":
+                    response = json.dumps(
+                        {"status": 403, "reason": "peer_credential_unexpected"},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ) + "\n"
+                    try:
+                        conn.sendall(response.encode("utf-8"))
+                    except (BrokenPipeError, OSError):
+                        print(
+                            "[ce-egress-self-push] client disconnected before response; dropping connection",
+                            file=sys.stderr,
+                        )
+                    if once:
+                        break
+                    continue
                 data = b""
                 while True:
                     chunk = conn.recv(65536)
@@ -212,6 +241,50 @@ def serve_self_push_unix_socket(
                     )
             if once:
                 break
+
+
+def _audit_self_push_peercred(
+    conn: socket.socket,
+    *,
+    config: BrokerConfig,
+    broker_seat_id: str,
+    expected_peer_uids: frozenset[int] | None,
+    expected_peer_gids: frozenset[int] | None,
+    reject_unexpected_peer: bool,
+) -> dict[str, Any]:
+    creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    peer_pid, peer_uid, peer_gid = struct.unpack("3i", creds)
+    profile_configured = expected_peer_uids is not None or expected_peer_gids is not None
+    if not profile_configured:
+        # Default remains best-effort host-origin record-and-flag for compatibility;
+        # hard-reject-by-default is follow-on.
+        origin = "host_origin"
+        decision = "flag"
+    else:
+        uid_matches = expected_peer_uids is None or peer_uid in expected_peer_uids
+        gid_matches = expected_peer_gids is None or peer_gid in expected_peer_gids
+        if uid_matches and gid_matches:
+            origin = "contained_seat"
+            decision = "allow"
+        elif reject_unexpected_peer:
+            origin = "unexpected"
+            decision = "reject"
+        else:
+            origin = "unexpected"
+            decision = "flag"
+
+    return append_audit(
+        config.audit_log,
+        {
+            "event": "self_push_peercred",
+            "broker_seat_id": broker_seat_id,
+            "peer_uid": peer_uid,
+            "peer_gid": peer_gid,
+            "peer_pid": peer_pid,
+            "origin": origin,
+            "decision": decision,
+        },
+    )
 
 
 def _contained_secret_findings(request: Mapping[str, Any]) -> tuple[str, ...]:
