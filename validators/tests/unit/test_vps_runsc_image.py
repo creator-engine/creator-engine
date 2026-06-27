@@ -59,8 +59,43 @@ def test_dockerfile_builds_herdr_from_source_in_compatible_stage() -> None:
         "COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr"
         in text
     )
-    assert "COPY herdr" in text
+    # Repo-root build context (ce-ops#309): the entrypoint is COPYed by its
+    # repo-relative path so the validator-venv stage can also COPY validators/**.
+    assert "COPY deploy/vps-runsc/herdr-harness-entrypoint.sh" in text
     assert not re.search(r"COPY\s+(?:\./)?herdr\s+/usr/local/bin/herdr", text)
+
+
+def test_dockerfile_bakes_ci_parity_validator_venv() -> None:
+    """ce-ops#309: a contained seat must be able to self-run the validator
+    preflight, so the image bakes a Python-3.14 venv with the validator runtime
+    + dev deps installed OFFLINE from the vendored wheelhouses, plus libsodium
+    for the worktree-lease Ed25519 gate (PCO-024). The cp314 wheels in
+    validators/wheelhouse*/ cannot load on the image's system Python 3.11, so a
+    same-Python pip install cannot reach CI parity."""
+    text = _dockerfile()
+
+    # Python-3.14 builder stage (matches deploy/oci/Dockerfile's base family).
+    assert re.search(
+        r"^FROM --platform=linux/amd64 python:3\.14-slim-bookworm"
+        r"(?:@sha256:[0-9a-f]{64})? AS validator-venv-builder$",
+        text,
+        re.M,
+    )
+    # Offline install from BOTH vendored wheelhouses, mirroring validate.yml.
+    assert "python3.14 -m venv /opt/ce-validator-venv" in text
+    assert "--no-index --find-links validators/wheelhouse" in text
+    assert "--find-links validators/wheelhouse-dev" in text
+    assert "-r validators/requirements.txt" in text
+    assert "-r validators/requirements-dev.txt" in text
+    # No network resolution and no system-Python band-aid.
+    assert "--break-system-packages" not in text
+    # Relocate the venv + interpreter into the runtime and put it first on PATH.
+    assert "COPY --from=validator-venv-builder /opt/ce-validator-venv /opt/ce-validator-venv" in text
+    assert "COPY --from=validator-venv-builder /usr/local/bin/python3.14 /usr/local/bin/python3.14" in text
+    assert 'ENV PATH="/opt/ce-validator-venv/bin:${PATH}"' in text
+    # libsodium for the PCO-024 Ed25519 verification path.
+    assert "libsodium23" in text
+    assert "find_library('sodium')" in text
 
 
 def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> None:

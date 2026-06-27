@@ -46,6 +46,25 @@ The launcher always applies (in both foreground and detached mode):
 - repo, Codex home, contained Codex config, and Codex binary/package bind mounts
 - `CODEX_HOME`, `TERM`, and `CE_DGX_HARNESS` for the image entrypoint
 
+## Building the image
+
+Build from the **repository root** as the Docker context (not this directory):
+
+```bash
+docker build -f deploy/vps-runsc/Dockerfile -t creator-engine/codex-runsc:x86_64 .
+```
+
+The repo-root context is required (ce-ops#309) because the image bakes a
+CI-parity validator venv: a `python:3.14` builder stage `COPY`s `validators/**`
+(pyproject, sources, and the offline `wheelhouse/` + `wheelhouse-dev/`) and
+installs the validator runtime and dev/test deps **offline**, matching
+`.github/workflows/validate.yml`. The Python-3.14 venv plus its interpreter are
+relocated into the runtime stage and put first on `PATH`, and `libsodium23` is
+installed so the worktree-lease Ed25519 gate (PCO-024) verifies. This lets a
+contained seat self-run the validator preflight and self-push instead of
+stranding finished work. This mirrors how `deploy/oci/Dockerfile` consumes
+`validators/**` from the repo root.
+
 ## Detached launch (canonical)
 
 The canonical way to drive a contained VPS seat is a detached, named-persistent
