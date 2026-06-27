@@ -67,15 +67,20 @@ GREENFIELD_LEG_IDS: tuple[str, ...] = (
 #: ``v3_installer`` so the projection (plan) and the executor (these legs) are the SAME list.
 ADOPTION_LEG_IDS: tuple[str, ...] = tuple(v3_installer.BROWNFIELD_APPLY_STEP_IDS)
 #: The greenfield FORGE legs that an adoption run SKIPS ("brownfield_adoption_mode"): the
-#: bootstrap-PAT probe (adoption writes ride the §6 minted App token, not the PAT), the
 #: greenfield repo create / App install / direct workflow install / branch-protection write
 #: (the join PR carries the workflow on its branch and never mutates protection), the
 #: greenfield workspace checkout (the scaffold leg does its own checkout), and the smoke
 #: drive (adoption opens a PR, it does not run a first-project smoke). The early LOCAL legs
 #: (signed_spec_verify, answers_merge, host_dependencies, runtime_posture, cli_exposure) are
 #: mode-agnostic and RUN in both modes (the operator is installing CE locally either way).
+#: ce-ops#328: the bootstrap-PAT probe is NOT skipped in adoption mode. Adoption WRITES ride
+#: the §6 minted App token (not the PAT), so the probe is right-sized to IDENTITY-ONLY
+#: (``bootstrap_required_scopes`` returns ``()`` for ``mode != "new"`` — ce-ops#94, demanding
+#: no greenfield write scopes), but it is still the ONLY leg that resolves the forge actor
+#: identity from ``GET /user`` and sets ``_bootstrap_forge_identity``. ``brownfield_build_scaffold``
+#: hard-requires that identity (refusing the ambient git-author fallback), so skipping the probe
+#: made EVERY solo brownfield adoption ``--apply`` refuse with ``forge_identity_unresolved``.
 ADOPTION_SKIPPED_GREENFIELD_LEG_IDS: frozenset[str] = frozenset({
-    "github_bootstrap_token_probe",
     "github_repo_create",
     "github_app_install",
     "github_workflow_install",
