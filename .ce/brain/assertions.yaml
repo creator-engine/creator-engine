@@ -210,4 +210,41 @@ records:
     evidence_ref: probe:worker_spawn_runtime_support
     probe: worker_spawn_runtime_support
     type: probe
+- claim:
+    fact: 'GOTCHA: any outward-facing doc-grounded / customer-support agent must ground
+      via docs-as-skills (load specific allowlisted doc files on demand) rather than
+      RAG/embedding-retrieval or context-stuffing, so it cites the EXACT source file+section
+      it loaded (deterministic, verifiable provenance). This is the load-bearing mechanism
+      that makes a hard cite-or-refuse / I-do-not-know contract ENFORCEABLE, gives
+      a verifiable user trail, enforces confidentiality at bundle-build time (cannot
+      leak what was never loaded), and makes freshness checkable (doc-sha + release-parity
+      guard). The naive build reaches for RAG/embeddings, whose fuzzy provenance lets
+      the model hallucinate sources; without deterministic citations cite-or-refuse
+      is unenforceable and hallucinated install steps / invented sources become the
+      dominant customer-facing failure mode. See .ce/brain/notes/deterministic-citations.md;
+      provenance: support-agent plan section 2b.'
+    object: deterministic_citations_via_docs_as_skills
+    predicate: requires
+    source_sha256: 51b59ac94fc70f9e69ddaf2891ae7f89d6c9dde441d8a049c0517d83d5ab2236
+    subject: doc_grounded_support_agent
+  content_hash: e2eae6bc7a0d0ca043262f7b70633eb8a9febfa3f58fea740b1c431b4fe61907
+  evidence_ref: .ce/brain/notes/deterministic-citations.md
+  id: brain-assertion-4f8eb4d1be3e0b0ce8c29edb
+  kind: brain-assertion
+  prev_hash: 5f73e7bbfaed4e91347923b7e3ea045477e7d0ea57d26d10dd42fb12e73997eb
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 9
+  statement: 'Outward-facing doc-grounded / customer-support agents must use deterministic
+    citations (docs-as-skills loading of allowlisted source files, not RAG/embeddings
+    or context-stuffing) so cite-or-refuse is enforceable, provenance is verifiable,
+    confidentiality is bundle-build-enforced, and freshness is checkable. Detail:
+    .ce/brain/notes/deterministic-citations.md'
+  status: active
+  superseded_by: null
+  type: gotcha
+  verification_method:
+    evidence_ref: .ce/brain/notes/deterministic-citations.md
+    type: static
 schema_version: '1'
