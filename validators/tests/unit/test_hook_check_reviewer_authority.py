@@ -34,6 +34,14 @@ def _ctx(auth):
     return hc.HookContext(posture="governed", manifest_paths=(), side_effect_authority=auth)
 
 
+def _bash_event(command: str) -> dict:
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+
+
 # --- _mechanics_would_deny: the bounded decision ---
 def test_pr_review_denied_without_authority():
     assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(None)) is not None
@@ -41,6 +49,48 @@ def test_pr_review_denied_without_authority():
 
 def test_pr_review_allowed_with_matching_envelope():
     assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(_envelope())) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh api -X POST repos/creator-engine/creator-engine/pulls/106/reviews -f event=APPROVE -f body=LGTM",
+        "gh api --method POST repos/creator-engine/creator-engine/pulls/106/reviews --raw-field event=APPROVE --raw-field body=LGTM",
+    ],
+)
+def test_gh_api_review_approve_denied_without_authority_at_runtime(command):
+    decision = hc.evaluate(
+        _bash_event(command),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=None,
+            seat_class="worker",
+        ),
+    )
+
+    assert hc.classify_mechanics(command) == "pr_review"
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "restricted mechanic (pr_review)" in decision.reason
+
+
+def test_gh_api_review_approve_denied_even_with_matching_pr_review_envelope():
+    command = "gh api -X POST repos/creator-engine/creator-engine/pulls/106/reviews -f event=APPROVE -f body=LGTM"
+    decision = hc.evaluate(
+        _bash_event(command),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=_envelope(),
+            seat_class="worker",
+        ),
+    )
+
+    assert hc.classify_mechanics(command) == "pr_review"
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "restricted mechanic (pr_review)" in decision.reason
 
 
 def test_pr_review_denied_on_wrong_pr():
