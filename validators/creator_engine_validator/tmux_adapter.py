@@ -28,6 +28,16 @@ TMUX_BIN = "tmux"
 # ``pane_current_path`` settles a moment after creation, so the snapshot can
 # still read the server's cwd. The cwd is instead verified post-spawn by polling
 # ``display-message`` (see ``_poll_pane_cwd``).
+#
+# NOTE on the delimiter: the format string carries a literal TAB, but some tmux
+# builds *sanitize* whitespace in ``-F`` output, emitting an underscore (``_``)
+# in place of the tab. This is build/environment dependent, NOT version
+# dependent: tmux 3.4 on one Ubuntu 24.04 box converts ``\t`` -> ``_`` while tmux
+# 3.4 on another box preserves the tab (ce-ops#332). ``_parse_identity`` is
+# therefore tolerant of BOTH separators. The five identity fields are safe to
+# normalise this way because none of them contains an underscore: ``session_id``
+# is ``$N``, ``window_id`` ``@N``, ``pane_id`` ``%N``, ``pane_tty`` a
+# ``/dev/...`` path, and ``pane_pid`` a decimal integer.
 _IDENTITY_FORMAT = "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_tty}\t#{pane_pid}"
 
 # Bounded poll for the pane to settle into its ``-c`` start directory.
@@ -206,7 +216,13 @@ class TmuxAdapter:
     @staticmethod
     def _parse_identity(stdout: str) -> TmuxPane:
         line = (stdout or "").strip().splitlines()
-        fields = (line[0].split("\t") if line else [])
+        # Some tmux builds sanitize the literal TAB delimiter in ``-F`` output to
+        # an underscore (ce-ops#332), so normalise the separator before splitting.
+        # Both ``\t`` and ``_`` are treated as field separators; the five identity
+        # fields never contain an underscore themselves, so splitting on ``_``
+        # after the swap recovers exactly the intended fields under either build.
+        raw = line[0] if line else ""
+        fields = raw.replace("\t", "_").split("_") if raw else []
         fields = [f.strip() for f in fields]
 
         def get(idx: int) -> str | None:

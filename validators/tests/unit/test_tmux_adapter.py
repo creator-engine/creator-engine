@@ -13,6 +13,7 @@ import pytest
 from creator_engine_validator.tmux_adapter import (
     TmuxAdapter,
     TmuxCwdMismatch,
+    TmuxError,
     TmuxPane,
     TmuxUnavailable,
 )
@@ -97,6 +98,49 @@ def test_command_passed_through_after_separator():
     adapter.ensure_pane(session="ce-lane", window="lane-x", command=["sh", "-c", "echo hi"])
     create = next(c for c in fake.calls if c[1] in ("new-session", "new-window"))
     assert create[-3:] == ["sh", "-c", "echo hi"]
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        # tmux build that PRESERVES the literal TAB delimiter (our dev box).
+        "$0\t@0\t%0\t/dev/pts/1\t17075\n",
+        # tmux build that SANITIZES the TAB to '_' in -F output (pilot Ubuntu
+        # 24.04 / tmux 3.4) — the ce-ops#332 crash input.
+        "$0_@0_%0_/dev/pts/1_17075\n",
+    ],
+    ids=["tab-separated", "underscore-sanitized"],
+)
+def test_parse_identity_tolerates_tab_and_underscore_separators(identity):
+    pane = TmuxAdapter._parse_identity(identity)
+    assert pane.session_id == "$0"
+    assert pane.window_id == "@0"
+    assert pane.pane_id == "%0"
+    assert pane.pane_tty == "/dev/pts/1"
+    assert pane.pane_pid == 17075
+
+
+def test_parse_identity_raises_on_unparseable_output():
+    # A single empty/garbage token must still raise (regression guard: the
+    # underscore-tolerant split must not silently accept a non-identity line).
+    with pytest.raises(TmuxError):
+        TmuxAdapter._parse_identity("\n")
+
+
+def test_ensure_pane_parses_underscore_sanitized_identity():
+    """End-to-end ensure_pane on a tmux build that sanitizes the TAB to '_'."""
+
+    class FakeUnderscoreTmux(FakeTmux):
+        IDENTITY = "$0_@0_%0_/dev/pts/1_17075\n"
+
+    fake = FakeUnderscoreTmux(available=True)
+    adapter = TmuxAdapter(runner=fake)
+    pane = adapter.ensure_pane(session="ce-lane", window="lane-x", command=["sh", "-c", "true"])
+    assert pane.session_id == "$0"
+    assert pane.window_id == "@0"
+    assert pane.pane_id == "%0"
+    assert pane.pane_tty == "/dev/pts/1"
+    assert pane.pane_pid == 17075
 
 
 _NOOP_SLEEP = lambda *_: None
