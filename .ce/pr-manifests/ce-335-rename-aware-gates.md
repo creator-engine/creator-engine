@@ -21,10 +21,9 @@ The change:
 - Add regression coverage for pure relocations, large real changes, and
   rename plus unlisted-path containment failures.
 
-Per-file purpose (the closed path-set - 12 paths; `(A)` add, `(M)` modify):
+Per-file purpose (the closed path-set - 10 paths; `(A)` add, `(M)` modify):
 - **`.ce/changelog/ce-335-rename-aware-gates.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/ce-335-rename-aware-gates.md`** *(A)* - this carrier.
-- **`.github/workflows/validate.yml`** *(M)* - work-sizing gate step label documents rename-aware behavior.
 - **`validators/creator_engine_validator/carrier_gen.py`** *(M)* - generated carrier path sets use rename-aware name-only diff.
 - **`validators/creator_engine_validator/checks/path_manifest_fidelity.py`** *(M)* - path-manifest gates use rename-aware diff consistently.
 - **`validators/creator_engine_validator/checks/work_sizing_floor.py`** *(M)* - work-sizing floor uses rename-aware numstat.
@@ -33,19 +32,17 @@ Per-file purpose (the closed path-set - 12 paths; `(A)` add, `(M)` modify):
 - **`validators/tests/unit/test_carrier_gen.py`** *(M)* - carrier generator command expectation.
 - **`validators/tests/unit/test_path_manifest_fidelity.py`** *(M)* - path-manifest rename containment regressions.
 - **`validators/tests/unit/test_work_sizing_floor.py`** *(M)* - work-sizing relocation and large-change regressions.
-- **`validators/tests/unit/test_work_sizing_floor_ci_wiring.py`** *(M)* - workflow step-name assertion.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=835ab43acadef4612565b8a9686104c3e8864cd0534014f39f7eace4ab3b7342
+AUTHORIZED_PATHS_SHA256=1e7ee474e427f1f06b9d81d84a30e86248d4144716650fef745a4224bb19d430
 
 ```text
 .ce/changelog/ce-335-rename-aware-gates.md
 .ce/pr-manifests/ce-335-rename-aware-gates.md
-.github/workflows/validate.yml
 validators/creator_engine_validator/carrier_gen.py
 validators/creator_engine_validator/checks/path_manifest_fidelity.py
 validators/creator_engine_validator/checks/work_sizing_floor.py
@@ -54,5 +51,4 @@ validators/creator_engine_validator/v3_cli.py
 validators/tests/unit/test_carrier_gen.py
 validators/tests/unit/test_path_manifest_fidelity.py
 validators/tests/unit/test_work_sizing_floor.py
-validators/tests/unit/test_work_sizing_floor_ci_wiring.py
 ```
