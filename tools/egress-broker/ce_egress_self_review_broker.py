@@ -47,6 +47,7 @@ from creator_engine_validator.forge.cred_injection_proxy import (  # noqa: E402
 )
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest  # noqa: E402
 from egress_broker.config import BrokerConfig, BrokerConfigError, SeatAppConfig, load_broker_config  # noqa: E402
+from egress_broker.host_broker import systemd_activated_unix_socket  # noqa: E402
 from egress_broker.minter import (  # noqa: E402
     EgressSignerError,
     VaultKvConfig,
@@ -525,20 +526,29 @@ class SelfReviewServer(socketserver.UnixStreamServer):
         *,
         submitter: Callable[[SelfReviewRequest], SelfReviewResult],
         max_request_bytes: int,
+        activated_socket: socket.socket | None = None,
     ) -> None:
         self.socket_path = socket_path
         self.submitter = submitter
         self.max_request_bytes = max_request_bytes
-        Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
-        try:
-            Path(socket_path).unlink()
-        except FileNotFoundError:
-            pass
-        super().__init__(socket_path, _ReviewHandler)
-        os.chmod(socket_path, 0o600)
+        self._owns_socket_path = activated_socket is None
+        if activated_socket is None:
+            Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                Path(socket_path).unlink()
+            except FileNotFoundError:
+                pass
+            super().__init__(socket_path, _ReviewHandler)
+            os.chmod(socket_path, 0o600)
+        else:
+            super().__init__(socket_path, _ReviewHandler, bind_and_activate=False)
+            self.socket.close()
+            self.socket = activated_socket
 
     def server_close(self) -> None:
         super().server_close()
+        if not self._owns_socket_path:
+            return
         try:
             Path(self.socket_path).unlink()
         except FileNotFoundError:
@@ -554,6 +564,7 @@ def serve(
     transport=None,
     gh_spawn=None,
     now: Callable[[], float] | None = None,
+    activated_socket: socket.socket | None = None,
 ) -> None:
     """Serve the Unix socket until interrupted."""
     def submitter(request: SelfReviewRequest) -> SelfReviewResult:
@@ -570,6 +581,7 @@ def serve(
         socket_path,
         submitter=submitter,
         max_request_bytes=max_request_bytes,
+        activated_socket=activated_socket,
     ) as server:
         _LOG.info("listening socket=%s repo=%s", socket_path, config.repo)
         server.serve_forever()
@@ -671,14 +683,19 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG_ERROR
 
     try:
-        serve(socket_path=args.socket, config=config, max_request_bytes=args.max_request_bytes)
+        serve(
+            socket_path=args.socket,
+            config=config,
+            max_request_bytes=args.max_request_bytes,
+            activated_socket=systemd_activated_unix_socket(),
+        )
     except KeyboardInterrupt:
         return EXIT_OK
     except _BrokerStartupError as exc:
         # Fail-closed vault misconfiguration (no secrets in the message).
         print(f"[ce-egress-self-review] startup error: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         print(f"[ce-egress-self-review] REFUSED (fail-closed): {exc}", file=sys.stderr)
         return EXIT_REFUSED
     return EXIT_OK

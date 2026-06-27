@@ -21,7 +21,10 @@ if os.path.isdir(_VALIDATORS):
     sys.path.insert(0, _VALIDATORS)
 
 from egress_broker.config import BrokerConfigError, load_broker_config  # noqa: E402
-from egress_broker.host_broker import serve_self_push_unix_socket  # noqa: E402
+from egress_broker.host_broker import (  # noqa: E402
+    serve_self_push_unix_socket,
+    systemd_activated_unix_socket,
+)
 from egress_broker.minter import (  # noqa: E402
     EgressSignerError,
     VaultKvConfig,
@@ -206,6 +209,7 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
             signer = signer_factory(seat.pem_path)
         else:
             signer = _build_signer(seat)
+        activated_socket = systemd_activated_unix_socket()
         run_server(
             args.socket,
             config=config,
@@ -213,6 +217,7 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
             host_repo_path=args.host_repo_path,
             signer=signer,
             once=args.once,
+            activated_socket=activated_socket,
         )
     except _BrokerStartupError as exc:
         print(f"[ce-egress-self-push] startup error: {exc}", file=sys.stderr)

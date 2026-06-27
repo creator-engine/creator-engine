@@ -1,0 +1,14 @@
+[Unit]
+Description=Creator Engine contained-seat self-push egress broker socket
+Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/egress-broker
+
+[Socket]
+ListenStream=/run/ce-egress/dev-3.sock
+SocketMode=0660
+SocketGroup=ce-dev-3
+DirectoryMode=0755
+RemoveOnStop=no
+Service=ce-egress-broker.service
+
+[Install]
+WantedBy=sockets.target

@@ -10,12 +10,15 @@ import socket
 import threading
 import time
 
+import pytest
+
 from creator_engine_validator.forge.scoped_token import ScopedToken
 from egress_broker.config import load_broker_config
 from egress_broker.host_broker import (
     handle_self_push_json_line,
     handle_self_push_request,
     serve_self_push_unix_socket,
+    systemd_activated_unix_socket,
 )
 from egress_broker.policy import CommitFacts
 
@@ -545,6 +548,89 @@ def test_serve_unix_socket_flags_unexpected_peercred_by_default(tmp_path):
     peercred = _audit_records(tmp_path)[0]
     assert peercred["origin"] == "unexpected"
     assert peercred["decision"] == "flag"
+
+
+def test_systemd_activation_helper_uses_fromfd_and_unsets_environment(tmp_path, monkeypatch):
+    socket_path = tmp_path / "activated-helper.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(1)
+    activation_fd = os.dup(listener.fileno())
+    listener.close()
+
+    monkeypatch.setenv("LISTEN_FDS", "1")
+    monkeypatch.setenv("LISTEN_PID", str(os.getpid()))
+    monkeypatch.setenv("LISTEN_FDNAMES", "egress-broker")
+
+    activated = systemd_activated_unix_socket(first_fd=activation_fd)
+
+    assert activated is not None
+    assert "LISTEN_FDS" not in os.environ
+    assert "LISTEN_PID" not in os.environ
+    assert "LISTEN_FDNAMES" not in os.environ
+
+    with activated:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(str(socket_path))
+            conn, _addr = activated.accept()
+            conn.close()
+
+
+def test_systemd_activation_helper_requires_listen_pid(monkeypatch):
+    monkeypatch.setenv("LISTEN_FDS", "1")
+    monkeypatch.delenv("LISTEN_PID", raising=False)
+    monkeypatch.setenv("LISTEN_FDNAMES", "egress-broker")
+
+    try:
+        with pytest.raises(RuntimeError, match="LISTEN_PID"):
+            systemd_activated_unix_socket(first_fd=9999)
+    finally:
+        assert "LISTEN_FDS" not in os.environ
+        assert "LISTEN_PID" not in os.environ
+        assert "LISTEN_FDNAMES" not in os.environ
+
+
+def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path):
+    socket_path = tmp_path / "activated-self-push.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(16)
+    before = socket_path.stat()
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_exceptions = []
+
+    def run_server():
+        try:
+            serve_self_push_unix_socket(
+                socket_path,
+                config=_config(tmp_path),
+                broker_seat_id="dev-4",
+                host_repo_path="/host/workspaces/creator-engine",
+                apply_default=True,
+                once=True,
+                activated_socket=listener,
+                courier_fn=fake_courier,
+            )
+        except Exception as exc:  # pragma: no cover - asserted through server_exceptions
+            server_exceptions.append(exc)
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    response = _send_socket_request(socket_path)
+    server_thread.join(timeout=2)
+    after = socket_path.stat()
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert not server_thread.is_alive()
+    assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
 
 
 def test_serve_unix_socket_half_closed_client(tmp_path):

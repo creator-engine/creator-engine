@@ -31,6 +31,7 @@ from .host_broker import (
     handle_self_push_json_line,
     handle_self_push_request,
     serve_self_push_unix_socket,
+    systemd_activated_unix_socket,
 )
 from .orchestrator import ContainedSeatSelfPushRequest, contained_seat_self_push
 from .policy import (
@@ -56,4 +57,5 @@ __all__ = [
     "handle_self_push_json_line",
     "handle_self_push_request",
     "serve_self_push_unix_socket",
+    "systemd_activated_unix_socket",
 ]
