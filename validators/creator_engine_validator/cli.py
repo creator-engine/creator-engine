@@ -117,6 +117,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_runtime_policy.add_argument("path", nargs="?", default=".", help="path to scan")
 
+    scan_public_docs_confidentiality = sub.add_parser(
+        "scan-public-docs-confidentiality",
+        help=(
+            "fast public-docs confidentiality scan: fail if any non-allowlisted "
+            "public doc leaks a ce-ops# ticket ref or internal host identifier "
+            "(same rule as the CI guard; runs in ce validate-pr before push)"
+        ),
+    )
+    scan_public_docs_confidentiality.add_argument(
+        "path", nargs="?", default=".", help="repo root to scan (default: .)"
+    )
+
     openbao_p3 = sub.add_parser(
         "openbao-p3-plan",
         help="render the value-free OpenBao Phase 3 deployment plan; executes no production steps",
@@ -545,6 +557,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-runtime-policy":
         from .checks.ce_runtime_policy import run as _run_runtime_policy
         result = _run_runtime_policy([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-public-docs-confidentiality":
+        from .public_docs_confidentiality import run as _run_public_docs_confidentiality
+        result = _run_public_docs_confidentiality([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "openbao-p3-plan":
         return _openbao_p3_plan(args)
