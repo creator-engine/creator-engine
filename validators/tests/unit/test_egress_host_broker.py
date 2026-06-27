@@ -5,6 +5,7 @@ host-owned courier. Tests inject all live boundaries, so no real gh/git/network 
 """
 
 import json
+import os
 import socket
 import threading
 import time
@@ -38,6 +39,67 @@ def _connect_when_ready(socket_path, *, timeout=5.0):
             if time.monotonic() >= deadline:
                 raise
             time.sleep(0.01)
+
+
+def _success_result(request, *, apply=True):
+    return type(
+        "Result",
+        (),
+        {
+            "seat_id": request.seat_id,
+            "branch": request.branch,
+            "head_sha": _GOOD_FACTS.head_sha,
+            "allowed": True,
+            "applied": apply,
+            "pushed": False,
+            "pr_number": None,
+            "installation_id": None,
+        },
+    )()
+
+
+def _start_once_socket_server(socket_path, tmp_path, *, courier_fn, **kwargs):
+    server_exceptions = []
+
+    def run_server():
+        try:
+            serve_self_push_unix_socket(
+                socket_path,
+                config=_config(tmp_path),
+                broker_seat_id="dev-4",
+                host_repo_path="/host/workspaces/creator-engine",
+                apply_default=True,
+                once=True,
+                courier_fn=courier_fn,
+                **kwargs,
+            )
+        except Exception as exc:  # pragma: no cover - asserted through server_exceptions
+            server_exceptions.append(exc)
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    return server_thread, server_exceptions
+
+
+def _send_socket_request(socket_path, *, send_request=True):
+    with _connect_when_ready(socket_path) as client:
+        client.settimeout(2)
+        if send_request:
+            client.sendall((json.dumps(_request()) + "\n").encode("utf-8"))
+        data = b""
+        while b"\n" not in data:
+            chunk = client.recv(65536)
+            assert chunk
+            data += chunk
+    return json.loads(data.decode("utf-8"))
+
+
+def _audit_records(tmp_path):
+    return [
+        json.loads(line)
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
 
 _GOOD_FACTS = CommitFacts(
     head_sha="a" * 40,
@@ -368,6 +430,121 @@ def test_json_line_seam_returns_one_secret_free_response_line(tmp_path):
     assert response["status"] == 200
     assert response["installation_id"] == 242
     assert _SENTINEL not in raw
+
+
+def test_serve_unix_socket_audits_real_peercred(tmp_path):
+    socket_path = tmp_path / "peercred-real.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_once_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+    )
+
+    response = _send_socket_request(socket_path)
+    server_thread.join(timeout=2)
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert not server_thread.is_alive()
+    peercred = _audit_records(tmp_path)[0]
+    assert peercred["event"] == "self_push_peercred"
+    assert peercred["broker_seat_id"] == "dev-4"
+    assert peercred["peer_uid"] == os.getuid()
+    assert peercred["peer_gid"] == os.getgid()
+    assert isinstance(peercred["peer_pid"], int)
+    assert peercred["peer_pid"] > 0
+    assert peercred["origin"] == "host_origin"
+    assert peercred["decision"] == "flag"
+
+
+def test_serve_unix_socket_allows_matching_expected_peercred(tmp_path):
+    socket_path = tmp_path / "peercred-allow.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_once_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+        expected_peer_uids=frozenset({os.getuid()}),
+        expected_peer_gids=frozenset({os.getgid()}),
+    )
+
+    response = _send_socket_request(socket_path)
+    server_thread.join(timeout=2)
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert not server_thread.is_alive()
+    peercred = _audit_records(tmp_path)[0]
+    assert peercred["origin"] == "contained_seat"
+    assert peercred["decision"] == "allow"
+
+
+def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path):
+    socket_path = tmp_path / "peercred-reject.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_once_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+        expected_peer_uids=frozenset({os.getuid() + 1}),
+        reject_unexpected_peer=True,
+    )
+
+    response = _send_socket_request(socket_path, send_request=False)
+    server_thread.join(timeout=2)
+
+    assert response == {"status": 403, "reason": "peer_credential_unexpected"}
+    assert courier_calls == []
+    assert server_exceptions == []
+    assert not server_thread.is_alive()
+    peercred = _audit_records(tmp_path)[0]
+    assert peercred["origin"] == "unexpected"
+    assert peercred["decision"] == "reject"
+
+
+def test_serve_unix_socket_flags_unexpected_peercred_by_default(tmp_path):
+    socket_path = tmp_path / "peercred-flag.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_once_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+        expected_peer_uids=frozenset({os.getuid() + 1}),
+    )
+
+    response = _send_socket_request(socket_path)
+    server_thread.join(timeout=2)
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert not server_thread.is_alive()
+    peercred = _audit_records(tmp_path)[0]
+    assert peercred["origin"] == "unexpected"
+    assert peercred["decision"] == "flag"
 
 
 def test_serve_unix_socket_half_closed_client(tmp_path):
