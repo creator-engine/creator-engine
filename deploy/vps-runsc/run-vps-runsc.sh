@@ -14,7 +14,7 @@ Launch mode:
                               run --rm and block the caller's terminal.
 
 Environment:
-  CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64)
+  CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64@sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639)
   CE_VPS_RUNTIME               Docker runtime (default: runsc-gvproxy-ptrace)
   CE_VPS_DOCKER_NETWORK        Docker --network value (default: host)
   CE_VPS_HARNESS               Harness: codex, claude, or controller (default: codex)
@@ -139,7 +139,7 @@ case "${harness}" in
     ;;
 esac
 
-CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:x86_64}"
+CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:x86_64@sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639}"
 CE_VPS_RUNTIME="${CE_VPS_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_VPS_DOCKER_NETWORK="${CE_VPS_DOCKER_NETWORK:-host}"
 CE_VPS_REPO="${CE_VPS_REPO:-$(pwd)}"

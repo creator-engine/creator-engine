@@ -22,6 +22,9 @@ HOOK_COMMAND = (
     "PYTHONPATH=/workspace/creator-engine/validators "
     "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
 )
+RUNSC_IMAGE_RE = re.compile(
+    r"^creator-engine/codex-runsc:x86_64(?:@sha256:[0-9a-fA-F]{64})?$"
+)
 
 
 def expected_contained_codex_config() -> str:
@@ -94,6 +97,12 @@ def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.Completed
 def dry_run_argv(result: subprocess.CompletedProcess[str]) -> list[str]:
     assert result.returncode == 0, result.stderr
     return shlex.split(result.stdout)
+
+
+def runsc_image_index(argv: list[str]) -> int:
+    matches = [index for index, arg in enumerate(argv) if RUNSC_IMAGE_RE.fullmatch(arg)]
+    assert len(matches) == 1, argv
+    return matches[0]
 
 
 def make_live_fake_docker(root: Path) -> Path:
@@ -213,9 +222,9 @@ def test_codex_dry_run_uses_vps_containment_defaults() -> None:
     assert "--cap-drop=ALL" in argv
     assert "--user" in argv
     assert "1234:5678" in argv
-    assert "creator-engine/codex-runsc:x86_64" in argv
-    assert argv[-4:] == [
-        "creator-engine/codex-runsc:x86_64",
+    image_index = runsc_image_index(argv)
+    assert image_index == len(argv) - 4
+    assert argv[image_index + 1 :] == [
         "exec",
         "--dangerously-bypass-hook-trust",
         "summarize status",
@@ -251,10 +260,8 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     assert HOOK_COMMAND in text
     assert HOOK.is_file()
     assert "--dangerously-bypass-hook-trust" in argv
-    assert (
-        argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
-        == ["--dangerously-bypass-hook-trust"]
-    )
+    image_index = runsc_image_index(argv)
+    assert argv[image_index + 1 :] == ["--dangerously-bypass-hook-trust"]
 
 
 def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -> None:
@@ -282,15 +289,14 @@ def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -
 def test_codex_tui_dry_run_ends_at_image_without_literal_tui_subcommand() -> None:
     argv = dry_run_argv(run_wrapper("tui"))
 
-    assert argv[-2:] == [
-        "creator-engine/codex-runsc:x86_64",
-        "--dangerously-bypass-hook-trust",
-    ]
+    image_index = runsc_image_index(argv)
+    assert image_index == len(argv) - 2
+    assert argv[image_index + 1] == "--dangerously-bypass-hook-trust"
     assert "--name" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-codex"
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
-    assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
+    assert "tui" not in argv[image_index + 1 :]
 
 
 def test_codex_dry_run_mounts_repo_codex_home_and_codex_binary() -> None:
@@ -348,13 +354,14 @@ def test_controller_variant_uses_claude_harness_marker_without_credential_env() 
 
     argv = dry_run_argv(result)
 
-    assert argv[-1] == "creator-engine/codex-runsc:x86_64"
+    image_index = runsc_image_index(argv)
+    assert image_index == len(argv) - 1
     assert "CE_DGX_HARNESS=claude" in argv
     assert "CE_DGX_HARNESS_MODE=tui" in argv
     assert "--dangerously-bypass-hook-trust" not in argv
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in argv
     assert "synthetic-secret-token-value" not in result.stdout
-    assert "tui" not in argv[argv.index("creator-engine/codex-runsc:x86_64") + 1 :]
+    assert "tui" not in argv[image_index + 1 :]
     assert any(
         arg == "type=bind,source=/opt/claude/bin/claude,target=/usr/local/bin/claude,readonly"
         for arg in argv

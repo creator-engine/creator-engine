@@ -7,6 +7,14 @@ surfaces:
     update_policy: downstream digest capture pending
     last_evaluated: "2026-06-26"
 
+  - name: VPS runsc image
+    version: "x86_64"
+    commit_or_digest: sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639
+    source: docker.io/creator-engine/codex-runsc:x86_64
+    custody: rented
+    update_policy: digest pin required before default VPS launch use
+    last_evaluated: "2026-06-26"
+
   - name: herdr
     version: null
     commit_or_digest: ff924966
