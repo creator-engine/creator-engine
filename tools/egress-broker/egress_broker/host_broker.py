@@ -12,6 +12,7 @@ The successful path returns only a value-free result projection.
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import struct
@@ -38,6 +39,7 @@ _SECRET_KEY_RE = re.compile(
 )
 
 CourierFn = Callable[..., Any]
+_SD_LISTEN_FDS_START = 3
 _UNSUPPORTED_REQUEST_FIELDS = frozenset(
     {
         "command",
@@ -50,6 +52,71 @@ _UNSUPPORTED_REQUEST_FIELDS = frozenset(
         "token",
     }
 )
+
+
+def systemd_activated_unix_socket(
+    *,
+    first_fd: int = _SD_LISTEN_FDS_START,
+    unset_environment: bool = True,
+) -> socket.socket | None:
+    """Return the single systemd-activated Unix stream socket, if present.
+
+    systemd passes listening descriptors through ``LISTEN_FDS`` starting at fd 3.
+    ``socket.fromfd`` duplicates the inherited fd, so this helper closes the original
+    after duplication and unsets the activation environment to avoid leaking it to
+    child processes.
+    """
+
+    listen_fds_raw = os.environ.get("LISTEN_FDS")
+    listen_pid_raw = os.environ.get("LISTEN_PID")
+
+    def _unset() -> None:
+        if unset_environment:
+            os.environ.pop("LISTEN_FDS", None)
+            os.environ.pop("LISTEN_PID", None)
+            os.environ.pop("LISTEN_FDNAMES", None)
+
+    if not listen_fds_raw:
+        return None
+    if listen_pid_raw is None:
+        _unset()
+        raise RuntimeError("systemd socket activation requires LISTEN_PID")
+
+    try:
+        listen_fds = int(listen_fds_raw)
+    except ValueError as exc:
+        _unset()
+        raise RuntimeError("invalid systemd socket activation LISTEN_FDS") from exc
+
+    try:
+        listen_pid = int(listen_pid_raw)
+    except ValueError as exc:
+        _unset()
+        raise RuntimeError("invalid systemd socket activation LISTEN_PID") from exc
+    if listen_pid != os.getpid():
+        _unset()
+        return None
+
+    if listen_fds == 0:
+        _unset()
+        return None
+    if listen_fds != 1:
+        _unset()
+        raise RuntimeError(f"expected exactly one systemd socket fd, got {listen_fds}")
+
+    try:
+        inherited = socket.fromfd(first_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as exc:
+        _unset()
+        raise RuntimeError("could not inherit systemd socket activation fd") from exc
+
+    try:
+        os.close(first_fd)
+    except OSError:
+        pass
+    _unset()
+    inherited.setblocking(True)
+    return inherited
 
 
 def handle_self_push_request(
@@ -169,24 +236,32 @@ def serve_self_push_unix_socket(
     expected_peer_uids: frozenset[int] | None = None,
     expected_peer_gids: frozenset[int] | None = None,
     reject_unexpected_peer: bool = False,
+    activated_socket: socket.socket | None = None,
     courier_fn: CourierFn = contained_seat_self_push,
     **host_courier_options: Any,
 ) -> None:
     """Serve the JSON-line SELF-PUSH protocol on a host-owned Unix socket.
 
     The caller is expected to create the parent directory with the desired UID/GID ownership.
-    This function refuses to replace an existing path, binds a stream Unix socket, chmods it
-    to ``mode`` (default ``0600``), and handles one request per connection. ``once=True`` is
-    a CI/test seam; the live daemon leaves it false under a supervisor.
+    When ``activated_socket`` is unset, this function refuses to replace an existing path,
+    binds a stream Unix socket, chmods it to ``mode`` (default ``0600``), and handles one
+    request per connection. When systemd socket activation supplies ``activated_socket``, the
+    broker uses that already-listening socket without touching the path, preserving the socket
+    inode across daemon restarts. ``once=True`` is a CI/test seam; the live daemon leaves it
+    false under a supervisor.
     """
     path = Path(socket_path)
-    if path.exists():
-        raise RuntimeError(f"self-push socket path already exists: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+    if activated_socket is None:
+        if path.exists():
+            raise RuntimeError(f"self-push socket path already exists: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(path))
         path.chmod(mode)
         server.listen(16)
+    else:
+        server = activated_socket
+    with server:
         while True:
             conn, _addr = server.accept()
             with conn:
@@ -324,4 +399,5 @@ __all__ = [
     "handle_self_push_json_line",
     "handle_self_push_request",
     "serve_self_push_unix_socket",
+    "systemd_activated_unix_socket",
 ]

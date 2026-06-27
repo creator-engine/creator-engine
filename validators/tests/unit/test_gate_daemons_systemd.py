@@ -141,6 +141,7 @@ def test_integrator_authorized_reviewer_config_is_documented(repo_root: Path):
 # ---------------------------------------------------------------------------
 
 EGRESS_BROKER_UNIT = "ce-egress-broker.service"
+EGRESS_SELF_REVIEW_UNIT = "ce-egress-self-review.service"
 
 
 def test_egress_broker_unit_parses_and_has_required_sections(repo_root: Path):
@@ -194,3 +195,20 @@ def test_egress_broker_unit_env_vars_are_parametric(repo_root: Path):
     assert "$CE_EGRESS_BROKER_SEAT" in exec_start
     assert "$CE_EGRESS_BROKER_REPO" in exec_start
     assert "$CE_EGRESS_BROKER_CONFIG" in exec_start
+
+
+def test_egress_self_review_unit_socket_is_parametric(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_SELF_REVIEW_UNIT)
+    exec_start = unit["Service"]["ExecStart"]
+
+    assert "$CE_EGRESS_SELF_REVIEW_SOCKET" in exec_start
+    assert "$CE_EGRESS_SELF_REVIEW_CONFIG" in exec_start
+    assert "/run/ce-egress/dev-3-review.sock" not in exec_start
+
+
+def test_egress_socket_units_own_default_run_paths(repo_root: Path):
+    broker_socket = _read_unit(repo_root, "ce-egress-broker.socket")
+    review_socket = _read_unit(repo_root, "ce-egress-self-review.socket")
+
+    assert broker_socket["Socket"]["ListenStream"] == "/run/ce-egress/dev-3.sock"
+    assert review_socket["Socket"]["ListenStream"] == "/run/ce-egress/dev-3-review.sock"

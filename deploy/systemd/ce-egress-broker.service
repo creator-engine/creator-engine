@@ -1,25 +1,20 @@
 [Unit]
 Description=Creator Engine contained-seat self-push egress broker
 Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/egress-broker
-After=network-online.target
+Requires=ce-egress-broker.socket
+After=network-online.target ce-egress-broker.socket
 Wants=network-online.target
 
 [Service]
 Type=simple
-# CE_EGRESS_SEAT_GID must match the container seat's gid (e.g. 1003 for cedev2/ce-dev-3).
-# Setting the group to the seat's gid (mode 0660) lets the contained seat uid connect
-# to the broker socket without requiring privileged capabilities or the docker group.
-# Default is left unset here; provide CE_EGRESS_SEAT_GID in the EnvironmentFile.
 EnvironmentFile=%h/.config/creator-engine/ce-egress-broker.env
 WorkingDirectory=/workspace/creator-engine
+Sockets=ce-egress-broker.socket
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_push_broker.py \
   --socket "$CE_EGRESS_BROKER_SOCKET" \
   --seat "$CE_EGRESS_BROKER_SEAT" \
   --host-repo-path "$CE_EGRESS_BROKER_REPO" \
   --config "$CE_EGRESS_BROKER_CONFIG"
-# Fix socket permissions so the contained seat uid (running as gid CE_EGRESS_SEAT_GID)
-# can connect. chown to the seat gid, mode 0660.
-ExecStartPost=/bin/sh -c 'chown :${CE_EGRESS_SEAT_GID} "$CE_EGRESS_BROKER_SOCKET" && chmod 0660 "$CE_EGRESS_BROKER_SOCKET"'
 Restart=on-failure
 RestartSec=30s
 
