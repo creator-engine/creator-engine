@@ -350,6 +350,28 @@ def test_run_with_base_manifest_path_not_changed_fails(tmp_path: Path):
     assert "src/missing.py" in rendered
 
 
+def test_run_with_base_single_manifest_pure_relocation_uses_destination_path(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/old_module.py", "line\n" * 80)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "large source file on base")
+    manifest = _write_manifest(repo, ["src/new_module.py"])
+    _git(repo, "add", "pr-manifest.md")
+    _git(repo, "commit", "-q", "-m", "manifest on base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    (repo / "src/new_module.py").write_text((repo / "src/old_module.py").read_text())
+    (repo / "src/old_module.py").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "pure relocation")
+
+    result = run_with_base([repo], base, manifest=manifest)
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
 def test_cli_verify_path_manifest_neutral_without_manifest(capsys, tmp_path: Path):
     repo, base = _init_repo(tmp_path)
     (repo / "changed.py").write_text("x = 1\n")
@@ -487,6 +509,62 @@ def test_per_pr_active_pass_self_inclusive(tmp_path: Path):
     _commit_per_pr(repo, slug, manifest)
     result = run_with_base([repo], base, manifest_dir=MANIFEST_DIR, head_ref="ce21-feature")
     assert result.ok, [e.format() for e in result.errors]
+
+
+def test_per_pr_pure_relocation_uses_destination_path(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/old_module.py", "line\n" * 80)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "large source file on base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    slug = branch_slug("ce21-feature")
+    carrier_rel = _carrier_rel(slug)
+    _write_repo_file(repo, "src/new_module.py", (repo / "src/old_module.py").read_text())
+    (repo / "src/old_module.py").unlink()
+    _write_repo_file(
+        repo,
+        carrier_rel,
+        _build_doc(sorted([carrier_rel, "src/new_module.py"]), prefix="AUTHORIZED"),
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "pure relocation")
+
+    result = run_with_base([repo], base, manifest_dir=MANIFEST_DIR, head_ref="ce21-feature")
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_per_pr_relocation_plus_unlisted_change_still_fails(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/old_module.py", "line\n" * 80)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "large source file on base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    slug = branch_slug("ce21-feature")
+    carrier_rel = _carrier_rel(slug)
+    _write_repo_file(repo, "src/new_module.py", (repo / "src/old_module.py").read_text())
+    (repo / "src/old_module.py").unlink()
+    _write_repo_file(repo, "src/rogue.py", "# not authorized\n")
+    _write_repo_file(
+        repo,
+        carrier_rel,
+        _build_doc(sorted([carrier_rel, "src/new_module.py"]), prefix="AUTHORIZED"),
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "relocation plus rogue")
+
+    result = run_with_base([repo], base, manifest_dir=MANIFEST_DIR, head_ref="ce21-feature")
+
+    assert not result.ok
+    codes = {e.code for e in result.errors}
+    assert "path_manifest_diff_outside_manifest" in codes, [e.format() for e in result.errors]
+    assert "src/rogue.py" in "\n".join(e.format() for e in result.errors)
 
 
 def test_per_pr_required_mode_fails_without_matching_changelog(tmp_path: Path):

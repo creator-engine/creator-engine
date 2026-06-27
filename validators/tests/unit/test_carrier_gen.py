@@ -25,7 +25,7 @@ def test_compute_path_set_uses_injected_runner_and_canonicalizes(tmp_path: Path)
 
     paths, count, sha = compute_path_set(tmp_path, "ce-test", base="base-sha", git_runner=fake_git)
 
-    assert calls == [(["diff", "--name-only", "base-sha..HEAD"], tmp_path)]
+    assert calls == [(["diff", "--name-only", "--find-renames", "base-sha..HEAD"], tmp_path)]
     assert paths == (f"{MANIFEST_DIR}/ce-test.md", "a.py", "z.py")
     assert count == 3
     assert sha == _sha(paths)
@@ -146,7 +146,7 @@ def test_write_carriers_writes_changelog_before_manifest_and_uses_diff_paths(tmp
 
     assert events == [
         {
-            "argv": ["diff", "--name-only", "origin/main..HEAD"],
+            "argv": ["diff", "--name-only", "--find-renames", "origin/main..HEAD"],
             "changelog_exists": True,
             "manifest_exists": False,
         }

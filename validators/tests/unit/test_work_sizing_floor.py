@@ -273,7 +273,7 @@ def test_run_with_base_sizes_source_added_lines_not_test_added_lines(tmp_path):
     _commit_all(repo)
 
     numstat = subprocess.run(
-        ["git", "diff", "--numstat", "--no-renames", f"{base}..HEAD"],
+        ["git", "diff", "--numstat", "--find-renames", f"{base}..HEAD"],
         cwd=repo,
         check=True,
         capture_output=True,
@@ -289,6 +289,48 @@ def test_run_with_base_sizes_source_added_lines_not_test_added_lines(tmp_path):
     result = chk.run_with_base([repo], base, declared_work_class="tiny")
 
     assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_with_base_pure_relocation_remains_tiny(tmp_path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/old_module.py", lines=700)
+    _commit_all(repo, "large source file on base")
+    base = _head(repo)
+
+    (repo / "src/new_module.py").write_text((repo / "src/old_module.py").read_text())
+    (repo / "src/old_module.py").unlink()
+    _commit_all(repo, "pure relocation")
+
+    numstat = subprocess.run(
+        ["git", "diff", "--numstat", "--find-renames", f"{base}..HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    projection = chk.sizing_floor_projection(
+        "tiny",
+        chk._pr_diff_ceiling_stats(chk.parse_numstat(numstat)),
+    )
+
+    assert projection["included_lines"] == 0
+    assert projection["minimum_work_class"] == "tiny"
+    result = chk.run_with_base([repo], base, declared_work_class="tiny")
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_with_base_large_source_change_still_requires_higher_tier(tmp_path):
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "src/large_feature.py", lines=801)
+    _commit_all(repo)
+
+    tiny_result = chk.run_with_base([repo], base, declared_work_class="tiny")
+    feature_result = chk.run_with_base([repo], base, declared_work_class="feature")
+
+    assert not tiny_result.ok
+    assert {e.code for e in tiny_result.errors} == {chk.CODE_INVALID}
+    assert feature_result.ok, [e.format() for e in feature_result.errors]
 
 
 def test_cli_verify_work_sizing_floor_exits_nonzero_on_underfloor(capsys, tmp_path):

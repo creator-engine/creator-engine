@@ -5188,15 +5188,15 @@ def _path_manifest_against_index(
     original_run_git = path_manifest_fidelity._run_git
 
     def _run_git_from_index(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
-        if argv == ["diff", "--name-status", "--no-renames", f"{base}..HEAD"]:
+        if argv == ["diff", "--name-status", "--find-renames", f"{base}..HEAD"]:
             try:
-                proc = _git_run(cwd, "diff", "--cached", "--name-status", "--no-renames", base)
+                proc = _git_run(cwd, "diff", "--cached", "--name-status", "--find-renames", base)
             except v3_installer.InstallRefused as exc:
                 return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr
-        if argv == ["diff", "--name-only", f"{base}..HEAD"]:
+        if argv == ["diff", "--name-only", "--find-renames", f"{base}..HEAD"]:
             try:
-                proc = _git_run(cwd, "diff", "--cached", "--name-only", base)
+                proc = _git_run(cwd, "diff", "--cached", "--name-only", "--find-renames", base)
             except v3_installer.InstallRefused as exc:
                 return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr
@@ -5369,9 +5369,9 @@ def _cmd_carrier(args: argparse.Namespace) -> int:
         )
 
     def _generator_git_runner(argv: Sequence[str], cwd: Path) -> tuple[int, str, str]:
-        if argv == ["diff", "--name-only", f"{args.base}..HEAD"]:
+        if argv == ["diff", "--name-only", "--find-renames", f"{args.base}..HEAD"]:
             try:
-                proc = _git_run(cwd, "diff", "--cached", "--name-only", args.base)
+                proc = _git_run(cwd, "diff", "--cached", "--name-only", "--find-renames", args.base)
             except v3_installer.InstallRefused as exc:
                 return 127, "", str(exc)
             return proc.returncode, proc.stdout, proc.stderr

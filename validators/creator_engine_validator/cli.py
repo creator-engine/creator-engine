@@ -199,7 +199,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     verify_work_sizing_floor = sub.add_parser(
         "verify-work-sizing-floor",
-        help="work_sizing_floor PR-diff gate (classifies git diff --numstat --no-renames <base>..HEAD against a declared work class)",
+        help="work_sizing_floor PR-diff gate (classifies git diff --numstat --find-renames <base>..HEAD against a declared work class)",
     )
     verify_work_sizing_floor.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
     verify_work_sizing_floor.add_argument(
