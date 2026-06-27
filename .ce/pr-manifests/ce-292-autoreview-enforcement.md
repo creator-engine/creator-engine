@@ -1,6 +1,7 @@
 # PR path manifest - ce-292-autoreview-enforcement - ce-ops#292 raw API approval guard
 
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21 convention).
+- **Declared work class:** tiny
 CI runs:
 
     verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref ce-292-autoreview-enforcement
