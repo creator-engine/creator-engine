@@ -7,7 +7,7 @@
 
   "policy": {
     "base_branch": "main",
-    "allowed_branch_namespaces": ["ce", "ce-", "ce-ops-", "v3-", "v35-", "feat/", "fix/", "bugfix-", "chore/", "docs/"],
+    "allowed_branch_namespaces": ["ce", "ce-ops-", "v3-", "v35-", "feat/", "fix/", "bugfix-", "chore/", "docs/"],
     "forbidden_branches": ["main", "master", "develop", "gh-pages", "release"],
     "authorized_emails": [],
     "authorized_logins": ["cedev1vps-cmd", "ubuntuaws745-cmyk", "ce-dev-3", "cedev4vps-coder"],
@@ -21,7 +21,7 @@
 
   "_policy_contained_seat_example": {
     "base_branch": "main",
-    "allowed_branch_namespaces": ["ce", "ce-"],
+    "allowed_branch_namespaces": ["ce"],
     "forbidden_branches": ["main", "master", "develop", "gh-pages", "release"],
     "authorized_emails": [],
     "authorized_logins": ["ce-dev-3"],

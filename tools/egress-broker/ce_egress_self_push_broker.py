@@ -27,7 +27,6 @@ from egress_broker.minter import (  # noqa: E402
     VaultKvConfig,
     make_signer_for_seat,
 )
-from egress_broker.orchestrator import EgressRefused  # noqa: E402
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 2
@@ -218,10 +217,8 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
     except _BrokerStartupError as exc:
         print(f"[ce-egress-self-push] startup error: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
-    except EgressRefused as exc:
-        print(f"[ce-egress-self-push] DENIED: {exc}", file=sys.stderr)
-        return EXIT_RUNTIME_ERROR
     except Exception as exc:  # noqa: BLE001 - process boundary maps all runtime failures to code 2.
+        # EgressRefused is serialized by host_broker into JSON; it does not escape here.
         # Deliberately do not print ``str(exc)``; subprocess/socket errors can contain
         # credential-shaped stderr from lower transports.
         print(

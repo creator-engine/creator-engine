@@ -63,6 +63,7 @@ _NOREPLY_RE = re.compile(
 #: conservative — a branch we cannot cleanly name is a branch we refuse.
 _BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[!-~]+$")
 _BRANCH_QUERY_DELIMITER_RE = re.compile(r"[?&#=]")
+_CE_TICKET_BRANCH_RE = re.compile(r"^ce-?[0-9]+-")
 
 #: Branches the broker NEVER pushes to regardless of config — the absolute floor. ``main`` and
 #: ``master`` are matched case-insensitively (so ``MAIN`` is also refused); the configured base
@@ -93,7 +94,9 @@ class BrokerPolicy:
 
     ``authorized_emails`` is matched case-insensitively against the full author email;
     ``authorized_logins`` is matched (exactly) against the login parsed from a GitHub
-    no-reply author email. ``allowed_branch_namespaces`` are prefix matches.
+    no-reply author email. ``allowed_branch_namespaces`` are prefix matches, except the
+    special ``"ce"`` namespace which means CE-ticket branches only: ``ceNNN-*`` or
+    ``ce-NNN-*``.
     ``forbidden_branches`` is unioned with the always-forbidden floor and the base branch.
     ``max_pushes_per_window`` is the rate cap (``0`` disables the guard).
 
@@ -208,7 +211,16 @@ def _branch_in_namespace(branch: str, policy: BrokerPolicy) -> CheckResult:
         return CheckResult(
             "branch_in_namespace", False, f"branch {branch!r} is empty or malformed"
         )
-    for prefix in policy.allowed_branch_namespaces:
+    for raw_prefix in policy.allowed_branch_namespaces:
+        prefix = raw_prefix.strip()
+        if prefix == "ce":
+            if _CE_TICKET_BRANCH_RE.match(name):
+                return CheckResult(
+                    "branch_in_namespace",
+                    True,
+                    f"branch {branch!r} matches allowed CE ticket namespace {prefix!r}",
+                )
+            continue
         if prefix and name.startswith(prefix):
             return CheckResult(
                 "branch_in_namespace", True, f"branch {branch!r} matches allowed namespace {prefix!r}"
