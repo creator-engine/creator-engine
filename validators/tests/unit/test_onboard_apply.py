@@ -349,6 +349,7 @@ def test_non_interactive_missing_answers_refuses_before_mutation(tmp_path):
 def test_sudo_grant_hole_refuses_before_mutation(tmp_path):
     driver = FakeDriver()
     answers = _answers(tmp_path)
+    answers["profile"] = "team"
     answers["host"]["sudo_grant"] = ["runsc"]
     probes = {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES}
     probes["proxy"] = False
@@ -365,7 +366,9 @@ def test_sudo_grant_hole_refuses_before_mutation(tmp_path):
 
 def test_greenfield_success_writes_ledger_and_honest_counters(tmp_path):
     driver = FakeDriver()
-    summary = _apply(tmp_path, driver)
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    summary = _apply(tmp_path, driver, answers=answers)
     assert summary["failed"] == 0
     assert summary["refused"] == 0
     assert summary["legs_total"] == len(onboard_apply.LEG_IDS)
@@ -402,8 +405,10 @@ def test_host_dependencies_are_idempotent_when_probe_is_green(tmp_path):
 
 def test_sudo_install_records_manual_rollback_when_it_mutates(tmp_path):
     driver = FakeDriver()
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
     probes = {tool: False for tool in v3_installer.REQUIRED_DEPENDENCIES}
-    summary = _apply(tmp_path, driver, probes=probes)
+    summary = _apply(tmp_path, driver, answers=answers, probes=probes)
     host_leg = _leg(summary, "host_dependencies")
     assert host_leg["status"] == "applied"
     assert host_leg["manual_rollback_required"] is True
@@ -412,7 +417,9 @@ def test_sudo_install_records_manual_rollback_when_it_mutates(tmp_path):
 
 def test_runtime_posture_failure_stops_before_github(tmp_path):
     driver = FakeDriver(runtime_ok=False)
-    summary = _apply(tmp_path, driver)
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    summary = _apply(tmp_path, driver, answers=answers)
     assert _leg(summary, "runtime_posture")["status"] == "failed"
     assert "resolve_secret" not in driver.calls
     assert _leg(summary, "github_bootstrap_token_probe")["status"] == "skipped"
@@ -476,17 +483,18 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
     assert posture_json["isolation_backend"] == "os-native"
 
 
-def test_default_profile_preserves_gvisor_proxy_posture(tmp_path):
-    # back-compat (req-4): the default install (no profile) keeps gvisor-proxy.
+def test_absent_profile_defaults_to_os_native_posture(tmp_path):
+    # ce-ops#326: no onboarding profile defaults to solo-pilot/os-native, not the
+    # runtime-policy schema default.
     driver = FakeDriver()
     summary = _apply(tmp_path, driver)
     assert summary["failed"] == 0
-    assert driver.provisioned_backend == "gvisor-proxy"
-    assert driver.verified_backend == "gvisor-proxy"
+    assert driver.provisioned_backend == "os-native"
+    assert driver.verified_backend == "os-native"
     posture_json = json.loads(
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
-    assert posture_json["isolation_backend"] == "gvisor-proxy"
+    assert posture_json["isolation_backend"] == "os-native"
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):
@@ -527,7 +535,9 @@ def test_plain_join_existing_already_ce_repo_converges(tmp_path):
     # floor present) is a plain-join: it CONVERGES via the idempotent verify/reconcile
     # legs instead of refusing brownfield.
     driver = FakeDriver(repo_exists=True)
-    summary = _apply(tmp_path, driver, answers=_answers(tmp_path, mode="existing"))
+    answers = _answers(tmp_path, mode="existing")
+    answers["profile"] = "team"
+    summary = _apply(tmp_path, driver, answers=answers)
     assert summary["failed"] == 0
     assert summary["refused"] == 0
     assert summary["brownfield_deferred"] == 0

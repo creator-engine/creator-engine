@@ -952,11 +952,11 @@ def _prepare(
             "answers_missing",
             "apply requires complete answers; run --inventory/--plan or pass --non-interactive to refuse explicitly",
         )
-    # ce-ops#71 Edit B+C: resolve the runtime backend from the profile
-    # (solo-pilot → os-native; team/absent → gvisor-proxy, back-compat) and make
+    # ce-ops#71 Edit B+C / ce-ops#326: resolve the runtime backend from the
+    # onboarding profile (solo-pilot/absent → os-native; team → gvisor-proxy) and make
     # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/proxy pairing
     # is planned ONLY for gvisor-proxy, so the governance-only path needs no sudo.
-    isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
+    isolation_backend = v3_installer.resolve_onboard_isolation_backend(profile=merged.value("profile"))
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
     probe = {tool: bool(request.dependency_probe.get(tool, False)) for tool in backend_deps}
     dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)

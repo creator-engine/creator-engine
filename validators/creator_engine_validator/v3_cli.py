@@ -3204,7 +3204,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 schema, detected=detected, answers=answers or None
             )
             inventory_merged = v3_installer.merge_answers(schema, answers=answers or None, detected=detected)
-            inventory_backend = v3_installer.resolve_isolation_backend(
+            inventory_backend = v3_installer.resolve_onboard_isolation_backend(
                 profile=inventory_merged.value("profile"),
                 explicit=inventory_merged.value("isolation_backend"),
             )
@@ -3280,10 +3280,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # ce-ops#71 MAJOR-1: resolve the isolation backend BEFORE the preflight, the
     # SAME way apply does (mirror ``onboard_apply._prepare``), and drive the probe /
     # dep-plan / sudo-grant diff off the BACKEND-AWARE deps — NOT the flat Tier-2
-    # ``REQUIRED_DEPENDENCIES``. Otherwise a solo-pilot → ``os-native`` install on a
-    # host without runsc/proxy is falsely REFUSED at this CLI gate even though the
-    # fixed, backend-driven apply never needs them. ``gvisor-proxy`` is unchanged.
-    isolation_backend = v3_installer.resolve_isolation_backend(profile=merged.value("profile"))
+    # ``REQUIRED_DEPENDENCIES``. Otherwise a solo-pilot/no-profile → ``os-native``
+    # install on a host without runsc/proxy is falsely REFUSED at this CLI gate
+    # even though the fixed, backend-driven apply never needs them. Explicit
+    # ``team``/``gvisor-proxy`` behavior is unchanged.
+    isolation_backend = v3_installer.resolve_onboard_isolation_backend(profile=merged.value("profile"))
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
     probe = {tool: _which(tool) for tool in backend_deps}
     dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)
@@ -3338,6 +3339,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             opt_out=opt_out, optout_ratification=optout_ratification,
             verifier=apply_verifier,
         )
+        plan["dependencies"]["isolation_backend"] = isolation_backend
     except v3_installer.InstallRefused as exc:
         return _emit(args, 1, [f"{_BRAND} · onboard REFUSED: {exc}"], {"error": "refused", "detail": str(exc)})
     if trust_anchor_evidence is not None:
@@ -3566,7 +3568,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     lines = [
         f"{_BRAND} · onboard (dry-run · {plan['mode']}) — spec verified against pinned key "
         f"{plan['verified']['key_id']!r}",
-        f"    dependencies · install {plan['dependencies']['install'] or '—'} · "
+        f"    dependencies · backend {isolation_backend} · install {plan['dependencies']['install'] or '—'} · "
         f"skip {plan['dependencies']['skip']} · sudo {'yes' if plan['dependencies']['needs_sudo'] else 'no'}",
         f"    cost profile · {plan['profile']['mode']} → {plan['profile']['runtime_policy']}",
     ]

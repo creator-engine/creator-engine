@@ -38,7 +38,14 @@ def _facts(**overrides) -> guard.EnvironmentFacts:
 
 
 @pytest.fixture()
-def inject_facts(monkeypatch):
+def inject_facts(monkeypatch, tmp_path):
+    missing_target_python = tmp_path / "missing-python"
+    monkeypatch.setattr(
+        doctor_runtime.bootstrap_runtime,
+        "default_target_python",
+        lambda repo_root: missing_target_python,
+    )
+
     def _install(**overrides):
         facts = _facts(**overrides)
         monkeypatch.setattr(doctor_runtime, "detect_environment", lambda *a, **k: facts)

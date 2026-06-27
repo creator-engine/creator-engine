@@ -140,6 +140,7 @@ PROFILE_DEFAULT_BACKEND: dict[str, str] = {
     "solo-pilot": "os-native",
     "team": DEFAULT_ISOLATION_BACKEND,
 }
+DEFAULT_ONBOARD_PROFILE = "solo-pilot"
 
 
 #: Backend → numeric isolation tier (the G71.2 :data:`TIER_DEPS` attestation
@@ -193,6 +194,19 @@ def resolve_isolation_backend(*, profile: Any = None, explicit: Any = None) -> s
     if isinstance(profile, str) and profile in PROFILE_DEFAULT_BACKEND:
         return PROFILE_DEFAULT_BACKEND[profile]
     return DEFAULT_ISOLATION_BACKEND
+
+
+def resolve_onboard_isolation_backend(*, profile: Any = None, explicit: Any = None) -> str:
+    """Resolve the onboarding backend, defaulting an omitted profile to solo-pilot.
+
+    Runtime-policy records that omit ``isolation_backend`` still resolve through
+    :func:`resolve_isolation_backend` and keep the schema-level
+    ``gvisor-proxy`` default. The first-run onboarding journey has a separate
+    operator default: no answers / no ``profile`` means solo-pilot, which maps to
+    the unprivileged ``os-native`` backend.
+    """
+    resolved_profile = profile if profile not in (None, "") else DEFAULT_ONBOARD_PROFILE
+    return resolve_isolation_backend(profile=resolved_profile, explicit=explicit)
 
 #: The educate-at-opt-out copy — VERBATIM from ``docs/contracts/spend-envelope.md``.
 EDUCATE_AT_OPTOUT = (
