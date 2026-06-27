@@ -93,6 +93,70 @@ def test_gh_api_review_approve_denied_even_with_matching_pr_review_envelope():
     assert "restricted mechanic (pr_review)" in decision.reason
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -X POST https://api.github.com/repos/creator-engine/creator-engine/pulls/106/reviews -d event=APPROVE",
+        "curl --request POST https://api.github.com/repos/creator-engine/creator-engine/pulls/106/reviews --data '{\"event\":\"APPROVE\"}'",
+        "curl -X POST repos/creator-engine/creator-engine/pulls/106/reviews --data-raw '{\"event\" : \"approve\"}'",
+        "curl --request POST /repos/creator-engine/creator-engine/pulls/106/reviews --data-binary '{\"EVENT\":\"APPROVE\"}'",
+        "curl -X POST https://api.github.com/repos/creator-engine/creator-engine/pulls/106/reviews --data-binary @review.json",
+        "curl --request POST /repos/creator-engine/creator-engine/pulls/106/reviews --data @-",
+    ],
+)
+def test_curl_api_review_approve_denied_without_authority_at_runtime(command):
+    decision = hc.evaluate(
+        _bash_event(command),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=None,
+            seat_class="worker",
+        ),
+    )
+
+    assert hc.classify_mechanics(command) == "pr_review"
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    gh_decision = hc.evaluate(
+        _bash_event("gh api -X POST repos/creator-engine/creator-engine/pulls/106/reviews -f event=APPROVE"),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=None,
+            seat_class="worker",
+        ),
+    )
+    assert decision.reason == gh_decision.reason
+
+
+def test_curl_api_review_approve_denied_even_with_matching_pr_review_envelope():
+    command = "curl -X POST https://api.github.com/repos/creator-engine/creator-engine/pulls/106/reviews -d event=APPROVE"
+    decision = hc.evaluate(
+        _bash_event(command),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=_envelope(),
+            seat_class="worker",
+        ),
+    )
+
+    assert hc.classify_mechanics(command) == "pr_review"
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    gh_decision = hc.evaluate(
+        _bash_event("gh api -X POST repos/creator-engine/creator-engine/pulls/106/reviews -f event=APPROVE"),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=_envelope(),
+            seat_class="worker",
+        ),
+    )
+    assert decision.reason == gh_decision.reason
+
+
 def test_pr_review_denied_on_wrong_pr():
     assert hc._mechanics_would_deny("gh pr review 999 --approve", _ctx(_envelope())) is not None
 
