@@ -115,6 +115,22 @@ Retire the seat when done:
 docker stop ce-vps-codex && docker rm ce-vps-codex
 ```
 
+Detached launch performs an idempotent pre-launch `docker rm -f <name>` for
+the exact `CE_VPS_CONTAINER_NAME` immediately before `docker run -d --name`.
+This clears a stale stopped or wedged copy of that one seat without touching
+other containers.
+
+To bound stopped-container buildup from one-off diagnostics, install the tracked
+host cron artifact:
+
+```bash
+sudo install -m 0644 deploy/vps-runsc/ce-docker-prune.cron /etc/cron.d/ce-docker-prune
+```
+
+The cron runs `docker container prune -f --filter "until=24h"` hourly. Docker
+container prune removes only stopped/exited containers, never running seats; the
+24h grace keeps recent crash/exit evidence available before cleanup.
+
 The generated contained Codex config pre-trusts `/workspace/creator-engine`
 (`trust_level = "trusted"`, `approval_policy = "never"`,
 `sandbox_mode = "danger-full-access"`), so a detached, non-interactive launch is

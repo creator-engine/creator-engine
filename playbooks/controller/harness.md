@@ -14,6 +14,18 @@ The contained seat drafts the forge operation and signals it. An uncontained
 courier executes that operation as the seat identity via the held token. The
 courier does not author the operation or substitute its own identity.
 
+## Contained Seat Probes
+
+Probe contained seats with `docker exec` into the LIVE named container:
+
+```bash
+docker exec -it <container-name> bash
+```
+
+Never probe by starting a throwaway `docker run` of the seat image. The herdr
+harness entrypoint is long-running and does not exit on its own, so ad-hoc
+`docker run --rm` probes can stay alive indefinitely and `--rm` never fires.
+
 ## Halt Conditions
 
 - No independent review for merge.

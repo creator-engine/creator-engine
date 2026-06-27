@@ -563,6 +563,7 @@ fi
 if [ "${detach}" = "1" ]; then
   # Named-persistent detached launch: start the container, then poll herdr for
   # readiness. Do NOT exec docker here (docker run -d returns immediately).
+  docker rm -f "${CE_VPS_CONTAINER_NAME}" 2>/dev/null || true
   "${docker_cmd[@]}"
   herdr_pane_list_has_entries() {
     python3 -c '
