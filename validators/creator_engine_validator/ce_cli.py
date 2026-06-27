@@ -53,6 +53,7 @@ ce connector fetch      # execute one read-only GET via an injectable client; --
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
 ce surfaces check-updates # read-only upstream version detection from surfaces/manifest.yaml
+ce surfaces fleet-rollout # seat-by-seat fleet rollout of updated surface versions
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
@@ -127,6 +128,7 @@ from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
 from .surfaces import check_updates as surfaces_check_updates
+from .surfaces import fleet_rollout as surfaces_fleet_rollout
 from .tmux_adapter import TmuxAdapter
 
 
@@ -268,6 +270,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="surface manifest path (default: <repo-root>/surfaces/manifest.yaml)",
     )
     surfaces_check.add_argument("--json", action="store_true", dest="json_output")
+    surfaces_rollout = surfaces_sub.add_parser(
+        "fleet-rollout",
+        help="seat-by-seat fleet rollout of updated surface versions",
+    )
+    surfaces_rollout.add_argument(
+        "--manifest",
+        default=None,
+        help="path to surfaces/manifest.yaml",
+    )
+    surfaces_rollout.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="herdr readiness timeout per seat (seconds)",
+    )
+    surfaces_rollout.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show plan without executing",
+    )
 
     # ce onboard — the ce-ops#197 first-run one-shot orchestrator. Sequences the
     # six phases (doctor → install → verify-install → fix-path → bootstrap →
@@ -4206,10 +4228,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.group == "update":
         return update_runtime.run_cli(args)
     if args.group == "surfaces":
-        if getattr(args, "surfaces_cmd", None) != "check-updates":
+        surfaces_cmd = getattr(args, "surfaces_cmd", None)
+        if surfaces_cmd == "check-updates":
+            return surfaces_check_updates.run_cli(args)
+        if surfaces_cmd == "fleet-rollout":
+            return surfaces_fleet_rollout.run_cli(args)
+        else:
             parser.parse_args(["surfaces", "--help"])  # prints surfaces help, exits
             return 2
-        return surfaces_check_updates.run_cli(args)
     if args.group == "onboard":
         return ce_onboard.run_cli(args)
     if args.group == "bootstrap":
