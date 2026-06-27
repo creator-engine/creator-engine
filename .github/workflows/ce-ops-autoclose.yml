@@ -47,5 +47,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
           CE_CROSS_REPO_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          CE_OPS_TOKEN: ${{ secrets.CE_OPS_TOKEN }}
         run: |
           python3 .github/scripts/ceops_autoclose.py
