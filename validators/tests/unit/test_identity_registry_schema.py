@@ -152,3 +152,70 @@ def test_optional_account_email_of_record_is_allowed_to_be_absent() -> None:
     del registry["accounts"][0]["email_of_record"]
 
     assert_valid(registry)
+
+
+def test_human_contributor_account_omits_owning_seat_and_host() -> None:
+    """human-contributor role does not require owning_seat or host."""
+    registry = valid_registry()
+    registry["accounts"].append(
+        {
+            "login": "EXAMPLE_LOGIN_HUMAN",
+            "github_id": "TODO_VERIFY",
+            "role": "human-contributor",
+            "noreply_commit_email": "TODO_VERIFY",
+            "email_of_record": "TODO_VERIFY",
+            "trust_tier": "external",
+            "onboarding_date": "TODO_VERIFY",
+        }
+    )
+
+    assert_valid(registry)
+
+
+def test_non_human_contributor_still_requires_owning_seat() -> None:
+    """Existing bot accounts still require owning_seat."""
+    registry = valid_registry()
+    del registry["accounts"][0]["owning_seat"]
+
+    assert_invalid(registry, "accounts/0")
+
+
+def test_non_human_contributor_still_requires_host() -> None:
+    """Existing bot accounts still require host."""
+    registry = valid_registry()
+    del registry["accounts"][0]["host"]
+
+    assert_invalid(registry, "accounts/0")
+
+
+def test_human_contributor_trust_tier_constrained() -> None:
+    """trust_tier only accepts constrained values."""
+    registry = valid_registry()
+    registry["accounts"].append(
+        {
+            "login": "EXAMPLE_LOGIN_HUMAN",
+            "github_id": "TODO_VERIFY",
+            "role": "human-contributor",
+            "noreply_commit_email": "TODO_VERIFY",
+            "trust_tier": "INVALID_TIER",
+        }
+    )
+
+    assert_invalid(registry, "accounts/1/trust_tier")
+
+
+def test_human_contributor_with_optional_owning_seat_and_host_is_valid() -> None:
+    """human-contributor may include owning_seat and host if desired."""
+    registry = valid_registry()
+    registry["accounts"].append(
+        {
+            "login": "EXAMPLE_LOGIN_HUMAN",
+            "github_id": "TODO_VERIFY",
+            "role": "human-contributor",
+            "noreply_commit_email": "TODO_VERIFY",
+            "owning_seat": "TODO_VERIFY",
+            "host": "TODO_VERIFY",
+        }
+    )
+
+    assert_valid(registry)
