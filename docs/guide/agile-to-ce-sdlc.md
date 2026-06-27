@@ -75,11 +75,13 @@ normal SCRUM toolchain:
 
 - **Spec-driven.** You write the spec, the plan, and the tasks *before* code.
   The artifacts are the source of truth, not a transcript or a memory.
-- **Verification-gated (the TDD spirit).** You declare **Done-when** acceptance
-  criteria up front; those are the executable definition of done. The gate runs
-  the project's example-and-test corpus and **refuses to let new failures land**
-  — so "done" means "the checks you named are met, with evidence," never "the
-  agent says it's fine." (More on how this is the honest version of TDD in §6.)
+- **Test-driven.** CE genuinely practices TDD: when the spec calls for tests, the
+  build writes and runs the **tests before the code** (`/speckit-implement` is
+  explicitly "tests before code"), and a task isn't done until its tests pass. On
+  top of that, the gate enforces it — you declare **Done-when** acceptance
+  criteria up front, the project's example-and-test corpus must pass, and the gate
+  **refuses any new test failure**. So "done" means "the checks are met, with
+  evidence," never "the agent says it's fine." (Full detail in §6.)
 - **Governance lives outside the agent.** The thing that decides whether work is
   good — and whether a privileged action is allowed — sits *outside* the agent
   and inspects every artifact and every privileged action. The agent can make a
@@ -376,28 +378,53 @@ governed flow rather than one big timeboxed push.
 
 ---
 
-## 6. The honest version of TDD in CE
+## 6. TDD in CE — tests-first at build, evidence-enforced at the gate
 
-If you expect literal red-green-refactor, here's the accurate picture: CE is
-**verification-evidence-gated**, and it captures the spirit of TDD without
-forcing a specific authoring order.
+CE is genuinely **test-driven**, and it works at two reinforcing levels: the
+agent writes and runs tests *first* while building, and the gate enforces that
+with verification evidence before anything ships. If you already practice TDD,
+you'll feel right at home.
 
-- **You write the test of "done" first.** The **Done-when** criteria on the
-  Scope are written at Shape time, *before* the Build run. They are the
-  executable definition of done, and they are exactly what the run is graded
-  against.
+**1. The spec-driven flow generates and executes tests *before* code.**
+
+- When the spec calls for tests (or you ask for a TDD approach), `/speckit-tasks`
+  emits the **test tasks before the implementation tasks** in each story's phase —
+  for example, each interface contract gets a contract-test task that is ordered
+  ahead of the code that satisfies it.
+- `/speckit-implement` then **executes test tasks before their corresponding
+  implementation tasks** — its build loop is explicitly "tests before code," and
+  it validates that tests pass and coverage meets requirements before a task is
+  considered complete. That is red-green-refactor in practice: write the failing
+  test, make it pass, move on. **A task isn't done until its tests pass.**
+
+> **The one honest nuance, not a hedge.** Test tasks are generated *when the spec
+> requests them or you ask for TDD* — they're opt-in per spec, not force-fed onto
+> a trivial docs tweak. For real feature work that's exactly what you want, and
+> the practice is tests-first with tests-as-Done.
+
+**2. The gate enforces it with verification evidence.**
+
+On top of the tests-first build, CE's gate makes the discipline non-negotiable
+at merge time:
+
+- **Done-when criteria are declared up front.** The acceptance checks you wrote
+  at Shape time *before* the Build run are exactly what the result is graded
+  against — the executable definition of done.
 - **Examples are tests.** Projects carry a corpus of well-formed and malformed
-  examples that the validator checks (well-formed must pass, malformed must be
+  examples the validator checks (well-formed must pass, malformed must be
   rejected). Behavioral changes are expected to include or update the tests and
   examples that cover them.
 - **The gate refuses regressions.** The local preflight and CI run the project's
   test suite at both the base and your change and **fail on any *new* failure** —
-  so you cannot land work that breaks what already passed. Green is required to
-  ship; **green never *authorizes* the ship** (that's ratification's job).
+  so a PR that adds failing tests or breaks existing ones is refused. Green is
+  required to ship; **green never *authorizes* the ship** (that's ratification's
+  job).
+- **The lifecycle bakes it in.** A unit of work cannot reach `verified`/`done`
+  without its tests passing and the completion evidence attached.
 
-In short: declare the checks up front, capture the evidence at done, and let the
-gate refuse anything that regresses. That's "tests define done," enforced from
-outside the agent.
+So TDD here is **both practiced and enforced**: tests-first when the agent builds,
+and verification evidence when the gate decides. The two reinforce each other —
+the build does the discipline, the gate proves it.
 
 ---
 
