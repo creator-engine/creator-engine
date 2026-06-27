@@ -215,7 +215,7 @@ Until that update is ratified, keep working as a contributor: propose small, sco
 
 ### Trust-Tier Graduation Criteria
 
-Graduation is evidence-based and auditable. Merged PRs, review records, DCO trailers, identity-map entries, and ratification records are the evidence; informal reputation, agent output, or CI success alone is not authority. The `trust_tier` identity field added by ce-ops#298 is a follow-on recording surface for the result, not an automated gate in this guide.
+Graduation is evidence-based and auditable. Merged PRs, review records, DCO trailers, identity-map entries, and ratification records are the evidence; informal reputation, agent output, or CI success alone is not authority. The `trust_tier` identity field is a follow-on recording surface for the result, not an automated gate in this guide.
 
 Observer to contributor, for implementer or verifier work:
 
