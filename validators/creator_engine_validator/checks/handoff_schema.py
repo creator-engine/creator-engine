@@ -204,7 +204,14 @@ def scan_document(doc_path: Path, text: str, repo_root: Path) -> list[Validation
     if kind not in SCHEMA_PATHS:
         return errors
 
-    schema_path = repo_root / SCHEMA_PATHS[kind]
+    # ce-ops#331: anchor the packaged schema via the shared resolver (robust to an
+    # installed wheel and any working directory), falling back to the repo-root
+    # path only if the resolver does not find a packaged file.
+    from ..schema import _resolve_schema_path
+
+    schema_path = _resolve_schema_path(SCHEMA_PATHS[kind])
+    if not schema_path.is_file():
+        schema_path = repo_root / SCHEMA_PATHS[kind]
     schema = _load_schema(schema_path)
     if schema is None:
         errors.append(

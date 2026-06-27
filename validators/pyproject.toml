@@ -40,6 +40,17 @@ cockpit-serve = [
 where = ["."]
 include = ["creator_engine_validator", "creator_engine_validator.*"]
 
+# ce-ops#331: the JSON-schema YAML files are packaged DATA shipped inside the wheel
+# at ``creator_engine_validator/schemas/``. They previously lived only at the repo
+# root (one level above this ``validators/`` build root), so they were never included
+# in the sdist/wheel and every schema-validating CLI (``ce brain init`` and the rest)
+# crashed with ``No such file or directory`` in any installed, non-source-checkout
+# environment. A repo-root ``schemas`` symlink keeps repo-root-relative dev/CI tooling
+# unchanged; the resolver (`schema.py:_resolve_schema_path`) anchors to this packaged
+# directory so it is robust in both a source tree and an installed wheel.
+[tool.setuptools.package-data]
+creator_engine_validator = ["schemas/*.schema.yaml"]
+
 [tool.pytest.ini_options]
 markers = [
   "slow: integration/live/long-running tests excluded from the fast unit lane",

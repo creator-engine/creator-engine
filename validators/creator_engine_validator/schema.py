@@ -14,37 +14,59 @@ def _json_pointer(error_path) -> str:
     return "/" + "/".join(parts) if parts else "/"
 
 
-#: Package/repo root. The package's own schema names are embedded as repo-root-relative
-#: constants (e.g. ``SCHEMA = "schemas/install-answers.schema.yaml"``); this is the same
-#: anchor ``ce_event_runtime.py`` / ``fanin_runtime.py`` use for their ``SCHEMA_PATH``s
-#: (``schema.py`` -> parents[0]=package, parents[1]=``validators``, parents[2]=repo root).
-_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-_PACKAGE_SCHEMAS_DIR = _PACKAGE_ROOT / "schemas"
+#: The package's own schema names are embedded as ``schemas/…`` constants (e.g.
+#: ``SCHEMA = "schemas/install-answers.schema.yaml"``) throughout the codebase; the
+#: same anchor ``ce_event_runtime.py`` / ``fanin_runtime.py`` use for their
+#: ``SCHEMA_PATH``s. The schema files are PACKAGED data shipped INSIDE the wheel at
+#: ``creator_engine_validator/schemas/`` (ce-ops#331) — they previously lived only at
+#: the repo root (``parents[2]``), one level ABOVE the ``validators/`` build root, so
+#: they were never included in the sdist/wheel and every schema-validating CLI crashed
+#: in an installed (non-source-checkout) environment. Anchoring to the package
+#: directory makes resolution robust in BOTH an installed wheel and a source tree (a
+#: repo-root ``schemas`` symlink keeps repo-root-relative dev/CI tooling working).
+#:
+#: Resolution prefers the in-package ``schemas/`` directory. A repo-root fallback is
+#: retained so a stale install whose schemas were not yet repackaged, or a source-tree
+#: layout discovered via ``parents[2]``, still resolves rather than hard-failing.
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_PACKAGE_SCHEMAS_DIR = _PACKAGE_DIR / "schemas"
+#: Legacy repo-root anchor (``schema.py`` -> parents[0]=package, parents[1]=``validators``,
+#: parents[2]=repo root). Retained only as a defensive fallback for source-tree layouts.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _resolve_schema_path(schema_path: str | Path) -> Path:
-    """Resolve a schema path for loading (ce-ops#54).
+    """Resolve a schema path for loading (ce-ops#54, ce-ops#331).
 
     A package schema referenced by a root-relative name (``schemas/…``) is anchored to
-    the package root so the CLI loads it from ANY working directory, not only the repo
-    root. Absolute paths, and genuinely cwd/user-relative paths that are NOT one of the
-    package's own schemas — e.g. a user-supplied ``--answers-schema <relative>`` — are
-    left untouched and keep their existing cwd-relative semantics. The distinguishing
-    test is conservative: anchor only when the joined path is a file that resolves under
-    the package ``schemas/`` directory; otherwise fall back to the path as given.
+    the PACKAGED schemas directory so the CLI loads it from ANY working directory and
+    from an installed wheel, not only a source-tree repo root. Absolute paths, and
+    genuinely cwd/user-relative paths that are NOT one of the package's own schemas —
+    e.g. a user-supplied ``--answers-schema <relative>`` — are left untouched and keep
+    their existing cwd-relative semantics. The distinguishing test is conservative:
+    anchor only when the joined path is a file that resolves under a ``schemas/``
+    directory the package owns; otherwise fall back to the path as given.
+
+    ``schemas/X`` is the canonical reference, so the joined relative path is checked
+    against the in-package directory first and, defensively, the repo-root anchor.
     """
     p = Path(schema_path)
     if p.is_absolute():
         return p
-    anchored = _PACKAGE_ROOT / p
-    try:
-        within_package_schemas = anchored.resolve().is_relative_to(
-            _PACKAGE_SCHEMAS_DIR.resolve()
-        )
-    except (OSError, ValueError):  # pragma: no cover - defensive
-        within_package_schemas = False
-    if within_package_schemas and anchored.is_file():
-        return anchored
+    for schemas_dir, anchor in (
+        # In-package data (the wheel ships these); strip the leading ``schemas/``
+        # segment when present so ``schemas/X`` maps onto ``<pkg>/schemas/X``.
+        (_PACKAGE_SCHEMAS_DIR, _PACKAGE_DIR),
+        # Defensive source-tree fallback: repo-root ``schemas/X``.
+        (_PACKAGE_SCHEMAS_DIR, _REPO_ROOT),
+    ):
+        anchored = anchor / p
+        try:
+            within = anchored.resolve().is_relative_to(schemas_dir.resolve())
+        except (OSError, ValueError):  # pragma: no cover - defensive
+            within = False
+        if within and anchored.is_file():
+            return anchored
     return p
 
 
