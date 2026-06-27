@@ -195,6 +195,22 @@ def test_disallowed_namespace_denies():
     assert not _check(d, "branch_in_namespace").passed
 
 
+def test_ceNNN_dash_branch_accepted_with_ce_prefix():
+    """ce296-closebot and ce302-broker-namespace pass when 'ce' is in namespaces."""
+    pol = _policy(allowed_branch_namespaces=("ce", "ce-", "feat/"))
+    for branch in ("ce296-closebot-token-and-parser", "ce302-broker-namespace"):
+        d = evaluate(_facts(), branch, pol)
+        assert _check(d, "branch_in_namespace").passed
+
+
+def test_ceNNN_dash_branch_rejected_without_ce_prefix():
+    """Regression: ce296- was rejected when only 'ce-' was in namespaces."""
+    pol = _policy(allowed_branch_namespaces=("ce-", "feat/"))
+    for branch in ("ce296-closebot-token-and-parser", "ce302-broker-namespace"):
+        d = evaluate(_facts(), branch, pol)
+        assert not _check(d, "branch_in_namespace").passed
+
+
 def test_forbidden_overrides_a_matching_namespace():
     # even if a namespace prefix would match "main", the forbidden gate denies
     pol = _policy(allowed_branch_namespaces=("main", "ce-"))
