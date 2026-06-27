@@ -89,7 +89,10 @@ def test_taxonomy_counts_and_disjoint():
     # adds signed in-place ``ce update`` as a v1 kernel runtime: 34 -> 35.
     # ce-ops#259 adds ``worker_run`` as the v1 `ce worker run` composition over
     # worker_spawn: 35 -> 36.
-    assert len(ver.V1_RUNTIME) == 36
+    # ce-ops#317 adds the `ce ask` support-agent P0 substrate — the honest-scaffold
+    # subcommand runtime (``support_runtime``) and the read-only PreToolUse profile
+    # that reuses the v1 hook-check spine (``support_profile``): 36 -> 38.
+    assert len(ver.V1_RUNTIME) == 38
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI

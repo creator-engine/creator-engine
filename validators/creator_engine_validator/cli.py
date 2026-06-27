@@ -129,6 +129,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "path", nargs="?", default=".", help="repo root to scan (default: .)"
     )
 
+    scan_support_corpus = sub.add_parser(
+        "scan-support-corpus",
+        help=(
+            "fail if the `ce ask` product-lens corpus allowlist lists a doc that "
+            "is NOT confidentiality-clean (the corpus must be a subset of the "
+            "confidentiality-clean surface; reuses the #571/#306 guard)"
+        ),
+    )
+    scan_support_corpus.add_argument(
+        "path", nargs="?", default=".", help="repo root to scan (default: .)"
+    )
+
     openbao_p3 = sub.add_parser(
         "openbao-p3-plan",
         help="render the value-free OpenBao Phase 3 deployment plan; executes no production steps",
@@ -561,6 +573,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-public-docs-confidentiality":
         from .public_docs_confidentiality import run as _run_public_docs_confidentiality
         result = _run_public_docs_confidentiality([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-support-corpus":
+        from .support_corpus import run as _run_support_corpus
+        result = _run_support_corpus([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "openbao-p3-plan":
         return _openbao_p3_plan(args)

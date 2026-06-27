@@ -508,6 +508,25 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Support-corpus confidentiality intersection (ce ask product-lens allowlist)",
+            lambda: (
+                _run_checked(
+                    "Support-corpus confidentiality intersection (ce ask product-lens allowlist)",
+                    [py, "-m", "creator_engine_validator", "scan-support-corpus", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "support corpus is a subset of the confidentiality-clean surface",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "YAML parse - workflow files",
             lambda: (_yaml_parse(_workflow_yaml_paths(config.repo_root), "workflow YAML parse", err), "valid YAML")[1],
             out,

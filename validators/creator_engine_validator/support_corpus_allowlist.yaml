@@ -1,0 +1,76 @@
+# CE support-agent product-lens corpus allowlist (P0.1).
+#
+# This is the checked-in manifest of the product-lens source set the `ce ask`
+# support agent is allowed to ground on (CE_SUPPORT_AGENT_PLAN_20260627.md §2a
+# "Serve"). It is the SINGLE declarative source of "which docs the support agent
+# may read".
+#
+# CRITICAL — confidentiality intersection (plan §2c/§2d):
+#   A doc is eligible for the support corpus ONLY if it is BOTH
+#     (a) listed here (product-lens), AND
+#     (b) confidentiality-CLEAN under the single-sourced #571/#306 guard
+#         (validators/creator_engine_validator/public_docs_confidentiality.py):
+#         no FORBIDDEN_PATTERNS offenses, not on KNOWN_PENDING, and not a net-new
+#         file in an INTERNAL_GUARDED_TREE.
+#   The eligibility is COMPUTED, not asserted: support_corpus.py reads this
+#   manifest, intersects it with the guard's clean set, and the corpus build /
+#   tests fail closed if a listed product-lens entry is NOT confidentiality-clean.
+#   You cannot leak what you never loaded — so the corpus can only ever be a
+#   subset of the confidentiality-clean public surface.
+#
+# Entries are repo-root-relative POSIX paths. Globs (fnmatch) are allowed for
+# doc families; they expand against the working tree at build/scan time. The
+# manifest carries product-lens INTENT; the guard carries the confidentiality
+# FACT; the corpus is the intersection.
+
+version: 1
+
+# Per-doc-family skill grouping mirrors the plan's read-only skill bundle
+# (install / usage / troubleshooting / onboarding / playbooks). The grouping is
+# advisory metadata for the later (separate-ticket) bundle projector; the
+# eligibility intersection does not depend on it.
+families:
+  install:
+    description: Install / verify-install / update product surfaces.
+    serve:
+      - README.md
+      - docs/install.sh
+      - docs/llms-install.md
+      - docs/downloads/**/install.sh
+
+  onboarding:
+    description: Human on-ramp, contributing, quickstart, mental model.
+    serve:
+      - CONTRIBUTING.md
+      - CODE_OF_CONDUCT.md
+      - SECURITY.md
+      - docs/guide/zero-to-governed-seat-quickstart.md
+      - docs/guide/understanding-ce.md
+      - docs/guide/pilot-runbook.md
+      - docs/guide/first-value-mythos.md
+      # NOTE: docs/guide/contributing-to-ce.md is product-lens INTENT but is
+      # currently on the confidentiality guard's KNOWN_PENDING ratchet, so the
+      # intersection will EXCLUDE it until it is cleaned. It is intentionally
+      # NOT listed here to keep the manifest honest (listing it would make the
+      # fail-closed eligibility test fail). Re-add once it leaves KNOWN_PENDING.
+
+  usage:
+    description: Usage of the shipped engine + governance concepts (product-lens).
+    serve:
+      # NOTE: docs/contracts/playbook-format.md is product-lens INTENT (usage of
+      # `ce playbook run`) but is currently on the confidentiality guard's
+      # KNOWN_PENDING ratchet, so the fail-closed intersection EXCLUDES it. It is
+      # intentionally NOT listed here to keep the manifest honest (listing an
+      # unclean doc fails scan-support-corpus). Re-add once it leaves
+      # KNOWN_PENDING.
+      #
+      # PLAYBOOK.md (public dual-use authoring layer) — served once present in
+      # the working tree; absent paths are skipped, not an error.
+      - PLAYBOOK.md
+
+  # `troubleshooting` is intentionally empty in this slice: the plan sources it
+  # from the same install/usage docs plus future dedicated troubleshooting docs
+  # that do not yet exist product-lens-clean. Left declared for shape.
+  troubleshooting:
+    description: Common-failure troubleshooting (sourced from install/usage docs).
+    serve: []
