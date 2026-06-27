@@ -103,5 +103,6 @@ from . import operator_runbook_refusal_sync as operator_runbook_refusal_sync  # 
 from . import release_artifact_parity_guard as release_artifact_parity_guard  # noqa: E402,F401
 from . import pr_closes_linkage as pr_closes_linkage  # noqa: E402,F401
 from . import surfaces_manifest as surfaces_manifest  # noqa: E402,F401
+from . import schema_reference_autogen_sync as schema_reference_autogen_sync  # noqa: E402,F401
 from . import cli_reference_autogen_sync as cli_reference_autogen_sync  # noqa: E402,F401
 from . import skill_antidrift_guard as skill_antidrift_guard  # noqa: E402,F401
