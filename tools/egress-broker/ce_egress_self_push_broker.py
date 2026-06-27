@@ -218,6 +218,7 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
         print(f"[ce-egress-self-push] startup error: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
     except Exception as exc:  # noqa: BLE001 - process boundary maps all runtime failures to code 2.
+        # EgressRefused is serialized by host_broker into JSON; it does not escape here.
         # Deliberately do not print ``str(exc)``; subprocess/socket errors can contain
         # credential-shaped stderr from lower transports.
         print(

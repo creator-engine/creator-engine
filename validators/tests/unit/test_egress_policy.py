@@ -195,6 +195,30 @@ def test_disallowed_namespace_denies():
     assert not _check(d, "branch_in_namespace").passed
 
 
+def test_ce_ticket_branches_accepted_with_ce_namespace():
+    """The special 'ce' namespace admits CE ticket branches with or without the dash."""
+    pol = _policy(allowed_branch_namespaces=("ce", "feat/"))
+    for branch in ("ce302-broker-namespace", "ce-302-broker-namespace"):
+        d = evaluate(_facts(), branch, pol)
+        assert _check(d, "branch_in_namespace").passed
+
+
+@pytest.mark.parametrize("branch", ["central-banking", "certbot-renew", "ceasefire", "ce"])
+def test_ce_namespace_denies_non_ticket_ce_prefixes(branch):
+    """Regression: configured 'ce' is digit-anchored, not a bare startswith prefix."""
+    pol = _policy(allowed_branch_namespaces=("ce", "feat/"))
+    d = evaluate(_facts(), branch, pol)
+    assert not _check(d, "branch_in_namespace").passed
+
+
+def test_ceNNN_dash_branch_rejected_without_ce_namespace():
+    """ceNNN- branches require the special 'ce' ticket namespace."""
+    pol = _policy(allowed_branch_namespaces=("ce-", "feat/"))
+    for branch in ("ce296-closebot-token-and-parser", "ce302-broker-namespace"):
+        d = evaluate(_facts(), branch, pol)
+        assert not _check(d, "branch_in_namespace").passed
+
+
 def test_forbidden_overrides_a_matching_namespace():
     # even if a namespace prefix would match "main", the forbidden gate denies
     pol = _policy(allowed_branch_namespaces=("main", "ce-"))
