@@ -212,3 +212,31 @@ The authority matrix already has least-privilege role categories for implementer
 To become an area owner or peer ratifier, a contributor needs a ratified identity/authority update, not just more merged PRs. The repo coordination policy is self-classified as `governance`, and changing its authority map requires the privileged ratification bar (`.ce/coordination.yml:1-12`, `schemas/coordination-policy.schema.yaml:17-20`). For privileged decisions in team mode, peer authority requires at least two distinct humans (`docs/contracts/peer-authority.md:15-20`, `schemas/coordination-policy.schema.yaml:85-97`).
 
 Until that update is ratified, keep working as a contributor: propose small, scoped changes; provide evidence; and let independent reviewers and ratifiers carry authority.
+
+### Trust-Tier Graduation Criteria
+
+Graduation is evidence-based and auditable. Merged PRs, review records, DCO trailers, identity-map entries, and ratification records are the evidence; informal reputation, agent output, or CI success alone is not authority. The `trust_tier` identity field is a follow-on recording surface for the result, not an automated gate in this guide.
+
+Observer to contributor, for implementer or verifier work:
+
+- At least one merged PR of any scope.
+- Every commit in that contribution carries a Developer Certificate of Origin `Signed-off-by:` trailer.
+- No unresolved conduct or policy violation is open against the contributor.
+
+Contributor to trusted implementer or trusted reviewer:
+
+- At least five merged PRs spanning at least two mutation classes, such as `docs` plus `code`, or `code` plus `test`.
+- At least two of those PRs were reviewed by an existing trusted human reviewer who was independent of the author. Peer authority's no-self-approval rule means the author's or running seat's human never counts as the reviewer or ratifier for the same decision (`docs/contracts/peer-authority.md:57-58`).
+- Every commit in those PRs carries a DCO `Signed-off-by:` trailer.
+- No conduct or policy violation remains open, and no unresolved privileged-class boundary crossing remains on the record.
+
+Trusted implementer or trusted reviewer to area owner or peer ratifier:
+
+- At least fifteen merged PRs total, including at least five merged PRs in the target area.
+- At least three consecutive calendar months of active contribution, where active means at least one merged PR in each month.
+- Demonstrated independent-review evidence: at least five review comments or PR reviews that a maintainer, area owner, or ratifier cited as useful evidence.
+- An identity entry for the contributor is present and resolved in `.ce/coordination.yml` `identity_map` before the first privileged ratification record counts.
+- The area-owner or peer-ratifier update is recorded as a privileged governance decision in `.ce/coordination.yml`. Once the identity map resolves two or more humans, that decision needs two distinct humans under peer authority (`docs/contracts/peer-authority.md:15-20`). If the map still resolves exactly one human, the honest N1-CARVEOUT solo path must record `quorum: n1_solo`; it is not quorum two and it expires automatically when the map resolves two or more humans (`docs/contracts/peer-authority.md:55-76`).
+- The contributor has a DCO-clean record across all counted contributions.
+
+These criteria define the observable bar for graduation. They do not add schema enforcement, alter CODEOWNERS, bypass branch protection, or replace the peer-authority contract.
