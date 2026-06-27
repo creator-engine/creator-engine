@@ -139,6 +139,68 @@ A PR whose changes do not pass these checks locally will not pass CI.
 > interpreter before invoking source-backed validator commands from that worktree.
 > See [`validators/README.md`](./validators/README.md).
 
+## Developer install (from source, editable)
+
+Use this path when you want the installed Creator Engine command-line tools to
+run directly from your local checkout while you edit files under `validators/`.
+It requires Python 3.14 and `uv`.
+
+For a fresh contributor checkout:
+
+```bash
+command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+git clone https://github.com/creator-engine/creator-engine.git
+cd creator-engine
+git switch main
+git pull
+```
+
+Then create the validator virtual environment and install the package in
+editable mode:
+
+```bash
+uv venv --python 3.14 validators/.venv
+CE_VALIDATOR_PYTHON=validators/.venv/bin/python
+uv pip install --python "$CE_VALIDATOR_PYTHON" -e validators/
+```
+
+Verify that the expected console scripts were installed:
+
+```bash
+validators/.venv/bin/ce --version
+validators/.venv/bin/cev3 --help
+validators/.venv/bin/creator-engine-validator --list-checks
+```
+
+Depending on the change you are making, you may only need one of `ce`, `cev3`,
+or `creator-engine-validator`, but all three are installed by the same
+`creator-engine-validator` Python distribution.
+
+Editable installs use the package build backend declared in
+`validators/pyproject.toml` (`setuptools.build_meta`). If your environment
+already has the needed build backend available through an online index or local
+package cache, the command above is sufficient.
+
+For a fully offline editable install, install from the checked-in wheelhouses so
+both runtime dependencies and the build backend are available:
+
+```bash
+UV_PYTHON_DOWNLOADS=never uv pip install \
+  --python "$CE_VALIDATOR_PYTHON" \
+  --offline \
+  --no-index \
+  --find-links validators/wheelhouse \
+  --find-links validators/wheelhouse-dev \
+  -r validators/requirements.txt \
+  -e validators/
+```
+
+The runtime wheelhouse alone is intentionally runtime-only; it may not contain
+`setuptools`, so an offline editable install can fail while resolving
+`build-system.requires`. If you only need the runtime or test dependency setup
+without an editable install, use the offline runtime or dev/test install paths
+in [`validators/README.md`](./validators/README.md).
+
 ## Version boundary (v1 ↔ v3)
 
 Creator Engine v1.0 and v3.x coexist in this repository on a shared base, and
