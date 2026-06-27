@@ -2,11 +2,11 @@
 
 Use this playbook before handing a branch to a controller for commit, push, or review.
 
-> **Standing directive (ce-ops#303): full local preflight before every self-push / commit-for-harvest.**
+> **Standing directive: full local preflight before every self-push / commit-for-harvest.**
 > Run the FULL local validator preflight (`ce validate-pr`, CI-parity) before
 > every self-push or commit-for-harvest. Do not discover gates via CI. The full
-> suite is what must pass before push. For fast iteration once ce-ops#11 (test-tier
-> split) lands on main, use `pytest -m "not slow"` — that is for iteration only;
+> suite is what must pass before push. For fast iteration once the test-tier
+> split lands on main, use `pytest -m "not slow"` — that is for iteration only;
 > the full suite still gates the push.
 
 1. Start from current main.
