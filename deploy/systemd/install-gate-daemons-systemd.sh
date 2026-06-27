@@ -78,6 +78,7 @@ else
 fi
 
 services=(
+  ce-belt-daemon.service
   ce-integrator-daemon.service
   ce-review-pickup-daemon.service
   # ce-egress-broker.service uses its own EnvironmentFile (ce-egress-broker.env) which must
@@ -112,8 +113,13 @@ ERROR: env file is missing: $env_file
 Create it before starting the services. Required:
   CE_GATE_REPO=owner/name
   CE_GATE_AUTHORIZED_REVIEWERS=reviewer-login[,reviewer-login...]
+  CE_BELT_IDENTITY=ce-dev-4
   GH_TOKEN=...
 Optional for review pickup:
+  CE_PICKUP_TOKEN=...
+Optional for work-pickup belt:
+  CE_BELT_INTERVAL_SECONDS=120
+  CE_BELT_LABELS=enhancement
   CE_PICKUP_TOKEN=...
 EOF
   exit 1
