@@ -1,6 +1,6 @@
 # Understanding Creator Engine
 
-*A plain-language guide to what CE is and the words it uses. If you want the full, precise mapping to the machine underneath, the canonical reference is [`../architecture/stage-vocabulary.md`](../architecture/stage-vocabulary.md). This guide is the friendly front door.*
+*A plain-language guide to what CE is and the words it uses. Brand new? Start at the [`Welcome / Start Here`](./welcome.md) onboarding front door, then come back here for the workflow tour. If you want the full, precise mapping to the machine underneath, the canonical reference is [`../architecture/stage-vocabulary.md`](../architecture/stage-vocabulary.md).*
 
 ## What CE is
 

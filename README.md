@@ -337,6 +337,8 @@ under `.ce/pr-manifests/<branch-slug>.md` whose path list exactly matches
   [`docs/decisions/ADR-0008-web-control-ui.md`](./docs/decisions/ADR-0008-web-control-ui.md).
 - Installer contract:
   [`docs/contracts/installer.md`](./docs/contracts/installer.md).
+- New here? Start with the welcome / onboarding front door:
+  [`docs/guide/welcome.md`](./docs/guide/welcome.md).
 - Pilot runbook:
   [`docs/guide/pilot-runbook.md`](./docs/guide/pilot-runbook.md).
 - Contribution workflow:

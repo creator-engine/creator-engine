@@ -2,7 +2,8 @@
 
 *The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub
 App, file work as a Scope, and get governed, cost-safe PRs + merges — all under
-the branded `cev3 session` frame, on your own agent. Plain-language intro:
+the branded `cev3 session` frame, on your own agent. Brand new? Begin at the
+[`Welcome / Start Here`](./welcome.md) front door. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
 contracts/designs. For the shortest command sequence, see
 [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md).*
