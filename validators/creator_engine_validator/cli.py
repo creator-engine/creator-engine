@@ -323,6 +323,56 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run build/parity/staging verification without promoting the output directory",
     )
 
+    release_bump = sub.add_parser(
+        "release-bump",
+        help="drive the canonical version sources to a release target (staged only; no commit/sign/publish)",
+    )
+    release_bump.add_argument("--repo-root", default=".", help="repo root holding validators/ (default: .)")
+    bump_src = release_bump.add_mutually_exclusive_group(required=True)
+    bump_src.add_argument("--tag", help="release/vX.Y.Z tag; version derived from it (tag-as-source-of-truth)")
+    bump_src.add_argument(
+        "--part",
+        choices=["major", "minor", "patch"],
+        help="compute next version by bumping this part of the current version (rehearsal path)",
+    )
+
+    release_changelog = sub.add_parser(
+        "release-changelog",
+        help="aggregate .ce/changelog/*.md fragments since the last release/* tag into release notes",
+    )
+    release_changelog.add_argument("--repo-root", default=".", help="repo root holding .ce/changelog/ (default: .)")
+    release_changelog.add_argument("--version", required=True, help="release version the notes are for")
+    release_changelog.add_argument(
+        "--since-tag",
+        default=None,
+        help="select fragments introduced after this ref (default: most recent release/* tag, else all)",
+    )
+    release_changelog.add_argument("--out", default=None, help="write the release notes to this file (default: stdout)")
+
+    release = sub.add_parser(
+        "release",
+        help="orchestrate bump → changelog → release-stage into a staged, signature-shaped artifact (no sign/publish)",
+    )
+    release.add_argument("--repo-root", default=".", help="source checkout root to build from (default: .)")
+    rel_src = release.add_mutually_exclusive_group(required=True)
+    rel_src.add_argument("--tag", help="release/vX.Y.Z tag; version derived (tag-as-source-of-truth)")
+    rel_src.add_argument("--version", help="explicit X.Y.Z to stage at (drives the sources to it)")
+    rel_src.add_argument("--part", choices=["major", "minor", "patch"], help="next version by bumping this part")
+    release.add_argument("--out", required=True, help="explicit output directory for the staged Pages mirror")
+    release.add_argument(
+        "--signing-key-id",
+        default="ce-dev1-root-v1",
+        choices=["ce-root-v1", "ce-dev1-root-v1"],
+        help="root trust anchor that will sign this release (placeholder staged; default: ce-dev1-root-v1)",
+    )
+    release.add_argument("--changelog-out", default=None, help="also write aggregated release notes to this file")
+    release.add_argument("--force", action="store_true", help="replace a non-empty output directory atomically")
+    release.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run the full bump/changelog/stage verification without promoting the output directory",
+    )
+
     return parser
 
 
@@ -623,6 +673,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _pco_release(args)
     if subcommand == "release-stage":
         return _release_stage(args)
+    if subcommand == "release-bump":
+        return _release_bump(args)
+    if subcommand == "release-changelog":
+        return _release_changelog(args)
+    if subcommand == "release":
+        return _release(args)
 
     parser.print_usage(sys.stderr)
     return 2
@@ -667,6 +723,129 @@ def _release_stage(args) -> int:
         print(f"canonical spec: {result.canonical_spec_sha256}")
         print(f"signature placeholder: {result.signature_placeholder}")
         print(f"operator signing command: {result.signing_command}")
+    return 0
+
+
+def _release_bump(args) -> int:
+    from .release_bump import ReleaseBumpError, bump_release_version
+
+    try:
+        result = bump_release_version(
+            repo_root=args.repo_root,
+            tag=args.tag,
+            part=args.part,
+        )
+    except ReleaseBumpError as exc:
+        print(f"ERROR: release-bump refused: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "version": result.version,
+        "previous_version": result.previous_version,
+        "source": result.source,
+        "version_py": str(result.version_py),
+        "pyproject": str(result.pyproject),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"release-bump: {result.previous_version} -> {result.version} (source: {result.source})")
+        print(f"version.py: {result.version_py}")
+        print(f"pyproject:  {result.pyproject}")
+    return 0
+
+
+def _release_changelog(args) -> int:
+    from .release_changelog import ReleaseChangelogError, aggregate_changelog
+
+    try:
+        result = aggregate_changelog(
+            repo_root=args.repo_root,
+            version=args.version,
+            since_tag=args.since_tag,
+        )
+    except ReleaseChangelogError as exc:
+        print(f"ERROR: release-changelog refused: {exc}", file=sys.stderr)
+        return 1
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(result.notes, encoding="utf-8")
+    if getattr(args, "json_output", False):
+        print(
+            json.dumps(
+                {
+                    "version": result.version,
+                    "fragment_count": result.fragment_count,
+                    "since_tag": result.since_tag,
+                    "out": args.out,
+                    "notes": result.notes,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    elif args.out:
+        print(
+            f"release-changelog: wrote {result.fragment_count} fragment(s) "
+            f"(since {result.since_tag or 'all'}) -> {args.out}"
+        )
+    else:
+        print(result.notes)
+    return 0
+
+
+def _release(args) -> int:
+    from .release_orchestrate import ReleaseOrchestrationError, orchestrate_release
+
+    try:
+        result = orchestrate_release(
+            repo_root=args.repo_root,
+            out=args.out,
+            tag=args.tag,
+            version=args.version,
+            part=args.part,
+            signing_key_id=args.signing_key_id,
+            changelog_out=args.changelog_out,
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except ReleaseOrchestrationError as exc:
+        print(f"ERROR: release refused: {exc}", file=sys.stderr)
+        return 1
+    packet = result.packet
+    payload = {
+        "version": result.version,
+        "previous_version": result.bump.previous_version,
+        "bump_source": result.bump.source,
+        "changelog_fragment_count": result.changelog.fragment_count,
+        "changelog_since_tag": result.changelog.since_tag,
+        "changelog_out": str(result.changelog_out) if result.changelog_out else None,
+        "out_dir": str(result.stage.out_dir),
+        "build_git_sha": packet.build_git_sha,
+        "canonical_spec_sha256": packet.canonical_spec_sha256,
+        "signing_key_id": packet.signing_key_id,
+        "signature_placeholder": packet.signature_placeholder,
+        "signing_command": packet.signing_command,
+        "canonical_path": packet.canonical_path,
+        "manifest_path": packet.manifest_path,
+        "signing_instructions_path": packet.signing_instructions_path,
+        "dry_run": bool(args.dry_run),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        action = "verified" if args.dry_run else "staged"
+        print(f"release: {action} {result.stage.out_dir}")
+        print(f"version: {result.bump.previous_version} -> {result.version} (source: {result.bump.source})")
+        print(f"changelog: {result.changelog.fragment_count} fragment(s) since {result.changelog.since_tag or 'all'}")
+        print(f"canonical spec sha256: {packet.canonical_spec_sha256}")
+        print(f"signing key id: {packet.signing_key_id}")
+        print(f"signature placeholder: {packet.signature_placeholder}")
+        print("RATIFICATION PACKET (Operator signs offline; nothing here signs/publishes):")
+        print(f"  canonical bytes:      {packet.canonical_path}")
+        print(f"  stage manifest:       {packet.manifest_path}")
+        print(f"  signing instructions: {packet.signing_instructions_path}")
+        print(f"  signing command:      {packet.signing_command}")
     return 0
 
 
