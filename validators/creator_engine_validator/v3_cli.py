@@ -2818,6 +2818,10 @@ def _select_onboard_apply_driver(
     return factory()
 
 
+def _onboard_apply_uses_userspace_installer(merged: "v3_installer.MergeResult") -> bool:
+    return bool(merged.value("host.userspace_install"))
+
+
 def _close_apply_driver(driver: Any) -> None:
     """Revoke a live-forge driver's token if it has a ``close()`` lifecycle hook (ce-ops#88).
 
@@ -2827,6 +2831,20 @@ def _close_apply_driver(driver: Any) -> None:
     close = getattr(driver, "close", None)
     if callable(close):
         close()
+
+
+def _apply_onboard_accepts_driver(func: Any) -> bool:
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return True
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return True
+    param = params.get("driver")
+    return param is not None and param.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
 
 
 def _protection_enforcement_from_ce_probe(probe: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -2892,6 +2910,50 @@ def _protection_floor_refusal_payload(
         "remediation": remediation,
         "enforcement": _protection_enforcement_from_ce_probe(probe),
     }
+
+
+def _onboard_plan_runtime_prerequisites(
+    *,
+    merged: "v3_installer.MergeResult",
+    first_project_plan: Mapping[str, Any] | None,
+    spawn_smoke: bool,
+) -> dict[str, list[dict[str, Any]]]:
+    if first_project_plan is None:
+        return {"prerequisites": [], "warnings": []}
+    harness = str(merged.value("provider.harness", "") or "")
+    needs_codex = harness in {"codex", "both"}
+    planned_for = "first_project_spawn" if spawn_smoke else "first_project_drive"
+    prerequisites: list[dict[str, Any]] = []
+
+    if not _which("tmux"):
+        prerequisites.append({
+            "id": "tmux",
+            "tool": "tmux",
+            "available": False,
+            "severity": "warning",
+            "planned_for": planned_for,
+            "message": "tmux is required before a governed seat can spawn; install tmux before running apply with spawn.",
+        })
+
+    if needs_codex and not _which("codex"):
+        prerequisites.append({
+            "id": "codex",
+            "tool": "codex",
+            "available": False,
+            "severity": "warning",
+            "planned_for": planned_for,
+            "message": "provider.harness is codex, but the codex CLI is not on PATH; install Codex before spawning that harness.",
+        })
+
+    warnings = [
+        {
+            "code": "missing_runtime_prerequisite",
+            "prerequisite": item["id"],
+            "message": item["message"],
+        }
+        for item in prerequisites
+    ]
+    return {"prerequisites": prerequisites, "warnings": warnings}
 
 
 def _load_trust_anchor_records(anchor_specs: Sequence[str]) -> tuple[v3_installer.TrustAnchorRecord, ...]:
@@ -3289,9 +3351,19 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     first_project_plan = v3_installer.build_greenfield_first_project_plan(
         schema, merged, missing
     )
+    runtime_prereq_plan = (
+        _onboard_plan_runtime_prerequisites(
+            merged=merged,
+            first_project_plan=first_project_plan,
+            spawn_smoke=bool(args.spawn_smoke),
+        )
+        if args.show_plan
+        else {"prerequisites": [], "warnings": []}
+    )
     if apply_mode:
         plain_join_driver = None
         adoption_driver = None  # ce-ops#85 — the E3 adoption driver (genuine-brownfield join PR)
+        userspace_driver = None
         adoption_mode = False
         live_candidate = None  # ce-ops#88 — a live-forge driver to revoke on every exit
         if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
@@ -3382,6 +3454,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                         "brownfield_adoption": brownfield_plan,
                     },
                 )
+        elif _onboard_apply_uses_userspace_installer(merged):
+            userspace_driver = _select_onboard_apply_driver(
+                merged=merged, policy_sha=_install_spec_digest, adoption=False
+            )
+            live_candidate = userspace_driver
         request = onboard_apply.ApplyRequest(
             spec_bytes=spec_bytes,
             schema=schema,
@@ -3404,8 +3481,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             brownfield_probe=brownfield_probe if adoption_mode else None,
         )
         try:
-            apply_driver = adoption_driver or plain_join_driver
-            if apply_driver is not None:
+            apply_driver = adoption_driver or plain_join_driver or userspace_driver
+            if apply_driver is not None and _apply_onboard_accepts_driver(onboard_apply.apply_onboard):
                 summary = onboard_apply.apply_onboard(
                     request, verifier=apply_verifier, driver=apply_driver
                 )
@@ -3526,6 +3603,12 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             f"→ E2 {first_project_plan['scaffold_input']['supplied_to_e2_leg']} · "
             f"first ship counted {str(not first_project_plan['first_ship_not_yet_counted']).lower()}"
         )
+    if args.show_plan:
+        for item in runtime_prereq_plan["prerequisites"]:
+            lines.append(
+                f"    prereq · WARN {item['tool']} missing for {item['planned_for']} — "
+                f"{item['message']}"
+            )
     plain_join_plan = None
     if merged.value("github.mode") == "existing" and brownfield_plan["enabled"]:
         # ce-ops#85 --plan/--apply PARITY: surface the plain-join route so --plan
@@ -3635,6 +3718,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         } if args.answers else None),
         "github_leg": github_leg,
         "first_project": first_project_plan,
+        "prerequisites": runtime_prereq_plan["prerequisites"],
+        "warnings": runtime_prereq_plan["warnings"],
         "brownfield_adoption": brownfield_plan if args.show_plan else None,
         "plain_join": plain_join_plan,
         "non_interactive": bool(args.non_interactive),
