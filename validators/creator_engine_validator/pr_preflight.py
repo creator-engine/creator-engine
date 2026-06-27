@@ -489,6 +489,25 @@ def run_preflight(
         return 1
     checks.append(
         _run_check(
+            "Public-docs confidentiality scan (ce-ops# / internal refs, pre-push)",
+            lambda: (
+                _run_checked(
+                    "Public-docs confidentiality scan (ce-ops# / internal refs, pre-push)",
+                    [py, "-m", "creator_engine_validator", "scan-public-docs-confidentiality", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "no public-doc confidentiality leaks",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "YAML parse - workflow files",
             lambda: (_yaml_parse(_workflow_yaml_paths(config.repo_root), "workflow YAML parse", err), "valid YAML")[1],
             out,
