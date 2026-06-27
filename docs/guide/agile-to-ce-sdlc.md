@@ -422,9 +422,43 @@ at merge time:
 - **The lifecycle bakes it in.** A unit of work cannot reach `verified`/`done`
   without its tests passing and the completion evidence attached.
 
-So TDD here is **both practiced and enforced**: tests-first when the agent builds,
-and verification evidence when the gate decides. The two reinforce each other —
-the build does the discipline, the gate proves it.
+**3. Rigor scales to the domain — and critical-infrastructure work mandates TDD.**
+
+The "tests when the spec requests them" posture above is the **default, routine**
+stance — sensible for ordinary changes, where forcing a full test suite onto a
+trivial tweak would be ceremony for its own sake. But CE lets a project set its
+*own* standard, and raise it as high as the work demands:
+
+- A team encodes its non-negotiable standards in the **project constitution**
+  (`/speckit-constitution`, written to `.specify/memory/constitution.md`). The
+  constitution holds the principles the whole flow must obey — stated as testable
+  MUST rules, not vague guidance.
+- For **critical-infrastructure / high-assurance components** — anything touching
+  live external systems, money, safety, or any context where a defect in
+  production is unacceptable — the constitution can make **TDD mandatory**:
+  tests-first, red-green, and **no path to Done or merge without the required
+  tests.** This is not opt-in for those components; it's the floor.
+- The constitution **propagates downstream automatically.** When you amend it,
+  `/speckit-constitution` syncs the dependent templates so the planning step's
+  Constitution Check and the task generator's testing-discipline categories
+  reflect the standard. The rigor is then applied for you in every later
+  `/speckit-plan` and `/speckit-tasks` run — you don't have to remember to ask for
+  it each time.
+- The **gate then enforces it uniformly.** The same baseline-diff gate and
+  Definition-of-Done attestation that hold all work also refuse a merge that
+  lacks the tests a high-assurance constitution requires. One engine, one set of
+  gates — the *bar* is what changes per project/component, not the machinery.
+
+So the same engine governs both ends of the spectrum: routine work can opt into
+tests, while critical-infrastructure work is held to tests-first-mandatory by its
+own constitution and Definition of Done. Rigor is not one-size-fits-all — it is
+set per project and component, and enforced uniformly.
+
+So TDD here is **both practiced and enforced**, and **scaled to the stakes**:
+tests-first when the agent builds, verification evidence when the gate decides,
+and a hard tests-first-mandatory floor for the components that can't tolerate a
+defect. The three reinforce each other — the build does the discipline, the
+constitution sets the bar, and the gate proves it.
 
 ---
 
