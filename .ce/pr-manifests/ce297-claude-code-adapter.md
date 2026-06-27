@@ -8,13 +8,14 @@ Closes creator-engine/ce-ops#297
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=42b093f83c50b91a4b9b02666b6c3c933f51781910f9c017f057d18eeaa26bfd
+AUTHORIZED_PATHS_SHA256=2538da4de30ea2644e621bfb6b450325544f4f88170f2c4cfa815d930ab47b7c
 
 ```text
 .ce/changelog/ce297-claude-code-adapter.md
 .ce/pr-manifests/ce297-claude-code-adapter.md
+validators/creator_engine_validator/_versions.py
 validators/creator_engine_validator/harness_adapters/claude_code_adapter.py
 validators/tests/unit/test_claude_code_adapter_lifecycle.py
 ```
