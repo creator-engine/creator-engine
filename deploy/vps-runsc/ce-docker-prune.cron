@@ -1,0 +1,9 @@
+# Install as /etc/cron.d/ce-docker-prune on VPS hosts that run contained seats.
+#
+# docker container prune removes only stopped/exited containers, never running
+# containers. The 24h grace keeps recent crash/exit state inspectable before
+# reclaiming orphaned one-off probe containers.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+17 * * * * root docker container prune -f --filter "until=24h" >/dev/null 2>&1
