@@ -12,9 +12,9 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=e69abfd30457b583beb69360eba5f9e7a8011e029baba359670fc57d026644e6
+AUTHORIZED_PATHS_SHA256=d8cbf0315f70589ce7c5932151eeda4731de7214664696148ad447edde4b9a1c
 
 ```text
 .ce/changelog/ce132-cleanroom-install-s1.md
@@ -22,6 +22,7 @@ AUTHORIZED_PATHS_SHA256=e69abfd30457b583beb69360eba5f9e7a8011e029baba359670fc57d
 docs/downloads/0.2.0/SHA256SUMS
 docs/downloads/0.2.0/install.sh
 docs/install.sh
+docs/llms-install.md
 validators/creator_engine_validator/v3_cli.py
 validators/tests/unit/test_onboard_apply.py
 validators/tests/unit/test_v3_cli_cleanroom.py
