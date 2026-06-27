@@ -787,7 +787,7 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 9
+    assert len(active) == 10
     assert {
         brain_probe.record_probe_name(record)
         for record in active
@@ -803,6 +803,14 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert any(
         record["id"] == "brain-assertion-fleet-self-identity-live"
         and record["scope"] == {"seat": "ce-dev-1"}
+        for record in active
+    )
+    # The deterministic-citations design gotcha: a static, artifact-backed
+    # (non-probe) Knowledge-SSOT assertion grounded in a tracked design note.
+    assert any(
+        record["type"] == "gotcha"
+        and record["claim"].get("object") == "deterministic_citations_via_docs_as_skills"
+        and record["evidence_ref"] == ".ce/brain/notes/deterministic-citations.md"
         for record in active
     )
 
