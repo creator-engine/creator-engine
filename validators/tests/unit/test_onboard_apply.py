@@ -801,13 +801,42 @@ class FakeAdoptionDriver(FakeDriver):
             scaffold_workflow_sha if scaffold_workflow_sha is not None else onboard_apply.CE_WORKFLOW_SHA256
         )
         self.scaffold_artifacts: list[dict[str, Any]] | None = None
+        # ce-ops#328: faithfully model the real driver's identity coupling — the bootstrap
+        # probe is the ONLY leg that resolves the forge actor identity, and build_scaffold
+        # hard-requires it. The fake mirrors this so a regression that re-skips the probe in
+        # adoption mode is caught at the orchestration layer (build_scaffold would refuse).
+        self._bootstrap_forge_identity: dict[str, str] | None = None
 
     def secret_preflight_scan(self, *, scan_root, scaffold):
         self.calls.append("secret_preflight_scan")
         return self._scrub_result
 
+    def probe_bootstrap_token(self, *, token, repo, org_create_needed):
+        # The real probe resolves the forge actor identity from GET /user; mirror that here so
+        # the adoption-mode build_scaffold has it (ce-ops#328). Identity-only for a fine-grained
+        # token, classic-scope-bearing for a classic token — both set the identity.
+        result = super().probe_bootstrap_token(
+            token=token, repo=repo, org_create_needed=org_create_needed
+        )
+        if result.get("ok") and result.get("login"):
+            self._bootstrap_forge_identity = {
+                "login": result["login"],
+                "name": result["login"],
+                "email": f"{result['login']}@users.noreply.github.com",
+                "source": "bootstrap_token_get_user",
+            }
+        return result
+
     def build_adoption_scaffold(self, *, repo, base, branch, workspace_root, artifacts):
         self.calls.append("build_adoption_scaffold")
+        # ce-ops#328: refuse fail-closed if the forge actor identity was never resolved (the
+        # real driver raises forge_identity_unresolved here, refusing the ambient git fallback).
+        if self._bootstrap_forge_identity is None:
+            raise onboard_apply.ApplyRefused(
+                "forge_identity_unresolved",
+                "forge actor identity was not resolved from bootstrap token GET /user; "
+                "refusing ambient git author fallback",
+            )
         self.scaffold_artifacts = list(artifacts)
         if not self._scaffold_ok:
             return {"ok": False, "reason": "adoption_branch_checkout_failed"}
@@ -882,6 +911,59 @@ def test_adoption_opens_join_pr_and_skips_greenfield_forge_legs(tmp_path):
     plan = _adoption_plan(tmp_path, _brownfield_probe())
     assert driver.opened_with["plan_ref"] == plan["inventory_sha256"]
     assert onboard_apply.CE_WORKFLOW_PATH in driver.opened_with["manifest_paths"]
+
+
+def test_adoption_runs_bootstrap_probe_identity_only_and_reaches_build_scaffold(tmp_path):
+    # ce-ops#328 regression: the bootstrap-token probe must RUN in adoption mode (not be
+    # skipped) because it is the ONLY leg that resolves the forge actor identity that
+    # brownfield_build_scaffold hard-requires. Before the fix, the probe was skipped and EVERY
+    # solo brownfield adoption --apply refused at build_scaffold with forge_identity_unresolved.
+    assert "github_bootstrap_token_probe" not in onboard_apply.ADOPTION_SKIPPED_GREENFIELD_LEG_IDS
+    driver = FakeAdoptionDriver()  # default token_type="classic"
+    summary = _adoption_apply(tmp_path, driver)
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    # the probe runs (not skipped) and is right-sized to identity-only for a plain-join/adoption
+    # (mode != "new" → bootstrap_required_scopes() == () → capability mode identity_only_plain_join).
+    probe = _leg(summary, "github_bootstrap_token_probe")
+    assert probe["status"] == "already_satisfied"
+    assert probe["verification"]["capability"]["mode"] == "identity_only_plain_join"
+    # the identity it resolved was actually consumed: build_scaffold ran and bound the commit author.
+    assert "build_adoption_scaffold" in driver.calls
+    assert driver._bootstrap_forge_identity is not None
+    assert summary["brownfield_adopted"] == 1
+
+
+def test_adoption_identity_only_finegrained_bootstrap_token_is_accepted(tmp_path):
+    # ce-ops#328 / ce-ops#94: a fine-grained bootstrap PAT (no write scopes, identity-only) is
+    # accepted in adoption mode — adoption writes ride the App token, not the PAT — and still
+    # resolves the forge actor identity so build_scaffold can proceed.
+    driver = FakeAdoptionDriver()
+    driver.token_type = "fine_grained"
+    summary = _adoption_apply(tmp_path, driver)
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    probe = _leg(summary, "github_bootstrap_token_probe")
+    assert probe["verification"]["token_type"] == "fine_grained"
+    assert probe["verification"]["capability"]["mode"] == "identity_only_plain_join"
+    assert "build_adoption_scaffold" in driver.calls
+    assert summary["brownfield_adopted"] == 1
+
+
+def test_adoption_invalid_bootstrap_token_refuses_before_build_scaffold(tmp_path):
+    # ce-ops#328 fail-closed: an invalid/unresolvable bootstrap token must still refuse clearly at
+    # the probe leg (never fall through to build_scaffold or an ambient git-author fallback).
+    class _BadProbeDriver(FakeAdoptionDriver):
+        def probe_bootstrap_token(self, *, token, repo, org_create_needed):
+            self.calls.append("probe_bootstrap_token")
+            return {"ok": False, "reason": "bootstrap_probe_no_identity"}
+
+    driver = _BadProbeDriver()
+    summary = _adoption_apply(tmp_path, driver)
+    probe = _leg(summary, "github_bootstrap_token_probe")
+    assert probe["status"] == "refused"
+    assert probe["verification"]["code"] == "bootstrap_token_invalid"
+    # fail-closed: no scaffold build, no PR, nothing adopted.
+    assert "build_adoption_scaffold" not in driver.calls
+    assert summary["brownfield_adopted"] == 0
 
 
 def test_adoption_drift_check_refuses_before_scrub_or_build(tmp_path):
