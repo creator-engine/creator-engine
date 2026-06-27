@@ -266,7 +266,7 @@ def _full_repo(root: Path, version: str = "0.2.0") -> str:
     (docs / "install.sh").write_text("#!/usr/bin/env bash\necho install\n", encoding="utf-8")
     (docs / "schemas" / "install-answers.schema.yaml").write_text("kind: schema\n", encoding="utf-8")
     (docs / "keys" / "ce-root-v1").write_text(
-        "ce-dev1-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest\n", encoding="utf-8"
+        "ce-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest\n", encoding="utf-8"
     )
     (docs / "llms-install.md").write_text(_LLMS_INSTALL, encoding="utf-8")
 
@@ -282,7 +282,7 @@ def _full_repo(root: Path, version: str = "0.2.0") -> str:
 
 _LLMS_INSTALL = """<!--
 signature:
-  key_id: ce-dev1-root-v1
+  key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
   value: OLD
@@ -326,9 +326,9 @@ artifact_manifest:
 
 ```bash
 curl -fsSL https://creator-engine.dev/keys/ce-root-v1 -o ce-root-v1
-grep -Eo 'ce-dev1-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw > ce-root-v1.anchor
-test "x" = "$(ssh-keygen -l -f ce-root-v1 -E sha256 | awk '$3 == "ce-dev1-root-v1" { print $2; exit }')"
-ssh-keygen -Y verify -f ce-root-v1 -I ce-dev1-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
+grep -Eo 'ce-root-v1[ =]SHA256:[A-Za-z0-9+/]{43}' ce-root-v1.anchor.raw > ce-root-v1.anchor
+test "x" = "$(ssh-keygen -l -f ce-root-v1 -E sha256 | awk '$3 == "ce-root-v1" { print $2; exit }')"
+ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s ce-spec.sig < ce-spec.canonical
 ```
 """
 

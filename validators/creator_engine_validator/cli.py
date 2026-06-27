@@ -304,11 +304,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     release_stage.add_argument(
         "--signing-key-id",
-        default="ce-dev1-root-v1",
+        default="ce-root-v1",
         choices=["ce-root-v1", "ce-dev1-root-v1"],
         help=(
             "valid root trust anchor that will sign this release "
-            "(default: ce-dev1-root-v1); becomes the staged spec signature.key_id "
+            "(default: ce-root-v1, the public trust root the install recipe is "
+            "authored for; ce-dev1-root-v1 is the dev/test anchor and rewrites "
+            "the embedded recipe); becomes the staged spec signature.key_id "
             "and is part of the signed canonical bytes"
         ),
     )
@@ -361,9 +363,9 @@ def _build_parser() -> argparse.ArgumentParser:
     release.add_argument("--out", required=True, help="explicit output directory for the staged Pages mirror")
     release.add_argument(
         "--signing-key-id",
-        default="ce-dev1-root-v1",
+        default="ce-root-v1",
         choices=["ce-root-v1", "ce-dev1-root-v1"],
-        help="root trust anchor that will sign this release (placeholder staged; default: ce-dev1-root-v1)",
+        help="root trust anchor that will sign this release (placeholder staged; default: ce-root-v1, the public trust root)",
     )
     release.add_argument("--changelog-out", default=None, help="also write aggregated release notes to this file")
     release.add_argument("--force", action="store_true", help="replace a non-empty output directory atomically")
