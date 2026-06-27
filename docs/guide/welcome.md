@@ -201,6 +201,7 @@ Start there once these four steps make sense.
 
 | You want to… | Read |
 | --- | --- |
+| **Follow a hands-on walkthrough start to finish (recommended first)** | [**`getting-started-step-by-step.md`**](./getting-started-step-by-step.md) |
 | Understand the workflow and its words | [`understanding-ce.md`](./understanding-ce.md) |
 | Map your Agile/SCRUM habits onto CE's SDLC | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |
 | Get to a governed seat fast | [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md) |
