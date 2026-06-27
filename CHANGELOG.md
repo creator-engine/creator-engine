@@ -6,7 +6,40 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
-(nothing yet — use this section for features landing after 0.2.0 while waiting for the next tag)
+(nothing yet — use this section for features landing after 0.3.0 while waiting for the next tag)
+
+## v0.3.0 — clean-install milestone (2026-06-27)
+
+The release that makes a fresh `ce` install "just work" for real users — no
+hand-holding, no hand-patching. Headlined by the install-blocker fixes a real
+onboarding surfaced on the published 0.2.0 wheel.
+
+### Fixed
+
+- `ce brain init` (and every schema-validating command) now works from any directory — schemas are packaged inside the installed wheel instead of resolved from a source checkout, so commands no longer crash when run outside the repo
+- `ce launch` pane-identity parsing is robust across tmux builds that sanitize tab characters (fixes a startup failure on tmux 3.4)
+- Brownfield `ce onboard --apply` resolves the forge actor identity before building the join-PR scaffold, so adopting an existing repo succeeds end-to-end
+- Install one-liner switched from `| sh` to `| bash`, avoiding a crash on systems where `/bin/sh` is dash (e.g. Ubuntu)
+
+### Added
+
+- Deterministic signed-release staging: `release`, `release-stage`, `release-bump`, and `release-changelog` subcommands bump the version, aggregate release notes, and stage a publishable, signature-shaped install mirror — root signing stays a single Operator gesture
+- Surface-bump carrier schema, runbook, and consistency guard for the surfaces manifest
+- Governed fleet rollout primitive with digest-pinned container images
+- `ce ask` support-agent foundations
+- Auto-generated CLI and schema reference documentation
+- Welcome / getting-started onboarding front-door and step-by-step walkthrough
+
+### Changed
+
+- Self-identity drift detection in the knowledge source-of-truth
+- Trust-tier graduation criteria and a human-contributor role added to the contributor guide
+- Vendored wheelhouse refreshed for the offline cross-platform install (x86_64 + aarch64)
+
+### Security
+
+- Peer-credential attestation (SO_PEERCRED) on the self-push broker connection
+- Socket-activated egress broker
 
 ## v0.2.0 — self-hosting milestone (2026-06-25)
 
