@@ -305,6 +305,9 @@ BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
         # The shared env/packaging-contract guard reuses the v1 packaging contract
         # types; candidate for extraction into a shared packaging-contract module.
         ("environment_guard", "packaging_runtime"),
+        # ce-ops#297: the shared Claude harness adapter must verify the v1 Claude
+        # hook-pack before reporting enforcement installed.
+        ("harness_adapters.claude_code_adapter", "hook_pack_confirm"),
     }
 )
 
