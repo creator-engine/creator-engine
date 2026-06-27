@@ -23,7 +23,13 @@ from .wheel_source_parity import verify_wheel_matches_source
 
 
 PLACEHOLDER_SIGNATURE = "<RESIGN-REQUIRED-ce-root-v1>"
-SIGNING_KEY_ID = "ce-dev1-root-v1"
+# The default signing anchor MUST match the principal the recipe in
+# ``docs/llms-install.md`` is authored for. That recipe verifies against the
+# PUBLIC trust root ``ce-root-v1``, so staging a public release is the
+# canonical, no-recipe-rewrite path. The DEV anchor below is the only target
+# that triggers a recipe rewrite (used for dev/test stages, never public).
+SIGNING_KEY_ID = "ce-root-v1"
+DEV_SIGNING_KEY_ID = "ce-dev1-root-v1"
 SIGNING_NAMESPACE = "ce-spec-v1"
 TRUST_ROOT_ID = "ce-root-v1"
 ALLOWED_SIGNING_KEY_IDS = ("ce-root-v1", "ce-dev1-root-v1")
@@ -212,29 +218,52 @@ def _canonical_install_spec(spec_text: str) -> str:
     )
 
 
+def _recipe_verify_principal(text: str) -> str:
+    """Extract the principal an installer verifies against from the recipe.
+
+    Parses the ``ssh-keygen -Y verify ... -I <principal>`` invocation embedded
+    in ``docs/llms-install.md``. This is the single source of truth for what
+    principal a recipe-following installer will trust; the staged
+    ``signature.key_id`` MUST equal it (see ``_assert_anchor_recipe_match``).
+    """
+    match = re.search(r"ssh-keygen -Y verify\b[^\n]*?-I (\S+)", text)
+    if match is None:
+        raise ReleasePublishError(
+            "cannot locate verify-recipe principal "
+            "('ssh-keygen -Y verify ... -I <principal>') in the staged install spec"
+        )
+    return match.group(1)
+
+
 def _replace_recipe_principal(text: str, signing_key_id: str) -> str:
     """Thread the chosen signer into the embedded verify-recipe prose.
 
-    The recipe in ``docs/llms-install.md`` hardcodes the default principal
-    (``SIGNING_KEY_ID``) in three places: the DNS-anchor ``grep`` regex, the
-    ``awk '$3 == ...'`` fingerprint selector, and the ``ssh-keygen -Y verify
-    -I`` invocation. Every principal reference MUST equal ``signature.key_id``
-    (the staged signer) or an installer following the recipe verifies against
-    the wrong principal and the install fails. The trust-root key FILE name
+    The recipe in ``docs/llms-install.md`` is authored for the PUBLIC trust
+    root ``SIGNING_KEY_ID`` (``ce-root-v1``) in three principal positions: the
+    DNS-anchor ``grep`` regex, the ``awk '$3 == ...'`` fingerprint selector,
+    and the ``ssh-keygen -Y verify -I`` invocation. Every principal reference
+    MUST equal ``signature.key_id`` (the staged signer) or an installer
+    following the recipe verifies against the wrong principal and the install
+    fails.
+
+    Staging at the canonical public anchor (``SIGNING_KEY_ID``) is therefore a
+    no-op: the source recipe already names it. A rewrite happens ONLY when
+    staging a different (DEV) anchor, where the source ``ce-root-v1`` principal
+    is replaced by the chosen signer. The trust-root key FILE name
     (``ce-root-v1``) and the out-of-band anchor record name
     (``_ce-root-v1.creator-engine.dev``) are signer-independent and must NOT
     change, so each pattern is anchored to the principal position only.
     """
     if signing_key_id == SIGNING_KEY_ID:
         return text
-    default = re.escape(SIGNING_KEY_ID)
+    source = re.escape(SIGNING_KEY_ID)
     patterns = (
-        # 1. grep -Eo 'ce-dev1-root-v1[ =]SHA256:...' (principal opens the regex)
-        (re.compile(rf"(grep -Eo ')({default})(\[)"), signing_key_id),
-        # 2. awk '$3 == "ce-dev1-root-v1" ...' (fingerprint selector principal)
-        (re.compile(rf"(awk '\$3 == \")({default})(\")"), signing_key_id),
-        # 3. ssh-keygen -Y verify ... -I ce-dev1-root-v1 ... (verify principal)
-        (re.compile(rf"(-I )({default})(\b)"), signing_key_id),
+        # 1. grep -Eo 'ce-root-v1[ =]SHA256:...' (principal opens the regex)
+        (re.compile(rf"(grep -Eo ')({source})(\[)"), signing_key_id),
+        # 2. awk '$3 == "ce-root-v1" ...' (fingerprint selector principal)
+        (re.compile(rf"(awk '\$3 == \")({source})(\")"), signing_key_id),
+        # 3. ssh-keygen -Y verify ... -I ce-root-v1 ... (verify principal)
+        (re.compile(rf"(-I )({source})(\b)"), signing_key_id),
     )
     for pattern, replacement in patterns:
         text, count = pattern.subn(rf"\g<1>{replacement}\g<3>", text)
@@ -243,6 +272,37 @@ def _replace_recipe_principal(text: str, signing_key_id: str) -> str:
                 f"expected exactly one recipe principal match for {pattern.pattern!r}, found {count}"
             )
     return text
+
+
+def _spec_signature_key_id(text: str) -> str:
+    """Read the staged ``signature.key_id`` value from the rendered spec."""
+    match = re.search(r"^  key_id: (\S+)$", text, flags=re.MULTILINE)
+    if match is None:
+        raise ReleasePublishError("staged install spec is missing a signature.key_id field")
+    return match.group(1)
+
+
+def _assert_anchor_recipe_match(text: str, signing_key_id: str) -> None:
+    """Fail-closed: staged anchor, signature.key_id, and recipe must agree.
+
+    Makes the anchor/recipe-divergence class of bug (ce-ops#324) impossible to
+    ship: the verify-principal an installer follows is parsed back out of the
+    rendered recipe and must equal both the requested anchor and the spec's
+    ``signature.key_id``. A mismatch raises before any artifact is emitted.
+    """
+    recipe_principal = _recipe_verify_principal(text)
+    spec_key_id = _spec_signature_key_id(text)
+    if spec_key_id != signing_key_id:
+        raise ReleasePublishError(
+            f"staged signature.key_id {spec_key_id!r} does not match requested "
+            f"signing anchor {signing_key_id!r}"
+        )
+    if recipe_principal != spec_key_id:
+        raise ReleasePublishError(
+            f"anchor/recipe divergence: staged signature.key_id {spec_key_id!r} "
+            f"does not match verify-recipe principal {recipe_principal!r}; "
+            "an installer following the recipe would verify against the wrong principal"
+        )
 
 
 def _replace_field(text: str, key: str, value: str) -> str:
@@ -334,6 +394,9 @@ def _render_placeholder_spec(
         sha_by_name=sha_by_name,
         base_url=base_url,
     )
+    # Fail-closed: staged anchor, signature.key_id, and verify-recipe principal
+    # must all agree before any canonical bytes (or artifact) are produced.
+    _assert_anchor_recipe_match(text, signing_key_id)
     canonical = _canonical_install_spec(text)
     canonical_sha = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     text = _replace_field(text, "value", PLACEHOLDER_SIGNATURE)
@@ -347,7 +410,7 @@ def _render_signing_instructions(
     signing_key_id: str = SIGNING_KEY_ID,
 ) -> str:
     return (
-        "# Operator signing seam for ce-root-v1\n\n"
+        f"# Operator signing seam for {signing_key_id}\n\n"
         "The staged install spec intentionally contains the placeholder "
         f"`{PLACEHOLDER_SIGNATURE}`. The Operator reviews the staged artifacts, "
         "signs the canonical spec bytes with the held root key, base64-encodes "
