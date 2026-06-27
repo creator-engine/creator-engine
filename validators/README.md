@@ -41,6 +41,12 @@ PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator --list-
 
 The validator must not call external services during dependency installation from `validators/wheelhouse/` or during validation. Runtime installs intentionally do not include pytest or other test-only dependencies.
 
+For an editable from-source contributor install that exposes the installed
+`ce`, `cev3`, and `creator-engine-validator` scripts from local checkout source,
+see
+[`Developer install (from source, editable)`](../CONTRIBUTING.md#developer-install-from-source-editable)
+in the contributing guide.
+
 ## Offline dev/test install
 
 To run the validator test suite from a fresh clone without network access, install the runtime and test-only dependency sets from their separate checked-in wheelhouses:
