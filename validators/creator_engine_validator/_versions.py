@@ -125,6 +125,15 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # the v1 ``ce worker`` kernel, resolving role definitions as data and
         # composing ``worker_spawn``; imports no v3 module.
         "worker_run",
+        # ce-ops#317: the `ce ask` support-agent P0 substrate (honest scaffold).
+        # ``support_runtime`` is the v1 ``ce ask`` subcommand runtime (driven by
+        # ce_cli, exactly like ce_onboard/pickup); ``support_profile`` is the
+        # read-only PreToolUse profile that REUSES the v1 ``hook_check`` spine
+        # primitives. Both import only v1 + shared modules (``support_corpus`` is
+        # shared) — NO v3 import, so the HARD v1<->v3 invariant is untouched, and
+        # classifying both v1 keeps their edges v1->v1 (no new shared->v1 ratchet).
+        "support_runtime",
+        "support_profile",
     }
 )
 

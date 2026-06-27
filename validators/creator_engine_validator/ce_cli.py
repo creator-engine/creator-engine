@@ -113,6 +113,7 @@ from . import (
     pr_preflight,
     reviewer_triage,
     seat_lifecycle,
+    support_runtime,
     side_effect_ledger_runtime,
     transcript_archive,
     update as update_runtime,
@@ -185,7 +186,7 @@ def _herdr_session_module():
 # are never silent). `herdr` (authenticated remote reach-plane) is internal pending
 # internal testing and GRADUATES to a public product command in a later release
 # (ce-ops#237).
-INTERNAL_COMMAND_GROUPS = frozenset({"herdr"})
+INTERNAL_COMMAND_GROUPS = frozenset({"herdr", "ask", "support"})
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1332,6 +1333,36 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="emit the machine-readable remote attach plan",
     )
+
+    # INTERNAL command (see INTERNAL_COMMAND_GROUPS): the `ce ask` / `ce support`
+    # doc-grounded support agent. THIS slice ships an HONEST SCAFFOLD of the P0
+    # substrate only (corpus allowlist + confidentiality intersection, read-only
+    # profile, system-prompt contract); the model wiring + eval are later tickets.
+    # Dev-gated (hidden from `ce --help`) per the internal-then-public doctrine;
+    # graduates to a public product command after the eval clears. `support` is a
+    # seam-label alias registered as its own parser (the launch/hud convention),
+    # so the command inventory stays one-key-per-group.
+    def _add_support_ask_parser(name: str) -> None:
+        ask = groups.add_parser(name, help=argparse.SUPPRESS)
+        ask.add_argument(
+            "question",
+            nargs="*",
+            help="the support question (scaffold: not yet answered)",
+        )
+        ask.add_argument(
+            "--foundations",
+            action="store_true",
+            help="print the read-only P0 substrate the scaffold has built",
+        )
+        ask.add_argument(
+            "--json",
+            action="store_true",
+            dest="json_output",
+            help="emit the machine-readable scaffold status",
+        )
+
+    _add_support_ask_parser("ask")
+    _add_support_ask_parser("support")
 
     publish_branch_cmd = groups.add_parser(
         "publish-branch",
@@ -4223,6 +4254,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.parse_args(["herdr", "--help"])  # prints herdr help, exits
             return 2
         return handler(args)
+    if args.group in ("ask", "support"):
+        return support_runtime.run_cli(args)
     if args.group == "verify-install":
         return _verify_install(args)
     if args.group == "update":
