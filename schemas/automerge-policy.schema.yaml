@@ -1,0 +1,60 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/automerge-policy.schema.yaml"
+title: "Creator Engine Auto-Merge Policy State"
+description: |
+  Durable, secret-free auto-merge policy state for the CEO-mode policy engine
+  (ce-ops#291 PR-A).  Ships with run_mode=dev and all class flags false so
+  nothing auto-merges until an Operator flips the enabling decision (PR-B/R2).
+
+  Mirrors ApprovalWallState in posture: atomic-write JSON, no secrets,
+  human-rooted enabling_decision_ref as the ratification record pointer.
+
+  IMPORTANT: This file is NEVER written by a worker or automated process
+  without an explicit Operator enabling_decision_ref.  All writes that set
+  any auto_merge flag to true MUST be accompanied by an enabling_decision_ref.
+type: object
+required:
+  - run_mode
+  - kill_switch
+  - classes
+additionalProperties: false
+properties:
+  run_mode:
+    type: string
+    enum: [dev, ceo, strangeLoop]
+    description: |
+      Master run-mode switch.  dev=nothing auto-merges; ceo=docs/none may
+      auto-merge when class flags are on; strangeLoop=future widening (design only).
+      Ships as "dev".
+  kill_switch:
+    type: boolean
+    description: |
+      Emergency halt: true stops all auto-merge instantly regardless of class
+      flags or run_mode.  Ships as false.
+  classes:
+    type: object
+    description: |
+      Per-mutation-class flags.  Each key is a mutation class name; value is
+      the per-class policy object.  All ship as auto_merge: false.
+    additionalProperties:
+      type: object
+      required:
+        - auto_merge
+      additionalProperties: false
+      properties:
+        auto_merge:
+          type: boolean
+          description: |
+            When true (CEO mode only) AND enabling_decision_ref is set AND
+            checks are green AND review is not CHANGES_REQUESTED: policy engine
+            may emit AUTO decision for this class.  Privileged classes
+            (governance/identity/security/attestation/redaction) NEVER auto-merge
+            even when this flag is true — the policy engine enforces this.
+            Ships as false.
+  enabling_decision_ref:
+    type: [string, "null"]
+    description: |
+      Opaque reference to the Operator ratification record that authorises
+      auto-merge for this policy state (e.g. a decision-record path, PR URL,
+      or DAYSHIFT manifest ref).  Must be non-null for any auto_merge=true
+      flag to take effect.  Ships as null.

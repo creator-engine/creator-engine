@@ -55,6 +55,7 @@ ce connector submit     # execute one bounded tracker_mirror write; credential R
 ce surfaces check-updates # read-only upstream version detection from surfaces/manifest.yaml
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce validate-pr          # run local PR preflight against committed base..HEAD state
+ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -1360,6 +1361,87 @@ def _build_parser() -> argparse.ArgumentParser:
         "--test-command",
         default=pr_preflight.DEFAULT_TEST_COMMAND,
         help=f"test command to compare at base and HEAD (default: {pr_preflight.DEFAULT_TEST_COMMAND})",
+    )
+
+    # ce automerge-decide — CEO-mode auto-merge classifier (PR-A, ce-ops#291).
+    # Classify-only / dry-run: prints the decision + rationale for a given PR;
+    # performs NO merge, mints NO capability marker.  Inert by construction.
+    automerge_decide = groups.add_parser(
+        "automerge-decide",
+        help=(
+            "classify a PR's mutation class + emit AUTO/GESTURE decision "
+            "(dry-run only; never merges, never mints a capability marker)"
+        ),
+    )
+    automerge_decide.add_argument(
+        "--paths",
+        action="append",
+        dest="changed_paths",
+        default=None,
+        metavar="PATH",
+        help="repeatable: repo-relative path changed in the PR (from git diff --name-only)",
+    )
+    automerge_decide.add_argument(
+        "--paths-file",
+        default=None,
+        dest="paths_file",
+        metavar="FILE",
+        help="path to a newline-separated file of changed paths (alternative to --paths)",
+    )
+    automerge_decide.add_argument(
+        "--declared-work-class",
+        default="story",
+        dest="declared_work_class",
+        choices=["tiny", "story", "feature", "epic"],
+        help="declared PR work class (default: story)",
+    )
+    automerge_decide.add_argument(
+        "--policy-state",
+        default=None,
+        dest="policy_state_path",
+        metavar="PATH",
+        help=(
+            "path to the automerge policy state JSON "
+            "(default: .ce/state/automerge/policy.json relative to --repo-root)"
+        ),
+    )
+    automerge_decide.add_argument(
+        "--repo-root",
+        default=".",
+        dest="repo_root",
+        help="repo root for default policy state path (default: current directory)",
+    )
+    automerge_decide.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        dest="pr_number",
+        help="optional PR number for the audit record",
+    )
+    automerge_decide.add_argument(
+        "--head-sha",
+        default=None,
+        dest="head_sha",
+        help="optional PR head SHA for the audit record",
+    )
+    automerge_decide.add_argument(
+        "--checks-json",
+        default=None,
+        dest="checks_json",
+        help="optional JSON object mapping check-name to status (e.g. '{\"ci\": \"success\"}')",
+    )
+    automerge_decide.add_argument(
+        "--review-decision",
+        default=None,
+        dest="review_decision",
+        choices=["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", ""],
+        help="optional GitHub reviewDecision for the PR",
+    )
+    automerge_decide.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON decision record",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
@@ -3428,6 +3510,87 @@ def _herdr_remote_attach(args) -> int:
     return 0
 
 
+def _automerge_decide(args) -> int:
+    """ce automerge-decide — classify + dry-run decision (PR-A, ce-ops#291).
+
+    Classify-ONLY: prints the AUTO/GESTURE decision and rationale.
+    NEVER merges, NEVER mints a capability marker.  Inert by construction.
+    """
+    from .forge.automerge_policy import (
+        AutoMergePolicyStateError,
+        automerge_policy_state_path,
+        decide_automerge,
+        load_automerge_policy_state,
+    )
+
+    # Resolve changed paths.
+    changed_paths: list[str] = list(getattr(args, "changed_paths", None) or [])
+    paths_file = getattr(args, "paths_file", None)
+    if paths_file:
+        try:
+            extra = Path(paths_file).read_text(encoding="utf-8").splitlines()
+            changed_paths.extend(p.strip() for p in extra if p.strip())
+        except OSError as exc:
+            print(f"ERROR: ce automerge-decide: cannot read --paths-file: {exc}", file=sys.stderr)
+            return 1
+
+    # Resolve policy state path.
+    repo_root = Path(getattr(args, "repo_root", "."))
+    policy_state_path_arg = getattr(args, "policy_state_path", None)
+    if policy_state_path_arg:
+        policy_path = Path(policy_state_path_arg)
+    else:
+        policy_path = automerge_policy_state_path(repo_root / ".ce/state")
+
+    try:
+        policy_state = load_automerge_policy_state(policy_path)
+    except AutoMergePolicyStateError as exc:
+        print(f"ERROR: ce automerge-decide: policy state unreadable: {exc}", file=sys.stderr)
+        print("(falling back to shipped default: dev mode, all flags false)", file=sys.stderr)
+        policy_state = None  # decide_automerge handles None → shipped default
+
+    # Parse optional checks JSON.
+    checks = None
+    checks_json_str = getattr(args, "checks_json", None)
+    if checks_json_str:
+        try:
+            checks = json.loads(checks_json_str)
+            if not isinstance(checks, dict):
+                raise ValueError("checks-json must be a JSON object")
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(f"ERROR: ce automerge-decide: --checks-json invalid: {exc}", file=sys.stderr)
+            return 1
+
+    review_decision = getattr(args, "review_decision", None) or None
+
+    decision = decide_automerge(
+        changed_paths=changed_paths,
+        declared_work_class=getattr(args, "declared_work_class", "story"),
+        policy_state=policy_state,
+        checks=checks,
+        review_decision=review_decision,
+        pr_number=getattr(args, "pr_number", None),
+        head_sha=getattr(args, "head_sha", None),
+    )
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(decision.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"ce automerge-decide: {decision.decision}")
+        print(f"  mutation_class  : {decision.mutation_class}")
+        print(f"  size_band       : {decision.size_band}")
+        print(f"  run_mode        : {decision.run_mode}")
+        print(f"  kill_switch     : {decision.kill_switch}")
+        print(f"  class_flag      : {decision.class_flag}")
+        print(f"  checks_green    : {decision.checks_green}")
+        print(f"  review_blocked  : {decision.review_decision_blocked}")
+        print(f"  ratification    : {decision.ratification_gates}")
+        print("  rationale:")
+        for line in decision.rationale:
+            print(f"    - {line}")
+    return 0
+
+
 def _make_gh_runner():
     """Factory for the work-claim gh runner (monkeypatchable in tests)."""
     return work_claims.default_gh_runner
@@ -4061,6 +4224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _publish_branch(args)
     if args.group == "validate-pr":
         return pr_preflight.run_cli(args)
+    if args.group == "automerge-decide":
+        return _automerge_decide(args)
     if args.group == "containment-status":
         return _containment_status(args)
     if args.group == "init":
