@@ -1845,6 +1845,28 @@ def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
     assert payload["first_project"] is None
 
 
+def test_onboard_plan_without_profile_defaults_to_os_native_no_sudo(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "claude"))
+    monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
+
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0, payload
+    assert payload["dependencies"]["install"] == []
+    assert payload["dependencies"]["needs_sudo"] is False
+    assert payload["dependencies"]["isolation_backend"] == "os-native"
+    assert payload["dependencies"]["isolation_tier"] == 1
+    assert payload["profile"]["isolation_tier"] == 1
+    assert "sudo (privileged dependency installs)" not in payload["human_approves"]
+
+    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan"])
+    text = capsys.readouterr().out
+    assert code == 0
+    assert "dependencies · backend os-native · install —" in text
+    assert "sudo no" in text
+
+
 def test_onboard_authentic_plan_trust_anchor_evidence_is_value_free(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([

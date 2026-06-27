@@ -1427,9 +1427,9 @@ def test_build_profile_carries_isolation_tier():
 
 # ---------------------------------------------------------------------------
 # ce-ops#71 CORE — the BACKEND-KEYED re-frame (Edit B) + the resolver (req 5).
-# Deps follow the SELECTED backend; the unprivileged os-native default needs no
-# sudo; an unknown backend fails closed; the schema default stays gvisor-proxy
-# (the back-compat gate, req 4).
+# Deps follow the SELECTED backend; the unprivileged os-native onboarding default
+# needs no sudo; an unknown backend fails closed; the runtime-policy schema default
+# stays gvisor-proxy (the back-compat gate, req 4).
 # ---------------------------------------------------------------------------
 def test_backend_deps_shape_and_no_sudo_default():
     assert inst.BACKEND_DEPS["os-native"] == ("git", "python", "uv")
@@ -1446,7 +1446,7 @@ def test_backend_deps_shape_and_no_sudo_default():
 def test_resolve_isolation_backend_precedence():
     # solo-pilot governance-only → the unprivileged os-native (Edit C)
     assert inst.resolve_isolation_backend(profile="solo-pilot") == "os-native"
-    # team / absent profile → the conservative back-compat default (OQ-4 escalated)
+    # team / absent runtime-policy selector → the conservative back-compat default.
     assert inst.resolve_isolation_backend(profile="team") == "gvisor-proxy"
     assert inst.resolve_isolation_backend() == "gvisor-proxy"
     assert inst.resolve_isolation_backend(profile=None) == "gvisor-proxy"
@@ -1455,6 +1455,15 @@ def test_resolve_isolation_backend_precedence():
     # unknown explicit backend → fail-closed
     with pytest.raises(inst.InstallRefused):
         inst.resolve_isolation_backend(explicit="podman-rootless")
+
+
+def test_resolve_onboard_isolation_backend_defaults_absent_profile_to_os_native():
+    assert inst.resolve_onboard_isolation_backend() == "os-native"
+    assert inst.resolve_onboard_isolation_backend(profile=None) == "os-native"
+    assert inst.resolve_onboard_isolation_backend(profile="") == "os-native"
+    assert inst.resolve_onboard_isolation_backend(profile="solo-pilot") == "os-native"
+    assert inst.resolve_onboard_isolation_backend(profile="team") == "gvisor-proxy"
+    assert inst.resolve_onboard_isolation_backend(profile=None, explicit="gvisor-proxy") == "gvisor-proxy"
 
 
 def test_plan_dependencies_by_backend_key():
