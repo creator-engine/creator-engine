@@ -57,6 +57,7 @@ ce surfaces fleet-rollout # seat-by-seat fleet rollout of updated surface versio
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
+ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -1535,6 +1536,31 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="json_output",
         help="emit machine-readable JSON decision record",
+    )
+
+    # ce automerge-status — read-only observability over dry-run decision logs.
+    automerge_status = groups.add_parser(
+        "automerge-status",
+        help="read dry-run automerge decision logs (read-only; never merges)",
+    )
+    automerge_status.add_argument(
+        "--repo-root",
+        default=".",
+        dest="repo_root",
+        help="repo root for default state dir (default: current directory)",
+    )
+    automerge_status.add_argument(
+        "--state-dir",
+        default=None,
+        dest="state_dir",
+        metavar="DIR",
+        help="state dir containing automerge/decisions (default: .ce/state relative to --repo-root)",
+    )
+    automerge_status.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON decision records",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
@@ -3758,6 +3784,77 @@ def _automerge_decide(args) -> int:
     return 0
 
 
+def _automerge_status(args) -> int:
+    """ce automerge-status — read dry-run decision logs without side effects."""
+
+    from .forge.automerge_policy import AutoMergePolicyStateError, load_decision_records
+
+    repo_root = Path(getattr(args, "repo_root", "."))
+    state_dir_arg = getattr(args, "state_dir", None)
+    state_dir = Path(state_dir_arg) if state_dir_arg else repo_root / ".ce/state"
+
+    try:
+        records = load_decision_records(state_dir)
+    except AutoMergePolicyStateError as exc:
+        print(f"ERROR: ce automerge-status: decision records unreadable: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json_output", False):
+        print(json.dumps({"state_dir": str(state_dir), "records": records}, indent=2, sort_keys=True))
+        return 0
+
+    print(f"ce automerge-status: {len(records)} decision record(s)")
+    for record in records:
+        decision = _automerge_status_decision(record.get("decision"))
+        pr_number = record.get("pr_number")
+        pr_label = f"#{pr_number}" if pr_number is not None else "(unknown PR)"
+        print(f"PR {pr_label}: {decision}")
+        print(f"  head_sha       : {_automerge_status_value(record.get('head_sha'))}")
+        print(f"  rationale      : {_automerge_status_value(record.get('rationale'))}")
+        print(f"  gates          : {_automerge_status_value(record.get('gate_results', record.get('gates')))}")
+        print(f"  checks_green   : {_automerge_status_value(record.get('checks_green'))}")
+        print(f"  reviewDecision : {_automerge_status_value(record.get('reviewDecision'))}")
+        print(f"  run_mode       : {_automerge_status_value(record.get('run_mode'))}")
+        print(f"  class_flag     : {_automerge_status_value(record.get('class_flag'))}")
+        print(f"  timestamps     : {_automerge_status_timestamps(record)}")
+    return 0
+
+
+def _automerge_status_decision(value) -> str:
+    decision = str(value) if value is not None else "UNKNOWN"
+    if decision == "GESTURE":
+        return "MANUAL"
+    return decision
+
+
+def _automerge_status_value(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value) if value else "-"
+    if isinstance(value, dict):
+        if not value:
+            return "-"
+        return ", ".join(f"{key}={value[key]}" for key in sorted(value))
+    return str(value)
+
+
+def _automerge_status_timestamps(record) -> str:
+    keys = (
+        "timestamp",
+        "created_at",
+        "createdAt",
+        "decided_at",
+        "decidedAt",
+        "emitted_at",
+        "emittedAt",
+        "updated_at",
+        "updatedAt",
+    )
+    values = [f"{key}={record[key]}" for key in keys if record.get(key) is not None]
+    return ", ".join(values) if values else "-"
+
+
 def _make_gh_runner():
     """Factory for the work-claim gh runner (monkeypatchable in tests)."""
     return work_claims.default_gh_runner
@@ -4409,6 +4506,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return pr_preflight.run_cli(args)
     if args.group == "automerge-decide":
         return _automerge_decide(args)
+    if args.group == "automerge-status":
+        return _automerge_status(args)
     if args.group == "containment-status":
         return _containment_status(args)
     if args.group == "init":

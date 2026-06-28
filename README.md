@@ -107,7 +107,7 @@ platform evolves:
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
   `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `onboard`, `publish-branch`,
-  `harness-matrix`, `containment-status`, `validate-pr`, and `automerge-decide`.
+  `harness-matrix`, `containment-status`, `validate-pr`, `automerge-decide`, and `automerge-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
@@ -153,7 +153,10 @@ platform evolves:
   or privileged paths map to the most-privileged GESTURE class) and emits an
   `AUTO` or `GESTURE_REQUIRED` decision and rationale by composing the existing
   `size_ceremony` ceremony table with the path classifier — dry-run only,
-  never merges, never mints a capability marker. `ce dequeue` removes one queued
+  never merges, never mints a capability marker. `ce automerge-status`
+  is the read-only companion reader: it loads and displays the dry-run
+  decision log records emitted by `ce automerge-decide` runs — never
+  merges, never arms, never mutates state. `ce dequeue` removes one queued
   PR from GitHub's merge queue through the governed v3 forge bridge. `ce hud` is an alias for the
   visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
