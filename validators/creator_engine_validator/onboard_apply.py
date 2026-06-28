@@ -158,6 +158,10 @@ KNOWN_CE_WORKFLOWS: tuple[CeWorkflowIdentity, ...] = (
 )
 DEFAULT_FIRST_SCOPE_ID = "ce-first-project-smoke"
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$")
+KNOWN_SHARED_OR_FOREIGN_APP_IDS: Mapping[str, str] = {
+    "4025879": "known CE dev-2 App",
+    "4085526": "known CE dev-4 App",
+}
 
 
 class ApplyRefused(Exception):
@@ -952,6 +956,7 @@ def _prepare(
             "answers_missing",
             "apply requires complete answers; run --inventory/--plan or pass --non-interactive to refuse explicitly",
         )
+    _refuse_known_shared_or_foreign_own_app(merged)
     # ce-ops#71 Edit B+C / ce-ops#326: resolve the runtime backend from the
     # onboarding profile (solo-pilot/absent → os-native; team → gvisor-proxy) and make
     # the host-dependency plan BACKEND-DRIVEN — the privileged runsc/proxy pairing
@@ -1024,6 +1029,22 @@ def _prepare(
         adoption_mode=adoption_mode,
         brownfield_plan=brownfield_plan,
         adoption_branch=BROWNFIELD_ADOPTION_BRANCH,
+    )
+
+
+def _refuse_known_shared_or_foreign_own_app(merged: v3_installer.MergeResult) -> None:
+    if merged.value("github.app.kind", "shared") != "own":
+        return
+    app_id = str(merged.value("github.app.app_id") or "").strip()
+    if app_id not in KNOWN_SHARED_OR_FOREIGN_APP_IDS:
+        return
+    label = KNOWN_SHARED_OR_FOREIGN_APP_IDS[app_id]
+    raise ApplyRefused(
+        "github_app_not_per_user",
+        "github.app.kind is 'own' but github.app.app_id "
+        f"{app_id!r} is a {label}; create a genuine per-user GitHub App for "
+        "this seat and supply its app_id, client_id, tmpfs PEM SecretRef, and "
+        "installation_id. Refusing to fall back to shared or foreign identity.",
     )
 
 
