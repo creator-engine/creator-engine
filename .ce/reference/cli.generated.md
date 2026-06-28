@@ -31,6 +31,16 @@ Options:
 | `--review-decision` | no | `, APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED` | optional GitHub reviewDecision for the PR |
 | `--json` | no |  | emit machine-readable JSON decision record |
 
+### `automerge-status`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  | repo root for default state dir (default: current directory) |
+| `--state-dir` | no |  | state dir containing automerge/decisions (default: .ce/state relative to --repo-root) |
+| `--json` | no |  | emit machine-readable JSON decision records |
+
 ### `bootstrap`
 
 Options:
