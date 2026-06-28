@@ -1,5 +1,5 @@
 ---
-slug: ce342-ci-retrigger
+slug: ce-342-ci-retrigger
 date: 2026-06-28
 kind: fix
 scope: pull request CI trigger
