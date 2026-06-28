@@ -51,8 +51,7 @@ Strong in-repository evidence exists for the core role contract:
   `implementer`, and `verification`.
 - `.claude/agents/README.md` and the role files define governed worker
   behavior and the reviewer specialization.
-- Root-checkout resume-state checkpoints at
-  `/home/ce-dev-1/creator-engine/.ce/state/research/RESUME_STATE_CE_DEV2_*`
+- Internal operating-practice checkpoints supplied as read-only seed context
   ground the operating practice that this design productizes: G1-G5 live
   grants and R-reserved HALT snapshots, night conveyor cadence, no-forks
   restricted-agent discipline, verify-before-dispatch, territory-map checks,
@@ -61,15 +60,12 @@ Strong in-repository evidence exists for the core role contract:
 
 Important gaps remain:
 
-- The exact ADR draft path named in the seed brief,
-  `.ce/state/research/ADR_DRAFT_substrate_independent_authority_20260628.md`,
-  is absent from this checkout.
-- `.ce/state/research/PETER_STEINBERGER_AUTONOMY_ANALYSIS_20260627.md`
-  is absent from this checkout. The resume-state checkpoint
-  `RESUME_STATE_CE_DEV2_DAYARC_20260627T0600Z` summarizes its thesis as
-  run-mode, not tooling: shift from `skynet x Dev` to `skynet x CEO`, with
-  throughput leading while governance catches up and the first live flip
-  reserved to the Operator.
+- The detailed authority-substrate ADR referenced by the seed brief is absent
+  from this checkout.
+- A referenced autonomy analysis source note is absent from this checkout. The
+  available checkpoint summary frames its thesis as run-mode, not tooling:
+  shift from `skynet x Dev` to `skynet x CEO`, with throughput leading while
+  governance catches up and the first live flip reserved to the Operator.
 - `.claude/skills/ce-dispatch/SKILL.md` and a dedicated `ce-harvest` skill
   are not live in this checkout. They should be productization slices or
   pointers to tracked dispatch and harvest playbooks, not assumed existing
@@ -632,8 +628,7 @@ For future implementation:
 - In-tree: `playbooks/controller/briefs/merge-gate.md`
 - In-tree: `specs/005-pco-parallel-controller-orchestration/worker-isolation-runtime.md`
 - In-tree: `.claude/agents/README.md`
-- Read-only root checkout context:
-  `/home/ce-dev-1/creator-engine/.ce/state/research/RESUME_STATE_CE_DEV2_*`
+- Read-only internal operating-practice checkpoints supplied as seed context
 - OpenAI Agents SDK docs: <https://developers.openai.com/api/docs/guides/agents>
 - Anthropic, "How we built our multi-agent research system" (2025-06-13):
   <https://www.anthropic.com/engineering/multi-agent-research-system>
