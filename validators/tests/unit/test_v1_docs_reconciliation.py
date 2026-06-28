@@ -57,7 +57,7 @@ def test_as_built_ce_inventory_matches_expected():
     assert _ce_command_groups() == {
         "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
         "connector", "containment-probe", "reviewer-triage", "claim",
-        "pickup", "playbook", "check", "doctor", "init", "launch", "hud",
+        "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "update", "onboard", "bootstrap", "publish-branch", "harness-matrix",
         "containment-status", "herdr", "validate-pr", "dequeue", "surfaces",
         "automerge-decide", "ask", "support",

@@ -100,6 +100,7 @@ from . import (
     ce_onboard,
     ce_provenance,
     connector_runtime,
+    dispatch_plan,
     doctor_runtime,
     fanin_runtime,
     forge_triage,
@@ -1568,6 +1569,16 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="dry-run with live work-claim collision checks through gh api")
     pt.add_argument("--json", action="store_true", dest="json_output",
                     help="emit machine-readable JSON")
+
+    dispatch = groups.add_parser("dispatch", help="plan and inspect governed seat dispatch (ce-ops#42)")
+    dispatch_sub = dispatch.add_subparsers(dest="dispatch_cmd")
+    dp = dispatch_sub.add_parser("plan", help="emit a deterministic seat-dispatch plan from issues JSON")
+    dp.add_argument("--arc-ticket", required=True, dest="arc_ticket")
+    dp.add_argument("--issues-json", default="-", dest="issues_json")
+    dp.add_argument("--repo", default=None)
+    dp.add_argument("--label", default=dispatch_plan.DEFAULT_PICKUP_LABEL)
+    dp.add_argument("--seat", action="append", dest="dispatch_seats", default=[])
+    dp.add_argument("--json", action="store_true", dest="json_output")
 
     pp = pickup_sub.add_parser("poll", help="one read-only Search API poll → work-items JSON")
     pp.add_argument("--identity", required=True,
@@ -3231,6 +3242,44 @@ def _pickup_triage(args) -> int:
     return 0
 
 
+def _dispatch_plan(args) -> int:
+    try:
+        if args.issues_json == "-":
+            issues_text = sys.stdin.read()
+        else:
+            issues_text = Path(args.issues_json).read_text(encoding="utf-8")
+        issue_payloads = forge_triage.load_issue_payloads(issues_text)
+        result = dispatch_plan.plan_dispatch(
+            arc_ticket=args.arc_ticket,
+            issues=issue_payloads,
+            repo=args.repo,
+            pickup_label=args.label,
+            assign_to=getattr(args, "dispatch_seats", ()) or (),
+        )
+    except (OSError, forge_triage.ForgeTriageError) as exc:
+        payload = {"ok": False, "error": str(exc)}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce dispatch plan refused: {exc}", file=sys.stderr)
+        return 2
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            f"ce dispatch plan: planned {len(result.items)} item(s); "
+            f"pickup label {result.pickup_label}"
+        )
+        for item in result.items:
+            seat = item.seat or "unassigned"
+            print(
+                f"  - {item.issue.repo}#{item.issue.number} -> {seat} "
+                f"({item.work_class}/{item.mutation_class}) {item.suggested_branch}"
+            )
+    return 0
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -4143,6 +4192,8 @@ _PICKUP_DISPATCH = {
     "triage": _pickup_triage,
 }
 
+_DISPATCH_DISPATCH = {"plan": _dispatch_plan}
+
 _HERDR_DISPATCH = {
     "remote-attach": _herdr_remote_attach,
 }
@@ -4236,6 +4287,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.group == "pickup":
         pickup_cmd = getattr(args, "pickup_cmd", None)
         handler = _PICKUP_DISPATCH.get(pickup_cmd)
+        if handler is None:
+            parser.print_usage(sys.stderr)
+            return 2
+        return handler(args)
+    if args.group == "dispatch":
+        dispatch_cmd = getattr(args, "dispatch_cmd", None)
+        handler = _DISPATCH_DISPATCH.get(dispatch_cmd)
         if handler is None:
             parser.print_usage(sys.stderr)
             return 2
