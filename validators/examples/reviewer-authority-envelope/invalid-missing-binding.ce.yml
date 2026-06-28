@@ -4,7 +4,7 @@ reviewer_authority_envelope:
   envelope_id: rva-missing-head
   mechanic: pr_review
   pr_number: 106
-  actor: ubuntuaws745-cmyk
+  actor: example-reviewer
   ratified_prompt_sha: ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27
   emitting_role: operator
   operating_mode: strict

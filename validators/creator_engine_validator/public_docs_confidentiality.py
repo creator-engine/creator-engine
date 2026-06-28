@@ -102,13 +102,11 @@ KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/decisions/ADR-0010-take-app-wheel-out-of-authored-prs.md",
         "docs/decisions/ADR-0011-devops-privileged-action-broker.md",
         "docs/decisions/ADR-0012-openbao-micro-unit-standup.md",
-        "docs/design/controller-bootstrap-injection.md",
         "docs/devops/openbao-approval-wall-arming.md",
         "docs/devops/openbao-operator-bringup.md",
         "docs/devops/openbao-production-golive.md",
         "docs/downloads/0.2.0/scanners/scanner-mirror.fragment.yaml",
         "docs/guide/contributing-to-ce.md",
-        "docs/keys/ce-root-v1",
         "docs/security/ce234-approval-capability-wall.md",
     }
 )

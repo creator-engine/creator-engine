@@ -3980,9 +3980,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_pr.add_argument("--base", default="main", help="the PR base branch (default: main)")
     p_pr.add_argument(
         "--app-config", required=True, dest="app_config",
-        help="REQUIRED path to the host GitHub-App config JSON — NO default (host filenames "
-             "differ: laptop ~/.ce-keys/ce-forge-app.json, CE-DEV-1 ~/.ce-keys/ce-forge-dev1.json; "
-             "a default would silently miss on one host)",
+        help="REQUIRED path to the host GitHub-App config JSON — NO default (config "
+             "locations differ by operator environment; a default would silently miss "
+             "in some venues)",
     )
     p_pr.add_argument("--source-dir", default=".", dest="source_dir",
                       help="local checkout holding the authored branch (default: cwd)")
@@ -3997,8 +3997,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_review.add_argument("--run", required=True, dest="run_id", metavar="RUN_ID",
                           help="the AUTHOR run id whose opened PR is reviewed")
     p_review.add_argument("--reviewer-actor", required=True, dest="reviewer_actor",
-                          help="the host-bound reviewer LOGIN (DATA — a login, never a token; e.g. "
-                               "ubuntuaws745-cmyk on the laptop, cedev1vps-cmd on CE-DEV-1)")
+                          help="the venue-bound reviewer LOGIN (DATA — a login, never a token; "
+                               "e.g. example-reviewer)")
     p_review.add_argument("--spawn", action="store_true",
                           help="provision + launch the governed reviewer venue (default: assemble-only)")
     p_review.add_argument("--venue-root", default=None, dest="venue_root",
