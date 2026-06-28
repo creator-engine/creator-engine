@@ -49,10 +49,13 @@ REMINDER = (
 # debuggable failure output.
 FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("confidential ce-ops# ticket reference", re.compile(r"ce-ops#\d+")),
+    ("confidential ce-ops private-repo URL", re.compile(r"github\.com/creator-engine/ce-ops")),
     ("internal seat-login marker", re.compile(r"\bce-dev-\d+\b")),
     ("internal tailnet hostname", re.compile(r"\.tailf3cfef\.ts\.net")),
     ("internal VPS IP", re.compile(r"100\.72\.252\.20")),
     ("internal hosting-provider name", re.compile(r"Hetzner")),
+    ("confidential internal codename skynet", re.compile(r"(?i)skynet")),
+    ("confidential ce-ops hyphen ticket ref", re.compile(r"ce-ops-\d+")),
 )
 
 # Public-doc file extensions we scan. The served docs tree carries markdown,
