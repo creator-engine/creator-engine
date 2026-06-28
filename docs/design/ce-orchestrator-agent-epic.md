@@ -3,7 +3,7 @@
 **Status**: Proposed epic artifact only. Do not file these tickets without
 Operator ratification.
 
-Goal: convert CE-DEV-2's ad hoc controller behavior into a deterministic,
+Goal: convert the orchestrator controller seat's ad hoc controller behavior into a deterministic,
 observable, governed Orchestrator Agent with clear authority boundaries and a
 path to CEO-mode composition.
 

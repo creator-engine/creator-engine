@@ -4,7 +4,7 @@
 document.
 
 **Scope**: Canonize the CE Orchestrator Agent role currently performed
-ad hoc by CE-DEV-2: coordination, supervision, and management of the
+ad hoc by the orchestrator controller seat: coordination, supervision, and management of the
 governed development fleet.
 
 **Non-goals**: This document does not change product code, validators,
@@ -20,7 +20,7 @@ then pulled forward into the next lane. The missing product artifact is
 the agent that owns that whole conveyor.
 
 Today the Orchestrator role exists as practice rather than product. It
-is distributed across CE-DEV-2 memory, resume-state checkpoints, controller
+is distributed across the orchestrator controller seat's memory, resume-state checkpoints, controller
 playbooks, bootstrap previews, worker role definitions, and ad hoc seat
 discipline. That makes the role effective but not shippable: a new
 controller can imitate parts of it, but the contract is not compact,
@@ -64,7 +64,7 @@ Important gaps remain:
   from this checkout.
 - A referenced autonomy analysis source note is absent from this checkout. The
   available checkpoint summary frames its thesis as run-mode, not tooling:
-  shift from `skynet x Dev` to `skynet x CEO`, with throughput leading while
+  shift from hands-on dev mode to fully-autonomous CEO-mode, with throughput leading while
   governance catches up and the first live flip reserved to the Operator.
 - `.claude/skills/ce-dispatch/SKILL.md` and a dedicated `ce-harvest` skill
   are not live in this checkout. They should be productization slices or
@@ -269,8 +269,8 @@ Model and effort routing:
 
 Current seat pattern:
 
-- CE-DEV-1 style seats may be non-contained and can self-push within grant.
-- CE-DEV-3/CE-DEV-4 style seats may be contained and need harvest fallback or
+- Non-contained controller seats may self-push within grant.
+- Contained build seats need harvest fallback or
   courier mechanics for forge side effects.
 - The Orchestrator dispatches self-contained briefs and avoids inline work.
 - Multi-ticket batch dispatch is permitted only after checking path
@@ -308,7 +308,7 @@ Knowledge layers:
    and operating memories. It is a recall substrate, not a decision authority.
 6. **Resume/checkpoint state**: the active controller must emit resumable
    state so the next controller can continue without memory-only transfer.
-   Current design grounding comes from the root checkout's CE-DEV-2
+   Current design grounding comes from the orchestrator controller seat's
    resume-state checkpoints.
 
 The productized Orchestrator should boot by loading the SSOT, validating its
@@ -475,7 +475,7 @@ Required surfaces:
 CEO-mode / `strangeLoop` composition:
 
 - CEO-mode is a run-mode shift from hands-on dev control to throughput
-  leadership: "skynet x Dev" becomes "skynet x CEO." The Orchestrator
+  leadership: direct development engagement gives way to fully-autonomous CEO-mode. The Orchestrator
   prioritizes fleet throughput while governance catches up one step behind.
 - CEO-mode does not weaken R-reserved boundaries. The first live auto-merge
   flip remains Operator-reserved.
@@ -557,7 +557,7 @@ substrate, not the source of governance truth.
 
 Epic title: **ce-ops: Productize the Governed CE Orchestrator Agent**
 
-Goal: convert CE-DEV-2's ad hoc controller behavior into a deterministic,
+Goal: convert the orchestrator controller seat's ad hoc controller behavior into a deterministic,
 observable, governed Orchestrator Agent with clear authority boundaries and a
 path to CEO-mode composition.
 
