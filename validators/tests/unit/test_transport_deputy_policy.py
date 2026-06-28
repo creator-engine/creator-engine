@@ -37,7 +37,7 @@ def test_reviewer_can_submit_review_to_matching_pr():
     assert decision.as_record()["verdict"] == "allow"
 
 
-def test_reviewer_review_submit_denies_approve_before_injection():
+def test_reviewer_review_submit_denies_approve_without_prior_authority_check():
     decision = evaluate(
         _request(
             method="POST",
@@ -47,7 +47,21 @@ def test_reviewer_review_submit_denies_approve_before_injection():
     )
 
     assert decision.allowed is False
-    assert "COMMENT/REQUEST_CHANGES" in " ".join(decision.reasons)
+    assert "lacks prior role/run-mode/envelope authority check" in " ".join(decision.reasons)
+
+
+def test_reviewer_review_submit_allows_approve_after_prior_authority_check():
+    decision = evaluate(
+        _request(
+            method="POST",
+            path=f"/repos/{_REPO}/pulls/7/reviews",
+            body=f'{{"event":"APPROVE","commit_id":"{_HEAD}"}}',
+            approve_authority_checked=True,
+        )
+    )
+
+    assert decision.allowed is True
+    assert decision.as_record()["request"]["approve_authority_checked"] is True
 
 
 def test_reviewer_review_submit_requires_explicit_event():

@@ -70,6 +70,22 @@ def _token(value: str = _SECRET, *, token_ref: str = "creator-engine/creator-eng
     )
 
 
+def _reviewer_authority_envelope(**overrides):
+    envelope = {
+        "envelope_id": "rva-test-reviewer-approve",
+        "mechanic": "pr_review",
+        "pr_number": 7,
+        "head_sha": _HEAD,
+        "actor": "reviewer-1",
+        "ratified_prompt_sha": "b" * 64,
+        "emitting_role": "reviewer",
+        "operating_mode": "transcendence",
+        "recorded_at": "2026-06-28T00:00:00Z",
+    }
+    envelope.update(overrides)
+    return {"reviewer_authority_envelope": envelope}
+
+
 class FakeMinter:
     def __init__(self, token: ScopedToken, events: list[str] | None = None):
         self.token = token
@@ -291,7 +307,7 @@ def test_contained_seat_review_fails_closed_without_valid_injected_credential():
     assert spawned == []
 
 
-def test_contained_seat_review_refuses_approve_before_mint_or_transport():
+def test_contained_seat_review_refuses_approve_without_permitting_run_mode_before_mint():
     minter = FakeMinter(_token())
     transport = FakeTransport()
 
@@ -304,15 +320,105 @@ def test_contained_seat_review_refuses_approve_before_mint_or_transport():
                 head_sha=_HEAD,
                 event="APPROVE",
                 body="seat approval must not be gate-valid",
+                run_mode="solo",
+                reviewer_authority_envelope=_reviewer_authority_envelope(),
             ),
             binding=_binding(),
             minter=minter,
             transport=transport,
         )
 
-    assert "APPROVE is controller approval-wall only" in str(exc.value)
+    assert "autonomous APPROVE is disabled" in str(exc.value)
     assert minter.calls == []
     assert transport.calls == []
+
+
+def test_contained_seat_review_approve_refuses_missing_envelope_before_mint():
+    minter = FakeMinter(_token())
+    transport = FakeTransport()
+
+    with pytest.raises(CredentialProxyRefused) as exc:
+        submit_contained_seat_pr_review(
+            ContainedSeatReview(
+                seat_id="seat-reviewer-1",
+                repo=_REPO,
+                pr_number=7,
+                head_sha=_HEAD,
+                event="APPROVE",
+                run_mode="strangeLoop",
+            ),
+            binding=_binding(),
+            minter=minter,
+            transport=transport,
+        )
+
+    assert "missing reviewer-authority-envelope" in str(exc.value)
+    assert minter.calls == []
+    assert transport.calls == []
+
+
+def test_contained_seat_review_approve_refuses_invalid_envelope_before_mint():
+    minter = FakeMinter(_token())
+    transport = FakeTransport()
+
+    with pytest.raises(CredentialProxyRefused) as exc:
+        submit_contained_seat_pr_review(
+            ContainedSeatReview(
+                seat_id="seat-reviewer-1",
+                repo=_REPO,
+                pr_number=7,
+                head_sha=_HEAD,
+                event="APPROVE",
+                run_mode="strangeLoop",
+                reviewer_authority_envelope=_reviewer_authority_envelope(pr_number=8),
+            ),
+            binding=_binding(),
+            minter=minter,
+            transport=transport,
+        )
+
+    assert "PR does not match request" in str(exc.value)
+    assert minter.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize("substrate", ["contained", "non-contained"])
+def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(substrate):
+    minter = FakeMinter(_token())
+    transport = FakeTransport()
+
+    result = submit_contained_seat_pr_review(
+        ContainedSeatReview(
+            seat_id="seat-reviewer-1",
+            repo=_REPO,
+            pr_number=7,
+            head_sha=_HEAD,
+            event="APPROVE",
+            body="Independent reviewer approval.",
+            run_mode="strangeLoop",
+            reviewer_authority_envelope=_reviewer_authority_envelope(),
+            containment_substrate=substrate,
+        ),
+        binding=_binding(),
+        minter=minter,
+        transport=transport,
+    )
+
+    assert result.applied is True
+    assert result.event == "APPROVE"
+    assert result.audit_record["outcome"] == "transport_dispatched"
+    assert result.audit_record["decision"]["request"]["approve_authority_checked"] is True
+    assert any(
+        check["name"] == "review_event_allowed" and check["passed"]
+        for check in result.audit_record["decision"]["checks"]
+    )
+    assert minter.calls[0].repo == _REPO
+    assert transport.calls[0].repo == _REPO
+    assert json.loads(transport.calls[0].body or "") == {
+        "body": "Independent reviewer approval.",
+        "commit_id": _HEAD,
+        "event": "APPROVE",
+    }
 
 
 def test_contained_seat_review_refuses_wall_secret_in_launch_context_before_mint():

@@ -85,6 +85,22 @@ def _token(value=_SECRET):
     )
 
 
+def _reviewer_authority_envelope(**overrides):
+    envelope = {
+        "envelope_id": "rva-test-reviewer-approve",
+        "mechanic": "pr_review",
+        "pr_number": 7,
+        "head_sha": _HEAD,
+        "actor": "reviewer-1",
+        "ratified_prompt_sha": "b" * 64,
+        "emitting_role": "reviewer",
+        "operating_mode": "transcendence",
+        "recorded_at": "2026-06-28T00:00:00Z",
+    }
+    envelope.update(overrides)
+    return {"reviewer_authority_envelope": envelope}
+
+
 def test_comment_review_mints_and_injects_token_only_into_gh_env(caplog):
     minted: list[TokenRequest] = []
     spawned: list[tuple[list[str], str | None, dict[str, str]]] = []
@@ -191,10 +207,32 @@ def test_approve_refused_when_run_mode_none():
     assert "APPROVE is controller approval-wall only" in str(exc.value)
 
 
-def test_approve_allowed_in_strangeloop_mode():
-    request = broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+@pytest.mark.parametrize("run_mode", ["solo", "team"])
+def test_approve_refused_in_current_solo_team_modes(run_mode):
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(
+            {**_payload(event="APPROVE"), "reviewer_authority_envelope": _reviewer_authority_envelope()},
+            run_mode=run_mode,
+        )
+
+    assert "APPROVE is controller approval-wall only" in str(exc.value)
+
+
+def test_approve_missing_envelope_refused_in_strangeloop_mode():
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+
+    assert "missing reviewer-authority-envelope" in str(exc.value)
+
+
+def test_approve_allowed_in_strangeloop_mode_with_valid_envelope():
+    request = broker.parse_request(
+        {**_payload(event="APPROVE"), "reviewer_authority_envelope": _reviewer_authority_envelope()},
+        run_mode="strangeLoop",
+    )
 
     assert request.event == "APPROVE"
+    assert request.reviewer_authority_envelope is not None
 
 
 def test_submit_self_review_approve_refused_in_dev_mode():
@@ -261,7 +299,14 @@ def test_submit_self_review_approve_allowed_in_strangeloop_mode(monkeypatch):
     monkeypatch.setattr(broker, "submit_contained_seat_pr_review", fake_submit)
 
     result = broker.submit_self_review(
-        _request(event="APPROVE"),
+        broker.SelfReviewRequest(
+            seat_id="seat-reviewer-1",
+            pr_number=7,
+            head_sha=_HEAD,
+            event="APPROVE",
+            body="Looks reasonable.",
+            reviewer_authority_envelope=_reviewer_authority_envelope(),
+        ),
         config=_config(),
         resolve_id_fn=resolve_id,
         mint_fn=mint,
@@ -272,6 +317,89 @@ def test_submit_self_review_approve_allowed_in_strangeloop_mode(monkeypatch):
 
     assert result.event == "APPROVE"
     assert called == {"resolve": 1, "mint": 1, "spawn": 1}
+
+
+def test_submit_self_review_approve_author_refused_before_envelope_or_mint():
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.submit_self_review(
+            broker.SelfReviewRequest(
+                seat_id="seat-reviewer-1",
+                pr_number=7,
+                head_sha=_HEAD,
+                event="APPROVE",
+                reviewer_authority_envelope=_reviewer_authority_envelope(),
+            ),
+            config=_config(),
+            resolve_id_fn=lambda seat: called.__setitem__("resolve", called["resolve"] + 1),
+            mint_fn=lambda req: called.__setitem__("mint", called["mint"] + 1),
+            gh_spawn=lambda *args: called.__setitem__("spawn", called["spawn"] + 1),
+            resolve_author_fn=_author("cedev4vps-coder"),
+            run_mode="strangeLoop",
+        )
+
+    assert "author≠reviewer" in str(exc.value)
+    assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+def test_submit_self_review_approve_refuses_invalid_envelope_before_mint():
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.submit_self_review(
+            broker.SelfReviewRequest(
+                seat_id="seat-reviewer-1",
+                pr_number=7,
+                head_sha=_HEAD,
+                event="APPROVE",
+                reviewer_authority_envelope=_reviewer_authority_envelope(emitting_role="controller"),
+            ),
+            config=_config(),
+            resolve_id_fn=lambda seat: called.__setitem__("resolve", called["resolve"] + 1),
+            mint_fn=lambda req: called.__setitem__("mint", called["mint"] + 1),
+            gh_spawn=lambda *args: called.__setitem__("spawn", called["spawn"] + 1),
+            resolve_author_fn=_author(),
+            run_mode="strangeLoop",
+        )
+
+    assert "emitting_role must be reviewer" in str(exc.value)
+    assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+@pytest.mark.parametrize("substrate", ["contained", "non-contained"])
+def test_submit_self_review_approve_outcome_does_not_depend_on_containment(monkeypatch, substrate):
+    def fake_submit(review, *, binding, minter, token_spawn=None, **kwargs):
+        return broker.SelfReviewResult(
+            ok=True,
+            repo=review.repo,
+            pr_number=review.pr_number,
+            head_sha=review.head_sha,
+            event=review.event,
+            review_id=990,
+            applied=True,
+        )
+
+    monkeypatch.setattr(broker, "submit_contained_seat_pr_review", fake_submit)
+
+    result = broker.submit_self_review(
+        broker.SelfReviewRequest(
+            seat_id="seat-reviewer-1",
+            pr_number=7,
+            head_sha=_HEAD,
+            event="APPROVE",
+            reviewer_authority_envelope=_reviewer_authority_envelope(),
+            containment_substrate=substrate,
+        ),
+        config=_config(),
+        resolve_id_fn=lambda seat: 123,
+        mint_fn=lambda req: _token(),
+        resolve_author_fn=_author(),
+        run_mode="strangeLoop",
+    )
+
+    assert result.event == "APPROVE"
+    assert result.review_id == 990
 
 
 def test_author_is_refused_before_resolve_mint_or_transport():

@@ -31,7 +31,7 @@ _TOKEN_VALUE_RE = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"Bearer\s+[A-Za-z0-9._~+/=-]{20,}|[A-Za-z0-9_-]{40,})"
 )
-_CONTAINED_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
+_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES", "APPROVE"})
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,7 @@ class TransportRequest:
     env: Mapping[str, str] = field(default_factory=dict)
     body: str | None = None
     contains_secret_material: bool = False
+    approve_authority_checked: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ class Decision:
                 "header_names": sorted(str(k) for k in self.request.headers),
                 "env_names": sorted(str(k) for k in self.request.env),
                 "body_present": self.request.body is not None,
+                "approve_authority_checked": self.request.approve_authority_checked,
             },
             "checks": [check.as_record() for check in self.checks],
         }
@@ -253,7 +255,7 @@ def evaluate(
                 else "unmatched write path denied before credential injection",
             )
         )
-        review_event_check = _contained_review_event_allowed(method, path, request.body)
+        review_event_check = _review_event_allowed(request, method, path)
         if review_event_check is not None:
             checks.append(review_event_check)
     else:
@@ -366,35 +368,47 @@ def _matching_rule(
     return None
 
 
-def _contained_review_event_allowed(method: str, path: str, body: str | None) -> CheckResult | None:
+def _review_event_allowed(
+    request: TransportRequest,
+    method: str,
+    path: str,
+) -> CheckResult | None:
     if method != "POST" or not _REVIEW_POST_RE.match(path):
         return None
-    if body is None:
+    if request.body is None:
         return CheckResult(
-            "contained_review_event_allowed",
+            "review_event_allowed",
             False,
-            "contained review POST is missing an explicit review event",
+            "review POST is missing an explicit review event",
         )
     try:
-        payload = json.loads(body)
+        payload = json.loads(request.body)
     except (json.JSONDecodeError, ValueError):
         return CheckResult(
-            "contained_review_event_allowed",
+            "review_event_allowed",
             False,
-            "contained review POST body is not a JSON object",
+            "review POST body is not a JSON object",
         )
     if not isinstance(payload, Mapping):
         return CheckResult(
-            "contained_review_event_allowed",
+            "review_event_allowed",
             False,
-            "contained review POST body is not a JSON object",
+            "review POST body is not a JSON object",
         )
     event = str(payload.get("event") or "").strip().upper().replace("-", "_")
-    allowed = event in _CONTAINED_REVIEW_EVENTS
+    if event == "APPROVE":
+        return CheckResult(
+            "review_event_allowed",
+            request.approve_authority_checked,
+            "review APPROVE authority was checked before transport policy"
+            if request.approve_authority_checked
+            else "review APPROVE lacks prior role/run-mode/envelope authority check",
+        )
+    allowed = event in _REVIEW_EVENTS
     return CheckResult(
-        "contained_review_event_allowed",
+        "review_event_allowed",
         allowed,
-        "contained review event is COMMENT or REQUEST_CHANGES"
+        "review event is COMMENT or REQUEST_CHANGES"
         if allowed
-        else "contained review event is outside COMMENT/REQUEST_CHANGES",
+        else "review event is outside COMMENT/REQUEST_CHANGES/APPROVE",
     )
