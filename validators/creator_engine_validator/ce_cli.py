@@ -945,10 +945,28 @@ def _build_parser() -> argparse.ArgumentParser:
     bi.add_argument(
         "--embedder",
         default="deterministic",
-        choices=("deterministic", "embeddinggemma"),
+        choices=("deterministic", "embeddinggemma", "vllm-openai"),
         help="embedding adapter (default: deterministic offline fake)",
     )
     bi.add_argument("--model-path", default=None, help="local model path for --embedder embeddinggemma")
+    bi.add_argument(
+        "--endpoint",
+        default=None,
+        help="override /v1/embeddings URL for --embedder vllm-openai (default: http://127.0.0.1:8989/v1/embeddings)",
+    )
+    bi.add_argument(
+        "--endpoint-model-id",
+        default=None,
+        dest="endpoint_model_id",
+        help="override model name for --embedder vllm-openai (default: Qwen/Qwen3-Embedding-8B)",
+    )
+    bi.add_argument(
+        "--endpoint-dim",
+        default=None,
+        type=int,
+        dest="endpoint_dim",
+        help="override expected embedding dimension for --embedder vllm-openai (default: 4096)",
+    )
     bi.add_argument(
         "--allow-confidential-egress",
         action="store_true",
@@ -971,10 +989,28 @@ def _build_parser() -> argparse.ArgumentParser:
     br.add_argument(
         "--embedder",
         default="deterministic",
-        choices=("deterministic", "embeddinggemma"),
+        choices=("deterministic", "embeddinggemma", "vllm-openai"),
         help="embedding adapter to query with — MUST match the embedder the store was ingested with (default: deterministic offline fake)",
     )
     br.add_argument("--model-path", default=None, help="local model path for --embedder embeddinggemma (must match ingest)")
+    br.add_argument(
+        "--endpoint",
+        default=None,
+        help="override /v1/embeddings URL for --embedder vllm-openai (default: http://127.0.0.1:8989/v1/embeddings)",
+    )
+    br.add_argument(
+        "--endpoint-model-id",
+        default=None,
+        dest="endpoint_model_id",
+        help="override model name for --embedder vllm-openai (default: Qwen/Qwen3-Embedding-8B)",
+    )
+    br.add_argument(
+        "--endpoint-dim",
+        default=None,
+        type=int,
+        dest="endpoint_dim",
+        help="override expected embedding dimension for --embedder vllm-openai (default: 4096)",
+    )
     br.add_argument("--top-k", type=int, default=brain_recall_surface.DEFAULT_TOP_K, help="max items per tier")
     br.add_argument("--scope", default=None, help="restrict recall to this scope string")
     br.add_argument("--as-of", default=None, help="exclude recall records stamped after this as_of (YYYY-MM-DDTHH:MM:SSZ)")
@@ -2780,6 +2816,9 @@ def _brain_ingest(args) -> int:
             scope=scope,
             embedder_name=args.embedder,
             model_path=args.model_path,
+            endpoint=getattr(args, "endpoint", None),
+            endpoint_model_id=getattr(args, "endpoint_model_id", None),
+            endpoint_dim=getattr(args, "endpoint_dim", None),
             allow_confidential_egress=args.allow_confidential_egress,
             as_of=args.as_of,
         )
@@ -2961,6 +3000,9 @@ def _brain_recall(args) -> int:
             state_root=args.state_root,
             embedder_name=args.embedder,
             model_path=args.model_path,
+            endpoint=getattr(args, "endpoint", None),
+            endpoint_model_id=getattr(args, "endpoint_model_id", None),
+            endpoint_dim=getattr(args, "endpoint_dim", None),
         )
     except brain_recall.BrainRecallError as exc:
         print(f"ERROR: ce brain recall refused [{exc.code}]: {exc}", file=sys.stderr)

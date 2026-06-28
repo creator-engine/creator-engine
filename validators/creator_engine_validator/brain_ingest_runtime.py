@@ -179,6 +179,9 @@ def ingest_markdown(
     scope: brain_recall.Scope = DEFAULT_SCOPE,
     embedder_name: str = "deterministic",
     model_path: Path | str | None = None,
+    endpoint: str | None = None,
+    endpoint_model_id: str | None = None,
+    endpoint_dim: int | None = None,
     allow_confidential_egress: bool = False,
     repo_root: Path | str | None = None,
     as_of: str | None = None,
@@ -188,7 +191,17 @@ def ingest_markdown(
     resolved_db_path = Path(db_path) if db_path is not None else default_db_path(state_root)
     source_files = discover_markdown_files(sources)
     chunks = build_recall_chunks(source_files, scope=scope, repo_root=repo_root, as_of=as_of)
-    active_embedder = embedder if embedder is not None else make_embedder(embedder_name, model_path=model_path)
+    active_embedder = (
+        embedder
+        if embedder is not None
+        else make_embedder(
+            embedder_name,
+            model_path=model_path,
+            endpoint=endpoint,
+            endpoint_model_id=endpoint_model_id,
+            endpoint_dim=endpoint_dim,
+        )
+    )
     active_store = store if store is not None else open_vector_store(resolved_db_path)
 
     changed_chunks: list[brain_recall.RecallChunk] = []
@@ -273,7 +286,39 @@ def ingest_markdown(
     )
 
 
-def make_embedder(name: str, *, model_path: Path | str | None = None) -> brain_recall.EmbeddingAdapter:
+def make_embedder(
+    name: str,
+    *,
+    model_path: Path | str | None = None,
+    endpoint: str | None = None,
+    endpoint_model_id: str | None = None,
+    endpoint_dim: int | None = None,
+) -> brain_recall.EmbeddingAdapter:
+    """Construct an EmbeddingAdapter by name.
+
+    Parameters
+    ----------
+    name:
+        Adapter selector.  Accepted values:
+
+        * ``"deterministic"`` — offline fake embedder (CI / no-GPU fallback).
+        * ``"embeddinggemma"`` / ``"embedding-gemma"`` — local sentence-transformers
+          model; requires ``--model-path``.
+        * ``"vllm-openai"`` / ``"openai-endpoint"`` / ``"openai"`` — OpenAI-compatible
+          HTTP endpoint (vLLM, etc.).  Defaults to the local Qwen3-Embedding-8B
+          serving at http://127.0.0.1:8989/v1/embeddings; configurable via
+          ``endpoint``, ``endpoint_model_id``, and ``endpoint_dim``.
+
+    model_path:
+        Local model path for the ``embeddinggemma`` adapter.
+    endpoint:
+        Override the /v1/embeddings URL for the ``vllm-openai`` adapter.
+    endpoint_model_id:
+        Override the model name sent to the endpoint.
+    endpoint_dim:
+        Override the expected embedding dimension for the endpoint adapter.
+    """
+
     normalized = name.strip().lower().replace("_", "-")
     if normalized == "deterministic":
         return brain_recall.DeterministicFakeEmbedding()
@@ -284,6 +329,12 @@ def make_embedder(name: str, *, model_path: Path | str | None = None) -> brain_r
         if not path.exists():
             raise BrainIngestInvalid(f"embeddinggemma model path does not exist: {path}")
         return _make_embeddinggemma(path)
+    if normalized in {"vllm-openai", "openai-endpoint", "openai"}:
+        return _make_openai_endpoint(
+            endpoint=endpoint,
+            model_id=endpoint_model_id,
+            dim=endpoint_dim,
+        )
     raise BrainIngestInvalid(f"unknown embedder: {name}")
 
 
@@ -316,6 +367,35 @@ def _make_embeddinggemma(model_path: Path) -> brain_recall.EmbeddingAdapter:
         if embedder_cls is not None:
             return _call_embedder_factory(embedder_cls, model_path)
     raise BrainIngestInvalid("embeddinggemma adapter module exposes no known factory")
+
+
+def _make_openai_endpoint(
+    *,
+    endpoint: str | None = None,
+    model_id: str | None = None,
+    dim: int | None = None,
+) -> brain_recall.EmbeddingAdapter:
+    """Construct an OpenAIEndpointEmbeddingAdapter from optional overrides."""
+
+    try:
+        module = importlib.import_module(
+            "creator_engine_validator.brain_embedding_openai_endpoint"
+        )
+    except ModuleNotFoundError as exc:
+        raise BrainIngestInvalid("openai-endpoint adapter module is not available") from exc
+    adapter_cls = getattr(module, "OpenAIEndpointEmbeddingAdapter", None)
+    if adapter_cls is None:
+        raise BrainIngestInvalid(
+            "openai-endpoint adapter module missing OpenAIEndpointEmbeddingAdapter"
+        )
+    kwargs: dict[str, Any] = {}
+    if endpoint is not None:
+        kwargs["endpoint"] = endpoint
+    if model_id is not None:
+        kwargs["model_id"] = model_id
+    if dim is not None:
+        kwargs["dim"] = dim
+    return adapter_cls(**kwargs)
 
 
 def _call_store_factory(factory: Any, path: Path) -> Any:

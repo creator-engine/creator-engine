@@ -372,6 +372,9 @@ def open_surface(
     embedder: Any | None = None,
     embedder_name: str | None = None,
     model_path: Path | str | None = None,
+    endpoint: str | None = None,
+    endpoint_model_id: str | None = None,
+    endpoint_dim: int | None = None,
     store: Any | None = None,
 ) -> BrainRecallSurface:
     """Open the recall surface over the F6.2 SQLite store + an embedder.
@@ -405,7 +408,13 @@ def open_surface(
             from . import brain_ingest_runtime
 
             try:
-                embedder = brain_ingest_runtime.make_embedder(embedder_name, model_path=model_path)
+                embedder = brain_ingest_runtime.make_embedder(
+                    embedder_name,
+                    model_path=model_path,
+                    endpoint=endpoint,
+                    endpoint_model_id=endpoint_model_id,
+                    endpoint_dim=endpoint_dim,
+                )
             except brain_ingest_runtime.BrainIngestError as exc:
                 raise BrainRecallInvalid(str(exc)) from exc
         else:
