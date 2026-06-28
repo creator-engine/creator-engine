@@ -1,0 +1,98 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/orchestrator-harvest-packet.schema.yaml"
+title: "Creator Engine Orchestrator Harvest Packet Record"
+description: |
+  Runtime packet for contained and non-contained worker harvest. It preserves
+  worker identity, role, brief pointer and hash, branch/base/head evidence,
+  changed paths, validation evidence, stop-line outcome, and scope verdict.
+
+  The packet carries refs and summaries only. It does not grant authority,
+  approve a PR, merge, publish, or resolve governance gates by itself.
+type: object
+required:
+  - kind
+  - version
+  - packet_id
+  - worker_id
+  - role
+  - brief_ref
+  - brief_sha256
+  - branch
+  - base_ref
+  - head_sha
+  - changed_paths
+  - diff_summary
+  - evidence
+  - stop_line_result
+  - scope_verdict
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce-orchestrator-harvest-packet
+  version:
+    type: integer
+    const: 1
+  packet_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+  worker_id:
+    type: string
+    minLength: 1
+  role:
+    type: string
+    enum: [implementer, verification, architect_research, reviewer]
+  brief_ref:
+    type: string
+    minLength: 1
+  brief_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  branch:
+    type: string
+    minLength: 1
+  base_ref:
+    type: string
+    minLength: 1
+  head_sha:
+    description: |
+      Git commit SHA observed at harvest time. Short SHAs are allowed for local
+      packets, but callers should prefer full 40-character commit ids.
+    type: string
+    pattern: "^[0-9a-f]{7,64}$"
+  changed_paths:
+    type: array
+    items:
+      type: string
+      minLength: 1
+  diff_summary:
+    type: string
+    minLength: 1
+  evidence:
+    type: object
+    required: [validation_commands, validation_result, artifacts]
+    unevaluatedProperties: false
+    properties:
+      validation_commands:
+        type: array
+        items:
+          type: string
+          minLength: 1
+      validation_result:
+        type: string
+        enum: [pass, fail, not_run]
+      artifacts:
+        description: |
+          Opaque refs to logs, reports, screenshots, or other harvest evidence.
+          Empty is valid when no external artifact was produced.
+        type: array
+        items:
+          type: string
+          minLength: 1
+  stop_line_result:
+    type: string
+    enum: [ready, blocked, returned, superseded]
+  scope_verdict:
+    type: string
+    enum: [in_scope, out_of_scope, needs_controller_review]
