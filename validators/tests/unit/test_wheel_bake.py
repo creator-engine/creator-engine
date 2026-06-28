@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import hashlib
+import shutil
 import subprocess
 import tomllib
 import zipfile
@@ -49,7 +50,7 @@ def _console_surface(repo_root: Path, wheel: Path) -> tuple[dict[str, str], str,
 def test_build_app_wheel_from_source_returns_recomputed_manifest(
     repo_root: Path, tmp_path: Path
 ):
-    manifest = build_app_wheel_from_source(repo_root, tmp_path)
+    manifest = build_app_wheel_from_source(repo_root, tmp_path, build_dir=tmp_path / "build-root")
     wheel = tmp_path / manifest.wheel_name
     head = subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD"],
@@ -82,8 +83,12 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
     left = tmp_path / "left"
     right = tmp_path / "right"
 
-    left_manifest = build_app_wheel_from_source(repo_root, left)
-    right_manifest = build_app_wheel_from_source(repo_root, right)
+    left_manifest = build_app_wheel_from_source(
+        repo_root, left, build_dir=tmp_path / "left-build-root"
+    )
+    right_manifest = build_app_wheel_from_source(
+        repo_root, right, build_dir=tmp_path / "right-build-root"
+    )
     left_wheel = left / left_manifest.wheel_name
     right_wheel = right / right_manifest.wheel_name
 
@@ -101,13 +106,48 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
 def test_source_build_does_not_require_or_recreate_committed_app_wheel(
     repo_root: Path, tmp_path: Path
 ):
-    manifest = build_app_wheel_from_source(repo_root, tmp_path)
+    manifest = build_app_wheel_from_source(repo_root, tmp_path, build_dir=tmp_path / "build-root")
     fresh = tmp_path / manifest.wheel_name
     committed = sorted((repo_root / "validators" / "wheelhouse").glob("creator_engine_validator-*.whl"))
 
     assert fresh.is_file()
     assert hashlib.sha256(fresh.read_bytes()).hexdigest() == manifest.sha256
     assert committed == []
+
+
+@pytest.mark.xdist_group("wheel-build")
+def test_build_app_wheel_from_source_ignores_checkout_build_artifacts(
+    repo_root: Path, tmp_path: Path
+):
+    stale_build = repo_root / "validators" / "build"
+    stale_payload = stale_build / "lib" / "creator_engine_validator" / "ce_cli.py"
+    stale_build_existed = stale_build.exists()
+    stale_payload_existed = stale_payload.exists()
+    previous_payload = stale_payload.read_bytes() if stale_payload_existed else None
+    poison = "def main():\n    raise SystemExit('stale checkout build artifact was packaged')\n"
+
+    try:
+        stale_payload.parent.mkdir(parents=True, exist_ok=True)
+        stale_payload.write_text(poison, encoding="utf-8")
+
+        manifest = build_app_wheel_from_source(
+            repo_root,
+            tmp_path / "wheelhouse",
+            build_dir=tmp_path / "build-root",
+        )
+        wheel = tmp_path / "wheelhouse" / manifest.wheel_name
+
+        assert stale_payload.read_text(encoding="utf-8") == poison
+        assert _wheel_text(wheel, "ce_cli.py") == (
+            repo_root / "validators" / "creator_engine_validator" / "ce_cli.py"
+        ).read_text(encoding="utf-8")
+    finally:
+        if previous_payload is not None:
+            stale_payload.write_bytes(previous_payload)
+        elif stale_payload.exists():
+            stale_payload.unlink()
+        if not stale_build_existed:
+            shutil.rmtree(stale_build, ignore_errors=True)
 
 
 def test_build_app_wheel_from_source_raises_typed_error_on_bad_repo(tmp_path: Path):
