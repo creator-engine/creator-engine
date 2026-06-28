@@ -32,6 +32,7 @@ REQUIRED_SECTIONS = (
     "safety_floor",
     "vocabulary_mapping",
     "worker_selection_policy",
+    "controller_knowledge_overlay",
     "harness_outputs",
 )
 
@@ -125,6 +126,22 @@ def validate_ssot(ssot: Any) -> None:
     require_list(root["safety_floor"], "$.safety_floor")
     require_mapping(root["vocabulary_mapping"], "$.vocabulary_mapping")
     require_list(root["worker_selection_policy"], "$.worker_selection_policy")
+    overlay = require_mapping(
+        root["controller_knowledge_overlay"], "$.controller_knowledge_overlay"
+    )
+    for key in (
+        "startup_sequence",
+        "pre_dispatch_checklist",
+        "harvest_sequence",
+        "preflight_discipline",
+        "g5_body_line_rule",
+        "new_ce_group_coupling",
+    ):
+        require_list(overlay.get(key), f"$.controller_knowledge_overlay.{key}")
+    require_mapping(
+        overlay.get("subagent_model_routing"),
+        "$.controller_knowledge_overlay.subagent_model_routing",
+    )
 
     outputs = require_mapping(root["harness_outputs"], "$.harness_outputs")
     for harness in ("codex", "claude"):
@@ -233,6 +250,48 @@ def render_worker_selection(ssot: dict[str, Any]) -> str:
     )
 
 
+def render_mapping_lines(values: dict[str, Any]) -> str:
+    lines = []
+    for key, value in values.items():
+        if isinstance(value, list):
+            require_list(value, f"mapping item {key}")
+            rendered_value = "; ".join(
+                require_text(item, f"mapping item {key}") for item in value
+            )
+        else:
+            rendered_value = require_text(value, f"mapping item {key}")
+        lines.append(f"- {key}: {rendered_value}")
+    return "\n".join(lines)
+
+
+def render_knowledge_overlay(ssot: dict[str, Any]) -> str:
+    overlay = ssot["controller_knowledge_overlay"]
+    sections = (
+        ("Startup Sequence", bullet_lines(overlay["startup_sequence"])),
+        ("Pre-Dispatch Checklist", bullet_lines(overlay["pre_dispatch_checklist"])),
+        ("Harvest Sequence", bullet_lines(overlay["harvest_sequence"])),
+        (
+            "Subagent Model Routing",
+            render_mapping_lines(overlay["subagent_model_routing"]),
+        ),
+        ("Preflight Discipline", bullet_lines(overlay["preflight_discipline"])),
+        ("G5 Body-Line Rule", bullet_lines(overlay["g5_body_line_rule"])),
+        ("New ce Group Coupling", bullet_lines(overlay["new_ce_group_coupling"])),
+    )
+    rendered_sections: list[str] = []
+    for title, body in sections:
+        rendered_sections.extend((f"### {title}", "", body, ""))
+    return "\n".join(
+        (
+            "## Controller Knowledge Overlay",
+            "",
+            ssot["metadata"]["preview_warning"],
+            "",
+            *rendered_sections,
+        )
+    ).rstrip()
+
+
 def render_foreman_core(
     ssot: dict[str, Any], harness: str, ssot_path: str, ssot_hash: str
 ) -> str:
@@ -260,6 +319,8 @@ def render_foreman_core(
             render_vocabulary(ssot),
             "",
             render_worker_selection(ssot),
+            "",
+            render_knowledge_overlay(ssot),
             "",
             "## Canonical Roles",
             "",
