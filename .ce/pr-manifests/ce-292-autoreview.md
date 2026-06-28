@@ -21,13 +21,14 @@ The changes:
 - Add a thin Claude `/code-review` command wrapper that maps no-blocking
   reviewer evidence to `COMMENT`, blocking evidence to `REQUEST_CHANGES`, and
   refuses any other event.
-- Add focused static tests for the AGENTS line and wrapper wiring.
+- Add focused tests for the AGENTS line, wrapper wiring, and behavioral
+  approval-denial guard on the self-fire review path.
 - Add this changelog and path manifest carrier.
 
 Per-file purpose:
 - **`AGENTS.md`** *(M)* - one-line auto-review operating instruction.
 - **`.claude/commands/code-review.md`** *(A)* - thin `/code-review` self-fire wrapper.
-- **`validators/tests/unit/test_claude_code_review_wrapper.py`** *(A)* - focused wiring tests.
+- **`validators/tests/unit/test_claude_code_review_wrapper.py`** *(A)* - focused wiring and behavioral guard tests.
 - **`.ce/changelog/ce-292-autoreview.md`** *(A)* - changelog fragment with `work_class: tiny`.
 - **`.ce/pr-manifests/ce-292-autoreview.md`** *(A)* - this carrier.
 
