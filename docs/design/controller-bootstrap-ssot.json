@@ -191,6 +191,59 @@
     "High-risk unclear work starts with architect_research and escalates only after scope and acceptance criteria are concrete.",
     "Choose the least-authority role that can complete the task and require explicit controller dispatch for any role escalation."
   ],
+  "controller_knowledge_overlay": {
+    "startup_sequence": [
+      "Read SSOT-grounded bootstrap before accepting any task.",
+      "Load the newest .ce/state/research/RESUME_STATE_* by mtime.",
+      "Surface any AWAITING-OPERATOR items before dispatch.",
+      "Probe-don't-remember: verify seat states, branch states, and in-flight territory before dispatch."
+    ],
+    "pre_dispatch_checklist": [
+      "Check the live in-flight territory map: consult .ce/pr-manifests/, .ce/briefs/, active worktrees under .claude/worktrees/, and .ce/wt-*/.",
+      "Intersect every candidate path against in-flight files.",
+      "Check context percentage; above 40 percent, compact or clear before an unrelated dispatch.",
+      "Save the seed brief to a file, send the seat the pointer plus sha256sum, and avoid long inline prompts.",
+      "Verify the work claim before the seat starts."
+    ],
+    "harvest_sequence": [
+      "Check seat output for READY-FOR-HARVEST.",
+      "Verify ce validate-pr or preflight is GREEN on the branch.",
+      "Harvest to a staging worktree under .ce/wt-<slug>-harvest/.",
+      "Controller holds the merge gate; enqueue only after independent review and green required checks."
+    ],
+    "subagent_model_routing": {
+      "controller": "claude-code effort:high",
+      "codex_work_seat": "codex effort:high (default)",
+      "codex_hardest": "codex effort:xhigh (hardest only)",
+      "claude_subagent_mechanical": "Haiku — fleet_recon / ops_triage / liveness / verification",
+      "claude_subagent_substantive": "Sonnet — architect_research / implementer / reviewer / harvest_intake",
+      "claude_subagent_controller_only": "Opus — controller/main loop ONLY; NEVER a subagent",
+      "architect_research_worker": "claude-sonnet",
+      "implementer_worker": "codex (preferred) or claude-code implementer role",
+      "verification_worker": "codex or claude-code verification role",
+      "forks": "FORBIDDEN for execution — use restricted custom roles, never context-inheriting fork",
+      "policy": "codex handles all work seats by default; effort:xhigh is reserved for hardest codex work only; Claude controllers use effort:high, not xhigh."
+    },
+    "preflight_discipline": [
+      "Run scripts/ce-preflight.sh --base origin/main --head-ref <branch> --declared-work-class <class> or ce validate-pr on a clean committed tree before any push.",
+      "Two-strikes rule: the same gate failing twice stops the slice.",
+      "Never treat raw pytest only as sufficient preflight evidence.",
+      "Preflight runs the same gates as CI.",
+      "ce validate-pr is canonical."
+    ],
+    "g5_body_line_rule": [
+      "Every PR body has exactly one line: - **Declared work class:** <tiny|story|feature|epic>.",
+      "The rule is case-insensitive.",
+      "A **Work class:** header or [PASS] log line does not satisfy the rule.",
+      "Pick the smallest honest class the floor accepts."
+    ],
+    "new_ce_group_coupling": [
+      "Any new ce CLI group in ce_cli.py requires a README.md mention for public groups.",
+      "Update test_v1_docs_reconciliation.py expected set.",
+      "Regenerate .ce/reference/cli.generated.md via python scripts/gen_cli_reference.py --write.",
+      "For internal-only groups, add to the internal-groups set; README check is exempt."
+    ]
+  },
   "harness_outputs": {
     "codex": {
       "metadata": {
