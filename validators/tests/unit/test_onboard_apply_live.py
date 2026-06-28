@@ -772,12 +772,12 @@ def test_plain_join_apply_completes_for_legacy_validate_yml_repo(tmp_path):
 # ---------------------------------------------------------------------------
 # ce-ops#90 (design A, Operator-ratified) — 2nd live-forge driver gap (dev-3 dogfood).
 # install_dependencies fetches the pinned userspace wheel (uv) from CE's OWN mirror
-# (docs/downloads/0.2.0/, NOT astral.sh / a live index), sha256-verifies it against the
+# (docs/downloads/0.3.0/, NOT astral.sh / a live index), sha256-verifies it against the
 # in-code pin (bound to the signed required_wheels entry), then installs OFFLINE via
 # `pip --no-index --find-links`. wait_for_app_installation is a read-only already-installed
 # detect. All tests are OFFLINE: injected mirror_fetch + pip_spawn → ZERO network / pip.
 # ---------------------------------------------------------------------------
-_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.2.0"
+_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.3.0"
 _UV_PIN = onboard_apply_live.MIRROR_USERSPACE_WHEELS["uv"]
 _UV_BYTES = (_MIRROR_DIR / _UV_PIN.filename).read_bytes()
 
@@ -814,7 +814,7 @@ def test_install_dependencies_fetches_uv_from_mirror_and_installs_offline():
     assert result == {"ok": True, "installed": ["uv"]}
     # fetched the pinned wheel from CE's mirror (NOT astral/PyPI) ...
     assert calls["fetch"] == [_UV_PIN.url]
-    assert "creator-engine.dev/downloads/0.2.0/" in _UV_PIN.url
+    assert "creator-engine.dev/downloads/0.3.0/" in _UV_PIN.url
     assert "astral" not in _UV_PIN.url
     # ... and installed it OFFLINE from a local find-links dir.
     assert len(calls["pip"]) == 1
@@ -1012,7 +1012,7 @@ def test_install_dependencies_fallback_with_tampered_wheel_fails_closed(tmp_path
 
 def test_uv_pin_matches_served_mirror_wheel_and_signed_manifest():
     # the in-code pin must equal the ACTUAL served mirror wheel bytes (reproduced) AND the
-    # docs/downloads/0.2.0/SHA256SUMS line AND the docs/llms-install.md required_wheels entry —
+    # docs/downloads/0.3.0/SHA256SUMS line AND the docs/llms-install.md required_wheels entry —
     # so the apply-time anti-tamper pin can never silently drift from the signed manifest.
     import hashlib as _h
     served = _MIRROR_DIR / _UV_PIN.filename

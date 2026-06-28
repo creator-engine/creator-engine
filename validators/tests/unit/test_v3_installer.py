@@ -378,9 +378,9 @@ def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
     manifest = inst.parse_bootstrap_manifest(_SPEC_TEXT)
     assert manifest.artifact_manifest_version == 1
     assert manifest.package_name == "creator-engine-validator"
-    assert manifest.package_version == "0.2.0"
+    assert manifest.package_version == "0.3.0"
     assert manifest.python_requires == ">=3.14"
-    assert manifest.app_wheel == "creator_engine_validator-0.2.0-py3-none-any.whl"
+    assert manifest.app_wheel == "creator_engine_validator-0.3.0-py3-none-any.whl"
     assert manifest.answers_schema_url == "https://creator-engine.dev/schemas/install-answers.schema.yaml"
     assert manifest.python_acquisition.tool == "uv"
     assert manifest.python_acquisition.version == "0.11.21"
@@ -400,7 +400,7 @@ def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
 
 def test_v3_installer_rejects_bad_bootstrap_manifest():
     bad_missing_app = _SPEC_TEXT.replace(
-        "  app_wheel: creator_engine_validator-0.2.0-py3-none-any.whl\n",
+        "  app_wheel: creator_engine_validator-0.3.0-py3-none-any.whl\n",
         "",
     )
     with pytest.raises(inst.InstallRefused, match="missing app_wheel"):
@@ -432,7 +432,7 @@ def test_sha256s_parser_and_platform_plan():
     assert arm_plan["platform"] == "linux-aarch64-cp314"
     arm_wheel_names = {wheel["filename"] for wheel in arm_plan["wheels"]}
     assert "attrs-26.1.0-py3-none-any.whl" in arm_wheel_names
-    assert "creator_engine_validator-0.2.0-py3-none-any.whl" in arm_wheel_names
+    assert "creator_engine_validator-0.3.0-py3-none-any.whl" in arm_wheel_names
     assert "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl" in arm_wheel_names
     assert "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl" in arm_wheel_names
     assert "uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl" in arm_wheel_names
