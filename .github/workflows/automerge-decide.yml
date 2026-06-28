@@ -1,0 +1,172 @@
+name: CE Automerge Decide
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    name: Advisory automerge decision
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator
+        run: python -m pip install -e validators
+
+      - name: Resolve changed paths
+        id: inputs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+        run: |
+          set -euo pipefail
+
+          work_dir="${RUNNER_TEMP}/ce-automerge-decide"
+          mkdir -p "${work_dir}"
+          paths_file="${work_dir}/changed-paths.txt"
+          pr_number=""
+          head_sha=""
+          review_decision=""
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            pr_number="${PR_NUMBER}"
+            head_sha="${PR_HEAD_SHA}"
+            base_sha="${PR_BASE_SHA}"
+
+            if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "${base_sha}" || true
+            fi
+            if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "refs/pull/${pr_number}/head"
+            fi
+
+            git diff --name-only --find-renames "${base_sha}..${head_sha}" > "${paths_file}"
+          elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            head_sha="${GITHUB_SHA}"
+            base_sha="${MERGE_GROUP_BASE_SHA}"
+
+            if [[ -n "${base_sha}" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "${base_sha}" || true
+            fi
+
+            if [[ -n "${base_sha}" ]] && git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+              git diff --name-only --find-renames "${base_sha}..${head_sha}" > "${paths_file}"
+            else
+              git diff --name-only --find-renames "${head_sha}^..${head_sha}" > "${paths_file}"
+            fi
+          else
+            echo "unsupported event: ${EVENT_NAME}" >&2
+            exit 1
+          fi
+
+          if [[ -z "${head_sha}" ]]; then
+            echo "could not resolve head SHA" >&2
+            exit 1
+          fi
+
+          {
+            echo "paths-file=${paths_file}"
+            echo "pr-number=${pr_number}"
+            echo "head-sha=${head_sha}"
+            echo "review-decision=${review_decision}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run automerge decision
+        id: decide
+        env:
+          PATHS_FILE: ${{ steps.inputs.outputs.paths-file }}
+          PR_NUMBER: ${{ steps.inputs.outputs.pr-number }}
+          HEAD_SHA: ${{ steps.inputs.outputs.head-sha }}
+          REVIEW_DECISION: ${{ steps.inputs.outputs.review-decision }}
+        run: |
+          set -euo pipefail
+
+          decisions_dir=".ce/state/automerge/decisions"
+          mkdir -p "${decisions_dir}"
+
+          safe_head="$(printf '%s' "${HEAD_SHA}" | tr -c 'A-Za-z0-9._-' '-')"
+          decision_key="${PR_NUMBER:-merge-group}-${safe_head}"
+          decision_file="${decisions_dir}/${decision_key}.json"
+
+          args=(
+            automerge-decide
+            --paths-file "${PATHS_FILE}"
+            --declared-work-class story
+            --repo-root .
+            --head-sha "${HEAD_SHA}"
+            # Advisory only: do not query live checks or mutate repo/PR state; absent check evidence fails closed.
+            --checks-json '{"checks":{}}'
+            --review-decision "${REVIEW_DECISION}"
+            --json
+          )
+          if [[ -n "${PR_NUMBER}" ]]; then
+            args+=(--pr "${PR_NUMBER}")
+          fi
+
+          python -m creator_engine_validator.ce_cli "${args[@]}" | tee "${decision_file}"
+
+          echo "decision-file=${decision_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write decision summary
+        env:
+          DECISION_FILE: ${{ steps.decide.outputs.decision-file }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          decision_path = Path(os.environ["DECISION_FILE"])
+          payload = json.loads(decision_path.read_text(encoding="utf-8"))
+          raw_decision = str(payload.get("decision") or "MANUAL")
+          summary_decision = "AUTO" if raw_decision == "AUTO" else "MANUAL"
+          rationale = payload.get("rationale") or []
+
+          lines = [
+              "# CE automerge decision",
+              "",
+              f"- Decision: {summary_decision}",
+              f"- Raw decision: {raw_decision}",
+              f"- Mutation class: {payload.get('mutation_class')}",
+              f"- Size band: {payload.get('size_band')}",
+              f"- PR: {payload.get('pr_number')}",
+              f"- Head SHA: {payload.get('head_sha')}",
+              "",
+              "## Rationale",
+          ]
+          lines.extend(f"- {item}" for item in rationale)
+          lines.append("")
+          lines.append(f"Decision JSON: `{decision_path.as_posix()}`")
+
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines))
+              handle.write("\n")
+          PY
+
+      - name: Upload decision artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ce-automerge-decision-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.decide.outputs.decision-file }}
+          if-no-files-found: error
