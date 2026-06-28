@@ -1,6 +1,6 @@
 # Controller Bootstrap Injection Design
 
-**Status**: Draft design for ce-ops#244 follow-up.
+**Status**: Draft design for controller bootstrap SSOT follow-up work.
 **Scope**: Design plus dry-run scaffold only. Applying generated
 controller bootstrap is a separate ratified step.
 

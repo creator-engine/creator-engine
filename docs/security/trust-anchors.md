@@ -28,7 +28,7 @@ Related: [SECURITY_MODEL.md](./SECURITY_MODEL.md)
 | Principal   | `ce-root-v1` |
 | Fingerprint | `SHA256:mkX7cRfHNrx6mtK8Ek30CcRn6fbfIPK/SU/6KKc0AOQ` |
 | Namespace   | `ce-spec-v1` |
-| Custody     | Operator-laptop-held private key, offline; never enters the repo or any governed seat |
+| Custody     | Operator-held private key, offline; never enters the repo or any governed seat |
 | Ratified    | 2026-06-10 |
 
 ### `ce-dev1-root-v1` (escalation / secondary key)
@@ -39,7 +39,7 @@ Related: [SECURITY_MODEL.md](./SECURITY_MODEL.md)
 | Principal   | `ce-dev1-root-v1` |
 | Fingerprint | `SHA256:tqPyyLJiJSJA3gdujT2tPv7MiJvdAevxHZSQCdPHC+s` |
 | Namespace   | `ce-spec-v1` |
-| Custody     | CE-DEV-1-held private key, encrypted at rest; never enters the repo or any governed seat |
+| Custody     | Secondary operator-held private key, encrypted at rest; never enters the repo or any governed seat |
 | Ratified    | 2026-06-11 |
 
 ---
