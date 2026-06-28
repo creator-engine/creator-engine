@@ -13,65 +13,65 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQndYMm9LTDJ3U0dVeTFCZTdDbFJpUjJPNlFuN1NTaEI4Zy9vWG9PekZNWGExTkh0OHAwY09KUEQKa01rTGhkRFpRTzZqVGlBTEFvR2tPQXZUVDZDT1lICi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 31086b80abc6af1b7bda939295669ad97db67f5c8fdd5f21e7a4cb6be83e4512
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQ0ZsTHNqK1d1NUdBOGlhd3ZEWGlhTVcwaXpXVS9UeHNlTHRLS3ZMVkd0S1FEaTMxWitoNzVTMTEKTmROcG5ub1dDSkRoSHQ4YWpuZjVYTnJGQ2Q0N2dDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 9fb30d53eb2b5594e5bf0b05188036a3246ad6be33cd61dee5356bd122a736e1
 
 artifact_manifest:
   artifact_manifest_version: 1
   package_name: creator-engine-validator
-  package_version: 0.2.0
+  package_version: 0.3.0
   python_requires: >=3.14
-  artifact_base_url: https://creator-engine.dev/downloads/0.2.0
-  sha256s_url: https://creator-engine.dev/downloads/0.2.0/SHA256SUMS
-  sha256s_sha256: 449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3
+  artifact_base_url: https://creator-engine.dev/downloads/0.3.0
+  sha256s_url: https://creator-engine.dev/downloads/0.3.0/SHA256SUMS
+  sha256s_sha256: bc6affdb1f67d240b971c6f3d54d1b5a075d241768d2046505e1d9240c945842
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
   answers_schema_sha256: 5879efacfd62507abbc83fd5729037e09c1259203d2ab87910cc9d3a9f605488
-  app_wheel: creator_engine_validator-0.2.0-py3-none-any.whl
+  app_wheel: creator_engine_validator-0.3.0-py3-none-any.whl
   required_wheels:
     - filename: attrs-26.1.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.2.0/attrs-26.1.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.0/attrs-26.1.0-py3-none-any.whl
       sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
       platforms: all
-    - filename: creator_engine_validator-0.2.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.2.0/creator_engine_validator-0.2.0-py3-none-any.whl
-      sha256: 709547f73c6365f522020814bdc264755b1c7d42394d5aa21ef30d859d4e3fa4
+    - filename: creator_engine_validator-0.3.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.0/creator_engine_validator-0.3.0-py3-none-any.whl
+      sha256: d3d3dd565921525ee578e8310c389ee054d9b4b91d9baa47b7b6586d2d7d42c1
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.2.0/jsonschema-4.26.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.0/jsonschema-4.26.0-py3-none-any.whl
       sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
       platforms: all
     - filename: jsonschema_specifications-2025.9.1-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.2.0/jsonschema_specifications-2025.9.1-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.0/jsonschema_specifications-2025.9.1-py3-none-any.whl
       sha256: 98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
       platforms: all
     - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
       platforms: linux-x86_64-cp314
     - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
       sha256: 501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
       platforms: linux-aarch64-cp314
     - filename: referencing-0.37.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.2.0/referencing-0.37.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.0/referencing-0.37.0-py3-none-any.whl
       sha256: 381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
       platforms: all
     - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: 47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
       platforms: linux-x86_64-cp314
     - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
       sha256: f251c812357a3fed308d684a5079ddfb9d933860fc6de89f2b7ab00da481e65f
       platforms: linux-aarch64-cp314
     - filename: uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd
       platforms: linux-x86_64-cp314
     - filename: uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.2.0/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.0/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
       sha256: 00193e4e077c27ee3d66da356744dbf0b3aa59356dfbd9a9efb1dc8469af8ad7
       platforms: linux-aarch64-cp314
   python_acquisition:
