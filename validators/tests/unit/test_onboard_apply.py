@@ -80,6 +80,18 @@ def _answers(tmp_path: Path, *, mode: str = "new", repo: str = "octo/greenfield"
     }
 
 
+def _answers_with_own_app(tmp_path: Path, *, app_id: str) -> dict[str, Any]:
+    answers = _answers(tmp_path)
+    answers["github"]["app"] = {
+        "kind": "own",
+        "app_id": app_id,
+        "client_id": "Iv1.peruser",
+        "pem": "file:///dev/shm/ce-app.pem",
+        "installation_id": 12345,
+    }
+    return answers
+
+
 def _request(
     tmp_path: Path,
     *,
@@ -362,6 +374,34 @@ def test_sudo_grant_hole_refuses_before_mutation(tmp_path):
     assert exc.value.code == "sudo_grant_uncovered"
     assert driver.calls == []
     assert not (tmp_path / "state" / "onboard" / "ledger.ndjson").exists()
+
+
+def test_own_app_rejects_known_foreign_app_id_before_mutation(tmp_path):
+    driver = FakeDriver()
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply.apply_onboard(
+            _request(tmp_path, answers=_answers_with_own_app(tmp_path, app_id="4085526")),
+            verifier=_verifier(),
+            driver=driver,
+        )
+    assert exc.value.code == "github_app_not_per_user"
+    assert "per-user GitHub App" in exc.value.detail
+    assert driver.calls == []
+    assert not (tmp_path / "state" / "onboard" / "ledger.ndjson").exists()
+
+
+def test_own_app_accepts_unlisted_per_user_app_id(tmp_path):
+    driver = FakeDriver()
+    summary = _apply(
+        tmp_path,
+        driver,
+        answers=_answers_with_own_app(tmp_path, app_id="9999999"),
+    )
+    assert summary["failed"] == 0
+    assert summary["refused"] == 0
+    app_leg = _leg(summary, "github_app_install")
+    assert app_leg["status"] == "already_satisfied"
+    assert app_leg["verification"]["bot_identity"] == "9999999[bot]"
 
 
 def test_greenfield_success_writes_ledger_and_honest_counters(tmp_path):

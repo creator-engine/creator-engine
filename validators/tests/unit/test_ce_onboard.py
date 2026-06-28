@@ -113,6 +113,15 @@ def test_every_phase_record_carries_audit_fields():
         assert d["decision"] in {"auto", "confirm", "ratified", "human_action"}
 
 
+def test_emit_manifest_guides_per_user_github_app():
+    manifest = ce_onboard.emit_manifest()
+    app_input = next(item for item in manifest["operator_inputs"] if item["id"] == "github.app")
+    assert app_input["kind"] == "own"
+    assert app_input["required_for"] == "contained-seat-onboarding"
+    assert "per-user GitHub App" in app_input["human_action"]
+    assert "shared App" in app_input["human_action"]
+
+
 # --- idempotent re-run -------------------------------------------------------
 def test_idempotent_rerun_is_safe_noop():
     legs = _ok_legs(

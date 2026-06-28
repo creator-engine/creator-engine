@@ -64,6 +64,19 @@ STATUS_REFUSED = "refused"
 STATUS_BLOCKED = "blocked"
 STATUS_HUMAN_ACTION = "human_action"
 
+GITHUB_APP_OPERATOR_INPUT = {
+    "id": "github.app",
+    "required_for": "contained-seat-onboarding",
+    "kind": "own",
+    "human_action": (
+        "Create an operator-owned per-user GitHub App for this seat, install it "
+        "on the target repo/account, and provide github.app.app_id, "
+        "github.app.client_id, github.app.pem as a tmpfs SecretRef, and "
+        "github.app.installation_id. Do not use the CE shared App or another "
+        "seat's App id."
+    ),
+}
+
 
 class OnboardError(Exception):
     """A hard, fail-closed onboard refusal (never a silent proceed)."""
@@ -429,6 +442,7 @@ def emit_manifest() -> dict[str, Any]:
             DECISION_RATIFIED,
             DECISION_HUMAN_ACTION,
         ],
+        "operator_inputs": [dict(GITHUB_APP_OPERATOR_INPUT)],
     }
 
 
