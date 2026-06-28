@@ -90,7 +90,6 @@ KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/contracts/computer-use-worker-harness.md",
         "docs/contracts/devops-privileged-action-broker.md",
         "docs/contracts/installer.md",
-        "docs/contracts/orchestrator.md",
         "docs/contracts/plain-join.md",
         "docs/contracts/playbook-format.md",
         "docs/contracts/README.md",
