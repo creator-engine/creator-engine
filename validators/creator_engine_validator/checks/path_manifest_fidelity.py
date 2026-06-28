@@ -646,7 +646,9 @@ def _run_with_base_per_pr(
 ) -> CheckResult:
     """Per-PR carrier mode (ce-ops#21): exactly one ADDED carrier per PR.
 
-    Classify the ``git diff --name-status <base>..HEAD`` paths under ``manifest_dir``:
+    Classify the non-deleted ``git diff --name-status <base>..HEAD`` paths under
+    ``manifest_dir``; D-status carrier paths are housekeeping deletions and are
+    not counted as new carrier claims.
 
     * **zero** carriers → NEUTRAL pass unless ``require_carrier`` is enabled;
     * **zero** carriers with ``require_carrier`` → ``path_manifest_carrier_required``;
@@ -739,7 +741,9 @@ def _run_with_base_per_pr(
         )
 
     prefix = manifest_dir.rstrip("/") + "/"
-    carrier_paths = sorted(p for p in changed if p.startswith(prefix))
+    carrier_paths = sorted(
+        p for p in changed if p.startswith(prefix) and status_by_path.get(p, "") != "D"
+    )
 
     if not carrier_paths:
         if require_carrier:

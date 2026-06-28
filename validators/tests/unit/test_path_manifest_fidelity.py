@@ -678,6 +678,30 @@ def test_per_pr_foreign_merged_carrier_edit_alongside_own_is_reported(tmp_path: 
     assert foreign in "\n".join(e.format() for e in result.errors)
 
 
+def test_per_pr_deleted_orphan_carrier_passes_alongside_own(tmp_path: Path):
+    repo, _base = _init_repo(tmp_path)
+    orphan = f"{MANIFEST_DIR}/old-orphan.md"
+    # A foreign/orphan carrier exists on base, so this PR's removal is status D.
+    _write_repo_file(repo, orphan, _build_doc([orphan], prefix="AUTHORIZED"))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "orphan carrier on base")
+    orphan_base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    slug = branch_slug("ce21-feature")
+    carrier_rel = _carrier_rel(slug)
+    (repo / orphan).unlink()
+    _write_repo_file(repo, carrier_rel, _build_doc(sorted([carrier_rel, orphan]), prefix="AUTHORIZED"))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "delete orphan + add own")
+
+    result = run_with_base([repo], orphan_base, manifest_dir=MANIFEST_DIR, head_ref="ce21-feature")
+
+    assert result.ok, [e.format() for e in result.errors]
+    assert "path_manifest_multiple_carriers" not in {e.code for e in result.errors}
+
+
 def test_per_pr_slug_mismatch_fails(tmp_path: Path):
     repo, base = _init_repo(tmp_path)
     # Carrier stem does not match branch_slug(head_ref).
