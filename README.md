@@ -106,13 +106,13 @@ platform evolves:
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
-  `pickup`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `onboard`, `publish-branch`,
+  `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `onboard`, `publish-branch`,
   `harness-matrix`, `containment-status`, `validate-pr`, and `automerge-decide`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
-  `ce playbook`, `ce surfaces`, `ce bootstrap`
+  `ce dispatch`, `ce playbook`, `ce surfaces`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
   `ce verify-install` (post-install provenance verification for a pinned CE
   release venv), `ce update` (signed in-place CE release updates, with
