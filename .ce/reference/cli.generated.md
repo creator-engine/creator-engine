@@ -369,6 +369,23 @@ Options:
 | `--convert-to-draft` | no |  | also convert the PR back to draft after dequeue |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `dispatch`
+
+plan and inspect governed seat dispatch (ce-ops#42)
+
+### `dispatch plan`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--arc-ticket` | yes |  |  |
+| `--issues-json` | no |  |  |
+| `--repo` | no |  |  |
+| `--label` | no |  |  |
+| `--seat` | no |  |  |
+| `--json` | no |  |  |
+
 ### `doctor`
 
 Options:
