@@ -47,6 +47,7 @@ ce brain recall      # hybrid (semantic+keyword) recall: SSOT-precedence, tier-t
 ce brain verify      # validate the local brain assertion ledger
 ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
 ce brain bootstrap   # emit the deterministic injection bootstrap payload
+ce orchestrator status # read Orchestrator runtime records (read-only)
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
@@ -109,6 +110,7 @@ from . import (
     integration_queue_dry_run,
     lane_runtime,
     launch_runtime,
+    orchestrator_status,
     pcl_runtime,
     playbook_runtime,
     publish_gate,
@@ -1047,6 +1049,23 @@ def _build_parser() -> argparse.ArgumentParser:
     bb.add_argument("--role", default=brain_bootstrap.DEFAULT_ROLE, help="bootstrap role label")
     bb.add_argument("--seat-class", default=brain_bootstrap.DEFAULT_SEAT_CLASS, help="foreman/worker; unknown fails closed to foreman")
     bb.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    orchestrator = groups.add_parser(
+        "orchestrator",
+        help="inspect Orchestrator runtime records (read-only)",
+    )
+    orchestrator_sub = orchestrator.add_subparsers(dest="orchestrator_cmd")
+    orch_status = orchestrator_sub.add_parser(
+        "status",
+        help="read and validate Orchestrator runtime records (read-only)",
+    )
+    orch_status.add_argument("--repo-root", default=".", help="repo root (default: cwd)")
+    orch_status.add_argument(
+        "--state-dir",
+        default=None,
+        help="orchestrator state dir (default: <repo-root>/.ce/state/orchestrator)",
+    )
+    orch_status.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bin_ = brain_sub.add_parser(
         "init",
@@ -2919,6 +2938,18 @@ def _brain_bootstrap(args) -> int:
     return 0
 
 
+def _orchestrator_status(args) -> int:
+    status = orchestrator_status.load_status(
+        repo_root=getattr(args, "repo_root", "."),
+        state_dir=getattr(args, "state_dir", None),
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(status, indent=2, sort_keys=True))
+    else:
+        print(orchestrator_status.render_human(status))
+    return 0 if status["ok"] else 1
+
+
 # ce-ops#206: the fixed, deterministic genesis assertion `ce brain init` writes
 # to bootstrap an empty workspace's brain ledger. Its claim merely records that
 # the ledger was genesis-initialized — it carries no capability verdict and is
@@ -4332,6 +4363,10 @@ _BRAIN_DISPATCH = {
     "verify": _brain_verify,
 }
 
+_ORCHESTRATOR_DISPATCH = {
+    "status": _orchestrator_status,
+}
+
 _CONNECTOR_DISPATCH = {
     "verify": _connector_verify,
     "plan": _connector_plan,
@@ -4426,6 +4461,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _BRAIN_DISPATCH.get(brain_cmd)
         if handler is None:
             parser.parse_args(["brain", "--help"])  # prints brain help, exits
+            return 2
+        return handler(args)
+    if args.group == "orchestrator":
+        orchestrator_cmd = getattr(args, "orchestrator_cmd", None)
+        handler = _ORCHESTRATOR_DISPATCH.get(orchestrator_cmd)
+        if handler is None:
+            parser.parse_args(["orchestrator", "--help"])  # prints orchestrator help, exits
             return 2
         return handler(args)
     if args.group == "connector":

@@ -56,7 +56,7 @@ def test_as_built_ce_inventory_matches_expected():
     # requirement below — see ce_cli.INTERNAL_COMMAND_GROUPS.
     assert _ce_command_groups() == {
         "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
-        "connector", "containment-probe", "reviewer-triage", "claim",
+        "orchestrator", "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "update", "onboard", "bootstrap", "publish-branch", "harness-matrix",
         "containment-status", "herdr", "validate-pr", "dequeue", "surfaces",

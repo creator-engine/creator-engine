@@ -725,6 +725,20 @@ Options:
 | `--emit-manifest` | no |  | emit the machine-readable phase manifest (consequence-class + reversibility) and exit |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `orchestrator`
+
+inspect Orchestrator runtime records (read-only)
+
+### `orchestrator status`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  | repo root (default: cwd) |
+| `--state-dir` | no |  | orchestrator state dir (default: <repo-root>/.ce/state/orchestrator) |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `pcl`
 
 append/verify/replay/index/merge local PCL coordination ledgers (G2.004.1)
