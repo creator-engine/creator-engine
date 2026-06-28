@@ -184,7 +184,7 @@ def _write_reviewer_authority_envelope(root: Path, pr_number: int = 108) -> str:
                     "mechanic": "pr_review",
                     "pr_number": pr_number,
                     "head_sha": "aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
-                    "actor": "ubuntuaws745-cmyk",
+                    "actor": "example-reviewer",
                     "ratified_prompt_sha": "ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27",
                     "emitting_role": "reviewer",
                     "operating_mode": "strict",

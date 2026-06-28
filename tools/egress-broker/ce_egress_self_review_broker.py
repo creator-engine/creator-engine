@@ -394,11 +394,28 @@ def _request_reviewer_authority_envelope(
         for key in ("reviewer_authority_ref", "reviewer_authority_envelope_ref"):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
-                return _load_reviewer_authority_ref(value.strip())
+                return _load_payload_reviewer_authority_ref(value.strip())
         env_ref = os.environ.get(CE_REVIEWER_AUTHORITY_ENV, "").strip()
         if env_ref:
             return _load_reviewer_authority_ref(env_ref)
     return None
+
+
+def _load_payload_reviewer_authority_ref(ref: str) -> Mapping[str, Any]:
+    raw = Path(ref)
+    if raw.is_absolute():
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref must be repo-root-relative"
+        )
+    repo_root = Path(_REPO_ROOT).resolve()
+    resolved = (repo_root / raw).resolve()
+    try:
+        resolved.relative_to(repo_root)
+    except ValueError:
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref must stay within repo root"
+        ) from None
+    return _load_reviewer_authority_ref(str(resolved))
 
 
 def _load_reviewer_authority_ref(ref: str) -> Mapping[str, Any]:
